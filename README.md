@@ -15,7 +15,13 @@ ParserNG is a powerful math tool that parses and evaluates algebraic expressions
 <li>Numerical (Iterative) solution for roots of equations</li>
 <li>Simultaneous Linear Equations</li>
 <li>Amongst others</li>
+<li>Variables creation and usage in math expressions</li>
+<li>Function creation and usage in math expressions</li>
 </ol>
+
+
+<p><b>Using ParserNG</b></p>
+
 
 
 
