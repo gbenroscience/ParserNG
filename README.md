@@ -1,5 +1,12 @@
 # ParserNG
-ParserNG is a powerful math tool that parses and evaluates algebraic expressions. 
+ParserNG is a powerful open-source math tool that parses and evaluates algebraic expressions. 
+
+It was created in 2009 by me, Gbemiro Jiboye and later used as a critical part of my final year project
+at the Department of Computer Science and Engineering, Obafemi Awolowo University,Ile-Ife, Osun State, Nigeria.
+
+My goal was to create a simple, yet powerful, not too bogus math tool that scientists and developers can deploy with their
+work to solve problems of all ranges--from simple to complex.
+
 
 <p><b>FEATURES</b></p>
 <ol>
@@ -23,5 +30,11 @@ ParserNG is a powerful math tool that parses and evaluates algebraic expressions
 <p><b>Using ParserNG</b></p>
 
 
+The simplest way to evaluate an expression in ParserNG is to use the <code>MathExpression</code> class.
+<code>MathExpression</code> is the class responsible for basic expression parsing and evaluation.
 
-
+Do:<br>
+<code>
+MathExpression expr = new MathExpression("r1=4;r1*5");<br>
+        System.out.println("result: " + expr.solve());
+  </code>
