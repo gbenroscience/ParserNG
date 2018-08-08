@@ -34,7 +34,15 @@ The simplest way to evaluate an expression in ParserNG is to use the <code>MathE
 <code>MathExpression</code> is the class responsible for basic expression parsing and evaluation.
 
 Do:<br>
-<code>MathExpression expr = new MathExpression("r1=4;r1*5");</code>
+<code>MathExpression expr = new MathExpression("r=4;r*5");</code>
 <br>
 <code>System.out.println("result: " + expr.solve());</code>
+
+<span>What does this do?</span>
+
+It creates a variable called <code>r</code>and sets its value to 4. Then it goes ahead to evaluate the expression
+<code>r*5</code> and returns its value when expr.solve() is called. <br>The print statement would give solution: <code>20.0</code>
+at the console
+
+
 
