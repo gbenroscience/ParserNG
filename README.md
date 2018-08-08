@@ -42,7 +42,7 @@ Do:<br>
 
 It creates a variable called <code>r</code>and sets its value to 4. Then it goes ahead to evaluate the expression
 <code>r*5</code> and returns its value when expr.solve() is called. <br>The print statement would give
-<br><code>solution: 20.0</code><br>
+<br><br><code>solution: 20.0</code><br><br>
 at the console
 
 
