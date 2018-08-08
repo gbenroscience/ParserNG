@@ -12,6 +12,7 @@ ParserNG is a powerful math tool that parses and evaluates algebraic expressions
 <li>Integral Calculus(Numerical)</li>
 <li>Quadratic Equations</li>
 <li>Tartaglia's Equations( or generally: <code>a.x<sup>3</sup>+b.x+c = 0</code> )</li>
+<li>Numerical (Iterative) solution for roots of equations</li>
 <li>Amongst others</li>
 </ol>
 
