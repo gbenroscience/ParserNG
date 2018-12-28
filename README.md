@@ -45,7 +45,7 @@ It creates a variable called <code>r</code>and sets its value to 4. Then it goes
 <br><br><code>solution: 20.0</code><br><br>
 at the console
 
-<b>Inbuilt Functions</b>
+<b>Inbuilt Functions</b><br>
 The parser has its own set of inbuilt functions. They are:
 <code>
 sin,cos,tan,sinh,cosh,tanh,sin-¹,cos-¹,tan-¹,sinh-¹,cosh-¹,tanh-¹,sec,csc,cot,sech,csch,coth,sec-¹,csc-¹,cot-¹,sech-¹,csch-¹,coth-¹,exp,ln,lg,log,ln-¹,lg-¹,log-¹,asin,acos,atan,asinh,acosh,atanh,asec,acsc,acot,asech,acsch,acoth,aln,alg,alog,floor,ceil,sqrt,cbrt,inverse,square,cube,pow,fact,comb,perm,sum,prod,avg,med,mode,rng,mrng,rms,cov,min,max,s_d,variance,st_err,rnd,sort,plot,diff,intg,quad,t_root,root,linear_sys,det,invert,tri_mat,echelon,matrix_mul,matrix_div,matrix_add,matrix_sub,matrix_pow,transpose,matrix_edit,
@@ -54,7 +54,7 @@ sin,cos,tan,sinh,cosh,tanh,sin-¹,cos-¹,tan-¹,sinh-¹,cosh-¹,tanh-¹,sec,csc,
 Note that alternatives to many functions having the inverse operator are provided in the form of an 'a' prefix.
 For example the inverse <code>sin</code> function is available both as <code>sin-¹</code> and as <code>asin</code>
 
-<b>User defined functions</b>
+<b>User defined functions</b><br>
 You can also define your own functions and use them in your math expressions.
 This is done in 2 ways:
 <ol>
