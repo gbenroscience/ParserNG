@@ -101,19 +101,33 @@ Your defined functions are volatile and will be forgotten once the current parse
 So for instance, you could pass the following to a MathExpression constructor:
 
 f(x)=sin(x)+cos(x-1)<br>
-Then do: f(2)....the parser automatically calculates sin(2)+cos(2-1) behind the scenes.
-
-
-
-
-
+Then do: f(2)....the parser automatically calculates sin(2)+cos(2-1) behind the scenes.<br><br>
 
 <b>Differential Calculus</b><br>
 
 <b>ParserNG</b> makes differentiating Math Expressions really easy.
-ParserNG uses its very own implementation of a differentiator.
 
-For
+<p>
+ParserNG uses its very own implementation of a symbolic differentiator.
+  
+  It performs symbolic differentiation of expressions behind the scenes and the computes the differential coefficient
+  of the function at some supplied x-value.
+  
+  <b>To differentiate a function, do:</b>
+  
+  <pre><code>
+  MathExpression expr = new MathExpression("diff(@(x)x^3,3,1)"); 
+  
+  System.out.println(ex.solve());
+  </code></pre>
+  
+  This will print:
+  
+  <code>
+  27.0
+  </code>
+
+</p>
 
 
 
