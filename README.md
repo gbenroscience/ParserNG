@@ -76,7 +76,7 @@ expression.solve();
 }
 </code></pre>
 <br>
-This ensures that the expression is parsed once(expensive operation) and then evaluated at various values of the variables. This second step is an high speed one, sometimes taking barely 3 microseconds on some machines.
+This ensures that the expression is parsed once(expensive operation) and then evaluated at various values of the variables. This second step is an high speed one, sometimes taking barely 3 microseconds on some machines.<br><br>
 
 
 <b>Inbuilt Functions</b><br>
