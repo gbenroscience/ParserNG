@@ -93,7 +93,7 @@ You can also define your own functions and use them in your math expressions.
 This is done in 2 ways:
 <ol>
   <li>f(x,a,b,c,...)= expr_in_said_variables<br> For example: f(x,y)=3*x^2+4*x*y+8</li>
-  <li>f = @(x,a,b,c,...)expr_in_said_variables<br> For example: f(x,y)=3*x^2+4*x*y+8</li>  
+  <li>f = @(x,a,b,c,...)expr_in_said_variables<br> For example: f= @(x,y)3*x^2+4*x*y+8</li>  
 </ol>
 
 Your defined functions are volatile and will be forgotten once the current parser session is over. The only way to have the parser remember them always is to introduce some form of persistence.
