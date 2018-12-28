@@ -43,7 +43,42 @@ Do:<br>
 It creates a variable called <code>r</code>and sets its value to 4. Then it goes ahead to evaluate the expression
 <code>r*5</code> and returns its value when expr.solve() is called. <br>The print statement would give
 <br><br><code>solution: 20.0</code><br><br>
-at the console
+at the console.
+
+
+Some key applications of parsers involve repeated iterations of a given expression at different values of the variables involved. Iteratively determining the roots of an equation, graphing etc.
+
+For repeated iterations of an expression over a value range, say 'x^2+5*x+1', the wrong usage would be:<br>
+
+
+for(int i=0;i<10000;i++){
+
+double x = i;
+MathExpression expression = new MathExpression("x="+i+";x^2+5*x+1");<br>
+
+expression.solve();<br>
+
+}<br>
+
+The MathExpression constructor basically does all the operations of scanning and interpreting of the input expression. This is a very expensive operation. It is better to do it just once and then run the solve() method over and over again at various values of the variables.
+
+For example:
+
+
+MathExpression expression = new MathExpression("x^2+5*x+1");
+ 
+        for(int i=0;i<100000;i++){
+            expression.setValue("x" , i+"");
+           expression.solve();
+        }
+        
+        This ensures that the expression is parsed once (expensive operation) and then evaluated at various values of the variables. This second step is an high speed one, sometimes taking barely 3 microseconds on some machines.
+
+
+ 
+
+
+
 
 <b>Inbuilt Functions</b><br>
 The parser has its own set of inbuilt functions. They are:
@@ -69,11 +104,8 @@ So for instance, you could pass the following to a MathExpression constructor:
 f(x)=sin(x)+cos(x-1)<br>
 Then do: f(2)....the parser automatically calculates sin(2)+cos(2-1) behind the scenes.
 
-For repeated iterations of a function over a value range, the wrong usage would be:<br>
 
-MathExpression expression = new MathExpression("x=3;f(x)=x^2+5*x+1");<br>
 
-expression.solve();<br>
 
 
 
