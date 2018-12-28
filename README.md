@@ -50,7 +50,7 @@ Some key applications of parsers involve repeated iterations of a given expressi
 
 For repeated iterations of an expression over a value range, say 'x^2+5*x+1', the wrong usage would be:<br>
 
-
+<pre><code>
 for(int i=0;i<10000;i++){
 
 double x = i;
@@ -58,27 +58,25 @@ MathExpression expression = new MathExpression("x="+i+";x^2+5*x+1");<br>
 
 expression.solve();<br>
 
-}<br>
+}
+</code></pre>
+<br>
 
 The MathExpression constructor basically does all the operations of scanning and interpreting of the input expression. This is a very expensive operation. It is better to do it just once and then run the solve() method over and over again at various values of the variables.
+  
 
 For example:
 
+<pre><code>
+MathExpression expression = new MathExpression("x^2+5*x+1");
 
- 
-      MathExpression expression = new MathExpression("x^2+5*x+1");
- 
-        for(int i=0;i<100000;i++){
-            expression.setValue("x" , i+"");
-           expression.solve();
-        }
-        
-        This ensures that the expression is parsed once (expensive operation) and then evaluated at various values of the variables. This second step is an high speed one, sometimes taking barely 3 microseconds on some machines.
-
-
- 
-
-
+for(int i=0; i<100000; i++){
+expression.setValue("x", String.valueOf(i) );
+expression.solve();
+}
+</code></pre>
+<br>
+This ensures that the expression is parsed once(expensive operation) and then evaluated at various values of the variables. This second step is an high speed one, sometimes taking barely 3 microseconds on some machines.
 
 
 <b>Inbuilt Functions</b><br>
