@@ -64,10 +64,30 @@ This is done in 2 ways:
 
 Your defined functions are volatile and will be forgotten once the current parser session is over. The only way to have the parser remember them always is to introduce some form of persistence.
 
-So for instance, you could do:
+So for instance, you could pass the following to a MathExpression constructor:
 
 f(x)=sin(x)+cos(x-1)<br>
 Then do: f(2)....the parser automatically calculates sin(2)+cos(2-1) behind the scenes.
+
+For repeated iterations of a function over a value range, the wrong usage would be:<br>
+
+MathExpression expression = new MathExpression("x=3;f(x)=x^2+5*x+1");<br>
+
+expression.solve();<br>
+
+
+
+<b>Differential Calculus</b><br>
+
+<b>ParserNG</b> makes differentiating Math Expressions really easy.
+ParserNG uses its very own implementation of a differentiator.
+
+For
+
+
+
+
+
 
 
 
