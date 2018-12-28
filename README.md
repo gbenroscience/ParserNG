@@ -66,7 +66,7 @@ Your defined functions are volatile and will be forgotten once the current parse
 
 So for instance, you could do:
 
-f(x)=sin(x)+cos(x-1)
+f(x)=sin(x)+cos(x-1)<br>
 Then do: f(2)....the parser automatically calculates sin(2)+cos(2-1) behind the scenes.
 
 
