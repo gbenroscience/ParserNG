@@ -17,11 +17,11 @@ If you need to access this library via Maven Central, do:
         </dependency>
  ```      
 
-It was created in 2009 by me, Gbemiro Jiboye and later used as a critical part of my final year project
+I created this library in 2009 and later used it as a critical part of my final year project
 at the Department of Computer Science and Engineering, Obafemi Awolowo University,Ile-Ife, Osun State, Nigeria.
 
-My goal was to create a simple, yet powerful, not too bogus math tool that scientists and developers can deploy with their
-work to solve problems of all ranges--from simple to complex.
+My goal was to create a simple, yet powerful, not too bogus math tool that scientists and developers could deploy with their
+work to solve mathematical problems both simple and complex.
 
 ParserNG is written completely in (pure) Java and so is as cross-platform as Java can be. I have used it to design math platforms for desktop Java, Java MicroEdition devices(as far back as 2010-2011) , Android,  and by porting the whole platform using J2OBJC from Gooogle; Swift also. The performance has been exceptionally acceptable in all cases.
 
