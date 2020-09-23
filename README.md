@@ -9,7 +9,7 @@ ParserNG is a powerful open-source math tool that parses and evaluates algebraic
 
 If you need to access this library via Maven Central, do:
 
-      ```Maven
+      ```Java
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
