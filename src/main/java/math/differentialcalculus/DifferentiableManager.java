@@ -7,7 +7,7 @@ package math.differentialcalculus;
 import java.util.ArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
+import static parser.Number.*;
 
 /**
  *

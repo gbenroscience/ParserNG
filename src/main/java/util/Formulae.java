@@ -9,9 +9,8 @@ package util;
  *
  * @author GBEMIRO
  */
-import com.itis.libs.parserng.android.expressParser.Variable;
- 
-import static com.itis.libs.parserng.android.expressParser.STRING.*;
+import parser.Variable;
+import static parser.STRING.*;
 public class Formulae {
 private String expression="";
 private String variable="";

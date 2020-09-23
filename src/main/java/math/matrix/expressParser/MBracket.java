@@ -82,7 +82,7 @@ private boolean evaluated=false;
  * The command was most likely moreBracs=bracs;
  * or in a loop, it would look like:
  *
- * for(int i=0;i<bracs.length;i++){
+ * for(int i=0;i&lt;bracs.length;i++){
  * moreBracs=bracs[i];
  * }
  *
@@ -94,7 +94,7 @@ private boolean evaluated=false;
  * moreBracs, too.This can cause a serious logical error in applications.
  * To stop this, we use this method in this way:
  *
- * for(int i=0;i<bracs.length;i++){
+ * for(int i=0;i&lt;bracs.length;i++){
  * moreBracs[i]=createTwinBracket(bracs[i]);
  * }
  *

@@ -5,13 +5,13 @@
 
 package math.matrix.expressParser;
 
-import com.itis.libs.parserng.android.expressParser.Precedence;
-import com.itis.libs.parserng.android.expressParser.Validatable;
+import parser.Precedence;
+import parser.Validatable;
 
 
 import java.util.ArrayList;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
-import static com.itis.libs.parserng.android.expressParser.Variable.*;
+import static parser.Number.*;
+import static parser.Variable.*;
  
 
 /**
@@ -77,7 +77,8 @@ public class MUnaryPostOperator extends MOperator implements Validatable {
 
 
 /**
- * @param function the Function object
+ * 
+ * @param scan The scanner output
  * that this MUnaryPostOperator object exists in.
  * validates the grammatical usage of this operator (by leaving the correctFunction attribute of the function object un-modified)
  * if the usage of this operator

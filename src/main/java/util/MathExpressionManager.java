@@ -4,11 +4,11 @@
  */
 
 package util;
-import com.itis.libs.parserng.android.expressParser.CustomScanner;
-import com.itis.libs.parserng.android.expressParser.Function;
-import com.itis.libs.parserng.android.expressParser.MathExpression;
-import com.itis.libs.parserng.android.expressParser.STRING;
-import com.itis.libs.parserng.android.expressParser.TYPE;
+import parser.CustomScanner;
+import parser.Function;
+import parser.MathExpression;
+import parser.STRING;
+import parser.TYPE;
 
 import java.util.ArrayList;
 import java.util.InputMismatchException;

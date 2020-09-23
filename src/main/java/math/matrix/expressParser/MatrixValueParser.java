@@ -4,15 +4,15 @@
  */
 package math.matrix.expressParser;
 
-import com.itis.libs.parserng.android.expressParser.STRING;
+import parser.STRING;
 
 import util.Dimension;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import util.MatrixFormatException;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
-import static com.itis.libs.parserng.android.expressParser.Operator.*;
+import static parser.Number.*;
+import static parser.Operator.*;
 
 /**
  *

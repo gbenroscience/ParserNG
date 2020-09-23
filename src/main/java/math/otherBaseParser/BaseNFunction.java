@@ -5,13 +5,11 @@
 
 package math.otherBaseParser;
 
-import com.itis.libs.parserng.android.expressParser.MathExpression;
-import com.itis.libs.parserng.android.expressParser.Number;
-
-import com.itis.libs.parserng.android.expressParser.*;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
-import static com.itis.libs.parserng.android.expressParser.methods.Method.*;
-import static com.itis.libs.parserng.android.expressParser.Variable.*;
+import parser.MathExpression;
+import parser.Number;
+import static parser.Number.*;
+import static parser.methods.Method.*;
+import static parser.Variable.*;
 import java.util.ArrayList;
 import math.Maths;
 

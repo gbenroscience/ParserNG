@@ -4,10 +4,10 @@
  */
 package math.differentialcalculus;
 
-import com.itis.libs.parserng.android.expressParser.Bracket;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
-import static com.itis.libs.parserng.android.expressParser.Operator.*;
-import static com.itis.libs.parserng.android.expressParser.Variable.*;
+import parser.Bracket;
+import static parser.Number.*;
+import static parser.Operator.*;
+import static parser.Variable.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -215,7 +215,6 @@ public class ExpressionSimplifier {
     /**
      * Used by the main parser solve to figure out SBP portions of a multi-bracketed expression (MBP)
      * @param list a list of scanner tokens of a maths expression
-     * @param hasDataSet checks if the ArrayList data it is to process represents a data set or not
      * @return the solution to a SBP maths expression
      */
     public static List<String> solve(List<String> list) {

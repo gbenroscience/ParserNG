@@ -5,14 +5,14 @@
 
 package math.numericalmethods;
 
-import com.itis.libs.parserng.android.expressParser.Number;
-import com.itis.libs.parserng.android.expressParser.Bracket;
-import com.itis.libs.parserng.android.expressParser.Variable;
+import parser.Number;
+import parser.Bracket;
+import parser.Variable;
 import java.util.InputMismatchException;
-import com.itis.libs.parserng.android.expressParser.Function;
-import com.itis.libs.parserng.android.expressParser.LISTS;
-import com.itis.libs.parserng.android.expressParser.MathExpression;
-import com.itis.libs.parserng.android.expressParser.Operator;
+import parser.Function;
+import parser.LISTS;
+import parser.MathExpression;
+import parser.Operator;
 import util.FunctionManager;
 import static java.lang.Math.*;
 import java.util.Arrays;
@@ -60,32 +60,32 @@ import util.VariableManager;
  * if no root is found, it is usually because no real
  * root exists for the function in the specified range.
  *
- *<br/><br/>
- *<b>Usage:</b><br/>
+ *<br><br>
+ *<b>Usage:</b><br>
  * The input that initializes objects of this class is a String value
  * that contains information about the function whose roots we seek
  * and the range in which we need to search for the function.
  * Always specify 2 values for the range,please.
  * If the variable has been initialized before in the workspace
  * and is visible to the currently evaluating object
- * of this class then an example could be:<br/>
+ * of this class then an example could be:<br>
  * <b>
  * 2x^3-5x+sin(x)-1=0,-3,5
- * </b><br/>
+ * </b><br>
  * This will try to seek out the zeroes of 2x^3-5x+sin(x)-1
  * between x = -3 and x = 5 depending on the algorithm in use.
  *
  * If however, the variable has not been initialized before in the workspace
  * or has been initialized but is not visible to the currently evaluating object
- * of this class then an example could be:<br/>
+ * of this class then an example could be:<br>
  * <b>
  * var x=0;2x^3-5x+sin(x)-1=0,-3,5
- * </b><br/>
+ * </b><br>
  *
  * <b>
  * <strong color="red">
  * CAUTION!!!!!
- * Always end your equations with "=0"<br/>
+ * Always end your equations with "=0"<br>
  * Objects of this class assume that you do
  * and make calculations based on that.
  * </strong>
@@ -186,12 +186,12 @@ public class RootFinder {
      *
      *  expression,lowerLimit,upperLimit,iterations(optional)
      *
-     * <br/>
+     * <br>
      * <b color='red'>
      *  Actually, the lower-limit and upper-limit values specified
      *  does not guarantee that the root returned will be between the values specified.
      *  In fact, the root could be far away from the values specified.
-     * <br/><br/><br/><br/>
+     * <br><br><br><br>
      * </b>
      *
      *

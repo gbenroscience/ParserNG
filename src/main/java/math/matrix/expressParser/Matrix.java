@@ -186,7 +186,7 @@ public class Matrix {
      * @param row1 The first row.
      * @param row2 The second row.
      *
-     * <b color='red'> BE CAREFUL!!!!<br/>
+     * <b color='red'> BE CAREFUL!!!!<br>
      * THIS METHOD ACTS ON THE MATRIX OBJECT ON WHICH IT IS CALLED AND MODIFIES
      * IT!
      * </b>
@@ -207,7 +207,7 @@ public class Matrix {
      * @param col1 The first row.
      * @param col2 The second row.
      *
-     * <b color='red'> BE CAREFUL!!!!<br/>
+     * <b color='red'> BE CAREFUL!!!!<br>
      * THIS METHOD ACTS ON THE MATRIX OBJECT ON WHICH IT IS CALLED AND MODIFIES
      * IT!
      * </b>

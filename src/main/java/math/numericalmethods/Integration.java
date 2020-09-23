@@ -7,7 +7,7 @@
 package math.numericalmethods;
 
  
-import com.itis.libs.parserng.android.expressParser.Function;
+import parser.Function;
 import java.util.*;
  
 /*

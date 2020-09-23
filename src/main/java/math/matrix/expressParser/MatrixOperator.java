@@ -5,9 +5,9 @@
 
 package math.matrix.expressParser;
 
-import com.itis.libs.parserng.android.expressParser.MathExpression;
-import com.itis.libs.parserng.android.expressParser.Precedence;
-import com.itis.libs.parserng.android.expressParser.UnaryPreOperator;
+import parser.MathExpression;
+import parser.Precedence;
+import parser.UnaryPreOperator;
 
 
 import java.util.ArrayList;

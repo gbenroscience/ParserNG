@@ -13,17 +13,15 @@
 package math.matrix.expressParser;
 
 
-import com.itis.libs.parserng.android.expressParser.STRING;
-import com.itis.libs.parserng.android.expressParser.Variable;
-
-import com.itis.libs.parserng.android.expressParser.*;
+import parser.STRING;
+import parser.Variable;
 import java.util.*;
 import java.util.ArrayList;
 import util.*;
-import static com.itis.libs.parserng.android.expressParser.STRING.*;
-import static com.itis.libs.parserng.android.expressParser.Operator.*;
-import static com.itis.libs.parserng.android.expressParser.Variable.*;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
+import static parser.STRING.*;
+import static parser.Operator.*;
+import static parser.Variable.*;
+import static parser.Number.*;
 /**
  *
  * @author GBEMIRO
@@ -333,7 +331,6 @@ return firstVarIndex;
  * e.g if val="2ABC+D+5.21q-$34"
  * it will return [2,ABC,+,D,+,5.21,q,-,$34]
  * @param val
- * @param varStore
  * @return An ArrayList of substrings consisting of Variable substrings and the other substrings
  * of the input.
  */
@@ -341,8 +338,7 @@ return firstVarIndex;
 public  ArrayList<String> splitStringOnVariables(String val)
 {//3AC-4+7sin5
 
-      ArrayList<String>split=new ArrayList<String>();
-   ArrayList<String>filter=new ArrayList<String>();
+      ArrayList<String>split=new ArrayList<>();
 
     int varIndex=2;
     String vars="A";

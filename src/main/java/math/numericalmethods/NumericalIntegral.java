@@ -3,14 +3,14 @@
  * and open the template in the editor.
  */
 package math.numericalmethods;
-import com.itis.libs.parserng.android.expressParser.Number;
-import com.itis.libs.parserng.android.expressParser.Bracket;
-import com.itis.libs.parserng.android.expressParser.Variable;
+import parser.Number;
+import parser.Bracket;
+import parser.Variable;
 import util.FunctionManager;
-import com.itis.libs.parserng.android.expressParser.Function;
-import com.itis.libs.parserng.android.expressParser.LISTS;
-import com.itis.libs.parserng.android.expressParser.MathExpression;
-import com.itis.libs.parserng.android.expressParser.Operator;
+import parser.Function;
+import parser.LISTS;
+import parser.MathExpression;
+import parser.Operator;
 import java.util.InputMismatchException;
 import static java.lang.Math.*;
 import java.util.Arrays;

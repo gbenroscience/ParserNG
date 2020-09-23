@@ -5,9 +5,9 @@
 
 package math.numericalmethods;
 
-import com.itis.libs.parserng.android.expressParser.Function;
-import com.itis.libs.parserng.android.expressParser.MathExpression;
-import com.itis.libs.parserng.android.expressParser.Variable;
+import parser.Function;
+import parser.MathExpression;
+import parser.Variable;
 import java.util.InputMismatchException;
 import java.util.logging.Level;
 import java.util.logging.Logger;

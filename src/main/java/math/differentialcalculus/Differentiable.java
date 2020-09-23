@@ -5,11 +5,11 @@
 package math.differentialcalculus;
 
 import java.util.ArrayList;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
-import static com.itis.libs.parserng.android.expressParser.Operator.*;
-import static com.itis.libs.parserng.android.expressParser.Variable.*;
+import static parser.Number.*;
+import static parser.Operator.*;
+import static parser.Variable.*;
 
-import static com.itis.libs.parserng.android.expressParser.methods.Method.*;
+import static parser.methods.Method.*;
 import java.util.List;
 import static math.differentialcalculus.Utilities.*;
 

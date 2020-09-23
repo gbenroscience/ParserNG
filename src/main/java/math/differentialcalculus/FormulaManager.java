@@ -7,7 +7,7 @@ package math.differentialcalculus;
 import java.util.ArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
+import static parser.Number.*;
 import java.util.List;
 /**
  *
@@ -186,7 +186,7 @@ return getFormula(name);
 
 /**
  *
- * @param f The Formula object to add to this object.
+ * @param form The Formula object to add to this object.
  */
 public void add( Formula form ){
 if(!contains(form.getName())){   

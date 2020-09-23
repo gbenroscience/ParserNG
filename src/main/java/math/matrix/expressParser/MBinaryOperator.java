@@ -5,14 +5,12 @@
 
 package math.matrix.expressParser;
 
-import com.itis.libs.parserng.android.expressParser.Precedence;
-import com.itis.libs.parserng.android.expressParser.Validatable;
-
-import com.itis.libs.parserng.android.expressParser.*;
+import parser.Precedence;
+import parser.Validatable;
 import java.util.ArrayList;
  
-import static com.itis.libs.parserng.android.expressParser.Number.*;
-import static com.itis.libs.parserng.android.expressParser.Variable.*;
+import static parser.Number.*;
+import static parser.Variable.*;
 
 /**
  *

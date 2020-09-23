@@ -9,7 +9,7 @@ import java.util.Map;
 import java.io.BufferedWriter;
 import java.io.FileWriter;
 
-import com.itis.libs.parserng.android.expressParser.Function;
+import parser.Function;
 
 /**
  *

@@ -5,7 +5,7 @@ ParserNG is a powerful open-source math tool that parses and evaluates algebraic
 
 <i>If you need to use the parser directly in your Android project, go to:
 [parserng-android](https://github.com/gbenroscience/parserng-android) by the same author
-</i><br/>
+</i><br>
 
 It was created in 2009 by me, Gbemiro Jiboye and later used as a critical part of my final year project
 at the Department of Computer Science and Engineering, Obafemi Awolowo University,Ile-Ife, Osun State, Nigeria.

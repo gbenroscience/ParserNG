@@ -5,8 +5,7 @@
 
 package util;
 
-import java.util.ArrayList;
-import java.util.Vector; 
+import java.util.ArrayList; 
 
 /**
  *
@@ -35,7 +34,7 @@ public class FormulaeManager {
     }
     /**
      * deletes Formulae objects based on their original expressions
-     * @param index the position of the Formulae object within the store
+     * @param expr The expression
      */
     public void deleteFormula(String expr){
         for(int i=0;i<formulaStore.size();i++){

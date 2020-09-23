@@ -5,8 +5,8 @@
 
 package math.matrix.expressParser;
 
-import com.itis.libs.parserng.android.expressParser.STRING;
-import com.itis.libs.parserng.android.expressParser.Variable;
+import parser.STRING;
+import parser.Variable;
  
 
 

@@ -15,7 +15,7 @@ package util;
  *
  */
 
-import com.itis.libs.parserng.android.expressParser.Variable;
+import parser.Variable;
 import java.util.Random;
 public class VariableGenerator {
 

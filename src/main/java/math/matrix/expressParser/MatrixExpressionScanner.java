@@ -13,9 +13,9 @@
 package math.matrix.expressParser;
 
 
-import com.itis.libs.parserng.android.expressParser.Number;
-import com.itis.libs.parserng.android.expressParser.STRING;
-import com.itis.libs.parserng.android.expressParser.Variable;
+import parser.Number;
+import parser.STRING;
+import parser.Variable;
 
 
 import java.util.*;
@@ -23,10 +23,10 @@ import java.util.ArrayList;
  
 import math.matrix.MatrixVariableManager;
 import util.*;
-import static com.itis.libs.parserng.android.expressParser.STRING.*;
-import static com.itis.libs.parserng.android.expressParser.Operator.*;
-import static com.itis.libs.parserng.android.expressParser.Variable.*;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
+import static parser.STRING.*;
+import static parser.Operator.*;
+import static parser.Variable.*;
+import static parser.Number.*;
 import static math.matrix.expressParser.MatrixVariable.*;
 /**
  *
@@ -334,7 +334,6 @@ return firstVarIndex;
  * e.g if val="2ABC+D+5.21q-$34"
  * it will return [2,ABC,+,D,+,5.21,q,-,$34]
  * @param val
- * @param varStore
  * @return An ArrayList of substrings consisting of Variable substrings and the other substrings
  * of the input.
  */

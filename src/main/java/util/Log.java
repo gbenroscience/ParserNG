@@ -7,7 +7,7 @@ package util;
 
 /**
  *
- * @author GBEMIRO JIBOYE <gbenroscience@gmail.com>
+ * @author GBEMIRO JIBOYE , gbenroscience@gmail.com
  */
 public class Log {
 

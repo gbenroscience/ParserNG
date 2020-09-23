@@ -7,7 +7,7 @@
 
 package math.matrix.expressParser;
 
-import com.itis.libs.parserng.android.expressParser.MathExpression;
+import parser.MathExpression;
   
 
 

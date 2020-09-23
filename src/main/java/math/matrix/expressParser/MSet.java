@@ -5,7 +5,7 @@
 
 package math.matrix.expressParser;
 
-import com.itis.libs.parserng.android.expressParser.STRING;
+import parser.STRING;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.NoSuchElementException;

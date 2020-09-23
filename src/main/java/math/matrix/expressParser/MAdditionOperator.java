@@ -21,10 +21,8 @@ public final class MAdditionOperator extends MBinaryOperator {
  *
  * @param index the index of this object in its
  * parent Function object's scanner.
- * @param function the Function object in which this
- * MAdditionOperator exists.
- *
- */
+ * @param scan The scanner output
+ */ 
     public MAdditionOperator(int index, ArrayList<String>scan){
         super("+", index, scan);
     }//end constructor

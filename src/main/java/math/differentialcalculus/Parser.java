@@ -5,16 +5,16 @@
  */
 package math.differentialcalculus;
 
-import com.itis.libs.parserng.android.expressParser.Number;
-import com.itis.libs.parserng.android.expressParser.Bracket;
-import com.itis.libs.parserng.android.expressParser.DataSetFormatter;
-import com.itis.libs.parserng.android.expressParser.Function;
-import com.itis.libs.parserng.android.expressParser.LISTS;
-import com.itis.libs.parserng.android.expressParser.MathExpression;
-import com.itis.libs.parserng.android.expressParser.MathScanner;
-import com.itis.libs.parserng.android.expressParser.Operator;
-import com.itis.libs.parserng.android.expressParser.Parser_Result;
-import com.itis.libs.parserng.android.expressParser.Variable;
+import parser.Number;
+import parser.Bracket;
+import parser.DataSetFormatter;
+import parser.Function;
+import parser.LISTS;
+import parser.MathExpression;
+import parser.MathScanner;
+import parser.Operator;
+import parser.Parser_Result;
+import parser.Variable;
 import java.util.Arrays;
 import java.util.List;
 import util.FunctionManager;

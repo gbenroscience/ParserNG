@@ -6,8 +6,8 @@
 package util;
 
 
-import com.itis.libs.parserng.android.expressParser.Function;
-import com.itis.libs.parserng.android.expressParser.Variable;
+import parser.Function;
+import parser.Variable;
 
 import java.util.ArrayList;
 import java.util.Collections;

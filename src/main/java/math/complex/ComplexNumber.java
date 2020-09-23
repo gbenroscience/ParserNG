@@ -110,7 +110,7 @@ this.state = ComplexState.CARTESIAN;
 
 /**
  * Adds two ComplexNumber objects
- * @param complexNumberThe ComplexNumber object to add to this one.
+ * @param complexNumber The ComplexNumber object to add to this one.
  * @return the sum of the two objects as a new ComplexNumber object.
  */
     public ComplexNumber add(ComplexNumber complexNumber){
@@ -118,7 +118,7 @@ this.state = ComplexState.CARTESIAN;
     }
 /**
  * Subtracts the parameter ComplexNumber object from this ComplexNumber object.
- * @param complexNumberThe ComplexNumber object to subtract from this one.
+ * @param complexNumber The ComplexNumber object to subtract from this one.
  * @return the difference of the two objects as a new ComplexNumber object.
  */
     public ComplexNumber minus(ComplexNumber complexNumber){
@@ -127,7 +127,7 @@ this.state = ComplexState.CARTESIAN;
 
 /**
  * Multiplies this ComplexNumber object by the parameter ComplexNumber object.
- * @param complexNumberThe ComplexNumber object to be employed in multiplying this one.
+ * @param complexNumber The ComplexNumber object to be employed in multiplying this one.
  * @return the product of the two objects as a new ComplexNumber object.
  */
 public ComplexNumber multiply(ComplexNumber complexNumber){
@@ -141,7 +141,7 @@ double d =complexNumber.imag;
 
 /**
  * Divides this ComplexNumber object by the parameter ComplexNumber object.
- * @param complexNumberThe ComplexNumber object to be employed in dividing this one.
+ * @param complexNumber The ComplexNumber object to be employed in dividing this one.
  * @return the division of the two objects as a new ComplexNumber object.
  */
 public ComplexNumber divide(ComplexNumber complexNumber){

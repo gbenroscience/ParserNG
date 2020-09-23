@@ -1,7 +1,7 @@
 package math;
 
 
-import com.itis.libs.parserng.android.expressParser.STRING;
+import parser.STRING;
 
 import static java.lang.Math.*;
 
@@ -1289,7 +1289,7 @@ public class Maths {                       //3.14159265358979323846;
      * <p>
      * <p>
      * This formula runs fastest at values of x very close to 1.
-     * e.g: 0.9<=x<=1.1 ,the accuracy is also highest for this range.
+     * e.g: 0.9&lte;x&lte;1.1 ,the accuracy is also highest for this range.
      * <p>
      * For this reason the algorithm uses a repeated-square-root deduction
      * process to force all numbers to fall into the specified range before
@@ -1329,9 +1329,6 @@ public class Maths {                       //3.14159265358979323846;
      * exponent of a number exists.
      * It runs on the J2SE platform, too and is only slightly slower than its
      * counterpart in class Math.
-     *
-     * @param x The number whose natural
-     *          logarithm is needed.
      * @param x The number whose exponent is needed.
      * @return the exponent of the number.
      */
@@ -1376,7 +1373,7 @@ public class Maths {                       //3.14159265358979323846;
     /**
      * We have code that computes the arctangent very accurately.
      * The same principles applied for the arctan do not work well
-     * for arcsin and arccos throughout the whole range -1<=x<=1.
+     * for arcsin and arccos throughout the whole range -1&leq;x&leq;1.
      * So we use the relationship between arctan,arccos and arcsin
      * to compute them.
      * This is it:
@@ -1415,7 +1412,7 @@ public class Maths {                       //3.14159265358979323846;
     /**
      * We have code that computes the arctangent very accurately.
      * The same principles applied for the arctan do not work well
-     * for arcsin and arccos throughout the whole range -1<=x<=1.
+     * for arcsin and arccos throughout the whole range -1&leq;x&leq;1.
      * So we use the relationship between arctan,arccos and arcsin
      * to compute them.
      * This is it:

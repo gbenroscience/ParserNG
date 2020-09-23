@@ -21,7 +21,6 @@ logBook.add(error);
 }
 /**
  * Displays the contents of this logBook on a JTextArea object and then clears its memory.
- * @param area
  */
 public void printLog(){
 	StringBuilder builder = new StringBuilder(logBook.toString());

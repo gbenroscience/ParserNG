@@ -6,11 +6,11 @@ package math.differentialcalculus;
 
 import java.util.ArrayList;
 import java.util.List;
-import com.itis.libs.parserng.android.expressParser.Bracket;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
-import static com.itis.libs.parserng.android.expressParser.Operator.*;
-import static com.itis.libs.parserng.android.expressParser.Variable.*;
-import static com.itis.libs.parserng.android.expressParser.methods.Method.*;
+import parser.Bracket;
+import static parser.Number.*;
+import static parser.Operator.*;
+import static parser.Variable.*;
+import static parser.methods.Method.*;
 
 import java.util.logging.Level;
 import java.util.logging.Logger;

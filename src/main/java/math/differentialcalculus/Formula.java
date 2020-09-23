@@ -8,9 +8,9 @@ import java.util.ArrayList;
 import java.util.Random;
 
 import static math.differentialcalculus.Utilities.*;
-import static com.itis.libs.parserng.android.expressParser.Number.*;
-import static com.itis.libs.parserng.android.expressParser.Operator.*;
-import static com.itis.libs.parserng.android.expressParser.Variable.*;
+import static parser.Number.*;
+import static parser.Operator.*;
+import static parser.Variable.*;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;

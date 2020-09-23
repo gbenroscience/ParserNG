@@ -5,10 +5,10 @@
 
 package util;
 
-import com.itis.libs.parserng.android.expressParser.CustomScanner;
-import com.itis.libs.parserng.android.expressParser.MathExpression;
-import com.itis.libs.parserng.android.expressParser.Operator;
-import com.itis.libs.parserng.android.expressParser.Variable;
+import parser.CustomScanner;
+import parser.MathExpression;
+import parser.Operator;
+import parser.Variable;
 
 import java.util.*;
 
