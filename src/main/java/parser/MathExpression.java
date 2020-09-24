@@ -2261,7 +2261,7 @@ public class MathExpression {
         double start = System.nanoTime();
 
 
-        double iterations = 1000000;
+        double iterations = 100;
 
         for(int i=0;i<iterations;i++){
             f.calc(i+3);
