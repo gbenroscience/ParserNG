@@ -20,10 +20,10 @@ If you need to access this library via Maven Central, do:
 This library was created in 2009 and later used by the author as part of a critical part of his University final year project
 at the Department of Computer Science and Engineering, Obafemi Awolowo University,Ile-Ife, Osun State, Nigeria.
 
-My goal was to create a simple, yet powerful, not too bogus math tool that scientists and developers could deploy with their
+The design goal of this library was to create a simple, yet powerful, not too bogus math tool that scientists and developers could deploy with their
 work to solve mathematical problems both simple and complex.
 
-ParserNG is written completely in (pure) Java and so is as cross-platform as Java can be. I have used it to design math platforms for desktop Java, Java MicroEdition devices(as far back as 2010-2011) , Android,  and by porting the whole platform using J2OBJC from Gooogle; Swift also. The performance has been exceptionally acceptable in all cases.
+ParserNG is written completely in (pure) Java and so is as cross-platform as Java can be. It has been used to design math platforms for desktop Java, Java MicroEdition devices(as far back as 2010-2011) , Android,  and by porting the whole platform using J2OBJC from Gooogle; Swift also. The performance has been exceptionally acceptable in all cases.
 
 
 <p><b>FEATURES</b></p>
