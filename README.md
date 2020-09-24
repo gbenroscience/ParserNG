@@ -17,7 +17,7 @@ If you need to access this library via Maven Central, do:
         </dependency>
  ```      
 
-I created this library in 2009 and later used it as a critical part of my final year project
+This library was created in 2009 and later used by the author as part of a critical part of his University final year project
 at the Department of Computer Science and Engineering, Obafemi Awolowo University,Ile-Ife, Osun State, Nigeria.
 
 My goal was to create a simple, yet powerful, not too bogus math tool that scientists and developers could deploy with their
@@ -197,5 +197,3 @@ This gives: 7.999999999998261... approx: 8 ...
 
 
 I will talk about other functionalities of the library, such as numerical integration later on! Thanks.
-
-
