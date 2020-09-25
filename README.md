@@ -276,7 +276,7 @@ This gives:
          188.99999999999997
          
          
-### 3. Solving simultaneous linear equations.
+#### 3. Solving simultaneous linear equations.
 
 The function that does this is `linear_sys`
 
@@ -299,5 +299,5 @@ This prints:
 
 
 
-
+## TO BE CONTINUED
 
