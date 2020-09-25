@@ -297,6 +297,141 @@ This prints:
      2.3529411764705888            
      -3.235294117647059`
 
+#### 4. Building triangular matrices
+
+Say you have defined a matrix `M` as in past examples, to decompose it into a triangular matrix, do:
+
+     MathExpression expr = new MathExpression("tri_mat(M)");
+        System.out.println(expr.solve());
+        
+For the matrix above, this would give:
+
+
+    1.0  ,1.3333333333333333  ,0.3333333333333333            
+    0.0  ,    1.0  ,4.749999999999999            
+    0.0  ,    0.0  ,    1.0            
+        
+         
+#### 5. Echelon form of a matrix       
+
+To find the echelon of the matrix `M` defined in 1. do,
+
+     MathExpression expr = new MathExpression("echelon(M)");
+     System.out.println(expr.solve());
+     
+This would give:
+
+     3.0  ,    4.0  ,    1.0            
+     0.0  ,    4.0  ,   19.0            
+     0.0  ,    0.0  ,  567.0     
+         
+
+
+#### 6. Matrix multiplication
+
+ParserNG of course allows matrix multiplication with ease.
+
+To multiply 2 matrices in 1 step: Do,
+
+    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    P=matrix_mul(M,N);P;");
+    System.out.println("soln: "+mulExpr.solve());
+    
+      
+   Or: 
+   
+   MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    matrix_mul(M,N);");
+    System.out.println("soln: "+mulExpr.solve());
+    
+         
+This would give:
+
+    25.0  ,    8.0  ,   45.0            
+    51.0  ,   13.0  ,   91.0            
+    28.0  ,    8.0  ,   57.0   
+
+
+#### 7. Matrix addition
+
+ParserNG allows easy addition of matrices.
+
+To multiply 2 matrices in 1 step: Do,
+
+    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    P=matrix_add(M,N);P;");
+    System.out.println("soln: "+mulExpr.solve());
+    
+      
+   Or: 
+   
+   MathExpression addMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    matrix_mul(M,N);");
+    System.out.println("soln: "+addMat.solve());
+    
+         
+This would give:
+
+    25.0  ,    8.0  ,   45.0            
+    51.0  ,   13.0  ,   91.0            
+    28.0  ,    8.0  ,   57.0   
+
+
+
+#### 8. Matrix subtraction
+
+ParserNG also allows matrix subtraction.
+
+To multiply 2 matrices in 1 step: Do,
+
+    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    P=matrix_sub(M,N);P;");
+    System.out.println("soln: "+mulExpr.solve());
+    
+      
+   Or: 
+   
+   MathExpression subMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    matrix_mul(M,N);");
+    System.out.println("soln: "+ subMat.solve());
+    
+         
+This would give:
+
+    25.0  ,    8.0  ,   45.0            
+    51.0  ,   13.0  ,   91.0            
+    28.0  ,    8.0  ,   57.0   
+
+
+
+
+#### 9. Powers of a Matrix
+
+ParserNG also allows quick computation of powers of a matrix.
+
+Here, given a matrix `M` , M<sup>2</sup> is defined as `MxM` and M<sup>n</sup> is defined as `MxMxM...(n times)`
+
+To find the power of a matrix, say M<sup>4</sup>,  do:
+
+    MathExpression mpow = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    P=matrix_pow(M,4);P;");
+    System.out.println("soln: "+mpow.solve());
+    
+      
+   Or: 
+   
+   MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    matrix_pow(M,4);");
+    System.out.println("soln: "+mulExpr.solve());
+    
+         
+This would give:
+
+    3228.0  , 2755.0  , 1798.0            
+    4565.0  , 3802.0  , 3049.0            
+    3432.0  , 2257.0  , 1327.0            
+
+
 
 
 ## TO BE CONTINUED
