@@ -196,4 +196,108 @@ System.out.println("result: " + expr.solve());
 This gives: 7.999999999998261... approx: 8 ...
 
 
-I will talk about other functionalities of the library, such as numerical integration later on! Thanks.
+## Functions and FunctionManager , Variables and VariableManager
+
+
+ParserNG comes with a FunctionManager class that allows users persist store functions for the duration of the session(JVM run).
+
+You may create and store a function directly by doing:
+
+    FunctionManager.add("f(x,y) = x-x/y");
+And then retrieve and use the function like this:
+
+    Function fxy = FunctionManager.lookUp("f");
+
+Or you may create the function directly and store it, like:
+
+Function fxy = new Function("f(x,y) = x-x/y");
+
+And then store it using:
+
+          FunctionManager.add(fxy);
+
+The same applies to variables.
+
+The variables that you create go into the VariableManager.
+So if you do:
+
+MathExpression me = new MathExpression("a=5;4*a");
+
+The parser immediately creates a variable called `a` , stores 5 in it, and saves the variable in the VariableManager.
+This variable can be used within other `MathExpression`s that you create within the current parser session.
+
+## Matrices
+
+ParserNG deals with matrices; howbeit on a functional level. On theway though is pure Matrix Algebra which is one of the targets set for the platform.
+
+Currently you can define matrices and even store them like functions...
+
+For example to define and store a matrix <b>M</b>
+
+     FunctionManager.add("M=@(3,3)(3,4,1,2,4,7,9,1,-2)"); 
+
+This can be extracted as a function by doing a simple lookup:
+
+Function matrixFun = FunctionManager.lookUp("M");
+To find its determinant, do something like:
+
+double det = matrixFun.calcDet();
+
+You can do more by getting the underlying Matrix object, i.e do:
+
+      Matrix m = matrixFun.getMatrix();
+
+But I digress. Let us look at the matrix functionality runnable from within the parser.
+
+### Parser manipulation of matrices.
+
+The parser comes with inbuilt matrix manipulating functions.
+
+
+#### 1. Create a matrix:
+
+        MathExpression expr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2)");
+
+This expression creates a new matrix function , `M` and stores it in the FunctionManager.
+
+Or the more direct form:
+
+        FunctionManager.add("M=@(3,3)(3,4,1,2,4,7,9,1,-2)");
+        
+#### 2. Determinants
+
+To calculate the determinant of the matrix `M`, above do:
+
+        MathExpression expr = new MathExpression("det(M)");
+        System.out.println(m.solve());
+
+This gives:
+         
+         188.99999999999997
+         
+         
+### 3. Solving simultaneous linear equations.
+
+The function that does this is `linear_sys`
+
+To represent the linear system:
+
+ 2x + 3y=-5<br>
+ 3x - 4y = 20
+ 
+ in ParserNG, do:
+ 
+ 
+         MathExpression linear = new MathExpression("linear_sys(2,3,-5,3,-4,20)");
+         System.out.println("soln: "+linear.solve());
+         
+This prints:
+
+     soln: 
+     2.3529411764705888            
+     -3.235294117647059`
+
+
+
+
+
