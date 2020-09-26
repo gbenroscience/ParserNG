@@ -1,5 +1,5 @@
 # ParserNG
-ParserNG is a powerful open-source math tool that parses and evaluates algebraic expressions. 
+ParserNG is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. 
 
 ## NOTE:
 
@@ -17,13 +17,13 @@ If you need to access this library via Maven Central, do:
         </dependency>
  ```      
 
-I created this library in 2009 and later used it as a critical part of my final year project
+This library was created in 2009 and later used by the author as part of a critical part of his University final year project
 at the Department of Computer Science and Engineering, Obafemi Awolowo University,Ile-Ife, Osun State, Nigeria.
 
-My goal was to create a simple, yet powerful, not too bogus math tool that scientists and developers could deploy with their
+The design goal of this library was to create a simple, yet powerful, not too bogus math tool that scientists and developers could deploy with their
 work to solve mathematical problems both simple and complex.
 
-ParserNG is written completely in (pure) Java and so is as cross-platform as Java can be. I have used it to design math platforms for desktop Java, Java MicroEdition devices(as far back as 2010-2011) , Android,  and by porting the whole platform using J2OBJC from Gooogle; Swift also. The performance has been exceptionally acceptable in all cases.
+ParserNG is written completely in (pure) Java and so is as cross-platform as Java can be. It has been used to design math platforms for desktop Java, Java MicroEdition devices(as far back as 2010-2011) , Android,  and by porting the whole platform using J2OBJC from Gooogle; Swift also. The performance has been exceptionally acceptable in all cases.
 
 
 <p><b>FEATURES</b></p>
@@ -90,7 +90,7 @@ MathExpression expression = new MathExpression("x^2+5*x+1");
 
 for(int i=0; i<100000; i++){
 expression.setValue("x", String.valueOf(i) );
-expression.solve();
+expression.solve();//Use the value from here according to your iterative needs...e.g plot a graph , do some summation etc..
 }
 </code></pre>
 <br>
@@ -196,6 +196,304 @@ System.out.println("result: " + expr.solve());
 This gives: 7.999999999998261... approx: 8 ...
 
 
-I will talk about other functionalities of the library, such as numerical integration later on! Thanks.
+## Functions and FunctionManager , Variables and VariableManager
 
+
+ParserNG comes with a FunctionManager class that allows users persist store functions for the duration of the session(JVM run).
+
+You may create and store a function directly by doing:
+
+    FunctionManager.add("f(x,y) = x-x/y");
+And then retrieve and use the function like this:
+
+    Function fxy = FunctionManager.lookUp("f");
+
+Or you may create the function directly and store it, like:
+
+Function fxy = new Function("f(x,y) = x-x/y");
+
+And then store it using:
+
+          FunctionManager.add(fxy);
+
+The same applies to variables.
+
+The variables that you create go into the VariableManager.
+So if you do:
+
+MathExpression me = new MathExpression("a=5;4*a");
+
+The parser immediately creates a variable called `a` , stores 5 in it, and saves the variable in the VariableManager.
+This variable can be used within other `MathExpression`s that you create within the current parser session.
+
+## Matrices
+
+ParserNG deals with matrices; howbeit on a functional level. On theway though is pure Matrix Algebra which is one of the targets set for the platform.
+
+Currently you can define matrices and even store them like functions...
+
+For example to define and store a matrix <b>M</b>
+
+     FunctionManager.add("M=@(3,3)(3,4,1,2,4,7,9,1,-2)"); 
+
+This can be extracted as a function by doing a simple lookup:
+
+Function matrixFun = FunctionManager.lookUp("M");
+To find its determinant, do something like:
+
+double det = matrixFun.calcDet();
+
+You can do more by getting the underlying Matrix object, i.e do:
+
+      Matrix m = matrixFun.getMatrix();
+
+But I digress. Let us look at the matrix functionality runnable from within the parser.
+
+### Parser manipulation of matrices.
+
+The parser comes with inbuilt matrix manipulating functions.
+
+
+#### 1. Create a matrix:
+
+        MathExpression expr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2)");
+
+This expression creates a new matrix function , `M` and stores it in the FunctionManager.
+
+Or the more direct form:
+
+        FunctionManager.add("M=@(3,3)(3,4,1,2,4,7,9,1,-2)");
+        
+#### 2. Determinants
+
+To calculate the determinant of the matrix `M`, above do:
+
+        MathExpression expr = new MathExpression("det(M)");
+        System.out.println(m.solve());
+
+This gives:
+         
+         188.99999999999997
+         
+         
+#### 3. Solving simultaneous linear equations.
+
+The function that does this is `linear_sys`
+
+To represent the linear system:
+
+ 2x + 3y=-5<br>
+ 3x - 4y = 20
+ 
+ in ParserNG, do:
+ 
+ 
+         MathExpression linear = new MathExpression("linear_sys(2,3,-5,3,-4,20)");
+         System.out.println("soln: "+linear.solve());
+         
+This prints:
+
+     soln: 
+     2.3529411764705888            
+     -3.235294117647059`
+
+#### 4. Building triangular matrices
+
+Say you have defined a matrix `M` as in past examples, to decompose it into a triangular matrix, do:
+
+     MathExpression expr = new MathExpression("tri_mat(M)");
+        System.out.println(expr.solve());
+        
+For the matrix above, this would give:
+
+
+    1.0  ,1.3333333333333333  ,0.3333333333333333            
+    0.0  ,    1.0  ,4.749999999999999            
+    0.0  ,    0.0  ,    1.0            
+        
+         
+#### 5. Echelon form of a matrix       
+
+To find the echelon of the matrix `M` defined in 1. do,
+
+     MathExpression expr = new MathExpression("echelon(M)");
+     System.out.println(expr.solve());
+     
+This would give:
+
+     3.0  ,    4.0  ,    1.0            
+     0.0  ,    4.0  ,   19.0            
+     0.0  ,    0.0  ,  567.0     
+         
+
+
+#### 6. Matrix multiplication
+
+ParserNG of course allows matrix multiplication with ease.
+
+To multiply 2 matrices in 1 step: Do,
+
+    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    P=matrix_mul(M,N);P;");
+    System.out.println("soln: "+mulExpr.solve());
+    
+      
+   Or: 
+   
+    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    matrix_mul(M,N);");
+    System.out.println("soln: "+mulExpr.solve());
+    
+         
+This would give:
+
+    25.0  ,    8.0  ,   45.0            
+    51.0  ,   13.0  ,   91.0            
+    28.0  ,    8.0  ,   57.0   
+
+
+#### 7. Matrix addition
+
+ParserNG allows easy addition of matrices.
+
+To multiply 2 matrices in 1 step: Do,
+
+    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    P=matrix_add(M,N);P;");
+    System.out.println("soln: "+mulExpr.solve());
+    
+      
+   Or: 
+   
+    MathExpression addMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    matrix_mul(M,N);");
+    System.out.println("soln: "+addMat.solve());
+    
+         
+This would give:
+
+    7.0  ,    5.0  ,    9.0            
+    4.0  ,    5.0  ,   10.0            
+    14.0  ,    2.0  ,    7.0   
+
+
+
+#### 8. Matrix subtraction
+
+ParserNG also allows matrix subtraction.
+
+To multiply 2 matrices in 1 step: Do,
+
+    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    P=matrix_sub(M,N);P;");
+    System.out.println("soln: "+mulExpr.solve());
+    
+      
+   Or: 
+   
+    MathExpression subMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    matrix_mul(M,N);");
+    System.out.println("soln: "+ subMat.solve());
+    
+         
+This would give:
+
+    -1.0  ,    3.0  ,   -7.0            
+     0.0  ,    3.0  ,    4.0            
+     4.0  ,    0.0  ,  -11.0 
+
+
+
+#### 9. Powers of a Matrix
+
+ParserNG also allows quick computation of powers of a matrix.
+
+Here, given a matrix `M` , M<sup>2</sup> is defined as `MxM` and M<sup>n</sup> is defined as `MxMxM...(n times)`
+
+To find the power of a matrix, say M<sup>4</sup>,  do:
+
+    MathExpression mpow = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    P=matrix_pow(M,4);P;");
+    System.out.println("soln: "+mpow.solve());
+    
+      
+   Or: 
+   
+    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    matrix_pow(M,4);");
+    System.out.println("soln: "+mulExpr.solve());
+    
+         
+This would give:
+
+    3228.0  , 2755.0  , 1798.0            
+    4565.0  , 3802.0  , 3049.0            
+    3432.0  , 2257.0  , 1327.0            
+
+
+
+#### 9. Transpose of a Matrix
+
+ParserNG also allows quick computation of the transpose of a matrix.
+
+
+To find the transpose of a matrix, `M`, do:
+
+    MathExpression trexp = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);P=transpose(M);P;");
+    System.out.println("soln: "+ trexp.solve());
+    
+      
+   Or: 
+   
+    MathExpression trexp = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);transpose(M);");
+    System.out.println("soln: "+ trexp.solve());
+    
+         
+This would give:
+
+    3.0  ,    2.0  ,    9.0            
+    4.0  ,    4.0  ,    1.0            
+    1.0  ,    7.0  ,   -2.0            
+
+
+
+
+#### 10. Editing a Matrix
+
+ParserNG also allows the entries in a matrix to be edited.
+
+The command for this is: `matrix_edit(M,2,2,-90)`
+
+The first argument is the Matrix object which we wish to edit.
+The second and the third arguments respectively represent the row and column that we wish to edit in the Matrix.
+
+The last entry represents the value to store in the specified location(entry) in the Matrix.
+
+##### For example
+
+To edit the contents of a matrix, `M`, do:
+
+    MathExpression trexp = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);P=matrix_edit(M,2,2,-90);P;");
+    System.out.println("soln: "+ trexp.solve());
+    
+      
+   Or: 
+   
+    MathExpression trexp = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);matrix_edit(M,2,2,-90);");
+    System.out.println("soln: "+ trexp.solve());
+    
+         
+This would give:
+
+    3.0  ,    4.0  ,    1.0            
+    2.0  ,    4.0  ,    7.0            
+    9.0  ,    1.0  ,  -90.0           
+
+
+Note that matrix indexes in ParserNG are zero-based, so be advised accordingly as entering an invalid row/column combination will throw an error in your code.
+
+
+
+
+## TO BE CONTINUED
 
