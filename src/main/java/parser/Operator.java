@@ -16,9 +16,9 @@ public class Operator{
 /**
  * The name of the operator object
  */
-private String name;
+protected String name;
 
-
+ 
 
 
     public static final String PLUS = "+";
@@ -383,41 +383,7 @@ public static Precedence getPrecedence(String name){
 
 return null;
 }
-
-/*
- * Recognizes the compound tokens
- * in a math expression.
- * Compound tokens are groups of tokens that
- * have a particular meaning and so must be treated accordingly.
- * e.g 3/4sin2 is not the same as 3/4*sin2
- *
- *
- */
-public static void orderCompoundTokens(MathExpression function){
-ArrayList<String>scanner=function.getScanner();
-
-for(int i=0;i<scanner.size();i++){
-    if( isPower(scanner.get(i)) ){
-
-
-    }//end if
-
-
-
-
-
-}//end for
-
-
-
-
-
-
-
-
-
-}
-
+ 
 /**
  *
  * @param scan An ArrayList object containing a

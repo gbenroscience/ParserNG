@@ -858,8 +858,8 @@ public class MathScanner {
          */
         for (int i = 0; i < scanner.size(); i++) {
 
-            if (new Number(scanner.get(i)).isNegative() && scanner.get(i + 1).equals("E")
-                    && new Number(scanner.get(i + 2)).isNumber()) {
+            if (Number.isNegative(scanner.get(i)) && scanner.get(i + 1).equals("E")
+                    && Number.isNumber(scanner.get(i + 2))) {
                 try {
                     scanner.set(i, scanner.get(i) + scanner.get(i + 1) + scanner.get(i + 2));
                     scanner.remove(i + 1);
@@ -977,8 +977,8 @@ public class MathScanner {
         for (int i = 0; i < scanner.size(); i++) {
             try {
 
-                if (new Number(scanner.get(i)).isNegative() && scanner.get(i + 1).equals("E")
-                        && new Number(scanner.get(i + 2)).isNumber()) {
+                if (Number.isNegative(scanner.get(i)) && scanner.get(i + 1).equals("E")
+                        && Number.isNumber(scanner.get(i + 2))) {
                     scanner.set(i, scanner.get(i) + scanner.get(i + 1) + scanner.get(i + 2));
                     scanner.remove(i + 1);
                     scanner.remove(i + 1);

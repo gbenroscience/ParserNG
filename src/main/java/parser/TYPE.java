@@ -6,11 +6,12 @@
 package parser;
 
 /**
- * Defines Calculitzer's allowed return types
+ * Defines the allowed return types
  *
  * @author JIBOYE Oluwagbemiro Olaoluwa
  */
 public enum TYPE {
 
-    MATRIX, NUMBER, STRING, VOID, LIST, ALGEBRAIC_EXPRESSION,ERROR
+    MATRIX, LIST, NUMBER, STRING, VOID, ALGEBRAIC_EXPRESSION, ERROR
+
 }

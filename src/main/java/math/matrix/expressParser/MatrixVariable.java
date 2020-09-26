@@ -110,6 +110,8 @@ return stringvalue+"]";
     }//end method
 
 /**
+ * 
+ * A + B + 2*C + A.B - A.B^5 + 3*4*A^2*C+I
  * Matrix names must start with # in
  * this syntax.
  * @param name The string to be checked if or not it

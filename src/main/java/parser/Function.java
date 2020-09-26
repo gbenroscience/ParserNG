@@ -271,6 +271,7 @@ public class Function {
                 MathExpression expr = new MathExpression(rhs);
                 String val = expr.solve();
                 String referenceName = expr.getReturnObjectName();
+                
                 if(Variable.isVariableString(newFuncName) || isVarNamesList){
                     Function f;
                     switch(expr.getReturnType()){
@@ -633,7 +634,7 @@ public class Function {
         return name;
     }
     /**
-     *
+     * @param args 
      * @return the value of a function when valid arguments are passed into its
      * parentheses. e.g if the fullname of the Function is f(x,y,c), this method
      * could be passed..f(3,-4,9)

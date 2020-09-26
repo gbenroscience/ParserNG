@@ -161,21 +161,13 @@ public class CustomScanner {
                         "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm-zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm"
                 ;
 
-        CustomScannerOld scanner = new CustomScannerOld(in,
-                true, "sinh", "+", "-", ")", "(", "sin", "cos", "/","zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm");
-
+    
 
         long start = System.nanoTime();
-
-        List<String> scan = scanner.scan();
-
+ 
         long duration = System.nanoTime() - start;
 
         System.out.println("Old Scanner parse in>>> "+(duration)+" ns");
-
-
-        System.out.println("Output>>>\n "+scan);
-
 
 
 

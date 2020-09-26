@@ -1309,14 +1309,14 @@ public class Maths {                       //3.14159265358979323846;
                 x = Math.sqrt(x);
                 count++;
             }//end while loop.
-            count = Maths.pow(2, count - 1);
+            count = pow(2, count - 1);
             double sum = 0.0;
             double lastSum = 1.0E-11;
             double i = 1.0;
             double xCalc = (x - 1) / (x + 1);
             for (; Math.abs(sum - lastSum) > 0; i += 2.0) {
                 lastSum = sum;
-                sum += (Maths.pow(xCalc, i) / i);
+                sum += (pow(xCalc, i) / i);
             }//end for loop.
             return 2 * sum * count;
         }//end else

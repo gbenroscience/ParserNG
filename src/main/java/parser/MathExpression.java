@@ -1503,7 +1503,7 @@ public class MathExpression {
         }
 //Create a collection to serve as a garbage collector for the empty memory
 //locations and other unwanted locations created in the processing collection
-        ArrayList<String> real = new ArrayList<String>();
+        ArrayList<String> real = new ArrayList<>();
 //insert an empty string in it so that we can use it to remove empty spaces from the processing collection.
         real.add("");
         real.add("(");
@@ -1747,37 +1747,7 @@ public class MathExpression {
             list.removeAll(real);
 
         }//end if
-/*
-         for (int i = 0; i < list.size(); i++) {
-         //multiply consecutive numbers in the list i.e[2,3]
-         try {
-         if (isNumber(list.get(i)) && isNumber(list.get(i + 1))) {//^|-|+|*|Č|Р]
-         if (!list.get(i).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-         list.set(i + 1, String.valueOf(Double.valueOf(list.get(i)) * Double.valueOf(list.get(i + 1))));
-         list.set(i, "");
-         }//end if
-         else if (list.get(i).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-         list.set(i + 1, "Infinity");
-         list.set(i, "");
-         } else if (!list.get(i).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-         list.set(i + 1, "Infinity");
-         list.set(i, "");
-         } else if (list.get(i).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-         list.set(i + 1, "Infinity");
-         list.set(i, "");
-         }
 
-         }
-         }//end try
-         catch (NullPointerException nolan) {
-         }//end catch
-         catch (NumberFormatException numerr) {
-         }//end catch
-         catch (IndexOutOfBoundsException inderr) {
-         }//end catch
-
-         }//end for
-         */
         list.removeAll(real);
 
         if (isHasPermOrCombOperators()) {
@@ -2169,6 +2139,51 @@ public class MathExpression {
 
 
     private static void junkExamples(){
+         
+         
+         MathExpression linear = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);V=@(2,2)(1,3,5,4);C=transpose(M);C;");
+         System.out.println("soln: "+linear.solve());
+         
+          MathExpression expr = new MathExpression("tri_mat(M)");
+        System.out.println(expr.solve());
+        
+        
+        expr = new MathExpression("echelon(M)");
+        System.out.println(expr.solve());
+         
+       
+        Function matrixFunction = FunctionManager.lookUp("M");
+        
+        Matrix matrix = matrixFunction.getMatrix();
+        System.out.println("underlying matrix: "+matrix);
+        
+        Matrix inv = matrix.inverse();
+        
+        System.out.println("inverted matrix: "+inv);
+        
+        matrix.multiply(inv);
+        
+        System.out.println("mul matrix: "+matrix);
+        
+        
+        
+        
+        FunctionManager.add("f(x,y) = x-x/y");
+        Function fxy = FunctionManager.lookUp("f");
+         
+        double iterations = 100;
+
+        for(int i=0;i<iterations;i++){
+            fxy.calc(i+3);
+        }
+        
+        
+        
+        
+        
+        
+        MathExpression parserng = new MathExpression("f(x,y) = x-x/y; f(2,3);f(2,5);");
+        System.out.println("SEE???????\n "+parserng.solve());
 
         /*
          MathExpression f = new MathExpression("x=17;3*x+1/x");//runs in about 2.3 milliSecs
@@ -2230,18 +2245,18 @@ public class MathExpression {
         //MathExpression expr = new MathExpression("f=3;5f");//BUGGY
         //MathExpression expr = new MathExpression("quad(@(x)3*x-2+3*x^2)");//BUGGY
         //MathExpression expr = new MathExpression("root(@(x)3*x-sin(x)-0.5,2)");//BUGGY
-        MathExpression expr = new MathExpression("r1=4;r1*5");
+        MathExpression exprs = new MathExpression("r1=4;r1*5");
 
 
         //A+k.A+AxB+A^c
-        System.out.println("scanner: " + expr.scanner);
-        System.out.println("solution: " + expr.solve());
+        System.out.println("scanner: " + exprs.scanner);
+        System.out.println("solution: " + exprs.solve());
 
         expr.setExpression("44+22*(3)");
-        System.out.println("solution--: " + expr.solve());
+        System.out.println("solution--: " + exprs.solve());
 
 
-        System.out.println("return type: " + expr.returnType);
+        System.out.println("return type: " + exprs.returnType);
         System.out.println("FunctionManager: " + FunctionManager.FUNCTIONS);
         System.out.println("VariableManager: " + VariableManager.VARIABLES);
 
@@ -2249,7 +2264,7 @@ public class MathExpression {
 
         MathExpression expression = new MathExpression("x=0;sin(ln(x))");
 
-        for(int i=0;i<100000;i++){
+        for(int i=0;i<100;i++){
             expression.setValue("x" , i+"");
             System.out.println( expression.solve() );
         }
@@ -2261,7 +2276,7 @@ public class MathExpression {
         double start = System.nanoTime();
 
 
-        double iterations = 100;
+        iterations = 100;
 
         for(int i=0;i<iterations;i++){
             f.calc(i+3);
@@ -2272,8 +2287,8 @@ public class MathExpression {
 
         System.out.println("DONE: "+ (elapsedNanos/1.0E6)+" ms");
 
-        MathExpression ex = new MathExpression("det(1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5)");
-        System.out.println(ex.solve());
+        MathExpression ex = new MathExpression("det(@(5,5)(-21,12,13,64,5,6,2.7,18,9,0,4,2,3,4,23,6,7,8,9,0,1,2,32,4,5));");
+        System.out.println("determinant: "+ex.solve());
 
 /**
  * On my Macbook Pro, 16GB RAM; 2.6 GHz Intel Core i7

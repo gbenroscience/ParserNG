@@ -421,39 +421,27 @@ public class Method {
             case DETERMINANT:
                 return TYPE.NUMBER.toString();
             case INVERSE_MATRIX:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.MATRIX.toString();
             case TRIANGULAR_MATRIX:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.MATRIX.toString();
             case ECHELON_MATRIX:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.MATRIX.toString();
             case MATRIX_MULTIPLY:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.MATRIX.toString();
             case MATRIX_DIVIDE:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.MATRIX.toString();
             case MATRIX_ADD:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.MATRIX.toString();
             case MATRIX_SUBTRACT:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.MATRIX.toString();
             case MATRIX_POWER:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.MATRIX.toString();
             case MATRIX_TRANSPOSE:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.MATRIX.toString();
             case MATRIX_EDIT:
                 return TYPE.VOID.toString();
 
-
-                /*
-               public static final String TRIANGULAR_MATRIX = TRIANGULAR_MATRIX;
-               public static final String ECHELON_MATRIX = ECHELON_MATRIX;
-               public static final String MATRIX_MULTIPLY = MATRIX_MULTIPLY;
-               public static final String MATRIX_DIVIDE = MATRIX_DIVIDE;
-               public static final String MATRIX_ADD = MATRIX_ADD;
-               public static final String MATRIX_SUBTRACT = MATRIX_SUBTRACT;
-               public static final String MATRIX_POWER = MATRIX_POWER;
-               public static final String MATRIX_TRANSPOSE = MATRIX_TRANSPOSE;
-               public static final String MATRIX_EDIT = MATRIX_EDIT;
-                     */
-
+ 
             default:
                 return TYPE.NUMBER.toString();
         }
@@ -1027,9 +1015,10 @@ public class Method {
             }
             else if (name.equals(MATRIX_TRANSPOSE)) {
                 Set set = new Set(list);
-                result = String.valueOf(set.transpose());
+                Matrix matrix = set.transpose();
                 list.clear();
-                list.add(result);
+                String ref = Function.storeAnonymousMatrixFunction(matrix);
+                list.add(ref);
                 return list;
             }
             else if (name.equals(MATRIX_EDIT)) {
@@ -1404,10 +1393,7 @@ public class Method {
             }//end if
             return false;
         }//end try
-        catch (IndexOutOfBoundsException boundsException) {
-            return false;
-        }//end catch
-        catch (NullPointerException nullPointerException) {
+        catch (IndexOutOfBoundsException | NullPointerException boundsException) {
             return false;
         }
     }//end method

@@ -522,37 +522,7 @@ public class ExpressionSimplifier {
             list.removeAll(real);
 
         }//end if
-/*
-        for (int i = 0; i < list.size(); i++) {
-            //multiply consecutive numbers in the list i.e[2,3]
-            try {
-                if (isNumber(list.get(i)) && isNumber(list.get(i + 1))) {//^|-|+|*|Č|Р]
-                    if (!list.get(i).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        list.set(i + 1, String.valueOf(Double.valueOf(list.get(i)) * Double.valueOf(list.get(i + 1))));
-                        list.set(i, "");
-                    }//end if
-                    else if (list.get(i).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        list.set(i + 1, "Infinity");
-                        list.set(i, "");
-                    } else if (!list.get(i).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        list.set(i + 1, "Infinity");
-                        list.set(i, "");
-                    } else if (list.get(i).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        list.set(i + 1, "Infinity");
-                        list.set(i, "");
-                    }
 
-                }
-            }//end try
-            catch (NullPointerException nolan) {
-            }//end catch
-            catch (NumberFormatException numerr) {
-            }//end catch
-            catch (IndexOutOfBoundsException inderr) {
-            }//end catch
-
-        }//end for
-        */
         list.removeAll(real);
 
         if (isHasPermOrCombOperators) {
