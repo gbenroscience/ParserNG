@@ -365,16 +365,16 @@ To multiply 2 matrices in 1 step: Do,
       
    Or: 
    
-   MathExpression addMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    MathExpression addMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
     matrix_mul(M,N);");
     System.out.println("soln: "+addMat.solve());
     
          
 This would give:
 
-    25.0  ,    8.0  ,   45.0            
-    51.0  ,   13.0  ,   91.0            
-    28.0  ,    8.0  ,   57.0   
+    7.0  ,    5.0  ,    9.0            
+    4.0  ,    5.0  ,   10.0            
+    14.0  ,    2.0  ,    7.0   
 
 
 
@@ -398,10 +398,9 @@ To multiply 2 matrices in 1 step: Do,
          
 This would give:
 
-    25.0  ,    8.0  ,   45.0            
-    51.0  ,   13.0  ,   91.0            
-    28.0  ,    8.0  ,   57.0   
-
+    -1.0  ,    3.0  ,   -7.0            
+     0.0  ,    3.0  ,    4.0            
+     4.0  ,    0.0  ,  -11.0 
 
 
 
@@ -430,6 +429,68 @@ This would give:
     3228.0  , 2755.0  , 1798.0            
     4565.0  , 3802.0  , 3049.0            
     3432.0  , 2257.0  , 1327.0            
+
+
+
+#### 9. Transpose of a Matrix
+
+ParserNG also allows quick computation of the transpose of a matrix.
+
+
+To find the transpose of a matrix, `M`, do:
+
+    MathExpression trexp = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);P=transpose(M);P;");
+    System.out.println("soln: "+ trexp.solve());
+    
+      
+   Or: 
+   
+    MathExpression trexp = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);transpose(M);");
+    System.out.println("soln: "+ trexp.solve());
+    
+         
+This would give:
+
+    3.0  ,    2.0  ,    9.0            
+    4.0  ,    4.0  ,    1.0            
+    1.0  ,    7.0  ,   -2.0            
+
+
+
+
+#### 10. Editing a Matrix
+
+ParserNG also allows the entries in a matrix to be edited.
+
+The command for this is: `matrix_edit(M,2,2,-90)`
+
+The first argument is the Matrix object which we wish to edit.
+The second and the third arguments respectively represent the row and column that we wish to edit in the Matrix.
+
+The last entry represents the value to store in the specified location(entry) in the Matrix.
+
+##### For example
+
+To edit the contents of a matrix, `M`, do:
+
+    MathExpression trexp = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);P=matrix_edit(M,2,2,-90);P;");
+    System.out.println("soln: "+ trexp.solve());
+    
+      
+   Or: 
+   
+    MathExpression trexp = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);matrix_edit(M,2,2,-90);");
+    System.out.println("soln: "+ trexp.solve());
+    
+         
+This would give:
+
+    3.0  ,    4.0  ,    1.0            
+    2.0  ,    4.0  ,    7.0            
+    9.0  ,    1.0  ,  -90.0           
+
+
+Note that matrix indexes in ParserNG are zero-based, so be advised accordingly as entering an invalid row/column combination will throw an error in your code.
 
 
 
