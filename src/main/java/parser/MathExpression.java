@@ -2141,7 +2141,7 @@ public class MathExpression {
     private static void junkExamples(){
          
          
-         MathExpression linear = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);V=@(2,2)(1,3,5,4);C=transpose(M);C;");
+         MathExpression linear = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");
          System.out.println("soln: "+linear.solve());
          
           MathExpression expr = new MathExpression("tri_mat(M)");

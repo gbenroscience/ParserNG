@@ -530,10 +530,12 @@ public class Matrix {
      * @param row The row where the value is to be inserted.
      * @param column The column where the value is to be inserted.
      */
-    public void update(double value, int row, int column) {
+    public boolean update(double value, int row, int column) {
         if (row < getRows() && column < getCols()) {
             array[row][column] = value;
+            return true;
         }
+        return false;
     }
 
     /**

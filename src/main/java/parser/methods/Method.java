@@ -742,7 +742,7 @@ public class Method {
     /**
      *
      * @param list A list containing a portion of a scanned function that has
-     * information about a method and its parameters..e.g. [sin,(,3.14,)] may be
+     * information about a method and its parameters..e.g. [sin,(,3.14,)] , or [matrix_edit,(,M,3,4,-90,)] may be
      * grabbed from a scanner output and sent to this method to evaluate.
      * @param DRG The trigonometric mode in which to run the method.
      * @return a {@link List} object which is the output of the method's
@@ -1021,9 +1021,9 @@ public class Method {
                 list.add(ref);
                 return list;
             }
-            else if (name.equals(MATRIX_EDIT)) {
+            else if (name.equals(MATRIX_EDIT)) {//matrix_edit(M,row,col,val)
                 Set set = new Set(list);
-                Matrix matrix = set.transpose();
+                Matrix matrix = set.editMatrix();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
