@@ -143,7 +143,7 @@ So for instance, you could pass the following to a MathExpression constructor:
 
     f(x)=sin(x)+cos(x-1)
    <br>
-Then do: `f(2)` ....the parser automatically calculates `sin(2)+cos(2-1)` behind the scenes.<br><br>
+Then do: `f(2)` ; the parser automatically calculates `sin(2)+cos(2-1)` behind the scenes.<br><br>
 
 #### Differential Calculus
 
