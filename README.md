@@ -282,8 +282,8 @@ The function that does this is `linear_sys`
 
 To represent the linear system:
 
- 2x + 3y=-5<br>
- 3x - 4y = 20
+    2x + 3y=-5<br>
+    3x - 4y = 20
  
  in ParserNG, do:
  
