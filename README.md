@@ -118,8 +118,8 @@ Your defined functions are volatile and will be forgotten once the current parse
 
 So for instance, you could pass the following to a MathExpression constructor:
 
-f(x)=sin(x)+cos(x-1)<br>
-Then do: f(2)....the parser automatically calculates sin(2)+cos(2-1) behind the scenes.<br><br>
+    f(x)=sin(x)+cos(x-1)<br>
+Then do: `f(2)` ....the parser automatically calculates sin(2)+cos(2-1) behind the scenes.<br><br>
 
 <b>Differential Calculus</b><br>
 
@@ -133,17 +133,16 @@ ParserNG uses its very own implementation of a symbolic differentiator.
   
   <b>To differentiate a function, do:</b>
   
-  <pre><code>
-  MathExpression expr = new MathExpression("diff(@(x)x^3,3,1)"); 
   
-  System.out.println(ex.solve());
-  </code></pre>
+     MathExpression expr = new MathExpression("diff(@(x)x^3,3,1)"); 
+  
+     System.out.println(ex.solve());
+ 
   
   This will print:
   
-  <code>
-  27.0
-  </code>
+      27.0
+
 
 </p>
 
@@ -157,7 +156,7 @@ MathExpression expr = new MathExpression("(34+32)-44/(8+9(3+2))-22");
 
 System.out.println("result: " + expr.solve()); 
 ``` 
-This gives: 43.16981132075472 
+This gives: `43.16981132075472`
 
 #### Or using variables and calculating simple expressions: 
 
@@ -172,7 +171,7 @@ System.out.println("result: " + expr.getValue("P"));
 MathExpression expr = new MathExpression("f(x)=39*sin(x^2)+x^3*cos(x);f(3)"); 
 System.out.println("result: " + expr.solve()); 
 ```
-This gives: -10.65717648378352 
+This gives: `-10.65717648378352` 
 
 #### Derivatives (Differential Calculus)
 
@@ -181,7 +180,7 @@ To evaluate the derivative at a given point(Note it does symbolic differentiatio
 MathExpression expr = new MathExpression("f(x)=x^3*ln(x); diff(f,3,1)"); 
 System.out.println("result: " + expr.solve()); 
 ```
-This gives: 38.66253179403897 
+This gives: `38.66253179403897` 
 
 The above differentiates x^3 * ln(x) once at x=3. 
 The number of times you can differentiate is 1 for now. 
@@ -193,7 +192,7 @@ The number of times you can differentiate is 1 for now.
 MathExpression expr = new MathExpression("f(x)=2*x; intg(f,1,3)"); 
 System.out.println("result: " + expr.solve()); 
 ```
-This gives: 7.999999999998261... approx: 8 ...
+This gives: `7.999999999998261...` approximately: `8` ...
 
 
 ## Functions and FunctionManager , Variables and VariableManager
@@ -210,18 +209,18 @@ And then retrieve and use the function like this:
 
 Or you may create the function directly and store it, like:
 
-Function fxy = new Function("f(x,y) = x-x/y");
+    Function fxy = new Function("f(x,y) = x-x/y");
 
 And then store it using:
 
-          FunctionManager.add(fxy);
+     FunctionManager.add(fxy);
 
 The same applies to variables.
 
 The variables that you create go into the VariableManager.
 So if you do:
 
-MathExpression me = new MathExpression("a=5;4*a");
+`MathExpression me = new MathExpression("a=5;4*a");`
 
 The parser immediately creates a variable called `a` , stores 5 in it, and saves the variable in the VariableManager.
 This variable can be used within other `MathExpression`s that you create within the current parser session.
