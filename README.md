@@ -1,21 +1,21 @@
 # ParserNG
-ParserNG is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. 
+<b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. 
 
 ## NOTE:
 
-<i>If you need to use the parser directly in your Android project, go to:
+If you need to use the parser directly in your Android project, go to:
 [parserng-android](https://github.com/gbenroscience/parserng-android) by the same author
-</i><br>
+<br>
 
 If you need to access this library via Maven Central, do:
       
-```Java
+ 
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
             <version>0.1.0</version>
         </dependency>
- ```      
+       
 
 This library was created in 2009 and later used by the author as part of a critical part of his University final year project
 at the Department of Computer Science and Engineering, Obafemi Awolowo University,Ile-Ife, Osun State, Nigeria.
@@ -52,7 +52,7 @@ The simplest way to evaluate an expression in ParserNG is to use the <code>MathE
 <code>MathExpression</code> is the class responsible for basic expression parsing and evaluation.
 
 Do:<br>
-<`MathExpression expr = new MathExpression("r=4;r*5");`
+`MathExpression expr = new MathExpression("r=4;r*5");`
 <br>
 `System.out.println("result: " + expr.solve());`
 
@@ -68,7 +68,7 @@ Some key applications of parsers involve repeated iterations of a given expressi
 
 For repeated iterations of an expression over a value range, say 'x^2+5*x+1', the wrong usage would be:<br>
 
-`
+```java
 for(int i=0;i<10000;i++){
 
 double x = i;
@@ -76,22 +76,23 @@ MathExpression expression = new MathExpression("x="+i+";x^2+5*x+1");
 expression.solve();
 
 }
-`
+```
 <br>
 
-The MathExpression constructor basically does all the operations of scanning and interpreting of the input expression. This is a very expensive operation. It is better to do it just once and then run the solve() method over and over again at various values of the variables.
+The `MathExpression` constructor basically does all the operations of scanning and interpreting of the input expression. This is a very expensive operation. It is better to do it just once and then run the `solve()` method over and over again at various values of the variables.
   
 
 For example:
 
 
-`MathExpression expression = new MathExpression("x^2+5*x+1");
+```java
+MathExpression expression = new MathExpression("x^2+5*x+1");
 
 for(int i=0; i<100000; i++){
 expression.setValue("x", String.valueOf(i) );
 expression.solve();//Use the value from here according to your iterative needs...e.g plot a graph , do some summation etc..
 }
-`
+```
 <br>
 This ensures that the expression is parsed once(expensive operation) and then evaluated at various values of the variables. This second step is an high speed one, sometimes taking barely 3 microseconds on some machines.<br><br>
 
@@ -117,57 +118,63 @@ You can also define your own functions and use them in your math expressions.
 This is done in one of 2 ways:
 <ol>
   <li>
-        ```java 
+ 
         f(x,a,b,c,...) = expr_in_said_variables
-        ```
-        <br> 
+        
+   <br> 
         For example: 
-        ```java 
-         f(x,y)=3*x^2+4*x*y+8
-        ```
-       </li>
+ 
+       f(x,y)=3*x^2+4*x*y+8
+
+  </li>
   <li>
-        ```java 
-        f = @(x,a,b,c,...)expr_in_said_variables
-        ```
-        <br> For example: 
-        ```java 
-          f = @(x,y)3*x^2+4*x*y+8
-        ```
-      </li>  
+ 
+       f = @(x,a,b,c,...)expr_in_said_variables
+ <br> For example: 
+ 
+      f = @(x,y)3*x^2+4*x*y+8
+
+</li>  
 </ol>
 
 Your defined functions are volatile and will be forgotten once the current parser session is over. The only way to have the parser remember them always is to introduce some form of persistence.
 
 So for instance, you could pass the following to a MathExpression constructor:
 
-    f(x)=sin(x)+cos(x-1)<br>
+    f(x)=sin(x)+cos(x-1)
+   <br>
 Then do: `f(2)` ....the parser automatically calculates `sin(2)+cos(2-1)` behind the scenes.<br><br>
 
-<b>Differential Calculus</b><br>
+#### Differential Calculus
 
-<b>ParserNG</b> makes differentiating Math Expressions really easy.
+<b>ParserNG</b> makes differentiating math expressions really easy.
 
-<p>
-ParserNG uses its very own implementation of a symbolic differentiator.
+ 
+
+It uses its very own implementation of a symbolic differentiator.
   
   It performs symbolic differentiation of expressions behind the scenes and then computes the differential coefficient
   of the function at some supplied x-value.
+  <br><br>
   
-  <b>To differentiate a function, do:</b>
   
   
-     MathExpression expr = new MathExpression("diff(@(x)x^3,3,1)"); 
+  To differentiate a function, do: <br><br>
   
-     System.out.println(ex.solve());
- 
+    
+       
+ ```java
+ MathExpression expr = new MathExpression("diff(@(x)x^3,3,1)");
+  
+ System.out.println(ex.solve());
+ ```
   
   This will print:
-  
-      27.0
+ 
+        27.0
 
 
-</p>
+ 
 
 ## More Examples
 
