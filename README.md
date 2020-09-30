@@ -238,14 +238,14 @@ For example to define and store a matrix <b>M</b>
 
 This can be extracted as a function by doing a simple lookup:
 
-Function matrixFun = FunctionManager.lookUp("M");
+    Function matrixFun = FunctionManager.lookUp("M");
 To find its determinant, do something like:
 
-double det = matrixFun.calcDet();
+    double det = matrixFun.calcDet();
 
 You can do more by getting the underlying Matrix object, i.e do:
 
-      Matrix m = matrixFun.getMatrix();
+    Matrix m = matrixFun.getMatrix();
 
 But I digress. Let us look at the matrix functionality runnable from within the parser.
 
