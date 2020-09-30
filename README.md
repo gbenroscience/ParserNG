@@ -52,15 +52,15 @@ The simplest way to evaluate an expression in ParserNG is to use the <code>MathE
 <code>MathExpression</code> is the class responsible for basic expression parsing and evaluation.
 
 Do:<br>
-<code>MathExpression expr = new MathExpression("r=4;r*5");</code>
+<`MathExpression expr = new MathExpression("r=4;r*5");`
 <br>
-<code>System.out.println("result: " + expr.solve());</code>
+`System.out.println("result: " + expr.solve());`
 
 <span>What does this do?</span>
 
-It creates a variable called <code>r</code>and sets its value to 4. Then it goes ahead to evaluate the expression
-<code>r*5</code> and returns its value when expr.solve() is called. <br>The print statement would give
-<br><br><code>solution: 20.0</code><br><br>
+It creates a variable called <code>r</code>and sets its value to `4`. Then it goes ahead to evaluate the expression
+`r*5` and returns its value when `expr.solve()` is called. <br>The print statement would give
+<br><br>`solution: 20.0`<br><br>
 at the console.
 
 
@@ -68,16 +68,15 @@ Some key applications of parsers involve repeated iterations of a given expressi
 
 For repeated iterations of an expression over a value range, say 'x^2+5*x+1', the wrong usage would be:<br>
 
-<pre><code>
+`
 for(int i=0;i<10000;i++){
 
 double x = i;
-MathExpression expression = new MathExpression("x="+i+";x^2+5*x+1");<br>
-
-expression.solve();<br>
+MathExpression expression = new MathExpression("x="+i+";x^2+5*x+1");
+expression.solve();
 
 }
-</code></pre>
+`
 <br>
 
 The MathExpression constructor basically does all the operations of scanning and interpreting of the input expression. This is a very expensive operation. It is better to do it just once and then run the solve() method over and over again at various values of the variables.
@@ -85,23 +84,28 @@ The MathExpression constructor basically does all the operations of scanning and
 
 For example:
 
-<pre><code>
-MathExpression expression = new MathExpression("x^2+5*x+1");
+
+`MathExpression expression = new MathExpression("x^2+5*x+1");
 
 for(int i=0; i<100000; i++){
 expression.setValue("x", String.valueOf(i) );
 expression.solve();//Use the value from here according to your iterative needs...e.g plot a graph , do some summation etc..
 }
-</code></pre>
+`
 <br>
 This ensures that the expression is parsed once(expensive operation) and then evaluated at various values of the variables. This second step is an high speed one, sometimes taking barely 3 microseconds on some machines.<br><br>
 
 
 <b>Inbuilt Functions</b><br>
 The parser has its own set of built-in functions. They are:
-<code>
-sin,cos,tan,sinh,cosh,tanh,sin-¹,cos-¹,tan-¹,sinh-¹,cosh-¹,tanh-¹,sec,csc,cot,sech,csch,coth,sec-¹,csc-¹,cot-¹,sech-¹,csch-¹,coth-¹,exp,ln,lg,log,ln-¹,lg-¹,log-¹,asin,acos,atan,asinh,acosh,atanh,asec,acsc,acot,asech,acsch,acoth,aln,alg,alog,floor,ceil,sqrt,cbrt,inverse,square,cube,pow,fact,comb,perm,sum,prod,avg,med,mode,rng,mrng,rms,cov,min,max,s_d,variance,st_err,rnd,sort,plot,diff,intg,quad,t_root,root,linear_sys,det,invert,tri_mat,echelon,matrix_mul,matrix_div,matrix_add,matrix_sub,matrix_pow,transpose,matrix_edit,
-</code>
+
+`sin,cos,tan,sinh,cosh,tanh,sin-¹,cos-¹,tan-¹,sinh-¹,cosh-¹,tanh-¹,sec,csc,cot,
+sech,csch,coth,sec-¹,csc-¹,cot-¹,sech-¹,csch-¹,coth-¹,exp,ln,lg,log,ln-¹,lg-¹,log-¹,
+asin,acos,atan,asinh,acosh,atanh,asec,acsc,acot,asech,acsch,acoth,aln,alg,alog,
+floor,ceil,sqrt,cbrt,inverse,square,cube,pow,fact,comb,perm,sum,prod,avg,med,mode,
+rng,mrng,rms,cov,min,max,s_d,variance,st_err,rnd,sort,plot,diff,intg,quad,t_root,
+root,linear_sys,det,invert,tri_mat,echelon,matrix_mul,matrix_div,matrix_add,matrix_sub,matrix_pow,transpose,matrix_edit`
+
 
 Note that alternatives to many functions having the inverse operator are provided in the form of an 'a' prefix.
 For example the inverse <code>sin</code> function is available both as <code>sin-¹</code> and as <code>asin</code>
@@ -110,8 +114,8 @@ For example the inverse <code>sin</code> function is available both as <code>sin
 You can also define your own functions and use them in your math expressions.
 This is done in one of 2 ways:
 <ol>
-  <li>f(x,a,b,c,...)= expr_in_said_variables<br> For example: f(x,y)=3*x^2+4*x*y+8</li>
-  <li>f = @(x,a,b,c,...)expr_in_said_variables<br> For example: f= @(x,y)3*x^2+4*x*y+8</li>  
+  <li>`f(x,a,b,c,...)= expr_in_said_variables`<br> For example: `f(x,y)=3*x^2+4*x*y+8`</li>
+  <li>`f = @(x,a,b,c,...)expr_in_said_variables`<br> For example: `f = @(x,y)3*x^2+4*x*y+8`</li>  
 </ol>
 
 Your defined functions are volatile and will be forgotten once the current parser session is over. The only way to have the parser remember them always is to introduce some form of persistence.
