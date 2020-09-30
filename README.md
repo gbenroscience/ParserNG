@@ -228,7 +228,7 @@ This variable can be used within other `MathExpression`s that you create within 
 
 ## Matrices
 
-ParserNG deals with matrices; howbeit on a functional level. On the way though is pure Matrix Algebra which is one of the targets set for the platform.
+ParserNG deals with matrices; howbeit on a functional level. On the way though is a pure Matrix Algebra parser component which is one of the targets set for the platform.
 
 Currently you can define matrices and even store them like functions...
 
