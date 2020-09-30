@@ -99,23 +99,42 @@ This ensures that the expression is parsed once(expensive operation) and then ev
 <b>Inbuilt Functions</b><br>
 The parser has its own set of built-in functions. They are:
 
-`sin,cos,tan,sinh,cosh,tanh,sin-¹,cos-¹,tan-¹,sinh-¹,cosh-¹,tanh-¹,sec,csc,cot,
-sech,csch,coth,sec-¹,csc-¹,cot-¹,sech-¹,csch-¹,coth-¹,exp,ln,lg,log,ln-¹,lg-¹,log-¹,
-asin,acos,atan,asinh,acosh,atanh,asec,acsc,acot,asech,acsch,acoth,aln,alg,alog,
-floor,ceil,sqrt,cbrt,inverse,square,cube,pow,fact,comb,perm,sum,prod,avg,med,mode,
-rng,mrng,rms,cov,min,max,s_d,variance,st_err,rnd,sort,plot,diff,intg,quad,t_root,
-root,linear_sys,det,invert,tri_mat,echelon,matrix_mul,matrix_div,matrix_add,matrix_sub,matrix_pow,transpose,matrix_edit`
+    sin,cos,tan,sinh,cosh,tanh,sin-¹,cos-¹,tan-¹,sinh-¹,cosh-¹,tanh-¹,sec,csc,cot,
+    sech,csch,coth,sec-¹,csc-¹,cot-¹,sech-¹,csch-¹,coth-¹,exp,ln,lg,log,ln-¹,lg-¹,log-¹,
+    asin,acos,atan,asinh,acosh,atanh,asec,acsc,acot,asech,acsch,acoth,aln,alg,alog,
+    floor,ceil,sqrt,cbrt,inverse,square,cube,pow,fact,comb,perm,sum,prod,avg,med,mode,
+    rng,mrng,rms,cov,min,max,s_d,variance,st_err,rnd,sort,plot,diff,intg,quad,t_root,
+    root,linear_sys,det,invert,tri_mat,echelon,matrix_mul,matrix_div,matrix_add,matrix_sub,matrix_pow,transpose,matrix_edit
+    
+  <br>
 
 
 Note that alternatives to many functions having the inverse operator are provided in the form of an 'a' prefix.
 For example the inverse <code>sin</code> function is available both as <code>sin-¹</code> and as <code>asin</code>
 
-<b>User defined functions</b><br>
+#### User defined functions
 You can also define your own functions and use them in your math expressions.
 This is done in one of 2 ways:
 <ol>
-  <li>`f(x,a,b,c,...)= expr_in_said_variables`<br> For example: `f(x,y)=3*x^2+4*x*y+8`</li>
-  <li>`f = @(x,a,b,c,...)expr_in_said_variables`<br> For example: `f = @(x,y)3*x^2+4*x*y+8`</li>  
+  <li>
+        ```java 
+        f(x,a,b,c,...) = expr_in_said_variables
+        ```
+        <br> 
+        For example: 
+        ```java 
+         f(x,y)=3*x^2+4*x*y+8
+        ```
+       </li>
+  <li>
+        ```java 
+        f = @(x,a,b,c,...)expr_in_said_variables
+        ```
+        <br> For example: 
+        ```java 
+          f = @(x,y)3*x^2+4*x*y+8
+        ```
+      </li>  
 </ol>
 
 Your defined functions are volatile and will be forgotten once the current parser session is over. The only way to have the parser remember them always is to introduce some form of persistence.
@@ -123,7 +142,7 @@ Your defined functions are volatile and will be forgotten once the current parse
 So for instance, you could pass the following to a MathExpression constructor:
 
     f(x)=sin(x)+cos(x-1)<br>
-Then do: `f(2)` ....the parser automatically calculates sin(2)+cos(2-1) behind the scenes.<br><br>
+Then do: `f(2)` ....the parser automatically calculates `sin(2)+cos(2-1)` behind the scenes.<br><br>
 
 <b>Differential Calculus</b><br>
 
