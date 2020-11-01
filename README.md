@@ -140,7 +140,7 @@ This is done in one of 2 ways:
 <i>
 Your defined functions are volatile and will be forgotten once the current parser session is over. The only way to have the parser remember them always is to introduce some form of persistence.
 </i>
-
+<br>
 So for instance, you could pass the following to a MathExpression constructor:
 
     f(x)=sin(x)+cos(x-1)
