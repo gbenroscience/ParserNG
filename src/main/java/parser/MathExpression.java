@@ -4,10 +4,12 @@
  */
 package parser;
 
+import com.google.gson.Gson;
 import parser.methods.Method;
 
 import math.Maths;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.InputMismatchException;
 import java.util.List;
 import util.*;
@@ -2137,6 +2139,27 @@ public class MathExpression {
         return scanner;
     }//end method solveSubPortions()
 
+    private static void moreJunkExamples(){
+        System.out.println(0xFF000000);
+        System.out.println(0xFF888888);
+        System.out.println(0xFFFFFFFF);
+       Function f = FunctionManager.add("f(x,y) = x - x/y");
+       
+       
+       int iterations = 1000000;
+       
+        double start = System.nanoTime();
+        
+        double val = 0;
+        for(int i=1;i<iterations;i++){
+               f.calc(2,3);
+        }
+  
+       
+       start = System.nanoTime() - start;
+       
+        System.out.println("Time: "+(start/iterations)+" ns");
+    }
 
     private static void junkExamples(){
          
@@ -2299,10 +2322,13 @@ public class MathExpression {
 
     }
 
+    
+    
     public static void main(String args[]) {
-
-junkExamples();
-
-
+         MathExpression expr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2)");
+         System.out.println(expr.solve());
+    //    junkExamples();
+    moreJunkExamples();
+ 
     }//end method
 }//end class MathExpression
