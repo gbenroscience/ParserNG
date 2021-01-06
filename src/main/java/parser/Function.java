@@ -61,11 +61,11 @@ public class Function {
     /**
      *
      * @param input The user input into the system, usually of the form:
-     * F(x,y,z,w,....)=mathexpr;..where mathexpr is an algebraic expression in
-     * terms of x,y,z,...
+     * F(x,y,z,w,....)=mathexpr; or F= @(x,y,z,w,...)mathexpr ...where mathexpr is an algebraic expression in
+     * terms of x,y,z,w,...
      *
      */
-    public Function(String input) {
+    public Function(String input) throws InputMismatchException {
         try {
             input = STRING.purifier(input);
 
@@ -123,7 +123,7 @@ public class Function {
             /**
              * This loop should check if all arguments in the params list are
              * numbers... This is necessary for the input to be a Matrix
-             * function or a Lists
+             * function or a List
              */
             for (String p : params) {
                 try {

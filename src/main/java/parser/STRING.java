@@ -672,13 +672,13 @@ public static String removeCommas(String h){
  * @return a string devoid of all white space.
  */
 public static String purifier(String h){
-    String y="";
+    StringBuilder b = new StringBuilder();
     for(int i=0;i<h.length();i++){
       if(!h.substring(i,i+1).equals("")&&!h.substring(i,i+1).equals(" ")&&!h.substring(i,i+1).equals("\n")){
-          y+=h.substring(i,i+1);
+          b.append(h.charAt(i)); 
       }
  }
-    return y;
+    return b.toString();
 }
 
 
@@ -1703,6 +1703,9 @@ public static boolean isEven(int a) {
 
 public static void main(String args[]){//tester method for STRING methods
 
+    String h = "My God-given boy's name is -Judah!!!!";
+    
+    System.out.println(purifier(h));
 String str = "Am I not trying a lot for you ?";
 
 
