@@ -222,7 +222,7 @@ System.out.println("result: " + expr.solve());
 ```
 This gives: `38.66253179403897` 
 
-The above differentiates x^3 * ln(x) once at x=3. 
+The above differentiates x<sup>3</sup> * ln(x) once at x=3. 
 The number of times you can differentiate is 1 for now. 
 
 #### For Numerical Integration: 
