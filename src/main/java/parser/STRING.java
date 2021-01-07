@@ -1703,9 +1703,11 @@ public static boolean isEven(int a) {
 
 public static void main(String args[]){//tester method for STRING methods
 
-    String h = "My God-given boy's name is -Judah!!!!";
+    String h = "F= @(x,y,z,w,...)mathexpr ";
+    String v = "F(x,y,z,w,...) = mathexpr ";
     
     System.out.println(purifier(h));
+    System.out.println(purifier(v));
 String str = "Am I not trying a lot for you ?";
 
 

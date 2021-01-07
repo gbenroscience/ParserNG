@@ -58,11 +58,12 @@ public class Function {
         this.type = MATRIX;
         FunctionManager.add(this);
     }
+
     /**
      *
      * @param input The user input into the system, usually of the form:
-     * F(x,y,z,w,....)=mathexpr; or F= @(x,y,z,w,...)mathexpr ...where mathexpr is an algebraic expression in
-     * terms of x,y,z,w,...
+     * F(x,y,z,w,....)=mathexpr; or F= @(x,y,z,w,...)mathexpr ...where mathexpr
+     * is an algebraic expression in terms of x,y,z,w,...
      *
      */
     public Function(String input) throws InputMismatchException {
@@ -71,9 +72,9 @@ public class Function {
 
             int openIndex = input.indexOf("(");
             int equalsIndex = input.indexOf("=");
+            int atIndex = input.indexOf("@");
 
-
-            if(equalsIndex == -1){
+            if (equalsIndex == -1) {
                 boolean anonymous = input.startsWith("@");
                 if (anonymous) {
                     parseInput(input);
@@ -82,12 +83,22 @@ public class Function {
                 throw new InputMismatchException("Bad function syntax!");
             }
 
-
-
-
-
-
-
+            /**
+             * F=@(x,y,z,w,...)mathexpr OR F(x,y,z,w,...)=mathexpr
+             */
+            String tokenAfterEquals = input.substring(equalsIndex + 1, equalsIndex + 2);
+            if (atIndex != -1 && atIndex < openIndex) {
+                //The enclosing if assumes that the user is creating a function using the anonymous function assignment format.
+                if (atIndex != openIndex - 1) {
+                         throw new InputMismatchException("Error in function format... anonymous function assignment format must have the `@` preceding the `(`");
+                    //error...token between at symbol and param list
+                } else if (!tokenAfterEquals.equals("@")) {
+                            //Avoid this nonsense: f=kdkdk@(x,...)expr
+                         throw new InputMismatchException("Error in function format... anonymous function assignment format must have the `=` preceding the `@`");
+                    //cool... function created with anonymous function assignment
+                }
+            }
+            
 
             if (openIndex == -1 || equalsIndex == -1) {
                 throw new InputMismatchException("Bad function format!");
@@ -143,7 +154,7 @@ public class Function {
                     int cols = Integer.parseInt(params.get(1));
                     int indexOfLastCloseBrac = input.lastIndexOf(")");
                     int compIndexOfLastCloseBrac = Bracket.getComplementIndex(false, indexOfLastCloseBrac, input);
-                    String list = input.substring(compIndexOfLastCloseBrac,indexOfLastCloseBrac+1 );
+                    String list = input.substring(compIndexOfLastCloseBrac, indexOfLastCloseBrac + 1);
                     if (!list.startsWith("(") || !list.endsWith(")")) {
                         throw new InputMismatchException("Invalid Matrix Format...Circular Parentheses missing");
                     }
@@ -167,7 +178,7 @@ public class Function {
                         this.matrix.setName(name);
 
                     } else {
-                        throw new InputMismatchException("Invalid number of entries found in Matrix Data---for input: "+input);
+                        throw new InputMismatchException("Invalid number of entries found in Matrix Data---for input: " + input);
                     }
 
                 }//end else if params-list  size == 2
@@ -179,7 +190,7 @@ public class Function {
 
         } catch (Exception e) {
             e.printStackTrace();
-            throw new InputMismatchException("Bad Function Syntax--"+input);
+            throw new InputMismatchException("Bad Function Syntax--" + input);
         }
 
     }//end constructor
@@ -192,7 +203,6 @@ public class Function {
         return type;
     }
 
-
     /**
      *
      * @param x A list of variable values to set for the function. The supplied
@@ -202,7 +212,7 @@ public class Function {
      */
     public double calc(double... x) {
         int i = 0;
-        if( x.length == independentVariables.size()){
+        if (x.length == independentVariables.size()) {
             for (Variable var : independentVariables) {
                 mathExpression.setValue(var.getName(), String.valueOf(x[i++]));
             }
@@ -212,11 +222,11 @@ public class Function {
         return Double.NaN;
     }
 
-
-    public static boolean assignObject(String input){
+    public static boolean assignObject(String input) {
 
         /**
-         * Check if it is a function  assignment operation...e.g: f=matrix_mul(A,B)
+         * Check if it is a function assignment operation...e.g:
+         * f=matrix_mul(A,B)
          *
          */
         input = STRING.purifier(input);
@@ -225,93 +235,86 @@ public class Function {
         int semiColonIndex = input.indexOf(";");
 
         int indexOfOpenBrac = input.indexOf("(");
-        if(equalsIndex==-1 && semiColonIndex==-1 && indexOfOpenBrac==-1){
+        if (equalsIndex == -1 && semiColonIndex == -1 && indexOfOpenBrac == -1) {
             throw new InputMismatchException("Wrong Input!");
         }
 
         /**
-         * Check if the user used the form f(x)=.... instead
-         * of f=@(x)....
-         * If so convert to the latter format, and then
-         * recompute the necessary indexes.
+         * Check if the user used the form f(x)=.... instead of f=@(x).... If so
+         * convert to the latter format, and then recompute the necessary
+         * indexes.
          */
-        if(indexOfOpenBrac!=-1 && indexOfOpenBrac < equalsIndex){
-            input = input.substring(0,indexOfOpenBrac)+
-
-                    "=@"+input.substring(indexOfOpenBrac,Bracket.getComplementIndex(true, indexOfOpenBrac, input)+1)+input.substring(equalsIndex+1);
+        if (indexOfOpenBrac != -1 && indexOfOpenBrac < equalsIndex) {
+            input = input.substring(0, indexOfOpenBrac)
+                    + "=@" + input.substring(indexOfOpenBrac, Bracket.getComplementIndex(true, indexOfOpenBrac, input) + 1) + input.substring(equalsIndex + 1);
             //recompute the indexes.
             equalsIndex = input.indexOf("=");
             semiColonIndex = input.indexOf(";");
         }
 
-
         boolean success = false;
 
-        if(equalsIndex != -1 && semiColonIndex != -1){
-            String newFuncName = input.substring(0,equalsIndex);
-            boolean isVarNamesList = isParameterList("("+newFuncName+")");
+        if (equalsIndex != -1 && semiColonIndex != -1) {
+            String newFuncName = input.substring(0, equalsIndex);
+            boolean isVarNamesList = isParameterList("(" + newFuncName + ")");
             boolean hasCommas = newFuncName.contains(",");
-            String rhs = input.substring(equalsIndex+1,semiColonIndex);
+            String rhs = input.substring(equalsIndex + 1, semiColonIndex);
 
-
-            if(Number.validNumber(rhs)){
-                if(Variable.isVariableString(newFuncName)){
-                    VariableManager.VARIABLES.put(newFuncName,new Variable(newFuncName,rhs,false));
-                }
-                else if( isVarNamesList ){
-                    List<String> vars = new CustomScanner(newFuncName,false,",").scan();
-                    for(String var : vars){
-                        VariableManager.VARIABLES.put(var, new Variable(var,rhs,false));
+            if (Number.validNumber(rhs)) {
+                if (Variable.isVariableString(newFuncName)) {
+                    VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, rhs, false));
+                } else if (isVarNamesList) {
+                    List<String> vars = new CustomScanner(newFuncName, false, ",").scan();
+                    for (String var : vars) {
+                        VariableManager.VARIABLES.put(var, new Variable(var, rhs, false));
                     }
                 }
 
                 success = true;
-            }
-            else{
+            } else {
                 MathExpression expr = new MathExpression(rhs);
                 String val = expr.solve();
                 String referenceName = expr.getReturnObjectName();
-                
-                if(Variable.isVariableString(newFuncName) || isVarNamesList){
+
+                if (Variable.isVariableString(newFuncName) || isVarNamesList) {
                     Function f;
-                    switch(expr.getReturnType()){
+                    switch (expr.getReturnType()) {
                         case MATRIX:
-                            if(isVarNamesList && hasCommas){
+                            if (isVarNamesList && hasCommas) {
                                 throw new InputMismatchException("Initialize a function at a time!");
                             }
                             f = FunctionManager.lookUp(referenceName);
-                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName+"="+f.expressionForm()));
+                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
                             success = true;
                             break;
                         case ALGEBRAIC_EXPRESSION:
-                            if(isVarNamesList && hasCommas){
+                            if (isVarNamesList && hasCommas) {
                                 throw new InputMismatchException("Initialize a function at a time!");
                             }
                             f = FunctionManager.lookUp(referenceName);
-                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName+"="+f.expressionForm()));
+                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
                             success = true;
                             break;
                         case LIST:
-                            if(isVarNamesList && hasCommas){
+                            if (isVarNamesList && hasCommas) {
                                 throw new InputMismatchException("Initialize a function at a time!");
                             }
                             f = FunctionManager.lookUp(referenceName);
-                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName+"="+f.expressionForm()));
+                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
                             success = true;
                             break;
                         case STRING://for now, this only confirms that a comma separated list has been returned
 
                             break;
                         case NUMBER:
-                            if(isVarNamesList && hasCommas){
-                                List<String> vars = new CustomScanner(newFuncName,false,",").scan();
-                                for(String var : vars){
-                                    VariableManager.VARIABLES.put(var, new Variable(var,val,false));
+                            if (isVarNamesList && hasCommas) {
+                                List<String> vars = new CustomScanner(newFuncName, false, ",").scan();
+                                for (String var : vars) {
+                                    VariableManager.VARIABLES.put(var, new Variable(var, val, false));
                                 }
                                 success = true;
-                            }
-                            else{
-                                VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName,val,false));
+                            } else {
+                                VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, val, false));
                                 success = true;
                             }
 
@@ -324,16 +327,15 @@ public class Function {
 
                             break;
 
-
                     }//end switch statement
 
                 }//end if
-                else{
-                    throw new InputMismatchException("Syntax Error---"+newFuncName);
+                else {
+                    throw new InputMismatchException("Syntax Error---" + newFuncName);
                 }
             }//end else
         }
-        if(success){
+        if (success) {
             FunctionManager.update();
             VariableManager.update();
         }
@@ -385,7 +387,6 @@ public class Function {
                     }//end catch
                 }//end for
 
-
                 while (cutUpInput[2].startsWith("(") && cutUpInput[2].endsWith(")") && Bracket.getComplementIndex(true, 0, cutUpInput[2]) == cutUpInput[2].length() - 1) {
                     cutUpInput[2] = cutUpInput[2].substring(1, cutUpInput[2].length() - 1).trim();
                 }
@@ -396,7 +397,7 @@ public class Function {
                 }
             }//end if
             else {
-                if(isDimensionsList(cutUpInput[1])){
+                if (isDimensionsList(cutUpInput[1])) {
                     Function f = new Function(input);
                     this.matrix = f.matrix;
                     this.type = f.type;
@@ -441,20 +442,21 @@ public class Function {
      * object.
      */
     public int numberOfParameters() {
-        if(type == LIST){
+        if (type == LIST) {
             return 1;
         }
-        if(type == MATRIX){
+        if (type == MATRIX) {
             return 2;
         }
 
         return independentVariables.size();
     }
+
     /**
      *
      * @param list A string containing info. about the arguments to be passed to
-     * the Function. The format is (num1,num2,num3,....)
-     * The information should be numbers only
+     * the Function. The format is (num1,num2,num3,....) The information should
+     * be numbers only
      * @return true if its format is valid.
      */
     private static boolean isDimensionsList(String list) {
@@ -516,11 +518,10 @@ public class Function {
         }
 
         int sz = scan.size();
-        if(sz == 0){
+        if (sz == 0) {
             return false;
-        }
-        else if(sz == 1){
-            if(Variable.isVariableString(scan.get(0))){
+        } else if (sz == 1) {
+            if (Variable.isVariableString(scan.get(0))) {
                 return true;
             }
         }
@@ -567,7 +568,9 @@ public class Function {
      *
      */
     public Variable getIndependentVariable(String name) {
-        if(type!=ALGEBRAIC){return null;}
+        if (type != ALGEBRAIC) {
+            return null;
+        }
         int sz = independentVariables.size();
         for (int i = 0; i < sz; i++) {
             if (independentVariables.get(i).getName().equalsIgnoreCase(name)) {
@@ -584,7 +587,9 @@ public class Function {
      * given name.
      */
     public boolean hasIndependentVariable(String var) {
-        if(type!=ALGEBRAIC){return false;}
+        if (type != ALGEBRAIC) {
+            return false;
+        }
         Variable v = new Variable(var);
         return independentVariables.contains(v);
     }//end method
@@ -625,7 +630,7 @@ public class Function {
      * @param matrix The {@link Matrix} object to be wrapped in a function
      * @return the name assigned to the anonymous function created.
      */
-    public static String storeAnonymousMatrixFunction(Matrix matrix){
+    public static String storeAnonymousMatrixFunction(Matrix matrix) {
         int num = FunctionManager.countAnonymousFunctions();
         String name = "anon" + (num + 1);
 
@@ -633,14 +638,17 @@ public class Function {
         FunctionManager.add(new Function(matrix));
         return name;
     }
+
     /**
-     * @param args 
+     * @param args
      * @return the value of a function when valid arguments are passed into its
      * parentheses. e.g if the fullname of the Function is f(x,y,c), this method
      * could be passed..f(3,-4,9)
      */
     public String evalArgs(String args) {
-        if(type!=ALGEBRAIC){return null;}
+        if (type != ALGEBRAIC) {
+            return null;
+        }
         String str = getFullName();
 //StringBuilder;
         CustomScanner cs = new CustomScanner(args, false, "(", ")", ",");
@@ -710,8 +718,8 @@ public class Function {
                 x2 = p;
             }
             int i = 0;
-            int len = sz+1;
-            for (double x = x1; i<len && x <= x2; x += xStep, i++) {
+            int len = sz + 1;
+            for (double x = x1; i < len && x <= x2; x += xStep, i++) {
                 String xStr = String.valueOf(x);
                 mathExpression.setValue(variableName, xStr);
                 results[0][i] = mathExpression.solve();
@@ -749,7 +757,7 @@ public class Function {
         int sz = (int) ((xUpper - xLower) / xStep);
 
         double[][] results = new double[2][sz + 1];
-        int len = sz+1;
+        int len = sz + 1;
         int i = 0;
         for (double x = xLower; i < len && x <= xUpper; x += xStep, i++) {
             mathExpression.setValue(variableName, String.valueOf(x));
@@ -830,21 +838,21 @@ public class Function {
             case ALGEBRAIC:
                 return getName() + "=@" + paramList + mathExpression.getExpression();
             case MATRIX:
-                return getName()+ "=@" + paramList + "(" + matrixToCommaList(matrix)+")";
+                return getName() + "=@" + paramList + "(" + matrixToCommaList(matrix) + ")";
             case LIST:
-                return getName()+ "=@" + paramList + "(" + matrixToCommaList(matrix)+")";
+                return getName() + "=@" + paramList + "(" + matrixToCommaList(matrix) + ")";
             default:
                 return "";
         }
 
     }//end method
 
-    public boolean isAnonymous(){
+    public boolean isAnonymous() {
         return isAnonymous(this);
     }
 
-    public static boolean isAnonymous(Function f){
-        switch (f.type){
+    public static boolean isAnonymous(Function f) {
+        switch (f.type) {
             case ALGEBRAIC:
                 return f.dependentVariable.getName().startsWith("anon");
             case MATRIX:
@@ -858,7 +866,7 @@ public class Function {
 
     }
 
-    public static boolean isAnonymous(String name){
+    public static boolean isAnonymous(String name) {
         return name.startsWith("anon");
     }
 
@@ -917,51 +925,51 @@ public class Function {
 
     /**
      *
-     * @return the determinant of the function if it is of type {@link Function#MATRIX}
-     * Otherwise it returns {@link Double#NaN}
+     * @return the determinant of the function if it is of type
+     * {@link Function#MATRIX} Otherwise it returns {@link Double#NaN}
      */
-    public double calcDet(){
-        if(type == MATRIX){
+    public double calcDet() {
+        if (type == MATRIX) {
             return matrix.determinant();
         }
         return Double.NaN;
     }
+
     /**
      *
-     * @return the inverse of the matrix-function if it is of type {@link Function#MATRIX}
-     * Otherwise it returns null
+     * @return the inverse of the matrix-function if it is of type
+     * {@link Function#MATRIX} Otherwise it returns null
      */
-    public Matrix calcInverse(){
-        if(type == MATRIX){
+    public Matrix calcInverse() {
+        if (type == MATRIX) {
             return matrix.inverse();
         }
         return null;
     }
+
     /**
      *
-     * @return the triangular Matrix of the function if it is of type {@link Function#MATRIX}
-     * Otherwise it returns null
+     * @return the triangular Matrix of the function if it is of type
+     * {@link Function#MATRIX} Otherwise it returns null
      */
-    public Matrix triangularMatrix(){
-        if(type == MATRIX){
+    public Matrix triangularMatrix() {
+        if (type == MATRIX) {
             return matrix.reduceToTriangularMatrix();
         }
         return null;
     }
+
     /**
      *
-     * @return the row-reduced echelon matrix of the function if it is of type {@link Function#MATRIX}
-     * Otherwise it returns null
+     * @return the row-reduced echelon matrix of the function if it is of type
+     * {@link Function#MATRIX} Otherwise it returns null
      */
-    public Matrix reduceToEchelon(){
-        if(type == MATRIX){
+    public Matrix reduceToEchelon() {
+        if (type == MATRIX) {
             return matrix.reduceToRowEchelonMatrix();
         }
         return null;
     }
-
-
-
 
     /**
      *
@@ -1060,7 +1068,7 @@ public class Function {
 
     public static void main(String args[]) {
 
-    /*    Function f = new Function("@(3,3)(4,1,2,5,6,8,2,3,9)");
+        /*    Function f = new Function("@(3,3)(4,1,2,5,6,8,2,3,9)");
 
         System.out.println(f.getMatrix());
 
@@ -1074,16 +1082,10 @@ public class Function {
 
 
         System.out.println(FunctionManager.FUNCTIONS);
-        */
-
-
-
-        Function func = new Function("p=@(x)sin(x)+x+x^2");
+         */
+        Function func = new Function("p=@(x)@sin(x)+x+x^2");
         FunctionManager.add(func);
         System.out.println(func.calc(4));
-
-
-
 
     }//end method
 
