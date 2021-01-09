@@ -1,15 +1,16 @@
 package util.help;
 
 
-import com.google.gson.Gson;
-import com.google.gson.stream.JsonReader;
 
+
+import interfaces.Savable;
 import java.io.StringReader;
+import util.Serializer;
 
 /**
  * Created by JIBOYE Oluwagbemiro Olaoluwa on 8/5/2016.
  */
-public class Topic{
+public class Topic implements Savable{
 
     private String title;
     private String content;
@@ -36,13 +37,19 @@ public class Topic{
         return title;
     }
 
-    public static Topic parseTopic(String json){
-        JsonReader reader = new JsonReader(new StringReader(json));
-        return new Gson().fromJson(reader, Topic.class);
+    public static Topic parseTopic(String enc){
+        return (Topic) Serializer.deserialize(enc);
     }
 
     @Override
+    public String serialize() {
+         return Serializer.serialize(this);
+    }
+    
+    
+
+    @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return Serializer.serialize(this);
     }
 }

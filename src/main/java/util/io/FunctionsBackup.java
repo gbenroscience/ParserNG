@@ -1,6 +1,5 @@
 package util.io;
 
-import com.google.gson.Gson;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -46,7 +45,7 @@ public class FunctionsBackup {
             for(Map.Entry<String,Function>entry:map.entrySet()) {
                 Function f = entry.getValue();
                 if (f!=null && !f.isAnonymous()){
-                    String s = new Gson().toJson(f);
+                    String s = f.serialize();
                     bw.write(s + newLine);
             }
             }

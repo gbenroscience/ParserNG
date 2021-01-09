@@ -1,6 +1,5 @@
 package util.io;
-
-import com.google.gson.Gson;
+ 
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -11,6 +10,7 @@ import java.io.BufferedWriter;
 import java.io.FileWriter;
 
 import parser.Variable;
+import util.Serializer;
 
 /**
  *
@@ -45,7 +45,7 @@ String newLine = System.getProperty("line.separator");
              bw = new BufferedWriter(fw);
 
           for(Map.Entry<String,Variable>entry:map.entrySet()){
-              String s = new Gson().toJson(entry.getValue());
+              String s = entry.getValue().serialize();
               if(s!=null && !s.equals("null")){
                   bw.write(s + newLine);
  }

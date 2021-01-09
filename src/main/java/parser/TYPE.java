@@ -5,12 +5,14 @@
  */
 package parser;
 
+import java.io.Serializable;
+
 /**
  * Defines the allowed return types
  *
  * @author JIBOYE Oluwagbemiro Olaoluwa
  */
-public enum TYPE {
+public enum TYPE implements Serializable{
 
     MATRIX, LIST, NUMBER, STRING, VOID, ALGEBRAIC_EXPRESSION, ERROR
 

@@ -1,24 +1,21 @@
 package util;
 
-import com.google.gson.Gson;
-import com.google.gson.stream.JsonReader;
 
-import java.io.StringReader;
-import java.util.Date;
+import interfaces.Savable;
 
 /**
  * Created by hp on 7/7/2016.
  */
-public class Settings {
-
+public class Settings implements Savable {
 
     private String userName;
     private String password;
     private boolean activated;
     private long activationDate;
 
+    public Settings() {
+    }
 
-    public Settings(){}
     public Settings(String password, boolean activated, String userName, long activationDate) {
         this.password = password;
         this.activated = activated;
@@ -58,19 +55,26 @@ public class Settings {
         this.activationDate = activationDate;
     }
 
-
     /**
      *
-     * @param settingsJson A json describing a valid {@link Settings} data
-     * @return an {@link Settings} object that encapsulates the json.
+     * @param enc The encoded format of the byte array: [num1, num2, num3, num4,
+     * ...]
+     * @return the Variable object that represents the encoded data
      */
-    public static Settings parseJson(String settingsJson){
-        JsonReader reader = new JsonReader(new StringReader(settingsJson));
-        return new Gson().fromJson(reader , Settings.class);
+    public static Settings parse(String enc) {
+        return (Settings) Serializer.deserialize(enc);
     }
 
     @Override
+    public String serialize() {
+           return Serializer.serialize(this);
+    }
+    
+    
+  
+
+    @Override
     public String toString() {
-        return new Gson().toJson(this);
+        return Serializer.serialize(this);
     }
 }

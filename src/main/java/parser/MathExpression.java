@@ -3,13 +3,12 @@
  * and open the template in the editor.
  */
 package parser;
-
-import com.google.gson.Gson;
+ 
+import interfaces.Savable;
 import parser.methods.Method;
 
 import math.Maths;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.InputMismatchException;
 import java.util.List;
 import util.*;
@@ -54,7 +53,7 @@ import math.matrix.expressParser.Matrix;
  *
  * @author GBENRO
  */
-public class MathExpression {
+public class MathExpression implements Savable{
 
     public Parser_Result parser_Result = Parser_Result.VALID;
     //determines the mode in which trig operations will be carried out on numbers.if DRG==0,it is done in degrees
@@ -2331,4 +2330,14 @@ public class MathExpression {
     moreJunkExamples();
  
     }//end method
+
+    @Override
+    public String serialize() {
+        return Serializer.serialize(this);
+    }
+    
+    public MathExpression parse(String enc){
+        return (MathExpression) Serializer.deserialize(enc);
+    }
+    
 }//end class MathExpression

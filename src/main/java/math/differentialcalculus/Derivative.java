@@ -235,6 +235,10 @@ public class Derivative {
             String expression = "diff(@(x)4*x*x*sin(x^2)-x,3,1)";
             //System.out.println(Derivative.eval(expression));
             System.out.println(Derivative.eval(expression));
+            
+            
+            String expr = "diff(@(x)x^2*cos(x)-2*x*sin(x)-2*cos(x) , 2,1)";
+             System.out.println(Derivative.eval(expr));
 
         } catch (Exception ex) {
             Logger.getLogger(DerivativeStructureBuilder.class.getName()).log(Level.SEVERE, null, ex);

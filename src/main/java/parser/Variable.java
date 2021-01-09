@@ -3,14 +3,16 @@
  * and open the template in the editor.
  */
 package parser;
+ 
+ 
 
-import com.google.gson.Gson;
-
+import interfaces.Savable;
 import java.io.StringReader;
 import java.util.InputMismatchException;
 
 import math.Maths;
 import java.util.NoSuchElementException;
+import util.Serializer;
 
 /**
  *
@@ -18,13 +20,13 @@ import java.util.NoSuchElementException;
  *
  * template for modeling/creating variable objects
  */
-public class Variable {
+public class Variable implements Savable{
 
 //a String variable that represents the String property of the varriable
     private String name;
 
     private TYPE type;
-    
+
     //the value stored by this variable
     private String value;
     //the units stored by this variable..not compulsory
@@ -47,15 +49,15 @@ public class Variable {
     public static Variable ans = new Variable("ans", "0.0", false);
 
     public static Variable e = new Variable("e", String.valueOf(Math.E), true);
-    
+
     static {
         ans.type = TYPE.NUMBER;
         e.type = TYPE.NUMBER;
-        PI.type =  TYPE.NUMBER;
+        PI.type = TYPE.NUMBER;
     }
 
     public Variable(String name) {
-        
+
         if (isVariableString(name)) {
             this.name = name;
             this.value = "0.0";
@@ -107,8 +109,6 @@ public class Variable {
     public TYPE getType() {
         return type;
     }
-    
-    
 
     /**
      *
@@ -327,8 +327,7 @@ public class Variable {
     /**
      * changes the value stored in the variable
      *
-     * @param value The value to be stored.
-     * Sometimes the value contains a unit.
+     * @param value The value to be stored. Sometimes the value contains a unit.
      * To support this, the user should place a space between the value and the
      * units.
      *
@@ -519,14 +518,19 @@ public class Variable {
             return false;
         }//end else
     }//end method
-
-    public static Variable parse(String json) {
-        Gson gson = new Gson();
-        return gson.fromJson(new StringReader(json), Variable.class);
+    
+/**
+ * 
+ * @param enc The encoded format of the byte array: [num1, num2, num3, num4, ...]
+ * @return the Variable object that represents the encoded data
+ */
+    public static Variable parse(String enc) {
+        return (Variable) Serializer.deserialize(enc);
     }
 
-    public String getSerialize() {
-        return new Gson().toJson(this);
+    @Override
+    public String serialize() {
+        return Serializer.serialize(this);
     }
 
     @Override

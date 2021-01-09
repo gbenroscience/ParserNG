@@ -4,7 +4,7 @@
  */
 package parser;
 
-import com.google.gson.Gson;
+import interfaces.Savable;
 import parser.methods.Method;
 
 import java.io.StringReader;
@@ -13,13 +13,14 @@ import java.util.InputMismatchException;
 import java.util.List;
 import math.matrix.expressParser.Matrix;
 import util.FunctionManager;
+import util.Serializer;
 import util.VariableManager;
 
 /**
  *
  * @author JIBOYE OLUWAGBEMIRO OLAOLUWA
  */
-public class Function {
+public class Function implements Savable{
 
     /**
      * The dependent variable
@@ -1061,9 +1062,8 @@ public class Function {
 
     }
 
-    public static Function parse(String json) {
-        Gson gson = new Gson();
-        return gson.fromJson(new StringReader(json), Function.class);
+    public static Function parse(String enc) {
+        return (Function) Serializer.deserialize(enc);
     }
 
     public static void main(String args[]) {
@@ -1088,5 +1088,10 @@ public class Function {
         System.out.println(func.calc(4));
 
     }//end method
+
+    @Override
+    public String serialize() {
+      return Serializer.serialize(this);
+    }
 
 }//end class

@@ -1,6 +1,6 @@
 package logic;
-
-import com.google.gson.JsonObject;
+ 
+import interfaces.Savable;
 
 import java.util.ArrayList;
 
@@ -8,26 +8,25 @@ import util.FormulaeManager;
 import util.HistoryManager;
 import util.MathExpressionManager;
 import util.Mode;
+import util.Serializer;
 import util.Settings;
 
-public class CalcLogic {
 
+public class CalcLogic implements Savable{
+    
     /**
      * Stores the commands used on the CommandLineActivity
      */
-    private final ArrayList<JsonObject> commandHistory = new ArrayList<>();
+    private final ArrayList<String> commandHistory = new ArrayList<>();
+    
     private final HistoryManager histMan =  new HistoryManager();
-
-
+    
     private final MathExpressionManager funcMan = new MathExpressionManager();
 
     private final FormulaeManager formMan = new FormulaeManager();
 
     private final Mode mode = Mode.CALCULATOR;// The usage MODE of this tool..either via the command line or in the calculator MODE.
-
-
-
-
+    
     /**
      * When true, the calculator is in a state wherein the last action it performed
      * was the evaluation of an expression.
@@ -69,7 +68,7 @@ public class CalcLogic {
 
 
 
-    public ArrayList<JsonObject> getCommandHistory() {
+    public ArrayList<String> getCommandHistory() {
         return commandHistory;
     }
 
@@ -167,6 +166,15 @@ public class CalcLogic {
         return useMode;
     }
 
+    @Override
+    public String serialize() {
+        return Serializer.serialize(this);
+    }
+
+    
+    public static CalcLogic parse(String enc) {
+        return (CalcLogic) Serializer.deserialize(enc);
+    }
 
 
 }
