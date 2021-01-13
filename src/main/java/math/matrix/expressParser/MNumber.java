@@ -5,6 +5,7 @@
 package math.matrix.expressParser;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import static parser.STRING.*;
 import static parser.Operator.*;
 import static parser.Variable.*;
@@ -206,6 +207,14 @@ public class MNumber {
     }
 
     public static void main(String args[]) {
-        MNumber dNum = new MNumber("5u");
+        HashMap<Double,Double> map = new HashMap<>();
+        
+        double c = map.get(0);
+        
+        double v = c;
+        
+        System.out.println("c: "+c);
+        System.out.println("v: "+v);
+        
     }
 }

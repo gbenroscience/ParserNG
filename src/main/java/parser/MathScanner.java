@@ -527,6 +527,7 @@ public class MathScanner {
         filter.add(",");
         scanner.addAll(cs.scan());
 
+      
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
 
@@ -544,6 +545,7 @@ public class MathScanner {
                 }
 
             }
+
             /**
              * convert 2,sin patterns to 2,*,sin This allows us to use 2sin(5)
              * or 2A + 3B As the parser will interprete them into: 2*sin(5) and
@@ -598,7 +600,7 @@ public class MathScanner {
 
             }
         }//end for loop
-
+  
 //sort(5,3,2,1,-8,-9,12,34,98,-900,34,23,12,340)
 
         for (int i = 0; i < scanner.size(); i++) {//±–
@@ -627,6 +629,7 @@ public class MathScanner {
             }
 
         }//end if
+        
         removeExcessBrackets(scanner);
         recognizeAnonymousFunctions(scanner);
         for (int i = 0; i < scanner.size(); i++) {
@@ -1073,6 +1076,7 @@ public class MathScanner {
 
     public static void recognizeAnonymousFunctions(List<String> scanner) {
         int indexOfAt = -1;
+ 
         while ((indexOfAt = scanner.indexOf("@")) != -1) {
 
             /**
@@ -1111,6 +1115,8 @@ public class MathScanner {
 
                 }
 
+            }else{
+                throw new InputMismatchException("Syntax Error occurred while scanning math expression.\nReason: The @ symbol is used exclusively to create functions. Expected: `(`, found: `"+scanner.get(indexOfAt + 1)+"`");
             }
 
         }
@@ -1250,7 +1256,7 @@ public class MathScanner {
      */
     public static void extractFunctionStringFromExpressionForMatrixMethods(List<String> list){
         list.removeAll(Arrays.asList(","));
-        //System.out.println(">>>>>IN: "+list);
+      
         int sz = list.size();
         /**
          * Confirm that there remains only one open and one close bracket in the tokens list.
@@ -1378,7 +1384,7 @@ public class MathScanner {
 
 
 
-        // System.out.println(">>>>>OUT: "+list);
+ 
     }//end method
     /**
      *

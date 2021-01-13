@@ -307,7 +307,7 @@ public class Variable implements Savable{
 
     /**
      *
-     * @param name mutator method that changes the value of the variable
+     * @param name mutator method that changes the name of the variable
      */
     public void setName(String name) {
         if (isVariableString(name)) {

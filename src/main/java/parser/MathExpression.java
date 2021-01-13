@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 package parser;
- 
+
 import interfaces.Savable;
 import parser.methods.Method;
 
@@ -53,7 +53,7 @@ import math.matrix.expressParser.Matrix;
  *
  * @author GBENRO
  */
-public class MathExpression implements Savable{
+public class MathExpression implements Savable {
 
     public Parser_Result parser_Result = Parser_Result.VALID;
     //determines the mode in which trig operations will be carried out on numbers.if DRG==0,it is done in degrees
@@ -134,11 +134,11 @@ public class MathExpression implements Savable{
     /**
      *
      * @param input The function to be evaluated. The general format contains
-     * variable and constant declarations for variables and constants that are
-     * not yet initialized,assignment expressions for those that have been
-     * initialized and then an expression to evaluate. e.g. x =-12; var y
+     * variable, constant and function declarations for variables, constants and functions that are
+     * not yet initialized, assignment expressions for those that have been
+     * initialized and then an expression to evaluate. e.g. x = -12; y
      * =x+1/12; const x1,x2,x3=10; z =sin(3x-1)+2.98cos(4x);cos(3x+12); The last
-     * expression is function to be evaluated and it is always without any
+     * expression is a function to be evaluated and it is always without any
      * equals sign and may or may not end with a semicolon.
      *
      */
@@ -146,35 +146,31 @@ public class MathExpression implements Savable{
         setAutoInitOn(false);
         this.variableManager = new VariableManager();
 
-
-        CustomScanner cs = new CustomScanner( STRING.purifier(input), false, VariableManager.endOfLine);
+        CustomScanner cs = new CustomScanner(STRING.purifier(input), false, VariableManager.endOfLine);
 
         List<String> scanned = cs.scan();
+        
+ 
         String mathExpr = null;
         int exprCount = 0;
 
-        for(String code : scanned) {
-            if(code.contains("=")){
-                boolean success = Function.assignObject(code+";");
-                if(!success) {
+        for (String code : scanned) {
+            if (code.contains("=")) {
+                boolean success = Function.assignObject(code + ";");
+                if (!success) {
                     correctFunction = success;
                     parser_Result = Parser_Result.SYNTAX_ERROR;
                     input = null;
                     return;
                 }
-            }
-            else{
-                mathExpr = "("+code+")";
+            } else {
+                mathExpr = "(" + code + ")";
                 ++exprCount;
             }
         }
+  
 
-
-
-
-
-
-        if (mathExpr!=null && !mathExpr.isEmpty() && exprCount == 1) {
+        if (mathExpr != null && !mathExpr.isEmpty() && exprCount == 1) {
             setExpression(mathExpr);
         }//end if
         else {
@@ -223,16 +219,17 @@ public class MathExpression implements Savable{
         return autoInitOn;
     }
 
-
     private void initializing(String expression) {
-
+ 
         setCorrectFunction(true);
         setHasListReturningOperators(false);
         setNoOfListReturningOperators(0);
         whitespaceremover.add("");
         //Scanner operation
+
         MathScanner opScanner = new MathScanner(expression);
         scanner = opScanner.scanner(variableManager);
+ 
         correctFunction = opScanner.isRunnable();
 
         parser_Result = opScanner.parser_Result;
@@ -1131,7 +1128,7 @@ public class MathExpression implements Savable{
             String varName = scan.get(i);
 
             try {
-                if(i+1 < sz){//a next token exists (at i+1) so check the next token
+                if (i + 1 < sz) {//a next token exists (at i+1) so check the next token
                     if (isVariableString(scan.get(i)) && !isOpeningBracket(scan.get(i + 1))) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
@@ -1139,9 +1136,8 @@ public class MathExpression implements Savable{
                         }
 
                     }//end if
-                }
-                else{//no next token exists
-                    if (isVariableString(scan.get(i)) ) {
+                } else {//no next token exists
+                    if (isVariableString(scan.get(i))) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
                             scan.set(i, v.getValue());
@@ -1149,7 +1145,6 @@ public class MathExpression implements Savable{
 
                     }//end if
                 }
-
 
             }//end try
             catch (IndexOutOfBoundsException ind) {
@@ -1211,8 +1206,8 @@ public class MathExpression implements Savable{
      * ArrayList object) stored by each bracket we meet during this scan and
      * compare it with the index (say B)stored by the bracket from which we
      * began the loop the last time this method was called. This is the bracket
-     * at index startPosition-2. If A&lt;B then we apply the decrement or shrinking
-     * factor to it.Else we continue the scan.
+     * at index startPosition-2. If A&lt;B then we apply the decrement or
+     * shrinking factor to it.Else we continue the scan.
      *
      *
      * @param brac the Bracket store to modify
@@ -1361,6 +1356,7 @@ public class MathExpression implements Savable{
                             solve(executable);
                         }//end if
                         else if (isMethod) {
+            
                             try {
                                 /**
                                  * Get the view of the scanner between the
@@ -1390,7 +1386,7 @@ public class MathExpression implements Savable{
 
                                 }//end if
                                 else {
-
+                                    
                                     solve(executable.subList(1, executable.size()));
                                     executable.add(")");
                                     executable.add(1, "(");
@@ -1424,8 +1420,6 @@ public class MathExpression implements Savable{
 
             }//end while
 
-
-
             listAppender = listToString(myScan);
             if (listAppender.startsWith("(")) {
                 listAppender = listAppender.substring(1);
@@ -1436,6 +1430,7 @@ public class MathExpression implements Savable{
                 }
 
             }
+
             if (validNumber(listAppender)) {
                 returnType = TYPE.NUMBER;
             } else if (listAppender.contains(",")) {
@@ -1467,7 +1462,7 @@ public class MathExpression implements Savable{
                 listAppender = "A SYNTAX ERROR OCCURED";
                 correctFunction = true;
             }
-            if(myScan.size() == 1){
+            if (myScan.size() == 1) {
                 returnObjectName = myScan.get(0);
             }
             return listAppender;
@@ -2138,74 +2133,61 @@ public class MathExpression implements Savable{
         return scanner;
     }//end method solveSubPortions()
 
-    private static void moreJunkExamples(){
+    private static void moreJunkExamples() {
         System.out.println(0xFF000000);
         System.out.println(0xFF888888);
         System.out.println(0xFFFFFFFF);
-       Function f = FunctionManager.add("f(x,y) = x - x/y");
-       
-       
-       int iterations = 1000000;
-       
+        Function f = FunctionManager.add("f(x,y) = x - x/y");
+
+        int iterations = 1000000;
+
         double start = System.nanoTime();
-        
+
         double val = 0;
-        for(int i=1;i<iterations;i++){
-               f.calc(2,3);
+        for (int i = 1; i < iterations; i++) {
+            f.calc(2, 3);
         }
-  
-       
-       start = System.nanoTime() - start;
-       
-        System.out.println("Time: "+(start/iterations)+" ns");
+
+        start = System.nanoTime() - start;
+
+        System.out.println("Time: " + (start / iterations) + " ns");
     }
 
-    private static void junkExamples(){
-         
-         
-         MathExpression linear = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");
-         System.out.println("soln: "+linear.solve());
-         
-          MathExpression expr = new MathExpression("tri_mat(M)");
+    private static void junkExamples() {
+
+        MathExpression linear = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");
+        System.out.println("soln: " + linear.solve());
+
+        MathExpression expr = new MathExpression("tri_mat(M)");
         System.out.println(expr.solve());
-        
-        
+
         expr = new MathExpression("echelon(M)");
         System.out.println(expr.solve());
-         
-       
+
         Function matrixFunction = FunctionManager.lookUp("M");
-        
+
         Matrix matrix = matrixFunction.getMatrix();
-        System.out.println("underlying matrix: "+matrix);
-        
+        System.out.println("underlying matrix: " + matrix);
+
         Matrix inv = matrix.inverse();
-        
-        System.out.println("inverted matrix: "+inv);
-        
+
+        System.out.println("inverted matrix: " + inv);
+
         matrix.multiply(inv);
-        
-        System.out.println("mul matrix: "+matrix);
-        
-        
-        
-        
+
+        System.out.println("mul matrix: " + matrix);
+
         FunctionManager.add("f(x,y) = x-x/y");
         Function fxy = FunctionManager.lookUp("f");
-         
+
         double iterations = 100;
 
-        for(int i=0;i<iterations;i++){
-            fxy.calc(i+3);
+        for (int i = 0; i < iterations; i++) {
+            fxy.calc(i + 3);
         }
-        
-        
-        
-        
-        
-        
+
         MathExpression parserng = new MathExpression("f(x,y) = x-x/y; f(2,3);f(2,5);");
-        System.out.println("SEE???????\n "+parserng.solve());
+        System.out.println("SEE???????\n " + parserng.solve());
 
         /*
          MathExpression f = new MathExpression("x=17;3*x+1/x");//runs in about 2.3 milliSecs
@@ -2244,7 +2226,6 @@ public class MathExpression implements Savable{
         //3,log(2,4),8,9
         //FunctionManager.add("f=@(x)sin(x)-x");//A=4;sum(3A,4,4+cos(8),5,6+sin(3),2!,7A,3E-8+6,4)
         //Formula...................t_root(@(x)2.2x^3+3*x+8*x^0)
-
         //MathExpression express = new MathExpression("sum(root(f,2,3),1,2,4,2,9)");//³√ diff(@(x)3*x²+5*³√(x),3),diff(@(x)3*x,3)
         //MathExpression express = new MathExpression("sum(root(f,2,3),1,2,4,2,9)");//³√ diff(@(x)3*x²+5*³√(x),3),diff(@(x)3*x,3)
         //³√ diff(@(x)3*x²+5*³√(x),3),diff(@(x)3*x,3)
@@ -2259,7 +2240,6 @@ public class MathExpression implements Savable{
         FunctionManager.add("N=@(x)(sin(x))");
         FunctionManager.add("r=@(x)(ln(sin(x)))");
 
-
         //WORK ON sum(3,-2sin(3)^2,4,5) error //matrix_mul(@(2,2)(3,1,4,2),@(2,2)(2,-9,-4,3))...sum(3,2sin(4),5,-3cos(2*sin(5)),4,1,3)
         //matrix_mul(invert(@(2,2)(3,1,4,2)),@(2,2)(2,-9,-4,3)).............matrix_mul(invert(@(2,2)(3,1,4,2)),@(2,2)(2,-9,-4,3))
         //matrix_mul(invert(@(2,2)(3,1,4,2)),matrix_mul(M2,2sin(3)sum(3,6,5,3)cos(9/8*6)det(@(2,2)(2,-9,-4,3))))
@@ -2269,7 +2249,6 @@ public class MathExpression implements Savable{
         //MathExpression expr = new MathExpression("root(@(x)3*x-sin(x)-0.5,2)");//BUGGY
         MathExpression exprs = new MathExpression("r1=4;r1*5");
 
-
         //A+k.A+AxB+A^c
         System.out.println("scanner: " + exprs.scanner);
         System.out.println("solution: " + exprs.solve());
@@ -2277,18 +2256,15 @@ public class MathExpression implements Savable{
         expr.setExpression("44+22*(3)");
         System.out.println("solution--: " + exprs.solve());
 
-
         System.out.println("return type: " + exprs.returnType);
         System.out.println("FunctionManager: " + FunctionManager.FUNCTIONS);
         System.out.println("VariableManager: " + VariableManager.VARIABLES);
 
-
-
         MathExpression expression = new MathExpression("x=0;sin(ln(x))");
 
-        for(int i=0;i<100;i++){
-            expression.setValue("x" , i+"");
-            System.out.println( expression.solve() );
+        for (int i = 0; i < 100; i++) {
+            expression.setValue("x", i + "");
+            System.out.println(expression.solve());
         }
 
         System.out.println(">>> Finished.");
@@ -2297,47 +2273,41 @@ public class MathExpression implements Savable{
 
         double start = System.nanoTime();
 
-
         iterations = 100;
 
-        for(int i=0;i<iterations;i++){
-            f.calc(i+3);
+        for (int i = 0; i < iterations; i++) {
+            f.calc(i + 3);
         }
 
-        double elapsedNanos = (System.nanoTime() - start)/iterations;
+        double elapsedNanos = (System.nanoTime() - start) / iterations;
 
-
-        System.out.println("DONE: "+ (elapsedNanos/1.0E6)+" ms");
+        System.out.println("DONE: " + (elapsedNanos / 1.0E6) + " ms");
 
         MathExpression ex = new MathExpression("det(@(5,5)(-21,12,13,64,5,6,2.7,18,9,0,4,2,3,4,23,6,7,8,9,0,1,2,32,4,5));");
-        System.out.println("determinant: "+ex.solve());
+        System.out.println("determinant: " + ex.solve());
 
-/**
- * On my Macbook Pro, 16GB RAM; 2.6 GHz Intel Core i7
- *
- * The code runs the solve() method at 3.8 microseconds.
- */
-
-
+        /**
+         * On my Macbook Pro, 16GB RAM; 2.6 GHz Intel Core i7
+         *
+         * The code runs the solve() method at 3.8 microseconds.
+         */
     }
 
-    
-    
     public static void main(String args[]) {
-         MathExpression expr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2)");
-         System.out.println(expr.solve());
-    //    junkExamples();
-    moreJunkExamples();
- 
+        MathExpression expr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2)");
+        System.out.println(expr.solve());
+        //    junkExamples();
+        moreJunkExamples();
+
     }//end method
 
     @Override
     public String serialize() {
         return Serializer.serialize(this);
     }
-    
-    public MathExpression parse(String enc){
+
+    public MathExpression parse(String enc) {
         return (MathExpression) Serializer.deserialize(enc);
     }
-    
+
 }//end class MathExpression

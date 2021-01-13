@@ -28,31 +28,43 @@ import util.VariableManager;
  * equations. They combine a variety of
  * algorithms in an if-fail-switch-algorithm
  * fashion to iteratively deduce the roots.
- *
- * The Secant Algorithm.
+ *<ol>
+ * <li>
+ * <b>The Secant Algorithm.</b>
+ * <p>
  * The first algorithm is the secant algorithm.
  * It requires 2 values of x between which it
  * seeks out the root.
  * If it does not find it in the specified range however,
- * it may search outside the range.
- *
+ * it may search outside the range. 
+ * 
  * If the secant fails, the object automatically
  * switches over to another of its methods...
- * The Bisection Algorithm.
- *
+ * </p>
+ * </li>
+ * <li>
+ * <b> The Bisection Algorithm.</b>
+ * <p>
  * This algorithm searches for a root ONLY
  * within the specified range and returns
  * one if it exists.
  * However if it fails, the object again automatically
  * switches over to an highly unpredictable algorithm
- * called here:
- * The Self-Evaluating Algorithm.
+ * called here: 
+ * </p>
+ * </li>
+ * <li>
+ * <b> The Self-Evaluating Algorithm. </b>
+ * <p>
  * Two variants of these are used here and due to its
  * unstable nature,it is the algorithm of last resort.
  * It searches for a root starting at the first limit specified for
  * x but the direction of search is not guaranteed due to
  * its instability.
- *
+ * </p>
+ * </li>
+ *  
+ * </ol>
  * If both flavors of this algorithm fail, then an error
  * report is generated.
  *
@@ -79,7 +91,7 @@ import util.VariableManager;
  * or has been initialized but is not visible to the currently evaluating object
  * of this class then an example could be:<br>
  * <b>
- * var x=0;2x^3-5x+sin(x)-1=0,-3,5
+ * x=0;2x^3-5x+sin(x)-1=0,-3,5
  * </b><br>
  *
  * <b>
@@ -137,6 +149,8 @@ public class RootFinder {
         catch (Exception ex) {
         }
     }//end constructor
+    
+    
     /**
      *
      * @param function A String to be used to initialize
@@ -509,12 +523,12 @@ public class RootFinder {
 
             String variable = getVariable();
 
-            System.err.println(" function to diff "+function.expressionForm());
+            //System.err.println(" function to diff "+function.expressionForm());
             String gradFunxn =   Derivative.eval( "diff("+function.expressionForm()+",1)" );
 
-            System.err.println("gradient function is "+gradFunxn);
+            //System.err.println("gradient function is "+gradFunxn);
             Function gradFunc = new Function("@("+variable+")"+gradFunxn);
-            System.err.println("gradient function is "+gradFunc.expressionForm());
+            //System.err.println("gradient function is "+gradFunc.expressionForm());
 
             function.getMathExpression().setDRG(1);
             gradFunc.getMathExpression().setDRG(1);
@@ -703,12 +717,13 @@ public class RootFinder {
 
     public static void main( String args[]){
 
-        FunctionManager.add("f=@(x)sin(x)-x");
+        FunctionManager.add("f=@(x)3*x^3+2*x^2-8*x+1");
         //RootFinder finder = new RootFinder("root(f,2,4)");
 
-        RootFinder finder = new RootFinder("root(f,2,4)");
+        RootFinder finder = new RootFinder("root(f,-0.4,0.11)");
 
         System.out.println( finder.findRoots() );
+    
     }//end method
 
 

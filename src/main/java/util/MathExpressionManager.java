@@ -261,7 +261,7 @@ public class MathExpressionManager {
      * optimizes it if possible,
      * and then solves it.
      * Else if the expression cannot be optimized,
-     * it has to interprete and then evaluate it.
+     * it has to interpret and then evaluate it.
      * It then stores the expression.
      * @param expr The expression to evaluate.
      * @return the result.

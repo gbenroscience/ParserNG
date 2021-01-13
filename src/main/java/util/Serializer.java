@@ -40,7 +40,7 @@ public class Serializer {
     
     /**
      * 
-     * @param yourObject Serializes the object to a byte array and returns it as a pstring printed as: [num1, num2, num3, num4, .....]
+     * @param yourObject Serializes the object to a byte array and returns it as a string printed as: [num1, num2, num3, num4, .....]
      * @return a string representation for the byte array representation of the object.
      */
     public static final String serialize(Savable yourObject) {

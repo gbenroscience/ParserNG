@@ -32,7 +32,9 @@ public class Methods {
 			"exp", "ln", "lg", "log", "ln-¹", "lg-¹", "log-¹", "asin", "acos",
 			"atan", "asinh", "acosh", "atanh", "asec", "acsc", "acot", "asech",
 			"acsch", "acoth", "aln", "alg", "alog", "sqrt","cbrt", "inverse",
-			"square", "cube", "pow", "floor", "ceil", "diff", "quad", "intg" };
+			"square", "cube", "pow", "floor", "ceil", "diff", "quad", "intg"
+                      
+                        };
 
 	/**
 	 *

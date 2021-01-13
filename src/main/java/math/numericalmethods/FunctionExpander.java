@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import math.matrix.expressParser.Matrix;
 import math.matrix.expressParser.PrecisionMatrix;
 import static java.lang.Math.*;
+import math.differentialcalculus.Formula;
 
 /**
  *
@@ -504,6 +505,10 @@ public class FunctionExpander {
     }//end class PolynomialCalculus
 
     public static void main(String args[]) {
+       
+        FunctionExpander polynomial = new FunctionExpander("poly(@(x)(x-1)(x+2)(3+x),1,20,4)", DOUBLE_PRECISION);//var x=1;..is to initialize the variable x.
+        System.out.println(polynomial.getPolynomial());
+        
         FunctionExpander expand = new FunctionExpander("poly(@(x)asin(x),0.8,1.0,25)", DOUBLE_PRECISION);//var x=1;..is to initialize the variable x.
         String poly = expand.getPolynomial();
         System.out.println("polynomial function = " + poly + "\n\n\n");
@@ -517,3 +522,9 @@ public class FunctionExpander {
     }//end main
 
 }//end class
+/**
+ * 
+ * 
+ * (x-1)(x+2)(x+3) = x^3+4x^2+x-6
+ *  
+ */

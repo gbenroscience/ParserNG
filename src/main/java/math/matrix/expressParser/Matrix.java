@@ -4,14 +4,20 @@
  */
 package math.matrix.expressParser;
 
+import java.util.HashMap;
 import java.util.InputMismatchException;
+import java.util.List;
 import java.util.Random;
+import parser.CustomScanner;
+import parser.Operator;
 
 /**
  *
  * @author GBEMIRO
  */
 public class Matrix {
+
+    public static final String lambda = "n";
 
     /**
      * The simple name used to label this Matrix object.
@@ -23,7 +29,7 @@ public class Matrix {
      */
     private double array[][];
     /**
-     * attribute used to compute the detMultiplier of the Matrix object.
+     * attribute used to cofactorDet the detMultiplier of the Matrix object.
      */
     private static double det = 0;
 
@@ -131,7 +137,7 @@ public class Matrix {
         return this.array;
     }
 
-    public double getElem(int row,int col){
+    public double getElem(int row, int col) {
         return array[row][col];
     }
 
@@ -258,7 +264,7 @@ public class Matrix {
 
         }//end if
         else {
-             System.out.println( "ERROR IN MATRIX INPUT!!");
+            System.out.println("ERROR IN MATRIX INPUT!!");
         }
 
         return new Matrix(matrix);
@@ -289,7 +295,7 @@ public class Matrix {
 
         }//end ifghjjk
         else {
-             System.out.println( "ERROR IN MATRIX INPUT!!");
+            System.out.println("ERROR IN MATRIX INPUT!!");
         }
 
         return new Matrix(matrix);
@@ -367,7 +373,7 @@ public class Matrix {
 
         }//end if
         else {
-             System.out.println( "ERROR IN MATRIX INPUT!!");
+            System.out.println("ERROR IN MATRIX INPUT!!");
         }
 
         return m;
@@ -613,7 +619,7 @@ public class Matrix {
             }//end outer for
             this.setArray(matrix.array);
         } else {
-             System.out.println( "COLUMN VALUE SHOULD "
+            System.out.println("COLUMN VALUE SHOULD "
                     + "RANGE FROM ZERO TO THE NUMBER OF COLUMNS IN THIS MATRIX.");
         }
     }//end method columnDeleteFromEnd
@@ -652,7 +658,7 @@ public class Matrix {
 
             this.setArray(matrix.array);
         } else {
-             System.out.println( "COLUMN VALUE SHOULD "
+            System.out.println("COLUMN VALUE SHOULD "
                     + "RANGE FROM ZERO TO THE NUMBER OF COLUMNS IN THIS MATRIX.");
         }
     }//end method columnDeleteFromStart
@@ -690,7 +696,7 @@ public class Matrix {
 
             this.setArray(matrix.array);
         } else {
-             System.out.println( "NUMBER OF ROWS TO BE DELETED SHOULD "
+            System.out.println("NUMBER OF ROWS TO BE DELETED SHOULD "
                     + "RANGE FROM ZERO TO (AND INCLUDING) THE NUMBER OF ROWS IN THIS MATRIX.");
         }
     }//end method rowDeleteFromEnd
@@ -825,7 +831,6 @@ public class Matrix {
                 }
             }//end if
 
-
             for (int rowed = row + 1; rowed < mat.getRows(); rowed++) {
                 double mul = mat.array[rowed][row];
                 for (int coled = row; coled < mat.getCols(); coled++) {
@@ -908,6 +913,47 @@ public class Matrix {
         return new Matrix(matrix);
     }//end method transpose
 
+    public Matrix adjoint() {
+        if (isSquareMatrix()) {
+            int rows = getRows();
+            int cols = getCols();
+            double matrix[][] = new double[rows][cols];
+
+            for (int row = 0; row < rows; row++) {
+                for (int col = 0; col < cols; col++) {
+                    matrix[row][col] = getCofactor(row, col).determ();
+                }//end inner for
+            }//end outer for
+
+            return new Matrix(matrix).transpose();
+        }
+        return null;
+    }
+/**
+ * 
+ * @return a matrix that contains the cofactors of the elements of this Matrix.
+ */
+    public Matrix getCofactorMatrix() {
+
+        if (isSquareMatrix()) {
+
+            int rows = getRows();
+            int cols = getCols();
+            double matrix[][] = new double[rows][cols];
+
+            int count = 0;
+            for (int row = 0; row < rows; row++) {
+                for (int col = 0; col < cols; col++, count++) {
+                    matrix[row][col] = (count%2==0 ? 1 : -1)*getCofactor(row, col).determ();
+                }//end inner for
+            }//end outer for    
+
+            return new Matrix(matrix);
+        }
+        
+        return null;
+    }
+
     /**
      *
      * @param i the row on which the element whose minor is needed lies.
@@ -964,6 +1010,49 @@ public class Matrix {
     }
 
     /**
+     *
+     * @param m a 2 X 2 matrix
+     * @return the detMultiplier of this matrix
+     */
+    private static String $2X2determinantForEigen(String[][] m) {
+        /*
+        {
+        {2-n  ,   4}
+        {3    , 5-n}
+        
+        
+        }
+        m[0][0].m[1][1]-m[1][0].m[0][1]
+         */
+        //looks like (2-n)(3-n)-(4)(2)
+
+        String v1 = "", v2 = "";
+        if (parser.Number.validNumber(m[1][0]) && parser.Number.validNumber(m[0][1])) {
+            double val = Double.parseDouble(m[1][0]) * Double.parseDouble(m[0][1]);
+            v1 = String.valueOf(val);
+        }
+
+        if (parser.Number.validNumber(m[0][0]) && parser.Number.validNumber(m[1][1])) {
+            double val = Double.parseDouble(m[0][0]) * Double.parseDouble(m[1][1]);
+            v2 = String.valueOf(val);
+        }
+
+        if (!v1.isEmpty() && !v2.isEmpty()) {
+            return String.valueOf(Double.parseDouble(v2) - Double.parseDouble(v1));
+        }
+
+        String expr1 = v1.isEmpty() ? uniVariableExpressionExpander(lambda, m[1][0], m[0][1]) : v1;
+        String expr2 = v2.isEmpty() ? uniVariableExpressionExpander(lambda, m[0][0], m[1][1]) : v2;
+
+        String negExpr1 = uniVariableExpressionExpander(lambda, "-1", expr1);
+
+        String expanded = uniVariableExpressionExpander(lambda, "1", expr2 + "+" + negExpr1);
+
+        return expanded;
+
+    }
+
+    /**
      * @param m the matrix whose top row is to be multiplied by a scalar
      * Multiplies the top row of a matrix by a scalar. This is an important
      * operation during the evaluation of a detMultiplier.
@@ -976,13 +1065,12 @@ public class Matrix {
         return new Matrix(m.array);
     }
 
-
     /**
-     * Sarus' rule for computing determinants.
-     * This technique is too slow and memory intensive for large
-     * matrices..n>=10.
-     * Please use the determ() instance method. It uses a O(cube_n)
-     * algorithm as against this method's O(n!)
+     * Sarus' rule for computing determinants. This technique is too slow and
+     * memory intensive for large matrices..n>=10. Please use the determ()
+     * instance method. It uses a O(cube_n) algorithm as against this method's
+     * O(n!)
+     *
      * @param m the Matrix object whose detMultiplier is desired.
      * @return the detMultiplier of the matrix
      */
@@ -1018,8 +1106,7 @@ public class Matrix {
 
     /**
      *
-     * @return the determinant of this matrix using a row reduction
-     * technique.
+     * @return the determinant of this matrix using a row reduction technique.
      */
     public double determinant() {
         return this.determ();
@@ -1097,6 +1184,38 @@ public class Matrix {
         }
 
         return output;
+    }//end method toString
+
+    /**
+     * @param mat The string matrix
+     */
+    public static void printTextMatrix(String[][] mat) {
+        String output = "\n";
+        String appender = "";
+
+        int rows = mat.length;
+        if (mat.length == 0) {
+            System.out.println("EMPTY");
+        }
+        int cols = mat[0].length;
+        for (int row = 0; row < rows; row++) {
+
+            for (int column = 0; column < cols; column++) {
+
+                if (column < cols) {
+                    appender += String.format("%7s%3s", mat[row][column], ",");
+                }
+                if (column == cols - 1) {
+                    appender = appender.substring(0, appender.length() - 1);
+                    appender += "          \n";
+                }
+                output += appender;
+                appender = "";
+            }
+        }
+
+        System.out.println("MATRIX:\n" + output);
+
     }//end method toString
 
     /**
@@ -1230,9 +1349,9 @@ public class Matrix {
 
     /**
      * Row reduction technique used to compute the determinant of this matrix.
-     * The other method using recursion is not worth it above n = 10;
-     * The memory consumed by the process and the time used to compute it is 
-     * incomparable to this method's performance.
+     * The other method using recursion is not worth it above n = 10; The memory
+     * consumed by the process and the time used to compute it is incomparable
+     * to this method's performance.
      *
      * @return the inverse of the Matrix as another Matrix object.
      */
@@ -1240,12 +1359,10 @@ public class Matrix {
 
         double detMultiplier = 1;
 
-
-        Matrix mat= new Matrix(this);
+        Matrix mat = new Matrix(this);
         //Now we row-reduce.
         int rows = mat.getRows();
         int cols = mat.getCols();
-
 
         if (rows == cols) {
             for (int row = 0; row < rows; row++) {
@@ -1276,7 +1393,7 @@ public class Matrix {
                 for (int col = row; col < cols; col++) {
                     mat.array[row][col] /= pivot;
                 }//end inner for loop
-                detMultiplier*=pivot;
+                detMultiplier *= pivot;
                 for (int rw = row + 1; rw < rows; rw++) {
                     double newRowMultiplier = -1 * mat.array[rw][row];
                     for (int col = row; col < cols; col++) {
@@ -1287,26 +1404,535 @@ public class Matrix {
 
             }//end for
 
-            for(int row=0;row<rows;row++){
+            for (int row = 0; row < rows; row++) {
                 detMultiplier *= mat.array[row][row];
             }//end for
-
+return detMultiplier;
         }
 
-        return detMultiplier;
+        throw new InputMismatchException("The input to the determinant function be a square matrix!");
     }
 
     /**
+     *
+     * @param cofactors The matrix of cofactors.
+     * @return the algebraic expression for the determinant of the matrix of
+     * cofactors.
+     */
+    private static String findDetEigen(String[][] cofactors) {
+        if (cofactors.length == 2 && cofactors[0].length == 2) {
+            return $2X2determinantForEigen(cofactors);
+        } else {
+            StringBuilder eqnBuilder = new StringBuilder();
+            int row = 0;
+            for (int col = 0; col < cofactors[0].length; col++) {
+                String[][] cfs = getCofactorTextArray(cofactors, row, col);
+                String cofactorDet = findDetEigen(cfs);
+                if (col == 0) {
+                    String expr = uniVariableExpressionExpander(lambda, cofactors[row][col], cofactorDet);
+                    if (!expr.isEmpty()) {
+                        eqnBuilder.append("+").append(expr);
+                    }
+                } else {
+                    if (col % 2 == 0) {
+                        String expr = uniVariableExpressionExpander(lambda, cofactors[row][col], cofactorDet);
+                        if (!expr.isEmpty()) {
+                            eqnBuilder.append("+").append(expr);
+                        }
+                    } else {
+                        String negExpr = uniVariableExpressionExpander(lambda, "-1", cofactors[row][col]);
+                        if (!negExpr.isEmpty()) {
+                            String expr = uniVariableExpressionExpander(lambda, negExpr, cofactorDet);
+                            if (!expr.isEmpty()) {
+                                eqnBuilder.append("+").append(expr);
+                            }
+                        }
+
+                    }
+                }
+            }
+
+            return eqnBuilder.toString();
+        }
+    }
+
+    public final String getCharacteristicPolynomialForEigenVector(){
+        return findCharacteristicPolynomialForEigenValues(this);
+    }
+    /**
+     *
+     * @param m The Matrix object
+     * @return the characteristic polynomial
+     */
+    public static final String findCharacteristicPolynomialForEigenValues(Matrix m) {
+
+        if (m.isSquareMatrix()) {
+
+            int rows = m.getRows();
+            int cols = m.getCols();
+
+            String[][] mat = new String[rows][cols];
+
+            //Create matrix array in string format
+            for (int row = 0; row < rows; row++) {
+                for (int col = 0; col < cols; col++) {
+                    mat[row][col] = String.valueOf(m.array[row][col]);
+                }
+            }
+
+            //Create A-λ array in string format
+            for (int row = 0, col = 0; row < rows; row++, col++) {
+                String c = mat[row][col];
+                mat[row][col] = c + "-" + lambda;
+            }
+
+            // printTextMatrix(mat);
+            StringBuilder eqnBuilder = new StringBuilder();
+
+            int row = 0;
+            for (int col = 0; col < cols; col++) {
+                String entry = mat[row][col];
+                String cofactorDet;
+                if (mat.length == 2) {
+                    return findDetEigen(mat);
+                }
+                String[][] cofactors = getCofactorTextArray(mat, row, col);
+                cofactorDet = findDetEigen(cofactors);
+
+                if (col == 0) {
+                    eqnBuilder.append(uniVariableExpressionExpander(lambda, entry, cofactorDet));
+                } else {
+                    if (col % 2 == 0) {
+                        String expr = uniVariableExpressionExpander(lambda, entry, cofactorDet);
+                        if (!expr.isEmpty()) {
+                            eqnBuilder.append("+").append(expr);
+                        }
+                    } else {
+                        String negExpr = uniVariableExpressionExpander(lambda, "-1", entry);
+                        if (!negExpr.isEmpty()) {
+                            String expr = uniVariableExpressionExpander(lambda, negExpr, cofactorDet);
+                            if (!expr.isEmpty()) {
+                                eqnBuilder.append("+").append(expr);
+                            }
+                        }
+                    }
+                }
+
+            }
+
+            String expr = uniVariableExpressionExpander(lambda, "1", eqnBuilder.toString());
+
+            return expr;
+        }
+
+        return null;
+
+    }
+/**
+ * 
+ * @param rw The row of a given element
+ * @param cl The position of that element
+ * @return the cofactor sub-matrix used to calculate the cofactor element of the specified position
+ */
+    private  Matrix getCofactor(int rw, int cl) {
+        if (rw >= 0 && cl >= 0) {
+
+            int rows = getRows();
+            int cols = getCols();
+
+            Matrix mat = new Matrix(rows - 1, cols - 1);
+
+            int subRow = 0, subCol = 0;
+
+            for (int row = 0; row < rows; row++) {
+
+                if (row != rw) {
+                    for (int col = 0; col < cols; col++) {
+
+                        if (col != cl) {// , 
+                            mat.array[subRow][subCol] = array[row][col];
+                            subCol++;
+                        }
+                    }
+                    subCol = 0;
+                    subRow++;
+                }
+
+            }
+            return mat;
+        }
+
+        return null;
+    }
+/**
+ * 
+ * @param matrix A 2d matrix array
+ * @param rw The row of a given element
+ * @param cl The position of that element
+ * @return the cofactor sub-matrix used to calculate the cofactor element of the specified position
+ */
+    private static String[][] getCofactorTextArray(String[][] matrix, int rw, int cl) {
+        if (rw >= 0 && cl >= 0) {
+
+            int rows = matrix.length;
+            int cols = matrix[0].length;
+
+            String[][] mat = new String[rows - 1][cols - 1];
+
+            int subRow = 0, subCol = 0;
+
+            for (int row = 0; row < rows; row++) {
+
+                if (row != rw) {
+                    for (int col = 0; col < cols; col++) {
+
+                        if (col != cl) {// , 
+                            mat[subRow][subCol] = matrix[row][col];
+                            subCol++;
+                        }
+                    }
+                    subCol = 0;
+                    subRow++;
+                }
+
+            }
+            return mat;
+        }
+
+        return null;
+    }
+
+    /**
+     * Generates the expression map of the expression... a map whose keys are
+     * the powers of the variable of the expression and whose values are the
+     * coefficients of the variables. e.g. 3x^2-2x+1 would produce:
+     * [{2,3},{1,-2},{0,1}]
+     *
+     * @param variableName The name of the variable
+     * @param scan The list to smoothen
+     * @return the expression map
+     */
+    private static HashMap<Double, Double> generateExpressionMap(String variableName, List<String> scan) {
+        if (scan.isEmpty()) {
+            return new HashMap<>();
+        }
+        if (scan.get(0).equals(Operator.PLUS)) {
+            scan.remove(0);
+        }
+        if (scan.isEmpty()) {
+            return new HashMap<>();
+        }
+
+        if (scan.get(0).equals(Operator.MINUS)) {
+            if (parser.Number.isNumber(scan.get(1))) {
+                scan.set(1, (-1 * Double.parseDouble(scan.get(1))) + "");
+                scan.remove(0);
+            }
+        }
+
+        /**
+         * change kx^n to k*x^n
+         */
+        for (int i = 0; i < scan.size(); i++) {
+            if (i > 0 && scan.get(i).equals(variableName)) {
+                if (parser.Number.isNumber(scan.get(i - 1))) {
+                    scan.add(i, "*");
+                    i += 1;
+                }
+            }
+        }
+
+        // apply coeffs to variables missing their coefficients
+        for (int i = 0; i < scan.size(); i++) {
+            if (scan.get(i).equals(variableName)) {
+
+                if (i == 0) {
+                    scan.add(0, "*");
+                    scan.add(0, "1");
+                    i += 2;
+                } else {
+                    if (Operator.isPlusOrMinus(scan.get(i - 1))) {
+                        scan.add(i, "*");
+                        scan.add(i, "1");
+                        if (i == scan.size() - 1) {
+                            break;
+                        }
+                        i += 2;
+                    }
+                }
+            }
+        }//end for loop
+
+        //smoothing change constants; Change terms in x to: x^1 and constant terms to x^0
+        for (int i = 0; i < scan.size(); i++) {
+
+            if (i + 1 < scan.size()) {
+                if (scan.get(i).equals(Operator.PLUS) && scan.get(i + 1).equals(Operator.PLUS)) {
+                    scan.set(i, Operator.PLUS);
+                    scan.remove(i + 1);
+                }
+
+                if (scan.get(i).equals(Operator.PLUS) && scan.get(i + 1).equals(Operator.MINUS)) {
+                    scan.set(i, Operator.MINUS);
+                    scan.remove(i + 1);
+                }
+
+                if (scan.get(i).equals(Operator.MINUS) && scan.get(i + 1).equals(Operator.PLUS)) {
+                    scan.set(i, Operator.MINUS);
+                    scan.remove(i + 1);
+                }
+
+                if (scan.get(i).equals(Operator.MINUS) && scan.get(i + 1).equals(Operator.MINUS)) {
+                    scan.set(i, Operator.PLUS);
+                    scan.remove(i + 1);
+                }
+
+            }
+            //locate a variable
+            if (scan.get(i).equals(variableName)) {
+                //A free variable can never be at the beginning due to the previous for loop
+                //if at the end
+                if (i == scan.size() - 1) {//make its exponent 1
+                    scan.add(Operator.POWER);
+                    scan.add("1");
+                    break;
+                } else {//else if it is just before a ± operator (e.g. x + or x -), then make its exponent 1
+                    if (Operator.isPlusOrMinus(scan.get(i + 1))) {
+                        scan.add(i + 1, "1");
+                        scan.add(i + 1, Operator.POWER);
+                        i += 2;
+                    }
+                }
+
+            } /*locate a number*/ else if (parser.Number.isNumber(scan.get(i))) {
+
+                if (i == 0) {  //if at start: make its x coefficient 0
+                    if (i + 1 < scan.size()) {
+                        if (Operator.isPlusOrMinus(scan.get(i + 1))) {
+                            scan.add(1, "0");
+                            scan.add(1, Operator.POWER);
+                            scan.add(1, variableName);
+                            scan.add(1, Operator.MULTIPLY);
+                            i += 4;
+                        }
+                    } else {
+                        scan.add(Operator.MULTIPLY);
+                        scan.add(variableName);
+                        scan.add(Operator.POWER);
+                        scan.add("0");
+
+                        break;
+
+                    }
+
+                } else if (i == scan.size() - 1) {//if at end, make its x coefficient 0
+                    if (Operator.isPlusOrMinus(scan.get(i - 1))) {
+                        scan.add(Operator.MULTIPLY);
+                        scan.add(variableName);
+                        scan.add(Operator.POWER);
+                        scan.add("0");
+                    }
+                    break;
+                } else {//if somewhere within the production, make its x coefficient 0
+                    if (Operator.isPlusOrMinus(scan.get(i - 1)) && Operator.isPlusOrMinus(scan.get(i + 1))) {
+                        scan.add(i + 1, Operator.MULTIPLY);
+                        scan.add(i + 1, variableName);
+                        scan.add(i + 1, Operator.POWER);
+                        scan.add(i + 1, "0");
+                        i += 4;
+                    }
+                }
+            }
+
+        }//end for loop
+
+        HashMap<Double, Double> map = new HashMap<>();//key is the exponent(power of the variable), value is the coefficient
+        //a.x^n
+        for (int i = 0; i < scan.size(); i++) {
+            if (scan.get(i).equals(Operator.POWER)) {
+                double exp = Double.valueOf(scan.get(i + 1));
+                double coeff = Double.valueOf(scan.get(i - 3));//3*x^2
+
+                if (i - 4 >= 0 && scan.get(i - 4).equals(Operator.MINUS)) {
+                    coeff *= -1;
+                }
+                double coef = map.getOrDefault(exp, 0.0);
+                map.put(exp, coeff + coef);
+            }
+        }
+
+        return map;
+    }
+
+    /**
+     *
+     * @param variableName The variable
+     * @param exprs The different expressions of the variable to be multiplied
+     * @return the expanded product of the expressions.
+     */
+    private static final String uniVariableExpressionExpander(String variableName, String... exprs) {
+
+        String eqn = exprs[0];
+        for (int i = 1; i < exprs.length; i++) {
+            eqn = uniVariableExpressionExpander(variableName, eqn, exprs[i]);
+        }
+        return eqn;
+    }
+
+    /**
+     *
+     * @param expression Must be a math expression of the
+     * form:(polynomial_1)(polynomial_2) e.g: (1*x^1-2)(3*x^2+5*x^1+8)
+     * @return
+     */
+    private static final String uniVariableExpressionExpander(String variableName, String expr1, String expr2) {
+
+        List<String> tokens1 = new CustomScanner(expr1, true, Operator.PLUS, Operator.MINUS, Operator.MULTIPLY, Operator.DIVIDE, Operator.POWER, variableName).scan();
+
+        List<String> tokens2 = new CustomScanner(expr2, true, Operator.PLUS, Operator.MINUS, Operator.MULTIPLY, Operator.DIVIDE, Operator.POWER, variableName).scan();
+
+        HashMap<Double, Double> map1 = generateExpressionMap(variableName, tokens1);
+        HashMap<Double, Double> map2 = generateExpressionMap(variableName, tokens2);
+
+        HashMap<Double, Double> product = new HashMap();
+
+        for (HashMap.Entry<Double, Double> e : map1.entrySet()) {
+
+            double exp = e.getKey();
+            double coeff = e.getValue();
+
+            for (HashMap.Entry<Double, Double> f : map2.entrySet()) {
+
+                double ex = f.getKey();
+                double coef = f.getValue();
+
+                double coeffProd = coef * coeff;
+                double expProd = ex + exp;//3x^2*5x^3
+
+                double oldCoef = product.getOrDefault(expProd, 0.0);
+                product.put(expProd, coeffProd + oldCoef);
+
+            }
+
+        }
+        
+
+        int i = 0;
+        StringBuilder result = new StringBuilder();
+        for (HashMap.Entry<Double, Double> e : product.entrySet()) {
+
+            double exp = e.getKey();
+            double coeff = e.getValue();
+            if (coeff == 0) {
+                continue;
+            }
+
+            if (i == 0) {
+                result.append(coeff).append("*").append(variableName).append(Operator.POWER).append(exp);
+                //result.append(appendLogic(coeff, variableName, exp));
+            } else {
+                if (coeff >= 0) {
+                    result.append("+").append(coeff).append("*").append(variableName).append(Operator.POWER).append(exp);
+                    //result.append("+").append(appendLogic(coeff, variableName, exp));
+                } else {
+                    result.append(coeff).append("*").append(variableName).append(Operator.POWER).append(exp);
+                    //result.append("+").append(appendLogic(coeff, variableName, exp));
+                }
+            }
+
+            i++;
+        }
+        String res = result.toString();
+        /*
+        res = res.replace("+-", "-");
+        res = res.replace("-+", "-");
+        res = res.replace("--", "+");
+        res = res.replace("++", "+");
+*/
+        return res;
+    }
+    private static String appendLogic(double coeff ,String variableName , double exp){
+        if(exp == 0.0){
+            return coeff+"";
+        }else if(exp == 1){
+            return coeff+"*"+variableName;
+        }else{
+            return coeff+"*"+variableName+Operator.POWER+exp;
+        }
+    }
+    
+    
+    public void print(){
+        System.out.println(toString());
+    }
+
+    /**
+     * (2-x)(3-x)(1-x)=(6-5x+x^2)(1-x)=6-11x+6x^2-x^3 {1, 2, 3, 4, 5} {6, 7, 8,
+     * 9, 0} {1, 2, 3, 4, 5} {6, 7, 8, 9, 0} {1, 2, 3, 4, 5}
      *
      * @param args The command line args
      */
     public static void main(String... args) {
 
-        Matrix a = new Matrix(5,5);
-        double arr[][] = {{1,2,3,4,5},{6,7,8,9,0},{1,2,3,4,5},{6,7,8,9,0},{1,2,3,4,5}};
-        a.array = arr;
-        System.out.println("A: "+a);
-        System.out.println("det(A): "+Matrix.det(a));
+        String expanded = uniVariableExpressionExpander("x", "2-x", "-8-7*x+x^2");
+        System.out.println("expanded: " + expanded);
+
+         double array1[][] = {
+            {1, 2, 3},
+            {0, 4, 5},
+            {1, 0, 6}
+        };
+        Matrix ma = new Matrix(array1);
+      
+        System.out.println("Matrix...");
+        ma.print();
+        
+        Matrix cof = ma.getCofactorMatrix();
+        
+        System.out.println("Cofactor Matrix...");
+        cof.print();
+
+        String eqn = Matrix.findCharacteristicPolynomialForEigenValues(ma);
+
+        System.out.println("eigen-value-rnd: " + eqn);
+
+        double arr[][] = {
+            {1, 2, 3, 4, 5},
+            {6, 7, 8, 9, 0},
+            {12, -2, 8, 2, 7},
+            {2, 9, -3, 5, 10},
+            {21, 4, 13, 0, 15}
+        };
+        Matrix a = new Matrix(arr);
+
+        System.out.println("eigen-eqn-a: " + findCharacteristicPolynomialForEigenValues(a));
+
+        double ar[][] = {
+            {2, 0, 0, 0},
+            {1, 2, 0, 0},
+            {0, 1, 3, 0},
+            {0, 0, 1, 3}
+        };
+        a = new Matrix(ar);
+
+        System.out.println("eigen-eqn-a: " + findCharacteristicPolynomialForEigenValues(a));
+
+        double arr1[][] = {
+            {2, 0, 0},
+            {0, 4, 5},
+            {0, 4, 3}
+        };
+        Matrix b = new Matrix(arr1);
+
+        System.out.println("eigen-eqn-b: " + findCharacteristicPolynomialForEigenValues(b));
+
+        double arr2[][] = {
+            {2, 1},
+            {1, 2}
+        };
+        Matrix c = new Matrix(arr2);
+
+        System.out.println("eigen-eqn-c: " + findCharacteristicPolynomialForEigenValues(c));
 
         Matrix m1 = new Matrix(4, 4);
         double array[][] = {{1, -8, 2, 5}, {4, 8, 2, 4}, {6, 5, 2, 1}, {2, 1, 6, 8}};
@@ -1336,10 +1962,9 @@ public class Matrix {
         double det_1 = m.determ();
         double t3 = System.nanoTime() - t2;
 
-        System.out.printf("New method for determinant gives %4f in %4f %2s \n", det_1, (t3 * 1.0E-6), "ms"); 
-        
-        
-/*
+        System.out.printf("New method for determinant gives %4f in %4f %2s \n", det_1, (t3 * 1.0E-6), "ms");
+
+        /*
         Matrix m1 = new Matrix( new double[][]{{5, -6, 8, 9}, {3,1,0,6}, {2,10,4,5}, {16,12,2,4}});
 
         System.out.println("--------------------------Matrix:\n" + m1);
@@ -1366,7 +1991,6 @@ public class Matrix {
         System.out.println("INVERSE: " + m5);
 
         System.out.println("Product using new method: M X 1/M: " + Matrix.multiply(m3, m5));*/
-
         /**
          * double t0 = System.nanoTime(); Matrix m = new Matrix(3024,3025);
          * double t1 = System.nanoTime() - t0; System.out.println( "Creating the

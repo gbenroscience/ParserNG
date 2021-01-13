@@ -39,30 +39,30 @@ public class Method {
      */
     private int DRG = 1;
 
-    public static final String SIN =  "sin";
-    public static final String COS =  "cos";
-    public static final String TAN =  "tan";
-    public static final String SINH =  "sinh";
-    public static final String COSH =  "cosh";
-    public static final String TANH =  "tanh";
-    public static final String ARC_SIN =  "sin-¹";
-    public static final String ARC_COS =  "cos-¹";
-    public static final String ARC_TAN =  "tan-¹";
-    public static final String ARC_SINH =  "sinh-¹";
-    public static final String ARC_COSH =  "cosh-¹";
+    public static final String SIN = "sin";
+    public static final String COS = "cos";
+    public static final String TAN = "tan";
+    public static final String SINH = "sinh";
+    public static final String COSH = "cosh";
+    public static final String TANH = "tanh";
+    public static final String ARC_SIN = "sin-¹";
+    public static final String ARC_COS = "cos-¹";
+    public static final String ARC_TAN = "tan-¹";
+    public static final String ARC_SINH = "sinh-¹";
+    public static final String ARC_COSH = "cosh-¹";
     public static final String ARC_TANH = "tanh-¹";
     public static final String SEC = "sec";
     public static final String COSEC = "csc";
     public static final String COT = "cot";
-    public static final String SECH ="sech";
+    public static final String SECH = "sech";
     public static final String COSECH = "csch";
     public static final String COTH = "coth";
-    public static final String ARC_SEC ="sec-¹";
+    public static final String ARC_SEC = "sec-¹";
     public static final String ARC_COSEC = "csc-¹";
-    public static final String ARC_COT ="cot-¹";
+    public static final String ARC_COT = "cot-¹";
     public static final String ARC_SECH = "sech-¹";
-    public static final String ARC_COSECH ="csch-¹";
-    public static final String ARC_COTH ="coth-¹";
+    public static final String ARC_COSECH = "csch-¹";
+    public static final String ARC_COTH = "coth-¹";
     public static final String EXP = "exp";
     public static final String LN = "ln";
     public static final String LG = "lg";
@@ -113,6 +113,7 @@ public class Method {
     public static final String RANDOM = "rnd";
     public static final String SORT = "sort";
     public static final String PLOT = "plot";
+    public static final String PRINT = "print";
     public static final String DIFFERENTIATION = "diff";
     public static final String INTEGRATION = "intg";
     public static final String QUADRATIC = "quad";
@@ -130,7 +131,10 @@ public class Method {
     public static final String MATRIX_POWER = "matrix_pow";
     public static final String MATRIX_TRANSPOSE = "transpose";
     public static final String MATRIX_EDIT = "matrix_edit";
-
+    public static final String MATRIX_COFACTORS = "cofactor";
+    public static final String MATRIX_ADJOINT = "adjoint";
+    public static final String MATRIX_EIGENVEC = "eigvec";
+    public static final String MATRIX_EIGENPOLY = "eigpoly";
 
     /**
      * A list of all inbuilt methods of the parser of this software.The user is
@@ -139,100 +143,104 @@ public class Method {
      */
     public static final String[] inbuiltMethods
             = new String[]{
-            SIN ,
-            COS ,
-            TAN ,
-            SINH ,
-            COSH ,
-            TANH ,
-            ARC_SIN ,
-            ARC_COS ,
-            ARC_TAN ,
-            ARC_SINH ,
-            ARC_COSH ,
-            ARC_TANH ,
-            SEC ,
-            COSEC ,
-            COT ,
-            SECH ,
-            COSECH ,
-            COTH ,
-            ARC_SEC ,
-            ARC_COSEC ,
-            ARC_COT ,
-            ARC_SECH ,
-            ARC_COSECH ,
-            ARC_COTH ,
-            EXP ,
-            LN ,
-            LG ,
-            LOG ,
-            LN_INV ,
-            LG_INV ,
-            LOG_INV ,
-            ARC_SIN_ALT ,
-            ARC_COS_ALT ,
-            ARC_TAN_ALT ,
-            ARC_SINH_ALT ,
-            ARC_COSH_ALT ,
-            ARC_TANH_ALT ,
-            ARC_SEC_ALT ,
-            ARC_COSEC_ALT ,
-            ARC_COT_ALT ,
-            ARC_SECH_ALT ,
-            ARC_COSECH_ALT ,
-            ARC_COTH_ALT ,
-            LN_INV_ALT ,
-            LG_INV_ALT ,
-            LOG_INV_ALT ,
-            FLOOR ,
-            CEIL ,
-            SQRT ,
-            CBRT ,
-            INVERSE ,
-            SQUARE ,
-            CUBE ,
-            POW ,
-            FACT ,
-            COMBINATION ,
-            PERMUTATION ,
-            SUM ,
-            PROD ,
-            AVG ,
-            MEDIAN ,
-            MODE ,
-            RANGE ,
-            MID_RANGE ,
-            ROOT_MEAN_SQUARED ,
-            COEFFICIENT_OF_VARIATION ,
-            MIN ,
-            MAX ,
-            STD_DEV ,
-            VARIANCE ,
-            STD_ERR ,
-            RANDOM ,
-            SORT ,
-            PLOT ,
-            DIFFERENTIATION ,
-            INTEGRATION ,
-            QUADRATIC ,
-            TARTAGLIA_ROOTS ,
-            GENERAL_ROOT ,
-            LINEAR_SYSTEM ,
-            DETERMINANT ,
-            INVERSE_MATRIX ,
-            TRIANGULAR_MATRIX ,
-            ECHELON_MATRIX ,
-            MATRIX_MULTIPLY ,
-            MATRIX_DIVIDE ,
-            MATRIX_ADD ,
-            MATRIX_SUBTRACT ,
-            MATRIX_POWER ,
-            MATRIX_TRANSPOSE ,
-            MATRIX_EDIT
+                SIN,
+                COS,
+                TAN,
+                SINH,
+                COSH,
+                TANH,
+                ARC_SIN,
+                ARC_COS,
+                ARC_TAN,
+                ARC_SINH,
+                ARC_COSH,
+                ARC_TANH,
+                SEC,
+                COSEC,
+                COT,
+                SECH,
+                COSECH,
+                COTH,
+                ARC_SEC,
+                ARC_COSEC,
+                ARC_COT,
+                ARC_SECH,
+                ARC_COSECH,
+                ARC_COTH,
+                EXP,
+                LN,
+                LG,
+                LOG,
+                LN_INV,
+                LG_INV,
+                LOG_INV,
+                ARC_SIN_ALT,
+                ARC_COS_ALT,
+                ARC_TAN_ALT,
+                ARC_SINH_ALT,
+                ARC_COSH_ALT,
+                ARC_TANH_ALT,
+                ARC_SEC_ALT,
+                ARC_COSEC_ALT,
+                ARC_COT_ALT,
+                ARC_SECH_ALT,
+                ARC_COSECH_ALT,
+                ARC_COTH_ALT,
+                LN_INV_ALT,
+                LG_INV_ALT,
+                LOG_INV_ALT,
+                FLOOR,
+                CEIL,
+                SQRT,
+                CBRT,
+                INVERSE,
+                SQUARE,
+                CUBE,
+                POW,
+                FACT,
+                PRINT,
+                COMBINATION,
+                PERMUTATION,
+                SUM,
+                PROD,
+                AVG,
+                MEDIAN,
+                MODE,
+                RANGE,
+                MID_RANGE,
+                ROOT_MEAN_SQUARED,
+                COEFFICIENT_OF_VARIATION,
+                MIN,
+                MAX,
+                STD_DEV,
+                VARIANCE,
+                STD_ERR,
+                RANDOM,
+                SORT,
+                PLOT,
+                DIFFERENTIATION,
+                INTEGRATION,
+                QUADRATIC,
+                TARTAGLIA_ROOTS,
+                GENERAL_ROOT,
+                LINEAR_SYSTEM,
+                DETERMINANT,
+                INVERSE_MATRIX,
+                TRIANGULAR_MATRIX,
+                ECHELON_MATRIX,
+                MATRIX_MULTIPLY,
+                MATRIX_DIVIDE,
+                MATRIX_ADD,
+                MATRIX_SUBTRACT,
+                MATRIX_POWER,
+                MATRIX_TRANSPOSE,
+                MATRIX_EDIT,
+                MATRIX_COFACTORS,
+                MATRIX_ADJOINT,
+                MATRIX_EIGENVEC,
+                MATRIX_EIGENPOLY
 
-
-    };
+            };
 
     /**
      *
@@ -247,16 +255,13 @@ public class Method {
         }
     }
 
-
-
-
     /**
      *
      * @param typeName The name of the method
      * @return the return type
      */
-    public static String returnTypeDef(String typeName){
-        switch(typeName){
+    public static String returnTypeDef(String typeName) {
+        switch (typeName) {
             case SIN:
                 return TYPE.NUMBER.toString();
             case COS:
@@ -368,6 +373,8 @@ public class Method {
                 return TYPE.NUMBER.toString();
             case FACT:
                 return TYPE.NUMBER.toString();
+            case PRINT:
+                return TYPE.VOID.toString();
             case COMBINATION:
                 return TYPE.NUMBER.toString();
             case PERMUTATION:
@@ -417,7 +424,7 @@ public class Method {
             case GENERAL_ROOT:
                 return TYPE.NUMBER.toString();
             case LINEAR_SYSTEM:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+                return TYPE.LIST.toString();
             case DETERMINANT:
                 return TYPE.NUMBER.toString();
             case INVERSE_MATRIX:
@@ -440,14 +447,20 @@ public class Method {
                 return TYPE.MATRIX.toString();
             case MATRIX_EDIT:
                 return TYPE.VOID.toString();
+            case MATRIX_ADJOINT:
+                return TYPE.MATRIX.toString();
+            case MATRIX_COFACTORS:
+                return TYPE.MATRIX.toString();
+            case MATRIX_EIGENPOLY:
+                return TYPE.ALGEBRAIC_EXPRESSION.toString();
+            case MATRIX_EIGENVEC:
+                return TYPE.MATRIX.toString();
 
- 
             default:
                 return TYPE.NUMBER.toString();
         }
 
     }
-
 
     /**
      *
@@ -460,7 +473,8 @@ public class Method {
                 || methodName.equals(TARTAGLIA_ROOTS) || methodName.equals(PLOT) || methodName.equals(MATRIX_MULTIPLY)
                 || methodName.equals(MATRIX_DIVIDE) || methodName.equals(MATRIX_ADD) || methodName.equals(MATRIX_SUBTRACT)
                 || methodName.equals(MATRIX_POWER) || methodName.equals(MATRIX_EDIT) || methodName.equals(MATRIX_TRANSPOSE)
-                || methodName.equals(DETERMINANT);
+                || methodName.equals(DETERMINANT) || methodName.equals(MATRIX_ADJOINT) || methodName.equals(MATRIX_COFACTORS)
+                || methodName.equals(MATRIX_EIGENPOLY) || methodName.equals(MATRIX_EIGENVEC) || methodName.equals(PRINT);
     }
 
     /**
@@ -482,15 +496,7 @@ public class Method {
         String[] userDefined = new String[sz + inbuiltMethods.length];
         String[] keyset = FunctionManager.FUNCTIONS.keySet().toArray(new String[]{});
         System.arraycopy(keyset, 0, userDefined, 0, keyset.length);
-        /*  for(int i=0;i<sz;i++){
-         userDefined[i] = keyset[i];
-         }*///end for loop
-        int sz1 = userDefined.length;
-        int pass = 0;
-        for (int i = sz; i < sz1; i++, pass++) {
-            userDefined[i] = inbuiltMethods[pass];
-        }//end for loop
-
+        System.arraycopy(inbuiltMethods, 0, userDefined, keyset.length, inbuiltMethods.length);
         return userDefined;
     }//end method.
 
@@ -547,9 +553,9 @@ public class Method {
      */
     public static boolean isListReturningStatsMethod(String op) {
         return (op.equals(SORT) || op.equals(MODE) || op.equals(RANDOM) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS)
-                || op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX))||
-                op.equals(MATRIX_MULTIPLY)||op.equals(MATRIX_DIVIDE)||op.equals(MATRIX_ADD)||op.equals(MATRIX_SUBTRACT)||op.equals(MATRIX_POWER)||
-                op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EDIT);
+                || op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX))
+                || op.equals(MATRIX_MULTIPLY) || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT) || op.equals(MATRIX_POWER)
+                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EDIT);
     }
 
     /**
@@ -643,6 +649,26 @@ public class Method {
         return op.equals(ECHELON_MATRIX);
     }
 
+    public boolean isMatrixCofactors(String op) {
+        return op.equals(MATRIX_COFACTORS);
+    }
+
+    public boolean isMatrixAdjoint(String op) {
+        return op.equals(MATRIX_ADJOINT);
+    }
+
+    public boolean isMatrixEigenVec(String op) {
+        return op.equals(MATRIX_EIGENVEC);
+    }
+
+    public boolean isMatrixEigenPoly(String op) {
+        return op.equals(MATRIX_EIGENPOLY);
+    }
+
+    public boolean isPrint(String op) {
+        return op.equals(PRINT);
+    }
+
     /**
      * @param op the String to check
      * @return true if the operator is a statistical operator..basically any
@@ -658,77 +684,85 @@ public class Method {
                 || op.equals(SORT) || isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || op.equals(POW) || op.equals(DIFFERENTIATION)
                 || op.equals(INTEGRATION)
                 || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
-                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || isMatrixMethod(op));
+                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || isMatrixMethod(op) || op.equals(PRINT));
     }//end method
 
     /**
      *
      * @param op The method name
-     * @return true if the method is capable of acting on one or more matrix functions
+     * @return true if the method is capable of acting on one or more matrix
+     * functions
      */
-    public static boolean isMatrixMethod(String op){
-        return op.equals(LINEAR_SYSTEM) || op.equals(DETERMINANT) || op.equals(INVERSE_MATRIX) ||
-                op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX) || op.equals(MATRIX_MULTIPLY) ||
-                op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT) ||
-                op.equals(MATRIX_POWER) || op.equals(MATRIX_EDIT) || op.equals(MATRIX_TRANSPOSE);
+    public static boolean isMatrixMethod(String op) {
+        return op.equals(LINEAR_SYSTEM) || op.equals(DETERMINANT) || op.equals(INVERSE_MATRIX)
+                || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX) || op.equals(MATRIX_MULTIPLY)
+                || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT)
+                || op.equals(MATRIX_POWER) || op.equals(MATRIX_EDIT) || op.equals(MATRIX_TRANSPOSE)
+                || op.equals(MATRIX_COFACTORS) || op.equals(MATRIX_ADJOINT) || op.equals(MATRIX_EIGENPOLY) || op.equals(MATRIX_EIGENVEC);
     }
+
     /**
      *
      * @param op The method name
      * @return true if the method is the matrix multiplication method name
      */
-    public static boolean isMatrixMul(String op){
+    public static boolean isMatrixMul(String op) {
         return op.equals(MATRIX_MULTIPLY);
     }
+
     /**
      *
      * @param op The method name
      * @return true if the method is the matrix division method name
      */
-    public static boolean isMatrixDiv(String op){
+    public static boolean isMatrixDiv(String op) {
         return op.equals(MATRIX_DIVIDE);
     }
+
     /**
      *
      * @param op The method name
      * @return true if the method is the matrix addition method name
      */
-    public static boolean isMatrixAdd(String op){
+    public static boolean isMatrixAdd(String op) {
         return op.equals(MATRIX_ADD);
     }
+
     /**
      *
      * @param op The method name
      * @return true if the method is the matrix subtraction method name
      */
-    public static boolean isMatrixSub(String op){
+    public static boolean isMatrixSub(String op) {
         return op.equals(MATRIX_SUBTRACT);
     }
+
     /**
      *
      * @param op The method name
      * @return true if the method is the matrix power method name
      */
-    public static boolean isMatrixPow(String op){
+    public static boolean isMatrixPow(String op) {
         return op.equals(MATRIX_POWER);
     }
+
     /**
      *
      * @param op The method name
      * @return true if the method is the transpose method name
      */
-    public static boolean isTranspose(String op){
+    public static boolean isTranspose(String op) {
         return op.equals(MATRIX_TRANSPOSE);
     }
+
     /**
      *
      * @param op The method name
      * @return true if the method is the matrix edit method name
      */
-    public static boolean isMatrixEdit(String op){
+    public static boolean isMatrixEdit(String op) {
         return op.equals(MATRIX_EDIT);
     }
-
 
     /**
      *
@@ -742,13 +776,15 @@ public class Method {
     /**
      *
      * @param list A list containing a portion of a scanned function that has
-     * information about a method and its parameters..e.g. [sin,(,3.14,)] , or [matrix_edit,(,M,3,4,-90,)] may be
-     * grabbed from a scanner output and sent to this method to evaluate.
+     * information about a method and its parameters..e.g. [sin,(,3.14,)] , or
+     * [matrix_edit,(,M,3,4,-90,)] may be grabbed from a scanner output and sent
+     * to this method to evaluate.
      * @param DRG The trigonometric mode in which to run the method.
      * @return a {@link List} object which is the output of the method's
      * operation.
      */
     public static List<String> run(List<String> list, int DRG) {
+        
         String name = list.get(0);
 
         String result = "";
@@ -756,6 +792,7 @@ public class Method {
         list.remove(list.size() - 1);//remove the closing bracket.
         int sz = list.size();
         if (isStatsMethod(name)) {
+
             if (name.equals(SUM)) {
                 Set set = new Set(list);
                 result = String.valueOf(set.sum());
@@ -956,81 +993,108 @@ public class Method {
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            }
-            else if (name.equals(TRIANGULAR_MATRIX)) {
+            } else if (name.equals(TRIANGULAR_MATRIX)) {
                 Set set = new Set(list);
                 Matrix matrix = set.triMatrix();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            }
-            else if (name.equals(ECHELON_MATRIX)) {
+            } else if (name.equals(ECHELON_MATRIX)) {
                 Set set = new Set(list);
                 Matrix matrix = set.echelon();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            }
-            else if (name.equals(MATRIX_MULTIPLY)) {
+            } else if (name.equals(MATRIX_MULTIPLY)) {
                 Set set = new Set(list);
                 Matrix matrix = set.multiplyMatrix();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            }
-            else if (name.equals(MATRIX_DIVIDE)) {
+            } else if (name.equals(MATRIX_DIVIDE)) {
                 Set set = new Set(list);
                 Matrix matrix = set.divideMatrix();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            }
-            else if (name.equals(MATRIX_ADD)) {
+            } else if (name.equals(MATRIX_ADD)) {
                 Set set = new Set(list);
                 Matrix matrix = set.addMatrix();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            }
-            else if (name.equals(MATRIX_SUBTRACT)) {
+            } else if (name.equals(MATRIX_SUBTRACT)) {
                 Set set = new Set(list);
                 Matrix matrix = set.subtractMatrix();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            }
-            else if (name.equals(MATRIX_POWER)) {
+            } else if (name.equals(MATRIX_POWER)) {
                 Set set = new Set(list);
                 Matrix matrix = set.powerMatrix();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            }
-            else if (name.equals(MATRIX_TRANSPOSE)) {
+            } else if (name.equals(MATRIX_TRANSPOSE)) {
                 Set set = new Set(list);
                 Matrix matrix = set.transpose();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            }
-            else if (name.equals(MATRIX_EDIT)) {//matrix_edit(M,row,col,val)
+            } else if (name.equals(MATRIX_EDIT)) {//matrix_edit(M,row,col,val)
                 Set set = new Set(list);
                 Matrix matrix = set.editMatrix();
                 list.clear();
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
+            } else if (name.equals(MATRIX_ADJOINT)) {
+                Set set = new Set(list);
+                Matrix matrix = set.adjoint();
+                list.clear();
+                String ref = Function.storeAnonymousMatrixFunction(matrix);
+                list.add(ref);
+                return list;
+            } else if (name.equals(MATRIX_COFACTORS)) {
+                Set set = new Set(list);
+                Matrix matrix = set.cofactorMatrix();
+                list.clear();
+                String ref = Function.storeAnonymousMatrixFunction(matrix);
+                list.add(ref);
+                return list;
+            } else if (name.equals(MATRIX_EIGENPOLY)) {
+                Set set = new Set(list);
+                String poly = set.eigenPoly();
+
+                list.clear();
+                String ref = "anon" + (FunctionManager.countAnonymousFunctions() + 1);
+
+                Function.storeAnonymousFunction("@(" + Matrix.lambda + ")" + poly);
+                list.add(ref);
+                return list;
+            } else if (name.equals(MATRIX_EIGENVEC)) {
+                Set set = new Set(list);
+                Matrix matrix = set.eigenVectors();
+                list.clear();
+                String ref = Function.storeAnonymousMatrixFunction(matrix);
+                list.add(ref);
+                return list;
+            } else if (name.equals(PRINT)) {
+               
+                Set set = new Set(list);
+                set.print();
+                list.clear();
+                list.add("0");
+                return list;
             }
-
-
 
         } else {
 
@@ -1478,7 +1542,7 @@ public class Method {
      */
     public static String[] getStatsMethods() {
         return new String[]{
-                SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT
+            SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT
         };
 
     }
@@ -1493,8 +1557,8 @@ public class Method {
 
         String[] statsoperators
                 = new String[]{
-                SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT
-        };
+                    SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT
+                };
 
         CustomScanner cs = new CustomScanner(expr, true, statsoperators);
         List<String> scan = cs.scan();
@@ -1517,14 +1581,12 @@ public class Method {
         System.out.println(Method.isMethodName("F"));
         System.out.println(isMethodNameBeginner("Č"));
 
-StringBuilder builder = new StringBuilder();
-        for(String name : inbuiltMethods){
-    builder.append(name).append(",");
+        StringBuilder builder = new StringBuilder();
+        for (String name : inbuiltMethods) {
+            builder.append(name).append(",");
         }
 
-
         System.out.println(builder);
-
 
     }
 

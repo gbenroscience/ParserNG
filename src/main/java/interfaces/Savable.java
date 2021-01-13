@@ -25,5 +25,4 @@ public interface Savable extends Serializable{
     
     public String serialize();
     
-    
 }

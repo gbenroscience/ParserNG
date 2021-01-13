@@ -468,7 +468,7 @@ public class Set {
      */
     public double median() {
         double median = 0;
-        System.out.println("sort: " + data);
+ 
         List<String> scan = new ArrayList<String>();
         scan = sort();
         int g = size();
@@ -699,7 +699,7 @@ return der.findDerivativeByPolynomialExpander();
             input = input.substring(1, input.length() - 1);
             input = input.concat("=0");
         }
-        System.out.println(input);
+ 
         Tartaglia_Equation solver = new Tartaglia_Equation(input);
 
         String reducedForm = solver.interpretedSystem();
@@ -751,7 +751,7 @@ return der.findDerivativeByPolynomialExpander();
         boolean has2NumberArguments = false;
         if (Number.validNumber(data.get(sz - 1)) && Number.validNumber(data.get(sz - 2)) && Number.validNumber(data.get(sz - 3))) {
             has3NumberArguments = true;
-            System.out.println("Data: " + data);
+       
         }//end if
         if (Number.validNumber(data.get(sz - 1)) && Number.validNumber(data.get(sz - 2)) && !Number.validNumber(data.get(sz - 3))) {
             has2NumberArguments = true;
@@ -1042,7 +1042,170 @@ return der.findDerivativeByPolynomialExpander();
  
 
     }
+   /**
+     * The list must have been originally supplied: adjoint(A) {where A is a
+     * Matrix} It finds the adjoint of A and returns the result as a list.
+     *
+     * @return a {@link Matrix} containing the matrix transpose.
+     */
+    public Matrix adjoint() {
 
+        if (data.size() == 1) {
+
+            String token = data.get(0);
+
+            if (Variable.isVariableString(token)) {
+                Function f = FunctionManager.lookUp(token);
+
+                if (f != null) {
+                    return f.getMatrix().adjoint();
+                }
+
+            }
+
+        }
+        
+        throw new InputMismatchException("Bad args for matrix adjoint");
+ 
+
+    }
+      /**
+     * The list must have been originally supplied: adjoint(A) {where A is a
+     * Matrix} It finds the adjoint of A and returns the result as a list.
+     *
+     * @return a {@link Matrix} containing the matrix transpose.
+     */
+    public Matrix cofactorMatrix() {
+
+        if (data.size() == 1) {
+
+            String token = data.get(0);
+
+            if (Variable.isVariableString(token)) {
+                Function f = FunctionManager.lookUp(token);
+
+                if (f != null) {
+                    return f.getMatrix().getCofactorMatrix();
+                }
+
+            }
+
+        }
+        
+        throw new InputMismatchException("Bad args for matrix cofactors");
+ 
+
+    }
+      /**
+     * The list must have been originally supplied: eigvec(A) {where A is a
+     * Matrix} It finds the eigenvalues of A and returns the result as a list.
+     *
+     * @return a {@link Matrix} containing the matrix transpose.
+     */
+    public Matrix eigenVectors() {
+
+        if (data.size() == 1) {
+
+            String token = data.get(0);
+
+            if (Variable.isVariableString(token)) {
+                Function f = FunctionManager.lookUp(token);
+
+                if (f != null) {
+                    return f.getMatrix().transpose();
+                }
+
+            }
+
+        }
+        
+        throw new InputMismatchException("Bad args for matrix eigenValues");
+ 
+
+    }
+    
+    private static final void printImpl(String data){
+        System.out.println("ParserNG> "+data);
+    }
+       /**
+     * The list must have been originally supplied: eigvec(A) {where A is a
+     * Matrix} It finds the eigenvalues of A and returns the result as a list.
+     *
+     * @return a {@link Matrix} containing the matrix transpose.
+     */
+    public void print() {
+
+        if (data.size() == 1) {
+
+            String token = data.get(0);
+
+            if (Variable.isVariableString(token)) {
+                Function f = FunctionManager.lookUp(token);
+                
+                if (f != null) {
+                    
+                    switch(f.getType()){
+                        case Function.ALGEBRAIC:
+                             printImpl(f.toString());
+                              break;
+                        case Function.MATRIX:
+                            printImpl(f.getMatrix().toString());
+                              break;
+                        case Function.LIST:
+                            printImpl(f.getMatrix().toString());
+                              break;
+                        default:
+                            printImpl(f.toString());
+                              break;
+                    }
+          
+                }else{
+                    Variable v = VariableManager.getVariable(token);
+                    if(v != null){
+                      printImpl(v.toString());  
+                    }
+                }
+
+            }else if(parser.Number.isNumber(token)){
+                printImpl(token);
+            }
+       
+
+            return;
+        }
+        
+        throw new InputMismatchException("Bad args for printing");
+ 
+
+    }
+      /**
+     * The list must have been originally supplied: eigPoly(A) {where A is a
+     * Matrix} It finds the characterisic polynomial whose solution yields the eigenvalues of A and returns the result as a list.
+     *
+     * @return a {@link Matrix} containing the matrix transpose.
+     */
+    public String eigenPoly() {
+
+        if (data.size() == 1) {
+
+            String token = data.get(0);
+ 
+
+            if (Variable.isVariableString(token)) {
+                Function f = FunctionManager.lookUp(token);
+
+                if (f != null) {
+                    return f.getMatrix().getCharacteristicPolynomialForEigenVector();
+                }
+
+            }
+
+        }
+        
+        throw new InputMismatchException("Bad args for matrix eigenVectors");
+ 
+
+    }
     /**
      * The list must have been originally supplied: transpose(A) {where A is a
      * Matrix} It transposes A and returns the result as a list.
@@ -1051,7 +1214,7 @@ return der.findDerivativeByPolynomialExpander();
      */
     public Matrix editMatrix() {
 
-        System.out.println("args: " + data);
+ 
         if (data.size() == 4) {
 
             String token = data.get(0);

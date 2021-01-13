@@ -20,7 +20,7 @@ import util.VariableManager;
  *
  * @author JIBOYE OLUWAGBEMIRO OLAOLUWA
  */
-public class Function implements Savable{
+public class Function implements Savable {
 
     /**
      * The dependent variable
@@ -91,15 +91,14 @@ public class Function implements Savable{
             if (atIndex != -1 && atIndex < openIndex) {
                 //The enclosing if assumes that the user is creating a function using the anonymous function assignment format.
                 if (atIndex != openIndex - 1) {
-                         throw new InputMismatchException("Error in function format... anonymous function assignment format must have the `@` preceding the `(`");
+                    throw new InputMismatchException("Error in function format... anonymous function assignment format must have the `@` preceding the `(`");
                     //error...token between at symbol and param list
                 } else if (!tokenAfterEquals.equals("@")) {
-                            //Avoid this nonsense: f=kdkdk@(x,...)expr
-                         throw new InputMismatchException("Error in function format... anonymous function assignment format must have the `=` preceding the `@`");
+                    //Avoid this nonsense: f=kdkdk@(x,...)expr
+                    throw new InputMismatchException("Error in function format... anonymous function assignment format must have the `=` preceding the `@`");
                     //cool... function created with anonymous function assignment
                 }
             }
-            
 
             if (openIndex == -1 || equalsIndex == -1) {
                 throw new InputMismatchException("Bad function format!");
@@ -145,11 +144,12 @@ public class Function implements Savable{
                     break;
                 }
             }//end for loop
+        
             if (notAlgebraic) {
-                if (size == 1) {
+                if (size == 1) {   
                     int listSize = Integer.parseInt(params.get(0));
                     type = LIST;
-                } else if (size == 2) {
+                } else if (size == 2) {  
                     //A matrix definition...A(2,3)=(3,2,4,5,3,1)------A=@(3,3)(3,4,32,3,4,4,3,3,4)
                     int rows = Integer.parseInt(params.get(0));
                     int cols = Integer.parseInt(params.get(1));
@@ -165,7 +165,7 @@ public class Function implements Savable{
                     if (rows * cols == matrixData.size()) {
                         matrixData.add(0, cols + "");
                         matrixData.add(0, rows + "");
-
+  
                         //Validate the entries
                         for (int i = 0; i < matrixData.size(); i++) {
                             try {
@@ -351,9 +351,10 @@ public class Function implements Savable{
      *
      */
     private void parseInput(String input) {
+    
         input = input.trim();
         if (input.contains("@")) {
-
+  
             boolean anonymous = input.startsWith("@");
             if (anonymous) {
                 input = "anon" + (FunctionManager.countAnonymousFunctions() + 1) + "=".concat(input);
@@ -367,6 +368,7 @@ public class Function implements Savable{
 
             CustomScanner cs = new CustomScanner(cutUpInput[1], false, ",", "(", ")");
             List<String> scan = cs.scan();
+       
             if (Variable.isVariableString(cutUpInput[0]) && isParameterList(cutUpInput[1])) {
                 if (cutUpInput[0].startsWith("anon") && !anonymous) {
                     throw new InputMismatchException("Function Name Cannot Start With \'anon\'.\n \'anon\' is a reserved name for anonymous functions.");
@@ -387,11 +389,11 @@ public class Function implements Savable{
                         break;
                     }//end catch
                 }//end for
-
+ 
                 while (cutUpInput[2].startsWith("(") && cutUpInput[2].endsWith(")") && Bracket.getComplementIndex(true, 0, cutUpInput[2]) == cutUpInput[2].length() - 1) {
                     cutUpInput[2] = cutUpInput[2].substring(1, cutUpInput[2].length() - 1).trim();
                 }
-
+ 
                 setMathExpression(new MathExpression(vars.concat(cutUpInput[2].trim())));
                 if (!mathExpression.isCorrectFunction()) {
                     throw new InputMismatchException("SYNTAX ERROR IN FUNCTION");
@@ -410,7 +412,7 @@ public class Function implements Savable{
         else {
             throw new InputMismatchException("Syntax Error: Format Is: F=@(x,y,z,...)mathexpr");
         }//end else
-
+ 
     }//end method
 
     public void setDependentVariable(Variable dependentVariable) {
@@ -631,7 +633,7 @@ public class Function implements Savable{
      * @param matrix The {@link Matrix} object to be wrapped in a function
      * @return the name assigned to the anonymous function created.
      */
-    public static String storeAnonymousMatrixFunction(Matrix matrix) {
+    public static synchronized String storeAnonymousMatrixFunction(Matrix matrix) {
         int num = FunctionManager.countAnonymousFunctions();
         String name = "anon" + (num + 1);
 
@@ -639,6 +641,29 @@ public class Function implements Savable{
         FunctionManager.add(new Function(matrix));
         return name;
     }
+    
+    
+    /**
+     *
+     * @param expression The expression used to create the function...e.g @(x)sin(x-1)^cos(x)
+     * @return the name assigned to the anonymous function created.
+     */
+    public static synchronized String storeAnonymousFunction(String expression) {
+        int num = FunctionManager.countAnonymousFunctions();
+        String name = "anon" + (num + 1);
+        
+        
+        String tempName = "temp"+System.nanoTime();
+        
+        Function f = new Function(tempName+"="+expression);
+        f.dependentVariable.setName(name);
+
+      
+        FunctionManager.add(f);
+        return name;
+    }
+    
+    
 
     /**
      * @param args
@@ -660,9 +685,11 @@ public class Function implements Savable{
             int sz = l.size();
             int sz1 = independentVariables.size();
             if (sz == sz1) {
+              
                 String vars = "";
                 for (int i = 0; i < sz; i++) {
-                    if (!Number.validNumber(l.get(i)) && !Variable.isVariableString(l.get(i))) {
+                    String token = l.get(i);
+                    if (!Number.validNumber(token) && !Variable.isVariableString(token)) {
                         throw new NumberFormatException("Unrecognized Value or Variable: " + l.get(i));
                     }//end if
                     else {
@@ -1067,31 +1094,33 @@ public class Function implements Savable{
     }
 
     public static void main(String args[]) {
-
-        /*    Function f = new Function("@(3,3)(4,1,2,5,6,8,2,3,9)");
-
-        System.out.println(f.getMatrix());
-
-        FunctionManager.add(f);
-        System.out.println(FunctionManager.FUNCTIONS);
-        Function fun = new Function("@(x)3*x^3");
-        System.out.println(fun.calc(4));
-        FunctionManager.add(fun);
-        System.out.println("form-f: "+f.expressionForm());
-        System.out.println("form-fun: "+fun.expressionForm());
-
-
-        System.out.println(FunctionManager.FUNCTIONS);
-         */
-        Function func = new Function("p=@(x)@sin(x)+x+x^2");
+        
+       MathExpression addMat = new MathExpression("w=6*5;K=@(2,3)(2,3,4,9,8,1);M=@(3,3)(1,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);v=eigpoly(@(3,3)(2,1,5,6,9,2,4,3,8));c=v(30);print(w);");
+  
+       System.out.println("soln: "+addMat.solve());
+        
+               System.out.println(FunctionManager.FUNCTIONS);
+        
+       
+        Function func = new Function("p=@(x)sin(x)+x+x^2");
         FunctionManager.add(func);
         System.out.println(func.calc(4));
+        
+        int count = 10000;
+        
+        
+        double start = System.nanoTime();
+        for(int i=1;i<=count;i++){
+            String val = func.evalArgs("p("+i+")");
+        }
+        double duration = System.nanoTime() - start;
+        System.out.println("Eval took: "+(duration/1.0E6)+"ms");
 
     }//end method
 
     @Override
     public String serialize() {
-      return Serializer.serialize(this);
+        return Serializer.serialize(this);
     }
 
 }//end class
