@@ -264,7 +264,8 @@ public class Set {
         Arrays.sort(array);
         count = 0;
         for (double d : array) {
-            sort.add(String.valueOf(d));
+            String c = String.valueOf(d);
+            sort.add(c.endsWith(".0") ? c.substring(0 , c.length()-2) : c);
         }
 
         return sort;
