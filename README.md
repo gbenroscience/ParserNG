@@ -13,7 +13,7 @@ If you need to access this library via Maven Central, do:
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
-            <version>0.1.0</version>
+            <version>0.1.4</version>
         </dependency>
        
 
@@ -405,7 +405,7 @@ To multiply 2 matrices in 1 step: Do,
    Or: 
    
     MathExpression addMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
-    matrix_mul(M,N);");
+    matrix_add(M,N);");
     System.out.println("soln: "+addMat.solve());
     
          
@@ -431,7 +431,7 @@ To multiply 2 matrices in 1 step: Do,
    Or: 
    
     MathExpression subMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
-    matrix_mul(M,N);");
+    matrix_sub(M,N);");
     System.out.println("soln: "+ subMat.solve());
     
          
