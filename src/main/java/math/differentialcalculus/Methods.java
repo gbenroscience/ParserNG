@@ -33,7 +33,6 @@ public class Methods {
 			"atan", "asinh", "acosh", "atanh", "asec", "acsc", "acot", "asech",
 			"acsch", "acoth", "aln", "alg", "alog", "sqrt","cbrt", "inverse",
 			"square", "cube", "pow", "floor", "ceil", "diff", "quad", "intg"
-                      
                         };
 
 	/**
@@ -61,10 +60,9 @@ public class Methods {
 	 *            The invoking Derivative object.
 	 * @return the differential coefficient.
 	 */
-	public static ArrayList<String> getMethodDifferential(String method,
-														  String var, Derivative d) {
+	public static ArrayList<String> getMethodDifferential(String method,String var, Derivative d) {
 		String der = "";
-		String append = var.equals(Differentiable.basevariable) ? "" : "*diff("
+		String append = var.equals(d.baseVariable) ? "" : "*diff("
 				+ var + ")";
 
 		if (method.equals("sin")) {
@@ -153,6 +151,8 @@ public class Methods {
 				String expr = getText(d.translateToBaseTerms(diff));
 				print("Expression: " + expr+", var = "+var);
 				Derivative drv = new Derivative(expr);
+                                drv.baseVariable = d.baseVariable;
+                                
 				der = drv.differentiate();
 			}// end try
 			catch (Exception ex) {

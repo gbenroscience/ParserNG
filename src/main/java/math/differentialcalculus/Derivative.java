@@ -21,6 +21,11 @@ import static math.differentialcalculus.Utilities.*;
 public class Derivative {
 
     public DerivativeStructureBuilder builder;
+    /**
+     * The base variable that the top level expression is to be differentiated
+     * with respect to.
+     */
+    protected String baseVariable;
 
     /**
      * Accepted format...diff(expr);or diff(diffName)...where diffName is the
@@ -53,7 +58,7 @@ public class Derivative {
     }
 
     /**
-     *
+     * @param d The Differentiable item
      * @return an ArrayList containing this object's data in terms of the base
      * variable.
      */
@@ -165,6 +170,17 @@ public class Derivative {
 
         return array;
     }//end method
+    
+    
+    /**
+     * 
+     * @param name The name to check.
+     * @return true if the name is automatically generated and
+     * so, most likely refers to a stored Differentiable.
+     */
+    public boolean isBaseVariable(String name){
+       return name.equals(this.baseVariable);
+    }//end method
 
     /**
      *
@@ -180,13 +196,15 @@ public class Derivative {
      *
      */
     public static String eval(String expr) {
-
+//the anonymous function to be differentiated: e.g.diff(@(p)(3*p^3+2*p^2-8*p+1),1)
         try {
             Parser p = new Parser(expr);
 
             if (p.result == Parser_Result.VALID) {
 
                 expr = "diff(" + p.getFunction().getMathExpression().getExpression() + ")";
+
+                String baseVariable = p.getFunction().getIndependentVariables().get(0).getName();
 
                 int orderOfDiff = p.getOrderOfDifferentiation();
 
@@ -195,14 +213,16 @@ public class Derivative {
 
                     for (int i = 1; i <= orderOfDiff; i++) {
                         Derivative derivative = new Derivative(expr);
+                        derivative.baseVariable = baseVariable;
                         expr = "diff(" + derivative.differentiate() + ")";
                     }//end for loop
                     expr = expr.substring(5, expr.length() - 1);
-                    MathExpression me = new MathExpression("x=" + evalPoint + ";" + expr);
+                    MathExpression me = new MathExpression(baseVariable + "=" + evalPoint + ";" + expr);
                     return me.solve();
                 } else {
                     for (int i = 1; i <= orderOfDiff; i++) {
                         Derivative derivative = new Derivative(expr);
+                        derivative.baseVariable = baseVariable;
                         expr = "diff(" + derivative.differentiate() + ")";
                     }//end for loop
                     expr = expr.substring(5, expr.length() - 1);
@@ -235,10 +255,9 @@ public class Derivative {
             String expression = "diff(@(x)4*x*x*sin(x^2)-x,3,1)";
             //System.out.println(Derivative.eval(expression));
             System.out.println(Derivative.eval(expression));
-            
-            
+
             String expr = "diff(@(x)x^2*cos(x)-2*x*sin(x)-2*cos(x) , 2,1)";
-             System.out.println(Derivative.eval(expr));
+            System.out.println(Derivative.eval(expr));
 
         } catch (Exception ex) {
             Logger.getLogger(DerivativeStructureBuilder.class.getName()).log(Level.SEVERE, null, ex);

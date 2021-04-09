@@ -249,7 +249,7 @@ public class Set {
         }
         return sort;
     }
-
+    
     /**
      *
      * @return a number list sorted in ascending order
@@ -270,7 +270,6 @@ public class Set {
 
         return sort;
     }//end result
-
     /**
      *
      * @return the inverse of the Matrix as a number list
@@ -621,33 +620,38 @@ public class Set {
     public String differentiate() {
 
         int sz = data.size();
-        if (sz == 1) {
-            String anonFunc = data.get(0);
-            String solution = Derivative.eval("diff(" + anonFunc + ",1)");
-
-            return solution;
-        } else if (sz == 2) {
-            String anonFunc = data.get(0);
-            double value = Double.valueOf(data.get(1));
-
-            String solution = Derivative.eval("diff(" + anonFunc + "," + value + ")");
-            /*  NumericalDerivative der = new NumericalDerivative(new Function(anonFunc), value );
-return der.findDerivativeByPolynomialExpander();*/
-            return solution;
-        }//end if
-        else if (sz == 3) {
-            String anonFunc = data.get(0);
-            double value = Double.valueOf(data.get(1));
-            int order = Integer.parseInt(data.get(2));
-            /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.valueOf(data.get(1)));
-return der.findDerivativeByPolynomialExpander();
-             */
-            String solution = Derivative.eval("diff(" + anonFunc + "," + value + "," + order + ")");
-
-            return solution;
-        }//end else if
-        else {
-            throw new InputMismatchException(" Parameter List " + data + " Is Invalid!");
+        switch (sz) {
+            case 1:
+            {
+                String anonFunc = data.get(0);
+                String solution = Derivative.eval("diff(" + anonFunc + ",1)");
+                
+                return solution;
+            }
+            case 2:
+            {
+                String anonFunc = data.get(0);
+                double value = Double.valueOf(data.get(1));
+                
+                String solution = Derivative.eval("diff(" + anonFunc + "," + value + ")");
+                /*  NumericalDerivative der = new NumericalDerivative(new Function(anonFunc), value );
+                return der.findDerivativeByPolynomialExpander();*/
+                return solution;
+            }//end if
+            case 3:
+            {
+                String anonFunc = data.get(0);
+                double value = Double.valueOf(data.get(1));
+                int order = Integer.parseInt(data.get(2));
+                /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.valueOf(data.get(1)));
+                return der.findDerivativeByPolynomialExpander();
+                */
+                String solution = Derivative.eval("diff(" + anonFunc + "," + value + "," + order + ")");
+                
+                return solution;
+            }//end else if
+            default:
+                throw new InputMismatchException(" Parameter List " + data + " Is Invalid!");
         }
     }
 
@@ -717,7 +721,7 @@ return der.findDerivativeByPolynomialExpander();
     public String rootOfEquation() {
         int sz = data.size();
         boolean has2NumberArguments = false;
-
+ System.out.println("LIST: "+data);
         if (Number.validNumber((String) data.get(sz - 1)) && !Number.validNumber((String) data.get(sz - 2))) {
             has2NumberArguments = true;
         }//end if

@@ -3,13 +3,12 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>0.1.4</version>
+    <version>0.1.5</version>
     <packaging>jar</packaging>
     
     <name>ParserNG</name>
-    <description>Rich and Performant, Cross Platform Java Library(100% Java)... No dependencies, 
-        comes with a print function for parser members(variables , functions and numbers), 
-        enhancements to matrix functionality(adjoint, cofactors and the characteristic polynomial used to compute the eigenvalues)</description>
+    <description>Rich and Performant, Cross Platform Java Library(100% Java)... Now allows the differentiation function to be differentiated with
+    respect to any variable(not just x). A command line tool(parser.cmd.ParserCmd) has also be added. Its still in its infancy; but it works</description>
     <url>https://github.com/gbenroscience/ParserNG</url>
 
     <licenses>

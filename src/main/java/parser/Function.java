@@ -1095,7 +1095,7 @@ public class Function implements Savable {
 
     public static void main(String args[]) {
         
-       MathExpression addMat = new MathExpression("w=6*5;K=@(2,3)(2,3,4,9,8,1);M=@(3,3)(1,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);v=eigpoly(@(3,3)(2,1,5,6,9,2,4,3,8));c=v(30);print(w);");
+       MathExpression addMat = new MathExpression("w=6*5;K=@(2,3)(2,3,4,9,8,1);M=@(3,3)(1,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);v=eigpoly(@(3,3)(2,1,5,6,9,2,4,3,8));c=v(30);3*M+N;");
   
        System.out.println("soln: "+addMat.solve());
         
@@ -1114,7 +1114,14 @@ public class Function implements Savable {
             String val = func.evalArgs("p("+i+")");
         }
         double duration = System.nanoTime() - start;
-        System.out.println("Eval took: "+(duration/1.0E6)+"ms");
+        System.out.println("Eval took: "+(duration/(count*1.0E6))+"ms");
+        
+        
+        for(int i=1;i<=count;i++){
+            String val = func.evalArgs("p("+i+")");
+        }
+         duration = System.nanoTime() - start;
+        System.out.println("Eval took: "+(duration/(count*1.0E6))+"ms");
 
     }//end method
 

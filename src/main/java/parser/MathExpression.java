@@ -1459,7 +1459,7 @@ public class MathExpression implements Savable {
             }//end if
             //give an error statement and then reset correctFunction to true;
             else {
-                listAppender = "A SYNTAX ERROR OCCURED";
+                listAppender = "A SYNTAX ERROR OCCURRED";
                 correctFunction = true;
             }
             if (myScan.size() == 1) {
@@ -1499,13 +1499,13 @@ public class MathExpression implements Savable {
         }
 //Create a collection to serve as a garbage collector for the empty memory
 //locations and other unwanted locations created in the processing collection
-        ArrayList<String> real = new ArrayList<>();
+        ArrayList<String> garbage = new ArrayList<>();
 //insert an empty string in it so that we can use it to remove empty spaces from the processing collection.
-        real.add("");
-        real.add("(");
-        real.add(")");
+        garbage.add("");
+        garbage.add("(");
+        garbage.add(")");
 
-        list.removeAll(real);
+        list.removeAll(garbage);
 
 //solves the factorial component of the input|[²]|[³]|[-¹]²³-¹
         if (isHasPostNumberOperators()) {
@@ -1555,14 +1555,15 @@ public class MathExpression implements Savable {
                 } catch (IndexOutOfBoundsException inderror) {
                 }
             }//end for
-            list.removeAll(real);
+            list.removeAll(garbage);
         }//end if
 
         if (isHasPowerOperators()) {
 
-            /*Deals with powers.Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
+            /*Deals with powers.
+            Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
              instead of sin(A^B).
-             Also instructs the software to multiply any 2 numbers in consecutive positions in the vector.
+             Also instructs the software to multiply any 2 numbers in consecutive positions in the list.
              This is important in distinguishing between functions such as sinAB and sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
              */
             for (int i = 0; i < list.size(); i++) {
@@ -1632,7 +1633,7 @@ public class MathExpression implements Savable {
                 }
             }//end for
 
-            list.removeAll(real);
+            list.removeAll(garbage);
 
         }//end if
         //Handles the pre-number operators.
@@ -1663,7 +1664,7 @@ public class MathExpression implements Savable {
             }//end for
         }//end if
 
-        list.removeAll(real);
+        list.removeAll(garbage);
 
         if (isHasPowerOperators()) {
             //do the in between operators
@@ -1740,11 +1741,11 @@ public class MathExpression implements Savable {
                 }
             }//end for
 
-            list.removeAll(real);
+            list.removeAll(garbage);
 
         }//end if
 
-        list.removeAll(real);
+        list.removeAll(garbage);
 
         if (isHasPermOrCombOperators()) {
             //do the lower precedence in between operators
@@ -1803,7 +1804,7 @@ public class MathExpression implements Savable {
                 }//end catch
 
             }//end for
-            list.removeAll(real);
+            list.removeAll(garbage);
         }//end if
         boolean skip = false;
         if (isHasMulOrDivOperators() || isHasRemainderOperators() || isHasLogicOperators()) {
@@ -2042,7 +2043,7 @@ public class MathExpression implements Savable {
                 }//end if (skip)
             }//end for
 
-            list.removeAll(real);
+            list.removeAll(garbage);
 
         }//end if
         if (isHasPlusOrMinusOperators()) {
@@ -2079,10 +2080,10 @@ public class MathExpression implements Savable {
             }//end for
         }//end if
 
-        real.add("(");
-        real.add(")");
+        garbage.add("(");
+        garbage.add(")");
 
-        list.removeAll(real);
+        list.removeAll(garbage);
         if (list.size() != 1) {
             this.parser_Result = this.parser_Result == Parser_Result.VALID ? Parser_Result.SYNTAX_ERROR : this.parser_Result;
             this.correctFunction = false;
@@ -2094,6 +2095,9 @@ public class MathExpression implements Savable {
         return list;
 
     }//end method solve
+    
+    
+     
 
     /**
      *

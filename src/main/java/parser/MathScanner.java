@@ -1392,6 +1392,8 @@ public class MathScanner {
      */
     public static void main(String args[]) {//tester method for STRING methods
 
+        
+        //A*B*C*D*E+3*A+4*B-22*A^2*det(A)
         //String expr = "matrix_mul(M,((((M)))))";
         String expr = "matrix_mul(M,3,((det(M))))";
         CustomScanner cs = new CustomScanner(expr, true,"matrix_mul", "sum", ",", "(", ")", "^","a","b","x");

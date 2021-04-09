@@ -49,15 +49,7 @@ public class Utilities {
     }//end if
     return false;
     }//end method
-    /**
-     * 
-     * @param name The name to check.
-     * @return true if the name is automatically generated and
-     * so, most likely refers to a stored Differentiable.
-     */
-    public static boolean isBaseVariable(String name){
-       return name.equals(Differentiable.basevariable);
-    }//end method
+ 
     /**
      * 
      * @param data An ArrayList of Strings.

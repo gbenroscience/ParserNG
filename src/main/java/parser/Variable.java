@@ -128,7 +128,7 @@ public class Variable implements Savable{
     }
 
     public String getFullName() {
-        return fullName;
+        return fullName == null || fullName.isEmpty() ? name: fullName;
     }
 
     /**

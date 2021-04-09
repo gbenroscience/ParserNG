@@ -523,7 +523,7 @@ public class RootFinder {
 
             String variable = getVariable();
 
-            //System.err.println(" function to diff "+function.expressionForm());
+            //System.err.println(" function to differentiate: "+function.expressionForm());
             String gradFunxn =   Derivative.eval( "diff("+function.expressionForm()+",1)" );
 
             //System.err.println("gradient function is "+gradFunxn);
@@ -559,7 +559,7 @@ public class RootFinder {
                     df_x = Double.parseDouble(  gradFunc.eval() );
 
                     ++count;
-                    System.err.println("x = "+x+" at count = "+count);
+                    System.err.println(variable+" = "+x+" at count = "+count);
                 }
                 catch(Exception nfe){
                     nfe.printStackTrace();
@@ -717,7 +717,7 @@ public class RootFinder {
 
     public static void main( String args[]){
 
-        FunctionManager.add("f=@(x)3*x^3+2*x^2-8*x+1");
+        FunctionManager.add("f=@(p)3*p^3+2*p^2-8*p+1");
         //RootFinder finder = new RootFinder("root(f,2,4)");
 
         RootFinder finder = new RootFinder("root(f,-0.4,0.11)");

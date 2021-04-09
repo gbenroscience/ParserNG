@@ -29,11 +29,7 @@ public class Differentiable {
      * The information contained by the Differentiable.
      */
     private ArrayList<String>data;
-    /**
-     * The base variable that the top level expression is to
-     * be differentiated with respect to.
-     */
-    public static final String basevariable = "x";
+ 
     
 
 
@@ -211,7 +207,7 @@ public class Differentiable {
 
         if( sz == 3 ){
             if( isOpeningBracket(data.get(0)) && isVariableString(data.get(1)) && isClosingBracket(data.get(2)) ){
-                if(isBaseVariable(data.get(1))){
+                if(d.isBaseVariable(data.get(1))){
                     derivedData.add("1");
                 }
                 else if(isAutoGenNameFormat(data.get(1))){
@@ -511,7 +507,7 @@ public class Differentiable {
                         temp.addAll(derived);
                         --i;
                     }//end if
-                    else if(isBaseVariable(derivedData.get(i+2))){
+                    else if(d.isBaseVariable(derivedData.get(i+2))){
                         List<String> temp = derivedData.subList(i, i+4);
                         temp.clear();
                         temp.add("1");
@@ -534,7 +530,7 @@ public class Differentiable {
 
                         --i;
                     }//end if
-                    else if(isBaseVariable(derivedData.get(i+3))){
+                    else if(d.isBaseVariable(derivedData.get(i+3))){
                         List<String> temp = derivedData.subList(i, i+4);
                         temp.clear();
                         temp.add("-1");
@@ -580,7 +576,7 @@ public class Differentiable {
 
 
     /**
-     *
+     * @param derivedData 
      * @return the derivative as a String object.
      */
     public String getDerivativeExpression(ArrayList<String>derivedData){
@@ -597,10 +593,10 @@ public class Differentiable {
 
 
 
-    @Override
-    public String toString() {
-        return "<name,basevariable> = <"+name+","+basevariable+">,data = "+data;
-    }
+//    @Override
+//    public String toString() {
+//        return "<name,basevariable> = <"+name+","+basevariable+">,data = "+data;
+//    }
 
 
 
