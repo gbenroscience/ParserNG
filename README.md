@@ -397,9 +397,9 @@ ParserNG allows easy addition of matrices.
 
 To multiply 2 matrices in 1 step: Do,
 
-    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    MathExpression addMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
     P=matrix_add(M,N);P;");
-    System.out.println("soln: "+mulExpr.solve());
+    System.out.println("soln: "+ addMat.solve());
     
       
    Or: 
@@ -423,9 +423,9 @@ ParserNG also allows matrix subtraction.
 
 To multiply 2 matrices in 1 step: Do,
 
-    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    MathExpression subMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
     P=matrix_sub(M,N);P;");
-    System.out.println("soln: "+mulExpr.solve());
+    System.out.println("soln: "+ subMat.solve());
     
       
    Or: 
@@ -458,9 +458,9 @@ To find the power of a matrix, say M<sup>4</sup>,  do:
       
    Or: 
    
-    MathExpression mulExpr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
+    MathExpression mpow = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
     matrix_pow(M,4);");
-    System.out.println("soln: "+mulExpr.solve());
+    System.out.println("soln: "+ mpow.solve());
     
          
 This would give:
@@ -532,7 +532,38 @@ This would give:
 Note that matrix indexes in ParserNG are zero-based, so be advised accordingly as entering an invalid row/column combination will throw an error in your code.
 
 
+#### 11. Finding the characteristic polynomial of a Matrix
 
+ParserNG allows the quick evaluation of the characteristic polynomial of a square matrix; this polynomial can then be solved to find the eigenvalues, and hence the eigenvector of the Matrix.
 
+The function is called `eigpoly`
+
+<p style="font-weight:bold;color:brown;font-style:italic;font-size:1.3em">
+Actually, there is a function called `eigvec`, which in the future will allow the user to automatically generate the eigenvector from the Matrix; but at the moment, we cannot completely solve all generated polynomials completely, so the `eigvec` function is still in the works.
+</p>
+
+To generate the characteristic polynomial, do:
+
+    MathExpression expression = new MathExpression("eigpoly(@(3,3)(4,2,1,3,1,8,-5,6,12))");
+    System.out.println("soln: "+ expression.solve());
+
+This will give:
+
+    anon2=@(n)(-273.0*n^0.0-15.0*n^1.0+17.0*n^2.0-1.0*n^3.0)
+    
+The `anon2` may be `anon` anything. anon signifies an automatically generated anonymous function created to hold a function value that no variable was created for by the user.
+
+So the parser keeps records of them by using the prefixed variable name, `anon` alongside a digit which indicates the number of anonymous functions in memory.
+
+Note that the anonymous function is a valid function in `n`, and so if you do: anon2(12) it will evaluate the eigen polynomial (the characteristic polynomial) at `n=12`
+
+If you did:
+
+    MathExpression expression = new MathExpression("eigpoly(@(5,5)(12,1,4,2,9,3,1,8,-5,6,13,9,7,3,5,7,3,5,4,9,13,2,4,8,6))");
+    System.out.println("soln: "+ expression.solve());
+    
+This would give:
+
+     anon3=@(n)(20883.0*n^0.0+1155.0*n^1.0-1667.0*n^2.0+30.0*n^4.0-1.0*n^5.0+35.0*n^3.0)
 ## TO BE CONTINUED
 
