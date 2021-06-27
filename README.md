@@ -13,7 +13,7 @@ If you need to access this library via Maven Central, do:
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
-            <version>0.1.4</version>
+            <version>0.1.5</version>
         </dependency>
        
 
@@ -86,7 +86,7 @@ For example:
 
 
 ```java
-MathExpression expression = new MathExpression("x^2+5*x+1");
+MathExpression expression = new MathExpression("x=0;x^2+5*x+1");
 
 for(int i=0; i<100000; i++){
 expression.setValue("x", String.valueOf(i) );
