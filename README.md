@@ -551,9 +551,10 @@ This will give:
 
     anon2=@(n)(-273.0*n^0.0-15.0*n^1.0+17.0*n^2.0-1.0*n^3.0)
     
-The `anon2` may be `anon` anything. anon signifies an automatically generated anonymous function created to hold a function value that no variable was created for by the user.
+The `anon2` may be `anon` anything.<br><br>
+`anon` signifies an automatically generated anonymous function created to hold a function value that no variable was created for by the user.
 
-So the parser keeps records of them by using the prefixed variable name, `anon` alongside a digit which indicates the number of anonymous functions in memory.
+So the parser keeps records of them by using the prefixed variable name, `anon`, alongside a digit which indicates the position of the referenced anonymous function in memory.
 
 Note that the anonymous function is a valid function in `n`, and so if you do: anon2(12) it will evaluate the eigen polynomial (the characteristic polynomial) at `n=12`
 
