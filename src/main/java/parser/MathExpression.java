@@ -742,18 +742,18 @@ public class MathExpression implements Savable, Solvable {
         // determine the presence of list returning statistical operators
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
-            if (i + 1 < scanner.size()) {
-                String nextToken = scanner.get(i + 1);
-                if (isOpeningBracket(nextToken)) {
-                    if (Method.isListReturningStatsMethod(token)) {
+            if (i - 1 >= 0) {
+                String prevToken = scanner.get(i - 1);
+                if (isOpeningBracket(token)) {
+                    if (Method.isListReturningStatsMethod(prevToken)) {
                         noOfListReturningOperators++;
-                    } else if (Method.isDefinedMethod(token)) {
+                    } if (Method.isDefinedMethod(prevToken)) {
                         hasFunctions = true;
-                    } else if (Method.isInBuiltMethod(token)) {
+                    }  if (Method.isInBuiltMethod(prevToken)) {
                         hasInbuiltFunctions = true;
-                    } else if (Method.isUserDefinedFunction(token)) {
+                    } if (Method.isUserDefinedFunction(prevToken)) {
                         hasUserDefinedFunctions = true;
-                    } else if (Method.isNumberReturningNonUserDefinedMethod(token)) {
+                    } if (Method.isNumberReturningNonUserDefinedMethod(prevToken)) {
                         hasNumberReturningNonUserDefinedFunctions = true;
                     }
                 }
