@@ -421,7 +421,7 @@ This would give:
 
 ParserNG also allows matrix subtraction.
 
-To multiply 2 matrices in 1 step: Do,
+To find the difference of 2 matrices in 1 step: Do,
 
     MathExpression subMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
     P=matrix_sub(M,N);P;");
