@@ -395,7 +395,7 @@ This would give:
 
 ParserNG allows easy addition of matrices.
 
-To multiply 2 matrices in 1 step: Do,
+To add 2 matrices in 1 step: Do,
 
     MathExpression addMat = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);
     P=matrix_add(M,N);P;");
