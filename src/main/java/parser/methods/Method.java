@@ -98,6 +98,9 @@ public class Method {
     public static final String PERMUTATION = "perm";
     public static final String SUM = "sum";
     public static final String PROD = "prod";
+    public static final String GEOM = "geom";
+    public static final String GSUM = "gsum";
+    public static final String COUNT = "count";
     public static final String AVG = "avg";
     public static final String MEDIAN = "med";
     public static final String MODE = "mode";
@@ -203,6 +206,9 @@ public class Method {
                 PERMUTATION,
                 SUM,
                 PROD,
+                COUNT,
+                GEOM,
+                GSUM,
                 AVG,
                 MEDIAN,
                 MODE,
@@ -382,6 +388,12 @@ public class Method {
             case SUM:
                 return TYPE.NUMBER.toString();
             case PROD:
+                return TYPE.NUMBER.toString();
+            case GEOM:
+                return TYPE.NUMBER.toString();
+            case GSUM:
+                return TYPE.NUMBER.toString();
+            case COUNT:
                 return TYPE.NUMBER.toString();
             case AVG:
                 return TYPE.NUMBER.toString();
@@ -684,7 +696,8 @@ public class Method {
                 || op.equals(SORT) || isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || op.equals(POW) || op.equals(DIFFERENTIATION)
                 || op.equals(INTEGRATION)
                 || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
-                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || isMatrixMethod(op) || op.equals(PRINT));
+                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || isMatrixMethod(op) || op.equals(PRINT)
+                || op.equals(GEOM) || op.equals(GSUM) || op.equals(COUNT));
     }//end method
 
     /**
@@ -802,6 +815,24 @@ public class Method {
             } else if (name.equals(PROD)) {
                 Set set = new Set(list);
                 result = String.valueOf(set.prod());
+                list.clear();
+                list.add(result);
+                return list;
+            } else if (name.equals(COUNT)) {
+                Set set = new Set(list);
+                result = String.valueOf(set.size());
+                list.clear();
+                list.add(result);
+                return list;
+            }  else if (name.equals(GSUM)) {
+                Set set = new Set(list);
+                result = set.gsum().toString();
+                list.clear();
+                list.add(result);
+                return list;
+            }  else if (name.equals(GEOM)) {
+                Set set = new Set(list);
+                result = set.geom().toString();
                 list.clear();
                 list.add(result);
                 return list;
@@ -1542,7 +1573,7 @@ public class Method {
      */
     public static String[] getStatsMethods() {
         return new String[]{
-            SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT
+            SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT
         };
 
     }
@@ -1557,7 +1588,7 @@ public class Method {
 
         String[] statsoperators
                 = new String[]{
-                    SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT
+                    SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT
                 };
 
         CustomScanner cs = new CustomScanner(expr, true, statsoperators);
