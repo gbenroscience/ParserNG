@@ -4,7 +4,10 @@
  */
 package parser;
 
+import math.BigDecimalNthRootCalculation;
 import math.numericalmethods.RootFinder;
+
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.InputMismatchException;
@@ -103,6 +106,29 @@ public class Set {
 
         return u;
     }//end sum
+
+    /**
+     *
+     * @return the geomethrical (multiplied) sum of all elements in the data set
+     */
+    public BigDecimal gsum() {
+        BigDecimal u = new BigDecimal("1");
+        for (int i = 0; i < data.size(); i++) {
+            u = u.multiply(new BigDecimal(data.get(i)));
+        }
+
+        return u;
+    }//end gsum
+
+    /**
+     *
+     * @return the geomethrical avarage of all elements in the data set
+     */
+    public BigDecimal geom() {
+        BigDecimal gsum = gsum();
+        int size = size();
+        return BigDecimalNthRootCalculation.nthRoot(size, gsum);
+    }//end geom
 
     /**
      *
