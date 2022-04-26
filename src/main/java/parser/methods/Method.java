@@ -11,6 +11,9 @@ import static parser.Number.*;
 import static parser.Operator.*;
 import parser.Set;
 import parser.TYPE;
+
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.InputMismatchException;
 import java.util.List;
 import math.Maths;
@@ -144,8 +147,11 @@ public class Method {
      * free to define his own functions.
      *
      */
-    public static final String[] inbuiltMethods
-            = new String[]{
+    public static final String[] inbuiltMethods = createInBuiltMethods();
+
+    public  static String[] createInBuiltMethods() {
+        List<String> stats = Arrays.asList(getStatsMethods());
+        List<String> rest = Arrays.asList(new String[]{
                 SIN,
                 COS,
                 TAN,
@@ -204,25 +210,6 @@ public class Method {
                 PRINT,
                 COMBINATION,
                 PERMUTATION,
-                SUM,
-                PROD,
-                COUNT,
-                GEOM,
-                GSUM,
-                AVG,
-                MEDIAN,
-                MODE,
-                RANGE,
-                MID_RANGE,
-                ROOT_MEAN_SQUARED,
-                COEFFICIENT_OF_VARIATION,
-                MIN,
-                MAX,
-                STD_DEV,
-                VARIANCE,
-                STD_ERR,
-                RANDOM,
-                SORT,
                 PLOT,
                 DIFFERENTIATION,
                 INTEGRATION,
@@ -245,8 +232,13 @@ public class Method {
                 MATRIX_ADJOINT,
                 MATRIX_EIGENVEC,
                 MATRIX_EIGENPOLY
+        });
+        List<String> r = new ArrayList<>(stats.size()+rest.size());
+        r.addAll(stats);
+        r.addAll(rest);
+        return r.stream().sorted().toArray(String[]::new);
 
-            };
+    }
 
     /**
      *
@@ -690,14 +682,12 @@ public class Method {
      * sum,prod,min,max,avg,var,rms,cov,s_d,st_err,rng,mrng,med,mode,rnd
      */
     public static boolean isStatsMethod(String op) {
-        return (op.equals(SUM) || op.equals(PROD) || op.equals(AVG) || op.equals(MEDIAN) || op.equals(MODE)
-                || op.equals(RANGE) || op.equals(MID_RANGE) || op.equals(ROOT_MEAN_SQUARED) || op.equals(COEFFICIENT_OF_VARIATION) || op.equals(MIN)
-                || op.equals(MAX) || op.equals(STD_DEV) || op.equals(VARIANCE) || op.equals(STD_ERR) || op.equals(RANDOM)
-                || op.equals(SORT) || isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || op.equals(POW) || op.equals(DIFFERENTIATION)
-                || op.equals(INTEGRATION)
-                || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
-                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || isMatrixMethod(op) || op.equals(PRINT)
-                || op.equals(GEOM) || op.equals(GSUM) || op.equals(COUNT));
+        return (isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op)
+                || isMatrixMethod(op) || isHardcodedStatsMethod(op)
+                || op.equals(POW) || op.equals(DIFFERENTIATION)
+                || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
+                || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
+                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || op.equals(PRINT));
     }//end method
 
     /**
@@ -1571,11 +1561,20 @@ public class Method {
      *
      * @return all the statistical methods used by the parser.
      */
-    public static String[] getStatsMethods() {
+    private static String[] getStatsMethods() {
         return new String[]{
             SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT
         };
 
+    }
+
+    private static boolean isHardcodedStatsMethod(String op) {
+        for (String x: getStatsMethods()) {
+            if (x.equals(op)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1585,13 +1584,7 @@ public class Method {
      * @return true if it finds statistical operators in the expression.
      */
     public static boolean hasStatsMethod(String expr) {
-
-        String[] statsoperators
-                = new String[]{
-                    SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT
-                };
-
-        CustomScanner cs = new CustomScanner(expr, true, statsoperators);
+        CustomScanner cs = new CustomScanner(expr, true, getStatsMethods());
         List<String> scan = cs.scan();
         int size = scan.size();
         for (int i = 0; i < size; i++) {
