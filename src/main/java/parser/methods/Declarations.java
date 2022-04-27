@@ -108,6 +108,7 @@ public class Declarations {
     public static final String MATRIX_ADJOINT = "adjoint";
     public static final String MATRIX_EIGENVEC = "eigvec";
     public static final String MATRIX_EIGENPOLY = "eigpoly";
+    public static final String HELP = "help";
 
     /**
      * A list of all inbuilt methods of the parser of this software.The user is
@@ -118,7 +119,7 @@ public class Declarations {
     public static String[] createInBuiltMethods() {
         List<String> stats = Arrays.asList(getStatsMethods());
         List<String> rest = Arrays.asList(
-                new String[]{SIN, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN, ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH, COTH, ARC_SEC, ARC_COSEC, ARC_COT, ARC_SECH,
+                new String[]{HELP, SIN, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN, ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH, COTH, ARC_SEC, ARC_COSEC, ARC_COT, ARC_SECH,
                         ARC_COSECH, ARC_COTH, EXP, LN, LG, LOG, LN_INV, LG_INV, LOG_INV, ARC_SIN_ALT, ARC_COS_ALT, ARC_TAN_ALT, ARC_SINH_ALT, ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
                         ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT, LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, FLOOR, CEIL, SQRT, CBRT, INVERSE, SQUARE, CUBE, POW, FACT, PRINT, COMBINATION,
                         PERMUTATION, PLOT, DIFFERENTIATION, INTEGRATION, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT, LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX, ECHELON_MATRIX,
@@ -350,5 +351,4 @@ public class Declarations {
         return new String[]{SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT};
 
     }
-
- }
+}

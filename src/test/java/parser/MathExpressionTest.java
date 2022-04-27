@@ -2,6 +2,7 @@ package parser;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import parser.methods.Declarations;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -37,6 +38,14 @@ class MathExpressionTest {
         Assertions.assertEquals("2.0", me.solve());
         me = new MathExpression("8^(1/2)");
         Assertions.assertEquals("2.8284271247461903", me.solve());
+    }
+
+    @Test
+    void help() {
+        MathExpression me = new MathExpression("help");
+        String help = me.solve();
+        Assertions.assertTrue(help.length() > 100);
+        Assertions.assertTrue(help.contains(Declarations.SIN));
     }
 
 }

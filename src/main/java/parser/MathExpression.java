@@ -6,6 +6,7 @@ package parser;
 
 import interfaces.Savable;
 import parser.methods.Declarations;
+import parser.methods.Help;
 import parser.methods.Method;
 
 import math.Maths;
@@ -1315,6 +1316,9 @@ public class MathExpression implements Savable {
      * @return the result of the evaluation
      */
     public String solve() {
+        if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
+            return Help.getHelp();
+        }
         if (correctFunction && !hasFunctionOrVariableInitStatement) {
             final ArrayList<String> myScan = new ArrayList<String>();
 
