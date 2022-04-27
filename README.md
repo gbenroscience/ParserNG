@@ -154,6 +154,13 @@ And then do:
      sin(2)+cos(2-1)
   
   behind the scenes.<br><br>
+Note, that such functions do not propagate to help.
+
+#### User hardcoded functions
+if you need more complex function, it is best to hardcode it and contribute it.
+However sometimes the mehtod may be to dummy, or review to slow, so for such cases you can implement BasicNumericalMethod interface and Declarations.registerBasicNumericalMethod it.
+Such method will be used as any other hardcoded function. See MathExpressionTest.customUserFunctionTest for basic example.
+Note, that current implementation is stateless. It may be changed in future if needed. Unlike `User defined functions` those methods propagate to help.
 
 #### Differential Calculus
 

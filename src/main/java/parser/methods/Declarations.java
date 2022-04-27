@@ -2,9 +2,12 @@ package parser.methods;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import parser.TYPE;
+import parser.methods.ext.WeirdFunction;
 
 public class Declarations {
 
@@ -111,10 +114,38 @@ public class Declarations {
     public static final String HELP = "help";
 
     /**
+     * A list user registered hardcoded methods
+     */
+    private static final List<BasicNumericalMethod> BASIC_NUMERICAL_METHODS = new ArrayList<>();
+
+    static List<BasicNumericalMethod> getBasicNumericalMethods() {
+        return Collections.unmodifiableList(BASIC_NUMERICAL_METHODS);
+    }
+
+    public static void registerBasicNumericalMethod(BasicNumericalMethod basicNumericalMethod) {
+        unregisterBasicNumericalMethod(basicNumericalMethod.getClass());
+        BASIC_NUMERICAL_METHODS.add(basicNumericalMethod);
+    }
+
+    public static void unregisterBasicNumericalMethod(Class clazz) {
+        for(int i = BASIC_NUMERICAL_METHODS.size()-1; i>=0; i--) {
+            if (BASIC_NUMERICAL_METHODS.get(i).getClass().equals(clazz)){
+                BASIC_NUMERICAL_METHODS.remove(i);
+            }
+        }
+    }
+
+    static {
+        registerBasicNumericalMethod(new WeirdFunction());
+    }
+
+    /**
      * A list of all inbuilt methods of the parser of this software.The user is
      * free to define his own functions.
      */
-    public static final String[] inbuiltMethods = createInBuiltMethods();
+    public static String[] getInbuiltMethods() {
+        return createInBuiltMethods();
+    }
 
     public static String[] createInBuiltMethods() {
         List<String> stats = Arrays.asList(getStatsMethods());
@@ -127,6 +158,7 @@ public class Declarations {
         List<String> r = new ArrayList<>(stats.size() + rest.size());
         r.addAll(stats);
         r.addAll(rest);
+        r.addAll(BASIC_NUMERICAL_METHODS.stream().map(a -> a.getName()).collect(Collectors.toList()));
         return r.stream().sorted().toArray(String[]::new);
 
     }
@@ -136,6 +168,11 @@ public class Declarations {
      * @return the return type
      */
     public static String returnTypeDef(String typeName) {
+        for(BasicNumericalMethod basicNumericalMethod: BASIC_NUMERICAL_METHODS){
+            if (typeName.equals(basicNumericalMethod.getName())){
+                return basicNumericalMethod.getType();
+            }
+        }
         switch (typeName) {
             case SIN:
                 return TYPE.NUMBER.toString();
@@ -185,7 +222,6 @@ public class Declarations {
                 return TYPE.NUMBER.toString();
             case ARC_COTH:
                 return TYPE.NUMBER.toString();
-
             case EXP:
                 return TYPE.NUMBER.toString();
             case LN:
@@ -336,7 +372,6 @@ public class Declarations {
                 return TYPE.ALGEBRAIC_EXPRESSION.toString();
             case MATRIX_EIGENVEC:
                 return TYPE.MATRIX.toString();
-
             default:
                 return TYPE.NUMBER.toString();
         }
@@ -350,5 +385,14 @@ public class Declarations {
     static String[] getStatsMethods() {
         return new String[]{SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT};
 
+    }
+
+    public static boolean isBasicNumericalFunction(String op){
+        for(BasicNumericalMethod basicNumericalMethod: Declarations.getBasicNumericalMethods()){
+            if (op.equals(basicNumericalMethod.getName())){
+                return true;
+            }
+        }
+        return false;
     }
 }

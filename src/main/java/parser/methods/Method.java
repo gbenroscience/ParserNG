@@ -11,6 +11,7 @@ import static parser.Number.*;
 import static parser.methods.Declarations.*;
 import parser.Set;
 
+import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.List;
 import math.Maths;
@@ -85,10 +86,10 @@ public class Method {
      */
     public static String[] getAllFunctions() {
         int sz = FunctionManager.FUNCTIONS.size();
-        String[] userDefined = new String[sz + inbuiltMethods.length];
+        String[] userDefined = new String[sz + getInbuiltMethods().length];
         String[] keyset = FunctionManager.FUNCTIONS.keySet().toArray(new String[]{});
         System.arraycopy(keyset, 0, userDefined, 0, keyset.length);
-        System.arraycopy(inbuiltMethods, 0, userDefined, keyset.length, inbuiltMethods.length);
+        System.arraycopy(getInbuiltMethods(), 0, userDefined, keyset.length, getInbuiltMethods().length);
         return userDefined;
     }//end method.
 
@@ -270,7 +271,7 @@ public class Method {
      * sum,prod,min,max,avg,var,rms,cov,s_d,st_err,rng,mrng,med,mode,rnd
      */
     public static boolean isStatsMethod(String op) {
-        return (isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op)
+        return (isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || isBasicNumericalFunction(op)
                 || isMatrixMethod(op) || isHardcodedStatsMethod(op)
                 || op.equals(POW) || op.equals(DIFFERENTIATION)
                 || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
@@ -383,7 +384,15 @@ public class Method {
         list.remove(list.size() - 1);//remove the closing bracket.
         int sz = list.size();
         if (isStatsMethod(name)) {
-
+            for (BasicNumericalMethod basicNumericalMethod: getBasicNumericalMethods()){
+                if (name.equals(basicNumericalMethod.getName())){
+                    Set set = new Set(list);
+                    result = basicNumericalMethod.solve(new ArrayList<>(set.getData()));
+                    list.clear();
+                    list.add(result);
+                    return list;
+                }
+            }
             if (name.equals(SUM)) {
                 Set set = new Set(list);
                 result = String.valueOf(set.sum());
@@ -1004,7 +1013,7 @@ public class Method {
      * the parser.
      */
     public static boolean isDefinedMethod(String methodName) {
-        return arrayContains(inbuiltMethods, methodName) || FunctionManager.contains(methodName);
+        return arrayContains(getInbuiltMethods(), methodName) || FunctionManager.contains(methodName);
     }//end method
 
     /**
@@ -1014,7 +1023,7 @@ public class Method {
      * function.
      */
     public static boolean isInBuiltMethod(String methodName) {
-        return arrayContains(inbuiltMethods, methodName);
+        return arrayContains(getInbuiltMethods(), methodName);
     }//end method
 
     /**
@@ -1183,7 +1192,7 @@ public class Method {
         System.out.println(isMethodNameBeginner("Č"));
 
         StringBuilder builder = new StringBuilder();
-        for (String name : inbuiltMethods) {
+        for (String name : getInbuiltMethods()) {
             builder.append(name).append(",");
         }
 
