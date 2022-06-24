@@ -12,8 +12,4 @@ public interface BasicNumericalMethod {
 
     String getType();
 
-    public static String toLine(String op, String text) {
-        return Help.align(op) + " - " + text;
-    }
-
 }

@@ -2,6 +2,7 @@ package parser.methods.ext;
 
 import parser.TYPE;
 import parser.methods.BasicNumericalMethod;
+import parser.methods.Help;
 
 import java.util.List;
 
@@ -13,7 +14,7 @@ public class WeirdFunction implements BasicNumericalMethod {
 
     @Override
     public String getHelp() {
-        return BasicNumericalMethod.toLine(getName(), "this is help to " + getName());
+        return Help.toLine(getName(), "this is help to " + getName());
     }
 
     @Override

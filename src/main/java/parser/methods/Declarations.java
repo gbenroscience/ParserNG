@@ -2,9 +2,9 @@ package parser.methods;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import parser.TYPE;
 import parser.methods.ext.WeirdFunction;
@@ -158,9 +158,17 @@ public class Declarations {
         List<String> r = new ArrayList<>(stats.size() + rest.size());
         r.addAll(stats);
         r.addAll(rest);
-        r.addAll(BASIC_NUMERICAL_METHODS.stream().map(a -> a.getName()).collect(Collectors.toList()));
-        return r.stream().sorted().toArray(String[]::new);
+        r.addAll(methodsToNames(BASIC_NUMERICAL_METHODS));
+        Collections.sort(r);
+        return r.toArray(new String[r.size()]);
+    }
 
+    private static Collection<String> methodsToNames(List<BasicNumericalMethod> basicNumericalMethods) {
+        List<String> result = new ArrayList<>(basicNumericalMethods.size());
+        for (BasicNumericalMethod method : basicNumericalMethods) {
+            result.add(method.getName());
+        }
+        return result;
     }
 
     /**
@@ -168,8 +176,8 @@ public class Declarations {
      * @return the return type
      */
     public static String returnTypeDef(String typeName) {
-        for(BasicNumericalMethod basicNumericalMethod: BASIC_NUMERICAL_METHODS){
-            if (typeName.equals(basicNumericalMethod.getName())){
+        for (BasicNumericalMethod basicNumericalMethod : BASIC_NUMERICAL_METHODS) {
+            if (typeName.equals(basicNumericalMethod.getName())) {
                 return basicNumericalMethod.getType();
             }
         }
