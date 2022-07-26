@@ -30,6 +30,20 @@ class MathExpressionTest {
     }
 
     @Test
+    void geomExpressionMultipleBrackets() {
+        MathExpression me = new MathExpression("geom((2+((2-2)),(8+8)-(((8))),4))");
+        Assertions.assertEquals("4.000000000", me.solve());
+        me = new MathExpression("(geom(((2,8,4))))");
+        Assertions.assertEquals("4.000000000", me.solve());
+        me = new MathExpression("geom((2,8,4))+geom(((2,8,4)))");
+        Assertions.assertEquals("8.0", me.solve());
+        me = new MathExpression("(geom((2+((2-2)),(8+8)-(((8))),4))+geom(((2,8,4))))");
+        Assertions.assertEquals("8.0", me.solve());
+        me = new MathExpression("((((geom((2,8,4))+geom(((2,8,4)))))))");
+        Assertions.assertEquals("8.0", me.solve());
+    }
+
+    @Test
     void expTest() {
         MathExpression me = new MathExpression("2^3");
         Assertions.assertEquals("8.0", me.solve());
@@ -47,6 +61,14 @@ class MathExpressionTest {
     void customEmbeddedFunctionTest() {
         MathExpression me = new MathExpression("weirdFce(1,2,3)");
         Assertions.assertEquals("0.1", me.solve());
+    }
+
+    @Test
+    void customEmbeddedFunctionTestMultipleBrackets() {
+        MathExpression me = new MathExpression("((weirdFce((1,2,3))))");
+        Assertions.assertEquals("0.1", me.solve());
+        me = new MathExpression("((weirdFce(((1)+((1+1)),((2)),((3+2))))))");
+        Assertions.assertEquals("0.3.0", me.solve()); //weird, by nature of weird function. Will be removed once it wil be repalced by proper function
     }
 
     @Test
