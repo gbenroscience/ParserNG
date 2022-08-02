@@ -8,9 +8,10 @@ import parser.CustomScanner;
 import parser.Function;
 import static parser.STRING.*;
 import static parser.Number.*;
-import static parser.Operator.*;
+import static parser.methods.Declarations.*;
 import parser.Set;
-import parser.TYPE;
+
+import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.List;
 import math.Maths;
@@ -39,214 +40,6 @@ public class Method {
      */
     private int DRG = 1;
 
-    public static final String SIN = "sin";
-    public static final String COS = "cos";
-    public static final String TAN = "tan";
-    public static final String SINH = "sinh";
-    public static final String COSH = "cosh";
-    public static final String TANH = "tanh";
-    public static final String ARC_SIN = "sin-¹";
-    public static final String ARC_COS = "cos-¹";
-    public static final String ARC_TAN = "tan-¹";
-    public static final String ARC_SINH = "sinh-¹";
-    public static final String ARC_COSH = "cosh-¹";
-    public static final String ARC_TANH = "tanh-¹";
-    public static final String SEC = "sec";
-    public static final String COSEC = "csc";
-    public static final String COT = "cot";
-    public static final String SECH = "sech";
-    public static final String COSECH = "csch";
-    public static final String COTH = "coth";
-    public static final String ARC_SEC = "sec-¹";
-    public static final String ARC_COSEC = "csc-¹";
-    public static final String ARC_COT = "cot-¹";
-    public static final String ARC_SECH = "sech-¹";
-    public static final String ARC_COSECH = "csch-¹";
-    public static final String ARC_COTH = "coth-¹";
-    public static final String EXP = "exp";
-    public static final String LN = "ln";
-    public static final String LG = "lg";
-    public static final String LOG = "log";
-    public static final String LN_INV = "ln-¹";
-    public static final String LG_INV = "lg-¹";
-    public static final String LOG_INV = "log-¹";
-    public static final String ARC_SIN_ALT = "asin";
-    public static final String ARC_COS_ALT = "acos";
-    public static final String ARC_TAN_ALT = "atan";
-    public static final String ARC_SINH_ALT = "asinh";
-    public static final String ARC_COSH_ALT = "acosh";
-    public static final String ARC_TANH_ALT = "atanh";
-    public static final String ARC_SEC_ALT = "asec";
-    public static final String ARC_COSEC_ALT = "acsc";
-    public static final String ARC_COT_ALT = "acot";
-    public static final String ARC_SECH_ALT = "asech";
-    public static final String ARC_COSECH_ALT = "acsch";
-    public static final String ARC_COTH_ALT = "acoth";
-    public static final String LN_INV_ALT = "aln";
-    public static final String LG_INV_ALT = "alg";
-    public static final String LOG_INV_ALT = "alog";
-    public static final String FLOOR = "floor";
-    public static final String CEIL = "ceil";
-    public static final String SQRT = "sqrt";
-    public static final String CBRT = "cbrt";
-    public static final String INVERSE = "inverse";
-    public static final String SQUARE = "square";
-    public static final String CUBE = "cube";
-    public static final String POW = "pow";
-    public static final String FACT = "fact";
-    public static final String COMBINATION = "comb";
-    public static final String PERMUTATION = "perm";
-    public static final String SUM = "sum";
-    public static final String PROD = "prod";
-    public static final String GEOM = "geom";
-    public static final String GSUM = "gsum";
-    public static final String COUNT = "count";
-    public static final String AVG = "avg";
-    public static final String MEDIAN = "med";
-    public static final String MODE = "mode";
-    public static final String RANGE = "rng";
-    public static final String MID_RANGE = "mrng";
-    public static final String ROOT_MEAN_SQUARED = "rms";
-    public static final String COEFFICIENT_OF_VARIATION = "cov";
-    public static final String MIN = "min";
-    public static final String MAX = "max";
-    public static final String STD_DEV = "s_d";
-    public static final String VARIANCE = "variance";
-    public static final String STD_ERR = "st_err";
-    public static final String RANDOM = "rnd";
-    public static final String SORT = "sort";
-    public static final String PLOT = "plot";
-    public static final String PRINT = "print";
-    public static final String DIFFERENTIATION = "diff";
-    public static final String INTEGRATION = "intg";
-    public static final String QUADRATIC = "quad";
-    public static final String TARTAGLIA_ROOTS = "t_root";
-    public static final String GENERAL_ROOT = "root";
-    public static final String LINEAR_SYSTEM = "linear_sys";
-    public static final String DETERMINANT = "det";
-    public static final String INVERSE_MATRIX = "invert";
-    public static final String TRIANGULAR_MATRIX = "tri_mat";
-    public static final String ECHELON_MATRIX = "echelon";
-    public static final String MATRIX_MULTIPLY = "matrix_mul";
-    public static final String MATRIX_DIVIDE = "matrix_div";
-    public static final String MATRIX_ADD = "matrix_add";
-    public static final String MATRIX_SUBTRACT = "matrix_sub";
-    public static final String MATRIX_POWER = "matrix_pow";
-    public static final String MATRIX_TRANSPOSE = "transpose";
-    public static final String MATRIX_EDIT = "matrix_edit";
-    public static final String MATRIX_COFACTORS = "cofactor";
-    public static final String MATRIX_ADJOINT = "adjoint";
-    public static final String MATRIX_EIGENVEC = "eigvec";
-    public static final String MATRIX_EIGENPOLY = "eigpoly";
-
-    /**
-     * A list of all inbuilt methods of the parser of this software.The user is
-     * free to define his own functions.
-     *
-     */
-    public static final String[] inbuiltMethods
-            = new String[]{
-                SIN,
-                COS,
-                TAN,
-                SINH,
-                COSH,
-                TANH,
-                ARC_SIN,
-                ARC_COS,
-                ARC_TAN,
-                ARC_SINH,
-                ARC_COSH,
-                ARC_TANH,
-                SEC,
-                COSEC,
-                COT,
-                SECH,
-                COSECH,
-                COTH,
-                ARC_SEC,
-                ARC_COSEC,
-                ARC_COT,
-                ARC_SECH,
-                ARC_COSECH,
-                ARC_COTH,
-                EXP,
-                LN,
-                LG,
-                LOG,
-                LN_INV,
-                LG_INV,
-                LOG_INV,
-                ARC_SIN_ALT,
-                ARC_COS_ALT,
-                ARC_TAN_ALT,
-                ARC_SINH_ALT,
-                ARC_COSH_ALT,
-                ARC_TANH_ALT,
-                ARC_SEC_ALT,
-                ARC_COSEC_ALT,
-                ARC_COT_ALT,
-                ARC_SECH_ALT,
-                ARC_COSECH_ALT,
-                ARC_COTH_ALT,
-                LN_INV_ALT,
-                LG_INV_ALT,
-                LOG_INV_ALT,
-                FLOOR,
-                CEIL,
-                SQRT,
-                CBRT,
-                INVERSE,
-                SQUARE,
-                CUBE,
-                POW,
-                FACT,
-                PRINT,
-                COMBINATION,
-                PERMUTATION,
-                SUM,
-                PROD,
-                COUNT,
-                GEOM,
-                GSUM,
-                AVG,
-                MEDIAN,
-                MODE,
-                RANGE,
-                MID_RANGE,
-                ROOT_MEAN_SQUARED,
-                COEFFICIENT_OF_VARIATION,
-                MIN,
-                MAX,
-                STD_DEV,
-                VARIANCE,
-                STD_ERR,
-                RANDOM,
-                SORT,
-                PLOT,
-                DIFFERENTIATION,
-                INTEGRATION,
-                QUADRATIC,
-                TARTAGLIA_ROOTS,
-                GENERAL_ROOT,
-                LINEAR_SYSTEM,
-                DETERMINANT,
-                INVERSE_MATRIX,
-                TRIANGULAR_MATRIX,
-                ECHELON_MATRIX,
-                MATRIX_MULTIPLY,
-                MATRIX_DIVIDE,
-                MATRIX_ADD,
-                MATRIX_SUBTRACT,
-                MATRIX_POWER,
-                MATRIX_TRANSPOSE,
-                MATRIX_EDIT,
-                MATRIX_COFACTORS,
-                MATRIX_ADJOINT,
-                MATRIX_EIGENVEC,
-                MATRIX_EIGENPOLY
-
-            };
 
     /**
      *
@@ -261,218 +54,6 @@ public class Method {
         }
     }
 
-    /**
-     *
-     * @param typeName The name of the method
-     * @return the return type
-     */
-    public static String returnTypeDef(String typeName) {
-        switch (typeName) {
-            case SIN:
-                return TYPE.NUMBER.toString();
-            case COS:
-                return TYPE.NUMBER.toString();
-            case TAN:
-                return TYPE.NUMBER.toString();
-            case SINH:
-                return TYPE.NUMBER.toString();
-            case COSH:
-                return TYPE.NUMBER.toString();
-            case TANH:
-                return TYPE.NUMBER.toString();
-            case ARC_SIN:
-                return TYPE.NUMBER.toString();
-            case ARC_COS:
-                return TYPE.NUMBER.toString();
-            case ARC_TAN:
-                return TYPE.NUMBER.toString();
-            case ARC_SINH:
-                return TYPE.NUMBER.toString();
-            case ARC_COSH:
-                return TYPE.NUMBER.toString();
-            case ARC_TANH:
-                return TYPE.NUMBER.toString();
-            case SEC:
-                return TYPE.NUMBER.toString();
-            case COSEC:
-                return TYPE.NUMBER.toString();
-            case COT:
-                return TYPE.NUMBER.toString();
-            case SECH:
-                return TYPE.NUMBER.toString();
-            case COSECH:
-                return TYPE.NUMBER.toString();
-            case COTH:
-                return TYPE.NUMBER.toString();
-            case ARC_SEC:
-                return TYPE.NUMBER.toString();
-            case ARC_COSEC:
-                return TYPE.NUMBER.toString();
-            case ARC_COT:
-                return TYPE.NUMBER.toString();
-            case ARC_SECH:
-                return TYPE.NUMBER.toString();
-            case ARC_COSECH:
-                return TYPE.NUMBER.toString();
-            case ARC_COTH:
-                return TYPE.NUMBER.toString();
-
-            case EXP:
-                return TYPE.NUMBER.toString();
-            case LN:
-                return TYPE.NUMBER.toString();
-            case LG:
-                return TYPE.NUMBER.toString();
-            case LOG:
-                return TYPE.NUMBER.toString();
-            case LN_INV:
-                return TYPE.NUMBER.toString();
-            case LG_INV:
-                return TYPE.NUMBER.toString();
-            case LOG_INV:
-                return TYPE.NUMBER.toString();
-            case ARC_SIN_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_COS_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_TAN_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_SINH_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_COSH_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_TANH_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_SEC_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_COSEC_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_COT_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_SECH_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_COSECH_ALT:
-                return TYPE.NUMBER.toString();
-            case ARC_COTH_ALT:
-                return TYPE.NUMBER.toString();
-            case LN_INV_ALT:
-                return TYPE.NUMBER.toString();
-            case LG_INV_ALT:
-                return TYPE.NUMBER.toString();
-            case LOG_INV_ALT:
-                return TYPE.NUMBER.toString();
-            case FLOOR:
-                return TYPE.NUMBER.toString();
-            case CEIL:
-                return TYPE.NUMBER.toString();
-            case SQRT:
-                return TYPE.NUMBER.toString();
-            case CBRT:
-                return TYPE.NUMBER.toString();
-            case INVERSE:
-                return TYPE.NUMBER.toString();
-            case SQUARE:
-                return TYPE.NUMBER.toString();
-            case CUBE:
-                return TYPE.NUMBER.toString();
-            case POW:
-                return TYPE.NUMBER.toString();
-            case FACT:
-                return TYPE.NUMBER.toString();
-            case PRINT:
-                return TYPE.VOID.toString();
-            case COMBINATION:
-                return TYPE.NUMBER.toString();
-            case PERMUTATION:
-                return TYPE.NUMBER.toString();
-            case SUM:
-                return TYPE.NUMBER.toString();
-            case PROD:
-                return TYPE.NUMBER.toString();
-            case GEOM:
-                return TYPE.NUMBER.toString();
-            case GSUM:
-                return TYPE.NUMBER.toString();
-            case COUNT:
-                return TYPE.NUMBER.toString();
-            case AVG:
-                return TYPE.NUMBER.toString();
-            case MEDIAN:
-                return TYPE.NUMBER.toString();
-            case MODE:
-                return TYPE.LIST.toString();
-            case RANGE:
-                return TYPE.NUMBER.toString();
-            case MID_RANGE:
-                return TYPE.NUMBER.toString();
-            case ROOT_MEAN_SQUARED:
-                return TYPE.NUMBER.toString();
-            case COEFFICIENT_OF_VARIATION:
-                return TYPE.NUMBER.toString();
-            case MIN:
-                return TYPE.NUMBER.toString();
-            case MAX:
-                return TYPE.NUMBER.toString();
-            case STD_DEV:
-                return TYPE.NUMBER.toString();
-            case VARIANCE:
-                return TYPE.NUMBER.toString();
-            case STD_ERR:
-                return TYPE.NUMBER.toString();
-            case RANDOM:
-                return TYPE.LIST.toString();
-            case SORT:
-                return TYPE.NUMBER.toString();
-            case PLOT:
-                return TYPE.VOID.toString();
-            case DIFFERENTIATION:
-                return TYPE.NUMBER.toString();
-            case INTEGRATION:
-                return TYPE.NUMBER.toString();
-            case QUADRATIC:
-                return TYPE.LIST.toString();
-            case TARTAGLIA_ROOTS:
-                return TYPE.LIST.toString();
-            case GENERAL_ROOT:
-                return TYPE.NUMBER.toString();
-            case LINEAR_SYSTEM:
-                return TYPE.LIST.toString();
-            case DETERMINANT:
-                return TYPE.NUMBER.toString();
-            case INVERSE_MATRIX:
-                return TYPE.MATRIX.toString();
-            case TRIANGULAR_MATRIX:
-                return TYPE.MATRIX.toString();
-            case ECHELON_MATRIX:
-                return TYPE.MATRIX.toString();
-            case MATRIX_MULTIPLY:
-                return TYPE.MATRIX.toString();
-            case MATRIX_DIVIDE:
-                return TYPE.MATRIX.toString();
-            case MATRIX_ADD:
-                return TYPE.MATRIX.toString();
-            case MATRIX_SUBTRACT:
-                return TYPE.MATRIX.toString();
-            case MATRIX_POWER:
-                return TYPE.MATRIX.toString();
-            case MATRIX_TRANSPOSE:
-                return TYPE.MATRIX.toString();
-            case MATRIX_EDIT:
-                return TYPE.VOID.toString();
-            case MATRIX_ADJOINT:
-                return TYPE.MATRIX.toString();
-            case MATRIX_COFACTORS:
-                return TYPE.MATRIX.toString();
-            case MATRIX_EIGENPOLY:
-                return TYPE.ALGEBRAIC_EXPRESSION.toString();
-            case MATRIX_EIGENVEC:
-                return TYPE.MATRIX.toString();
-
-            default:
-                return TYPE.NUMBER.toString();
-        }
-
-    }
 
     /**
      *
@@ -505,10 +86,10 @@ public class Method {
      */
     public static String[] getAllFunctions() {
         int sz = FunctionManager.FUNCTIONS.size();
-        String[] userDefined = new String[sz + inbuiltMethods.length];
+        String[] userDefined = new String[sz + getInbuiltMethods().length];
         String[] keyset = FunctionManager.FUNCTIONS.keySet().toArray(new String[]{});
         System.arraycopy(keyset, 0, userDefined, 0, keyset.length);
-        System.arraycopy(inbuiltMethods, 0, userDefined, keyset.length, inbuiltMethods.length);
+        System.arraycopy(getInbuiltMethods(), 0, userDefined, keyset.length, getInbuiltMethods().length);
         return userDefined;
     }//end method.
 
@@ -690,14 +271,12 @@ public class Method {
      * sum,prod,min,max,avg,var,rms,cov,s_d,st_err,rng,mrng,med,mode,rnd
      */
     public static boolean isStatsMethod(String op) {
-        return (op.equals(SUM) || op.equals(PROD) || op.equals(AVG) || op.equals(MEDIAN) || op.equals(MODE)
-                || op.equals(RANGE) || op.equals(MID_RANGE) || op.equals(ROOT_MEAN_SQUARED) || op.equals(COEFFICIENT_OF_VARIATION) || op.equals(MIN)
-                || op.equals(MAX) || op.equals(STD_DEV) || op.equals(VARIANCE) || op.equals(STD_ERR) || op.equals(RANDOM)
-                || op.equals(SORT) || isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || op.equals(POW) || op.equals(DIFFERENTIATION)
-                || op.equals(INTEGRATION)
-                || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
-                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || isMatrixMethod(op) || op.equals(PRINT)
-                || op.equals(GEOM) || op.equals(GSUM) || op.equals(COUNT));
+        return (isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || isBasicNumericalFunction(op)
+                || isMatrixMethod(op) || isHardcodedStatsMethod(op)
+                || op.equals(POW) || op.equals(DIFFERENTIATION)
+                || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
+                || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
+                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || op.equals(PRINT));
     }//end method
 
     /**
@@ -805,7 +384,15 @@ public class Method {
         list.remove(list.size() - 1);//remove the closing bracket.
         int sz = list.size();
         if (isStatsMethod(name)) {
-
+            for (BasicNumericalMethod basicNumericalMethod: getBasicNumericalMethods()){
+                if (name.equals(basicNumericalMethod.getName())){
+                    Set set = new Set(list);
+                    result = basicNumericalMethod.solve(new ArrayList<>(set.getData()));
+                    list.clear();
+                    list.add(result);
+                    return list;
+                }
+            }
             if (name.equals(SUM)) {
                 Set set = new Set(list);
                 result = String.valueOf(set.sum());
@@ -1416,7 +1003,7 @@ public class Method {
      * the parser.
      */
     public static boolean isUnaryPreOperatorORDefinedMethod(String methodName) {
-        return isDefinedMethod(methodName) || isUnaryPreOperator(methodName);
+        return isDefinedMethod(methodName) || parser.Operator.isUnaryPreOperator(methodName);
     }//end method
 
     /**
@@ -1426,7 +1013,7 @@ public class Method {
      * the parser.
      */
     public static boolean isDefinedMethod(String methodName) {
-        return arrayContains(inbuiltMethods, methodName) || FunctionManager.contains(methodName);
+        return arrayContains(getInbuiltMethods(), methodName) || FunctionManager.contains(methodName);
     }//end method
 
     /**
@@ -1436,7 +1023,7 @@ public class Method {
      * function.
      */
     public static boolean isInBuiltMethod(String methodName) {
-        return arrayContains(inbuiltMethods, methodName);
+        return arrayContains(getInbuiltMethods(), methodName);
     }//end method
 
     /**
@@ -1513,7 +1100,7 @@ public class Method {
      */
     public static boolean isMethodNameBeginner(String name) {
 
-        if (!isPermOrComb(name) && Character.isLetter(name.toCharArray()[0]) || name.equals("_") || name.equals("$")) {
+        if (!parser.Operator.isPermOrComb(name) && Character.isLetter(name.toCharArray()[0]) || name.equals("_") || name.equals("$")) {
             return true;
         }//end if
         return false;
@@ -1567,15 +1154,13 @@ public class Method {
         return larger;
     }//end method.
 
-    /**
-     *
-     * @return all the statistical methods used by the parser.
-     */
-    public static String[] getStatsMethods() {
-        return new String[]{
-            SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT
-        };
-
+    private static boolean isHardcodedStatsMethod(String op) {
+        for (String x: getStatsMethods()) {
+            if (x.equals(op)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1585,13 +1170,7 @@ public class Method {
      * @return true if it finds statistical operators in the expression.
      */
     public static boolean hasStatsMethod(String expr) {
-
-        String[] statsoperators
-                = new String[]{
-                    SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT
-                };
-
-        CustomScanner cs = new CustomScanner(expr, true, statsoperators);
+        CustomScanner cs = new CustomScanner(expr, true, getStatsMethods());
         List<String> scan = cs.scan();
         int size = scan.size();
         for (int i = 0; i < size; i++) {
@@ -1613,7 +1192,7 @@ public class Method {
         System.out.println(isMethodNameBeginner("Č"));
 
         StringBuilder builder = new StringBuilder();
-        for (String name : inbuiltMethods) {
+        for (String name : getInbuiltMethods()) {
             builder.append(name).append(",");
         }
 

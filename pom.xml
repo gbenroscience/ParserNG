@@ -90,7 +90,8 @@
                 <artifactId>maven-javadoc-plugin</artifactId>
                 <configuration>
                     <additionalparam>-Xdoclint:none</additionalparam>
-                    <source>8</source>
+                    <source>7</source>
+                    <target>7</target>
                     <detectJavaApiLink>false</detectJavaApiLink>
                 </configuration>
                 <version>2.9.1</version>
