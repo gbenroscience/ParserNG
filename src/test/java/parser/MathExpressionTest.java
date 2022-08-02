@@ -7,8 +7,6 @@ import parser.methods.Declarations;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 class MathExpressionTest {
 
     @Test
@@ -59,16 +57,17 @@ class MathExpressionTest {
 
     @Test
     void customEmbeddedFunctionTest() {
-        MathExpression me = new MathExpression("weirdFce(1,2,3)");
-        Assertions.assertEquals("0.1", me.solve());
+        MathExpression me = new MathExpression("avgN(0,1,2,3)");
+        Assertions.assertEquals("2", me.solve());
     }
 
     @Test
     void customEmbeddedFunctionTestMultipleBrackets() {
-        MathExpression me = new MathExpression("((weirdFce((1,2,3))))");
-        Assertions.assertEquals("0.1", me.solve());
-        me = new MathExpression("((weirdFce(((1)+((1+1)),((2)),((3+2))))))");
-        Assertions.assertEquals("0.3.0", me.solve()); //weird, by nature of weird function. Will be removed once it wil be repalced by proper function
+        MathExpression me = new MathExpression("((avgN((0,1,2,3))))");
+        Assertions.assertEquals("2", me.solve());
+        me = new MathExpression("((avgN((0,  (1)+((1+1)),((2)),((3+2))))))");
+        //me = new MathExpression("((weir((    (1)+((1+1)),((2)),((3+2))))))");
+        Assertions.assertEquals("3.333333333", me.solve()); //weird, by nature of weird function. Will be removed once it wil be repalced by proper function
     }
 
     @Test

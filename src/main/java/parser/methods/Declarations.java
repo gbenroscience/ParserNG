@@ -7,7 +7,7 @@ import java.util.Collections;
 import java.util.List;
 
 import parser.TYPE;
-import parser.methods.ext.WeirdFunction;
+import parser.methods.ext.AvgN;
 
 public class Declarations {
 
@@ -136,7 +136,7 @@ public class Declarations {
     }
 
     static {
-        registerBasicNumericalMethod(new WeirdFunction());
+        registerBasicNumericalMethod(new AvgN());
     }
 
     /**
