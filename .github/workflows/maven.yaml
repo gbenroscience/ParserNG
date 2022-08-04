@@ -35,6 +35,6 @@ jobs:
           maven-version: 3.8.2
 
       - name: Build ParserNG with Maven
-        run: mvn --batch-mode --update-snapshots clean install -Dgpg.skip
+        run: mvn "-Dgpg.skip" "--batch-mode" "--update-snapshots" "clean" "install"
 
 
