@@ -8,6 +8,7 @@ import java.util.List;
 
 import parser.TYPE;
 import parser.methods.ext.AvgN;
+import parser.methods.ext.GeomN;
 
 public class Declarations {
 
@@ -137,6 +138,7 @@ public class Declarations {
 
     static {
         registerBasicNumericalMethod(new AvgN());
+        registerBasicNumericalMethod(new GeomN());
     }
 
     /**
