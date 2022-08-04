@@ -30,15 +30,17 @@ public class AvgNTest {
         Assertions.assertEquals("50", me.solve());
         me = new MathExpression("avgN(2,45,1,1000,55)");
         Assertions.assertEquals("50", me.solve());
-        me = new MathExpression("avgN(2,45,1,1000,70,55)");
-        Assertions.assertEquals("55", me.solve());
-        me = new MathExpression("avgN(3,45,1,1000,70,55)");
-        Assertions.assertEquals("55", me.solve());
-        me = new MathExpression("avgN(3,45,1,1000,70,55,0)");
+        me = new MathExpression("avgN(2,45,1,1000,80,55)");
+        // the avgN default size DEFAULT_AVGN_MISIZE is two, thus 45,1,1000,80,55 -> 1,45,55,80,1000-> 45,55,70 => 180/3
+        Assertions.assertEquals("60", me.solve());
+        me = new MathExpression("avgN(3,45,1,1000,80,55)");
+        Assertions.assertEquals("60", me.solve());
+        me = new MathExpression("avgN(3,45,1,1000,80,55,0)");
         Assertions.assertEquals("50", me.solve());
-        me = new MathExpression("avgN(3,45,1,1000,70,55,0,0)");
-        Assertions.assertEquals("45", me.solve());
-        me = new MathExpression("avgN(3,45,1,1000,70,55,0,0,0)");
+        me = new MathExpression("avgN(3,45,1,1000,80,55,0,0)");
+        // the avgN default size DEFAULT_AVGN_MISIZE is two, thus 45,1,1000,80,55,0,0 -> 0,0,1,45,55,80,1000-> 1,45,55=> 101/3
+        Assertions.assertEquals("33.66666667", me.solve());
+        me = new MathExpression("avgN(3,45,1,1000,80,55,0,0,0)");
         Assertions.assertEquals("23", me.solve());
     }
 
