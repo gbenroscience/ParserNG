@@ -2146,7 +2146,11 @@ public class MathExpression implements Savable, Solvable {
 
 
     public static void main(String... args) {
-        System.out.println(new MathExpression(args[0]).solve());
+        String in  = Main.joinArgs(Arrays.asList(args), true);
+        if (Main.isVerbose()) {
+            System.err.println(in);
+        }
+        System.out.println(new MathExpression(in).solve());
     }//end method
 
     @Override
