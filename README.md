@@ -4,6 +4,8 @@
 * [ParserNG](#ParserNG)
     * [Usage and note](#usage-and-note)
     * [FEATURES](#features)
+* [Using ParserNG as commandline tool](#using-parserng-as-commandline-tool)
+    * [cmdline examples](#cmdline-examples)
 * [Using ParserNG as library](#using-parserng-as-library)
     * [Inbuilt Functions](#inbuilt-functions)
     * [User defined functions](#user-defined-functions)
@@ -76,6 +78,76 @@ ParserNG is written completely in (pure) Java and so is as cross-platform as Jav
 <li>Function creation and usage in math expressions</li>
 </ol>
 
+## Using ParserNG as commandline tool
+You cn use jar dirrectly as commandline calculus. Unless the tool is packed to your distribution:
+```
+java -jar parser-ng-0.1.7.jar  1+1
+2.0
+```
+You can get help by 
+```
+java -jar parser-ng-0.1.7.jar  -h
+  ParserNG 0.1.7 math.Main
+-h/-H/--help         this text; do not change for help (witout dashes), which lists functions
+-v/-V/--verbose      output is reprinted to stderr with some inter-steps
+-t/-T/--trim         by default, each line is one expression,
+                     however for better redability, sometimes it is worthy to
+                     to split the expression to multiple lines. and evaluate as one.
+-i/-I/--interaktive  instead of evaluating any input, interactive prompt is opened
+                     If you lunch interactive mode wit TRIM, the expression is
+                     evaluated once you exit (done, quit, exit...)
+                     it is the same as launching parser.cmd.ParserCmd main class
+           To read stdin, you have to set INTERACTIVE mode on
+           To list all known functions,  type `help` as MathExpression
+  Without any parameter, input is considered as math expression and calculated
+  without trim, it would be the same as launching parser.MathExpression main class
+  run help in verbose mode (-h -v) to get examples
+```
+You  can get examples
+```
+java -jar parser-ng-0.1.7.jar  -h -v
+```
+Note, that parser.MathExpression nor parser.cmd.ParserCmd classes works as stand alone working main methods, but  do not take any parameters except expressions
+
+Program can work with stdin, out and err properly. Can work with multiline input - see `-t` switch. If you ned to work with stdin, use `-i` which is otherwise interactive mode
+
+### cmdline examples
+Following lines describes, how stdin/aruments are processed, and how different is input/output wit `-t` on/off
+```
+  java -jar parser-ng-0.1.7.jar -h
+    this help
+  java -jar parser-ng-0.1.7.jar 1+1
+    2.0
+  java -jar parser-ng-0.1.7.jar "1+1
+                                 +2+2"
+    2.0
+    4.0
+  java -jar parser-ng-0.1.7.jar -t "1+1
+                                    +2+2"
+    6.0
+  java -jar parser-ng-0.1.7.jar -i  1+1
+    nothing, will expect manual output, and calculate line by line
+  java -jar parser-ng-0.1.7.jar -i -t  1+1
+    nothing, will expect manual output and calcualte it all as one expression
+  echo 2+2 | java -jar parser-ng-0.1.7.jar  1+1
+    2.0
+  echo "1+1 
+        +2+2 | java -jar parser-ng-0.1.7.jar -i
+    2.0
+    4.0
+  echo "1+1 
+        +2+2 | java -jar parser-ng-0.1.7.jar -i -t
+    6.0
+  java -cp parser-ng-0.1.7.jar parser.cmd.ParserCmd "1+1
+    will ask for manual imput en evaluate per line
+  echo "1+1 
+        +2+2 | java -cp parser-ng-0.1.7.jar parser.cmd.ParserCmd 2>/dev/null
+    2.0
+    4.0
+  java -cp parser-ng-0.1.7.jar parser.MathExpression "1+1
+                                                      +2+2"
+    6.0
+```
 
 ## Using ParserNG as library
 The simplest way to evaluate an expression in ParserNG is to use the <code>MathExpression</code> class.
