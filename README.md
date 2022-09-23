@@ -1,7 +1,39 @@
 # ParserNG
 <b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. 
 
-## NOTE:
+* [ParserNG](#ParserNG)
+    * [Usage and note](#usage-and-note)
+    * [FEATURES](#features)
+* [Using ParserNG as library](#using-parserng-as-library)
+    * [Inbuilt Functions](#inbuilt-functions)
+    * [User defined functions](#user-defined-functions)
+    * [User hardcoded functions](#user-hardcoded-functions)
+    * [Differential Calculus](#differential-Calculus)
+* [More Examples](#more-examples)
+    * [Or using variables and calculating simple expressions](#or-using-variables-and-calculating-simple-expressions)
+    * [Or using functions](#or-using-functions)
+    * [Derivatives - Differential Calculus](#derivatives---differential-calculus)
+    * [For Numerical Integration](#for-numerical-integration)
+* [Functions and FunctionManager, Variables and VariableManager](#functions-and-functionmanager-variables-and-variablemanager)
+* [Matrices](#matrices)
+    * [Parser manipulation of matrices](#parser-manipulation-of-matrices)
+       * [1. Create a matrix](#1-create-a-matrix)
+       * [2. Determinants](#2-determinants)
+       * [3. Solving simultaneous linear equations](#3-solving-simultaneous-linear-equations)
+       * [4. Building triangular matrices](#4-building-triangular-matrices)
+       * [5. Echelon form of a matrix](#5-echelon-form-of-a-matrix)
+       * [6. Matrix multiplication](#6-matrix-multiplication)
+       * [7. Matrix addition](#7-matrix-addition)
+       * [8. Matrix subtraction](#8-matrix-subtraction)
+       * [9. Powers of a Matrix](#9-powers-of-a-matrix)
+       * [10. Transpose of a Matrix](#10-transpose-of-a-matrix)
+       * [11. Editing a Matrix](#11-editing-a-matrix)
+          * [Editing a Matrix example](#editing-a-matrix-example)
+       * [12. Finding the characteristic polynomial of a Matrix](#12-finding-the-characteristic-polynomial-of-a-matrix)
+ * [TO BE CONTINUED](#to-be-continued)
+
+
+## Usage and note
 
 If you need to use the parser directly in your Android project, go to:
 [parserng-android](https://github.com/gbenroscience/parserng-android) by the same author
@@ -26,7 +58,7 @@ work to solve mathematical problems both simple and complex.
 ParserNG is written completely in (pure) Java and so is as cross-platform as Java can be. It has been used to design math platforms for desktop Java, Java MicroEdition devices(as far back as 2010-2011) , Android,  and by porting the whole platform using J2OBJC from Google; Swift also. The performance has been exceptionally acceptable in all cases.
 
 
-<p><b>FEATURES</b></p>
+## FEATURES
 <ol>
 <li>Arithmetic operations.</li>
 <li>Statistical operations</li>
@@ -45,9 +77,7 @@ ParserNG is written completely in (pure) Java and so is as cross-platform as Jav
 </ol>
 
 
-<p><b>Using ParserNG</b></p>
-
-
+## Using ParserNG as library
 The simplest way to evaluate an expression in ParserNG is to use the <code>MathExpression</code> class.
 <code>MathExpression</code> is the class responsible for basic expression parsing and evaluation.
 
@@ -97,7 +127,7 @@ expression.solve();//Use the value from here according to your iterative needs..
 This ensures that the expression is parsed once(expensive operation) and then evaluated at various values of the variables. This second step is an high speed one, sometimes taking barely 3 microseconds on some machines.<br><br>
 
 
-<b>Inbuilt Functions</b><br>
+#### Inbuilt Functions
 The parser has its own set of built-in functions. They are:
 
     sin,cos,tan,sinh,cosh,tanh,sin-¹,cos-¹,tan-¹,sinh-¹,cosh-¹,tanh-¹,sec,csc,cot,
@@ -107,6 +137,12 @@ The parser has its own set of built-in functions. They are:
     rng,mrng,rms,cov,min,max,s_d,variance,st_err,rnd,sort,plot,diff,intg,quad,t_root,
     root,linear_sys,det,invert,tri_mat,echelon,matrix_mul,matrix_div,matrix_add,matrix_sub,matrix_pow,transpose,matrix_edit
     
+  <br>
+  For runtime loaded list of all functions (with description, even in-runtime-added - see User hardcoded functions), run 'help' as MathExpression's value
+  ```
+MathExpression expression = new MathExpression("help");
+expression.solve();
+  ``` 
   <br>
 
 
@@ -158,8 +194,8 @@ Note, that such functions do not propagate to help.
 
 #### User hardcoded functions
 if you need more complex function, it is best to hardcode it and contribute it.
-However sometimes the mehtod may be to dummy, or review to slow, so for such cases you can implement BasicNumericalMethod interface and Declarations.registerBasicNumericalMethod it.
-Such method will be used as any other hardcoded function. See MathExpressionTest.customUserFunctionTest for basic example.
+However sometimes the mehtod may be to dummy, or review to slow, so for such cases you can implement `BasicNumericalMethod` interface and `Declarations.registerBasicNumericalMethod` it.
+Such method will be used as any other hardcoded function. See `MathExpressionTest.customUserFunctionTest` for basic example.
 Note, that current implementation is stateless. It may be changed in future if needed. Unlike `User defined functions` those methods propagate to help.
 
 #### Differential Calculus
@@ -205,14 +241,14 @@ System.out.println("result: " + expr.solve());
 ``` 
 This gives: `43.16981132075472`
 
-#### Or using variables and calculating simple expressions: 
+#### Or using variables and calculating simple expressions
 
 ```java 
 MathExpression expr = new MathExpression("r=3;P=2*pi*r;"); 
 
 System.out.println("result: " + expr.getValue("P")); 
 ```
-#### Or using functions: 
+#### Or using functions
 
 ```java
 MathExpression expr = new MathExpression("f(x)=39*sin(x^2)+x^3*cos(x);f(3)"); 
@@ -220,7 +256,7 @@ System.out.println("result: " + expr.solve());
 ```
 This gives: `-10.65717648378352` 
 
-#### Derivatives (Differential Calculus)
+#### Derivatives - Differential Calculus
 
 To evaluate the derivative at a given point(Note it does symbolic differentiation(not numerical) behind the scenes, so the accuracy is not limited by the errors of numerical approximations): 
 ```java
@@ -232,7 +268,7 @@ This gives: `38.66253179403897`
 The above differentiates x<sup>3</sup> * ln(x) once at x=3. 
 The number of times you can differentiate is 1 for now. 
 
-#### For Numerical Integration: 
+#### For Numerical Integration
 
 ```java 
 
@@ -242,7 +278,7 @@ System.out.println("result: " + expr.solve());
 This gives: `7.999999999998261...` approximately: `8` ...
 
 
-## Functions and FunctionManager , Variables and VariableManager
+## Functions and FunctionManager, Variables and VariableManager
 
 
 ParserNG comes with a FunctionManager class that allows users persist store functions for the duration of the session(JVM run).
@@ -295,12 +331,12 @@ You can do more by getting the underlying Matrix object, i.e do:
 
 But I digress. Let us look at the matrix functionality runnable from within the parser.
 
-### Parser manipulation of matrices.
+### Parser manipulation of matrices
 
 The parser comes with inbuilt matrix manipulating functions.
 
 
-#### 1. Create a matrix:
+#### 1. Create a matrix
 
         MathExpression expr = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2)");
 
@@ -322,7 +358,7 @@ This gives:
          188.99999999999997
          
          
-#### 3. Solving simultaneous linear equations.
+#### 3. Solving simultaneous linear equations
 
 The function that does this is `linear_sys`
 
@@ -358,7 +394,7 @@ For the matrix above, this would give:
     0.0  ,    0.0  ,    1.0            
         
          
-#### 5. Echelon form of a matrix       
+#### 5. Echelon form of a matrix
 
 To find the echelon of the matrix `M` defined in 1. do,
 
@@ -478,7 +514,7 @@ This would give:
 
 
 
-#### 9. Transpose of a Matrix
+#### 10. Transpose of a Matrix
 
 ParserNG also allows quick computation of the transpose of a matrix.
 
@@ -504,7 +540,7 @@ This would give:
 
 
 
-#### 10. Editing a Matrix
+#### 11. Editing a Matrix
 
 ParserNG also allows the entries in a matrix to be edited.
 
@@ -515,7 +551,7 @@ The second and the third arguments respectively represent the row and column tha
 
 The last entry represents the value to store in the specified location(entry) in the Matrix.
 
-##### For example
+##### Editing a Matrix example
 
 To edit the contents of a matrix, `M`, do:
 
@@ -539,7 +575,7 @@ This would give:
 Note that matrix indexes in ParserNG are zero-based, so be advised accordingly as entering an invalid row/column combination will throw an error in your code.
 
 
-#### 11. Finding the characteristic polynomial of a Matrix
+#### 12. Finding the characteristic polynomial of a Matrix
 
 ParserNG allows the quick evaluation of the characteristic polynomial of a square matrix; this polynomial can then be solved to find the eigenvalues, and hence the eigenvector of the Matrix.
 
@@ -573,5 +609,7 @@ If you did:
 This would give:
 
      anon3=@(n)(20883.0*n^0.0+1155.0*n^1.0-1667.0*n^2.0+30.0*n^4.0-1.0*n^5.0+35.0*n^3.0)
+
 ## TO BE CONTINUED
+And much more!
 
