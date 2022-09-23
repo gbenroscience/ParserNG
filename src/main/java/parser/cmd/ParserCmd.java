@@ -10,10 +10,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Scanner;
 
 import interfaces.Solvable;
 import math.Main;
+import parser.LogicalExpression;
 import parser.MathExpression;
 
 /**
@@ -25,10 +25,15 @@ public class ParserCmd {
 
     public static void main(String[] args) throws IOException {
 
+        if (args.length > 0) {
+            if (Main.getLogcalSwitch().isIn(args[0])) {
+                Main.setLogic(true);
+            }
+        }
         BufferedReader sc = new BufferedReader(new InputStreamReader(System.in));
 
         System.err.println("Welcome To ParserNG Command Line");
-        String title = Main.isTrim() ? "Line" : "Question";
+        String title = Main.isTrim() ? Main.isLogic() ? "Logical Line" : "Math Line" : Main.isLogic() ? "Logical Question" : "Math Question";
         int i = 0;
         List<String> batch = new ArrayList<>();
         while (true) {
@@ -59,8 +64,13 @@ public class ParserCmd {
     }
 
     private static void calWitOutput(String cmd) {
-        Solvable expression = new MathExpression(cmd);
-        String ans = expression.solve();
+        String ans = null;
+        try {
+            Solvable expression = Main.isLogic() ? new LogicalExpression(cmd, LogicalExpression.verboseStderrLogger) : new MathExpression(cmd);
+            ans = expression.solve();
+        }catch (Exception ex) {
+            ans = ex.getMessage();
+        }
         System.err.printf("Answer%s\n", divider);
         System.err.flush();
         System.out.println(ans);

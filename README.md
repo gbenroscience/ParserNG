@@ -32,7 +32,8 @@
        * [11. Editing a Matrix](#11-editing-a-matrix)
           * [Editing a Matrix example](#editing-a-matrix-example)
        * [12. Finding the characteristic polynomial of a Matrix](#12-finding-the-characteristic-polynomial-of-a-matrix)
- * [TO BE CONTINUED](#to-be-continued)
+* [Logical Calculus](#logical-calculus)
+* [TO BE CONTINUED](#to-be-continued)
 
 
 ## Usage and note
@@ -47,7 +48,7 @@ If you need to access this library via Maven Central, do:
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
-            <version>0.1.7</version>
+            <version>0.1.8</version>
         </dependency>
        
 
@@ -79,21 +80,31 @@ ParserNG is written completely in (pure) Java and so is as cross-platform as Jav
 </ol>
 
 ## Using ParserNG as commandline tool
-You cn use jar dirrectly as commandline calculus. Unless the tool is packed to your distribution:
+You can use jar directly as commandline calculus. Unless the tool is packed to your distribution:
 ```
-java -jar parser-ng-0.1.7.jar  1+1
+java -jar parser-ng-0.1.8.jar  1+1
 2.0
+```
+Or as logical parser
+```
+java -jar parser-ng-0.1.8.jar -l true and true
+true
+java -jar parser-ng-0.1.8.jar -l "2 == (4-2)"
+true
 ```
 You can get help by 
 ```
-java -jar parser-ng-0.1.7.jar  -h
-  ParserNG 0.1.7 math.Main
+java -jar parser-ng-0.1.8.jar  -h
+  ParserNG 0.1.8 math.Main
 -h/-H/--help         this text; do not change for help (witout dashes), which lists functions
 -v/-V/--verbose      output is reprinted to stderr with some inter-steps
+-l/-L/--logic        will add logical expression wrapper around the expression
+                     Logical expression parser is much less evolved and slow. Do not use it if you don't must
+                     If you use logical parse, result is always true/false. If it is not understood, it reuslts to false
 -t/-T/--trim         by default, each line is one expression,
                      however for better redability, sometimes it is worthy to
                      to split the expression to multiple lines. and evaluate as one.
--i/-I/--interaktive  instead of evaluating any input, interactive prompt is opened
+-i/-I/--interactive  instead of evaluating any input, interactive prompt is opened
                      If you lunch interactive mode wit TRIM, the expression is
                      evaluated once you exit (done, quit, exit...)
                      it is the same as launching parser.cmd.ParserCmd main class
@@ -102,51 +113,74 @@ java -jar parser-ng-0.1.7.jar  -h
   Without any parameter, input is considered as math expression and calculated
   without trim, it would be the same as launching parser.MathExpression main class
   run help in verbose mode (-h -v) to get examples
+
 ```
-You  can get examples
+You  can get examples by verbose help:
 ```
-java -jar parser-ng-0.1.7.jar  -h -v
+java -jar parser-ng-0.1.8.jar  -h -v
 ```
-Note, that parser.MathExpression nor parser.cmd.ParserCmd classes works as stand alone working main methods, but  do not take any parameters except expressions
+you can list functions:
+```
+java -jar parser-ng-0.1.8.jar  help
+List of currently known methods:
+acos        - help not yet written. See https://github.com/gbenroscience/ParserNG
+...
+variance    - help not yet written. See https://github.com/gbenroscience/ParserNG
+List of functions is just tip of iceberg, see: https://github.com/gbenroscience/ParserNG for all features
+```
+you can list logical operators:
+```
+java -jar parser-ng-0.1.8.jar  -l help
+Comparing operators: !=, ==, >=, <=, le, ge, lt, gt, <, >
+Logical operators: impl, xor, imp, eq, or, and, |, &
+As Mathematical parts are using () as brackets, Logical parts must be grouped by [] eg.
+Negation can be done by single ! strictly close attached to [; eg ![true]  is ... false. Some spaces like ! [ are actually ok to
+...
+```
+  Note, that parser.MathExpression nor parser.LogicalExpression classes do not take any parameters except expressions
+  Note, that parser.cmd.ParserCmd class takes single parameter -l/-L/--logic to contorl its evaluation
 
 Program can work with stdin, out and err properly. Can work with multiline input - see `-t` switch. If you ned to work with stdin, use `-i` which is otherwise interactive mode
 
 ### cmdline examples
-Following lines describes, how stdin/aruments are processed, and how different is input/output wit `-t` on/off
+Following lines describes, how stdin/arguments are processed, and how different is input/output with `-t` on/off
 ```
-  java -jar parser-ng-0.1.7.jar -h
+   java -jar parser-ng-0.1.8.jar -h
     this help
-  java -jar parser-ng-0.1.7.jar 1+1
+  java -jar parser-ng-0.1.8.jar 1+1
     2.0
-  java -jar parser-ng-0.1.7.jar "1+1
+  java -jar parser-ng-0.1.8.jar "1+1
                                  +2+2"
     2.0
     4.0
-  java -jar parser-ng-0.1.7.jar -t "1+1
+  java -jar parser-ng-0.1.8.jar -t "1+1
                                     +2+2"
     6.0
-  java -jar parser-ng-0.1.7.jar -i  1+1
+  java -jar parser-ng-0.1.8.jar -i  1+1
     nothing, will expect manual output, and calculate line by line
-  java -jar parser-ng-0.1.7.jar -i -t  1+1
+  java -jar parser-ng-0.1.8.jar -i -t  1+1
     nothing, will expect manual output and calcualte it all as one expression
-  echo 2+2 | java -jar parser-ng-0.1.7.jar  1+1
+  echo 2+2 | java -jar parser-ng-0.1.8.jar  1+1
     2.0
   echo "1+1 
-        +2+2 | java -jar parser-ng-0.1.7.jar -i
+        +2+2 | java -jar parser-ng-0.1.8.jar -i
     2.0
     4.0
   echo "1+1 
-        +2+2 | java -jar parser-ng-0.1.7.jar -i -t
+        +2+2 | java -jar parser-ng-0.1.8.jar -i -t
     6.0
-  java -cp parser-ng-0.1.7.jar parser.cmd.ParserCmd "1+1
+  java -cp parser-ng-0.1.8.jar parser.cmd.ParserCmd "1+1
     will ask for manual imput en evaluate per line
   echo "1+1 
-        +2+2 | java -cp parser-ng-0.1.7.jar parser.cmd.ParserCmd 2>/dev/null
+        +2+2 | java -cp parser-ng-0.1.8.jar parser.cmd.ParserCmd 2>/dev/null
     2.0
     4.0
-  java -cp parser-ng-0.1.7.jar parser.MathExpression "1+1
+  java -cp parser-ng-0.1.8.jar parser.MathExpression "1+1
                                                       +2+2"
     6.0
+  java -cp parser-ng-0.1.8.jar parser.LogicalExpression "true or false"
+    true
+
 ```
 
 ## Using ParserNG as library
@@ -683,6 +717,120 @@ If you did:
 This would give:
 
      anon3=@(n)(20883.0*n^0.0+1155.0*n^1.0-1667.0*n^2.0+30.0*n^4.0-1.0*n^5.0+35.0*n^3.0)
+
+## Logical Calculus
+
+The logical expressions in math engine have theirs intentional limitations. Thus allmighty logical expression parser was added around individually evaluated Mathematical expressions which results can be later compared, and logically grouped.  The simplest way to evaluate an logical  expression in ParserNG is to use the <code>LogicalExpression</code> class.
+<code>LogicalExpression</code> is the class responsible for basic comaprsions and logica  expression parsing and evaluation. It calls <code>MathExpression</code> to ech of its basic non-logical parts
+
+Do:<br>
+`LogicalExpression expr = new LogicalExpression("[1+1 < (2+0)*1 impl [ [5 == 6 || 33<(22-20)*2 ]xor [ [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2]]] eq [ true && false ] ");`
+<br>
+`System.out.println("result: " + expr.solve());`
+<br>
+`true`
+
+<span>What does this do? it will call new MathExpression(...) to each math expression, then comapre them all and then do logicla operations above resulting booleans</span> 
+```
+brackets: [1+1 < (2+0)*1 impl [ [5 == 6 || 33<(22-20)*2 ]xor [ [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2]]] eq [ true && false ] 
+  brackets: 1+1 < (2+0)*1 impl [ [5 == 6 || 33<(22-20)*2 ]xor [ [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2]]
+    brackets:  [5 == 6 || 33<(22-20)*2 ]xor [ [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2]
+        evaluating: 5 == 6 || 33<(22-20)*2 
+          evaluating: 5 == 6
+            evaluating: 5
+            is: 5
+            evaluating: 6
+            is: 6
+          ... 5 == 6
+          is: false
+          evaluating: 33<(22-20)*2 
+            evaluating: 33
+            is: 33
+            evaluating: (22-20)*2 
+            is: 4.0
+          ... 33 < 4.0
+          is: false
+        ... false | false
+        is: false
+    to:   false xor [ [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2]
+      brackets:  [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2
+          evaluating:   5-3 < 2 or 7*(5+2)<=5 
+            evaluating:   5-3 < 2
+              evaluating:   5-3
+              is: 2.0
+              evaluating: 2
+              is: 2
+            ... 2.0 < 2
+            is: false
+            evaluating: 7*(5+2)<=5 
+              evaluating: 7*(5+2)
+              is: 49.0
+              evaluating: 5 
+              is: 5
+            ... 49.0 <= 5
+            is: false
+          ... false or false
+          is: false
+      to:   false  and 1+1 == 2
+          evaluating:   false  and 1+1 == 2
+            evaluating:   false
+            is: false
+            evaluating: 1+1 == 2
+              evaluating: 1+1
+              is: 2.0
+              evaluating: 2
+              is: 2
+            ... 2.0 == 2
+            is: true
+          ... false and true
+          is: false
+    to:   false xor  false 
+        evaluating:   false xor  false 
+          evaluating:   false
+          is: false
+          evaluating: false 
+          is: false
+        ... false xor false
+        is: false
+  to: 1+1 < (2+0)*1 impl  false 
+      evaluating: 1+1 < (2+0)*1 impl  false 
+        evaluating: 1+1 < (2+0)*1
+          evaluating: 1+1
+          is: 2.0
+          evaluating: (2+0)*1
+          is: 2.0
+        ... 2.0 < 2.0
+        is: false
+        evaluating: false 
+        is: false
+      ... false impl false
+to:  true  eq [ true && false ] 
+    evaluating:  true && false 
+      evaluating:  true
+      is: true
+      evaluating: false 
+      is: false
+    ... true & false
+    is: false
+to:  true  eq  false  
+    evaluating:  true  eq  false  
+      evaluating:  true
+      is: true
+      evaluating: false  
+      is: false
+    ... true eq false
+    is: false
+false
+```
+Note, that logical parsser supports only dual operators, so where true|false|true is valid, 1<2<3  is invalid!
+Thus:  [1<2]<3   is necessary and  even  [[true|false]|true]is recomeded to be used, For 1<2<3  exception is thrown.
+Single letter can logical operands can be used in row. So eg | have same meaning as ||. But also unluckily also eg < is same as <<
+Negation can be done by single ! strictly close attached to [; eg ![true]  is ... false. Some spaces like ! [ are actually ok to
+Note, that variables works, but must be included in first evaluated expression. Which is obvious for "r=3;r<r+1"
+But much less for [r=3;r<r+1 || [r<5]]", which fails and must be declared as "[r<r+1 || [r=3;r<5]]"
+To avoid this, you can declare all in first dummy expression: "[r=3;r<1] || [r<r+1 || [r<5]]" which ensure theirs allocation ahead of time and do not affect the rest
+If you modify the variables, in the subseqet calls, results maybe funny. Use verbose mode to debug order
+
 
 ## TO BE CONTINUED
 And much more!
