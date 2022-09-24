@@ -11,32 +11,73 @@ import parser.cmd.ParserCmd;
 
 public class Main {
 
+    private static class MultiSwitch {
+        private final String[] switches;
+
+        public MultiSwitch(String... switches) {
+            this.switches = switches;
+        }
+
+        public void removeFrom(List<String> l) {
+            for (String s : switches) {
+                l.remove(s);
+            }
+        }
+
+        public boolean isContained(List<String> l) {
+            for (String s : switches) {
+                if (l.contains(s)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            for (int x = 0; x < switches.length; x++) {
+                sb.append(switches[x]);
+                if (x != switches.length - 1) {
+                    sb.append("/");
+                }
+            }
+            return sb.toString();
+        }
+
+        public String getSwitch(int i) {
+            return switches[i];
+        }
+    }
+
+    private static final MultiSwitch verboseSwitch = new MultiSwitch("-v", "-V", "--verbose");
+    private static final MultiSwitch trimSwitch = new MultiSwitch("-t", "-T", "--trim");
+    private static final MultiSwitch helpSwitch = new MultiSwitch("-h", "-H", "--help");
+    private static final MultiSwitch interactiveSwitch = new MultiSwitch("-i", "-I", "--interactive");
+
     private static boolean trim = false;
     private static boolean verbose = false;
 
     public static void main(String... args) throws IOException {
         List<String> aargs = new ArrayList<>(Arrays.asList(args));
-        if (aargs.contains("-v") || aargs.contains("-V") || aargs.contains("--verbose")) {
+        if (verboseSwitch.isContained(aargs)) {
             //todo pass, to debug in ParserNG engine
             verbose = true;
-            aargs.remove("-v");
-            aargs.remove("-V");
-            aargs.remove("--verbose");
+            verboseSwitch.removeFrom(aargs);
         }
-        if (aargs.contains("-t") || aargs.contains("-T") || aargs.contains("--trim")) {
+        if (trimSwitch.isContained(aargs)) {
             trim = true;
-            aargs.remove("-t");
-            aargs.remove("-T");
-            aargs.remove("--trim");
+            trimSwitch.removeFrom(aargs);
         }
-        if (aargs.contains("-h") || aargs.contains("-H") || aargs.contains("--help")) {
+        if (helpSwitch.isContained(aargs)) {
             help();
             if (isVerbose()) {
                 examples();
             }
-        } else if (aargs.contains("-i") || aargs.contains("-I") || aargs.contains("--interactive")) {
-            if (aargs.size() > 1) {
-                System.err.println("-i/-I is interactive mode, commandline expression omitted");
+        } else if (interactiveSwitch.isContained(aargs)) {
+            interactiveSwitch.removeFrom(aargs);
+            if (aargs.size() > 0) {
+                System.err.println(interactiveSwitch.toString() + " is interactive mode, commandline expression omitted");
             }
             ParserCmd.main(null);
         } else {
@@ -58,12 +99,12 @@ public class Main {
 
     static void help() {
         System.out.println("  ParserNG " + getVersion() + " " + Main.class.getName());
-        System.out.println("-h/-H/--help         this text; do not change for help (witout dashes), which lists functions");
-        System.out.println("-v/-V/--verbose      output is reprinted to stderr with some inter-steps");
-        System.out.println("-t/-T/--trim         by default, each line is one expression,");
+        System.out.println(helpSwitch + "         this text; do not change for help (witout dashes), which lists functions");
+        System.out.println(verboseSwitch + "      output is reprinted to stderr with some inter-steps");
+        System.out.println(trimSwitch + "         by default, each line is one expression,");
         System.out.println("                     however for better redability, sometimes it is worthy to");
         System.out.println("                     to split the expression to multiple lines. and evaluate as one.");
-        System.out.println("-i/-I/--interaktive  instead of evaluating any input, interactive prompt is opened");
+        System.out.println(interactiveSwitch + "  instead of evaluating any input, interactive prompt is opened");
         System.out.println("                     If you lunch interactive mode wit TRIM, the expression is");
         System.out.println("                     evaluated once you exit (done, quit, exit...)");
         System.out.println("                     it is the same as launching " + ParserCmd.class.getName() + " main class");
@@ -71,7 +112,7 @@ public class Main {
         System.out.println("           To list all known functions,  type `help` as MathExpression");
         System.out.println("  Without any parameter, input is considered as math expression and calculated");
         System.out.println("  without trim, it would be the same as launching " + MathExpression.class.getName() + " main class");
-        System.out.println("  run help in verbose mode (-h -v) to get examples");
+        System.out.println("  run help in verbose mode (" + helpSwitch.getSwitch(0) + " " + verboseSwitch.getSwitch(0) + ") to get examples");
     }
 
     static void examples() {
