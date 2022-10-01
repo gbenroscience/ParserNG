@@ -25,6 +25,15 @@ public class AvgNTest {
     }
 
     @Test
+    void decimalsInCountWorksAsHould() {
+        MathExpression me;
+        me = new MathExpression("avgN(0.4, 1, 2, 3, 4, 15)");
+        Assertions.assertEquals("5", me.solve());
+        me = new MathExpression("avgN(0.6, 1, 2, 3, 4, 15)");
+        Assertions.assertEquals("3", me.solve());
+    }
+
+    @Test
     void limitWorks() {
         MathExpression me = new MathExpression("avgN(1,45,1,55,1000)");
         Assertions.assertEquals("50", me.solve());
