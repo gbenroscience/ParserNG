@@ -15,6 +15,7 @@ import java.util.NoSuchElementException;
 import java.util.Random;
 import math.Maths;
 import math.numericalmethods.NumericalIntegral;
+import parser.methods.ext.Utils;
 import util.FunctionManager;
 
 import java.util.Arrays;
@@ -112,12 +113,7 @@ public class Set {
      * @return the geomethrical (multiplied) sum of all elements in the data set
      */
     public BigDecimal gsum() {
-        BigDecimal u = new BigDecimal("1");
-        for (int i = 0; i < data.size(); i++) {
-            u = u.multiply(new BigDecimal(data.get(i)));
-        }
-
-        return u;
+        return Utils.gsum(Utils.stringsToBigDecimals(data));
     }//end gsum
 
     /**

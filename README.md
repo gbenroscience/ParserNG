@@ -13,7 +13,7 @@ If you need to access this library via Maven Central, do:
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
-            <version>0.1.5</version>
+            <version>0.1.7</version>
         </dependency>
        
 
@@ -23,7 +23,7 @@ at the Department of Computer Science and Engineering, Obafemi Awolowo Universit
 The design goal of this library was to create a simple, yet powerful, not too bogus math tool that scientists and developers could deploy with their
 work to solve mathematical problems both simple and complex.
 
-ParserNG is written completely in (pure) Java and so is as cross-platform as Java can be. It has been used to design math platforms for desktop Java, Java MicroEdition devices(as far back as 2010-2011) , Android,  and by porting the whole platform using J2OBJC from Gooogle; Swift also. The performance has been exceptionally acceptable in all cases.
+ParserNG is written completely in (pure) Java and so is as cross-platform as Java can be. It has been used to design math platforms for desktop Java, Java MicroEdition devices(as far back as 2010-2011) , Android,  and by porting the whole platform using J2OBJC from Google; Swift also. The performance has been exceptionally acceptable in all cases.
 
 
 <p><b>FEATURES</b></p>
@@ -154,6 +154,13 @@ And then do:
      sin(2)+cos(2-1)
   
   behind the scenes.<br><br>
+Note, that such functions do not propagate to help.
+
+#### User hardcoded functions
+if you need more complex function, it is best to hardcode it and contribute it.
+However sometimes the mehtod may be to dummy, or review to slow, so for such cases you can implement BasicNumericalMethod interface and Declarations.registerBasicNumericalMethod it.
+Such method will be used as any other hardcoded function. See MathExpressionTest.customUserFunctionTest for basic example.
+Note, that current implementation is stateless. It may be changed in future if needed. Unlike `User defined functions` those methods propagate to help.
 
 #### Differential Calculus
 
