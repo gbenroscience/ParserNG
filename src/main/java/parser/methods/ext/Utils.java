@@ -1,7 +1,11 @@
 package parser.methods.ext;
 
 
+import math.BigDecimalNthRootCalculation;
+
 import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -72,6 +76,14 @@ public final class Utils {
             gsumm = gsumm.multiply(token);
         }
         return gsumm;
+    }
+
+    public static int getFirstTokenAsInt(List<String> tokens) {
+        //if an output of function is used as first parameter (eg count(1,2,4)/3) , it is eg 1.0, thus float
+        BigDecimal toRemoveOrig = new BigDecimal(tokens.get(0), new MathContext(10, RoundingMode.HALF_DOWN));
+        BigDecimal toRemoveD = toRemoveOrig.setScale(0, RoundingMode.HALF_DOWN);
+        int toRemove = toRemoveD.intValue();
+        return toRemove;
     }
 
 }

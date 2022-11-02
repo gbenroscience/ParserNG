@@ -12,7 +12,7 @@ public class Help {
         for (String op : getInbuiltMethods()) {
             sb.append(getHelp(op)).append("\n");
         }
-        sb.append("See: https://github.com/gbenroscience/ParserNG").append("\n");
+        sb.append("List of functions is just tip of iceberg, see: https://github.com/gbenroscience/ParserNG for all features").append("\n");
         return sb.toString();
     }
 
