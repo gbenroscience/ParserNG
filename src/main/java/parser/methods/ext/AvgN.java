@@ -16,7 +16,7 @@ public class AvgN implements BasicNumericalMethod {
 
     @Override
     public String solve(List<String> tokens) {
-        int toRemove = Integer.parseInt(tokens.get(0));
+        int toRemove = Utils.getFirstTokenAsInt(tokens);
         List<BigDecimal> l = Utils.stringsToBigDecimals(tokens, 1);
         Collections.sort(l);
         Utils.trimList(l, toRemove, DEFAULT_AVGN_MISIZE);

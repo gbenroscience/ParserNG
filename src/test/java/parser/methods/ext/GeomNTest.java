@@ -26,6 +26,15 @@ public class GeomNTest {
     }
 
     @Test
+    void decimalsInCountWorksAsHould() {
+        MathExpression me;
+        me = new MathExpression("geomN(0.4, 1, 2, 3, 4, 15)");
+        Assertions.assertEquals("3.245342223", me.solve());
+        me = new MathExpression("geomN(0.6, 1, 2, 3, 4, 15)");
+        Assertions.assertEquals("2.884499141", me.solve());
+    }
+
+    @Test
     void limitWorks() {
         MathExpression me = new MathExpression("geomN(1,2,1,4,1000,8)");
         Assertions.assertEquals("4.000000000", me.solve());
