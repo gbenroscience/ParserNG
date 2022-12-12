@@ -29,10 +29,8 @@ public class LogicalExpression implements Solvable {
     }
 
     public static void main(String args[]) {
-        String in  = Main.joinArgs(Arrays.asList(args), true);
-        if (Main.isVerbose()) {
-            System.err.println(in);
-        }
+        String in = Main.joinArgs(Arrays.asList(args), true);
+        verboseStderrLogger.log(in);
         System.out.println(new LogicalExpression(in, verboseStderrLogger).solve());
 
     }//end method
@@ -42,7 +40,11 @@ public class LogicalExpression implements Solvable {
         if (originalExpression.trim().equalsIgnoreCase(Declarations.HELP)) {
             return getHelp();
         }
-        return evalBrackets(originalExpression, mainLogger);
+        if (LogicalExpressionParser.isLogical(originalExpression)) {
+            return evalBrackets(originalExpression, mainLogger);
+        } else {
+            return new MathExpression(originalExpression).solve();
+        }
     }
 
     private String evalBrackets(String ex, ExpressionLogger logger) {
@@ -106,8 +108,8 @@ public class LogicalExpression implements Solvable {
 
 
     public static String getHelp() {
-        return new ComparingExpressionParser(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp()+"\n"+
-               new LogicalExpressionParser(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp() + "\n" +
+        return new ComparingExpressionParser(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp() + "\n" +
+                new LogicalExpressionParser(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp() + "\n" +
                 "As Mathematical parts are using () as brackets, Logical parts must be grouped by [] eg: " + "\n" +
                 "1+1 < (2+0)*1 impl [ [5 == 6 || 33<(22-20)*2 ]xor [ [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2]] eq [ true && false ]" + "\n" +
                 "Note, that logical parsser supports only dual operators, so where true|false|true is valid, 1<2<3  is invalid!" + "\n" +

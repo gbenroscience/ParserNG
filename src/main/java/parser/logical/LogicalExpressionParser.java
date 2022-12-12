@@ -6,14 +6,37 @@ import java.util.Arrays;
 public class LogicalExpressionParser extends AbstractSplittingParser {
 
     private static final String[] chars = new String[]{"imp", "eq", "or", "and", "|", "&"};
+    private static final String[] secchars = new String[]{"impl", "xor"};
 
     public LogicalExpressionParser(String expression, ExpressionLogger log) {
         super(expression, log);
     }
 
+    public static boolean isLogical(String originalExpression) {
+        for (String s : new String[]{"false", "true"}) {
+            if (originalExpression.toLowerCase().contains(s)) {
+                return true;
+            }
+        }
+        for (String s : chars) {
+            if (originalExpression.contains(s)) {
+                return true;
+            }
+        }
+        for (String s : secchars) {
+            if (originalExpression.contains(s)) {
+                return true;
+            }
+        }
+        if (ComparingExpressionParser.isComparing(originalExpression)){
+            return true;
+        }
+        return false;
+    }
+
 
     public String[] getPrimaryChars() {
-        return new String[]{"impl", "xor"};
+        return Arrays.copyOf(secchars, secchars.length);
     }
 
     public String[] getSecondaryChars() {
@@ -25,7 +48,7 @@ public class LogicalExpressionParser extends AbstractSplittingParser {
         boolean result = new ComparingExpressionParser(split.get(0), new ExpressionLogger.InheritingExpressionLogger(log)).evaluate();
         for (int i = 1; i <= split.size() - 2; i = i + 2) {
             String op = split.get(i);
-            ComparingExpressionParser comp2 = new ComparingExpressionParser(split.get(i + 1),new ExpressionLogger.InheritingExpressionLogger(log));
+            ComparingExpressionParser comp2 = new ComparingExpressionParser(split.get(i + 1), new ExpressionLogger.InheritingExpressionLogger(log));
             boolean r2 = comp2.evaluate();
             log.log("... " + result + " " + op + " " + r2);
             if ("&".equals(op) || "and".equals(op)) {

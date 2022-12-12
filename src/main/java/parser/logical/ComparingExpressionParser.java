@@ -10,7 +10,21 @@ public class ComparingExpressionParser extends AbstractSplittingParser {
 
     public ComparingExpressionParser(String expression, ExpressionLogger log) {
         super(expression, log);
+    }
 
+
+    public static boolean isComparing(String originalExpression) {
+        for (String s : primaryChars) {
+            if (originalExpression.contains(s)) {
+                return true;
+            }
+        }
+        for (String s : secondaryChars) {
+            if (originalExpression.contains(s)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public String[] getPrimaryChars() {

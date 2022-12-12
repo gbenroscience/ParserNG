@@ -55,6 +55,10 @@ class LogicalExpressionTest {
         Assertions.assertEquals("false", expr.solve());
         expr = new LogicalExpression(" !   [false]", log);
         Assertions.assertEquals("true", expr.solve());
+        expr = new LogicalExpression("[False]", log);
+        Assertions.assertEquals("false", expr.solve());
+        expr = new LogicalExpression("TRUE", log);
+        Assertions.assertEquals("true", expr.solve());
     }
 
     @Test
