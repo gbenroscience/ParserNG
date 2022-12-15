@@ -8,12 +8,15 @@ import java.util.List;
 
 import parser.TYPE;
 import parser.methods.ext.Avg;
+import parser.methods.ext.Abs;
 import parser.methods.ext.AvgN;
 import parser.methods.ext.Count;
 import parser.methods.ext.Geom;
 import parser.methods.ext.GeomN;
 import parser.methods.ext.Gsum;
 import parser.methods.ext.Sum;
+import parser.methods.ext.Lengths;
+import parser.methods.ext.Rounding;
 
 public class Declarations {
 
@@ -144,6 +147,14 @@ public class Declarations {
         registerBasicNumericalMethod(new Geom());
         registerBasicNumericalMethod(new Count());
         registerBasicNumericalMethod(new Gsum());
+        registerBasicNumericalMethod(new Rounding.RoundX());
+        registerBasicNumericalMethod(new Rounding.RoundN());
+        registerBasicNumericalMethod(new Rounding.RoundDigitsN());
+        registerBasicNumericalMethod(new Rounding.Round());
+        registerBasicNumericalMethod(new Abs());
+        registerBasicNumericalMethod(new Lengths.Length());
+        registerBasicNumericalMethod(new Lengths.LengthDecimal());
+        registerBasicNumericalMethod(new Lengths.LengthFractional());
     }
 
     /**

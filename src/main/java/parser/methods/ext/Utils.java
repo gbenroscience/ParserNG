@@ -150,4 +150,22 @@ public final class Utils {
             throw new RuntimeException(name + " requires at least" + count + " argument(s). Was " + tokens.size() + "(" + tokens.toString() + ")");
         }
     }
+
+    public static int[] decimalAndFractionalParts(String s) {
+        return decimalAndFractionalParts(new BigDecimal(s));
+    }
+
+    public static int[] decimalAndFractionalParts(BigDecimal bd) {
+        bd = bd.abs();
+        int r[] = new int[]{0, 0};
+        long decimal = bd.toBigInteger().longValue();
+        r[0] = ("" + decimal).length();
+        String stripped = bd.stripTrailingZeros().toString();
+        if (stripped.length() <= r[0]) {
+            r[1] = 0;
+        } else {
+            r[1] = stripped.substring(r[0] + 1).length();
+        }
+        return r;
+    }
 }

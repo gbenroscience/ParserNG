@@ -205,4 +205,38 @@ class UtilsTest {
         Assertions.assertEquals(null, l);
     }
 
+    @Test
+    void getFirstTokenAsInt() {
+        int i = Utils.getFirstTokenAsInt(Arrays.asList("11.1"));
+        Assertions.assertEquals(11, i);
+    }
+
+    @Test
+    void decimalAndFractionalParts() {
+        int[] r = Utils.decimalAndFractionalParts("1.1");
+        Assertions.assertArrayEquals(new int[]{1,1}, r);
+        r = Utils.decimalAndFractionalParts("1.12");
+        Assertions.assertArrayEquals(new int[]{1,2}, r);
+        r = Utils.decimalAndFractionalParts("12.1");
+        Assertions.assertArrayEquals(new int[]{2,1}, r);
+        r = Utils.decimalAndFractionalParts("12.12");
+        Assertions.assertArrayEquals(new int[]{2,2}, r);
+
+        r = Utils.decimalAndFractionalParts("12");
+        Assertions.assertArrayEquals(new int[]{2,0}, r);
+        r = Utils.decimalAndFractionalParts("12.");
+        Assertions.assertArrayEquals(new int[]{2,0}, r);
+
+        r = Utils.decimalAndFractionalParts("1234567890.1234567890000");
+        Assertions.assertArrayEquals(new int[]{10,9}, r);
+
+        r = Utils.decimalAndFractionalParts("-1.1");
+        Assertions.assertArrayEquals(new int[]{1,1}, r);
+        r = Utils.decimalAndFractionalParts("-1.12");
+        Assertions.assertArrayEquals(new int[]{1,2}, r);
+        r = Utils.decimalAndFractionalParts("-12.1");
+        Assertions.assertArrayEquals(new int[]{2,1}, r);
+        r = Utils.decimalAndFractionalParts("-12.12");
+        Assertions.assertArrayEquals(new int[]{2,2}, r);
+    }
 }
