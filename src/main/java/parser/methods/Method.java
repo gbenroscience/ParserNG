@@ -786,10 +786,6 @@ public class Method {
                                 result = String.valueOf(0.5 * Math.log((Double.valueOf(list.get(0)) + 1) / (Double.valueOf(list.get(0)) - 1)));
                             } else if (name.equals(LG_INV) || name.equals(LG_INV_ALT)) {
                                 result = String.valueOf(Math.pow(10, Double.valueOf(list.get(0))));
-                            } else if (name.equals(CEIL)) {
-                                result = String.valueOf(Math.ceil(Double.valueOf(list.get(0))));
-                            } else if (name.equals(FLOOR)) {
-                                result = String.valueOf(Math.floor(Double.valueOf(list.get(0))));
                             } else if (name.equals(SQRT)) {
                                 result = String.valueOf(Math.sqrt(Double.valueOf(list.get(0))));
                             } else if (name.equals(CBRT)) {
@@ -871,10 +867,6 @@ public class Method {
                                 result = String.valueOf(Maths.acoth(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LG_INV) || name.equals(LG_INV_ALT)) {
                                 result = String.valueOf(Math.pow(10, Double.valueOf(list.get(0))));
-                            } else if (name.equals(CEIL)) {
-                                result = String.valueOf(Math.ceil(Double.valueOf(list.get(0))));
-                            } else if (name.equals(FLOOR)) {
-                                result = String.valueOf(Math.floor(Double.valueOf(list.get(0))));
                             } else if (name.equals(SQRT)) {
                                 result = String.valueOf(Math.sqrt(Double.valueOf(list.get(0))));
                             } else if (name.equals(CBRT)) {
@@ -956,10 +948,6 @@ public class Method {
                                 result = String.valueOf(Maths.acoth(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LG_INV) || name.equals(LG_INV_ALT)) {
                                 result = String.valueOf(Math.pow(10, Double.valueOf(list.get(0))));
-                            } else if (name.equals(CEIL)) {
-                                result = String.valueOf(Math.ceil(Double.valueOf(list.get(0))));
-                            } else if (name.equals(FLOOR)) {
-                                result = String.valueOf(Math.floor(Double.valueOf(list.get(0))));
                             } else if (name.equals(SQRT)) {
                                 result = String.valueOf(Math.sqrt(Double.valueOf(list.get(0))));
                             } else if (name.equals(CBRT)) {

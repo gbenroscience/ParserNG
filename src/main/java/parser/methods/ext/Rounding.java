@@ -25,10 +25,10 @@ public class Rounding {
         @Override
         public String solve(List<String> tokens) {
             if (tokens.size() != 2) {
-                throw new RuntimeException("roundN function takes exactly two argument");
+                throw new RuntimeException("roundN function takes exactly two arguments");
             }
             int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
-            return naturalRound(fractionalDigits, tokens.get(1)).toString();
+            return naturalRound(fractionalDigits, tokens.get(1), RoundingMode.HALF_UP).toString();
         }
 
         @Override
@@ -79,7 +79,7 @@ public class Rounding {
         @Override
         public String solve(List<String> tokens) {
             if (tokens.size() != 2) {
-                throw new RuntimeException("roundX function takes exactly two argument");
+                throw new RuntimeException("roundX function takes exactly two arguments");
             }
             int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
             return unnaturalRound(fractionalDigits, tokens.get(1)).toString();
@@ -107,10 +107,10 @@ public class Rounding {
         @Override
         public String solve(List<String> tokens) {
             if (tokens.size() != 2) {
-                throw new RuntimeException("roundDigitsN function takes exactly two argument");
+                throw new RuntimeException("roundDigitsN function takes exactly two arguments");
             }
             int digits = Utils.getFirstTokenAsInt(tokens);
-            return new BigDecimal(tokens.get(1)).round(new MathContext(digits, RoundingMode.HALF_UP)).toString();
+            return roundDigits(digits, tokens.get(1), RoundingMode.HALF_UP);
         }
 
         @Override
@@ -129,16 +129,24 @@ public class Rounding {
         }
     }
 
-    static BigDecimal naturalRound(int origScale, String orig) {
-        return naturalRound(origScale, new BigDecimal(orig));
+    static String roundDigits(int digits, String s, RoundingMode m) {
+        return roundDigits(digits, new BigDecimal(s), m);
     }
 
-    static BigDecimal naturalRound(int origScale, BigDecimal orig) {
+    private static String roundDigits(int digits, BigDecimal bd, RoundingMode m) {
+        return bd.round(new MathContext(digits, m)).toString();
+    }
+
+    static BigDecimal naturalRound(int origScale, String orig, RoundingMode m) {
+        return naturalRound(origScale, new BigDecimal(orig), m);
+    }
+
+    static BigDecimal naturalRound(int origScale, BigDecimal orig, RoundingMode m) {
         if (origScale < 0) {
             throw new RuntimeException("Scale must be 0 or positive");
         }
         int[] l = Utils.decimalAndFractionalParts(orig);
-        MathContext pr = new MathContext(l[0] + origScale, RoundingMode.HALF_UP);
+        MathContext pr = new MathContext(l[0] + origScale, m);
         BigDecimal rounded = orig.round(pr);
         return rounded;
     }

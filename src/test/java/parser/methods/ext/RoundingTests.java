@@ -14,6 +14,10 @@ public class RoundingTests {
         Assertions.assertEquals("1E+2", me.solve());
         me = new MathExpression("roundDigitsN(2, 125.35)");
         Assertions.assertEquals("1.3E+2", me.solve());
+        me = new MathExpression("roundDigitsN(2, -125.35)");
+        Assertions.assertEquals("-1.3E+2", me.solve());
+        me = new MathExpression("roundDigitsN(2, -124.35)");
+        Assertions.assertEquals("-1.2E+2", me.solve());
         me = new MathExpression("roundDigitsN(3, 125.35)");
         Assertions.assertEquals("125", me.solve());
         me = new MathExpression("roundDigitsN(4, 125.35)");
@@ -23,6 +27,7 @@ public class RoundingTests {
         me = new MathExpression("roundDigitsN(6, 125.35)");
         Assertions.assertEquals("125.35", me.solve());
     }
+
     @Test
     void roundingAsExpected() {
         MathExpression me;
@@ -97,8 +102,8 @@ public class RoundingTests {
             me = new MathExpression("roundN(2," + s + "1.445)");
             Assertions.assertEquals(r + "1.45", me.solve());
 
-            me = new MathExpression("roundN(2, 12.99999)");
-            Assertions.assertEquals("13.00", me.solve());
+            me = new MathExpression("roundN(2, " + s + "12.99999)");
+            Assertions.assertEquals(r + "13.00", me.solve());
         }
 
     }
@@ -140,8 +145,8 @@ public class RoundingTests {
             me = new MathExpression("roundX(2," + s + "1.445)");
             Assertions.assertEquals(r + "1.45", me.solve());
 
-            me = new MathExpression("roundX(2, 12.99999)");
-            Assertions.assertEquals("13.0000", me.solve());
+            me = new MathExpression("roundX(2, " + s + "12.99999)");
+            Assertions.assertEquals(r + "13.0000", me.solve());
         }
 
     }
