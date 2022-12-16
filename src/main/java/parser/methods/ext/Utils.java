@@ -160,11 +160,14 @@ public final class Utils {
         int r[] = new int[]{0, 0};
         long decimal = bd.toBigInteger().longValue();
         r[0] = ("" + decimal).length();
-        String stripped = bd.stripTrailingZeros().toString();
+        String stripped = bd.stripTrailingZeros().toPlainString();
         if (stripped.length() <= r[0]) {
             r[1] = 0;
         } else {
             r[1] = stripped.substring(r[0] + 1).length();
+        }
+        if (decimal == 0) {
+            r[0] = 0;
         }
         return r;
     }

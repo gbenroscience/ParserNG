@@ -109,18 +109,18 @@ public class FloorCeilTests {
                 r = "-";
             }
             me = new MathExpression("floorN(1," + s + "1)");
-            Assertions.assertEquals(r + "1", me.solve());
+            Assertions.assertEquals(r + "1.0", me.solve());
             me = new MathExpression("floorN(2," + s + "2)");
-            Assertions.assertEquals(r + "2", me.solve());
+            Assertions.assertEquals(r + "2.00", me.solve());
 
             me = new MathExpression("floorN(2," + s + "1.1)");
-            Assertions.assertEquals(r + "1.1", me.solve());
+            Assertions.assertEquals(r + "1.10", me.solve());
             me = new MathExpression("floorN(2," + s + "1.9)");
-            Assertions.assertEquals(r + "1.9", me.solve());
+            Assertions.assertEquals(r + "1.90", me.solve());
             me = new MathExpression("floorN(5," + s + "1.4)");
-            Assertions.assertEquals(r + "1.4", me.solve());
+            Assertions.assertEquals(r + "1.40000", me.solve());
             me = new MathExpression("floorN(6, " + s + "1.5)");
-            Assertions.assertEquals(r + "1.5", me.solve());
+            Assertions.assertEquals(r + "1.500000", me.solve());
 
             me = new MathExpression("floorN(1," + s + "1.44)");
             if (s.equals("-")) {
@@ -274,18 +274,18 @@ public class FloorCeilTests {
                 r = "-";
             }
             me = new MathExpression("ceilN(1," + s + "1)");
-            Assertions.assertEquals(r + "1", me.solve());
+            Assertions.assertEquals(r + "1.0", me.solve());
             me = new MathExpression("ceilN(2," + s + "2)");
-            Assertions.assertEquals(r + "2", me.solve());
+            Assertions.assertEquals(r + "2.00", me.solve());
 
             me = new MathExpression("ceilN(2," + s + "1.1)");
-            Assertions.assertEquals(r + "1.1", me.solve());
+            Assertions.assertEquals(r + "1.10", me.solve());
             me = new MathExpression("ceilN(2," + s + "1.9)");
-            Assertions.assertEquals(r + "1.9", me.solve());
+            Assertions.assertEquals(r + "1.90", me.solve());
             me = new MathExpression("ceilN(5," + s + "1.4)");
-            Assertions.assertEquals(r + "1.4", me.solve());
+            Assertions.assertEquals(r + "1.40000", me.solve());
             me = new MathExpression("ceilN(6, " + s + "1.5)");
-            Assertions.assertEquals(r + "1.5", me.solve());
+            Assertions.assertEquals(r + "1.500000", me.solve());
 
             me = new MathExpression("ceilN(1," + s + "1.44)");
             if (s.equals("-")) {

@@ -145,9 +145,7 @@ public class Rounding {
         if (origScale < 0) {
             throw new RuntimeException("Scale must be 0 or positive");
         }
-        int[] l = Utils.decimalAndFractionalParts(orig);
-        MathContext pr = new MathContext(l[0] + origScale, m);
-        BigDecimal rounded = orig.round(pr);
+        BigDecimal rounded = orig.setScale(origScale, m);
         return rounded;
     }
 
@@ -162,8 +160,7 @@ public class Rounding {
         BigDecimal rounded = orig;
         while (Utils.decimalAndFractionalParts(rounded)[1] > origScale) {
             int[] l = Utils.decimalAndFractionalParts(rounded);
-            MathContext pr = new MathContext(l[0] + l[1] - 1, RoundingMode.HALF_UP);
-            rounded = rounded.round(pr);
+            rounded = rounded.setScale(l[1] - 1, RoundingMode.HALF_UP);
         }
         return rounded;
     }

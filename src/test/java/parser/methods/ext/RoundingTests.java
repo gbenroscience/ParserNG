@@ -74,18 +74,18 @@ public class RoundingTests {
                 r = "-";
             }
             me = new MathExpression("roundN(1," + s + "1)");
-            Assertions.assertEquals(r + "1", me.solve());
+            Assertions.assertEquals(r + "1.0", me.solve());
             me = new MathExpression("roundN(2," + s + "2)");
-            Assertions.assertEquals(r + "2", me.solve());
+            Assertions.assertEquals(r + "2.00", me.solve());
 
             me = new MathExpression("roundN(2," + s + "1.1)");
-            Assertions.assertEquals(r + "1.1", me.solve());
+            Assertions.assertEquals(r + "1.10", me.solve());
             me = new MathExpression("roundN(2," + s + "1.9)");
-            Assertions.assertEquals(r + "1.9", me.solve());
+            Assertions.assertEquals(r + "1.90", me.solve());
             me = new MathExpression("roundN(5," + s + "1.4)");
-            Assertions.assertEquals(r + "1.4", me.solve());
+            Assertions.assertEquals(r + "1.40000", me.solve());
             me = new MathExpression("roundN(6, " + s + "1.5)");
-            Assertions.assertEquals(r + "1.5", me.solve());
+            Assertions.assertEquals(r + "1.500000", me.solve());
 
             me = new MathExpression("roundN(1," + s + "1.44)");
             Assertions.assertEquals(r + "1.4", me.solve());
@@ -148,7 +148,99 @@ public class RoundingTests {
             me = new MathExpression("roundX(2, " + s + "12.99999)");
             Assertions.assertEquals(r + "13.0000", me.solve());
         }
+    }
 
+    @Test
+    void aroundZero() {
+        MathExpression me;
+        for (String s : new String[]{"", "-", "--"}) {
+            String r = "";
+            if (s.equals("-")) {
+                r = "-";
+            }
+            me = new MathExpression("round(" + s + "0.9)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("round(" + s + "0.5)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("round(" + s + "0.4)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("round(" + s + "0.1)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("round(" + s + "0)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("round(" + s + "0.0)");
+            Assertions.assertEquals( "0", me.solve());
+
+            me = new MathExpression("round(" + s + "0.94)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("round(" + s + "0.95)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("round(" + s + "0.54)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("round(" + s + "0.55)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("round(" + s + "0.44)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("round(" + s + "0.45)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("round(" + s + "0.14)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("round(" + s + "0.15)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("round(" + s + "0)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("round(" + s + "0.04)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("round(" + s + "0.05)");
+            Assertions.assertEquals( "0", me.solve());
+        }
+    }
+
+
+    @Test
+    void xaroundZero() {
+        MathExpression me;
+        for (String s : new String[]{"", "-", "--"}) {
+            String r = "";
+            if (s.equals("-")) {
+                r = "-";
+            }
+            me = new MathExpression("roundX(0," + s + "0.9)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.5)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.4)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.1)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("roundX(0," + s + "0)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.0)");
+            Assertions.assertEquals( "0.0", me.solve());
+
+            me = new MathExpression("roundX(0," + s + "0.94)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.95)");
+            Assertions.assertEquals(r + "1.0", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.54)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.55)");
+            Assertions.assertEquals(r + "1", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.44)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.45)");
+            Assertions.assertEquals( r+ "1", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.14)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.15)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("roundX(0," + s + "0)");
+            Assertions.assertEquals( "0", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.04)");
+            Assertions.assertEquals( "0.0", me.solve());
+            me = new MathExpression("roundX(0," + s + "0.05)");
+            Assertions.assertEquals( "0", me.solve());
+        }
     }
 
 }
