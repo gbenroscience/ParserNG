@@ -17,7 +17,7 @@ public class AlgebraExpressionParser {
     }
 
     public BigDecimal evaluate() {
-        log.log("evaluating: " + original);
+        log.log("evaluating math: " + original);
         BigDecimal r =  new BigDecimal(mathExpression.solve());
         log.log("is: " + r.toString());
         return r;

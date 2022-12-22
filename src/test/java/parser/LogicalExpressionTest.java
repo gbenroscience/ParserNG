@@ -10,8 +10,14 @@ class LogicalExpressionTest {
 
     @Test
     void solveNonsense() {
-        LogicalExpression expr = new LogicalExpression("1+1 < (2+0)*1 impl [ [5 == 6 || 33<(22-20)*2 ]xor [ [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2]] eq [ true && false ] ", log);
+        LogicalExpression expr = new LogicalExpression("1+1 < (2+0)*1 impl [ [5 == 6 || 33<(22-20)*2 ] xor [ [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2]] eq [ true && false ] ", log);
         Assertions.assertEquals("true",expr.solve());
+        LogicalExpression exprPartx = new LogicalExpression("1+1 < (2+0)*1 impl   false", log);
+        Assertions.assertEquals("true",exprPartx.solve());
+        LogicalExpression exprFixedPart1 = new LogicalExpression("[1+1 < (2+0)*1 impl  false ]  eq  false", log);
+        Assertions.assertEquals("false",exprFixedPart1.solve());
+        LogicalExpression exprFixedPart2 = new LogicalExpression("1+1 < (2+0)*1 impl  [ false   eq  false]", log);
+        Assertions.assertEquals("true",exprFixedPart2.solve());
     }
 
     @Test
@@ -82,6 +88,7 @@ class LogicalExpressionTest {
         Assertions.assertEquals("false", expr.solve());
     }
 
+    @Test
     void notMoreWithSpaces() {
         LogicalExpression expr;
         expr = new LogicalExpression("![true] || !    [false] ", log);
@@ -102,19 +109,28 @@ class LogicalExpressionTest {
         Assertions.assertEquals("false", expr.solve());
     }
 
+    @Test
     void variablesWorks() {
         LogicalExpression expr;
-        expr = new LogicalExpression("r=3;r<r+1", log);
+        expr = new LogicalExpression("q=3;q<q+1", log);
         Assertions.assertEquals("true", expr.solve());
-        expr = new LogicalExpression("[r<r+1 || [r=3;r<5]]", log);
+        expr = new LogicalExpression("[q<q+1 || [q=3;q<5]]", log);
         Assertions.assertEquals("true", expr.solve());
-        expr = new LogicalExpression("[r=3;r<1] || [r<r+1 || [r<5]]", log);
+        expr = new LogicalExpression("[q=3;q<1] || [q<q+1 || [q<5]]", log);
         Assertions.assertEquals("true", expr.solve());
     }
 
+    @Test
     void variablesDoNotWorks(){
-        LogicalExpression expr;
-        expr = new LogicalExpression("[r=3;r<r+1 || [r<5]", log);
-        Assertions.assertEquals("Character r is neither a decimal digit number, decimal point, nor \"e\" notation exponential mark.", expr.solve());
+        try {
+            LogicalExpression expr;
+            expr = new LogicalExpression("[s=3;s<s+1 || [s<5]]", log);
+            String s = expr.solve();
+            Assertions.assertEquals("Character s is neither a decimal digit number, decimal point, nor \"e\" notation exponential mark.", s);
+        }catch(NumberFormatException ex){
+            ex.printStackTrace();
+            return;
+        }
+        Assertions.assertTrue(false, "should have thrown");
     }
 }

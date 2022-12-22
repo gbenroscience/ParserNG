@@ -4,11 +4,14 @@ import org.junit.jupiter.api.Assertions;
 
 import java.util.List;
 
+import org.junit.jupiter.api.Test;
+import parser.LogicalExpression;
+
 class LogicalExpressionParserTest {
 
     private static PrintingExpressionLogger log = new PrintingExpressionLogger();
 
-    @org.junit.jupiter.api.Test
+    @Test
     void splitTest1() {
         List<String> s;
         s = new LogicalExpressionParser("not important now", log).split("1+2+3 < 5");
@@ -19,7 +22,7 @@ class LogicalExpressionParserTest {
         Assertions.assertEquals("1+2+3<5", s.get(0));
         Assertions.assertEquals("&", s.get(1));
         Assertions.assertEquals("2+5>7", s.get(2));
-        s = new LogicalExpressionParser("not important now", log).split("1+2+3<5    &&&&2+5>7");
+        s = new LogicalExpressionParser("not important now", log).split("1+2+3<5    &&&& 2+5>7");
         Assertions.assertEquals(3, s.size());
         Assertions.assertEquals("1+2+3<5", s.get(0));
         Assertions.assertEquals("&", s.get(1));
@@ -29,14 +32,14 @@ class LogicalExpressionParserTest {
         Assertions.assertEquals("1+2+3<5", s.get(0));
         Assertions.assertEquals("|", s.get(1));
         Assertions.assertEquals("2+5>7", s.get(2));
-        s = new LogicalExpressionParser("not important now", log).split("1+2+3<5||||    2+5>7");
+        s = new LogicalExpressionParser("not important now", log).split("1+2+3<5 ||||    2+5>7");
         Assertions.assertEquals(3, s.size());
         Assertions.assertEquals("1+2+3<5", s.get(0));
         Assertions.assertEquals("|", s.get(1));
         Assertions.assertEquals("2+5>7", s.get(2));
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void splitTest2() {
         List<String> s;
         s = new LogicalExpressionParser("not important now", log).split("1+2+3 < 5");
@@ -70,7 +73,7 @@ class LogicalExpressionParserTest {
         Assertions.assertEquals("2+5>7", s.get(2));
         Assertions.assertEquals("|", s.get(3));
         Assertions.assertEquals("5<6", s.get(4));
-        s = new LogicalExpressionParser("not important now", log).split("1+2+3<5    &&&&2+5>7 & 5<7 & 1+2+3<5||||    2+5>7");
+        s = new LogicalExpressionParser("not important now", log).split("1+2+3<5    &&&& 2+5>7 & 5<7 & 1+2+3<5 ||||    2+5>7");
         Assertions.assertEquals(9, s.size());
         Assertions.assertEquals("1+2+3<5", s.get(0));
         Assertions.assertEquals("&", s.get(1));
@@ -83,7 +86,7 @@ class LogicalExpressionParserTest {
         Assertions.assertEquals("2+5>7", s.get(8));
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void evalTest() {
         LogicalExpressionParser comp;
         comp = new LogicalExpressionParser("1+2+3 >= 7", log);
@@ -96,7 +99,7 @@ class LogicalExpressionParserTest {
         Assertions.assertFalse(comp.evaluate());
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void andTable() {
         Assertions.assertTrue(new LogicalExpressionParser("true and true", log).evaluate());
         Assertions.assertFalse(new LogicalExpressionParser("false and true", log).evaluate());
@@ -108,7 +111,7 @@ class LogicalExpressionParserTest {
         Assertions.assertFalse(new LogicalExpressionParser("true &&&& false", log).evaluate());
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void orTable() {
         Assertions.assertTrue(new LogicalExpressionParser("true or true", log).evaluate());
         Assertions.assertTrue(new LogicalExpressionParser("false or true", log).evaluate());
@@ -120,7 +123,7 @@ class LogicalExpressionParserTest {
         Assertions.assertTrue(new LogicalExpressionParser("true |||| false", log).evaluate());
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void xorTable() {
         Assertions.assertFalse(new LogicalExpressionParser("true xor true", log).evaluate());
         Assertions.assertTrue(new LogicalExpressionParser("false xor true", log).evaluate());
@@ -128,7 +131,7 @@ class LogicalExpressionParserTest {
         Assertions.assertTrue(new LogicalExpressionParser("true xor false", log).evaluate());
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void eqTable() {
         Assertions.assertTrue(new LogicalExpressionParser("true eq true", log).evaluate());
         Assertions.assertFalse(new LogicalExpressionParser("false eq true", log).evaluate());
@@ -136,7 +139,7 @@ class LogicalExpressionParserTest {
         Assertions.assertFalse(new LogicalExpressionParser("true eq false", log).evaluate());
     }
 
-    @org.junit.jupiter.api.Test
+    @Test
     void implTable() {
         Assertions.assertTrue(new LogicalExpressionParser("true imp true", log).evaluate());
         Assertions.assertTrue(new LogicalExpressionParser("false imp true", log).evaluate());
@@ -149,7 +152,7 @@ class LogicalExpressionParserTest {
     }
 
 
-    @org.junit.jupiter.api.Test
+    @Test
     void eqTableWithEq() {
         Assertions.assertTrue(new LogicalExpressionParser("0 == 0  eq 0 == 0", log).evaluate());
         Assertions.assertFalse(new LogicalExpressionParser("0 != 0 eq 0 == 0", log).evaluate());
@@ -182,6 +185,117 @@ class LogicalExpressionParserTest {
             ex++;
         }
         Assertions.assertEquals(4, ex, "four exceptions expected");
+    }
+
+    @Test
+    void floorIsNotOr() {
+        LogicalExpression comp;
+        comp = new LogicalExpression(" floor(4.5) == 4 and ceil(4.5) == 5 ", log);
+        Assertions.assertEquals("true", comp.solve());
+
+        comp = new LogicalExpression(" floor(4.5) != 4 or ceil(4.5) != 5 ", log);
+        Assertions.assertEquals("false", comp.solve());
+
+        comp = new LogicalExpression(" floor(4.5) ", log);
+        Assertions.assertTrue("4".equals(comp.solve()) || "4.0".equals(comp.solve()));
+    }
+
+
+    @Test
+    void ternary2() {
+        LogicalExpression exprPartX = new LogicalExpression("false impl  false  impl  false", log);
+        Assertions.assertEquals("true", exprPartX.solve());
+        LogicalExpression exprParty = new LogicalExpression("false xor  false  xor  false", log);
+        Assertions.assertEquals("false", exprParty.solve());
+        LogicalExpression exprPartXX = new LogicalExpression("1<2 impl  1<2  impl  1<2", log);
+        Assertions.assertEquals("true", exprPartXX.solve());
+        LogicalExpression exprPartyy = new LogicalExpression("1<2 xor  1<2  xor  1<2", log);
+        Assertions.assertEquals("true", exprPartyy.solve());
+
+        LogicalExpression exprPartXXX = new LogicalExpression("1+1<2 impl  1+1<2  impl  1+1<2", log);
+        Assertions.assertEquals("true", exprPartXXX.solve());
+        LogicalExpression exprPartyyy = new LogicalExpression("1+1<2 xor  1+1<2  xor  1+1<2", log);
+        Assertions.assertEquals("false", exprPartyyy.solve());
+    }
+
+    @Test
+    void ternary1() {
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 and 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 and 1<2 and 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 and 1<2 and 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 and 1<2 and 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("true and true and true", log).evaluate());
+
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 or 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 or 1<2 and 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 or 1<2 or 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 or 1<2 or 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("true or true or true", log).evaluate());
+
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 imp 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 imp 1<2 imp 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 imp 1<2 imp 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 imp 1<2 imp 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("true imp true imp true", log).evaluate());
+
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 eq 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 eq 1<2 and 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 eq 1<2 eq 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 eq 1<2 eq 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("true eq true eq true", log).evaluate());
+
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 imp 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1+1==2 imp 1<2 and 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 imp 1<2 imp 1+1==2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("1<2 imp 1<2 imp 1<2", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("true imp true imp true", log).evaluate());
+
+        Assertions.assertTrue(new LogicalExpressionParser("true and true or true", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("true or true and true", log).evaluate());
+        Assertions.assertTrue(new LogicalExpressionParser("true imp true eq true", log).evaluate());
+    }
+
+    @Test
+    void ternary311() {
+        LogicalExpression exprPartX = new LogicalExpression("false or  false  impl  false", log);
+        Assertions.assertEquals("true", exprPartX.solve());
+        LogicalExpression exprPartXX = new LogicalExpression("1<2 or  1<2 impl  1<2", log);
+        Assertions.assertEquals("true", exprPartXX.solve());
+        LogicalExpression exprPartXXX = new LogicalExpression("1+1<2 or  1+1<2 impl  1+1<2", log);
+        Assertions.assertEquals("true", exprPartXXX.solve());
+    }
+
+    @Test
+    void ternary312() {
+        LogicalExpression exprPartX = new LogicalExpression("false imp  false  or  false", log);
+        Assertions.assertEquals("true", exprPartX.solve());
+        LogicalExpression exprPartXX = new LogicalExpression("1<2 imp  1<2 or  1<2", log);
+        Assertions.assertEquals("true", exprPartXX.solve());
+        LogicalExpression exprPartXXX = new LogicalExpression("1+1<2 imp  1+1<2 or  1+1<2", log);
+        Assertions.assertEquals("true", exprPartXXX.solve());
+    }
+
+    @Test
+    void ternary313() {
+        LogicalExpression exprPartX = new LogicalExpression("false impl  false  or  false", log);
+        Assertions.assertEquals("true", exprPartX.solve());
+        LogicalExpression exprPartXX = new LogicalExpression("1<2 impl  1<2 or  1<2", log);
+        Assertions.assertEquals("true", exprPartXX.solve());
+        LogicalExpression exprPartXXX = new LogicalExpression("1+1<2 impl  1+1<2 or  1+1<2", log);
+        Assertions.assertEquals("true", exprPartXXX.solve());
+    }
+
+
+    @Test
+    void solveNonsense1() {
+        LogicalExpression exprPart = new LogicalExpression("1+1 < (2+0)*1 imp  false  eq  false", log);
+        Assertions.assertEquals("true", exprPart.solve());
+    }
+
+    @Test
+    void solveNonsense2() {
+        LogicalExpression exprPart = new LogicalExpression("1+1 < (2+0)*1 impl  false  eq  false", log);
+        Assertions.assertEquals("true", exprPart.solve());
     }
 
 }

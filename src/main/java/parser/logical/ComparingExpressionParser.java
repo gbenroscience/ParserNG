@@ -5,8 +5,10 @@ import java.util.Arrays;
 
 public class ComparingExpressionParser extends AbstractSplittingParser {
 
-    private static final String[] primaryChars = new String[]{"!=", "==", ">=", "<=", "le", "ge", "lt", "gt"};
-    private static final String[] secondaryChars = new String[]{"<", ">"};
+    private static final String[] primaryChars1 = new String[]{"!=", "==", ">=", "<="};
+    private static final String[] primaryChars2 = new String[]{"le", "ge", "lt", "gt"};
+    private static final String[] secondaryChars1 = new String[]{"<", ">"};
+    private static final String[] secondaryChars2 = new String[]{};
 
     public ComparingExpressionParser(String expression, ExpressionLogger log) {
         super(expression, log);
@@ -14,12 +16,22 @@ public class ComparingExpressionParser extends AbstractSplittingParser {
 
 
     public static boolean isComparing(String originalExpression) {
-        for (String s : primaryChars) {
+        for (String s : primaryChars1) {
             if (originalExpression.contains(s)) {
                 return true;
             }
         }
-        for (String s : secondaryChars) {
+        for (String s : primaryChars2) {
+            if (originalExpression.contains(s)) {
+                return true;
+            }
+        }
+        for (String s : secondaryChars1) {
+            if (originalExpression.contains(s)) {
+                return true;
+            }
+        }
+        for (String s : secondaryChars2) {
             if (originalExpression.contains(s)) {
                 return true;
             }
@@ -27,18 +39,26 @@ public class ComparingExpressionParser extends AbstractSplittingParser {
         return false;
     }
 
-    public String[] getPrimaryChars() {
-        return Arrays.copyOf(primaryChars, primaryChars.length);
+    public String[] getPrimaryChars1() {
+        return Arrays.copyOf(primaryChars1, primaryChars1.length);
     }
 
-    public String[] getSecondaryChars() {
-        return Arrays.copyOf(secondaryChars, secondaryChars.length);
+    public String[] getPrimaryChars2() {
+        return Arrays.copyOf(primaryChars2, primaryChars2.length);
+    }
+
+    public String[] getSecondaryChars1() {
+        return Arrays.copyOf(secondaryChars1, secondaryChars1.length);
+    }
+
+    public String[] getSecondaryChars2() {
+        return Arrays.copyOf(secondaryChars2, secondaryChars2.length);
     }
 
     public boolean evaluate() {
-        log.log("evaluating: " + getOriginal());
+        log.log("evaluating comparison: " + getOriginal());
         if (split.size() == 1) {
-            boolean r = parseBooleanStrict(split.get(0).trim());
+            boolean r = parseBooleanStrict(split.get(0).trim(), log);
             log.log("is: " + r);
             return r;
         } else if (split.size() == 3) {
@@ -78,10 +98,10 @@ public class ComparingExpressionParser extends AbstractSplittingParser {
         }
     }
 
-    public static boolean parseBooleanStrict(String trim) {
+    public static boolean parseBooleanStrict(String trim, ExpressionLogger log) {
         if ("true".equalsIgnoreCase(trim)) {
             return true;
-        } else if ("false".equalsIgnoreCase(trim)){
+        } else if ("false".equalsIgnoreCase(trim)) {
             return false;
         } else {
             throw new ArithmeticException(trim + " is not true/false");

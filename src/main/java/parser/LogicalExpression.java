@@ -82,7 +82,7 @@ public class LogicalExpression implements Solvable {
                                 x = x - neg;//!!!!
                                 ExpressionLogger tmpl = new ExpressionLogger.InheritingExpressionLogger(logger);
                                 tmpl.log("!" + eval);
-                                boolean b = !ComparingExpressionParser.parseBooleanStrict(eval.trim());
+                                boolean b = !ComparingExpressionParser.parseBooleanStrict(eval.trim(), logger);
                                 tmpl.log("..." + b);
                                 eval = "" + b;
                             }
