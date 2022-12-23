@@ -150,6 +150,10 @@ class MathExpressionTest {
     @Test
     void junkExamples() {
         boolean print = false;
+        //this test is checking content of variables.
+        //some other tests could have set them. Eg
+        //LogicalExpressionTest variablesDoNotWorks and variablestWorks
+        VariableManager.clearVariables();
         MathExpression linear = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");
         String ls = linear.solve();
         if (print) System.out.println("soln: " + ls);
