@@ -298,4 +298,11 @@ class LogicalExpressionParserTest {
         Assertions.assertEquals("true", exprPart.solve());
     }
 
+    @Test
+    void help() {
+        LogicalExpression exprPart = new LogicalExpression("help", log);
+        String h1 = exprPart.solve();
+        Assertions.assertTrue(h1.length() > 100);
+    }
+
 }

@@ -5,18 +5,25 @@ import java.util.Arrays;
 
 import parser.methods.Declarations;
 
-public class LogicalExpressionParser extends AbstractSplittingParser {
+public class LogicalExpressionParser extends AbstractSplittingParser implements LogicalExpressionMemberFactory.LogicalExpressionMember {
 
     private static final String[] chars1 = new String[]{};
     private static final String[] chars2 = new String[]{"impl", "xor"};
     private static final String[] secchars1 = new String[]{"|", "&"};
     private static final String[] secchars2 = new String[]{"imp", "eq", "or", "and"};
+    private final LogicalExpressionMemberFactory subexpressionFactory;
 
     public LogicalExpressionParser(String expression, ExpressionLogger log) {
-        super(expression, log);
+        this(expression, log, new ComparingExpressionParser.ComparingExpressionParserFactory());
     }
 
-    public static boolean isLogical(String originalExpression) {
+    public LogicalExpressionParser(String expression, ExpressionLogger log, LogicalExpressionMemberFactory subexpressionFactory) {
+        super(expression, log);
+        this.subexpressionFactory = subexpressionFactory;
+    }
+
+    @Override
+    public boolean isLogicalExpressionMember(String originalExpression) {
         String[] methods = Declarations.getInbuiltMethods();
         for (String method : methods) {
             //otherwise eg floor would match or, and thus delegate to Logical parser
@@ -47,7 +54,7 @@ public class LogicalExpressionParser extends AbstractSplittingParser {
                 return true;
             }
         }
-        if (ComparingExpressionParser.isComparing(originalExpression)) {
+        if (subexpressionFactory.createLogicalExpressionMember("", log).isLogicalExpressionMember(originalExpression)) {
             return true;
         }
         return false;
@@ -72,10 +79,10 @@ public class LogicalExpressionParser extends AbstractSplittingParser {
 
     public boolean evaluate() {
         log.log("evaluating logical: " + getOriginal());
-        boolean result = new ComparingExpressionParser(split.get(0), new ExpressionLogger.InheritingExpressionLogger(log)).evaluate();
+        boolean result = subexpressionFactory.createLogicalExpressionMember(split.get(0), new ExpressionLogger.InheritingExpressionLogger(log)).evaluate();
         for (int i = 1; i <= split.size() - 2; i = i + 2) {
             String op = split.get(i);
-            ComparingExpressionParser comp2 = new ComparingExpressionParser(split.get(i + 1), new ExpressionLogger.InheritingExpressionLogger(log));
+            LogicalExpressionMemberFactory.LogicalExpressionMember comp2 = subexpressionFactory.createLogicalExpressionMember(split.get(i + 1), new ExpressionLogger.InheritingExpressionLogger(log));
             boolean r2 = comp2.evaluate();
             log.log("... " + result + " " + op + " " + r2);
             if ("&".equals(op) || "and".equals(op)) {
@@ -103,5 +110,9 @@ public class LogicalExpressionParser extends AbstractSplittingParser {
     @Override
     public String getName() {
         return "Logical operators";
+    }
+
+    public LogicalExpressionMemberFactory getSubexpressionFactory() {
+        return subexpressionFactory;
     }
 }

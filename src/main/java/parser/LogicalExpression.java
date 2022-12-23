@@ -4,6 +4,8 @@ import interfaces.Solvable;
 import math.Main;
 import parser.logical.ComparingExpressionParser;
 import parser.logical.ExpressionLogger;
+import parser.logical.LogicalExpressionMemberFactory;
+import parser.logical.LogicalExpressionMemberFactory.LogicalExpressionMember;
 import parser.logical.LogicalExpressionParser;
 import parser.methods.Declarations;
 
@@ -13,6 +15,7 @@ public class LogicalExpression implements Solvable {
 
     private final String originalExpression;
     private final ExpressionLogger mainLogger;
+    private final LogicalExpressionMemberFactory logicalExpressionMemberFactory;
 
     public static final ExpressionLogger verboseStderrLogger = new ExpressionLogger() {
         @Override
@@ -24,8 +27,13 @@ public class LogicalExpression implements Solvable {
     };
 
     public LogicalExpression(String s, ExpressionLogger logger) {
+        this(s, logger, new ComparingExpressionParser.ComparingExpressionParserFactory());
+    }
+
+    public LogicalExpression(String s, ExpressionLogger logger, LogicalExpressionMemberFactory logicalExpressionMemberFactory) {
         this.originalExpression = s;
         this.mainLogger = logger;
+        this.logicalExpressionMemberFactory = logicalExpressionMemberFactory;
     }
 
     public static void main(String args[]) {
@@ -40,7 +48,7 @@ public class LogicalExpression implements Solvable {
         if (originalExpression.trim().equalsIgnoreCase(Declarations.HELP)) {
             return getHelp();
         }
-        if (LogicalExpressionParser.isLogical(originalExpression)) {
+        if (new LogicalExpressionParser("", ExpressionLogger.DEV_NULL, logicalExpressionMemberFactory).isLogicalExpressionMember(originalExpression)) {
             return evalBrackets(originalExpression, mainLogger);
         } else {
             return new MathExpression(originalExpression).solve();
@@ -102,14 +110,15 @@ public class LogicalExpression implements Solvable {
     }
 
     private String evalDirect(String s, ExpressionLogger logger) {
-        LogicalExpressionParser lex = new LogicalExpressionParser(s, new ExpressionLogger.InheritingExpressionLogger(logger));
+        LogicalExpressionParser lex = new LogicalExpressionParser(s, new ExpressionLogger.InheritingExpressionLogger(logger), logicalExpressionMemberFactory);
         return "" + lex.evaluate();
     }
 
 
-    public static String getHelp() {
-        return new ComparingExpressionParser(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp() + "\n" +
-                new LogicalExpressionParser(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp() + "\n" +
+    public String getHelp() {
+        LogicalExpressionParser l = new LogicalExpressionParser(" 1 == 1", ExpressionLogger.DEV_NULL, logicalExpressionMemberFactory);
+        return l.getSubexpressionFactory().createLogicalExpressionMember(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp() + "\n" +
+                l.getHelp() + "\n" +
                 "As Mathematical parts are using () as brackets, Logical parts must be grouped by [] eg: " + "\n" +
                 "1+1 < (2+0)*1 impl [ [5 == 6 || 33<(22-20)*2 ]xor [ [  5-3 < 2 or 7*(5+2)<=5 ] and 1+1 == 2]] eq [ true && false ]" + "\n" +
                 "Note, that logical parsser supports only dual operators, so where true|false|true is valid, 1<2<3  is invalid!" + "\n" +

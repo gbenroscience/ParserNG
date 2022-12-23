@@ -15,6 +15,17 @@ public abstract class AbstractSplittingParser {
     protected final List<String> split;
     protected final ExpressionLogger log;
 
+    /**
+     * Dummy constructor to make more easy overriding
+     **/
+    public AbstractSplittingParser() {
+        pattern1 = Pattern.compile(".*");
+        pattern2 = pattern1;
+        original = pattern1.toString();
+        split = new ArrayList<>(0);
+        log = ExpressionLogger.DEV_NULL;
+    }
+
     public AbstractSplittingParser(String expression, ExpressionLogger log) {
         this.log = log;
         pattern1 = toPattern(getPrimaryChars1(), getPrimaryChars2());

@@ -3,7 +3,7 @@ package parser.logical;
 import java.math.BigDecimal;
 import java.util.Arrays;
 
-public class ComparingExpressionParser extends AbstractSplittingParser {
+public class ComparingExpressionParser extends AbstractSplittingParser implements LogicalExpressionMemberFactory.LogicalExpressionMember {
 
     private static final String[] primaryChars1 = new String[]{"!=", "==", ">=", "<="};
     private static final String[] primaryChars2 = new String[]{"le", "ge", "lt", "gt"};
@@ -14,8 +14,13 @@ public class ComparingExpressionParser extends AbstractSplittingParser {
         super(expression, log);
     }
 
+    public ComparingExpressionParser() {
+        super();
+    }
 
-    public static boolean isComparing(String originalExpression) {
+
+    @Override
+    public boolean isLogicalExpressionMember(String originalExpression) {
         for (String s : primaryChars1) {
             if (originalExpression.contains(s)) {
                 return true;
@@ -39,22 +44,27 @@ public class ComparingExpressionParser extends AbstractSplittingParser {
         return false;
     }
 
+    @Override
     public String[] getPrimaryChars1() {
         return Arrays.copyOf(primaryChars1, primaryChars1.length);
     }
 
+    @Override
     public String[] getPrimaryChars2() {
         return Arrays.copyOf(primaryChars2, primaryChars2.length);
     }
 
+    @Override
     public String[] getSecondaryChars1() {
         return Arrays.copyOf(secondaryChars1, secondaryChars1.length);
     }
 
+    @Override
     public String[] getSecondaryChars2() {
         return Arrays.copyOf(secondaryChars2, secondaryChars2.length);
     }
 
+    @Override
     public boolean evaluate() {
         log.log("evaluating comparison: " + getOriginal());
         if (split.size() == 1) {
@@ -111,5 +121,13 @@ public class ComparingExpressionParser extends AbstractSplittingParser {
     @Override
     public String getName() {
         return "Comparing operators";
+    }
+
+    public static class ComparingExpressionParserFactory implements  LogicalExpressionMemberFactory {
+
+        @Override
+        public LogicalExpressionMember createLogicalExpressionMember(String expression, ExpressionLogger log) {
+            return new ComparingExpressionParser(expression, log);
+        }
     }
 }

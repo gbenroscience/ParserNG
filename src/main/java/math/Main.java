@@ -9,6 +9,7 @@ import interfaces.Solvable;
 import parser.LogicalExpression;
 import parser.MathExpression;
 import parser.cmd.ParserCmd;
+import parser.logical.ExpressionLogger;
 
 public class Main {
 
@@ -180,7 +181,7 @@ public class Main {
         System.out.println("    true");
         System.out.println("  Note, that " + MathExpression.class.getName() + " nor " + LogicalExpression.class.getName() + " classes do not take any parameters except expressions");
         System.out.println("  Note, that " + ParserCmd.class.getName() + " class takes single parameter " + logcalSwitch + " to contorl its evaluation");
-        System.out.println(LogicalExpression.getHelp());
+        System.out.println(new LogicalExpression(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp());
     }
 
     public static String joinArgs(List<String> filteredArgs, boolean trim) {
