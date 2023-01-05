@@ -24,9 +24,7 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 2) {
-                throw new RuntimeException("roundN function takes exactly two arguments");
-            }
+            Utils.checkTokensCount("RoundN", 2, tokens);
             int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
             return naturalRound(fractionalDigits, tokens.get(1), RoundingMode.HALF_UP).toString();
         }
@@ -51,9 +49,7 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 1) {
-                throw new RuntimeException("round function takes exactly one argument");
-            }
+            Utils.checkTokensCount("Round", 1, tokens);
             return new RoundN().solve(Arrays.asList("0", tokens.get(0)));
         }
 
@@ -78,9 +74,7 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 2) {
-                throw new RuntimeException("roundX function takes exactly two arguments");
-            }
+            Utils.checkTokensCount("RoundX", 2, tokens);
             int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
             return unnaturalRound(fractionalDigits, tokens.get(1)).toString();
         }
@@ -106,9 +100,7 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 2) {
-                throw new RuntimeException("roundDigitsN function takes exactly two arguments");
-            }
+            Utils.checkTokensCount("roundDigitsN", 2, tokens);
             int digits = Utils.getFirstTokenAsInt(tokens);
             return roundDigits(digits, tokens.get(1), RoundingMode.HALF_UP);
         }

@@ -243,4 +243,26 @@ public class RoundingTests {
         }
     }
 
+    @Test
+    void roundAsExpectedExpr() {
+        MathExpression me;
+        me = new MathExpression("round(3+2)");
+        Assertions.assertEquals("5", me.solve());
+        me = new MathExpression("round(3/2)");
+        Assertions.assertEquals("2", me.solve());
+    }
+
+    @Test
+    void roundAsExpectedFunctions() {
+        MathExpression me;
+        me = new MathExpression("round(sin(5))");
+        Assertions.assertEquals("-1", me.solve());
+        me = new MathExpression("roundN(2,sin(5))");
+        Assertions.assertEquals("-0.96", me.solve());
+        me = new MathExpression("round(abs(-1.5))");
+        Assertions.assertEquals("2", me.solve());
+
+    }
+
+
 }

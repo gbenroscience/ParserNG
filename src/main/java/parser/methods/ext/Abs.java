@@ -12,9 +12,7 @@ public class Abs implements BasicNumericalMethod {
 
     @Override
     public String solve(List<String> tokens) {
-        if (tokens.size() != 1) {
-            throw new RuntimeException("abs function takes exactly one argument");
-        }
+        Utils.checkTokensCount("Abs", 1, tokens);
         return new BigDecimal(tokens.get(0)).abs().toString();
     }
 

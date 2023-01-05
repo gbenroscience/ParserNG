@@ -13,9 +13,7 @@ public class Lengths {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 1) {
-                throw new RuntimeException("length function takes exactly one argument");
-            }
+            Utils.checkTokensCount("Length", 1, tokens);
             int[] l = Utils.decimalAndFractionalParts(tokens.get(0));
             return "" + (l[0] + l[1]);
         }
@@ -40,9 +38,7 @@ public class Lengths {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 1) {
-                throw new RuntimeException("Length decimal function takes exactly one argument");
-            }
+            Utils.checkTokensCount("LengthDecimal", 1, tokens);
             int[] l = Utils.decimalAndFractionalParts(tokens.get(0));
             return "" + l[0];
         }
@@ -67,9 +63,7 @@ public class Lengths {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 1) {
-                throw new RuntimeException("length fractional function takes exactly one argument");
-            }
+            Utils.checkTokensCount("LengthFractional", 1, tokens);
             int[] l = Utils.decimalAndFractionalParts(tokens.get(0));
             return "" + l[1];
         }

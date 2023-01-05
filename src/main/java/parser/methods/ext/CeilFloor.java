@@ -4,7 +4,6 @@ import parser.TYPE;
 import parser.methods.BasicNumericalMethod;
 import parser.methods.Help;
 
-import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 
@@ -15,9 +14,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 1) {
-                throw new RuntimeException("Ceil function takes exactly one argument");
-            }
+            Utils.checkTokensCount("Ceil", 1, tokens);
             return Rounding.naturalRound(0, tokens.get(0), RoundingMode.CEILING).toString();
         }
 
@@ -42,9 +39,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 1) {
-                throw new RuntimeException("Floor function takes exactly one argument");
-            }
+            Utils.checkTokensCount("Floor", 1, tokens);
             return Rounding.naturalRound(0, tokens.get(0), RoundingMode.FLOOR).toString();
         }
 
@@ -68,9 +63,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 2) {
-                throw new RuntimeException("CeilN function takes exactly two arguments");
-            }
+            Utils.checkTokensCount("CeilN", 2, tokens);
             int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
             return Rounding.naturalRound(fractionalDigits, tokens.get(1), RoundingMode.CEILING).toString();
         }
@@ -96,9 +89,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 2) {
-                throw new RuntimeException("FloorN function takes exactly one arguments");
-            }
+            Utils.checkTokensCount("FloorN", 2, tokens);
             int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
             return Rounding.naturalRound(fractionalDigits, tokens.get(1), RoundingMode.FLOOR).toString();
         }
@@ -125,9 +116,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 2) {
-                throw new RuntimeException("CeilDigitsN function takes exactly two arguments");
-            }
+            Utils.checkTokensCount("CeilDigitsN", 2, tokens);
             int digits = Utils.getFirstTokenAsInt(tokens);
             return Rounding.roundDigits(digits, tokens.get(1), RoundingMode.CEILING);
         }
@@ -153,9 +142,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            if (tokens.size() != 2) {
-                throw new RuntimeException("FloorDigitsN function takes exactly two arguments");
-            }
+            Utils.checkTokensCount("FloorDigitsN", 2, tokens);
             int digits = Utils.getFirstTokenAsInt(tokens);
             return Rounding.roundDigits(digits, tokens.get(1), RoundingMode.FLOOR);
         }

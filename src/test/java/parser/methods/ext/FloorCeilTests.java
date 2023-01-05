@@ -2,6 +2,7 @@ package parser.methods.ext;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+
 import parser.MathExpression;
 
 public class FloorCeilTests {
@@ -161,7 +162,7 @@ public class FloorCeilTests {
                 Assertions.assertEquals("1.44", me.solve());
             }
 
-            me = new MathExpression("floorN(2, "+s+"12.99999)");
+            me = new MathExpression("floorN(2, " + s + "12.99999)");
             if (s.equals("-")) {
                 Assertions.assertEquals("-13.00", me.solve());
             } else {
@@ -334,6 +335,48 @@ public class FloorCeilTests {
         }
 
     }
+
+    @Test
+    void fracPreReq() {
+        MathExpression me;
+        me = new MathExpression("3/2");
+        Assertions.assertEquals("1.5", me.solve());
+        me = new MathExpression("(3/2)");
+        Assertions.assertEquals("1.5", me.solve());
+        me = new MathExpression("sin(5)");
+        Assertions.assertEquals("-0.9589242746631385", me.solve());
+        me = new MathExpression("sin(2+3)");
+        Assertions.assertEquals("-0.9589242746631385", me.solve());
+    }
+
+    @Test
+    void fracPreReqNonStat() {
+        MathExpression me;
+        me = new MathExpression("sin(3/2)");
+        Assertions.assertEquals("0.9974949866040544", me.solve());
+    }
+
+    @Test
+    void fracPreReqStat() {
+        MathExpression me;
+        me = new MathExpression("sum(3/2)");
+        Assertions.assertEquals("1.5", me.solve());
+    }
+
+    @Test
+    void ceilingAsExpectedExpr() {
+        MathExpression me;
+        me = new MathExpression("ceil(3/2)");
+        Assertions.assertEquals("2", me.solve());
+    }
+
+    @Test
+    void flooringAsExpectedFraExpr() {
+        MathExpression me;
+        me = new MathExpression("floor(3/2)");
+        Assertions.assertEquals("1", me.solve());
+    }
+
 
 
 }
