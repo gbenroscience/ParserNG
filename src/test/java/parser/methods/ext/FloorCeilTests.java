@@ -350,10 +350,24 @@ public class FloorCeilTests {
     }
 
     @Test
-    void fracPreReqNonStat() {
+    void fracPreReqNonStat1() {
         MathExpression me;
         me = new MathExpression("sin(3/2)");
         Assertions.assertEquals("0.9974949866040544", me.solve());
+    }
+
+    @Test
+    void fracPreReqNonStat2() {
+        MathExpression me;
+        me = new MathExpression("sin(1+1)");
+        Assertions.assertEquals("0.9092974268256817", me.solve());
+        me = new MathExpression("sin(2+2)");
+        Assertions.assertEquals("-0.7568024953079282", me.solve());
+        me = new MathExpression("sin(8)");
+        Assertions.assertEquals("0.9893582466233818", me.solve());
+        //ParserNG iincorrectly solve sin(1+1,2+2) as  sin(2*4)
+        me = new MathExpression("sin(1+1,2+2)");
+        Assertions.assertEquals("0.9893582466233818", me.solve());
     }
 
     @Test
