@@ -1,5 +1,7 @@
 package parser.methods;
 
+import logic.DRG_MODE;
+
 import java.util.List;
 
 public interface BasicNumericalMethod {
@@ -11,5 +13,9 @@ public interface BasicNumericalMethod {
     String getName();
 
     String getType();
+
+    default void setRadDegGrad(DRG_MODE deg) {
+        //no op for most
+    }
 
 }

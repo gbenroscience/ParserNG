@@ -151,7 +151,7 @@ class MathExpressionTest {
         MathExpression me = new MathExpression("help");
         String help = me.solve();
         Assertions.assertTrue(help.length() > 100);
-        Assertions.assertTrue(help.contains(Declarations.SIN));
+        Assertions.assertTrue(help.contains(Declarations.COS));
     }
 
     @Test
@@ -331,7 +331,7 @@ class MathExpressionTest {
 
         expression.setValue("x", 0 + "");
         if (print) System.out.println(expression.solve());
-        Assertions.assertEquals("A SYNTAX ERROR OCCURRED", expression.solve());
+        Assertions.assertEquals("SYNTAX ERROR", expression.solve());
         expression.setValue("x", 1 + "");
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals("0.0", expression.solve());

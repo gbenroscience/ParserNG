@@ -789,7 +789,6 @@ public class Function implements Savable {
         int i = 0;
         for (double x = xLower; i < len && x <= xUpper; x += xStep, i++) {
             mathExpression.setValue(variableName, String.valueOf(x));
-            mathExpression.setDRG(DRG);
             results[0][i] = Double.parseDouble(mathExpression.solve());
             results[1][i] = x;
         }//end for
@@ -817,7 +816,6 @@ public class Function implements Savable {
      * variables and constants.
      */
     public String eval() {
-        mathExpression.setDRG(1);
         return mathExpression.solve();
     }
 

@@ -6,6 +6,7 @@ package parser;
 
 import interfaces.Savable;
 import interfaces.Solvable;
+import logic.DRG_MODE;
 import math.Main;
 import parser.methods.Declarations;
 import parser.methods.Help;
@@ -63,7 +64,7 @@ public class MathExpression implements Savable, Solvable {
     public Parser_Result parser_Result = Parser_Result.VALID;
     //determines the mode in which trig operations will be carried out on numbers.if DRG==0,it is done in degrees
 //if DRG==1, it is done in radians and if it is 2, it is done in grads.
-    protected int DRG = 1;
+    private DRG_MODE DRG = Declarations.degGradRadFromVariable();
     public static String lastResult = "0.0";
     private ArrayList<String> whitespaceremover = new ArrayList<>();//used to remove white spaces from the ArrayList
     /**
@@ -259,7 +260,7 @@ public class MathExpression implements Savable, Solvable {
      *
      * @return the DRG value:0 for degrees, 1 for rads, 2 for grads
      */
-    public int getDRG() {
+    public DRG_MODE getDRG() {
         return DRG;
     }
 
@@ -268,8 +269,8 @@ public class MathExpression implements Savable, Solvable {
      *
      * @param DRG
      */
-    public void setDRG(int DRG) {
-        this.DRG = (DRG == 0 || DRG == 1 || DRG == 2) ? DRG : 0;
+    public void setDRG(DRG_MODE DRG) {
+        this.DRG = DRG;
     }
 
     /**

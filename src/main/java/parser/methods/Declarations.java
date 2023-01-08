@@ -6,15 +6,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
+import logic.DRG_MODE;
 import parser.TYPE;
 import parser.methods.ext.AvgN;
 import parser.methods.ext.GeomN;
+import parser.methods.ext.Sin;
 import parser.methods.ext.Sum;
 
 public class Declarations {
 
 
-    public static final String SIN = "sin";
     public static final String COS = "cos";
     public static final String TAN = "tan";
     public static final String SINH = "sinh";
@@ -140,6 +141,7 @@ public class Declarations {
         registerBasicNumericalMethod(new AvgN());
         registerBasicNumericalMethod(new GeomN());
         registerBasicNumericalMethod(new Sum());
+        registerBasicNumericalMethod(new Sin());
     }
 
     /**
@@ -153,7 +155,7 @@ public class Declarations {
     public static String[] createInBuiltMethods() {
         List<String> stats = Arrays.asList(getStatsMethods());
         List<String> rest = Arrays.asList(
-                new String[]{HELP, SIN, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN, ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH, COTH, ARC_SEC, ARC_COSEC, ARC_COT, ARC_SECH,
+                new String[]{HELP, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN, ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH, COTH, ARC_SEC, ARC_COSEC, ARC_COT, ARC_SECH,
                         ARC_COSECH, ARC_COTH, EXP, LN, LG, LOG, LN_INV, LG_INV, LOG_INV, ARC_SIN_ALT, ARC_COS_ALT, ARC_TAN_ALT, ARC_SINH_ALT, ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
                         ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT, LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, FLOOR, CEIL, SQRT, CBRT, INVERSE, SQUARE, CUBE, POW, FACT, PRINT, COMBINATION,
                         PERMUTATION, PLOT, DIFFERENTIATION, INTEGRATION, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT, LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX, ECHELON_MATRIX,
@@ -185,8 +187,6 @@ public class Declarations {
             }
         }
         switch (typeName) {
-            case SIN:
-                return TYPE.NUMBER.toString();
             case COS:
                 return TYPE.NUMBER.toString();
             case TAN:
@@ -403,5 +403,24 @@ public class Declarations {
             }
         }
         return false;
+    }
+
+    public static DRG_MODE degGradRadFromVariable() {
+        String userDrgMode = System.getenv(DRG_MODE.DEG_MODE_VARIABLE);
+        if (userDrgMode == null) {
+            userDrgMode = System.getProperty(DRG_MODE.DEG_MODE_VARIABLE);
+        }
+        if (userDrgMode == null) {
+            return DRG_MODE.RAD;
+        }
+        if (userDrgMode.toUpperCase().trim().equals("DEG")) {
+            return DRG_MODE.DEG;
+        } else if (userDrgMode.toUpperCase().trim().equals("RAD")) {
+            return DRG_MODE.RAD;
+        } if (userDrgMode.toUpperCase().trim().equals("GRAD")) {
+            return DRG_MODE.GRAD;
+        } else {
+            return DRG_MODE.RAD;
+        }
     }
 }
