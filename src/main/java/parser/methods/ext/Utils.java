@@ -1,12 +1,13 @@
 package parser.methods.ext;
 
 
-import math.BigDecimalNthRootCalculation;
+import parser.MathExpression;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public final class Utils {
@@ -84,6 +85,22 @@ public final class Utils {
         BigDecimal toRemoveD = toRemoveOrig.setScale(0, RoundingMode.HALF_DOWN);
         int toRemove = toRemoveD.intValue();
         return toRemove;
+    }
+
+    public static List<BigDecimal> evaluateSingleToken(List<String> tokens) {
+        try {
+            List r = new ArrayList(tokens.size());
+            for (String token : tokens) {
+                r.add(new BigDecimal(token));
+            }
+            return r;
+        } catch (NumberFormatException ex) {
+            String expression = "";
+            for (String token : tokens) {
+                expression = expression + token;
+            }
+            return Arrays.asList(new BigDecimal(new MathExpression(expression).solve()));
+        }
     }
 
 }

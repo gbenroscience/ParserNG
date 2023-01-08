@@ -9,6 +9,7 @@ import java.util.List;
 import parser.TYPE;
 import parser.methods.ext.AvgN;
 import parser.methods.ext.GeomN;
+import parser.methods.ext.Sum;
 
 public class Declarations {
 
@@ -70,7 +71,6 @@ public class Declarations {
     public static final String FACT = "fact";
     public static final String COMBINATION = "comb";
     public static final String PERMUTATION = "perm";
-    public static final String SUM = "sum";
     public static final String PROD = "prod";
     public static final String GEOM = "geom";
     public static final String GSUM = "gsum";
@@ -139,6 +139,7 @@ public class Declarations {
     static {
         registerBasicNumericalMethod(new AvgN());
         registerBasicNumericalMethod(new GeomN());
+        registerBasicNumericalMethod(new Sum());
     }
 
     /**
@@ -300,8 +301,6 @@ public class Declarations {
                 return TYPE.NUMBER.toString();
             case PERMUTATION:
                 return TYPE.NUMBER.toString();
-            case SUM:
-                return TYPE.NUMBER.toString();
             case PROD:
                 return TYPE.NUMBER.toString();
             case GEOM:
@@ -393,7 +392,7 @@ public class Declarations {
      * @return all the statistical methods used by the parser.
      */
     static String[] getStatsMethods() {
-        return new String[]{SUM, PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT};
+        return new String[]{PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT};
 
     }
 

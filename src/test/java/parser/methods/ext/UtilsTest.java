@@ -186,4 +186,19 @@ class UtilsTest {
 
     }
 
+    @Test
+    void evaluateSingleTokenTest() {
+        List<BigDecimal> l;
+        l = Utils.evaluateSingleToken(Arrays.asList("1"));
+        Assertions.assertEquals(Arrays.asList(new BigDecimal("1")), l);
+        l = Utils.evaluateSingleToken(Arrays.asList("1+1"));
+        Assertions.assertEquals(Arrays.asList(new BigDecimal("2.0")), l);
+        l = Utils.evaluateSingleToken(Arrays.asList("1", "2"));
+        Assertions.assertEquals(Arrays.asList(new BigDecimal("1"), new BigDecimal("2")), l);
+        l = Utils.evaluateSingleToken(Arrays.asList("1+1", "2"));
+        Assertions.assertEquals(Arrays.asList(new BigDecimal("13.0")), l); //this is artificial value which should never happen, but demonstrate possible issue
+        l = Utils.evaluateSingleToken(Arrays.asList("1", "+", "2"));
+        Assertions.assertEquals(Arrays.asList(new BigDecimal("3.0")), l);
+
+    }
 }

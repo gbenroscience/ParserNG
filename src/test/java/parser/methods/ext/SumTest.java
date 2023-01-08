@@ -10,7 +10,7 @@ public class SumTest {
     void sumAcceptsOnePlainArgument() {
         MathExpression me;
         me = new MathExpression("sum(5)");
-        Assertions.assertEquals("5.0", me.solve());
+        Assertions.assertEquals("5", me.solve());
     }
 
     @Test
@@ -25,7 +25,7 @@ public class SumTest {
     void sumAcceptsTwoPlainArguments() {
         MathExpression me;
         me = new MathExpression("sum(5,6)");
-        Assertions.assertEquals("11.0", me.solve());
+        Assertions.assertEquals("11", me.solve());
     }
 
     @Test
@@ -39,7 +39,7 @@ public class SumTest {
     void sumAcceptsStatFunction() {
         MathExpression me;
         me = new MathExpression("sum(sum(5))");
-        Assertions.assertEquals("5.0", me.solve());
+        Assertions.assertEquals("5", me.solve());
     }
 
     @Test
@@ -53,22 +53,22 @@ public class SumTest {
     void sumAcceptsTwoStatFunction() {
         MathExpression me;
         me = new MathExpression("sum(sum(5),sum(6))");
-        Assertions.assertEquals("11.0", me.solve());
+        Assertions.assertEquals("11", me.solve());
     }
 
     @Test
     void sumAcceptsTwoNumFunction() {
         MathExpression me;
         me = new MathExpression("sum(sin(5),sin(5))");
-        Assertions.assertEquals("-1.917848549326277", me.solve());
+        Assertions.assertEquals("-1.9178485493262770", me.solve());
     }
 
     @Test
     void sumAcceptsStatAndNumFunction() {
         MathExpression me;
         me = new MathExpression("sum(sum(5),sin(5))");
-        Assertions.assertEquals("4.041075725336862", me.solve());
+        Assertions.assertEquals("4.0410757253368615", me.solve());
         me = new MathExpression("sum(sin(5),sum(5))");
-        Assertions.assertEquals("4.041075725336862", me.solve());
+        Assertions.assertEquals("4.0410757253368615", me.solve());
     }
 }
