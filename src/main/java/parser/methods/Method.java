@@ -399,30 +399,6 @@ public class Method {
                 list.clear();
                 list.add(result);
                 return list;
-            } else if (name.equals(COUNT)) {
-                Set set = new Set(list);
-                result = String.valueOf(set.size());
-                list.clear();
-                list.add(result);
-                return list;
-            }  else if (name.equals(GSUM)) {
-                Set set = new Set(list);
-                result = set.gsum().toString();
-                list.clear();
-                list.add(result);
-                return list;
-            }  else if (name.equals(GEOM)) {
-                Set set = new Set(list);
-                result = set.geom().toString();
-                list.clear();
-                list.add(result);
-                return list;
-            } else if (name.equals(AVG)) {
-                Set set = new Set(list);
-                result = String.valueOf(set.avg());
-                list.clear();
-                list.add(result);
-                return list;
             } else if (name.equals(MEDIAN)) {
                 Set set = new Set(list);
                 result = String.valueOf(set.median());

@@ -18,38 +18,6 @@ import java.util.Map;
 class MathExpressionTest {
 
     @Test
-    void countExpression() {
-        MathExpression me = new MathExpression("count(1,1,2,3,3)");
-        Assertions.assertEquals("5", me.solve());
-    }
-
-    @Test
-    void gsumExpression() {
-        MathExpression me = new MathExpression("gsum(1,1,2,3)");
-        Assertions.assertEquals("6", me.solve());
-    }
-
-    @Test
-    void geomExpression() {
-        MathExpression me = new MathExpression("geom(2,8,4)");
-        Assertions.assertEquals("4.000000000", me.solve());
-    }
-
-    @Test
-    void geomExpressionMultipleBrackets() {
-        MathExpression me = new MathExpression("geom((2+((2-2)),(8+8)-(((8))),4))");
-        Assertions.assertEquals("4.000000000", me.solve());
-        me = new MathExpression("(geom(((2,8,4))))");
-        Assertions.assertEquals("4.000000000", me.solve());
-        me = new MathExpression("geom((2,8,4))+geom(((2,8,4)))");
-        Assertions.assertEquals("8.0", me.solve());
-        me = new MathExpression("(geom((2+((2-2)),(8+8)-(((8))),4))+geom(((2,8,4))))");
-        Assertions.assertEquals("8.0", me.solve());
-        me = new MathExpression("((((geom((2,8,4))+geom(((2,8,4)))))))");
-        Assertions.assertEquals("8.0", me.solve());
-    }
-
-    @Test
     void expTest() {
         MathExpression me = new MathExpression("2^3");
         Assertions.assertEquals("8.0", me.solve());

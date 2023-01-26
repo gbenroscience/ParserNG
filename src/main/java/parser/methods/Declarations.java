@@ -7,8 +7,12 @@ import java.util.Collections;
 import java.util.List;
 
 import parser.TYPE;
+import parser.methods.ext.Avg;
 import parser.methods.ext.AvgN;
+import parser.methods.ext.Count;
+import parser.methods.ext.Geom;
 import parser.methods.ext.GeomN;
+import parser.methods.ext.Gsum;
 import parser.methods.ext.Sum;
 
 public class Declarations {
@@ -72,10 +76,6 @@ public class Declarations {
     public static final String COMBINATION = "comb";
     public static final String PERMUTATION = "perm";
     public static final String PROD = "prod";
-    public static final String GEOM = "geom";
-    public static final String GSUM = "gsum";
-    public static final String COUNT = "count";
-    public static final String AVG = "avg";
     public static final String MEDIAN = "med";
     public static final String MODE = "mode";
     public static final String RANGE = "rng";
@@ -140,6 +140,10 @@ public class Declarations {
         registerBasicNumericalMethod(new AvgN());
         registerBasicNumericalMethod(new GeomN());
         registerBasicNumericalMethod(new Sum());
+        registerBasicNumericalMethod(new Avg());
+        registerBasicNumericalMethod(new Geom());
+        registerBasicNumericalMethod(new Count());
+        registerBasicNumericalMethod(new Gsum());
     }
 
     /**
@@ -303,14 +307,6 @@ public class Declarations {
                 return TYPE.NUMBER.toString();
             case PROD:
                 return TYPE.NUMBER.toString();
-            case GEOM:
-                return TYPE.NUMBER.toString();
-            case GSUM:
-                return TYPE.NUMBER.toString();
-            case COUNT:
-                return TYPE.NUMBER.toString();
-            case AVG:
-                return TYPE.NUMBER.toString();
             case MEDIAN:
                 return TYPE.NUMBER.toString();
             case MODE:
@@ -392,7 +388,7 @@ public class Declarations {
      * @return all the statistical methods used by the parser.
      */
     static String[] getStatsMethods() {
-        return new String[]{PROD, AVG, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT, GEOM, GSUM, COUNT};
+        return new String[]{PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT};
 
     }
 
