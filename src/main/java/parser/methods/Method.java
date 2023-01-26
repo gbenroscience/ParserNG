@@ -393,13 +393,7 @@ public class Method {
                     return list;
                 }
             }
-            if (name.equals(SUM)) {
-                Set set = new Set(list);
-                result = String.valueOf(set.sum());
-                list.clear();
-                list.add(result);
-                return list;
-            } else if (name.equals(PROD)) {
+            if (name.equals(PROD)) {
                 Set set = new Set(list);
                 result = String.valueOf(set.prod());
                 list.clear();

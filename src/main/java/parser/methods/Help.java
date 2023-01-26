@@ -23,8 +23,6 @@ public class Help {
             }
         }
         switch (op) {
-            case SUM:
-                return toLine(op, "Returns sum of all values. Eg: " + op + "(1,2) will evaluate as 1+2 to 3");
             case PROD:
                 return toLine(op, "product of all elements. s. Eg: " + op + "(1,2) will evaluate 1*2 to 2");
             case GEOM:
