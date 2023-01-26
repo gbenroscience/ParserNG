@@ -92,6 +92,17 @@ public final class Utils {
         return toRemove;
     }
 
+    public static boolean checkOnlyNumbers(List<String> tokens) {
+        try {
+            for (String token : tokens) {
+                new BigDecimal(token);
+            }
+            return true;
+        } catch (NumberFormatException ex) {
+            return false;
+        }
+    }
+
     /**
      * This is method, which allows the client functions to workaround the https://github.com/gbenroscience/ParserNG/issues/25
      * Once the issue is fixed, this method will simply change to convert list of strings to list of big decimals withot any evaluations
@@ -104,18 +115,26 @@ public final class Utils {
             return null;
         }
         try {
-            List r = new ArrayList(tokens.size());
-            for (String token : tokens) {
-                r.add(new BigDecimal(token));
-            }
-            return r;
+            return tokensToNumbers(tokens);
         } catch (NumberFormatException ex) {
-            String expression = "";
-            for (String token : tokens) {
-                expression = expression + token;
-            }
-            return Arrays.asList(new BigDecimal(new MathExpression(expression).solve()));
+            return Arrays.asList(new BigDecimal(new MathExpression(connectTokens(tokens)).solve()));
         }
+    }
+
+    private static List<BigDecimal> tokensToNumbers(List<String> tokens) {
+        List<BigDecimal> r = new ArrayList(tokens.size());
+        for (String token : tokens) {
+            r.add(new BigDecimal(token));
+        }
+        return r;
+    }
+
+    public static String connectTokens(List<String> tokens) {
+        StringBuilder expression = new StringBuilder();
+        for (String token : tokens) {
+            expression.append(token);
+        }
+        return expression.toString();
     }
 
     /**
