@@ -52,4 +52,21 @@ public class GeomNTest {
         Assertions.assertEquals("6.708203932", me.solve());
     }
 
+    @Test
+    void testEmpty() {
+        MathExpression me;
+        me = new MathExpression("geomN(1+1)");
+        Assertions.assertEquals("0", me.solve());
+        me = new MathExpression("geomN(1)");
+        Assertions.assertEquals("0", me.solve());
+    }
+
+    @Test
+    void testExpres() {
+        MathExpression me;
+        me = new MathExpression("geomN(0+1, 0+1)");
+        Assertions.assertEquals("1.0", me.solve());
+        me = new MathExpression("geomN(geomN(0,1), geomN(0,1))");
+        Assertions.assertEquals("1", me.solve());
+    }
 }
