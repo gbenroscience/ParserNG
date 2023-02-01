@@ -13,8 +13,13 @@ public class GeomN implements BasicNumericalMethod {
 
     @Override
     public String solve(List<String> tokens) {
-        int toRemove = Utils.getFirstTokenAsInt(tokens);
-        List<BigDecimal> l = Utils.stringsToBigDecimals(tokens, 1);
+        List<BigDecimal> convertedTokens = Utils.evaluateSingleToken(tokens);
+        Utils.checkAtLeastArgs(getName(), 1, convertedTokens);
+        if (convertedTokens.size() == 1) {
+            return "0";
+        }
+        int toRemove = Utils.getFirstBigDeciamalTokenAsInt(convertedTokens);
+        List<BigDecimal> l = convertedTokens.subList(1, convertedTokens.size());
         Collections.sort(l);
         Utils.trimList(l, toRemove, AvgN.DEFAULT_AVGN_MISIZE);
         BigDecimal gsumm = Utils.gsum(l);

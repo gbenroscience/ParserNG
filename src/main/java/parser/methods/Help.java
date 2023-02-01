@@ -23,18 +23,8 @@ public class Help {
             }
         }
         switch (op) {
-            case SUM:
-                return toLine(op, "Returns sum of all values. Eg: " + op + "(1,2) will evaluate as 1+2 to 3");
             case PROD:
                 return toLine(op, "product of all elements. s. Eg: " + op + "(1,2) will evaluate 1*2 to 2");
-            case GEOM:
-                return toLine(op, "returns geometrical average of elements. s. Eg: " + op + "(1,2,4) will evaluate (1*2*4)^1/3 thus na 8^1/3 thus to 2");
-            case GSUM:
-                return toLine(op, "product of all elements. s. Eg: " + op + "(1,2) will evaluate 1*2 to 2");
-            case COUNT:
-                return toLine(op, "number of elements in the function. Eg: " + op + "(1,1.1) will evaluate 3");
-            case AVG:
-                return toLine(op, "avarage of all elements. s. Eg: " + op + "(1,2) will evaluate (1*2)/2 to 0.5");
             case MEDIAN:
                 return toLine(op, "median from set. s. Eg: " + op + "(1,2,3) will evaluate as 2");
             default:

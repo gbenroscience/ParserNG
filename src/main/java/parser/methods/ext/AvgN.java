@@ -12,12 +12,17 @@ import java.util.List;
 
 public class AvgN implements BasicNumericalMethod {
 
-    public static final int DEFAULT_AVGN_MISIZE  = 2;
+    public static final int DEFAULT_AVGN_MISIZE = 2;
 
     @Override
     public String solve(List<String> tokens) {
-        int toRemove = Utils.getFirstTokenAsInt(tokens);
-        List<BigDecimal> l = Utils.stringsToBigDecimals(tokens, 1);
+        List<BigDecimal> convertedTokens = Utils.evaluateSingleToken(tokens);
+        Utils.checkAtLeastArgs(getName(), 1, convertedTokens);
+        if (convertedTokens.size() == 1) {
+            return "0";
+        }
+        int toRemove = Utils.getFirstBigDeciamalTokenAsInt(convertedTokens);
+        List<BigDecimal> l = convertedTokens.subList(1, convertedTokens.size());
         Collections.sort(l);
         Utils.trimList(l, toRemove, DEFAULT_AVGN_MISIZE);
         BigDecimal summ = Utils.sum(l);

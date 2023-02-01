@@ -2,11 +2,13 @@ package parser.methods.ext;
 
 
 import math.BigDecimalNthRootCalculation;
+import parser.MathExpression;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public final class Utils {
@@ -78,7 +80,11 @@ public final class Utils {
         return gsumm;
     }
 
-    public static int getFirstTokenAsInt(List<String> tokens) {
+    public static int getFirstBigDeciamalTokenAsInt(List<BigDecimal> tokens) {
+        return getFirstStringTokenAsInt(Arrays.asList(tokens.get(0).toString()));
+    }
+
+    public static int getFirstStringTokenAsInt(List<String> tokens) {
         //if an output of function is used as first parameter (eg count(1,2,4)/3) , it is eg 1.0, thus float
         BigDecimal toRemoveOrig = new BigDecimal(tokens.get(0), new MathContext(10, RoundingMode.HALF_DOWN));
         BigDecimal toRemoveD = toRemoveOrig.setScale(0, RoundingMode.HALF_DOWN);
@@ -86,4 +92,62 @@ public final class Utils {
         return toRemove;
     }
 
+    public static boolean checkOnlyNumbers(List<String> tokens) {
+        try {
+            for (String token : tokens) {
+                new BigDecimal(token);
+            }
+            return true;
+        } catch (NumberFormatException ex) {
+            return false;
+        }
+    }
+
+    /**
+     * This is method, which allows the client functions to workaround the https://github.com/gbenroscience/ParserNG/issues/25
+     * Once the issue is fixed, this method will simply change to convert list of strings to list of big decimals withot any evaluations
+     *
+     * @param tokens list of numbers or parts of mathematical expresion
+     * @return the converted numbers or evaluated expression as number.
+     */
+    public static List<BigDecimal> evaluateSingleToken(List<String> tokens) {
+        if (tokens == null) {
+            return null;
+        }
+        try {
+            return tokensToNumbers(tokens);
+        } catch (NumberFormatException ex) {
+            return Arrays.asList(new BigDecimal(new MathExpression(connectTokens(tokens)).solve()));
+        }
+    }
+
+    private static List<BigDecimal> tokensToNumbers(List<String> tokens) {
+        List<BigDecimal> r = new ArrayList(tokens.size());
+        for (String token : tokens) {
+            r.add(new BigDecimal(token));
+        }
+        return r;
+    }
+
+    public static String connectTokens(List<String> tokens) {
+        StringBuilder expression = new StringBuilder();
+        for (String token : tokens) {
+            expression.append(token);
+        }
+        return expression.toString();
+    }
+
+    /**
+     * helper method to unify argument check on standart functions
+     *
+     * @param name
+     * @param count
+     * @param tokens
+     * @throws RuntimeException
+     */
+    public static void checkAtLeastArgs(String name, int count, List tokens) throws RuntimeException {
+        if (tokens.size() < count) {
+            throw new RuntimeException(name + " requires at least" + count + " argument(s). Was " + tokens.size() + "(" + tokens.toString() + ")");
+        }
+    }
 }

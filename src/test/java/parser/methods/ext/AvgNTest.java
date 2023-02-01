@@ -53,4 +53,21 @@ public class AvgNTest {
         Assertions.assertEquals("23", me.solve());
     }
 
+    @Test
+    void testEmpty() {
+        MathExpression me;
+        me = new MathExpression("avgN(1+1)");
+        Assertions.assertEquals("0", me.solve());
+        me = new MathExpression("avgN(1)");
+        Assertions.assertEquals("0", me.solve());
+    }
+
+    @Test
+    void testExpres() {
+        MathExpression me;
+        me = new MathExpression("avgN(0+1, 0+1)");
+        Assertions.assertEquals("1.0", me.solve());
+        me = new MathExpression("avgN(avgN(0,1), avgN(0,1))");
+        Assertions.assertEquals("1", me.solve());
+    }
 }
