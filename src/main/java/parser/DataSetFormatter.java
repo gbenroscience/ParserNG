@@ -202,8 +202,24 @@ public class DataSetFormatter {
     }
 
     public static void main(String args[]) {
-        String func = "sum(@(x)x^3+2*x+1,3,@(x)cos(x+4),5,-6,7,-8,8)";//"sort(sin(2),cosh(4),-6,log(12,10),-12,2*sin(3),cos(4),34)";
+        //String func = "sum(@(x)x^3+2*x+1,3,@(x)cos(x+4),5,-6,7,-8,8)";//"sort(sin(2),cosh(4),-6,log(12,10),-12,2*sin(3),cos(4),34)";
+        String func = "sum(1+1,3*2)";
+        //String func = "sum(1+1)";
 //String func = "(root(f,2,4))";
+MathExpression e = new MathExpression(func);
+      System.out.println(e.solve());
+
+
+          func = "sum(1+1)";
+ e = new MathExpression(func);
+      System.out.println(e.solve());
+
+
+      func = "sum(sin(5)+cosh(ln(5)))";
+  e = new MathExpression(func);
+      System.out.println(e.solve());     
+
+
         DataSetFormatter f = new DataSetFormatter(func);
         System.out.println("Before scan-processing, the data = " + func);
         System.out.println("After scan-processing, the dataset = " + f.dataset);

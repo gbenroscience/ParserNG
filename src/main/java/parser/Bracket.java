@@ -550,23 +550,23 @@ public class Bracket extends Operator {
      */
     public String getDomainContents(ArrayList<String> scan) {
 
-        String contents = "";
+        StringBuilder contents = new StringBuilder();
         if (isOpenBracket(name)) {
             int i = this.index;
             int j = this.complement.index;
 
             for (; i <= j; i++) {
-                contents += scan.get(i);
+                contents.append(scan.get(i));
             }//end for
         }//end if
         else {
             int i = this.index;
             int j = this.complement.index;
             for (; j <= i; j++) {
-                contents = contents.concat(scan.get(j));
+                contents.append(scan.get(j));
             }//end for
         }//end else
-        return contents;
+        return contents.toString();
     }//end method
 
     /**

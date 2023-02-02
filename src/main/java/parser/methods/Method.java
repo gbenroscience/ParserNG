@@ -16,6 +16,8 @@ import java.util.InputMismatchException;
 import java.util.List;
 import math.Maths;
 import math.matrix.expressParser.Matrix;
+import parser.MathExpression;
+import parser.Operator;
 import util.FunctionManager;
 
 /**
@@ -366,6 +368,42 @@ public class Method {
     }//end method
 
     /**
+     * A fix for stuff like sum,(,13,+,3,)...
+     * 
+     */
+    private static void quickFixCompoundStructuresInStatsExpression(List<String> list) {
+
+        String methodName = list.get(0);
+
+        if(!isStatsMethod(methodName)){
+            return;
+        }
+        int sz = list.size();
+        for (int i = 0; i < sz; i++) {
+            String token = list.get(i);
+            if (Operator.isBinaryOperator(token)) {
+
+                StringBuilder b = new StringBuilder();
+
+                for (i = 1; i < sz; i++) {
+                    b.append(list.get(i));
+                }
+
+                String fun = b.toString();
+
+                MathExpression f = new MathExpression(fun);
+                String val = f.solve();
+                list.clear();
+                list.add(methodName);
+                list.add("(");
+                list.add(val);
+                list.add(")");
+                break;
+            }
+        }
+
+    }    
+    /**
      *
      * @param list A list containing a portion of a scanned function that has
      * information about a method and its parameters..e.g. [sin,(,3.14,)] , or
@@ -377,6 +415,7 @@ public class Method {
      */
     public static List<String> run(List<String> list, int DRG) {
         
+        quickFixCompoundStructuresInStatsExpression(list);
         String name = list.get(0);
 
         String result = "";

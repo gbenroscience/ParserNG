@@ -744,62 +744,98 @@ public class MathExpression implements Savable, Solvable {
                     if (Operator.isClosingBracket(scanner.get(i))) {
                         int open = Bracket.getComplementIndex(false, i, scanner);
 
-                        if (!Method.isMethodName(scanner.get(open - 1))) {
-                            Bracket opener = new Bracket("(");
-                            opener.setIndex(open);
-                            Bracket closer = new Bracket(")");
-                            closer.setIndex(i);
-                            opener.setComplement(closer);
-                            closer.setComplement(opener);
-
-                            if (opener.simpleBracketPairHasVariables(scanner)) {
-                                continue;
-                            }
-
-                            String fun = opener.getDomainContents(scanner);
-                            while (fun.startsWith("(") && fun.endsWith(")")) {
-                                fun = fun.substring(1);
-                                fun = fun.substring(0, fun.length() - 1);
-                                fun = fun.trim();
-                            }//end while
-                            MathExpression f = new MathExpression(fun);
-                            String val = f.solve();
-                            scanner.add(open, val);
-                            scanner.subList(open + 1, i + 2).clear();
-                        }//end if
-                        else if (Method.isDefinedMethod(scanner.get(open - 1))) {
-                            int ind = open - 2;
-
-                            while (Operator.isOpeningBracket(scanner.get(ind))) {
-                                --ind;
-                            }//end while
-                            if (scanner.get(ind).equals("intg") || scanner.get(ind).equals("quad") || scanner.get(ind).equals("diff") || scanner.get(ind).equals("root")) {
+                        int preIndex = open - 1;
+                  
+                        if (preIndex >= 0) {
+                            String entry = scanner.get(preIndex);
+                            if (!Method.isMethodName(entry)) {
                                 Bracket opener = new Bracket("(");
                                 opener.setIndex(open);
                                 Bracket closer = new Bracket(")");
                                 closer.setIndex(i);
                                 opener.setComplement(closer);
                                 closer.setComplement(opener);
+
                                 if (opener.simpleBracketPairHasVariables(scanner)) {
                                     continue;
                                 }
+
                                 String fun = opener.getDomainContents(scanner);
                                 while (fun.startsWith("(") && fun.endsWith(")")) {
                                     fun = fun.substring(1);
                                     fun = fun.substring(0, fun.length() - 1);
                                     fun = fun.trim();
-                                }
+                                }//end while
                                 MathExpression f = new MathExpression(fun);
                                 String val = f.solve();
                                 scanner.add(open, val);
                                 scanner.subList(open + 1, i + 2).clear();
                             }//end if
+                            else if (Method.isDefinedMethod(entry)) {
+                                int ind = open - 2;
+                              
+                                if (Method.isStatsMethod(entry)) {
+                                    Bracket opener = new Bracket("(");
+                                    opener.setIndex(open);
+                                    Bracket closer = new Bracket(")");
+                                    closer.setIndex(i);
+                                    opener.setComplement(closer);
+                                    closer.setComplement(opener);
 
-                        }//end else if
+                                    if (opener.simpleBracketPairHasVariables(scanner)) {
+                                        continue;
+                                    }
+                                    String fun = opener.getDomainContents(scanner);
+                                    while (fun.startsWith("(") && fun.endsWith(")")) {
+                                        fun = fun.substring(1);
+                                        fun = fun.substring(0, fun.length() - 1);
+                                        fun = fun.trim();
+                                    }//end while
+                                    MathExpression f = new MathExpression(fun);
+                                    String val = f.solve();
+                                    scanner.add(open, val);
+                                    scanner.subList(open + 1, i + 2).clear();
+                                    scanner.add(open + 1, ")");
+                                    scanner.add(open, "(");
+                                } else {
+
+                                    while (ind >= 0 && Operator.isOpeningBracket(scanner.get(ind))) {
+                                        --ind;
+                                    }//end while
+                          
+                                    if (ind >= 0) {
+                                        String v = scanner.get(ind);
+                                        if (v.equals("intg") || v.equals("quad") || v.equals("diff") || v.equals("root")) {
+                                            Bracket opener = new Bracket("(");
+                                            opener.setIndex(open);
+                                            Bracket closer = new Bracket(")");
+                                            closer.setIndex(i);
+                                            opener.setComplement(closer);
+                                            closer.setComplement(opener);
+                                            if (opener.simpleBracketPairHasVariables(scanner)) {
+                                                continue;
+                                            }
+                                            String fun = opener.getDomainContents(scanner);
+                                            while (fun.startsWith("(") && fun.endsWith(")")) {
+                                                fun = fun.substring(1);
+                                                fun = fun.substring(0, fun.length() - 1);
+                                                fun = fun.trim();
+                                            }
+                                            MathExpression f = new MathExpression(fun);
+                                            String val = f.solve();
+                                            scanner.add(open, val);
+                                            scanner.subList(open + 1, i + 2).clear();
+                                        }//end if
+                                    }
+                                }
+
+                            }//end else if
+                        }
+
                     }//end if
                 }//end try
                 catch (IndexOutOfBoundsException boundsException) {
-
+                    boundsException.printStackTrace();
                 }
             }//end for
         }//end if
