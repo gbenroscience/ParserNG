@@ -73,17 +73,18 @@ public class AvgNTest {
 
     @Test
     void avgNFromExpressions() {
-        MathExpression me = new MathExpression("avgN(0,4+0,2+0)");
+        MathExpression me;
+        me = new MathExpression("avgN(0,4+0,2+0)");
         Assertions.assertEquals("3.0", me.solve());
         me = new MathExpression("avg(4+0,2+0)");
         Assertions.assertEquals("3.0", me.solve());
         me = new MathExpression("avg(0,3/2,2/3)");
-        Assertions.assertEquals("0.7222222222222222", me.solve());
+        Assertions.assertEquals("0.7222222222", me.solve());
         me = new MathExpression("avg(round(0.5),round(0.5))");
-        Assertions.assertEquals("1.0", me.solve());
+        Assertions.assertEquals("1", me.solve());
         me = new MathExpression("avgN(0,round(0.5),round(0.5))");
         Assertions.assertEquals("1", me.solve());
-        me = new MathExpression("round(avg(0,3/2,2/3)");
-        Assertions.assertEquals("0.7", me.solve());
+        me = new MathExpression("round(avg(0,3/2,2/3))");
+        Assertions.assertEquals("1", me.solve());
     }
 }

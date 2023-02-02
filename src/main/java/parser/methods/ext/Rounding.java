@@ -24,9 +24,10 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("RoundN", 2, tokens);
-            int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
-            return naturalRound(fractionalDigits, tokens.get(1), RoundingMode.HALF_UP).toString();
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("RoundN", 2, tt);
+            int fractionalDigits = Utils.getFirstBigDeciamalTokenAsInt(tt);
+            return naturalRound(fractionalDigits, tt.get(1), RoundingMode.HALF_UP).toString();
         }
 
         @Override
@@ -49,8 +50,9 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("Round", 1, tokens);
-            return new RoundN().solve(Arrays.asList("0", tokens.get(0)));
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("Round", 1, tt);
+            return naturalRound(0, tt.get(0), RoundingMode.HALF_UP).toString();
         }
 
         @Override
@@ -74,9 +76,10 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("RoundX", 2, tokens);
-            int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
-            return unnaturalRound(fractionalDigits, tokens.get(1)).toString();
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("RoundX", 2, tt);
+            int fractionalDigits = Utils.getFirstBigDeciamalTokenAsInt(tt);
+            return unnaturalRound(fractionalDigits, tt.get(1)).toString();
         }
 
         @Override
@@ -100,9 +103,10 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("roundDigitsN", 2, tokens);
-            int digits = Utils.getFirstTokenAsInt(tokens);
-            return roundDigits(digits, tokens.get(1), RoundingMode.HALF_UP);
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("roundDigitsN", 2, tt);
+            int digits = Utils.getFirstBigDeciamalTokenAsInt(tt);
+            return roundDigits(digits, tt.get(1), RoundingMode.HALF_UP);
         }
 
         @Override
@@ -121,17 +125,11 @@ public class Rounding {
         }
     }
 
-    static String roundDigits(int digits, String s, RoundingMode m) {
-        return roundDigits(digits, new BigDecimal(s), m);
-    }
 
-    private static String roundDigits(int digits, BigDecimal bd, RoundingMode m) {
+    public static String roundDigits(int digits, BigDecimal bd, RoundingMode m) {
         return bd.round(new MathContext(digits, m)).toString();
     }
 
-    static BigDecimal naturalRound(int origScale, String orig, RoundingMode m) {
-        return naturalRound(origScale, new BigDecimal(orig), m);
-    }
 
     static BigDecimal naturalRound(int origScale, BigDecimal orig, RoundingMode m) {
         if (origScale < 0) {

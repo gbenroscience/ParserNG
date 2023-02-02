@@ -4,7 +4,9 @@ import parser.TYPE;
 import parser.methods.BasicNumericalMethod;
 import parser.methods.Help;
 
+import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Arrays;
 import java.util.List;
 
 public class CeilFloor {
@@ -14,8 +16,9 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("Ceil", 1, tokens);
-            return Rounding.naturalRound(0, tokens.get(0), RoundingMode.CEILING).toString();
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("Ceil", 1, tt);
+            return Rounding.naturalRound(0, tt.get(0), RoundingMode.CEILING).toString();
         }
 
         @Override
@@ -39,8 +42,9 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("Floor", 1, tokens);
-            return Rounding.naturalRound(0, tokens.get(0), RoundingMode.FLOOR).toString();
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("Floor", 1, tt);
+            return Rounding.naturalRound(0, tt.get(0), RoundingMode.FLOOR).toString();
         }
 
         @Override
@@ -63,9 +67,10 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("CeilN", 2, tokens);
-            int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
-            return Rounding.naturalRound(fractionalDigits, tokens.get(1), RoundingMode.CEILING).toString();
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("CeilN", 2, tt);
+            int fractionalDigits = Utils.getFirstBigDeciamalTokenAsInt(tt);
+            return Rounding.naturalRound(fractionalDigits, tt.get(1), RoundingMode.CEILING).toString();
         }
 
         @Override
@@ -89,9 +94,10 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("FloorN", 2, tokens);
-            int fractionalDigits = Utils.getFirstTokenAsInt(tokens);
-            return Rounding.naturalRound(fractionalDigits, tokens.get(1), RoundingMode.FLOOR).toString();
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("FloorN", 2, tt);
+            int fractionalDigits = Utils.getFirstBigDeciamalTokenAsInt(tt);
+            return Rounding.naturalRound(fractionalDigits, tt.get(1), RoundingMode.FLOOR).toString();
         }
 
         @Override
@@ -116,9 +122,10 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("CeilDigitsN", 2, tokens);
-            int digits = Utils.getFirstTokenAsInt(tokens);
-            return Rounding.roundDigits(digits, tokens.get(1), RoundingMode.CEILING);
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("CeilDigitsN", 2, tt);
+            int digits = Utils.getFirstBigDeciamalTokenAsInt(tt);
+            return Rounding.roundDigits(digits, tt.get(1), RoundingMode.CEILING);
         }
 
         @Override
@@ -142,14 +149,15 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            Utils.checkTokensCount("FloorDigitsN", 2, tokens);
-            int digits = Utils.getFirstTokenAsInt(tokens);
-            return Rounding.roundDigits(digits, tokens.get(1), RoundingMode.FLOOR);
+            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            Utils.checkTokensCount("FloorDigitsN", 2, tt);
+            int digits = Utils.getFirstBigDeciamalTokenAsInt(tt);
+            return Rounding.roundDigits(digits, tt.get(1), RoundingMode.FLOOR);
         }
 
         @Override
         public String getHelp() {
-            return Help.toLine(getName(), "flooring digits towards negative infinity to N valid  digits");
+            return Help.toLine(getName(), "flooring digits towards negative infinity to N valid digits");
         }
 
         @Override

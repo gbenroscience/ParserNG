@@ -10,6 +10,7 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public final class Utils {
@@ -173,12 +174,17 @@ public final class Utils {
         return r;
     }
 
-    public static void checkTokensCount(String title, int expected, List<String> tokens) {
+    public static void checkTokensCount(String title, int expected, List tokens) {
         if (tokens.size() != expected) {
             throw new RuntimeException(
                     title + " function takes exactly " + expected + " argument(s)"
                             + " Was " + tokens.size() +
-                            " (" + tokens.stream().collect(Collectors.joining(",")) + ")");
+                            " (" + tokens.stream().map(new Function() {
+                        @Override
+                        public Object apply(Object a) {
+                            return a.toString();
+                        }
+                    }).collect(Collectors.joining(",")) + ")");
         }
     }
 }

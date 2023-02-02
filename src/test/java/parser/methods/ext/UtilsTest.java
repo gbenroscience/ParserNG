@@ -207,7 +207,7 @@ class UtilsTest {
 
     @Test
     void getFirstTokenAsInt() {
-        int i = Utils.getFirstTokenAsInt(Arrays.asList("11.1"));
+        int i = Utils.getFirstStringTokenAsInt(Arrays.asList("11.1"));
         Assertions.assertEquals(11, i);
     }
 
