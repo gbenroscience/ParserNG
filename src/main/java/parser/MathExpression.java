@@ -1384,6 +1384,7 @@ public class MathExpression implements Savable, Solvable {
      *
      * @return the result of the evaluation
      */
+    @Override
     public String solve() {
         if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
             return Help.getHelp();

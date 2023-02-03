@@ -1,7 +1,6 @@
 package parser.methods;
 
 import static  parser.methods.Declarations.*;
-import static  parser.methods.BasicNumericalMethod.*;
 
 public class Help {
 

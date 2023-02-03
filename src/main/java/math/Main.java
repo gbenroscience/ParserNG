@@ -6,12 +6,14 @@ import java.util.Arrays;
 import java.util.List;
 
 import interfaces.Solvable;
+import parser.LogicalExpression;
 import parser.MathExpression;
 import parser.cmd.ParserCmd;
+import parser.logical.ExpressionLogger;
 
 public class Main {
 
-    private static class MultiSwitch {
+    public static class MultiSwitch {
         private final String[] switches;
 
         public MultiSwitch(String... switches) {
@@ -22,6 +24,15 @@ public class Main {
             for (String s : switches) {
                 l.remove(s);
             }
+        }
+
+        public boolean isIn(String l) {
+            for (String s : switches) {
+                if (l.equals(s)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public boolean isContained(List<String> l) {
@@ -54,9 +65,11 @@ public class Main {
     private static final MultiSwitch trimSwitch = new MultiSwitch("-t", "-T", "--trim");
     private static final MultiSwitch helpSwitch = new MultiSwitch("-h", "-H", "--help");
     private static final MultiSwitch interactiveSwitch = new MultiSwitch("-i", "-I", "--interactive");
+    private static final MultiSwitch logcalSwitch = new MultiSwitch("-l", "-L", "--logic");
 
     private static boolean trim = false;
     private static boolean verbose = false;
+    private static boolean logic = false;
 
     public static void main(String... args) throws IOException {
         List<String> aargs = new ArrayList<>(Arrays.asList(args));
@@ -69,6 +82,10 @@ public class Main {
             trim = true;
             trimSwitch.removeFrom(aargs);
         }
+        if (logcalSwitch.isContained(aargs)) {
+            logic = true;
+            logcalSwitch.removeFrom(aargs);
+        }
         if (helpSwitch.isContained(aargs)) {
             help();
             if (isVerbose()) {
@@ -79,7 +96,7 @@ public class Main {
             if (aargs.size() > 0) {
                 System.err.println(interactiveSwitch.toString() + " is interactive mode, commandline expression omitted");
             }
-            ParserCmd.main(null);
+            ParserCmd.main(new String[0]);
         } else {
             String[] exs = joinArgs(aargs, trim).split("\n");
             for (String ex : exs) {
@@ -88,19 +105,29 @@ public class Main {
                     System.err.println(ex);
                     System.err.flush();
                 }
-                Solvable exp = new MathExpression(ex);
-                String r = exp.solve();
+                String r = null;
+                try {
+                    Solvable exp = logic ? new LogicalExpression(ex, LogicalExpression.verboseStderrLogger) : new MathExpression(ex);
+                    r  = exp.solve();
+                }catch(Exception fatal){
+                    if (verbose){
+                        throw fatal;
+                    } else {
+                        r = fatal.getMessage();
+                    }
+                }
                 System.out.println(r);
             }
         }
-        //switch math  logical (-l/-L/--logic),
-        // add main method to pom
     }
 
     static void help() {
         System.out.println("  ParserNG " + getVersion() + " " + Main.class.getName());
         System.out.println(helpSwitch + "         this text; do not change for help (witout dashes), which lists functions");
         System.out.println(verboseSwitch + "      output is reprinted to stderr with some inter-steps");
+        System.out.println(logcalSwitch + "        will add logical expression wrapper around the expression");
+        System.out.println("                     Logical expression parser is much less evolved and slow. Do not use it if you don't must");
+        System.out.println("                     If you use logical parse, result is always true/false. If it is not understood, it reuslts to false");
         System.out.println(trimSwitch + "         by default, each line is one expression,");
         System.out.println("                     however for better redability, sometimes it is worthy to");
         System.out.println("                     to split the expression to multiple lines. and evaluate as one.");
@@ -150,7 +177,11 @@ public class Main {
         System.out.println("  java -cp parser-ng-" + getVersion() + ".jar " + MathExpression.class.getName() + " \"1+1\n"
                 + "                                                      +2+2\"");
         System.out.println("    6.0");
-        System.out.println("  Note, that " + MathExpression.class.getName() + " nor " + ParserCmd.class.getName() + " classes do not take any aprameters except expressions");
+        System.out.println("  java -cp parser-ng-" + getVersion() + ".jar " + LogicalExpression.class.getName() + " \"true or false\"");
+        System.out.println("    true");
+        System.out.println("  Note, that " + MathExpression.class.getName() + " nor " + LogicalExpression.class.getName() + " classes do not take any parameters except expressions");
+        System.out.println("  Note, that " + ParserCmd.class.getName() + " class takes single parameter " + logcalSwitch + " to contorl its evaluation");
+        System.out.println(new LogicalExpression(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp());
     }
 
     public static String joinArgs(List<String> filteredArgs, boolean trim) {
@@ -174,8 +205,20 @@ public class Main {
         return verbose;
     }
 
+    public static boolean isLogic() {
+        return logic;
+    }
+
+    public static void setLogic(boolean logic) {
+        Main.logic = logic;
+    }
+
     public static String getVersion() {
         //todo, read from pom. See JRD how we did it
-        return "0.1.7";
+        return "0.1.8";
+    }
+
+    public static MultiSwitch getLogcalSwitch() {
+        return logcalSwitch;
     }
 }
