@@ -1,30 +1,29 @@
 package parser.methods.ext;
 
+import java.math.BigDecimal;
+import java.util.List;
+
 import parser.TYPE;
 import parser.methods.BasicNumericalMethod;
 import parser.methods.Help;
 
-import java.math.BigDecimal;
-import java.util.List;
-
-public class Count implements BasicNumericalMethod {
+public class Abs implements BasicNumericalMethod {
 
 
     @Override
     public String solve(List<String> tokens) {
-        List<BigDecimal> convertedTokens = Utils.tokensToNumbers(tokens);
-        return "" + convertedTokens.size();
+        Utils.checkTokensCount("Abs", 1, tokens);
+        return new BigDecimal(tokens.get(0)).abs().toString();
     }
-
 
     @Override
     public String getHelp() {
-        return Help.toLine(getName(), "number of elements in the function. Eg: " + getName() + "(1,1.1) will evaluate 3");
+        return Help.toLine(getName(), "absolute value abs(1.3)-> 1.3 abs(-2.5) -> 2.5");
     }
 
     @Override
     public String getName() {
-        return "count";
+        return "abs";
     }
 
     @Override

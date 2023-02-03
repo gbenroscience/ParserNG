@@ -1,7 +1,6 @@
 package parser.methods.ext;
 
 
-import math.BigDecimalNthRootCalculation;
 import parser.MathExpression;
 
 import java.math.BigDecimal;
@@ -10,6 +9,8 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public final class Utils {
 
@@ -121,7 +122,10 @@ public final class Utils {
         }
     }
 
-    private static List<BigDecimal> tokensToNumbers(List<String> tokens) {
+    public static List<BigDecimal> tokensToNumbers(List<String> tokens) {
+        if (tokens == null) {
+            return null;
+        }
         List<BigDecimal> r = new ArrayList(tokens.size());
         for (String token : tokens) {
             r.add(new BigDecimal(token));
@@ -148,6 +152,41 @@ public final class Utils {
     public static void checkAtLeastArgs(String name, int count, List tokens) throws RuntimeException {
         if (tokens.size() < count) {
             throw new RuntimeException(name + " requires at least" + count + " argument(s). Was " + tokens.size() + "(" + tokens.toString() + ")");
+        }
+    }
+
+    public static int[] decimalAndFractionalParts(String s) {
+        return decimalAndFractionalParts(new BigDecimal(s));
+    }
+
+    public static int[] decimalAndFractionalParts(BigDecimal bd) {
+        bd = bd.abs();
+        int r[] = new int[]{0, 0};
+        long decimal = bd.toBigInteger().longValue();
+        r[0] = ("" + decimal).length();
+        String stripped = bd.stripTrailingZeros().toPlainString();
+        if (stripped.length() <= r[0]) {
+            r[1] = 0;
+        } else {
+            r[1] = stripped.substring(r[0] + 1).length();
+        }
+        if (decimal == 0) {
+            r[0] = 0;
+        }
+        return r;
+    }
+
+    public static void checkTokensCount(String title, int expected, List tokens) {
+        if (tokens.size() != expected) {
+            throw new RuntimeException(
+                    title + " function takes exactly " + expected + " argument(s)"
+                            + " Was " + tokens.size() +
+                            " (" + tokens.stream().map(new Function() {
+                        @Override
+                        public Object apply(Object a) {
+                            return a.toString();
+                        }
+                    }).collect(Collectors.joining(",")) + ")");
         }
     }
 }

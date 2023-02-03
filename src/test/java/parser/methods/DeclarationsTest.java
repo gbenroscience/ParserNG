@@ -9,8 +9,6 @@ import parser.methods.ext.Utils;
 import java.math.BigDecimal;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 class DeclarationsTest {
 
     @Test
@@ -23,7 +21,7 @@ class DeclarationsTest {
         BasicNumericalMethod override = new BasicNumericalMethod() {
             @Override
             public String solve(List<String> tokens) {
-                List<BigDecimal> numericalTokens = Utils.evaluateSingleToken(tokens);
+                List<BigDecimal> numericalTokens = Utils.tokensToNumbers(tokens);
                 BigDecimal result = new BigDecimal("1");
                 for(BigDecimal numericalToken: numericalTokens){
                     result = result.multiply(numericalToken);

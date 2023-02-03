@@ -16,7 +16,7 @@ public class AvgN implements BasicNumericalMethod {
 
     @Override
     public String solve(List<String> tokens) {
-        List<BigDecimal> convertedTokens = Utils.evaluateSingleToken(tokens);
+        List<BigDecimal> convertedTokens = Utils.tokensToNumbers(tokens);
         Utils.checkAtLeastArgs(getName(), 1, convertedTokens);
         if (convertedTokens.size() == 1) {
             return "0";

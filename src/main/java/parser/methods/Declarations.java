@@ -8,12 +8,16 @@ import java.util.List;
 
 import parser.TYPE;
 import parser.methods.ext.Avg;
+import parser.methods.ext.Abs;
 import parser.methods.ext.AvgN;
+import parser.methods.ext.CeilFloor;
 import parser.methods.ext.Count;
 import parser.methods.ext.Geom;
 import parser.methods.ext.GeomN;
 import parser.methods.ext.Gsum;
 import parser.methods.ext.Sum;
+import parser.methods.ext.Lengths;
+import parser.methods.ext.Rounding;
 
 public class Declarations {
 
@@ -64,8 +68,6 @@ public class Declarations {
     public static final String LN_INV_ALT = "aln";
     public static final String LG_INV_ALT = "alg";
     public static final String LOG_INV_ALT = "alog";
-    public static final String FLOOR = "floor";
-    public static final String CEIL = "ceil";
     public static final String SQRT = "sqrt";
     public static final String CBRT = "cbrt";
     public static final String INVERSE = "inverse";
@@ -144,6 +146,20 @@ public class Declarations {
         registerBasicNumericalMethod(new Geom());
         registerBasicNumericalMethod(new Count());
         registerBasicNumericalMethod(new Gsum());
+        registerBasicNumericalMethod(new Rounding.RoundX());
+        registerBasicNumericalMethod(new Rounding.RoundN());
+        registerBasicNumericalMethod(new Rounding.RoundDigitsN());
+        registerBasicNumericalMethod(new Rounding.Round());
+        registerBasicNumericalMethod(new Abs());
+        registerBasicNumericalMethod(new Lengths.Length());
+        registerBasicNumericalMethod(new Lengths.LengthDecimal());
+        registerBasicNumericalMethod(new Lengths.LengthFractional());
+        registerBasicNumericalMethod(new CeilFloor.Ceil());
+        registerBasicNumericalMethod(new CeilFloor.CeilN());
+        registerBasicNumericalMethod(new CeilFloor.CeilDigitsN());
+        registerBasicNumericalMethod(new CeilFloor.Floor());
+        registerBasicNumericalMethod(new CeilFloor.FloorN());
+        registerBasicNumericalMethod(new CeilFloor.FloorDigitsN());
     }
 
     /**
@@ -159,7 +175,7 @@ public class Declarations {
         List<String> rest = Arrays.asList(
                 new String[]{HELP, SIN, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN, ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH, COTH, ARC_SEC, ARC_COSEC, ARC_COT, ARC_SECH,
                         ARC_COSECH, ARC_COTH, EXP, LN, LG, LOG, LN_INV, LG_INV, LOG_INV, ARC_SIN_ALT, ARC_COS_ALT, ARC_TAN_ALT, ARC_SINH_ALT, ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
-                        ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT, LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, FLOOR, CEIL, SQRT, CBRT, INVERSE, SQUARE, CUBE, POW, FACT, PRINT, COMBINATION,
+                        ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT, LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, SQRT, CBRT, INVERSE, SQUARE, CUBE, POW, FACT, PRINT, COMBINATION,
                         PERMUTATION, PLOT, DIFFERENTIATION, INTEGRATION, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT, LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX, ECHELON_MATRIX,
                         MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD, MATRIX_SUBTRACT, MATRIX_POWER, MATRIX_TRANSPOSE, MATRIX_EDIT, MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC, MATRIX_EIGENPOLY});
         List<String> r = new ArrayList<>(stats.size() + rest.size());
@@ -280,10 +296,6 @@ public class Declarations {
             case LG_INV_ALT:
                 return TYPE.NUMBER.toString();
             case LOG_INV_ALT:
-                return TYPE.NUMBER.toString();
-            case FLOOR:
-                return TYPE.NUMBER.toString();
-            case CEIL:
                 return TYPE.NUMBER.toString();
             case SQRT:
                 return TYPE.NUMBER.toString();

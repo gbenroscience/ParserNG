@@ -32,7 +32,7 @@ public class Methods {
 			"exp", "ln", "lg", "log", "ln-¹", "lg-¹", "log-¹", "asin", "acos",
 			"atan", "asinh", "acosh", "atanh", "asec", "acsc", "acot", "asech",
 			"acsch", "acoth", "aln", "alg", "alog", "sqrt","cbrt", "inverse",
-			"square", "cube", "pow", "floor", "ceil", "diff", "quad", "intg"
+			"square", "cube", "pow", "diff", "quad", "intg"
                         };
 
 	/**
@@ -140,10 +140,6 @@ public class Methods {
 		} else if (method.equals("cube")) {
 			der = "3*" + var + "^2" + append;
 		} else if (method.equals("pow")) {
-
-		} else if (method.equals("floor")) {
-
-		} else if (method.equals("ceil")) {
 
 		} else if (method.equals("diff")) {
 			try {
