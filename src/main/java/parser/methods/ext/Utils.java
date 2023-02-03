@@ -1,7 +1,6 @@
 package parser.methods.ext;
 
 
-import math.BigDecimalNthRootCalculation;
 import parser.MathExpression;
 
 import java.math.BigDecimal;
@@ -123,7 +122,10 @@ public final class Utils {
         }
     }
 
-    private static List<BigDecimal> tokensToNumbers(List<String> tokens) {
+    public static List<BigDecimal> tokensToNumbers(List<String> tokens) {
+        if (tokens == null) {
+            return null;
+        }
         List<BigDecimal> r = new ArrayList(tokens.size());
         for (String token : tokens) {
             r.add(new BigDecimal(token));

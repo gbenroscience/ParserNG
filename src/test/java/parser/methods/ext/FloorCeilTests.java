@@ -367,7 +367,7 @@ public class FloorCeilTests {
         Assertions.assertEquals("0.9893582466233818", me.solve());
         //ParserNG iincorrectly solve sin(1+1,2+2) as  sin(2*4)
         me = new MathExpression("sin(1+1,2+2)");
-        Assertions.assertEquals("0.9893582466233818", me.solve());
+        Assertions.assertEquals("SYNTAX ERROR", me.solve());
     }
 
     @Test

@@ -11,7 +11,7 @@ public class Gsum implements BasicNumericalMethod {
 
     @Override
     public String solve(List<String> tokens) {
-        List<BigDecimal> convertedTokens = Utils.evaluateSingleToken(tokens);
+        List<BigDecimal> convertedTokens = Utils.tokensToNumbers(tokens);
         if (convertedTokens.size() == 0) {
             return "0";
         }

@@ -6,7 +6,6 @@ import parser.methods.Help;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Arrays;
 import java.util.List;
 
 public class CeilFloor {
@@ -16,7 +15,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("Ceil", 1, tt);
             return Rounding.naturalRound(0, tt.get(0), RoundingMode.CEILING).toString();
         }
@@ -42,7 +41,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("Floor", 1, tt);
             return Rounding.naturalRound(0, tt.get(0), RoundingMode.FLOOR).toString();
         }
@@ -67,7 +66,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("CeilN", 2, tt);
             int fractionalDigits = Utils.getFirstBigDeciamalTokenAsInt(tt);
             return Rounding.naturalRound(fractionalDigits, tt.get(1), RoundingMode.CEILING).toString();
@@ -94,7 +93,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("FloorN", 2, tt);
             int fractionalDigits = Utils.getFirstBigDeciamalTokenAsInt(tt);
             return Rounding.naturalRound(fractionalDigits, tt.get(1), RoundingMode.FLOOR).toString();
@@ -122,7 +121,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("CeilDigitsN", 2, tt);
             int digits = Utils.getFirstBigDeciamalTokenAsInt(tt);
             return Rounding.roundDigits(digits, tt.get(1), RoundingMode.CEILING);
@@ -149,7 +148,7 @@ public class CeilFloor {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("FloorDigitsN", 2, tt);
             int digits = Utils.getFirstBigDeciamalTokenAsInt(tt);
             return Rounding.roundDigits(digits, tt.get(1), RoundingMode.FLOOR);

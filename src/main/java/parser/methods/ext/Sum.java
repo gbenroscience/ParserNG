@@ -12,7 +12,7 @@ public class Sum implements BasicNumericalMethod {
 
     @Override
     public String solve(List<String> tokens) {
-        List<BigDecimal> numericalTokens = Utils.evaluateSingleToken(tokens);
+        List<BigDecimal> numericalTokens = Utils.tokensToNumbers(tokens);
         BigDecimal result = new BigDecimal("0");
         for(BigDecimal numericalToken: numericalTokens){
             result = result.add(numericalToken);

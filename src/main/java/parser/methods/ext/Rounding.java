@@ -3,7 +3,6 @@ package parser.methods.ext;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
-import java.util.Arrays;
 import java.util.List;
 
 import parser.TYPE;
@@ -24,7 +23,7 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("RoundN", 2, tt);
             int fractionalDigits = Utils.getFirstBigDeciamalTokenAsInt(tt);
             return naturalRound(fractionalDigits, tt.get(1), RoundingMode.HALF_UP).toString();
@@ -50,7 +49,7 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("Round", 1, tt);
             return naturalRound(0, tt.get(0), RoundingMode.HALF_UP).toString();
         }
@@ -76,7 +75,7 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("RoundX", 2, tt);
             int fractionalDigits = Utils.getFirstBigDeciamalTokenAsInt(tt);
             return unnaturalRound(fractionalDigits, tt.get(1)).toString();
@@ -103,7 +102,7 @@ public class Rounding {
 
         @Override
         public String solve(List<String> tokens) {
-            List<BigDecimal> tt = Utils.evaluateSingleToken(tokens);
+            List<BigDecimal> tt = Utils.tokensToNumbers(tokens);
             Utils.checkTokensCount("roundDigitsN", 2, tt);
             int digits = Utils.getFirstBigDeciamalTokenAsInt(tt);
             return roundDigits(digits, tt.get(1), RoundingMode.HALF_UP);
