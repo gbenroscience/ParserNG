@@ -422,6 +422,7 @@ public class Method {
         list.subList(0, 2).clear();//remove the method name and its opening bracket.
         list.remove(list.size() - 1);//remove the closing bracket.
         int sz = list.size();
+
         if (isStatsMethod(name)) {
             for (BasicNumericalMethod basicNumericalMethod: getBasicNumericalMethods()){
                 if (name.equals(basicNumericalMethod.getName())){

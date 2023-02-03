@@ -56,7 +56,7 @@ public class GsumAvgGeomCountTest {
 
 
     @Test
-    void geomExpressionMultipleBrackets() {
+    void geomExpressionMultipleBrackets() {//((2+0.0)(16.0-8)4)
         MathExpression me = new MathExpression("geom((2+((2-2)),(8+8)-(((8))),4))");
         Assertions.assertEquals("4.000000000", me.solve());
         me = new MathExpression("(geom(((2,8,4))))");

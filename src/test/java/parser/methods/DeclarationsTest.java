@@ -19,7 +19,7 @@ class DeclarationsTest {
         me = new MathExpression("prod(1+1,2+2)");
         Assertions.assertEquals("8.0", me.solve());
         me = new MathExpression("prod(1+1)");
-        Assertions.assertEquals("SYNTAX ERROR", me.solve());
+        Assertions.assertEquals("2.0", me.solve());
         BasicNumericalMethod override = new BasicNumericalMethod() {
             @Override
             public String solve(List<String> tokens) {
@@ -57,7 +57,7 @@ class DeclarationsTest {
         }
         int after = Declarations.getInbuiltMethods().length;
         me = new MathExpression("prod(1+1)");
-        Assertions.assertEquals("SYNTAX ERROR", me.solve());
+        Assertions.assertEquals("2.0", me.solve());
         Assertions.assertEquals(before, after);
         Assertions.assertEquals(before+1, during);
     }

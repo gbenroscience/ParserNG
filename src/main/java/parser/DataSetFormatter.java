@@ -38,7 +38,6 @@ public class DataSetFormatter {
      */
     public static final String CLOSE_BRACKET_MASK = ">>>>";
 
-
     /**
      * Takes a comma separated string of data values and scans them into its
      * dataset attribute.
@@ -87,47 +86,47 @@ public class DataSetFormatter {
             sbpList.set(indexOfComma, COMMA_MASK);//mask the comma.
             String token = sbpList.get(lastIndexCursor);
             /**
-             * The logic of this if statement.
-             * This list is a comma-separated list
-             * We intend to place brackets about every group of tokens that occurs either between 2 commas, or between the beginning of the list and
-             * the first comma, or between the last comma and the end of the list.
-             * RULES:
-             * If only 1 token occurs in the said space, check if it is a compound number-variable token..e.g 3A or 4B
-             * If it is, bracket it, else ignore it; we cannot waste parentheses like that.
+             * The logic of this if statement. This list is a comma-separated
+             * list We intend to place brackets about every group of tokens that
+             * occurs either between 2 commas, or between the beginning of the
+             * list and the first comma, or between the last comma and the end
+             * of the list. RULES: If only 1 token occurs in the said space,
+             * check if it is a compound number-variable token..e.g 3A or 4B If
+             * it is, bracket it, else ignore it; we cannot waste parentheses
+             * like that.
              *
-             * If the group of tokens starts with the @ symbol, a function definition is there, DO NOT BRACKET IT.
+             * If the group of tokens starts with the @ symbol, a function
+             * definition is there, DO NOT BRACKET IT.
              *
              * ELSE, BRACKET IT ALL.
              *
              */
-            if ( !isAtOperator(token) && !Method.isListReturningStatsMethod(token) && !Method.isFunctionOperatingMethod(token)
-                    && (spaceWidth > 2 || (!validNumber(token) && !isVariableString(token)) )    ) {//Do not bracket anonymous functions.
+            if (!isAtOperator(token) && !Method.isListReturningStatsMethod(token) && !Method.isFunctionOperatingMethod(token)
+                    && (spaceWidth > 2 || (!validNumber(token) && !isVariableString(token)))) {//Do not bracket anonymous functions.
 // System.out.printf("lastIndexOfCursor = %d, indexOfComma = %d\n ",lastIndexCursor,indexOfComma);
                 //               System.out.println("HotSpot-Begin: "+sbpList+" targeting entries: "+sbpList.get(lastIndexCursor)+" AND "+sbpList.get(indexOfComma));
                 sbpList.add(indexOfComma, CLOSE_BRACKET_MASK);//add an encoded close bracket here
                 sbpList.add(lastIndexCursor, OPEN_BRACKET_MASK);//add an encoded open bracket here
                 //               System.out.println("HotSpot-End: "+sbpList);
                 lastIndexCursor = indexOfComma + 3;
-            }
-            else{
-                lastIndexCursor = indexOfComma+1;
+            } else {
+                lastIndexCursor = indexOfComma + 1;
             }
 
             //sum(@(x)3*x-sin(x),4
-
         }//end while loop
         int sz = sbpList.size();
         int spaceWidth = sz - lastIndexCursor;
         /**
-         * At the end of the loop, quantities in the comma separated list
-         * end up not been bracketed, so check if the quantity is a group of
-         * tokens. If so, bracket it. Else (a number or a variable, leave it unbracketed.
+         * At the end of the loop, quantities in the comma separated list end up
+         * not been bracketed, so check if the quantity is a group of tokens. If
+         * so, bracket it. Else (a number or a variable, leave it unbracketed.
          *
          *
          */
         String token = sbpList.get(lastIndexCursor);
-        if (  !isAtOperator(token) && !Method.isListReturningStatsMethod(token)  && !Method.isFunctionOperatingMethod(token)
-                && (spaceWidth > 2 || (!validNumber(token) && !isVariableString(token)) )  ) {
+        if (!isAtOperator(token) && !Method.isListReturningStatsMethod(token) && !Method.isFunctionOperatingMethod(token)
+                && (spaceWidth > 2 || (!validNumber(token) && !isVariableString(token)))) {
             //     System.out.println("HotSpot-Begin-1: "+sbpList);
             sbpList.add(sz, CLOSE_BRACKET_MASK);//add an encoded close bracket here
             sbpList.add(lastIndexCursor, OPEN_BRACKET_MASK);//add an encoded open bracket here
@@ -135,7 +134,6 @@ public class DataSetFormatter {
         }
 
         // System.out.println("END________________________________________________________________________END:  "+sbpList);
-
     }
 
     /**
@@ -156,21 +154,19 @@ public class DataSetFormatter {
         this.dataset = csc.scan();
 
         //  System.out.println("In the beginning: "+dataset);
-
         //root(5,@(x)sin(x)-x,2,4)
         //sum(4,3,5,6,7,1
         // (, and , ), and variable names
-
         for (int i = 0; i < dataset.size(); i++) {
 
             if (isCloseBracket(dataset.get(i))) {
                 int close = i;
                 int open = Bracket.getComplementIndex(false, close, dataset);
-                dataset.set(open,OPEN_BRACKET_MASK);
-                dataset.set(close,CLOSE_BRACKET_MASK);
+                dataset.set(open, OPEN_BRACKET_MASK);
+                dataset.set(close, CLOSE_BRACKET_MASK);
 
                 // List<String> subData = dataset.subList(open+1, close);
-                processCommasInSingleBracketPair(dataset.subList(open+1, close));
+                processCommasInSingleBracketPair(dataset.subList(open + 1, close));
                 //  System.out.println("dataset is now: "+dataset);
                 //  System.out.println("_______________________________________________________________________________________");
             }
@@ -194,11 +190,9 @@ public class DataSetFormatter {
                     break;
             }
 
-
         }
 
         //System.out.println("At the end: "+dataset);
-
     }
 
     public static void main(String args[]) {
@@ -206,19 +200,40 @@ public class DataSetFormatter {
         String func = "sum(1+1,3*2)";
         //String func = "sum(1+1)";
 //String func = "(root(f,2,4))";
-MathExpression e = new MathExpression(func);
-      System.out.println(e.solve());
+        MathExpression e = new MathExpression(func);
+        System.out.println(e.solve());
 
+        func = "sum(1+1*8+9)";
+        e = new MathExpression(func);
+        System.out.println(e.solve());
 
-          func = "sum(1+1)";
- e = new MathExpression(func);
-      System.out.println(e.solve());
+        func = "sum(sin(5)+cosh(ln(5)))";
+        e = new MathExpression(func);
+        System.out.println(e.solve());
 
+        func = "prod(5,2+2)";
+        e = new MathExpression(func);
+        System.out.println(e.solve());
 
-      func = "sum(sin(5)+cosh(ln(5)))";
-  e = new MathExpression(func);
-      System.out.println(e.solve());     
+        func = "a=2;geom((2+((2-2)),(8+8)-(((8))),4))";
+        e = new MathExpression(func);
+        System.err.println("scanner: " + e.scanner);
+        System.out.println(e.solve());
 
+        func = "sin(10)";
+        e = new MathExpression(func);
+        System.err.println("scanner: " + e.scanner);
+        System.out.println(e.solve());
+
+        func = "sin(2,1+4)";
+        e = new MathExpression(func);
+        System.err.println("scanner: " + e.scanner);
+        System.out.println(e.solve());
+
+        func = "sin(34+3,(15-3),2,1+4)";
+        e = new MathExpression(func);
+        System.err.println("scanner: " + e.scanner);
+        System.out.println(e.solve());
 
         DataSetFormatter f = new DataSetFormatter(func);
         System.out.println("Before scan-processing, the data = " + func);
