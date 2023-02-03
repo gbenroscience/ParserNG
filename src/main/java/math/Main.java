@@ -6,10 +6,12 @@ import java.util.Arrays;
 import java.util.List;
 
 import interfaces.Solvable;
+import logic.DRG_MODE;
 import parser.LogicalExpression;
 import parser.MathExpression;
 import parser.cmd.ParserCmd;
 import parser.logical.ExpressionLogger;
+import parser.methods.Help;
 
 public class Main {
 
@@ -140,6 +142,7 @@ public class Main {
         System.out.println("  Without any parameter, input is considered as math expression and calculated");
         System.out.println("  without trim, it would be the same as launching " + MathExpression.class.getName() + " main class");
         System.out.println("  run help in verbose mode (" + helpSwitch.getSwitch(0) + " " + verboseSwitch.getSwitch(0) + ") to get examples");
+        System.out.println(Help.getEnvVariables());
     }
 
     static void examples() {

@@ -396,7 +396,6 @@ public class VariableManager {
         private String getValue(String expr) throws NullPointerException, InputMismatchException {
             MathExpression func = new MathExpression(expr);
             func.setVariableValuesInFunction(func.getScanner());
-            func.setDRG(1);
             return func.solve();
         }
 

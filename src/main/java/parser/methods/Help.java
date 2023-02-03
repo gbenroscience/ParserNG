@@ -1,5 +1,7 @@
 package parser.methods;
 
+import logic.DRG_MODE;
+
 import static  parser.methods.Declarations.*;
 
 public class Help {
@@ -12,9 +14,14 @@ public class Help {
             sb.append(getHelp(op)).append("\n");
         }
         sb.append("List of functions is just tip of iceberg, see: https://github.com/gbenroscience/ParserNG for all features").append("\n");
+        sb.append(getEnvVariables()).append("\n");
         return sb.toString();
     }
 
+    public static String getEnvVariables() {
+        return "  Environment variables/java properties (so setup-able) in runtime):\n" +
+               "        " + DRG_MODE.DEG_MODE_VARIABLE + " - DEG/RAD/GRAD - allows to change units for trigonometric operations. Default is RAD. It is same as MathExpression().setDRG(...)";
+    }
     public static String getHelp(String op) {
         for(BasicNumericalMethod basicNumericalMethod: Declarations.getBasicNumericalMethods()){
             if (op.equals(basicNumericalMethod.getName())){

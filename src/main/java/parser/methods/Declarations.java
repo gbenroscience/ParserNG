@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
+import logic.DRG_MODE;
 import parser.TYPE;
 import parser.methods.ext.Avg;
 import parser.methods.ext.Abs;
@@ -411,5 +412,24 @@ public class Declarations {
             }
         }
         return false;
+    }
+
+    public static DRG_MODE degGradRadFromVariable() {
+        String userDrgMode = System.getenv(DRG_MODE.DEG_MODE_VARIABLE);
+        if (userDrgMode == null) {
+            userDrgMode = System.getProperty(DRG_MODE.DEG_MODE_VARIABLE);
+        }
+        if (userDrgMode == null) {
+            return DRG_MODE.RAD;
+        }
+        if (userDrgMode.toUpperCase().trim().equals("DEG")) {
+            return DRG_MODE.DEG;
+        } else if (userDrgMode.toUpperCase().trim().equals("RAD")) {
+            return DRG_MODE.RAD;
+        } if (userDrgMode.toUpperCase().trim().equals("GRAD")) {
+            return DRG_MODE.GRAD;
+        } else {
+            return DRG_MODE.RAD;
+        }
     }
 }

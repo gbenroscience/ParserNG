@@ -4,6 +4,7 @@
  */
 package parser.methods;
 
+import logic.DRG_MODE;
 import parser.CustomScanner;
 import parser.Function;
 import static parser.STRING.*;
@@ -413,7 +414,7 @@ public class Method {
      * @return a {@link List} object which is the output of the method's
      * operation.
      */
-    public static List<String> run(List<String> list, int DRG) {
+    public static List<String> run(List<String> list, DRG_MODE DRG) {
         
         quickFixCompoundStructuresInStatsExpression(list);
         String name = list.get(0);
@@ -427,6 +428,8 @@ public class Method {
             for (BasicNumericalMethod basicNumericalMethod: getBasicNumericalMethods()){
                 if (name.equals(basicNumericalMethod.getName())){
                     Set set = new Set(list);
+                    //TODO, make basicNumericalMethod statefull (initialize by reflection)
+                    //basicNumericalMethod.setRadDegGrad(DRG);
                     result = basicNumericalMethod.solve(new ArrayList<>(set.getData()));
                     list.clear();
                     list.add(result);
@@ -729,7 +732,7 @@ public class Method {
             if (sz == 1) {
                 try {
                     if (!list.get(0).equals("Infinity") && isNumber(list.get(0))) {
-                        if (DRG == 0) {
+                        if (DRG == DRG_MODE.DEG) {
                             if (name.equals(SIN)) {
                                 result = String.valueOf(Maths.sinDegToRad(Double.valueOf(list.get(0))));
                             } else if (name.equals(SINH)) {
@@ -809,8 +812,7 @@ public class Method {
 
 //add more definitions below....
                         }//end if DRG == 0
-                        else if (DRG == 1) {
-
+                        else if (DRG == DRG_MODE.RAD) {
                             if (name.equals(SIN)) {
                                 result = String.valueOf(Math.sin(Double.valueOf(list.get(0))));
                             } else if (name.equals(SINH)) {
@@ -890,8 +892,7 @@ public class Method {
 
 //add more definitions below....
                         }//end else if DRG == 1
-                        else if (DRG == 2) {
-
+                        else if (DRG == DRG_MODE.GRAD) {
                             if (name.equals(SIN)) {
                                 result = String.valueOf(Maths.sinGradToRad(Double.valueOf(list.get(0))));
                             } else if (name.equals(SINH)) {
