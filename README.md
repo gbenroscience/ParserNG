@@ -245,12 +245,17 @@ The parser has its own set of built-in functions. They are:
     rng,mrng,rms,cov,min,max,s_d,variance,st_err,rnd,sort,plot,diff,intg,quad,t_root,
     root,linear_sys,det,invert,tri_mat,echelon,matrix_mul,matrix_div,matrix_add,matrix_sub,matrix_pow,transpose,matrix_edit
     
-  <br>
-  For runtime loaded list of all functions (with description, even in-runtime-added - see User hardcoded functions), run 'help' as MathExpression's value
+<br>
+For runtime loaded list of all functions (with description, even in-runtime-added - see User hardcoded functions), and environment variables, run <code>help</code> as MathExpression's value<br>
+
   ```
 MathExpression expression = new MathExpression("help");
 expression.solve();
   ``` 
+  
+##### Environment variables/java properties (so setup-able) in runtime).
+See <code>help</code> for actual version-specific, up-to date, list<br>
+<li> RADDEGDRAD_PNG - DEG/RAD/GRAD - allows to change units for trigonometric operations. Default is RAD. It is same as <code>MathExpression().setDRG(...)</code>
   <br>
 
 

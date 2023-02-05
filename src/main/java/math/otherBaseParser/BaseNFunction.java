@@ -44,7 +44,6 @@ public class BaseNFunction extends MathExpression {
     public BaseNFunction( String input,int baseOfOperation ) {
         super(input);
         this.baseOfOperation=baseOfOperation;
-        setDRG(1);
 
         convertNumbersToDecimal();
     }

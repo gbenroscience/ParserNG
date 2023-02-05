@@ -530,9 +530,6 @@ public class RootFinder {
             Function gradFunc = new Function("@("+variable+")"+gradFunxn);
             //System.err.println("gradient function is "+gradFunc.expressionForm());
 
-            function.getMathExpression().setDRG(1);
-            gradFunc.getMathExpression().setDRG(1);
-
             function.getMathExpression().setValue(variable, String.valueOf(xOne));
             double f_x = Double.parseDouble(  function.eval() );
 
@@ -597,7 +594,6 @@ public class RootFinder {
 
             String variable = getVariable();
 
-            function.getMathExpression().setDRG(1);
             function.getMathExpression().setValue(variable, String.valueOf(xOne));
             System.err.println("xOne = "+xOne+", expression: "+function.getMathExpression().getExpression());
             double f1 = Double.parseDouble(  function.eval() );

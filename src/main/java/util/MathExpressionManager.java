@@ -34,12 +34,6 @@ public class MathExpressionManager {
      * of this class use to optimize an evaluation of an expression.
      */
     private int maxSize=200;
-    /**
-     * Whether to compute trigonometric functions
-     * in degrees, rads or grads. Set to 0 for degrees, set to 1 for rads
-     * and set to 2 for grads.
-     */
-    private int drgStatus=1;
 
 
     public MathExpressionManager() {
@@ -71,16 +65,6 @@ public class MathExpressionManager {
         this.maxSize = maxSize;
     }
 
-    public void setDrgStatus(int drgStatus) {
-        this.drgStatus = drgStatus>=0&&drgStatus<3?drgStatus:1;
-        for(int i=0;i<functions.size();i++){
-            functions.get(i).setDRG(drgStatus);
-        }
-    }//end method
-
-    public int getDrgStatus() {
-        return drgStatus;
-    }
 
     /**
      * A workspace uses a MathExpressionManager to
@@ -251,7 +235,6 @@ public class MathExpressionManager {
      */
     public MathExpression createFunction( String expr ){
         MathExpression f = new MathExpression(expr);
-        f.setDRG(1);
         storeFunction( f );
         return f;
     }//end method createFunction
@@ -292,7 +275,6 @@ public class MathExpressionManager {
 
             if (mathExpr!=null && !mathExpr.isEmpty() && exprCount == 1) {
                 if ((f = getFunctionByExpression(mathExpr)) != null) {//optimize function
-                    f.setDRG(drgStatus);
                 }//end if
                 else {
 /**
@@ -301,7 +283,6 @@ public class MathExpressionManager {
  * constants in the constructor
  */
                     f = new MathExpression("("+mathExpr+")");
-                    f.setDRG(drgStatus);
                     storeFunction(f);
                 }//end else
 

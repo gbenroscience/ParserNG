@@ -13,6 +13,7 @@ package parser;
  */
 //sin2+cos3-9tan(A+3B)
 //[sin,2,+,cos,3,-,9,tan (,A,+,3,B,)]
+import parser.methods.Declarations;
 import parser.methods.Method;
 
 import math.numericalmethods.RootFinder;
@@ -1276,10 +1277,10 @@ public class MathScanner {
             if (sz == 4 || sz == 5) {
                 if (Method.isMatrixMethod(list.get(0)) && isOpeningBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
                     if (sz == 4 && isClosingBracket(list.get(3))) {
-                        Method.run(list, 1);
+                        Method.run(list, Declarations.degGradRadFromVariable());
                     } else if (sz == 5 && (Method.isUserDefinedFunction(list.get(3)) || isNumber(list.get(3)) || isVariableString(list.get(3))) && isClosingBracket(list.get(4))) {
                         System.out.println("Debug--4");
-                        Method.run(list, 1);
+                        Method.run(list, Declarations.degGradRadFromVariable());
                     }
 
                 }

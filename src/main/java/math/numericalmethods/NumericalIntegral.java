@@ -180,7 +180,6 @@ public class NumericalIntegral {
         double m = 20000;
         double h = (xUpper - xLower)/( 2.0 * m );
         MathExpression fun = function.getMathExpression();
-        fun.setDRG(1);
         String variable = function.getIndependentVariables().get(0).getName();
 
 
@@ -241,7 +240,6 @@ public class NumericalIntegral {
 
 
         MathExpression fun = function.getMathExpression();
-        fun.setDRG(1);
         String variable = function.getIndependentVariables().get(0).getName();
 
 
@@ -334,7 +332,6 @@ public class NumericalIntegral {
     public String findTrapezoidalIntegral(){
         double dx = (xUpper - xLower)/( 10000.0 );
         MathExpression fun = function.getMathExpression();
-        fun.setDRG(1);
         String variable = function.getIndependentVariables().get(0).getName();
         fun.setValue(variable, String.valueOf(xLower));
 
@@ -382,7 +379,6 @@ public class NumericalIntegral {
 
 
         MathExpression fun = function.getMathExpression();
-        fun.setDRG(1);
         String variable = function.getIndependentVariables().get(0).getName();
         fun.setValue(variable, String.valueOf(xLower));
 
@@ -638,7 +634,6 @@ public class NumericalIntegral {
 
 
         MathExpression fun = new MathExpression( function.getMathExpression().getExpression() );
-        fun.setDRG(1);
         String variable = function.getIndependentVariables().get(0).getName();
 
 

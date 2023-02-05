@@ -13,8 +13,10 @@ import java.util.List;
 
 import interfaces.Solvable;
 import math.Main;
+import parser.ExpandingExpression;
 import parser.LogicalExpression;
 import parser.MathExpression;
+import parser.logical.ExpressionLogger;
 
 /**
  * @author GBEMIRO JIBOYE <gbenroscience@gmail.com>
@@ -28,6 +30,9 @@ public class ParserCmd {
         if (args.length > 0) {
             if (Main.getLogcalSwitch().isIn(args[0])) {
                 Main.setLogic(true);
+            }
+            if (Main.getExpandableSwitch().isIn(args[0])) {
+                Main.setExpandable(true);
             }
         }
         BufferedReader sc = new BufferedReader(new InputStreamReader(System.in));
@@ -66,7 +71,12 @@ public class ParserCmd {
     private static void calWitOutput(String cmd) {
         String ans = null;
         try {
-            Solvable expression = Main.isLogic() ? new LogicalExpression(cmd, LogicalExpression.verboseStderrLogger) : new MathExpression(cmd);
+
+            Solvable expression = Main.isLogic() ?
+                    new LogicalExpression(cmd, LogicalExpression.verboseStderrLogger) :
+                    Main.isExpandable() ?
+                            new ExpandingExpression(cmd, ExpandingExpression.getValuesFromVariables(), ExpandingExpression.verboseStderrLogger) :
+                            new MathExpression(cmd);
             ans = expression.solve();
         }catch (Exception ex) {
             ans = ex.getMessage();
