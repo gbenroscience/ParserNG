@@ -7,6 +7,7 @@ import java.util.List;
 
 import interfaces.Solvable;
 import logic.DRG_MODE;
+import parser.ExpandingExpression;
 import parser.LogicalExpression;
 import parser.MathExpression;
 import parser.cmd.ParserCmd;
@@ -68,10 +69,12 @@ public class Main {
     private static final MultiSwitch helpSwitch = new MultiSwitch("-h", "-H", "--help");
     private static final MultiSwitch interactiveSwitch = new MultiSwitch("-i", "-I", "--interactive");
     private static final MultiSwitch logcalSwitch = new MultiSwitch("-l", "-L", "--logic");
+    private static final MultiSwitch expandableSwitch = new MultiSwitch("-e", "-E", "--expandable");
 
     private static boolean trim = false;
     private static boolean verbose = false;
     private static boolean logic = false;
+    private static boolean expandable = false;
 
     public static void main(String... args) throws IOException {
         List<String> aargs = new ArrayList<>(Arrays.asList(args));
@@ -87,6 +90,13 @@ public class Main {
         if (logcalSwitch.isContained(aargs)) {
             logic = true;
             logcalSwitch.removeFrom(aargs);
+        }
+        if (expandableSwitch.isContained(aargs)) {
+            expandable = true;
+            expandableSwitch.removeFrom(aargs);
+        }
+        if (isLogic() && isExpandable()) {
+            throw new RuntimeException("you have set both logical and expandable parser. that is no go. Use onoy one of them in time.");
         }
         if (helpSwitch.isContained(aargs)) {
             help();
@@ -109,7 +119,11 @@ public class Main {
                 }
                 String r = null;
                 try {
-                    Solvable exp = logic ? new LogicalExpression(ex, LogicalExpression.verboseStderrLogger) : new MathExpression(ex);
+                    Solvable exp = logic ?
+                            new LogicalExpression(ex, LogicalExpression.verboseStderrLogger) :
+                            expandable ?
+                                    new ExpandingExpression(ex, ExpandingExpression.getValuesFromVariables(), ExpandingExpression.verboseStderrLogger) :
+                                    new MathExpression(ex);
                     r  = exp.solve();
                 }catch(Exception fatal){
                     if (verbose){
@@ -130,6 +144,11 @@ public class Main {
         System.out.println(logcalSwitch + "        will add logical expression wrapper around the expression");
         System.out.println("                     Logical expression parser is much less evolved and slow. Do not use it if you don't must");
         System.out.println("                     If you use logical parse, result is always true/false. If it is not understood, it reuslts to false");
+        System.out.println(expandableSwitch + "  Will add expandable parser around logical expression to allow you to work with sets and views on those sets");
+        System.out.println("                     by "+ ExpandingExpression.VALUES_PNG + "/" + ExpandingExpression.VALUES_IPNG + "variables you can pass in the set of numbers");
+        System.out.println("                     and access them by L0,L1,,, L1.. ..L2  L3,..L5 notations (set is space delimited)");
+        System.out.println("                     you can calculate dynamic indexes by L{expression} and use MN variable which stores length of input set");
+        System.out.println("                     Expandable parser is not natural by CLI usage. using directly "+ExpandingExpression.class.getName() + " is better, but CLI is crucial for testing expressions");
         System.out.println(trimSwitch + "         by default, each line is one expression,");
         System.out.println("                     however for better redability, sometimes it is worthy to");
         System.out.println("                     to split the expression to multiple lines. and evaluate as one.");
@@ -184,7 +203,10 @@ public class Main {
         System.out.println("    true");
         System.out.println("  Note, that " + MathExpression.class.getName() + " nor " + LogicalExpression.class.getName() + " classes do not take any parameters except expressions");
         System.out.println("  Note, that " + ParserCmd.class.getName() + " class takes single parameter " + logcalSwitch + " to contorl its evaluation");
+        System.out.println("Logical extension:");
         System.out.println(new LogicalExpression(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp());
+        System.out.println("Extandable extension:");
+        System.out.println(new ExpandingExpression(" 1 == 1", new ArrayList<String>(), ExpressionLogger.DEV_NULL).getHelp());
     }
 
     public static String joinArgs(List<String> filteredArgs, boolean trim) {
@@ -212,8 +234,16 @@ public class Main {
         return logic;
     }
 
+    public static boolean isExpandable() {
+        return expandable;
+    }
+
     public static void setLogic(boolean logic) {
         Main.logic = logic;
+    }
+
+    public static void setExpandable(boolean expandable) {
+        Main.expandable = expandable;
     }
 
     public static String getVersion() {
@@ -223,5 +253,9 @@ public class Main {
 
     public static MultiSwitch getLogcalSwitch() {
         return logcalSwitch;
+    }
+
+    public static MultiSwitch getExpandableSwitch() {
+        return expandableSwitch;
     }
 }

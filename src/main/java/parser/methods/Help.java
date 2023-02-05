@@ -1,6 +1,7 @@
 package parser.methods;
 
 import logic.DRG_MODE;
+import parser.ExpandingExpression;
 
 import static  parser.methods.Declarations.*;
 
@@ -20,7 +21,8 @@ public class Help {
 
     public static String getEnvVariables() {
         return "  Environment variables/java properties (so setup-able) in runtime):\n" +
-               "        " + DRG_MODE.DEG_MODE_VARIABLE + " - DEG/RAD/GRAD - allows to change units for trigonometric operations. Default is RAD. It is same as MathExpression().setDRG(...)";
+               "        " + DRG_MODE.DEG_MODE_VARIABLE + " - DEG/RAD/GRAD - allows to change units for trigonometric operations. Default is RAD. It is same as MathExpression().setDRG(...)\n" +
+               "        " + ExpandingExpression.VALUES_PNG + "/" + ExpandingExpression.VALUES_IPNG + " - space separated numbers - allows to set numboers for " + ExpandingExpression.class.getName();
     }
     public static String getHelp(String op) {
         for(BasicNumericalMethod basicNumericalMethod: Declarations.getBasicNumericalMethods()){
