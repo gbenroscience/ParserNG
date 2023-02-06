@@ -13,6 +13,7 @@ import parser.methods.ext.Abs;
 import parser.methods.ext.AvgN;
 import parser.methods.ext.CeilFloor;
 import parser.methods.ext.Count;
+import parser.methods.ext.Echo;
 import parser.methods.ext.Geom;
 import parser.methods.ext.GeomN;
 import parser.methods.ext.Gsum;
@@ -140,6 +141,10 @@ public class Declarations {
     }
 
     static {
+        registerBasicNumericalMethod(new Echo());
+        registerBasicNumericalMethod(new Echo.EchoN());
+        registerBasicNumericalMethod(new Echo.EchoNI());
+        registerBasicNumericalMethod(new Echo.EchoI());
         registerBasicNumericalMethod(new AvgN());
         registerBasicNumericalMethod(new GeomN());
         registerBasicNumericalMethod(new Sum());
