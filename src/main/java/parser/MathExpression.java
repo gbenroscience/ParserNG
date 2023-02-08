@@ -62,18 +62,34 @@ import math.matrix.expressParser.Matrix;
 public class MathExpression implements Savable, Solvable {
 
     public Parser_Result parser_Result = Parser_Result.VALID;
-    //determines the mode in which trig operations will be carried out on numbers.if DRG==0,it is done in degrees
-//if DRG==1, it is done in radians and if it is 2, it is done in grads.
+    // determines the mode in which trig operations will be carried out on
+    // numbers.if DRG==0,it is done in degrees
+    // if DRG==1, it is done in radians and if it is 2, it is done in grads.
     private DRG_MODE DRG = Declarations.degGradRadFromVariable();
     public static String lastResult = "0.0";
-    private ArrayList<String> whitespaceremover = new ArrayList<>();//used to remove white spaces from the ArrayList
+    private ArrayList<String> whitespaceremover = new ArrayList<>();// used to remove white spaces from the ArrayList
     /**
      * The expression to evaluate.
      */
     private String expression;
-    protected boolean correctFunction = true;//checks if the function is valid.
+    protected boolean correctFunction = true;// checks if the function is valid.
     protected int noOfListReturningOperators;
-    protected ArrayList<String> scanner = new ArrayList<>();//the ArrayList that stores the scanner input function
+    /**
+     * If true, the expression being evaluated contains any kind of function,e.g.
+     * sin,cos or other etc
+     */
+    protected boolean hasFunctions;
+    /**
+     * If true, the expression being evaluated contains at least one user defined function,e.g.
+     */
+    protected boolean hasUserDefinedFunctions;
+    /**
+     * If true, the expression being evaluated contains at least one inbuilt function,e.g.
+     * sin,cos or other etc
+     */
+    protected boolean hasInbuiltFunctions;
+
+    protected ArrayList<String> scanner = new ArrayList<>();// the ArrayList that stores the scanner input function
     private boolean optimizable;
     private Bracket[] bracket;
     protected boolean hasListReturningOperators;
@@ -140,12 +156,17 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param input The function to be evaluated. The general format contains
-     * variable, constant and function declarations for variables, constants and
-     * functions that are not yet initialized, assignment expressions for those
-     * that have been initialized and then an expression to evaluate. e.g. x =
-     * -12; y =x+1/12; const x1,x2,x3=10; z =sin(3x-1)+2.98cos(4x);cos(3x+12);
-     * The last expression is a function to be evaluated and it is always
-     * without any equals sign and may or may not end with a semicolon.
+     *              variable, constant and function declarations for variables,
+     *              constants and
+     *              functions that are not yet initialized, assignment expressions
+     *              for those
+     *              that have been initialized and then an expression to evaluate.
+     *              e.g. x =
+     *              -12; y =x+1/12; const x1,x2,x3=10; z
+     *              =sin(3x-1)+2.98cos(4x);cos(3x+12);
+     *              The last expression is a function to be evaluated and it is
+     *              always
+     *              without any equals sign and may or may not end with a semicolon.
      *
      */
     public MathExpression(String input) {
@@ -176,12 +197,12 @@ public class MathExpression implements Savable, Solvable {
 
         if (mathExpr != null && !mathExpr.isEmpty() && exprCount == 1) {
             setExpression(mathExpr);
-        }//end if
+        } // end if
         else {
             setExpression("(0.0)");
         }
 
-    }//end constructor MathExpression
+    }// end constructor MathExpression
 
     public String getExpression() {
         return expression;
@@ -204,16 +225,17 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @return true if this object has been scanned and is found valid. In this
-     * state, objects of this class are optimized to run at very high speeds.
+     *         state, objects of this class are optimized to run at very high
+     *         speeds.
      */
     public boolean isScannedAndOptimized() {
         try {
             return !scanner.isEmpty() && correctFunction && this != null;
-        }//end try
+        } // end try
         catch (NullPointerException nol) {
             return false;
-        }//end catch
-    }//end method
+        } // end catch
+    }// end method
 
     public static void setAutoInitOn(boolean autoInitOn) {
         MathExpression.autoInitOn = autoInitOn;
@@ -229,7 +251,7 @@ public class MathExpression implements Savable, Solvable {
         setHasListReturningOperators(false);
         setNoOfListReturningOperators(0);
         whitespaceremover.add("");
-        //Scanner operation
+        // Scanner operation
 
         MathScanner opScanner = new MathScanner(expression);
         scanner = opScanner.scanner(variableManager);
@@ -243,9 +265,9 @@ public class MathExpression implements Savable, Solvable {
             removeCommas();
             mapBrackets();
             functionComponentsAssociation();
-        }//end if
+        } // end if
 
-    }//end method initializing(args)
+    }// end method initializing(args)
 
     private void removeCommas() {
         List<String> commaList = new ArrayList<>();
@@ -274,7 +296,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @return the Brackets ArrayList containing all Bracket objects found in
-     * the input.
+     *         the input.
      */
     public Bracket[] getBracket() {
         return bracket;
@@ -283,7 +305,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param bracket the Brackets ArrayList containing all Bracket objects
-     * found in the input.
+     *                found in the input.
      */
     public void setBracket(Bracket[] bracket) {
         this.bracket = bracket;
@@ -300,7 +322,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param correctFunction sets if the input is valid and can be evaluated or
-     * not.
+     *                        not.
      */
     public void setCorrectFunction(boolean correctFunction) {
         this.correctFunction = correctFunction;
@@ -317,7 +339,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param noOfListReturningOperators sets the number of list returning
-     * operators found in the input.
+     *                                   operators found in the input.
      */
     public void setNoOfListReturningOperators(int noOfListReturningOperators) {
         this.noOfListReturningOperators = noOfListReturningOperators;
@@ -366,10 +388,22 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasListReturningOperators sets the number of list returning
-     * operators.
+     *                                  operators.
      */
     public void setHasListReturningOperators(boolean hasListReturningOperators) {
         this.hasListReturningOperators = hasListReturningOperators;
+    }
+
+    public boolean isHasFunctions() {
+        return hasFunctions;
+    }
+
+    public boolean isHasInbuiltFunctions() {
+        return hasInbuiltFunctions;
+    }
+
+    public boolean isHasUserDefinedFunctions() {
+        return hasUserDefinedFunctions;
     }
 
     /**
@@ -407,7 +441,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasPreNumberOperators sets whether the input has pre-number
-     * operators or not
+     *                              operators or not
      */
     public void setHasPreNumberOperators(boolean hasPreNumberOperators) {
         this.hasPreNumberOperators = hasPreNumberOperators;
@@ -424,7 +458,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasLogicOperators sets whether the input has logic operators or
-     * not.
+     *                          not.
      */
     public void setHasLogicOperators(boolean hasLogicOperators) {
         this.hasLogicOperators = hasLogicOperators;
@@ -441,7 +475,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasPostNumberOperators sets whether the input has post number
-     * operators
+     *                               operators
      */
     public void setHasPostNumberOperators(boolean hasPostNumberOperators) {
         this.hasPostNumberOperators = hasPostNumberOperators;
@@ -458,7 +492,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasPowerOperators sets whether or not the input has the power
-     * operator
+     *                          operator
      */
     public void setHasPowerOperators(boolean hasPowerOperators) {
         this.hasPowerOperators = hasPowerOperators;
@@ -475,7 +509,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasMulOrDivOperators sets whether the input has multiplication or
-     * division operators
+     *                             division operators
      */
     public void setHasMulOrDivOperators(boolean hasMulOrDivOperators) {
         this.hasMulOrDivOperators = hasMulOrDivOperators;
@@ -504,7 +538,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasPlusOrMinusOperators sets whether or not the input contains
-     * plus or minus operators
+     *                                plus or minus operators
      */
     public void setHasPlusOrMinusOperators(boolean hasPlusOrMinusOperators) {
         this.hasPlusOrMinusOperators = hasPlusOrMinusOperators;
@@ -521,7 +555,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasRemainderOperators sets whether or not remainder operators are
-     * found in the input
+     *                              found in the input
      */
     public void setHasRemainderOperators(boolean hasRemainderOperators) {
         this.hasRemainderOperators = hasRemainderOperators;
@@ -538,7 +572,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasPermOrCombOperators sets whether permutation and combination
-     * operators are found in the input
+     *                               operators are found in the input
      */
     public void setHasPermOrCombOperators(boolean hasPermOrCombOperators) {
         this.hasPermOrCombOperators = hasPermOrCombOperators;
@@ -547,7 +581,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @return true if permutation and combination operators are found in the
-     * input
+     *         input
      */
     public boolean isHasPermOrCombOperators() {
         return hasPermOrCombOperators;
@@ -556,7 +590,8 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @param hasNumberReturningStatsOperators sets whether or not the input
-     * contains a data set that will evaluate to a number
+     *                                         contains a data set that will
+     *                                         evaluate to a number
      */
     public void setHasNumberReturningStatsOperators(boolean hasNumberReturningStatsOperators) {
         this.hasNumberReturningStatsOperators = hasNumberReturningStatsOperators;
@@ -565,7 +600,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @return true if the input contains a data set that will evaluate to a
-     * number
+     *         number
      */
     public boolean isHasNumberReturningStatsOperators() {
         return hasNumberReturningStatsOperators;
@@ -590,8 +625,9 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @return an ArrayList object containing all Variable objects found in the
-     * current input expression. This is only a subset of all Variable objects
-     * used in the workspace of operation of this MathExpression object.
+     *         current input expression. This is only a subset of all Variable
+     *         objects
+     *         used in the workspace of operation of this MathExpression object.
      */
     public ArrayList<Variable> getVars() {
 
@@ -601,20 +637,21 @@ public class MathExpression implements Savable, Solvable {
             if (isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1))) {
                 String str = scanner.get(i);
                 Variable v = VariableManager.lookUp(str);
-                //Variable does not exist
+                // Variable does not exist
                 if (v == null) {
                     setCorrectFunction(false);
                     throw new NullPointerException("Variable " + str + " Was Never Initialized!!");
-                } //Variable exists
+                } // Variable exists
                 else {
-                    //  if var is in workspace but not yet recognized in this expression, add to usedVars
+                    // if var is in workspace but not yet recognized in this expression, add to
+                    // usedVars
                     if (!usedVars.contains(v)) {
                         usedVars.add(v);
                     }
                 }
-            }//end if
+            } // end if
 
-        }//end for loop
+        } // end for loop
         return usedVars;
 
     }
@@ -655,80 +692,97 @@ public class MathExpression implements Savable, Solvable {
                         exitForLoop = closeBracIndex <= scanner.size();
                         break;
                     }
-                }//end while
+                } // end while
 
-            }//end if
+            } // end if
 
             if (exitForLoop) {
                 break;
             }
 
-        }//end for
+        } // end for
 
         scanner.removeAll(whitespaceremover);
 
-    }//end method
+    }// end method
 
     public void statsVerifier() {
         scanner.removeAll(whitespaceremover);
 
-        //determine the presence of list returning statistical operators
+        // determine the presence of list returning statistical operators
         for (int i = 0; i < scanner.size(); i++) {
-            if (Method.isListReturningStatsMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
-                noOfListReturningOperators++;
-            }//end if
-
-        }//end for
+            String token = scanner.get(i);
+            if (i + 1 < scanner.size()) {
+                String nextToken = scanner.get(i + 1);
+                if (isOpeningBracket(nextToken)) {
+                    if (Method.isListReturningStatsMethod(token)) {
+                        noOfListReturningOperators++;
+                    } else if (Method.isDefinedMethod(token)) {
+                        hasFunctions = true;
+                    } else if (Method.isInBuiltMethod(token)) {
+                        hasInbuiltFunctions = true;
+                    } else if (Method.isUserDefinedFunction(token)) {
+                        hasUserDefinedFunctions = true;
+                    }
+                }
+            }
+        } // end for
 
         correctFunction = ListReturningStatsOperator.validateFunction(this.scanner);
         parser_Result = correctFunction ? Parser_Result.VALID : Parser_Result.SYNTAX_ERROR;
-        //processLogger.writeLog(ListReturningStatsOperator.getErrorMessage());
+        // processLogger.writeLog(ListReturningStatsOperator.getErrorMessage());
 
         if (noOfListReturningOperators > 0 && correctFunction) {
             setHasListReturningOperators(true);
-            //disable usage of multiple list operators in function here by un-commenting the statement below
+            // disable usage of multiple list operators in function here by un-commenting
+            // the statement below
             // correctFunction=false;
 
             if (isHasListReturningOperators()) {
 
-                scanner.remove(0);//temporarily remove the starting bracket
-                scanner.remove(scanner.size() - 1);//temporarily remove the ending bracket
+                scanner.remove(0);// temporarily remove the starting bracket
+                scanner.remove(scanner.size() - 1);// temporarily remove the ending bracket
 
                 for (int i = 0; i < scanner.size(); i++) {
                     try {
                         if (Method.isListReturningStatsMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
                             if (isBinaryOperator(scanner.get(i - 1))) {
-                                //processLogger.writeLog("Invalid Association Discovered For: \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\".\n");
+                                // processLogger.writeLog("Invalid Association Discovered For:
+                                // \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\".\n");
                                 correctFunction = false;
                                 break;
                             }
-                            if (isBracket(scanner.get(i - 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i - 2))
+                            if (isBracket(scanner.get(i - 1))
+                                    && !Method.isNumberReturningStatsMethod(scanner.get(i - 2))
                                     && !Method.isListReturningStatsMethod(scanner.get(i - 2))) {
-                                //processLogger.writeLog("Invalid Association Discovered For: \"(\" And "+scanner.get(i-2)+" And \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n ");
+                                // processLogger.writeLog("Invalid Association Discovered For: \"(\" And
+                                // "+scanner.get(i-2)+" And \""+scanner.get(i-1)+"\" And
+                                // \""+scanner.get(i)+"\"\n ");
                                 correctFunction = false;
 
                                 break;
                             }
 
-                        }//end if
-                    }//end try
+                        } // end if
+                    } // end try
                     catch (IndexOutOfBoundsException ind) {
                     }
 
-                }//end for
+                } // end for
 
                 scanner.add(0, "(");
                 scanner.add(")");
 
                 if (!correctFunction) {
                     parser_Result = Parser_Result.SYNTAX_ERROR;
-                    //processLogger.writeLog("Verifier discovers invalid association between data set returning operators:");
+                    // processLogger.writeLog("Verifier discovers invalid association between data
+                    // set returning operators:");
                 }
-            }//end if isHasListReturningOperator
+            } // end if isHasListReturningOperator
 
         }
 
-    }//end method statsVerifier
+    }// end method statsVerifier
 
     /**
      * e.g in structures like sort(3,sin2,2sin3,5,3,2,sin(4+5),4!...) This
@@ -763,12 +817,12 @@ public class MathExpression implements Savable, Solvable {
                                     fun = fun.substring(1);
                                     fun = fun.substring(0, fun.length() - 1);
                                     fun = fun.trim();
-                                }//end while
+                                } // end while
                                 MathExpression f = new MathExpression(fun);
                                 String val = f.solve();
                                 scanner.add(open, val);
                                 scanner.subList(open + 1, i + 2).clear();
-                            }//end if
+                            } // end if
                             else if (Method.isDefinedMethod(entry)) {
                                 int ind = open - 2;
 
@@ -784,35 +838,35 @@ public class MathExpression implements Savable, Solvable {
                                         continue;
                                     }
 
-                                    //This for loop checks if it is the fix's scenario. e.g. statmethodName(num_or_var operator num_or_var)...e.g. sum(2+3*2...)
-                                    // If sum(2, 3+4) WRONG scenario, prod(3*2)  CORRECT etc.
+                                    // This for loop checks if it is the fix's scenario. e.g.
+                                    // statmethodName(num_or_var operator num_or_var)...e.g. sum(2+3*2...)
+                                    // If sum(2, 3+4) WRONG scenario, prod(3*2) CORRECT etc.
                                     for (int c = open; c < i; c++) {
                                         String tkn = scanner.get(c);
                                         String nextTkn = scanner.get(c + 1);
-                                        if ((isNumber(tkn) || isVariableString(tkn)) && (isNumber(nextTkn) || isVariableString(nextTkn))) {
+                                        if ((isNumber(tkn) || isVariableString(tkn))
+                                                && (isNumber(nextTkn) || isVariableString(nextTkn))) {
                                             return;
                                         }
                                     }
 
                                     List<String> domain = new ArrayList<>(opener.getBracketDomainContents(scanner));
 
-
                                     String fun = opener.getDomainContents(scanner);
-                
+
                                     while (fun.startsWith("(") && fun.endsWith(")")) {
                                         fun = fun.substring(1);
                                         fun = fun.substring(0, fun.length() - 1);
                                         fun = fun.trim();
-                                    }//end while
-
+                                    } // end while
 
                                     if (fun.contains(OPEN_CIRC_BRAC)) {
-                                        
-                                    int op = 0, cl = 0;
- 
-                                        while ( (cl = LISTS.nextIndexOf(domain, cl, CLOSE_CIRC_BRAC)) != -1) {
+
+                                        int op = 0, cl = 0;
+
+                                        while ((cl = LISTS.nextIndexOf(domain, cl, CLOSE_CIRC_BRAC)) != -1) {
                                             op = Bracket.getComplementIndex(false, cl, domain);
-                                            List<String>l=domain.subList(op, cl+1);
+                                            List<String> l = domain.subList(op, cl + 1);
                                             List<String> val = solve(l);
                                             l.clear();
                                             l.addAll(val);
@@ -832,11 +886,12 @@ public class MathExpression implements Savable, Solvable {
 
                                     while (ind >= 0 && Operator.isOpeningBracket(scanner.get(ind))) {
                                         --ind;
-                                    }//end while
+                                    } // end while
 
                                     if (ind >= 0) {
                                         String v = scanner.get(ind);
-                                        if (v.equals("intg") || v.equals("quad") || v.equals("diff") || v.equals("root")) {
+                                        if (v.equals("intg") || v.equals("quad") || v.equals("diff")
+                                                || v.equals("root")) {
                                             Bracket opener = new Bracket("(");
                                             opener.setIndex(open);
                                             Bracket closer = new Bracket(")");
@@ -856,21 +911,21 @@ public class MathExpression implements Savable, Solvable {
                                             String val = f.solve();
                                             scanner.add(open, val);
                                             scanner.subList(open + 1, i + 2).clear();
-                                        }//end if
+                                        } // end if
                                     }
                                 }
 
-                            }//end else if
+                            } // end else if
                         }
 
-                    }//end if
-                }//end try
+                    } // end if
+                } // end try
                 catch (IndexOutOfBoundsException boundsException) {
                     boundsException.printStackTrace();
                 }
-            }//end for
-        }//end if
-    }//end method
+            } // end for
+        } // end if
+    }// end method
 
     /**
      * The method establishes meaning to some shorthand techniques in math that
@@ -907,14 +962,14 @@ public class MathExpression implements Savable, Solvable {
                         utility.append(scanner.get(i + 2));
                         scanner.set(i + 1, utility.toString());
                         scanner.set(i + 2, "");
-                        utility.delete(0, utility.length());//clear the builder.
-                    }//end if
+                        utility.delete(0, utility.length());// clear the builder.
+                    } // end if
 
-                }//end try
+                } // end try
                 catch (IndexOutOfBoundsException ind) {
-                }//end catch
+                } // end catch
 
-            }//end for
+            } // end for
 
             /**
              * The theory behind this is that any sub-expression that lies
@@ -936,12 +991,17 @@ public class MathExpression implements Savable, Solvable {
                  * (3/4)*sin2
                  */
                 try {
-                    if ((isNumber(scanner.get(i)) || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i)))) && (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))
-                            || Method.isNumberReturningStatsMethod(scanner.get(i + 1)) || Method.isLogOrAntiLogToAnyBase(scanner.get(i + 1)))) {
+                    if ((isNumber(scanner.get(i))
+                            || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))))
+                            && (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))
+                                    || Method.isNumberReturningStatsMethod(scanner.get(i + 1))
+                                    || Method.isLogOrAntiLogToAnyBase(scanner.get(i + 1)))) {
 
-                        //Determine the placement of the close bracket
+                        // Determine the placement of the close bracket
                         int j = i + 1;
-                        while (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(j)) || Method.isNumberReturningStatsMethod(scanner.get(j)) || Method.isLogOrAntiLogToAnyBase(scanner.get(j))) {
+                        while (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(j))
+                                || Method.isNumberReturningStatsMethod(scanner.get(j))
+                                || Method.isLogOrAntiLogToAnyBase(scanner.get(j))) {
                             ++j;
                         }
                         if (isNumber(scanner.get(j)) || isVariableString(scanner.get(j))) {
@@ -956,10 +1016,10 @@ public class MathExpression implements Savable, Solvable {
 
                         }
 
-                    }//end if
-                }//end try.
+                    } // end if
+                } // end try.
                 catch (IndexOutOfBoundsException indErr) {
-                }//end catch
+                } // end catch
 
                 try {
                     /**
@@ -967,23 +1027,25 @@ public class MathExpression implements Savable, Solvable {
                      * sin(-1*(2+3)). The generic situation is
                      * "preNumberOperator-(expr)"
                      */
-                    if (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+                    if (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i - 1))
+                            && Operator.isPlusOrMinus(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
                         if (scanner.get(i).equals(MINUS)) {
-                            List<String> subList = scanner.subList(i - 1, Bracket.getComplementIndex(true, i + 1, scanner) + 1);
+                            List<String> subList = scanner.subList(i - 1,
+                                    Bracket.getComplementIndex(true, i + 1, scanner) + 1);
 
                             subList.set(1, "(");
                             subList.add(2, "-1");
                             subList.add(3, MULTIPLY);
                             subList.add(")");
-                        }//end if
+                        } // end if
                         else if (scanner.get(i).equals(PLUS)) {
                             scanner.set(i, "");
                         }
 
-                    }//end if
-                }//end try
+                    } // end if
+                } // end try
                 catch (IndexOutOfBoundsException ind) {
-                }//end catch
+                } // end catch
 
                 try {
                     /**
@@ -991,7 +1053,8 @@ public class MathExpression implements Savable, Solvable {
                      * -1*sin2+3 if this is not done, it would be evaluated as
                      * -(sin2+3)
                      */
-                    if (isOpeningBracket(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))) {
+                    if (isOpeningBracket(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i))
+                            && Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))) {
                         if (scanner.get(i).equals(MINUS)) {
                             scanner.set(i, "-1");
                             scanner.add(i + 1, MULTIPLY);
@@ -999,20 +1062,21 @@ public class MathExpression implements Savable, Solvable {
                             scanner.set(i, "");
                         }
                     }
-                }//end try
+                } // end try
                 catch (IndexOutOfBoundsException ind) {
-                }//end catch
+                } // end catch
 
-            }//end for
+            } // end for
 
             scanner.removeAll(whitespaceremover);
 
         } else if (!correctFunction) {
-            //processLogger.writeLog("Beginning Parser Shutdown Tasks Due To Errors In User Input.");
+            // processLogger.writeLog("Beginning Parser Shutdown Tasks Due To Errors In User
+            // Input.");
         }
 
         detectKeyOperators();
-    }//end method codeModifier
+    }// end method codeModifier
 
     /**
      * Serves as a powerful optimizer of the evaluation section as it can govern
@@ -1039,14 +1103,14 @@ public class MathExpression implements Savable, Solvable {
             } else if (isLogicOperator(scanner.get(i))) {
                 setHasLogicOperators(true);
             }
-        }//end for
+        } // end for
 
     }
 
     /**
      *
      * @param scanner The ArrayList object that holds the string values in the
-     * scanned function.
+     *                scanned function.
      * @return a Bracket array that holds related brackets pairs.
      */
     public static Bracket[] mapBrackets(ArrayList<String> scanner) {
@@ -1058,8 +1122,8 @@ public class MathExpression implements Savable, Solvable {
 
         ArrayList<String> scan = new ArrayList<>();
         scan.addAll(scanner);
-        int open = 0;//tracks the index of an opening bracket
-        int close = scan.indexOf(")");//tracks the index of a closing bracket
+        int open = 0;// tracks the index of an opening bracket
+        int close = scan.indexOf(")");// tracks the index of a closing bracket
         int i = 0;
         while (close != -1) {
             try {
@@ -1079,13 +1143,14 @@ public class MathExpression implements Savable, Solvable {
 
                 close = scan.indexOf(")");
                 ++i;
-            }//end try
+            } // end try
             catch (IndexOutOfBoundsException ind) {
                 break;
             }
-        }//end while
+        } // end while
 
-//after the mapping the algorithm demands that all ( and ) should have been used up in the function
+        // after the mapping the algorithm demands that all ( and ) should have been
+        // used up in the function
         if (scan.indexOf("(") == -1 && scan.indexOf(")") == -1) {
             int size = bracs.size();
             Bracket[] bracket = new Bracket[size];
@@ -1094,7 +1159,7 @@ public class MathExpression implements Savable, Solvable {
             throw new InputMismatchException("SYNTAX ERROR!");
         }
 
-    }//end method
+    }// end method
 
     /**
      * Method mapBrackets goes over an input equation and maps all positions
@@ -1103,14 +1168,14 @@ public class MathExpression implements Savable, Solvable {
     public void mapBrackets() {
         try {
             setBracket(mapBrackets(scanner));
-        }//end method
+        } // end method
         catch (InputMismatchException ime) {
             parser_Result = Parser_Result.PARENTHESES_ERROR;
             setCorrectFunction(false);
             scanner.clear();
-        }//end catch
+        } // end catch
 
-    }//end method
+    }// end method
 
     /**
      *
@@ -1121,65 +1186,73 @@ public class MathExpression implements Savable, Solvable {
     public void functionComponentsAssociation() {
 
         if (correctFunction) {
-            scanner.removeAll(whitespaceremover);//remove white spaces that may result from past parser actions
-//check for good combinations of operators and numbers and dis-allow any other.
+            scanner.removeAll(whitespaceremover);// remove white spaces that may result from past parser actions
+            // check for good combinations of operators and numbers and dis-allow any other.
 
             for (int i = 0; i < scanner.size(); i++) {
-//check for the various valid arrangements for all members of the function.
+                // check for the various valid arrangements for all members of the function.
                 String token = scanner.get(i);
-                //Variables
+                // Variables
                 if (isVariableString(scanner.get(i)) && !Method.isUserDefinedFunction(token)) {
                     try {
-                        //specify valid tokens that can come before a variable
+                        // specify valid tokens that can come before a variable
                         if (!isOpeningBracket(scanner.get(i - 1))
                                 && !isLogicOperator(scanner.get(i - 1)) && !isUnaryPreOperator(scanner.get(i - 1))
-                                && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1)) && !isNumber(scanner.get(i - 1))
+                                && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1))
+                                && !isNumber(scanner.get(i - 1))
                                 && !isVariableString(scanner.get(i - 1))) {
-                            //processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n");
+                            // processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The
+                            // MathExpression Members \""+scanner.get(i-1)+"\" And
+                            // \""+scanner.get(i)+"\"\n");
                             correctFunction = false;
                             scanner.clear();
                             break;
-                        }//end if
-                        //specify valid tokens that can come after a variable
+                        } // end if
+                          // specify valid tokens that can come after a variable
                         if (!isBracket(scanner.get(i + 1)) && !isBinaryOperator(scanner.get(i + 1))
-                                && !isUnaryPostOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
+                                && !isUnaryPostOperator(scanner.get(i + 1))
+                                && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
                                 && !isLogicOperator(scanner.get(i + 1)) && !isAssignmentOperator(scanner.get(i + 1))
-                                && !isUnaryPreOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
-                                && !Method.isLogToAnyBase(scanner.get(i + 1)) && !Method.isAntiLogToAnyBase(scanner.get(i + 1)) && !isNumber(scanner.get(i + 1))
+                                && !isUnaryPreOperator(scanner.get(i + 1))
+                                && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
+                                && !Method.isLogToAnyBase(scanner.get(i + 1))
+                                && !Method.isAntiLogToAnyBase(scanner.get(i + 1)) && !isNumber(scanner.get(i + 1))
                                 && !isVariableString(scanner.get(i + 1))) {
-                            //processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i)+"\" And \""+scanner.get(i+1)+"\"PLUS As You Have Done.\n");
+                            // processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The
+                            // MathExpression Members \""+scanner.get(i)+"\" And
+                            // \""+scanner.get(i+1)+"\"PLUS As You Have Done.\n");
 
                             correctFunction = false;
                             scanner.clear();
                             break;
-                        }//end if
-                    }//end try
+                        } // end if
+                    } // end try
                     catch (IndexOutOfBoundsException ind) {
-                    }//end catch
-                }//end else if
+                    } // end catch
+                } // end else if
 
-            }//end for
+            } // end for
             if (correctFunction) {
                 setCorrectFunction(validateAll(scanner));
             }
 
             if (correctFunction) {
                 scanner.removeAll(whitespaceremover);
-            }//end if
+            } // end if
             else {
                 scanner.clear();
                 bracket = null;
                 parser_Result = Parser_Result.SYNTAX_ERROR;
-            }//end else
+            } // end else
 
-        }//end if
+        } // end if
         else {
             scanner.clear();
             bracket = null;
             parser_Result = Parser_Result.SYNTAX_ERROR;
         }
 
-    }//end method functionComponentAssociation
+    }// end method functionComponentAssociation
 
     /**
      * An important process that must occur before the function is solved.
@@ -1200,29 +1273,29 @@ public class MathExpression implements Savable, Solvable {
             String varName = scan.get(i);
 
             try {
-                if (i + 1 < sz) {//a next token exists (at i+1) so check the next token
+                if (i + 1 < sz) {// a next token exists (at i+1) so check the next token
                     if (isVariableString(scan.get(i)) && !isOpeningBracket(scan.get(i + 1))) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
                             scan.set(i, v.getValue());
                         }
 
-                    }//end if
-                } else {//no next token exists
+                    } // end if
+                } else {// no next token exists
                     if (isVariableString(scan.get(i))) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
                             scan.set(i, v.getValue());
                         }
 
-                    }//end if
+                    } // end if
                 }
 
-            }//end try
+            } // end try
             catch (IndexOutOfBoundsException ind) {
-            }//end catch
+            } // end catch
 
-        }//end for
+        } // end for
 
     }// end method
 
@@ -1231,7 +1304,7 @@ public class MathExpression implements Savable, Solvable {
      * @param name The name of the variable or constant.
      * @return the value of the named variable or constant
      * @throws NullPointerException if a Variable object that has that name id
-     * not found.
+     *                              not found.
      */
     public String getValue(String name) throws NullPointerException {
         Variable var = variableManager.lookUp(name);
@@ -1240,10 +1313,10 @@ public class MathExpression implements Savable, Solvable {
 
     /**
      *
-     * @param name The name of the variable or constant.
+     * @param name  The name of the variable or constant.
      * @param value The value to set to the variable
      * @throws NullPointerException if a Variable object that has that name id
-     * not found.
+     *                              not found.
      */
     public void setValue(String name, String value) throws NullPointerException, NumberFormatException {
         Variable v = VariableManager.lookUp(name);
@@ -1282,12 +1355,12 @@ public class MathExpression implements Savable, Solvable {
      * shrinking factor to it.Else we continue the scan.
      *
      *
-     * @param brac the Bracket store to modify
+     * @param brac          the Bracket store to modify
      * @param startPosition the index in the ArrayList where the modification is
-     * to start
-     * @param increment the amount by which each bracket index is to be
-     * decreased
-     * @param run will run this method if given the sign to do so.
+     *                      to start
+     * @param increment     the amount by which each bracket index is to be
+     *                      decreased
+     * @param run           will run this method if given the sign to do so.
      */
     protected void modifyBracketIndices(Bracket[] brac, int startPosition, int increment, boolean run) {
         if (run) {
@@ -1298,29 +1371,31 @@ public class MathExpression implements Savable, Solvable {
 
                 for (int i = startPosition; i < brac.length; i++) {
                     valAtBracIndex = brac[i].getIndex();
-//values greater than the value stored by the bracket from which looping was started the
-// last time represent the indices of bracket in the function list that the compression function
-// will affect.So apply the decrement to them.
+                    // values greater than the value stored by the bracket from which looping was
+                    // started the
+                    // last time represent the indices of bracket in the function list that the
+                    // compression function
+                    // will affect.So apply the decrement to them.
                     try {
                         if (valAtBracIndex > valAtLastEvaluatedBracIndex) {
                             brac[i].setIndex(brac[i].getIndex() + increment);
-                        }//end if
-                    }//end try
+                        } // end if
+                    } // end try
                     catch (IndexOutOfBoundsException indexErr) {
-                    }//end catch
-                }//end for
+                    } // end catch
+                } // end for
 
                 ArrayList<Integer> arr = new ArrayList<Integer>();
                 for (int i = 0; i < brac.length; i++) {
                     arr.add(brac[i].getIndex());
                 }
-                //displayIndicesStoredInBrackets();
+                // displayIndicesStoredInBrackets();
 
             }
         }
 
-    }//end method reduceBracketIndices
-//(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)
+    }// end method reduceBracketIndices
+    // (1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)
 
     /**
      * Display the indices of all brackets in the function,bracket pair by
@@ -1343,7 +1418,7 @@ public class MathExpression implements Savable, Solvable {
      *
      * @param scan The ArrayList object.
      * @return the string version of the ArrayList and removes the braces i.e.
-     * []
+     *         []
      */
     protected String listToString(ArrayList<String> scan) {
         String str = String.valueOf(scan);
@@ -1355,7 +1430,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      *
      * @return an Array object containing duplicate contents of the List object
-     * alone
+     *         alone
      */
     protected Bracket[] copyArrayToArray() {
         int size = bracket.length;
@@ -1406,30 +1481,30 @@ public class MathExpression implements Savable, Solvable {
 
                 if (!correctFunction) {
                     break;
-                }//end if
+                } // end if
                 else {
                     try {
                         indexOpenInMyScan = brac[0].getIndex();
                         indexCloseInMyScan = brac[1].getIndex();
 
-                        boolean isMethod = false;//only list returning data sets e.g sort,rnd...
+                        boolean isMethod = false;// only list returning data sets e.g sort,rnd...
 
                         List<String> executable = null;
                         try {
                             isMethod = Method.isMethodName(myScan.get(indexOpenInMyScan - 1));
-                        }//end try
+                        } // end try
                         catch (IndexOutOfBoundsException indexErr) {
                             isMethod = false;
                         }
 
                         try {
                             executable = myScan.subList(indexOpenInMyScan, indexCloseInMyScan + 1);//
-                        }//end try
+                        } // end try
                         catch (IndexOutOfBoundsException indexErr) {
                         }
                         if (!isMethod) {
                             solve(executable);
-                        }//end if
+                        } // end if
                         else if (isMethod) {
 
                             try {
@@ -1444,7 +1519,7 @@ public class MathExpression implements Savable, Solvable {
 
                                     if (!Method.isUserDefinedFunction(executable.get(0))) {
                                         Method.run(executable, DRG);
-                                    }//end if
+                                    } // end if
                                     else if (Method.isUserDefinedFunction(executable.get(0))) {
                                         Function f = FunctionManager.lookUp(executable.get(0));
 
@@ -1455,11 +1530,11 @@ public class MathExpression implements Savable, Solvable {
                                             Method.run(executable, DRG);
                                         } else {
                                             Method.run(executable, DRG);
-                                        }//end else
+                                        } // end else
 
-                                    }//end else if
+                                    } // end else if
 
-                                }//end if
+                                } // end if
                                 else {
 
                                     solve(executable.subList(1, executable.size()));
@@ -1476,24 +1551,24 @@ public class MathExpression implements Savable, Solvable {
                             } catch (NullPointerException nolException) {
                                 break;
                             }
-                        }//end else if
+                        } // end else if
                         brac = mapBrackets(myScan);
-                    }//end try
+                    } // end try
                     catch (IndexOutOfBoundsException indexErr) {
                         indexErr.printStackTrace();
                         return "SYNTAX ERROR";
-                    }//end catch
+                    } // end catch
                     catch (NumberFormatException numErr) {
                         numErr.printStackTrace();
                         return "SYNTAX ERROR";
-                    }//end catch
+                    } // end catch
                     catch (InputMismatchException exception) {
                         exception.printStackTrace();
                         return "SYNTAX ERROR";
                     }
-                }//end else
+                } // end else
 
-            }//end while
+            } // end while
 
             listAppender = listToString(myScan);
             if (listAppender.startsWith("(")) {
@@ -1526,13 +1601,13 @@ public class MathExpression implements Savable, Solvable {
 
             }
 
-            //designed to deduce if or not the evaluating loop executed normally.
-            //If it didn't the statements in the else will execute
+            // designed to deduce if or not the evaluating loop executed normally.
+            // If it didn't the statements in the else will execute
             if (correctFunction) {
                 lastResult = listAppender;
 
-            }//end if
-            //give an error statement and then reset correctFunction to true;
+            } // end if
+              // give an error statement and then reset correctFunction to true;
             else {
                 listAppender = "A SYNTAX ERROR OCCURRED";
                 correctFunction = true;
@@ -1541,14 +1616,14 @@ public class MathExpression implements Savable, Solvable {
                 returnObjectName = myScan.get(0);
             }
             return listAppender;
-        }//end if
+        } // end if
         else if (hasFunctionOrVariableInitStatement) {
             return "Variable Storage Process Finished!";
         } else {
             return "SYNTAX ERROR";
         }
 
-    }//end method solve()
+    }// end method solve()
 
     /**
      * used by the main parser solve to figure out SBP portions of a
@@ -1559,30 +1634,32 @@ public class MathExpression implements Savable, Solvable {
      */
     protected List<String> solve(List<String> list) {
 
-//correct the anomaly: [ (,-,number....,)  ]
-        //   turn it into: [ (,,-number........,)     ]
-        //The double commas show that there exists an empty location in between the 2 commas
+        // correct the anomaly: [ (,-,number....,) ]
+        // turn it into: [ (,,-number........,) ]
+        // The double commas show that there exists an empty location in between the 2
+        // commas
         if (list.get(0).equals("(") && list.get(1).equals(MINUS) && isNumber(list.get(2))) {
             list.set(1, "");
-            //if the number is negative,make it positive
+            // if the number is negative,make it positive
             if (list.get(2).substring(0, 1).equals(MINUS)) {
                 list.set(2, list.get(2).substring(1));
-            } //if the number is positive,make it negative
+            } // if the number is positive,make it negative
             else {
                 list.set(2, MINUS + list.get(2));
             }
         }
-//Create a collection to serve as a garbage collector for the empty memory
-//locations and other unwanted locations created in the processing collection
+        // Create a collection to serve as a garbage collector for the empty memory
+        // locations and other unwanted locations created in the processing collection
         ArrayList<String> garbage = new ArrayList<>();
-//insert an empty string in it so that we can use it to remove empty spaces from the processing collection.
+        // insert an empty string in it so that we can use it to remove empty spaces
+        // from the processing collection.
         garbage.add("");
         garbage.add("(");
         garbage.add(")");
 
         list.removeAll(garbage);
 
-//solves the factorial component of the input|[²]|[³]|[-¹]²³-¹
+        // solves the factorial component of the input|[²]|[³]|[-¹]²³-¹
         if (isHasPostNumberOperators()) {
             for (int i = 0; i < list.size(); i++) {
                 try {
@@ -1591,30 +1668,30 @@ public class MathExpression implements Savable, Solvable {
                         if (isNumber(list.get(i))) {
                             list.set(i + 1, Maths.fact(list.get(i)));
                             list.set(i, "");
-                        }//end if
+                        } // end if
                         else if (list.get(i).equals("Infinity")) {
                             list.set(i + 1, "Infinity");
                             list.set(i, "");
-                        }//end else
+                        } // end else
 
                     } else if (isSquare(list.get(i + 1))) {
                         if (isNumber(list.get(i))) {
                             list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i)), 2)));
                             list.set(i, "");
-                        }//end if
+                        } // end if
                         else if (list.get(i).equals("Infinity")) {
                             list.set(i + 1, "Infinity");
                             list.set(i, "");
-                        }//end else
+                        } // end else
                     } else if (isCube(list.get(i + 1))) {
                         if (isNumber(list.get(i))) {
                             list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i)), 3)));
                             list.set(i, "");
-                        }//end if
+                        } // end if
                         else if (list.get(i).equals("Infinity")) {
                             list.set(i + 1, "Infinity");
                             list.set(i, "");
-                        }//end else
+                        } // end else
                     } else if (isInverse(list.get(i + 1))) {
                         if (isNumber(list.get(i))) {
                             list.set(i + 1, String.valueOf(1 / Double.parseDouble(list.get(i))));
@@ -1622,34 +1699,39 @@ public class MathExpression implements Savable, Solvable {
                         } else if (list.get(i).equals("Infinity")) {
                             list.set(i + 1, "0.0");
                             list.set(i, "");
-                        }//end else
+                        } // end else
                     }
-                }//end try
+                } // end try
                 catch (NumberFormatException numerror) {
                 } catch (NullPointerException nullerror) {
                 } catch (IndexOutOfBoundsException inderror) {
                 }
-            }//end for
+            } // end for
             list.removeAll(garbage);
-        }//end if
+        } // end if
 
         if (isHasPowerOperators()) {
 
-            /*Deals with powers.
-            Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
-             instead of sin(A^B).
-             Also instructs the software to multiply any 2 numbers in consecutive positions in the list.
-             This is important in distinguishing between functions such as sinAB and sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
+            /*
+             * Deals with powers.
+             * Handles the primary power operator e.g in 3^sin3^4.This is necessary at this
+             * stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
+             * instead of sin(A^B).
+             * Also instructs the software to multiply any 2 numbers in consecutive
+             * positions in the list.
+             * This is important in distinguishing between functions such as sinAB and
+             * sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
              */
             for (int i = 0; i < list.size(); i++) {
                 try {
                     if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
                         if (list.get(i).equals(POWER) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)), Double.parseDouble(list.get(i + 1)))));
+                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)),
+                                    Double.parseDouble(list.get(i + 1)))));
                             list.set(i - 1, "");
                             list.set(i, "");
-                        }//end if
-                    }//end if
+                        } // end if
+                    } // end if
                     else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
                         if (Double.parseDouble(list.get(i + 1)) > 1) {
                             list.set(i + 1, "Infinity");
@@ -1663,7 +1745,8 @@ public class MathExpression implements Savable, Solvable {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) == 0) {
+                        } else if (Double.parseDouble(list.get(i + 1)) < 1
+                                && Double.parseDouble(list.get(i + 1)) == 0) {
                             list.set(i + 1, "1.0");
                             list.set(i - 1, "");
                             list.set(i, "");
@@ -1685,7 +1768,8 @@ public class MathExpression implements Savable, Solvable {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) == 0) {
+                        } else if (Double.parseDouble(list.get(i - 1)) < 1
+                                && Double.parseDouble(list.get(i - 1)) == 0) {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
@@ -1693,25 +1777,25 @@ public class MathExpression implements Savable, Solvable {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        }//end else if
-                    }//end else if
+                        } // end else if
+                    } // end else if
                     else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
                         list.set(i + 1, "Infinity");
                         list.set(i - 1, "");
                         list.set(i, "");
                     }
 
-                }//end try
+                } // end try
                 catch (NumberFormatException numerror) {
                 } catch (NullPointerException nullerror) {
                 } catch (IndexOutOfBoundsException inderror) {
                 }
-            }//end for
+            } // end for
 
             list.removeAll(garbage);
 
-        }//end if
-        //Handles the pre-number operators.
+        } // end if
+          // Handles the pre-number operators.
 
         if (isHasPreNumberOperators()) {
             for (int i = list.size() - 1; i >= 0; i--) {
@@ -1720,44 +1804,50 @@ public class MathExpression implements Savable, Solvable {
                         if (list.get(i).equals(ROOT)) {
                             list.set(i, String.valueOf(Math.sqrt(Double.parseDouble(list.get(i + 1)))));
                             list.set(i + 1, "");
-                        }//end if
+                        } // end if
                         if (list.get(i).equals(CUBE_ROOT)) {
                             list.set(i, String.valueOf(Math.cbrt(Double.parseDouble(list.get(i + 1)))));
                             list.set(i + 1, "");
-                        }//end if
-//add more pre-number functions here...
-                    }//end if
+                        } // end if
+                        // add more pre-number functions here...
+                    } // end if
                     else if (list.get(i + 1).equals("Infinity")) {
                         list.set(i, "Infinity");
                         list.set(i + 1, "");
-                    }//end else if
-                }//end try
+                    } // end else if
+                } // end try
                 catch (NumberFormatException numerror) {
                 } catch (NullPointerException nullerror) {
                 } catch (IndexOutOfBoundsException inderror) {
                 }
-            }//end for
-        }//end if
+            } // end for
+        } // end if
 
         list.removeAll(garbage);
 
         if (isHasPowerOperators()) {
-            //do the in between operators
+            // do the in between operators
 
-            /*Deals with powers.Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
-             instead of sin(A^B).
-             Also instructs the software to multiply any 2 numbers in consecutive positions in the vector.
-             This is important in distinguishing between functions such as sinAB and sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
+            /*
+             * Deals with powers.Handles the primary power operator e.g in 3^sin3^4.This is
+             * necessary at this stage to dis-allow operations like sinA^Bfrom giving the
+             * result:(sinA)^B
+             * instead of sin(A^B).
+             * Also instructs the software to multiply any 2 numbers in consecutive
+             * positions in the vector.
+             * This is important in distinguishing between functions such as sinAB and
+             * sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
              */
             for (int i = 0; i < list.size(); i++) {
                 try {
                     if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
                         if (list.get(i).equals(POWER) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)), Double.parseDouble(list.get(i + 1)))));
+                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)),
+                                    Double.parseDouble(list.get(i + 1)))));
                             list.set(i - 1, "");
                             list.set(i, "");
-                        }//end if
-                    }//end if
+                        } // end if
+                    } // end if
                     else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
                         if (Double.parseDouble(list.get(i + 1)) > 1) {
                             list.set(i + 1, "Infinity");
@@ -1771,7 +1861,8 @@ public class MathExpression implements Savable, Solvable {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) == 0) {
+                        } else if (Double.parseDouble(list.get(i + 1)) < 1
+                                && Double.parseDouble(list.get(i + 1)) == 0) {
                             list.set(i + 1, "1.0");
                             list.set(i - 1, "");
                             list.set(i, "");
@@ -1793,7 +1884,8 @@ public class MathExpression implements Savable, Solvable {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) == 0) {
+                        } else if (Double.parseDouble(list.get(i - 1)) < 1
+                                && Double.parseDouble(list.get(i - 1)) == 0) {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
@@ -1801,38 +1893,40 @@ public class MathExpression implements Savable, Solvable {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        }//end else if
-                    }//end else if
+                        } // end else if
+                    } // end else if
                     else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
                         list.set(i + 1, "Infinity");
                         list.set(i - 1, "");
                         list.set(i, "");
                     }
 
-                }//end try
+                } // end try
                 catch (NumberFormatException numerror) {
                 } catch (NullPointerException nullerror) {
                 } catch (IndexOutOfBoundsException inderror) {
                 }
-            }//end for
+            } // end for
 
             list.removeAll(garbage);
 
-        }//end if
+        } // end if
 
         list.removeAll(garbage);
 
         if (isHasPermOrCombOperators()) {
-            //do the lower precedence in between operators
+            // do the lower precedence in between operators
 
             for (int i = 0; i < list.size(); i++) {
                 try {
                     if (list.get(i).equals(Operator.PERMUTATION)) {
                         if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(Maths.fact(list.get(i - 1))) / (Double.parseDouble(Maths.fact(String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))))))));
+                            list.set(i + 1, String.valueOf(Double.parseDouble(Maths.fact(list.get(i - 1)))
+                                    / (Double.parseDouble(Maths.fact(String.valueOf(Double.parseDouble(list.get(i - 1))
+                                            - Double.parseDouble(list.get(i + 1))))))));
                             list.set(i - 1, "");
                             list.set(i, "");
-                        }//end if
+                        } // end if
                         else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
@@ -1847,13 +1941,16 @@ public class MathExpression implements Savable, Solvable {
                             list.set(i, "");
                         }
 
-                    }//end if
+                    } // end if
                     else if (list.get(i).equals(Operator.COMBINATION)) {
                         if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(Maths.fact(list.get(i - 1))) / (Double.parseDouble(Maths.fact(String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))))) * Double.parseDouble(Maths.fact(list.get(i + 1))))));
+                            list.set(i + 1, String.valueOf(Double.parseDouble(Maths.fact(list.get(i - 1))) / (Double
+                                    .parseDouble(Maths.fact(String.valueOf(
+                                            Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1)))))
+                                    * Double.parseDouble(Maths.fact(list.get(i + 1))))));
                             list.set(i - 1, "");
                             list.set(i, "");
-                        }//end if
+                        } // end if
                         else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
@@ -1868,19 +1965,19 @@ public class MathExpression implements Savable, Solvable {
                             list.set(i, "");
                         }
 
-                    }//end else if
+                    } // end else if
 
-                }//end try
+                } // end try
                 catch (NullPointerException nolan) {
-                }//end catch
+                } // end catch
                 catch (NumberFormatException numerr) {
-                }//end catch
+                } // end catch
                 catch (IndexOutOfBoundsException inderr) {
-                }//end catch
+                } // end catch
 
-            }//end for
+            } // end for
             list.removeAll(garbage);
-        }//end if
+        } // end if
         boolean skip = false;
         if (isHasMulOrDivOperators() || isHasRemainderOperators() || isHasLogicOperators()) {
             for (int i = 0; i < list.size(); i++) {
@@ -1889,7 +1986,8 @@ public class MathExpression implements Savable, Solvable {
 
                     if (list.get(i).equals(MULTIPLY)) {
                         if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) * Double.parseDouble(list.get(i + 1))));
+                            list.set(i + 1, String.valueOf(
+                                    Double.parseDouble(list.get(i - 1)) * Double.parseDouble(list.get(i + 1))));
                             list.set(i - 1, "");
                             list.set(i, "");
                             skip = true;
@@ -1910,10 +2008,11 @@ public class MathExpression implements Savable, Solvable {
                             skip = true;
                         }
 
-                    }//end if
+                    } // end if
                     else if (list.get(i).equals(DIVIDE)) {
                         if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) / Double.parseDouble(list.get(i + 1))));
+                            list.set(i + 1, String.valueOf(
+                                    Double.parseDouble(list.get(i - 1)) / Double.parseDouble(list.get(i + 1))));
                             list.set(i - 1, "");
                             list.set(i, "");
                             skip = true;
@@ -1934,10 +2033,11 @@ public class MathExpression implements Savable, Solvable {
                             skip = true;
                         }
 
-                    }//end else if
+                    } // end else if
                     else if (list.get(i).equals(REMAINDER)) {
                         if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) % Double.parseDouble(list.get(i + 1))));
+                            list.set(i + 1, String.valueOf(
+                                    Double.parseDouble(list.get(i - 1)) % Double.parseDouble(list.get(i + 1))));
                             list.set(i - 1, "");
                             list.set(i, "");
                             skip = true;
@@ -1958,21 +2058,22 @@ public class MathExpression implements Savable, Solvable {
                             skip = true;
                         }
 
-                    }//end else if
-                }//end try
+                    } // end else if
+                } // end try
                 catch (NullPointerException nolan) {
-                }//end catch
+                } // end catch
                 catch (NumberFormatException numerr) {
-                }//end catch
+                } // end catch
                 catch (IndexOutOfBoundsException inderr) {
-                }//end catch
+                } // end catch
 
                 if (!skip) {
                     try {
                         if (list.get(i).equals(EQUALS)) {
 
                             if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) == 0));
+                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1))
+                                        - Double.parseDouble(list.get(i + 1))) == 0));
                                 list.set(i - 1, "");
                                 list.set(i, "");
                             } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
@@ -1989,19 +2090,20 @@ public class MathExpression implements Savable, Solvable {
                                 list.set(i, "");
                             }
                         }
-                    }//end try
+                    } // end try
                     catch (NullPointerException nolerr) {
-                    }//end catch
+                    } // end catch
                     catch (NumberFormatException numerr) {
-                    }//end catch
+                    } // end catch
                     catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
+                    } // end catch
 
                     try {
                         if (list.get(i).equals(GREATER_THAN)) {
 
                             if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) > 0));
+                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1))
+                                        - Double.parseDouble(list.get(i + 1))) > 0));
                                 list.set(i - 1, "");
                                 list.set(i, "");
                             } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
@@ -2018,19 +2120,20 @@ public class MathExpression implements Savable, Solvable {
                                 list.set(i, "");
                             }
                         }
-                    }//end try
+                    } // end try
                     catch (NullPointerException nolerr) {
-                    }//end catch
+                    } // end catch
                     catch (NumberFormatException numerr) {
-                    }//end catch
+                    } // end catch
                     catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
+                    } // end catch
 
                     try {
                         if (list.get(i).equals(GREATER_OR_EQUALS)) {
 
                             if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) >= 0));
+                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1))
+                                        - Double.parseDouble(list.get(i + 1))) >= 0));
                                 list.set(i - 1, "");
                                 list.set(i, "");
                             } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
@@ -2047,19 +2150,20 @@ public class MathExpression implements Savable, Solvable {
                                 list.set(i, "");
                             }
                         }
-                    }//end try
+                    } // end try
                     catch (NullPointerException nolerr) {
-                    }//end catch
+                    } // end catch
                     catch (NumberFormatException numerr) {
-                    }//end catch
+                    } // end catch
                     catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
+                    } // end catch
 
                     try {
                         if (list.get(i).equals(LESS_THAN)) {
 
                             if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) < 0));
+                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1))
+                                        - Double.parseDouble(list.get(i + 1))) < 0));
                                 list.set(i - 1, "");
                                 list.set(i, "");
                             } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
@@ -2076,20 +2180,21 @@ public class MathExpression implements Savable, Solvable {
                                 list.set(i, "");
                             }
 
-                        }//end if
-                    }//end try
+                        } // end if
+                    } // end try
                     catch (NullPointerException nolerr) {
-                    }//end catch
+                    } // end catch
                     catch (NumberFormatException numerr) {
-                    }//end catch
+                    } // end catch
                     catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
+                    } // end catch
 
                     try {
                         if (list.get(i).equals(LESS_OR_EQUALS)) {
                             if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
 
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) <= 0));
+                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1))
+                                        - Double.parseDouble(list.get(i + 1))) <= 0));
                                 list.set(i - 1, "");
                                 list.set(i, "");
                             } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
@@ -2105,39 +2210,42 @@ public class MathExpression implements Savable, Solvable {
                                 list.set(i - 1, "");
                                 list.set(i, "");
                             }
-                        }//end if
+                        } // end if
 
-                    }//end try
+                    } // end try
                     catch (NullPointerException nolerr) {
-                    }//end catch
+                    } // end catch
                     catch (NumberFormatException numerr) {
-                    }//end catch
+                    } // end catch
                     catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
+                    } // end catch
 
-                }//end if (skip)
-            }//end for
+                } // end if (skip)
+            } // end for
 
             list.removeAll(garbage);
 
-        }//end if
+        } // end if
         if (isHasPlusOrMinusOperators()) {
-            //Handles the subtraction and addition operators
+            // Handles the subtraction and addition operators
             for (int i = 0; i < list.size(); i++) {
                 try {
                     if (list.get(i).equals(PLUS) || list.get(i).equals(MINUS)) {
                         if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
                             if (list.get(i).equals(PLUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) + Double.parseDouble(list.get(i + 1))));
+                                list.set(i + 1, String.valueOf(
+                                        Double.parseDouble(list.get(i - 1)) + Double.parseDouble(list.get(i + 1))));
                                 list.set(i - 1, "");
                                 list.set(i, "");
-                            }//end else
-                            else if (list.get(i).equals(MINUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))));
+                            } // end else
+                            else if (list.get(i).equals(MINUS) && isNumber(list.get(i - 1))
+                                    && isNumber(list.get(i + 1))) {
+                                list.set(i + 1, String.valueOf(
+                                        Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))));
                                 list.set(i - 1, "");
                                 list.set(i, "");
-                            }//end else if
-                        }//end if
+                            } // end else if
+                        } // end if
                         else {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
@@ -2145,42 +2253,50 @@ public class MathExpression implements Savable, Solvable {
                         }
                     }
 
-                }//end try
+                } // end try
                 catch (NullPointerException nolerr) {
-                }//end catch
+                } // end catch
                 catch (NumberFormatException numerr) {
-                }//end catch
+                } // end catch
                 catch (IndexOutOfBoundsException inderr) {
-                }//end catch
-            }//end for
-        }//end if
+                } // end catch
+            } // end for
+        } // end if
 
         garbage.add("(");
         garbage.add(")");
 
         list.removeAll(garbage);
         if (list.size() != 1) {
-            this.parser_Result = this.parser_Result == Parser_Result.VALID ? Parser_Result.SYNTAX_ERROR : this.parser_Result;
+            this.parser_Result = this.parser_Result == Parser_Result.VALID ? Parser_Result.SYNTAX_ERROR
+                    : this.parser_Result;
             this.correctFunction = false;
             list.clear();
             list.add(parser_Result.name());
-        }//end if
+        } // end if
 
-//Now de-list or un-package the input.If all goes well the list should have only its first memory location occupied.
+        // Now de-list or un-package the input.If all goes well the list should have
+        // only its first memory location occupied.
         return list;
 
-    }//end method solve
+    }// end method solve
 
     /**
      *
      * @param scanner is a list of scanner functions, gotten during the
-     * evaluation of sets of data that contain functions that need to be
-     * evaluated instead of numbers.If the data set does not contain functions
-     * e.g avg(2,3,7,1,0,9,5), then method solve will easily solve it. But if it
-     * does e.g avg(2,sin,3,5,cos,(,5,) ), then we invoke this method in class
-     * Set's constructor before we evaluate the data set. Note this is method is
-     * not called directly by MathExpression objects but by objects of class Set
-     * invoked by a MathExpression object.
+     *                evaluation of sets of data that contain functions that need to
+     *                be
+     *                evaluated instead of numbers.If the data set does not contain
+     *                functions
+     *                e.g avg(2,3,7,1,0,9,5), then method solve will easily solve
+     *                it. But if it
+     *                does e.g avg(2,sin,3,5,cos,(,5,) ), then we invoke this method
+     *                in class
+     *                Set's constructor before we evaluate the data set. Note this
+     *                is method is
+     *                not called directly by MathExpression objects but by objects
+     *                of class Set
+     *                invoked by a MathExpression object.
      *
      * @return the solution to the scanner function
      */
@@ -2188,26 +2304,26 @@ public class MathExpression implements Savable, Solvable {
 
         scanner.add(0, "(");
         scanner.add(")");
-//[3,4,2,sin,2,sin,(,3,),3,*,cos,5,(,3,+,(,6,-,78,),)]
+        // [3,4,2,sin,2,sin,(,3,),3,*,cos,5,(,3,+,(,6,-,78,),)]
         int passes = 0;
         int i = 0;
         int j = 0;
         while (scanner.size() > 1) {
             passes++;
             try {
-                i = scanner.indexOf(")");//index of first )
-                j = LISTS.prevIndexOf(scanner, i, "("); //index of enclosing bracket of ) above
+                i = scanner.indexOf(")");// index of first )
+                j = LISTS.prevIndexOf(scanner, i, "("); // index of enclosing bracket of ) above
                 List<String> sub = scanner.subList(j, i + 1);
                 solve(sub);
 
-            }//end try
+            } // end try
             catch (IndexOutOfBoundsException indexerr) {
                 break;
-            }//end catch
-        }//end while
+            } // end catch
+        } // end while
 
         return scanner;
-    }//end method solveSubPortions()
+    }// end method solveSubPortions()
 
     public static void main(String... args) {
         String in = Main.joinArgs(Arrays.asList(args), true);
@@ -2215,7 +2331,7 @@ public class MathExpression implements Savable, Solvable {
             System.err.println(in);
         }
         System.out.println(new MathExpression(in).solve());
-    }//end method
+    }// end method
 
     @Override
     public String serialize() {
@@ -2226,4 +2342,4 @@ public class MathExpression implements Savable, Solvable {
         return (MathExpression) Serializer.deserialize(enc);
     }
 
-}//end class MathExpression
+}// end class MathExpression
