@@ -1516,7 +1516,6 @@ public class MathExpression implements Savable, Solvable {
                                  */
                                 executable = myScan.subList(indexOpenInMyScan - 1, indexCloseInMyScan + 1);
                                 if (Method.isStatsMethod(executable.get(0))) {
-
                                     if (!Method.isUserDefinedFunction(executable.get(0))) {
                                         Method.run(executable, DRG);
                                     } // end if

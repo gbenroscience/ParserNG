@@ -559,6 +559,7 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
 
     public static void main(String args[]) {
         String expr = "x=2;8x*sin(x^2)/3";
+//String expr = "x=2;f(x)=3*x^2+x+2*x;f(3);";
         PolynomialExpression polyExpression = new PolynomialExpression(expr, DOUBLE_PRECISION);
         System.err.println("scanner: "+polyExpression.scanner);
         System.out.println(polyExpression.solve());

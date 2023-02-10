@@ -381,6 +381,11 @@ public class VariableManager {
          * @return The value of the expression.
          */
         private String getValue(String expr) throws NullPointerException, InputMismatchException {
+            Variable v = VARIABLES.get(expr);
+            if(v != null){
+                return v.getValue();
+            }
+            
             MathExpression func = new MathExpression(expr);
             func.setVariableValuesInFunction(func.getScanner());
             return func.solve();

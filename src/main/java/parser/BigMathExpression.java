@@ -41,7 +41,6 @@ public class BigMathExpression extends MathExpression {
         // Check if the user defined functions do not contain any function whose bigmath
         // operation is yet undefined by ParserNG
         if(recursiveHasContrabandFunction(this)){
-            System.err.println("Error");
             setCorrectFunction(false);
            throw new InputMismatchException("Cannot support functions for now!");
         }
@@ -58,24 +57,31 @@ public class BigMathExpression extends MathExpression {
     private boolean recursiveHasContrabandFunction(MathExpression expression) {
         // Check if the user defined functions do not contain any function whose big math
         // operation is yet undefined by ParserNG
-        if (expression.isHasFunctions()) {
+        if (expression.hasFunctions) {
+            System.out.println("expression: "+expression.scanner);
             for (int i = 0; i < scanner.size(); i++) {
                 String token = scanner.get(i);
                 if (i + 1 < scanner.size()) {
                     String nextToken = scanner.get(i + 1);
                     if (isOpeningBracket(nextToken)) {
+                        System.out.println("1. token... "+token);
                         if(isInBuiltMethod(token)){
-                            return true;
+                            return true;//contraband
                         }
                         Function f = FunctionManager.getFunction(token);
+                        System.out.println("f: "+f);
                             if (f != null) {
                                 if(f.getType() != Function.ALGEBRAIC){
-                                    return true;
+                                    return true;//contraband
                                 }
                                 MathExpression me = f.getMathExpression();
-                                return recursiveHasContrabandFunction(me);
+                                if(me.hasInbuiltFunctions){
+                                    return true;
+                                }else if(me.hasUserDefinedFunctions){
+                                    return recursiveHasContrabandFunction(me);
+                                }
                             }
-
+                            System.out.println("token: "+token);
                     }
                 }
             } // end for
@@ -93,8 +99,7 @@ public class BigMathExpression extends MathExpression {
      * @return the solution to a SBP maths expression
      */
     @Override
-    public List<String> solve(List<String> list) {
-
+    protected List<String> solve(List<String> list) {
         //correct the anomaly: [ (,-,number....,)  ]
                 //   turn it into: [ (,,-number........,)     ]
                 //The double commas show that there exists an empty location in between the 2 commas
@@ -338,8 +343,14 @@ public class BigMathExpression extends MathExpression {
 
 
     public static void main(String[] args) {
-        BigMathExpression bme = new BigMathExpression("x=2;(1/3)*x+4*3*x");
+
+        MathExpression me = new MathExpression("a,v,d=2/3;b=3;f=3ab;6avd;");
+        System.out.print(me.solve());
+        BigMathExpression bme = new BigMathExpression("x=2;f(x)=3*x^2+x+2*x;f(3);");
         System.out.print(bme.solve());
+
+        BigMathExpression bm = new BigMathExpression("a1,v1,d1=0.66666666666666666666666666666666666666667;b1=3;F=3a1b1;6a1v1d1;");
+        System.out.print(bm.solve());
     }
 
 }
