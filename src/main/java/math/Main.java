@@ -248,7 +248,7 @@ public class Main {
 
     public static String getVersion() {
         //todo, read from pom. See JRD how we did it
-        return "0.1.8";
+        return "0.1.9";
     }
 
     public static MultiSwitch getLogcalSwitch() {
