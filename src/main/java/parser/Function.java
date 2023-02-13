@@ -223,7 +223,7 @@ public class Function implements Savable {
         return Double.NaN;
     }
 
-    public static boolean assignObject(String input) {
+    public static boolean assignObject(String input, Class mathExpClass) {
 
         /**
          * Check if it is a function assignment operation...e.g:
@@ -273,9 +273,10 @@ public class Function implements Savable {
 
                 success = true;
             } else {
-                MathExpression expr = new MathExpression(rhs);
+                MathExpression expr = mathExpClass == BigMathExpression.class ? new BigMathExpression(rhs) : new MathExpression(rhs);
                 String val = expr.solve();
                 String referenceName = expr.getReturnObjectName();
+                System.out.println("rhs: "+rhs+", mathExpClass: "+mathExpClass+", expr.class: "+expr.getClass()+", val: "+val+", type: "+expr.getReturnType());
 
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
                     Function f;

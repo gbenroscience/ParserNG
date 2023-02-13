@@ -80,14 +80,19 @@ public class MathExpression implements Savable, Solvable {
      */
     protected boolean hasFunctions;
     /**
-     * If true, the expression being evaluated contains at least one user defined function,e.g.
+     * If true, the expression being evaluated contains at least one user defined
+     * function,e.g.
      */
     protected boolean hasUserDefinedFunctions;
     /**
-     * If true, the expression being evaluated contains at least one inbuilt function,e.g.
+     * If true, the expression being evaluated contains at least one inbuilt
+     * function,e.g.
      * sin,cos or other etc
      */
     protected boolean hasInbuiltFunctions;
+
+
+    private boolean hasNumberReturningNonUserDefinedFunctions;
 
     protected ArrayList<String> scanner = new ArrayList<>();// the ArrayList that stores the scanner input function
     private boolean optimizable;
@@ -117,6 +122,7 @@ public class MathExpression implements Savable, Solvable {
      * <b><strong>where c has been declared before!</b></strong>
      */
     private boolean hasFunctionOrVariableInitStatement;
+
 
     /**
      * The VariableManager object that allows an object of this class to
@@ -182,7 +188,7 @@ public class MathExpression implements Savable, Solvable {
 
         for (String code : scanned) {
             if (code.contains("=")) {
-                boolean success = Function.assignObject(code + ";");
+                boolean success = Function.assignObject(code + ";", getClass());
                 if (!success) {
                     correctFunction = success;
                     parser_Result = Parser_Result.SYNTAX_ERROR;
@@ -194,7 +200,27 @@ public class MathExpression implements Savable, Solvable {
                 ++exprCount;
             }
         }
-
+        /**
+         * The input can contain a lot of evaluate-able expressions, but the real
+         * expression of focus
+         * is the one that is a math expression which is not assigned to anything.
+         * This constructor will evaluate everything else and store as appropriate, but
+         * will focus on the expression that is not assigned to anything
+         * as its main expression. For example:
+         * a=2;b=3;v=6ab;f(x)=9*cos(x);sin(cos(a/b));
+         * 
+         * In this input, there exists a number of expressions, but the expression that
+         * this constructor will adopt as its own expression
+         * will be sin(cos(a/b)), because it is an expression not assigned to anything
+         * a=2 and =3 and v=6ab will be evaluated and stored as variables,
+         * f(x)=9*cos(x) will be used to define and create the function f(x),
+         * but sin(cos(a/b)) will be the real expression assigned to this
+         * MathExpression.
+         * 
+         * If multiple expressions like sin(cos(a/b)) exist in the input, then the
+         * expression will default to (0.0),
+         * as there is no way for the parser to know which to choose from.
+         */
         if (mathExpr != null && !mathExpr.isEmpty() && exprCount == 1) {
             setExpression(mathExpr);
         } // end if
@@ -404,6 +430,10 @@ public class MathExpression implements Savable, Solvable {
 
     public boolean isHasUserDefinedFunctions() {
         return hasUserDefinedFunctions;
+    }
+
+    public boolean isHasNumberReturningNonUserDefinedFunctions() {
+        return hasNumberReturningNonUserDefinedFunctions;
     }
 
     /**
@@ -723,6 +753,8 @@ public class MathExpression implements Savable, Solvable {
                         hasInbuiltFunctions = true;
                     } else if (Method.isUserDefinedFunction(token)) {
                         hasUserDefinedFunctions = true;
+                    } else if (Method.isNumberReturningNonUserDefinedMethod(token)) {
+                        hasNumberReturningNonUserDefinedFunctions = true;
                     }
                 }
             }
@@ -1084,23 +1116,24 @@ public class MathExpression implements Savable, Solvable {
      */
     public void detectKeyOperators() {
         for (int i = 0; i < scanner.size(); i++) {
-            if (isPlusOrMinus(scanner.get(i))) {
+            String token = scanner.get(i);
+            if (isPlusOrMinus(token)) {
                 setHasPlusOrMinusOperators(true);
-            } else if (isUnaryPreOperator(scanner.get(i))) {
+            } else if (isUnaryPreOperator(token)) {
                 setHasPreNumberOperators(true);
-            } else if (isUnaryPostOperator(scanner.get(i))) {
+            } else if (isUnaryPostOperator(token)) {
                 setHasPostNumberOperators(true);
-            } else if (isMulOrDiv(scanner.get(i))) {
+            } else if (isMulOrDiv(token)) {
                 setHasMulOrDivOperators(true);
-            } else if (isPermOrComb(scanner.get(i))) {
+            } else if (isPermOrComb(token)) {
                 setHasPermOrCombOperators(true);
-            } else if (isRemainder(scanner.get(i))) {
+            } else if (isRemainder(token)) {
                 setHasRemainderOperators(true);
-            } else if (Method.isNumberReturningStatsMethod(scanner.get(i))) {
+            } else if (Method.isNumberReturningStatsMethod(token)) {
                 setHasNumberReturningStatsOperators(true);
-            } else if (isPower(scanner.get(i))) {
+            } else if (isPower(token)) {
                 setHasPowerOperators(true);
-            } else if (isLogicOperator(scanner.get(i))) {
+            } else if (isLogicOperator(token)) {
                 setHasLogicOperators(true);
             }
         } // end for
@@ -1395,7 +1428,7 @@ public class MathExpression implements Savable, Solvable {
         }
 
     }// end method reduceBracketIndices
-    // (1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)
+     // (1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)
 
     /**
      * Display the indices of all brackets in the function,bracket pair by
@@ -1808,7 +1841,7 @@ public class MathExpression implements Savable, Solvable {
                             list.set(i, String.valueOf(Math.cbrt(Double.parseDouble(list.get(i + 1)))));
                             list.set(i + 1, "");
                         } // end if
-                        // add more pre-number functions here...
+                          // add more pre-number functions here...
                     } // end if
                     else if (list.get(i + 1).equals("Infinity")) {
                         list.set(i, "Infinity");

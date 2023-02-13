@@ -31,8 +31,9 @@ public class BigMathExpression extends MathExpression {
 
     public BigMathExpression(String expression) throws InputMismatchException {
         super(expression);
+        util.Utils.loggingEnabled = true;
         if (isHasInbuiltFunctions() || isHasLogicOperators() || isHasListReturningOperators()
-                || isHasPreNumberOperators() || isHasNumberReturningStatsOperators()
+                || isHasPreNumberOperators() || isHasNumberReturningNonUserDefinedFunctions()
                 || isHasPermOrCombOperators() || isHasRemainderOperators() || isHasPostNumberOperators()) {
             setCorrectFunction(false);
             util.Utils.logError("Functions not supported yet!");
@@ -45,7 +46,10 @@ public class BigMathExpression extends MathExpression {
            throw new InputMismatchException("Cannot support functions for now!");
         }
     }
-
+/*
+ * || isHasLogicOperators() || isHasListReturningOperators()
+                || isHasPreNumberOperators() || isHasNumberReturningStatsOperators()
+ */
     /**
      * This function scans a MathExpression for functions that ParserNG cannot
      * evaluate using big math yet.
@@ -58,18 +62,16 @@ public class BigMathExpression extends MathExpression {
         // Check if the user defined functions do not contain any function whose big math
         // operation is yet undefined by ParserNG
         if (expression.hasFunctions) {
-            System.out.println("expression: "+expression.scanner);
-            for (int i = 0; i < scanner.size(); i++) {
+            int sz = scanner.size();
+            for (int i = 0; i < sz; i++) {
                 String token = scanner.get(i);
-                if (i + 1 < scanner.size()) {
+                if (i + 1 < sz) {
                     String nextToken = scanner.get(i + 1);
                     if (isOpeningBracket(nextToken)) {
-                        System.out.println("1. token... "+token);
                         if(isInBuiltMethod(token)){
                             return true;//contraband
                         }
                         Function f = FunctionManager.getFunction(token);
-                        System.out.println("f: "+f);
                             if (f != null) {
                                 if(f.getType() != Function.ALGEBRAIC){
                                     return true;//contraband
@@ -81,7 +83,6 @@ public class BigMathExpression extends MathExpression {
                                     return recursiveHasContrabandFunction(me);
                                 }
                             }
-                            System.out.println("token: "+token);
                     }
                 }
             } // end for
@@ -344,13 +345,13 @@ public class BigMathExpression extends MathExpression {
 
     public static void main(String[] args) {
 
-        MathExpression me = new MathExpression("a,v,d=2/3;b=3;f=3ab;6avd;");
-        System.out.print(me.solve());
-        BigMathExpression bme = new BigMathExpression("x=2;f(x)=3*x^2+x+2*x;f(3);");
-        System.out.print(bme.solve());
+        MathExpression me = new MathExpression("a,v,d=2/3;b=3;f=3ab;p(x)=x^3+5*x^2-4*x+1;p(9);");
+        System.out.println(me.solve());
+        BigMathExpression bme = new BigMathExpression("x=2;h(x)=3*x^2+x+2*x;h(3);");
+        System.out.println(bme.solve());
 
         BigMathExpression bm = new BigMathExpression("a1,v1,d1=0.66666666666666666666666666666666666666667;b1=3;F=3a1b1;6a1v1d1;");
-        System.out.print(bm.solve());
+        System.out.println(bm.solve());
     }
 
 }
