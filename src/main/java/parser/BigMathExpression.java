@@ -47,17 +47,13 @@ public class BigMathExpression extends MathExpression {
            throw new InputMismatchException("Cannot support functions for now!");
         }
     }
-/*
- * || isHasLogicOperators() || isHasListReturningOperators()
-                || isHasPreNumberOperators() || isHasNumberReturningStatsOperators()
- */
     /**
      * This function scans a MathExpression for functions that ParserNG cannot
      * evaluate using big math yet.
      * At the moment, this includes all functions that are not simple algebraic
      * functions.
      * 
-     * @return
+     * @return true if it finds any contraband function
      */
     private boolean recursiveHasContrabandFunction(MathExpression expression) {
         // Check if the user defined functions do not contain any function whose big math
