@@ -247,10 +247,10 @@ public class MathExpressionManager {
      * it has to interpret and then evaluate it.
      * It then stores the expression.
      * @param expr The expression to evaluate.
-     * @param mathExpClazz The java.util.Class that the parent MathExpression belongs to.. may be MathExpression.class, BigMathExpression.class etc.
+     * @param clazz The java.util.Class that the parent MathExpression belongs to.. may be MathExpression.class, BigMathExpression.class etc.
      * @return the result.
      */
-    public String solve( String expr , Class mathExpClazz) throws NullPointerException{
+    public <T extends MathExpression> String solve(String expr, Class<T> clazz) throws NullPointerException{
         try {
             CustomScanner cs = new CustomScanner( STRING.purifier(expr), false, VariableManager.endOfLine);
 
@@ -260,7 +260,7 @@ public class MathExpressionManager {
 
             for(String code : scanned) {
                 if(code.contains("=")){
-                    boolean success =  Function.assignObject(code+";", mathExpClazz);
+                    boolean success =  Function.assignObject(code+";", clazz);
                     if(!success) {
                         throw new Exception("Bad Variable or Function assignment!");
                     }
