@@ -66,12 +66,12 @@ public class BigMathExpression extends MathExpression {
                     String nextToken = scanner.get(i + 1);
                     if (isOpeningBracket(nextToken)) {
                         if(isInBuiltMethod(token)){
-                            return true;//contraband
+                            return true;//contraband found
                         }
                         Function f = FunctionManager.getFunction(token);
                             if (f != null) {
                                 if(f.getType() != Function.ALGEBRAIC){
-                                    return true;//contraband
+                                    return true;//contraband found
                                 }
                                 MathExpression me = f.getMathExpression();
                                 if(me.hasInbuiltFunctions){
@@ -85,7 +85,7 @@ public class BigMathExpression extends MathExpression {
             } // end for
         }
 
-        return false;
+        return false;//Yay, no contraband function found
     }
 
 
