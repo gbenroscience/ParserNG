@@ -24,7 +24,7 @@ import static parser.methods.Method.*;
 import util.FunctionManager;
 
 /**
- *
+ * Base class for handling calculations in BigDecimal
  * @author gbemirojiboye
  */
 public class BigMathExpression extends MathExpression {
