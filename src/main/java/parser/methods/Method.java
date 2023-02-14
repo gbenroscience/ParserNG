@@ -13,6 +13,7 @@ import static parser.methods.Declarations.*;
 import parser.Set;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.InputMismatchException;
 import java.util.List;
 import math.Maths;
@@ -189,22 +190,37 @@ public class Method {
     public static boolean isNumberReturningStatsMethod(String op) {
         return isStatsMethod(op) && !isListReturningStatsMethod(op);
     }
-
+/*
+ 
+ */
     /**
      * @param op the String to check
      * @return true if the operator is a statistical operator that operates on a
      * data set and returns a single value: e.g sum(4,3,2,2...)
      */
     public static boolean isNumberReturningNonUserDefinedMethod(String op) {
-        return isLogOrAntiLogToAnyBase(op) || isBasicNumericalFunction(op)
-        || op.equals(DETERMINANT) 
-        || op.equals(PROD)|| op.equals(MEDIAN)|| op.equals(RANGE)|| op.equals(MID_RANGE)|| op.equals(ROOT_MEAN_SQUARED)|| 
-        op.equals(COEFFICIENT_OF_VARIATION)|| op.equals(MIN)
+        String[] someFunctions = new String[]{
+            SIN, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN, ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH, 
+            COTH, ARC_SEC, ARC_COSEC, ARC_COT, ARC_SECH,
+                                   ARC_COSECH, ARC_COTH, EXP, LN, LG, LOG, LN_INV, LG_INV, LOG_INV, ARC_SIN_ALT, ARC_COS_ALT,
+                                    ARC_TAN_ALT, ARC_SINH_ALT, ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
+                                   ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT, LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, 
+                                   SQRT, CBRT, INVERSE, SQUARE, CUBE, POW, FACT, PLOT, DIFFERENTIATION, INTEGRATION, QUADRATIC, DETERMINANT
+                       
+        };
+
+        for(String x : someFunctions){
+            if(x.equals(op)){
+                return true;
+            }
+        }
+
+        return isBasicNumericalFunction(op)
+        || op.equals(DETERMINANT) || op.equals(PROD)|| op.equals(MEDIAN)|| op.equals(RANGE)|| op.equals(MID_RANGE)|| op.equals(ROOT_MEAN_SQUARED)
+        || op.equals(COEFFICIENT_OF_VARIATION)|| op.equals(MIN)
         || op.equals(MAX)|| op.equals(STD_DEV)|| op.equals(VARIANCE)|| op.equals(STD_ERR)
-        || op.equals(POW) || op.equals(DIFFERENTIATION)
-        || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
-        || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
-        || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || op.equals(PRINT);
+        || op.equals(POW) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
+        || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION);
     }
 
     /**

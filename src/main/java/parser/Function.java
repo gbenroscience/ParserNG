@@ -285,6 +285,7 @@ public class Function implements Savable {
                 }
                 String val = expr.solve();
                 String referenceName = expr.getReturnObjectName();
+                //System.out.println("rhs: "+rhs+", mathExpClass: "+mathExpClass+", expr.class: "+expr.getClass()+", val: "+val+", type: "+expr.getReturnType());
 
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
                     Function f;

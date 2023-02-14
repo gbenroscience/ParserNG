@@ -32,6 +32,7 @@ public class BigMathExpression extends MathExpression {
     public BigMathExpression(String expression) throws InputMismatchException {
         super(expression);
         util.Utils.loggingEnabled = true;
+        
         if (isHasInbuiltFunctions() || isHasLogicOperators() || isHasListReturningOperators()
                 || isHasPreNumberOperators() || isHasNumberReturningNonUserDefinedFunctions()
                 || isHasPermOrCombOperators() || isHasRemainderOperators() || isHasPostNumberOperators()) {
@@ -46,17 +47,13 @@ public class BigMathExpression extends MathExpression {
            throw new InputMismatchException("Cannot support functions for now!");
         }
     }
-/*
- * || isHasLogicOperators() || isHasListReturningOperators()
-                || isHasPreNumberOperators() || isHasNumberReturningStatsOperators()
- */
     /**
      * This function scans a MathExpression for functions that ParserNG cannot
      * evaluate using big math yet.
      * At the moment, this includes all functions that are not simple algebraic
      * functions.
      * 
-     * @return
+     * @return true if it finds any contraband function
      */
     private boolean recursiveHasContrabandFunction(MathExpression expression) {
         // Check if the user defined functions do not contain any function whose big math
@@ -69,12 +66,12 @@ public class BigMathExpression extends MathExpression {
                     String nextToken = scanner.get(i + 1);
                     if (isOpeningBracket(nextToken)) {
                         if(isInBuiltMethod(token)){
-                            return true;//contraband
+                            return true;//contraband found
                         }
                         Function f = FunctionManager.getFunction(token);
                             if (f != null) {
                                 if(f.getType() != Function.ALGEBRAIC){
-                                    return true;//contraband
+                                    return true;//contraband found
                                 }
                                 MathExpression me = f.getMathExpression();
                                 if(me.hasInbuiltFunctions){
@@ -88,7 +85,7 @@ public class BigMathExpression extends MathExpression {
             } // end for
         }
 
-        return false;
+        return false;//Yay, no contraband function found
     }
 
 
@@ -347,10 +344,10 @@ public class BigMathExpression extends MathExpression {
 
         MathExpression me = new MathExpression("a,v,d=2/3;b=3;f=3ab;p(x)=x^3+5*x^2-4*x+1;p(9);");
         System.out.println(me.solve());
-        BigMathExpression bme = new BigMathExpression("x=2;h(x)=3*x^2+x+2*x;h(3);");
+        BigMathExpression bme = new BigMathExpression("x=2;h(x)=5*x^2+x+2*x-cos(x);h(3);");
         System.out.println(bme.solve());
 
-        BigMathExpression bm = new BigMathExpression("a1,v1,d1=0.66666666666666666666666666666666666666667;b1=3;F=3a1b1;6a1v1d1;");
+        MathExpression bm = new MathExpression("x=9;f(x)=3*x^2+sin(x^2);f(6)<3");
         System.out.println(bm.solve());
     }
 
