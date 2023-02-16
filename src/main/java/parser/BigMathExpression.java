@@ -24,28 +24,27 @@ import static parser.methods.Method.*;
 import util.FunctionManager;
 
 /**
- *
+ * Base class for handling calculations in BigDecimal
  * @author gbemirojiboye
  */
 public class BigMathExpression extends MathExpression {
 
     public BigMathExpression(String expression) throws InputMismatchException {
         super(expression);
-        util.Utils.loggingEnabled = true;
-        
         if (isHasInbuiltFunctions() || isHasLogicOperators() || isHasListReturningOperators()
                 || isHasPreNumberOperators() || isHasNumberReturningNonUserDefinedFunctions()
                 || isHasPermOrCombOperators() || isHasRemainderOperators() || isHasPostNumberOperators()) {
             setCorrectFunction(false);
-            util.Utils.logError("Functions not supported yet!");
+            throw new InputMismatchException("Functions not supported yet!");
         } // end if
 
         // Check if the user defined functions do not contain any function whose bigmath
         // operation is yet undefined by ParserNG
         if(recursiveHasContrabandFunction(this)){
             setCorrectFunction(false);
-           throw new InputMismatchException("Cannot support functions for now!");
+           throw new InputMismatchException("User defined function calls unsupported inbuilt function!");
         }
+       
     }
     /**
      * This function scans a MathExpression for functions that ParserNG cannot
@@ -344,7 +343,7 @@ public class BigMathExpression extends MathExpression {
 
         MathExpression me = new MathExpression("a,v,d=2/3;b=3;f=3ab;p(x)=x^3+5*x^2-4*x+1;p(9);");
         System.out.println(me.solve());
-        BigMathExpression bme = new BigMathExpression("x=2;h(x)=5*x^2+x+2*x-cos(x);h(3);");
+        BigMathExpression bme = new BigMathExpression("x=2;h(x)=5*x^2+x+2*x-sin(x);h(3);");
         System.out.println(bme.solve());
 
         MathExpression bm = new MathExpression("x=9;f(x)=3*x^2+sin(x^2);f(6)<3");
