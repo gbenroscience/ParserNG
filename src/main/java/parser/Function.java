@@ -8,6 +8,7 @@ import interfaces.Savable;
 import parser.methods.Method;
 
 import java.io.StringReader;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.List;
@@ -223,7 +224,7 @@ public class Function implements Savable {
         return Double.NaN;
     }
 
-    public static boolean assignObject(String input, Class mathExpClass) {
+    public static <T extends MathExpression> boolean assignObject(String input, Class<T> clazz) {
 
         /**
          * Check if it is a function assignment operation...e.g:
@@ -273,7 +274,15 @@ public class Function implements Savable {
 
                 success = true;
             } else {
-                MathExpression expr = mathExpClass == BigMathExpression.class ? new BigMathExpression(rhs) : new MathExpression(rhs);
+                MathExpression expr;
+                try {
+                    expr = clazz.getConstructor(String.class).newInstance(rhs);
+                } catch (InstantiationException |
+                         IllegalAccessException |
+                         InvocationTargetException |
+                         NoSuchMethodException e) {
+                    throw new RuntimeException(e); // unreachable
+                }
                 String val = expr.solve();
                 String referenceName = expr.getReturnObjectName();
                 //System.out.println("rhs: "+rhs+", mathExpClass: "+mathExpClass+", expr.class: "+expr.getClass()+", val: "+val+", type: "+expr.getReturnType());
