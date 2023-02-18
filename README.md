@@ -901,6 +901,8 @@ is: true
 true
 ```
 
+See [jenkins-report-generic-chart-column](https://github.com/judovana/jenkins-report-generic-chart-column#most-common-expressions) as real-world user of `ExpandingParser`
+
 ## TO BE CONTINUED
 And much more!
 
