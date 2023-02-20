@@ -98,10 +98,11 @@ public class ExpandingExpression implements Solvable {
         //longterm todo, repalce this static help by better help using delegated help methods from logical parser
         return "This is abstraction which allows to set with slices, rows and subset of immutable known numbers." + "\n" +
                 "Instead of numbers, you can use literalls L0, L1...L99, which you can then call by:" + "\n" +
-                "Ln - vlaue of Nth number" + "\n" +
+                "Ln - vlaue of Nth number, or in Slices" + "\n" +
                 "L2..L4 - will expand to values of L2,L3,L4 - order is hnoured" + "\n" +
                 "L2.. - will expand to values of L2,L3,..Ln-1,Ln" + "\n" +
                 "..L5 - will expand to values of  L0,L1...L4,L5" + "\n" +
+                "where ..L5 or L2.. are order sensitive, the L{MN}..L0 or L0..L{MN} is not. But requires dynamic index evaluation." + "\n" +
                 "When used as standalone, " + VALUES_PNG + " xor " + VALUES_IPNG + "  are used to pass in the space separated numbers (the I is inverted order)" + "\n" +
                 "Assume " + VALUES_PNG + "='5 9 3 8', then it is the same as " + VALUES_IPNG + "='8 3 9 5'; BUt be aware, with I the L.. and ..L are a bit oposite then expected" + "\n" +
                 "L0 then expand to 8; L2.. expands to 9,3,8; ' ..L2 expands to 5,9 " + "\n" +
@@ -113,12 +114,12 @@ public class ExpandingExpression implements Solvable {
                 "MN         = 4\n" +
                 "Expanded as: avg(60,20,80)*1.1-4 <  70 | 80*1.3 + 4<  70\n" +
                 "...indeed\n" +
-                "Dynamic calculation of L's indexes\n" +
+                "Dynamic calculation of L's indexes:\n" +
                 "Sometimes, Lx, as number is not enough, and you need to calcualte it dynamically. To do so, you can use L{}\n" +
                 "Inisde {} can be mathematical formula (including Ls, MN. or even nested {}, which will evaluate itself as number, which will be used as Lx. Eg:\n" +
                 "'avg(..L{MN/2}) < avg(L{MN/2}..)' will go to 'avg(..L1) < avg(L1..)' will go on 1 2 3 to 'avg(1,2 ) < avg(2,3) will go to 1.5<2.5 ... true'\n" +
                 "For fun try eg: VALUES_PNG='1 2 3' on 'avg(..L{L{MN/2}}) < avg(L{L{MN/2}}..)'\n" +
-                "This parser by default uses LogicalExpression interpreter, but should work directly in" + "\n" +
+                "This parser by default uses LogicalExpression interpreter, but should work directly on simple Logical or Math expressions. The LogicalExpression class canbe repalced if needed." + "\n" +
                 "In verbose mode, the expanded expression is always printed";
 
     }
