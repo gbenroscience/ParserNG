@@ -53,8 +53,7 @@ If you need to access this library via Maven Central, do:
         </dependency>
        
 
-This library was created in 2009 and later used by the author as part of a critical part of his University final year project
-at the Department of Computer Science and Engineering, Obafemi Awolowo University,Ile-Ife, Osun State, Nigeria.
+This library was created in 2009.
 
 The design goal of this library was to create a simple, yet powerful, not too bogus math tool that scientists and developers could deploy with their
 work to solve mathematical problems both simple and complex.
