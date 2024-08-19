@@ -22,7 +22,7 @@ import util.Serializer;
  */
 public class Variable implements Savable{
 
-//a String variable that represents the String property of the varriable
+//the String property of the variable
     private String name;
 
     private TYPE type;
