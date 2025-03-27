@@ -13,6 +13,7 @@ import static parser.methods.Declarations.*;
 import parser.Set;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.InputMismatchException;
 import java.util.List;
 import math.Maths;
@@ -43,10 +44,9 @@ public class Method {
      */
     private int DRG = 1;
 
-
     /**
      *
-     * @param name The method name
+     * @param name       The method name
      * @param parameters The parameters to the method
      */
     public Method(String name, String... parameters) {
@@ -57,27 +57,32 @@ public class Method {
         }
     }
 
-
     /**
      *
      * @param methodName The name of the method.
      * @return true if the method name represents one that can operate on
-     * Function objects or anonymous Functions.
+     *         Function objects or anonymous Functions.
      */
     public static boolean isFunctionOperatingMethod(String methodName) {
-        return methodName.equals(DIFFERENTIATION) || methodName.equals(INTEGRATION) || methodName.equals(QUADRATIC) || methodName.equals(GENERAL_ROOT)
+        return methodName.equals(DIFFERENTIATION) || methodName.equals(INTEGRATION) || methodName.equals(QUADRATIC)
+                || methodName.equals(GENERAL_ROOT)
                 || methodName.equals(TARTAGLIA_ROOTS) || methodName.equals(PLOT) || methodName.equals(MATRIX_MULTIPLY)
-                || methodName.equals(MATRIX_DIVIDE) || methodName.equals(MATRIX_ADD) || methodName.equals(MATRIX_SUBTRACT)
-                || methodName.equals(MATRIX_POWER) || methodName.equals(MATRIX_EDIT) || methodName.equals(MATRIX_TRANSPOSE)
-                || methodName.equals(DETERMINANT) || methodName.equals(MATRIX_ADJOINT) || methodName.equals(MATRIX_COFACTORS)
-                || methodName.equals(MATRIX_EIGENPOLY) || methodName.equals(MATRIX_EIGENVEC) || methodName.equals(PRINT);
+                || methodName.equals(MATRIX_DIVIDE) || methodName.equals(MATRIX_ADD)
+                || methodName.equals(MATRIX_SUBTRACT)
+                || methodName.equals(MATRIX_POWER) || methodName.equals(MATRIX_EDIT)
+                || methodName.equals(MATRIX_TRANSPOSE)
+                || methodName.equals(DETERMINANT) || methodName.equals(MATRIX_ADJOINT)
+                || methodName.equals(MATRIX_COFACTORS)
+                || methodName.equals(MATRIX_EIGENPOLY) || methodName.equals(MATRIX_EIGENVEC)
+                || methodName.equals(PRINT);
     }
 
     /**
      *
      * @param expression Initializes the attributes of objects of this class by
-     * parsing the expression parameter. The format of expression is:
-     * methodname(args_1,args_2,....args_N)
+     *                   parsing the expression parameter. The format of expression
+     *                   is:
+     *                   methodname(args_1,args_2,....args_N)
      */
     public Method(String expression) {
         parseExpression(expression);
@@ -85,21 +90,21 @@ public class Method {
 
     /**
      * @return An array containing the names of all functions defined by the
-     * user and inbuilt into the software.
+     *         user and inbuilt into the software.
      */
     public static String[] getAllFunctions() {
         int sz = FunctionManager.FUNCTIONS.size();
         String[] userDefined = new String[sz + getInbuiltMethods().length];
-        String[] keyset = FunctionManager.FUNCTIONS.keySet().toArray(new String[]{});
+        String[] keyset = FunctionManager.FUNCTIONS.keySet().toArray(new String[] {});
         System.arraycopy(keyset, 0, userDefined, 0, keyset.length);
         System.arraycopy(getInbuiltMethods(), 0, userDefined, keyset.length, getInbuiltMethods().length);
         return userDefined;
-    }//end method.
+    }// end method.
 
     /**
      *
      * @param expression The expression to parse. The format of expression is:
-     * methodname(args_1,args_2,....args_N)
+     *                   methodname(args_1,args_2,....args_N)
      */
     public final void parseExpression(String expression) {
 
@@ -111,12 +116,12 @@ public class Method {
             params = l.subList(1, sz).toArray(params);
             setParameters(params);
             setName(l.get(0));
-        }//end if
+        } // end if
         else {
             throw new InputMismatchException("Invalid Method Name!");
-        }//end else
+        } // end else
 
-    }//end method
+    }// end method
 
     public void setName(String name) {
         this.name = name;
@@ -144,23 +149,78 @@ public class Method {
 
     /**
      * @param op the String to check
+     * @return true if the operator is a statistical operator...basically any
+     *         system function that takes more than 1 argument. So by definition
+     *         even
+     *         the <code>log</code> and <code>alog</code> (and its log-¹ variant)
+     *         are
+     *         included here. e.g
+     *         sum,prod,min,max,avg,var,rms,cov,s_d,st_err,rng,mrng,med,mode,rnd
+     */
+    public static boolean isStatsMethod(String op) {
+        return (isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || isBasicNumericalFunction(op)
+                || isMatrixMethod(op) || isHardcodedStatsMethod(op)
+                || op.equals(POW) || op.equals(DIFFERENTIATION)
+                || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
+                || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
+                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || op.equals(PRINT));
+    }// end method
+
+    /**
+     * @param op the String to check
      * @return true if the operator is a statistical operator that returns items
-     * in a list e.g sort(
+     *         in a list e.g sort(
      */
     public static boolean isListReturningStatsMethod(String op) {
-        return (op.equals(SORT) || op.equals(MODE) || op.equals(RANDOM) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS)
-                || op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX))
-                || op.equals(MATRIX_MULTIPLY) || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT) || op.equals(MATRIX_POWER)
-                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EDIT);
+        return (op.equals(SORT) || op.equals(MODE) || op.equals(RANDOM) || op.equals(QUADRATIC)
+                || op.equals(TARTAGLIA_ROOTS)
+                || op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX)
+                || op.equals(ECHELON_MATRIX))
+                || op.equals(MATRIX_MULTIPLY) || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD)
+                || op.equals(MATRIX_SUBTRACT) || op.equals(MATRIX_POWER)
+                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EDIT) || op.equals(MATRIX_COFACTORS)
+                || op.equals(MATRIX_COFACTORS) || op.equals(MATRIX_ADJOINT) || op.equals(MATRIX_EIGENPOLY) || op.equals(MATRIX_EIGENVEC);
     }
 
     /**
      * @param op the String to check
      * @return true if the operator is a statistical operator that operates on a
-     * data set and returns a single value: e.g sum(4,3,2,2...)
+     *         data set and returns a single value: e.g sum(4,3,2,2...)
      */
     public static boolean isNumberReturningStatsMethod(String op) {
         return isStatsMethod(op) && !isListReturningStatsMethod(op);
+    }
+/*
+ 
+ */
+    /**
+     * @param op the String to check
+     * @return true if the operator is a statistical operator that operates on a
+     * data set and returns a single value: e.g sum(4,3,2,2...)
+     */
+    public static boolean isNumberReturningNonUserDefinedMethod(String op) {
+        String[] someFunctions = new String[]{
+            SIN, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN, ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH, 
+            COTH, ARC_SEC, ARC_COSEC, ARC_COT, ARC_SECH,
+                                   ARC_COSECH, ARC_COTH, EXP, LN, LG, LOG, LN_INV, LG_INV, LOG_INV, ARC_SIN_ALT, ARC_COS_ALT,
+                                    ARC_TAN_ALT, ARC_SINH_ALT, ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
+                                   ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT, LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, 
+                                   SQRT, CBRT, INVERSE, SQUARE, CUBE, POW, FACT, PLOT, DIFFERENTIATION, INTEGRATION, QUADRATIC, DETERMINANT
+                       
+        };
+
+        for(String x : someFunctions){
+            if(x.equals(op)){
+                return true;
+            }
+        }
+
+        return isBasicNumericalFunction(op)
+        || op.equals(DETERMINANT) || op.equals(PROD)|| op.equals(MEDIAN)|| op.equals(RANGE)|| op.equals(MID_RANGE)|| op.equals(ROOT_MEAN_SQUARED)
+        || op.equals(COEFFICIENT_OF_VARIATION)|| op.equals(MIN)
+        || op.equals(MAX)|| op.equals(STD_DEV)|| op.equals(VARIANCE)|| op.equals(STD_ERR)
+        || op.equals(POW) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
+        || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION);
     }
 
     /**
@@ -174,7 +234,7 @@ public class Method {
     /**
      * @param op the String to check
      * @return true if the operator is the log operator the form is
-     * log(num,base)
+     *         log(num,base)
      */
     public static boolean isLogToAnyBase(String op) {
         return (op.equals(LOG));
@@ -183,7 +243,7 @@ public class Method {
     /**
      * @param op the String to check
      * @return true if the operator is the log operator the form is
-     * log-¹(num,base)
+     *         log-¹(num,base)
      */
     public static boolean isAntiLogToAnyBase(String op) {
         return (op.equals(LOG_INV) || op.equals(LOG_INV_ALT));
@@ -192,7 +252,7 @@ public class Method {
     /**
      * @param op the String to check
      * @return true if the operator is the natural log operator the form is
-     * log-¹(num,base)
+     *         log-¹(num,base)
      */
     public static boolean isNaturalLog(String op) {
         return (op.equals(LN));
@@ -201,7 +261,7 @@ public class Method {
     /**
      * @param op the String to check
      * @return true if the operator is the inverse natural log operator the form
-     * is log-¹(num,base)
+     *         is log-¹(num,base)
      */
     public static boolean isInverseNaturalLog(String op) {
         return (op.equals(LN_INV) || op.equals(LN_INV_ALT));
@@ -210,7 +270,7 @@ public class Method {
     /**
      * @param op the String to check
      * @return true if the operator is the inverse natural log operator the form
-     * is log-¹(num,base)
+     *         is log-¹(num,base)
      */
     public static boolean isExpMethod(String op) {
         return (op.equals(EXP));
@@ -266,34 +326,18 @@ public class Method {
     }
 
     /**
-     * @param op the String to check
-     * @return true if the operator is a statistical operator..basically any
-     * system function that takes more than 1 argument. So by definition even
-     * the <code>log</code> and <code>alog</code> (and its log-¹ variant) are
-     * included here. e.g
-     * sum,prod,min,max,avg,var,rms,cov,s_d,st_err,rng,mrng,med,mode,rnd
-     */
-    public static boolean isStatsMethod(String op) {
-        return (isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || isBasicNumericalFunction(op)
-                || isMatrixMethod(op) || isHardcodedStatsMethod(op)
-                || op.equals(POW) || op.equals(DIFFERENTIATION)
-                || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
-                || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
-                || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || op.equals(PRINT));
-    }//end method
-
-    /**
      *
      * @param op The method name
      * @return true if the method is capable of acting on one or more matrix
-     * functions
+     *         functions
      */
     public static boolean isMatrixMethod(String op) {
         return op.equals(LINEAR_SYSTEM) || op.equals(DETERMINANT) || op.equals(INVERSE_MATRIX)
                 || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX) || op.equals(MATRIX_MULTIPLY)
                 || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT)
                 || op.equals(MATRIX_POWER) || op.equals(MATRIX_EDIT) || op.equals(MATRIX_TRANSPOSE)
-                || op.equals(MATRIX_COFACTORS) || op.equals(MATRIX_ADJOINT) || op.equals(MATRIX_EIGENPOLY) || op.equals(MATRIX_EIGENVEC);
+                || op.equals(MATRIX_COFACTORS) || op.equals(MATRIX_ADJOINT) || op.equals(MATRIX_EIGENPOLY)
+                || op.equals(MATRIX_EIGENVEC);
     }
 
     /**
@@ -362,11 +406,11 @@ public class Method {
     /**
      *
      * @return true if the Function name has been defined by the user in the
-     * user's workspace.
+     *         user's workspace.
      */
     public static boolean isUserDefinedFunction(String op) {
         return FunctionManager.lookUp(op) != null;
-    }//end method
+    }// end method
 
     /**
      * A fix for stuff like sum,(,13,+,3,)...
@@ -376,7 +420,7 @@ public class Method {
 
         String methodName = list.get(0);
 
-        if(!isStatsMethod(methodName)){
+        if (!isStatsMethod(methodName)) {
             return;
         }
         int sz = list.size();
@@ -403,33 +447,36 @@ public class Method {
             }
         }
 
-    }    
+    }
+
     /**
      *
      * @param list A list containing a portion of a scanned function that has
-     * information about a method and its parameters..e.g. [sin,(,3.14,)] , or
-     * [matrix_edit,(,M,3,4,-90,)] may be grabbed from a scanner output and sent
-     * to this method to evaluate.
-     * @param DRG The trigonometric mode in which to run the method.
+     *             information about a method and its parameters..e.g.
+     *             [sin,(,3.14,)] , or
+     *             [matrix_edit,(,M,3,4,-90,)] may be grabbed from a scanner output
+     *             and sent
+     *             to this method to evaluate.
+     * @param DRG  The trigonometric mode in which to run the method.
      * @return a {@link List} object which is the output of the method's
-     * operation.
+     *         operation.
      */
     public static List<String> run(List<String> list, DRG_MODE DRG) {
-        
+
         quickFixCompoundStructuresInStatsExpression(list);
         String name = list.get(0);
 
         String result = "";
-        list.subList(0, 2).clear();//remove the method name and its opening bracket.
-        list.remove(list.size() - 1);//remove the closing bracket.
+        list.subList(0, 2).clear();// remove the method name and its opening bracket.
+        list.remove(list.size() - 1);// remove the closing bracket.
         int sz = list.size();
 
         if (isStatsMethod(name)) {
-            for (BasicNumericalMethod basicNumericalMethod: getBasicNumericalMethods()){
-                if (name.equals(basicNumericalMethod.getName())){
+            for (BasicNumericalMethod basicNumericalMethod : getBasicNumericalMethods()) {
+                if (name.equals(basicNumericalMethod.getName())) {
                     Set set = new Set(list);
-                    //TODO, make basicNumericalMethod statefull (initialize by reflection)
-                    //basicNumericalMethod.setRadDegGrad(DRG);
+                    // TODO, make basicNumericalMethod statefull (initialize by reflection)
+                    // basicNumericalMethod.setRadDegGrad(DRG);
                     result = basicNumericalMethod.solve(new ArrayList<>(set.getData()));
                     list.clear();
                     list.add(result);
@@ -533,18 +580,19 @@ public class Method {
                     list.clear();
                     list.add(result);
                     return list;
-                }//end try
+                } // end try
                 catch (ClassNotFoundException cnfe) {
-                    //System.out.println( " Function Not Defined!");
-                }//end catch
-            }//end else if
+                    // System.out.println( " Function Not Defined!");
+                } // end catch
+            } // end else if
             else if (name.equals(LOG)) {
                 if (sz == 1) {
                     result = String.valueOf(Maths.logToAnyBase(Double.valueOf(list.get(0)), 10));
                     list.clear();
                     list.add(result);
                 } else if (sz == 2) {
-                    result = String.valueOf(Maths.logToAnyBase(Double.valueOf(list.get(0)), Double.valueOf(list.get(1))));
+                    result = String
+                            .valueOf(Maths.logToAnyBase(Double.valueOf(list.get(0)), Double.valueOf(list.get(1))));
                     list.clear();
                     list.add(result);
                 }
@@ -557,7 +605,8 @@ public class Method {
                     list.add(result);
                     return list;
                 } else if (sz == 2) {
-                    result = String.valueOf(Maths.antiLogToAnyBase(Double.valueOf(list.get(0)), Double.valueOf(list.get(1))));
+                    result = String
+                            .valueOf(Maths.antiLogToAnyBase(Double.valueOf(list.get(0)), Double.valueOf(list.get(1))));
                     list.clear();
                     list.add(result);
                     return list;
@@ -680,7 +729,7 @@ public class Method {
                 String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
-            } else if (name.equals(MATRIX_EDIT)) {//matrix_edit(M,row,col,val)
+            } else if (name.equals(MATRIX_EDIT)) {// matrix_edit(M,row,col,val)
                 Set set = new Set(list);
                 Matrix matrix = set.editMatrix();
                 list.clear();
@@ -719,7 +768,7 @@ public class Method {
                 list.add(ref);
                 return list;
             } else if (name.equals(PRINT)) {
-               
+
                 Set set = new Set(list);
                 set.print();
                 list.clear();
@@ -770,11 +819,14 @@ public class Method {
                             } else if (name.equals(ARC_TAN) || name.equals(ARC_TAN_ALT)) {
                                 result = String.valueOf(Maths.atanRadToDeg(Double.valueOf(list.get(0))));
                             } else if (name.equals(ARC_SINH) || name.equals(ARC_SINH_ALT)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0)) + Math.sqrt(Math.pow(Double.valueOf(list.get(0)), 2) + 1)));
+                                result = String.valueOf(Math.log(Double.valueOf(list.get(0))
+                                        + Math.sqrt(Math.pow(Double.valueOf(list.get(0)), 2) + 1)));
                             } else if (name.equals(ARC_COSH) || name.equals(ARC_COSH_ALT)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0)) + Math.sqrt(Math.pow(Double.valueOf(list.get(0)), 2) - 1)));
+                                result = String.valueOf(Math.log(Double.valueOf(list.get(0))
+                                        + Math.sqrt(Math.pow(Double.valueOf(list.get(0)), 2) - 1)));
                             } else if (name.equals(ARC_TANH) || name.equals(ARC_TANH_ALT)) {
-                                result = String.valueOf(0.5 * Math.log((1 + Double.valueOf(list.get(0))) / (1 - Double.valueOf(list.get(0)))));
+                                result = String.valueOf(0.5 * Math
+                                        .log((1 + Double.valueOf(list.get(0))) / (1 - Double.valueOf(list.get(0)))));
                             } else if (name.equals(ARC_SEC) || name.equals("asec")) {
                                 result = String.valueOf(Maths.acosRadToDeg(1 / Double.valueOf(list.get(0))));
                             } else if (name.equals(ARC_COSEC) || name.equals("acsc")) {
@@ -782,11 +834,16 @@ public class Method {
                             } else if (name.equals(ARC_COT) || name.equals("acot")) {
                                 result = String.valueOf(Maths.atanRadToDeg(1 / Double.valueOf(list.get(0))));
                             } else if (name.equals(ARC_SECH) || name.equals(ARC_SECH_ALT)) {
-                                result = String.valueOf(Math.log((1 + Math.sqrt(1 - Math.pow(Double.valueOf(list.get(0)), 2))) / Double.valueOf(list.get(0))));
+                                result = String
+                                        .valueOf(Math.log((1 + Math.sqrt(1 - Math.pow(Double.valueOf(list.get(0)), 2)))
+                                                / Double.valueOf(list.get(0))));
                             } else if (name.equals(ARC_COSECH) || name.equals(ARC_COSECH_ALT)) {
-                                result = String.valueOf(Math.log((1 + Math.sqrt(1 + Math.pow(Double.valueOf(list.get(0)), 2))) / Double.valueOf(list.get(0))));
+                                result = String
+                                        .valueOf(Math.log((1 + Math.sqrt(1 + Math.pow(Double.valueOf(list.get(0)), 2)))
+                                                / Double.valueOf(list.get(0))));
                             } else if (name.equals(ARC_COTH) || name.equals(ARC_COTH_ALT)) {
-                                result = String.valueOf(0.5 * Math.log((Double.valueOf(list.get(0)) + 1) / (Double.valueOf(list.get(0)) - 1)));
+                                result = String.valueOf(0.5 * Math
+                                        .log((Double.valueOf(list.get(0)) + 1) / (Double.valueOf(list.get(0)) - 1)));
                             } else if (name.equals(LG_INV) || name.equals(LG_INV_ALT)) {
                                 result = String.valueOf(Math.pow(10, Double.valueOf(list.get(0))));
                             } else if (name.equals(SQRT)) {
@@ -810,8 +867,8 @@ public class Method {
                             list.add(result);
                             return list;
 
-//add more definitions below....
-                        }//end if DRG == 0
+                            // add more definitions below....
+                        } // end if DRG == 0
                         else if (DRG == DRG_MODE.RAD) {
                             if (name.equals(SIN)) {
                                 result = String.valueOf(Math.sin(Double.valueOf(list.get(0))));
@@ -890,8 +947,8 @@ public class Method {
                             list.add(result);
                             return list;
 
-//add more definitions below....
-                        }//end else if DRG == 1
+                            // add more definitions below....
+                        } // end else if DRG == 1
                         else if (DRG == DRG_MODE.GRAD) {
                             if (name.equals(SIN)) {
                                 result = String.valueOf(Maths.sinGradToRad(Double.valueOf(list.get(0))));
@@ -968,88 +1025,89 @@ public class Method {
                             list.clear();
                             list.add(result);
                             return list;
-//add more definitions below....
-                        }//end else if DRG == 2
-                    }//end if list.get(0).equals("Infinity")
+                            // add more definitions below....
+                        } // end else if DRG == 2
+                    } // end if list.get(0).equals("Infinity")
                     else if (list.get(0).equals("Infinity")) {
                         list.add("Infinity");
                         return list;
                     }
-                }//end try
+                } // end try
                 catch (NumberFormatException numerror) {
 
-                }//end catch
+                } // end catch
                 catch (NullPointerException nullerror) {
 
-                }//end catch
+                } // end catch
                 catch (IndexOutOfBoundsException inderror) {
 
-                }//end catch
+                } // end catch
 
                 list.add("Syntax Error!");
                 return list;
-            }//end if parameters.length==1
+            } // end if parameters.length==1
 
-        }//end else
+        } // end else
 
         throw new IllegalArgumentException(" Unknown function: " + name);
-    }//end method
+    }// end method
 
     /**
      *
      * @param methodName The name of the method
      * @return true if the method has been defined by the user or is defined by
-     * the parser.
+     *         the parser.
      */
     public static boolean isUnaryPreOperatorORDefinedMethod(String methodName) {
         return isDefinedMethod(methodName) || parser.Operator.isUnaryPreOperator(methodName);
-    }//end method
+    }// end method
 
     /**
      *
      * @param methodName The name of the method
      * @return true if the method has been defined by the user or is defined by
-     * the parser.
+     *         the parser.
      */
     public static boolean isDefinedMethod(String methodName) {
         return arrayContains(getInbuiltMethods(), methodName) || FunctionManager.contains(methodName);
-    }//end method
+    }// end method
 
     /**
      *
      * @param methodName The name of the method
      * @return true if the method is defined by the parser as a core inbuilt
-     * function.
+     *         function.
      */
     public static boolean isInBuiltMethod(String methodName) {
         return arrayContains(getInbuiltMethods(), methodName);
-    }//end method
+    }// end method
 
     /**
      *
      * @param array An array of strings
-     * @param str The string to check for.
+     * @param str   The string to check for.
      * @return true if the array contains the specified string.
      */
     public static boolean arrayContains(String array[], String str) {
         for (String s : array) {
             if (s.equals(str)) {
                 return true;
-            }//end if
-        }//end for
+            } // end if
+        } // end for
         return false;
-    }//end method
+    }// end method
 
     /**
      *
      * @param name The string to check if or not it represents a valid method
-     * name.<br>
-     * <b color = 'red'>
-     * The method may or may not have been defined. But once it represents a
-     * valid method name, this method will return true. In contrast, the
-     * 'isDefinedMethod' checks whether or not the method has been
-     * afore-defined.
-     * </b>
+     *             name.<br>
+     *             <b color = 'red'>
+     *             The method may or may not have been defined. But once it
+     *             represents a
+     *             valid method name, this method will return true. In contrast, the
+     *             'isDefinedMethod' checks whether or not the method has been
+     *             afore-defined.
+     *             </b>
      * @return true if the string represents a valid method name.
      */
     public static boolean isMethodName(String name) {
@@ -1057,7 +1115,7 @@ public class Method {
             String end = "";
             if (name.equals("-¹")) {
                 return false;
-            }//end if
+            } // end if
             else if (name.endsWith("-¹") && !name.equals("-¹")) {
                 end = "-¹";
                 name = name.substring(0, name.length() - 2);
@@ -1067,30 +1125,30 @@ public class Method {
                 for (int i = 0; i < len; i++) {
                     if (!isMethodNameBuilder(name.substring(i, i + 1))) {
                         return false;
-                    }//end if
-                }//end for loop
+                    } // end if
+                } // end for loop
 
                 return true;
-            }//end if
+            } // end if
             return false;
-        }//end try
+        } // end try
         catch (IndexOutOfBoundsException | NullPointerException boundsException) {
             return false;
         }
-    }//end method
+    }// end method
 
     /**
      *
      * @param name The string to check.
      * @return true if the string is part of the valid characters that can be
-     * used to build a method name.
+     *         used to build a method name.
      */
     public static boolean isMethodNameBuilder(String name) {
         if (isMethodNameBeginner(name) || isDigit(name)) {
             return true;
-        }//end if
+        } // end if
         return false;
-    }//end method
+    }// end method
 
     /**
      *
@@ -1099,11 +1157,12 @@ public class Method {
      */
     public static boolean isMethodNameBeginner(String name) {
 
-        if (!parser.Operator.isPermOrComb(name) && Character.isLetter(name.toCharArray()[0]) || name.equals("_") || name.equals("$")) {
+        if (!parser.Operator.isPermOrComb(name) && Character.isLetter(name.toCharArray()[0]) || name.equals("_")
+                || name.equals("$")) {
             return true;
-        }//end if
+        } // end if
         return false;
-    }//end method
+    }// end method
 
     @Override
     public String toString() {
@@ -1111,7 +1170,7 @@ public class Method {
         int sz = parameters.length;
         for (int i = 0; i < sz; i++) {
             out = out.concat(parameters[i].concat(","));
-        }//end for loop.
+        } // end for loop.
         out = out.substring(0, out.length());
         out = out.concat(")");
 
@@ -1143,18 +1202,18 @@ public class Method {
         for (int i = 0; i < len; i++) {
             if (i < subLen1) {
                 larger[i] = arr1[i];
-            }//end if
+            } // end if
             else {
                 larger[i] = arr2[i];
-            }//end else
+            } // end else
 
-        }//end for
+        } // end for
 
         return larger;
-    }//end method.
+    }// end method.
 
     private static boolean isHardcodedStatsMethod(String op) {
-        for (String x: getStatsMethods()) {
+        for (String x : getStatsMethods()) {
             if (x.equals(op)) {
                 return true;
             }
@@ -1176,12 +1235,12 @@ public class Method {
             try {
                 if (isStatsMethod(scan.get(i)) && scan.get(i + 1).startsWith("(")) {
                     return true;
-                }//end if
-            }//end try
+                } // end if
+            } // end try
             catch (IndexOutOfBoundsException boundsException) {
                 return false;
             }
-        }//end for
+        } // end for
         return false;
     }
 
@@ -1199,4 +1258,4 @@ public class Method {
 
     }
 
-}//end class
+}// end class

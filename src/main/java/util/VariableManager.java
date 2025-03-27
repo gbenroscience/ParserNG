@@ -51,7 +51,12 @@ public class VariableManager {
     public static String getEndOfLine() {
         return endOfLine;
     }
+   /**
+     * Saves stored functions and: updates the client UIs that use this manager.
+     */
+    public static void update() {
 
+    }
     /**
      *
      * @return the ArrayList object that stores the Variable data of objects of
@@ -142,7 +147,6 @@ public class VariableManager {
                     String value = new MathExpression(cmd.substring(indexOfEqual + 1)).solve();
                     Variable vv = new Variable(var, value, false);
                     VARIABLES.put(vv.getName(), vv);
-                    update();
                     return vv;
 
                 } catch (Exception e) {//handle exceptions
@@ -166,15 +170,8 @@ public class VariableManager {
         } else {
             commandParser.setCommand(cmd);
         }
-        update();
     }
 
-    /**
-     * Saves stored variables and updates the UI that renders the variables.
-     */
-    public static void update() {
-
-    }
 
     /**
      * Initializes the variables store and loads them from persistent storage
@@ -216,11 +213,7 @@ public class VariableManager {
      * @param varName the name of the Variable object to be deleted
      */
     public static void delete(String varName) {
-
         VARIABLES.remove(varName);
-
-        update();
-
     }//end method
 
     /**
@@ -232,7 +225,6 @@ public class VariableManager {
     public static void add(Variable var) {
         if (var != null && !var.isConstant() && !VARIABLES.containsKey(var.getName())) {
             VARIABLES.put(var.getName(), var);
-            update();
         }
     }//end method
 
@@ -249,8 +241,6 @@ public class VariableManager {
                 VARIABLES.put(v.getName(), v);
             }
         }
-
-        update();
     }//end method
 
     /**
@@ -265,7 +255,6 @@ public class VariableManager {
                 it.remove();
             }
         }
-        update();
     }
 
     /**
@@ -280,8 +269,6 @@ public class VariableManager {
                 it.remove();
             }
         }
-
-        update();
     }
 
     /**
@@ -339,7 +326,7 @@ public class VariableManager {
      * insertion of the Variable objects, if the store doe not already contain
      * them,or updating Variable objects in the store with the incoming ones if
      * they have the same name. The behavior of the parser is such that it
-     * interpretes and executes the code on the fly. This means that it will
+     * interprets and executes the code on the fly. This means that it will
      * stop inserting data in the VARIABLES only when it detects error in the
      * code.
      *
@@ -394,6 +381,11 @@ public class VariableManager {
          * @return The value of the expression.
          */
         private String getValue(String expr) throws NullPointerException, InputMismatchException {
+            Variable v = VARIABLES.get(expr);
+            if(v != null){
+                return v.getValue();
+            }
+            
             MathExpression func = new MathExpression(expr);
             func.setVariableValuesInFunction(func.getScanner());
             return func.solve();
