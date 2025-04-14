@@ -1,4 +1,4 @@
-v# ParserNG
+# ParserNG
 <b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. 
 
 * [ParserNG](#ParserNG)
