@@ -124,19 +124,22 @@ public class Utils {
 
     public static void logError(String message) {
         if (loggingEnabled) {
-            Log.e("Kalculitzer", message);
+            Log.e("ParserNG", message);
+            System.out.println();
         }
     }
 
     public static void logDebug(String message) {
         if (loggingEnabled) {
-            Log.d("Kalculitzer", message);
+            Log.d("ParserNG", message);
+            System.out.println();
         }
     }
 
     public static void logInfo(String message) {
         if (loggingEnabled) {
-            Log.i("Kalculitzer", message);
+            Log.i("ParserNG", message);
+            System.out.println();
         }
     }
 

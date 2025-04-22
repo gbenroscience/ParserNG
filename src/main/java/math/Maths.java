@@ -1575,6 +1575,7 @@ public class Maths {                       //3.14159265358979323846;
         System.out.println(" RUNTIME = " + ((t4 - t3) / 1.0E6) + " ms");
 
 
+        System.out.println(" fact = " + fact("0.01"));
     }
     /*We use the principle:
      * pi=(magic_whole_no)*(SUM(i^-n))^(1/n) < where i goes from 1 to infinity during summation >

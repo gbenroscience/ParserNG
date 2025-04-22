@@ -1299,21 +1299,18 @@ public class MathScanner {
         } else {
             for (int i = 0; i < list.size(); i++) {
 
-                //System.out.println("looping it! i = "+i+" of "+list.size()+"--now on: '"+list.get(i)+"' out of "+list);
                 if (isClosingBracket(list.get(i))) {
                     int open = Bracket.getComplementIndex(false, i, list);
                     if (open > 0) {
                         String token = list.get(open - 1);
                         if (Method.isMatrixMethod(token)) {
-                            List l = list.subList(open - 1, i + 1);
+                            List<String> l = list.subList(open - 1, i + 1);
                             int siz = l.size();
-                            System.err.println("list: " + list);
                             extractFunctionStringFromExpressionForMatrixMethods(l);
-
                             i = i - (siz - l.size());
                         } //Most likely you have gotten to the first parameter...ignore it and process the bracket
                         else if (FunctionManager.contains(token)) {
-                            List l = list.subList(open, i + 1);
+                            List<String> l = list.subList(open, i + 1);
                             int siz = l.size();
 
                             MathExpression me = new MathExpression(LISTS.createStringFrom(list, open, i + 1));

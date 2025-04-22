@@ -54,7 +54,7 @@ public class PolynomialExpression extends MathExpression {
      * (DOUBLE_PRECISION) or 2 (BIGDECIMAL_PRECISION), it defaults to
      * DOUBLE_PRECISION
      */
-    public void setPrecision(int precision) {
+    public final void setPrecision(int precision) {
         this.precision = precision == 1 ? DOUBLE_PRECISION : (precision == 2 ? BIGDECIMAL_PRECISION : DOUBLE_PRECISION);
     }
 
@@ -111,7 +111,7 @@ public class PolynomialExpression extends MathExpression {
 
         if (isHasPowerOperators()) {
 
-            /*Deals with powers.Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
+            /*Deals with powers.Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^B from giving the result:(sinA)^B
 instead of sin(A^B).
 Also instructs the software to multiply any 2 numbers in consecutive positions in the vector.
 This is important in distinguishing between functions such as sinAB and sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
@@ -559,7 +559,9 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
 
     public static void main(String args[]) {
         String expr = "x=2;8x*sin(x^2)/3";
+//String expr = "x=2;f(x)=3*x^2+x+2*x;f(3);";
         PolynomialExpression polyExpression = new PolynomialExpression(expr, DOUBLE_PRECISION);
+        System.err.println("scanner: "+polyExpression.scanner);
         System.out.println(polyExpression.solve());
     }//end method
 

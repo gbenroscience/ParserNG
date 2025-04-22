@@ -329,7 +329,7 @@ return op.equals(CUBE);
 /**
  * @param op the String to check
  * @return true if the operator is a pre-number operator
- * e.g the trig operators,exponential operators,logarithmic operators(not to any base)
+ * e.g √ and ³√
  */
 public static boolean isUnaryPreOperator(String op){
 return ( op.equals(ROOT) || op.equals(CUBE_ROOT));
@@ -337,7 +337,7 @@ return ( op.equals(ROOT) || op.equals(CUBE_ROOT));
 /**
  * @param op the String to check
  * @return true if the operator is a post number operator
- * e.g the inverse operator,the factorial,the square and the cube
+ * e.g -¹, !, ² and ³
  */
 public static boolean isUnaryPostOperator(String op){
    return (op.equals(INVERSE)||op.equals(FACTORIAL)||op.equals(SQUARE)||op.equals(CUBE));

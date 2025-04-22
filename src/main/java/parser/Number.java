@@ -42,7 +42,7 @@ public class Number {
         this.num = isNumber(num) ? num : "";
         this.index = index;
         if (this.num.equals("")) {
-            throw new IndexOutOfBoundsException("Invalid Name For Log or antilog to any base type Operator.");
+            throw new IndexOutOfBoundsException("Invalid Name For log or antilog to any base type Operator.");
         }//end if
         else {
             this.index = (index >= 0 && scan.get(index).equals(num)) ? index : -1;
