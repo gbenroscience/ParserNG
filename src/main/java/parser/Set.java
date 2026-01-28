@@ -98,7 +98,7 @@ public class Set {
     public double sum() {
         double u = 0;
         for (int i = 0; i < data.size(); i++) {
-            u += Double.valueOf(data.get(i));
+            u += Double.parseDouble(data.get(i));
         }
 
         return u;
@@ -111,7 +111,7 @@ public class Set {
     public double sumOfSquares() {
         double u = 0;
         for (int i = 0; i < data.size(); i++) {
-            u += Math.pow(Double.valueOf(data.get(i)), 2);
+            u += Math.pow(Double.parseDouble(data.get(i)), 2);
         }
         return u;
     }
@@ -124,7 +124,7 @@ public class Set {
     public double prod() {
         double u = 1;
         for (int i = 0; i < data.size(); i++) {
-            u *= Double.valueOf(data.get(i));
+            u *= Double.parseDouble(data.get(i));
         }
         return u;
     }
@@ -137,9 +137,9 @@ public class Set {
      */
     public double min() {
 //the maximum finder algorithm begins
-        double minval = Double.valueOf(data.get(0));
+        double minval = Double.parseDouble(data.get(0));
         for (int i = 0; i < data.size(); i++) {
-            double y = Double.valueOf(data.get(i));
+            double y = Double.parseDouble(data.get(i));
             if (y < minval) {
                 minval = y;
             }
@@ -154,9 +154,9 @@ public class Set {
      */
     public double max() {
 //the maximum finder algorithm begins
-        double maxval = Double.valueOf(data.get(0));
+        double maxval = Double.parseDouble(data.get(0));
         for (int i = 0; i < data.size(); i++) {
-            double y = Double.valueOf(data.get(i));
+            double y = Double.parseDouble(data.get(i));
             if (y > maxval) {
                 maxval = y;
             }
@@ -207,7 +207,7 @@ public class Set {
         double avrg = avg();
         double N = size();
         for (int i = 0; i < N; i++) {
-            u = (Double.valueOf(data.get(i)) - avrg);
+            u = (Double.parseDouble(data.get(i)) - avrg);
             u1 += Math.pow(u, 2);
         }
         return u1 / N;
@@ -473,10 +473,10 @@ public class Set {
         scan = sort();
         int g = size();
         if (STRING.isEven(g)) {
-            double med = (Double.valueOf(scan.get(g / 2)) + Double.valueOf(scan.get((g / 2) - 1))) / 2;
+            double med = (Double.parseDouble(scan.get(g / 2)) + Double.parseDouble(scan.get((g / 2) - 1))) / 2;
             median = med;
         } else if (!STRING.isEven(g)) {
-            median = Double.valueOf(scan.get((g - 1) / 2));
+            median = Double.parseDouble(scan.get((g - 1) / 2));
         }
 
         return median;
@@ -541,12 +541,12 @@ public class Set {
         Random rnd = new Random();
 //check if the random command came with only one argument
         if (size() == 1) {
-            int val = Integer.valueOf(data.get(0));
+            int val = Integer.parseInt(data.get(0));
             data.set(0, String.valueOf((int) val));
         } //check if it came with 2 arguments
         else if (size() == 2) {
-            double val = Double.valueOf(data.get(0));
-            double val1 = Double.valueOf(data.get(1));
+            double val = Double.parseDouble(data.get(0));
+            double val1 = Double.parseDouble(data.get(1));
             data.set(0, String.valueOf((int) val));
             data.set(1, String.valueOf((int) val1));
         }
@@ -554,12 +554,12 @@ public class Set {
         if (size() == 0) {
             vals.add(String.valueOf(rnd.nextFloat()));
         } else if (size() == 1) {
-            String num = String.valueOf(rnd.nextInt(Integer.valueOf(data.get(0))));
+            String num = String.valueOf(rnd.nextInt(Integer.parseInt(data.get(0))));
             vals.add(num);
         } else if (size() == 2) {
 
-            for (int i = 0; i < Integer.valueOf(data.get(1)); i++) {
-                vals.add(String.valueOf(rnd.nextInt(Integer.valueOf((data.get(0))))));
+            for (int i = 0; i < Integer.parseInt(data.get(1)); i++) {
+                vals.add(String.valueOf(rnd.nextInt(Integer.parseInt((data.get(0))))));
             }
         } else {
             throw new NoSuchElementException("Allowed Formats For rnd Are rnd(),rnd1(number),"
@@ -579,7 +579,7 @@ public class Set {
         String r = data.get(1);
 
         double n_Factorial = Double.parseDouble(Maths.fact(n));
-        double n_Minus_r_Factorial = Double.parseDouble(Maths.fact(String.valueOf(Double.valueOf(n) - Double.valueOf(r))));
+        double n_Minus_r_Factorial = Double.parseDouble(Maths.fact(String.valueOf(Double.parseDouble(n) - Double.parseDouble(r))));
 
         return String.valueOf(n_Factorial / n_Minus_r_Factorial);
     }
@@ -593,7 +593,7 @@ public class Set {
         String r = data.get(1);
 
         double n_Factorial = Double.parseDouble(Maths.fact(n));
-        double n_Minus_r_Factorial = Double.parseDouble(Maths.fact(String.valueOf(Double.valueOf(n) - Double.valueOf(r))));
+        double n_Minus_r_Factorial = Double.parseDouble(Maths.fact(String.valueOf(Double.parseDouble(n) - Double.parseDouble(r))));
         double r_Factorial = Double.parseDouble(Maths.fact(r));
 
         return String.valueOf(n_Factorial / (n_Minus_r_Factorial * r_Factorial));
@@ -631,7 +631,7 @@ public class Set {
             case 2:
             {
                 String anonFunc = data.get(0);
-                double value = Double.valueOf(data.get(1));
+                double value = Double.parseDouble(data.get(1));
                 
                 String solution = Derivative.eval("diff(" + anonFunc + "," + value + ")");
                 /*  NumericalDerivative der = new NumericalDerivative(new Function(anonFunc), value );
@@ -641,9 +641,9 @@ public class Set {
             case 3:
             {
                 String anonFunc = data.get(0);
-                double value = Double.valueOf(data.get(1));
+                double value = Double.parseDouble(data.get(1));
                 int order = Integer.parseInt(data.get(2));
-                /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.valueOf(data.get(1)));
+                /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.parseDouble(data.get(1)));
                 return der.findDerivativeByPolynomialExpander();
                 */
                 String solution = Derivative.eval("diff(" + anonFunc + "," + value + "," + order + ")");
@@ -771,7 +771,7 @@ public class Set {
                 function = function.concat(data.get(i));
             }//end for
 
-            NumericalIntegral intg = new NumericalIntegral(Double.valueOf(data.get(sz - 2)), Double.valueOf(data.get(sz - 1)), 0, function);
+            NumericalIntegral intg = new NumericalIntegral(Double.parseDouble(data.get(sz - 2)), Double.parseDouble(data.get(sz - 1)), 0, function);
             return String.valueOf(intg.findHighRangeIntegral()
             );
 
@@ -781,7 +781,7 @@ public class Set {
                 function = function.concat(data.get(i));
             }//end for
 
-            NumericalIntegral intg = new NumericalIntegral(Double.valueOf(data.get(sz - 3)), Double.valueOf(data.get(sz - 2)),
+            NumericalIntegral intg = new NumericalIntegral(Double.parseDouble(data.get(sz - 3)), Double.parseDouble(data.get(sz - 2)),
                     (int) Math.round(Double.parseDouble(data.get(sz - 1))), function);
             double val = intg.findHighRangeIntegral();
             return String.valueOf(val);

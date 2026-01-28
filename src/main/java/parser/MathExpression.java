@@ -2137,24 +2137,9 @@ public class MathExpression implements Savable {
         return scanner;
     }//end method solveSubPortions()
 
-    private static void moreJunkExamples() {
-        System.out.println(0xFF000000);
-        System.out.println(0xFF888888);
-        System.out.println(0xFFFFFFFF);
-        Function f = FunctionManager.add("f(x,y) = x - x/y");
-
-        int iterations = 1000000;
-
-        double start = System.nanoTime();
-
-        double val = 0;
-        for (int i = 1; i < iterations; i++) {
-            f.calc(2, 3);
-        }
-
-        start = System.nanoTime() - start;
-
-        System.out.println("Time: " + (start / iterations) + " ns");
+    private static void moreJunkExamples() { 
+       MathExpression me = new MathExpression("f(x)=sin(x^3-3*x-2);diff(f, 1);"); 
+        System.out.println(me.solve());
     }
 
     private static void junkExamples() {

@@ -10,7 +10,7 @@ import parser.MathExpression;
 
 /**
  *
- * @author GBEMIRO JIBOYE <gbenroscience@gmail.com>
+ * @author GBEMIRO JIBOYE
  */
 public class ParserCmd {
     

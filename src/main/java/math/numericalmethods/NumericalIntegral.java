@@ -841,14 +841,13 @@ public class NumericalIntegral {
                     expression = expression.substring(0,lastCommaIndex).trim();
                     throw new InputMismatchException(" Max of 3 args allowed! ");
                 }//end try
-                catch(NumberFormatException numErr){
+                catch(NumberFormatException | IndexOutOfBoundsException numErr){
 
-                }//end catch
-                catch(IndexOutOfBoundsException indErr){
+                }
+                //end catch
+                //end catch
 
-                }//end catch
-
-                if( new Double(args[0]).isNaN() ){
+                if( Double.valueOf(args[0]).isNaN() ){
                     setxLower(args[1]);
                     setxUpper(args[2]);
 //setIterations(5);
@@ -868,7 +867,7 @@ public class NumericalIntegral {
 
                     }//end catch
                 }//end if
-                else if( !new Double(args[0]).isNaN() ){
+                else if( !Double.valueOf(args[0]).isNaN() ){
                     setxLower(args[0]);
                     setxUpper(args[1]);
                     setIterations((int) args[2]);

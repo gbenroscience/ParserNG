@@ -195,7 +195,7 @@ public class Integration{
         	if(test){
             		// Calculate and store coefficients
             		Integration.gaussQuadCoeff(gaussQuadDist, gaussQuadWeight, glPoints);
-            		Integration.gaussQuadIndex.add(new Integer(glPoints));
+            		Integration.gaussQuadIndex.add(glPoints);
             		Integration.gaussQuadDistArrayList.add(gaussQuadDist);
             		Integration.gaussQuadWeightArrayList.add(gaussQuadWeight);
         	}

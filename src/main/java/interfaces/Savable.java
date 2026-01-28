@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 GBEMIRO JIBOYE <gbenroscience@gmail.com>.
+ * Copyright 2021 GBEMIRO JIBOYE.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import java.io.Serializable;
 
 /**
  *
- * @author GBEMIRO JIBOYE <gbenroscience@gmail.com>
+ * @author GBEMIRO JIBOYE
  */
 public interface Savable extends Serializable{
     
