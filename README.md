@@ -1,6 +1,8 @@
 # ParserNG
 <b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. 
 
+Looking for a leaner parser in native C for even faster execution? checkout [tinymath](https://github.com/gbenroscience/tinymath) 
+
 * [ParserNG](#ParserNG)
     * [Usage and note](#usage-and-note)
     * [FEATURES](#features)
