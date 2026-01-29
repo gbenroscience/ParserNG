@@ -186,7 +186,6 @@ public class FunctionExpander {
      */
     public Matrix getMatrix() {
         MathExpression fun = function.getMathExpression();
-        fun.setDRG(1);
         double dx = getXStep();
         double arr[][] = new double[degree + 1][degree + 2];
 
@@ -217,7 +216,6 @@ public class FunctionExpander {
      */
     public PrecisionMatrix getPrecisionMatrix() {
         MathExpression fun = function.getMathExpression();
-        fun.setDRG(1);
         double dx = getXStep();
         BigDecimal arr[][] = new BigDecimal[degree + 1][degree + 2];
 
@@ -512,7 +510,6 @@ public class FunctionExpander {
         String poly = expand.getPolynomial();
         System.out.println("polynomial function = " + poly + "\n\n\n");
         MathExpression me = new MathExpression(poly);
-        me.setDRG(1);
         me.setValue("x", "0.9999");
         System.out.println("evaluating polynomial function with normal parser = " + me.solve());
         expand.getFunction().getIndependentVariable("x").setValue("0.9999");

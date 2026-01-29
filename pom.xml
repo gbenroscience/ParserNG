@@ -3,12 +3,12 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>0.1.5</version>
+    <version>0.1.9</version>
     <packaging>jar</packaging>
     
     <name>ParserNG</name>
     <description>Rich and Performant, Cross Platform Java Library(100% Java)... Now allows the differentiation function to be differentiated with
-    respect to any variable(not just x). A command line tool(parser.cmd.ParserCmd) has also be added. Its still in its infancy; but it works</description>
+        respect to any variable(not just x). A command line tool(parser.cmd.ParserCmd) has also be added. Its still in its infancy; but it works</description>
     <url>https://github.com/gbenroscience/ParserNG</url>
 
     <licenses>
@@ -33,7 +33,21 @@
         <url>http://github.com/gbenroscience/ParserNG/tree/master</url>
     </scm>
     <dependencies>
-<!--        <dependency>
+        <!-- For tests -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>5.8.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <version>5.8.2</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!--        <dependency>
             <groupId>
                 com.google.code.gson
             </groupId>
@@ -59,6 +73,18 @@
     <build>
         <plugins>
             <plugin>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.0.2</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <!--<addClasspath>true</addClasspath>-->
+                            <mainClass>math.Main</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-source-plugin</artifactId>
                 <version>2.2.1</version>
@@ -77,6 +103,7 @@
                 <configuration>
                     <additionalparam>-Xdoclint:none</additionalparam>
                     <source>8</source>
+                    <target>8</target>
                     <detectJavaApiLink>false</detectJavaApiLink>
                 </configuration>
                 <version>2.9.1</version>
@@ -102,6 +129,21 @@
                         </goals>
                     </execution>
                 </executions>
+                <configuration>
+                    <keyname>42028AF0</keyname>
+                </configuration>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version> 3.0.0-M5</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>8</source>
+                    <target>8</target>
+                </configuration>
             </plugin>
         </plugins>
     </build>
@@ -110,7 +152,7 @@
     <properties>
         <doclint>none</doclint>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>1.8</maven.compiler.source>
-        <maven.compiler.target>1.8</maven.compiler.target>
+        <maven.compiler.source>1.7</maven.compiler.source>
+        <maven.compiler.target>1.7</maven.compiler.target>
     </properties>
 </project>

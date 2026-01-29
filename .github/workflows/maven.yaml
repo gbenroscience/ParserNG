@@ -1,0 +1,40 @@
+name: Java CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        java-version: [ 8, 11, 17 ]
+      fail-fast: false
+
+    name: ${{ matrix.os }} - Java ${{ matrix.java-version }} - Maven
+    steps:
+      - name: Checkout ParserNG repo
+        uses: actions/checkout@v2
+
+      - name: Set up JDK ${{ matrix.java-version }}
+        uses: actions/setup-java@v2
+        with:
+          java-version: ${{ matrix.java-version }}
+          distribution: 'adopt'
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@v4.4
+        with:
+          maven-version: 3.8.2
+
+      - name: Build ParserNG with Maven
+        run: mvn "-Dgpg.skip" "--batch-mode" "--update-snapshots" "clean" "install"
+
+

@@ -1,3 +1,4 @@
+
 /*
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
@@ -32,7 +33,7 @@ public class Methods {
 			"exp", "ln", "lg", "log", "ln-¹", "lg-¹", "log-¹", "asin", "acos",
 			"atan", "asinh", "acosh", "atanh", "asec", "acsc", "acot", "asech",
 			"acsch", "acoth", "aln", "alg", "alog", "sqrt","cbrt", "inverse",
-			"square", "cube", "pow", "floor", "ceil", "diff", "quad", "intg"
+			"square", "cube", "pow", "diff", "quad", "intg"
                         };
 
 	/**
@@ -141,10 +142,6 @@ public class Methods {
 			der = "3*" + var + "^2" + append;
 		} else if (method.equals("pow")) {
 
-		} else if (method.equals("floor")) {
-
-		} else if (method.equals("ceil")) {
-
 		} else if (method.equals("diff")) {
 			try {
 				Differentiable diff = d.builder.getManager().lookUp(var);
@@ -173,5 +170,5 @@ public class Methods {
 			return null;
 		}
 	}// end method
-
+ 
 }// end class
