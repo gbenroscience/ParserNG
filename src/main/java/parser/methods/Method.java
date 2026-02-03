@@ -43,7 +43,6 @@ public class Method {
      */
     private int DRG = 1;
 
-
     /**
      *
      * @param name The method name
@@ -56,7 +55,6 @@ public class Method {
             throw new InputMismatchException("Invalid Method Name!");
         }
     }
-
 
     /**
      *
@@ -370,13 +368,13 @@ public class Method {
 
     /**
      * A fix for stuff like sum,(,13,+,3,)...
-     * 
+     *
      */
     private static void quickFixCompoundStructuresInStatsExpression(List<String> list) {
 
         String methodName = list.get(0);
 
-        if(!isStatsMethod(methodName)){
+        if (!isStatsMethod(methodName)) {
             return;
         }
         int sz = list.size();
@@ -403,7 +401,8 @@ public class Method {
             }
         }
 
-    }    
+    }
+
     /**
      *
      * @param list A list containing a portion of a scanned function that has
@@ -415,7 +414,7 @@ public class Method {
      * operation.
      */
     public static List<String> run(List<String> list, DRG_MODE DRG) {
-        
+
         quickFixCompoundStructuresInStatsExpression(list);
         String name = list.get(0);
 
@@ -425,8 +424,8 @@ public class Method {
         int sz = list.size();
 
         if (isStatsMethod(name)) {
-            for (BasicNumericalMethod basicNumericalMethod: getBasicNumericalMethods()){
-                if (name.equals(basicNumericalMethod.getName())){
+            for (BasicNumericalMethod basicNumericalMethod : getBasicNumericalMethods()) {
+                if (name.equals(basicNumericalMethod.getName())) {
                     Set set = new Set(list);
                     //TODO, make basicNumericalMethod statefull (initialize by reflection)
                     //basicNumericalMethod.setRadDegGrad(DRG);
@@ -719,7 +718,7 @@ public class Method {
                 list.add(ref);
                 return list;
             } else if (name.equals(PRINT)) {
-               
+
                 Set set = new Set(list);
                 set.print();
                 list.clear();
@@ -1092,18 +1091,22 @@ public class Method {
         return false;
     }//end method
 
-    /**
-     *
-     * @param name The string to check.
-     * @return true if the string can be the first character in a method name.
-     */
     public static boolean isMethodNameBeginner(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
 
-        if (!parser.Operator.isPermOrComb(name) && Character.isLetter(name.toCharArray()[0]) || name.equals("_") || name.equals("$")) {
+        // First character
+        char first = name.charAt(0);
+
+        // Allow underscore or dollar sign directly
+        if (first == '_' || first == '$') {
             return true;
-        }//end if
-        return false;
-    }//end method
+        }
+
+        // If it's a letter and not a perm/comb operator, it's valid
+        return Character.isLetter(first) && !parser.Operator.isPermOrComb(name);
+    }
 
     @Override
     public String toString() {
@@ -1154,7 +1157,7 @@ public class Method {
     }//end method.
 
     private static boolean isHardcodedStatsMethod(String op) {
-        for (String x: getStatsMethods()) {
+        for (String x : getStatsMethods()) {
             if (x.equals(op)) {
                 return true;
             }

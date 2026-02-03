@@ -1412,8 +1412,6 @@ public class MathExpression implements Savable, Solvable {
 
             setVariableValuesInFunction(myScan);
 
-            String listAppender = "";
-
             while (brac.length > 0) {
 
                 if (!correctFunction) {
@@ -1422,7 +1420,7 @@ public class MathExpression implements Savable, Solvable {
                 else {
                     try {
                         indexOpenInMyScan = brac[0].getIndex();
-                        indexCloseInMyScan = brac[1].getIndex();
+                        indexCloseInMyScan = brac[1].getIndex(); 
 
                         boolean isMethod = false;//only list returning data sets e.g sort,rnd...
 
@@ -1507,7 +1505,7 @@ public class MathExpression implements Savable, Solvable {
 
             }//end while
 
-            listAppender = listToString(myScan);
+            String listAppender = listToString(myScan);
             if (listAppender.startsWith("(")) {
                 listAppender = listAppender.substring(1);
                 listAppender = listAppender.substring(0, listAppender.length() - 1);
@@ -2230,8 +2228,19 @@ public class MathExpression implements Savable, Solvable {
     }//end method
 
     public static void main(String... args) {
-        MathExpression m = new MathExpression("((sin(4+cos(3)))/ln(4-1)+3^(4*2))");  
-        System.out.println("soln: "+m.solve());
+        String s1 = "sin(1)+cos(1)+tan(1)+log(10)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5);";
+        String s2 = "((sin(4+cos(3)))/ln(4-1)+3^(4*2))";
+        
+        MathExpression m = new MathExpression(s1);
+        System.out.println("brackets: \n");
+        Bracket[]br = MathExpression.mapBrackets(m.scanner);
+        for(Bracket b:br){
+            System.out.println("b -> "+b);
+        }
+        double start = System.nanoTime();
+        String s = m.solve();
+        double interval =  System.nanoTime() - start;
+        System.out.println("soln: " + s+", "+(interval/1000)+" microns");
 
     }//end method
 
