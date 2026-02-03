@@ -6,6 +6,7 @@ package parser;
 
 import interfaces.Savable;
 import interfaces.Solvable;
+import java.util.ArrayDeque;
 import logic.DRG_MODE;
 import math.Main;
 import parser.methods.Declarations;
@@ -15,7 +16,9 @@ import parser.methods.Method;
 import math.Maths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.InputMismatchException;
+import java.util.Iterator;
 import java.util.List;
 import util.*;
 
@@ -796,23 +799,21 @@ public class MathExpression implements Savable, Solvable {
 
                                     List<String> domain = new ArrayList<>(opener.getBracketDomainContents(scanner));
 
-
                                     String fun = opener.getDomainContents(scanner);
-                
+
                                     while (fun.startsWith("(") && fun.endsWith(")")) {
                                         fun = fun.substring(1);
                                         fun = fun.substring(0, fun.length() - 1);
                                         fun = fun.trim();
                                     }//end while
 
-
                                     if (fun.contains(OPEN_CIRC_BRAC)) {
-                                        
-                                    int op = 0, cl = 0;
- 
-                                        while ( (cl = LISTS.nextIndexOf(domain, cl, CLOSE_CIRC_BRAC)) != -1) {
+
+                                        int op = 0, cl = 0;
+
+                                        while ((cl = LISTS.nextIndexOf(domain, cl, CLOSE_CIRC_BRAC)) != -1) {
                                             op = Bracket.getComplementIndex(false, cl, domain);
-                                            List<String>l=domain.subList(op, cl+1);
+                                            List<String> l = domain.subList(op, cl + 1);
                                             List<String> val = solve(l);
                                             l.clear();
                                             l.addAll(val);
@@ -1050,51 +1051,44 @@ public class MathExpression implements Savable, Solvable {
      * @return a Bracket array that holds related brackets pairs.
      */
     public static Bracket[] mapBrackets(ArrayList<String> scanner) {
+        for (Iterator<String> it = scanner.iterator(); it.hasNext();) {
+            if (" ".equals(it.next())) {
+                it.remove();
+            }
+        }
 
-        ArrayList<String> whiteSpaceRemover = new ArrayList<>();
-        whiteSpaceRemover.add(" ");
-        scanner.removeAll(whiteSpaceRemover);
         ArrayList<Bracket> bracs = new ArrayList<>();
+        Deque<Integer> stack = new ArrayDeque<>();
 
-        ArrayList<String> scan = new ArrayList<>();
-        scan.addAll(scanner);
-        int open = 0;//tracks the index of an opening bracket
-        int close = scan.indexOf(")");//tracks the index of a closing bracket
-        int i = 0;
-        while (close != -1) {
-            try {
-                open = LISTS.prevIndexOf(scan, close, "(");
+        for (int i = 0; i < scanner.size(); i++) {
+            String token = scanner.get(i);
+
+            if ("(".equals(token)) {
+                stack.push(i);
+            } else if (")".equals(token)) {
+                if (stack.isEmpty()) {
+                    throw new InputMismatchException("Unmatched closing bracket at index " + i);
+                }
+                int openIndex = stack.pop();
+
                 Bracket openBrac = new Bracket("(");
                 Bracket closeBrac = new Bracket(")");
-                openBrac.setIndex(open);
-                closeBrac.setIndex(close);
+                openBrac.setIndex(openIndex);
+                closeBrac.setIndex(i);
                 openBrac.setComplement(closeBrac);
                 closeBrac.setComplement(openBrac);
 
                 bracs.add(openBrac);
                 bracs.add(closeBrac);
-
-                scan.set(open, "");
-                scan.set(close, "");
-
-                close = scan.indexOf(")");
-                ++i;
-            }//end try
-            catch (IndexOutOfBoundsException ind) {
-                break;
             }
-        }//end while
-
-//after the mapping the algorithm demands that all ( and ) should have been used up in the function
-        if (scan.indexOf("(") == -1 && scan.indexOf(")") == -1) {
-            int size = bracs.size();
-            Bracket[] bracket = new Bracket[size];
-            return bracs.toArray(bracket);
-        } else {
-            throw new InputMismatchException("SYNTAX ERROR!");
         }
 
-    }//end method
+        if (!stack.isEmpty()) {
+            throw new InputMismatchException("Unmatched opening bracket(s) remain");
+        }
+
+        return bracs.toArray(new Bracket[0]);
+    }
 
     /**
      * Method mapBrackets goes over an input equation and maps all positions
@@ -1346,10 +1340,28 @@ public class MathExpression implements Savable, Solvable {
      * []
      */
     protected String listToString(ArrayList<String> scan) {
-        String str = String.valueOf(scan);
-        str = str.substring(1);
-        str = str.substring(0, str.length() - 1);
-        return str;
+        if (scan == null || scan.isEmpty()) {
+            return "";
+        }
+
+        // Optimization 1: Pre-size the builder to avoid internal array copying
+        // We estimate: avg string length (e.g., 5) + comma/space (2) * size
+        StringBuilder sb = new StringBuilder(scan.size() * 7);
+
+        // Optimization 2: Use a standard for-loop (slightly faster than Iterator in some JVMs)
+        for (int i = 0; i < scan.size(); i++) {
+            String s = scan.get(i);
+
+            // Skip nulls or empties if necessary for your parser logic
+            if (s != null && !s.isEmpty()) {
+                if (sb.length() > 0) {
+                    sb.append(", ");
+                }
+                sb.append(s);
+            }
+        }
+
+        return sb.toString();
     }
 
     /**
@@ -2209,17 +2221,18 @@ public class MathExpression implements Savable, Solvable {
         return scanner;
     }//end method solveSubPortions()
 
- 
-
- 
-
- 
-    public static void main(String... args) {
+    public static void main1(String... args) {
         String in = Main.joinArgs(Arrays.asList(args), true);
         if (Main.isVerbose()) {
             System.err.println(in);
         }
         System.out.println(new MathExpression(in).solve());
+    }//end method
+
+    public static void main(String... args) {
+        MathExpression m = new MathExpression("((sin(4+cos(3)))/ln(4-1)+3^(4*2))");  
+        System.out.println("soln: "+m.solve());
+
     }//end method
 
     @Override

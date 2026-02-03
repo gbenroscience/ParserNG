@@ -80,12 +80,12 @@ public class Bracket extends Operator {
      * similar objects at another address in memory and store in the new array.
      * The command was most likely moreBracs=bracs; or in a loop, it would look
      * like:
-     * 
+     *
      * for(int i=0;i&lt;bracs.length;i++){ moreBracs=bracs[i]; }
      *
      * These statements will only ensure that both arrays will hold a reference
      * to the same objects in memory,i.e RAM.
-     * 
+     *
      * Hence whenever an unsuspecting coder modifies the contents of bracs,
      * thinking He/She has a backup in moreBracs,Java is effecting the
      * modification on the objects referred to by moreBracs, too.This can cause
@@ -93,8 +93,7 @@ public class Bracket extends Operator {
      * in this way:
      *
      * for(int i=0;i&lt;bracs.length;i++){
-     * moreBracs[i]=createTwinBracket(bracs[i]);
-     * }
+     * moreBracs[i]=createTwinBracket(bracs[i]); }
      *
      *
      *
@@ -206,8 +205,6 @@ public class Bracket extends Operator {
         } else if (this.getIndex() > brac.getIndex() && this.getComplement().getIndex() < brac.getIndex()) {
             truth = true;
         }
-
-
 
         return truth;
     }
@@ -375,7 +372,6 @@ public class Bracket extends Operator {
             catch (IndexOutOfBoundsException ind) {
             }
 
-
         }
         return stop;
     }
@@ -434,7 +430,6 @@ public class Bracket extends Operator {
             }//end try
             catch (IndexOutOfBoundsException ind) {
             }
-
 
         }
         return stop;
@@ -596,12 +591,9 @@ public class Bracket extends Operator {
     private static boolean validateBracketStructure(List<String> scanner) {
         boolean correctFunction = false;
 
-
         ArrayList<String> scan = new ArrayList<String>();
         ArrayList<SimplePoint> map = new ArrayList<SimplePoint>();
         ArrayList<Bracket> bracs = new ArrayList<Bracket>();
-
-
 
         scan.addAll(scanner);
         int open = 0;//tracks the index of an opening bracket
@@ -617,7 +609,6 @@ public class Bracket extends Operator {
                 closeBrac.setIndex(close);
                 openBrac.setComplement(closeBrac);
                 closeBrac.setComplement(openBrac);
-
 
                 bracs.add(openBrac);
                 bracs.add(closeBrac);
@@ -640,48 +631,51 @@ public class Bracket extends Operator {
             correctFunction = false;
         }
 
-
-
         return correctFunction;
     }
 
     /**
-     *@param scanner  The ArrayList containing the scanner output for a Function
+     * @param scanner The ArrayList containing the scanner output for a Function
      * Multiplies the contents of this List by -1.
      */
-    public void multiplyContentsByMinusOne(List<String> scanner){
-        List<String>domain = getBracketDomainContents((ArrayList<String>) scanner);
+    public void multiplyContentsByMinusOne(List<String> scanner) {
+        List<String> domain = getBracketDomainContents((ArrayList<String>) scanner);
 
-
-        for(int i=0;i<domain.size();i++){
-            if(domain.get(i).equals("+")){
-                domain.set(i,"-");
+        for (int i = 0; i < domain.size(); i++) {
+            if (domain.get(i).equals("+")) {
+                domain.set(i, "-");
             }//end if
-            else if(domain.get(i).equals("-")) {
-                domain.set(i,"+");
+            else if (domain.get(i).equals("-")) {
+                domain.set(i, "+");
             }//end if
 
         }//end for loop
 
-        if(Number.isNumber(domain.get(1))) {
-            domain.set(1,""+(-1*Double.parseDouble(domain.get(1))) );
-        }
-        else if(Variable.isVariableString(domain.get(1))){
-            domain.add(1,"*");
-            domain.add(1,"-1");
-            complement.setIndex(complement.index+2);
+        if (Number.isNumber(domain.get(1))) {
+            domain.set(1, "" + (-1 * Double.parseDouble(domain.get(1))));
+        } else if (Variable.isVariableString(domain.get(1))) {
+            domain.add(1, "*");
+            domain.add(1, "-1");
+            complement.setIndex(complement.index + 2);
         }
 
     }//end method
 
     /**
-     * @param scanner  The ArrayList containing the scanner output for a Function
-     * @param index The index at which the token is to be retrieved.
-     * The first and elements are compulsorily always an open bracket and a close bracket
+     * @param scanner The ArrayList containing the scanner output for a Function
+     * @param index The index at which the token is to be retrieved. The first
+     * and elements are compulsorily always an open bracket and a close bracket
      * respectively.
      */
-    public String domainTokenAt(List<String> scanner,int index){
-        List<String>domain = getBracketDomainContents((ArrayList<String>) scanner);
+    public String domainTokenAt(List<String> scanner, int index) {
+        List<String> domain = getBracketDomainContents((ArrayList<String>) scanner);
         return domain.get(index);
+    }
+
+    public String toString() {
+        return String.format(
+                "{\"name\": \"%s\", \"index\": %d, \"evaluated\": %b, \"c_name\": \"%s\", \"c_index\": %d, \"c_evaluated\": %b}",
+                name, index, evaluated, complement.name, complement.index, complement.evaluated
+        );
     }
 }//end class Bracket
