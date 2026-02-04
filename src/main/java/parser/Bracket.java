@@ -276,10 +276,10 @@ public class Bracket extends Operator {
         if (isOpenBracket) {
             try {
                 for (int i = start; i < scan.size(); i++) {
-
-                    if (scan.get(i).equals("(")) {
+                    String s = scan.get(i);
+                    if (s.charAt(0) == '(') {
                         open++;
-                    } else if (scan.get(i).equals(")")) {
+                    } else if (s.charAt(0) == ')') {
                         close++;
                     }
                     if (open == close) {
@@ -296,9 +296,10 @@ public class Bracket extends Operator {
             try {
                 for (int i = start; i >= 0; i--) {
                     try {
-                        if (scan.get(i).equals("(")) {
+                        String s = scan.get(i);
+                        if (s.charAt(0) == '(') {
                             open++;
-                        } else if (scan.get(i).equals(")")) {
+                        } else if (s.charAt(0) == ')') {
                             close++;
                         }
                         if (open == close) {
@@ -335,10 +336,10 @@ public class Bracket extends Operator {
         if (isOpenBracket) {
             try {
                 for (int i = start; i < scan.size(); i++) {
-
-                    if (scan.get(i).equals("(")) {
+                    String s = scan.get(i);
+                    if (s.charAt(0) == '(') {
                         open++;
-                    } else if (scan.get(i).equals(")")) {
+                    } else if (s.charAt(0) == ')') {
                         close++;
                     }
                     if (open == close) {
@@ -355,9 +356,10 @@ public class Bracket extends Operator {
             try {
                 for (int i = start; i >= 0; i--) {
                     try {
-                        if (scan.get(i).equals("(")) {
+                        String s = scan.get(i);
+                        if (s.charAt(0) == '(') {
                             open++;
-                        } else if (scan.get(i).equals(")")) {
+                        } else if (s.charAt(0) == ')') {
                             close++;
                         }
                         if (open == close) {
@@ -395,9 +397,10 @@ public class Bracket extends Operator {
         if (isOpenBracket) {
             try {
                 for (int i = start; i < size; i++) {
-                    if (expr.substring(i, i + 1).equals("(")) {
+                    char c = expr.charAt(i);
+                    if (c == '(') {
                         open++;
-                    } else if (expr.substring(i, i + 1).equals(")")) {
+                    } else if (c == ')') {
                         close++;
                     }
                     if (open == close) {
@@ -414,9 +417,10 @@ public class Bracket extends Operator {
             try {
                 for (int i = start; i >= 0; i--) {
                     try {
-                        if (expr.substring(i, i + 1).equals("(")) {
+                          char c = expr.charAt(i);
+                        if  (c == '(') {
                             open++;
-                        } else if (expr.substring(i, i + 1).equals(")")) {
+                        }  else if (c == ')') {
                             close++;
                         }
                         if (open == close) {
@@ -591,9 +595,9 @@ public class Bracket extends Operator {
     private static boolean validateBracketStructure(List<String> scanner) {
         boolean correctFunction = false;
 
-        ArrayList<String> scan = new ArrayList<String>();
-        ArrayList<SimplePoint> map = new ArrayList<SimplePoint>();
-        ArrayList<Bracket> bracs = new ArrayList<Bracket>();
+        ArrayList<String> scan = new ArrayList<>();
+        ArrayList<SimplePoint> map = new ArrayList<>();
+        ArrayList<Bracket> bracs = new ArrayList<>();
 
         scan.addAll(scanner);
         int open = 0;//tracks the index of an opening bracket

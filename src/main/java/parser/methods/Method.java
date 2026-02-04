@@ -371,9 +371,7 @@ public class Method {
      *
      */
     private static void quickFixCompoundStructuresInStatsExpression(List<String> list) {
-
         String methodName = list.get(0);
-
         if (!isStatsMethod(methodName)) {
             return;
         }
@@ -381,15 +379,11 @@ public class Method {
         for (int i = 0; i < sz; i++) {
             String token = list.get(i);
             if (Operator.isBinaryOperator(token)) {
-
                 StringBuilder b = new StringBuilder();
-
                 for (i = 1; i < sz; i++) {
                     b.append(list.get(i));
                 }
-
                 String fun = b.toString();
-
                 MathExpression f = new MathExpression(fun);
                 String val = f.solve();
                 list.clear();
@@ -539,11 +533,11 @@ public class Method {
             }//end else if
             else if (name.equals(LOG)) {
                 if (sz == 1) {
-                    result = String.valueOf(Maths.logToAnyBase(Double.valueOf(list.get(0)), 10));
+                    result = String.valueOf(Maths.logToAnyBase(Double.parseDouble(list.get(0)), 10));
                     list.clear();
                     list.add(result);
                 } else if (sz == 2) {
-                    result = String.valueOf(Maths.logToAnyBase(Double.valueOf(list.get(0)), Double.valueOf(list.get(1))));
+                    result = String.valueOf(Maths.logToAnyBase(Double.parseDouble(list.get(0)), Double.parseDouble(list.get(1))));
                     list.clear();
                     list.add(result);
                 }
@@ -551,12 +545,12 @@ public class Method {
                 return list;
             } else if ((name.equals(LOG_INV) || name.equals(LOG_INV_ALT))) {
                 if (sz == 1) {
-                    result = String.valueOf(Maths.antiLogToAnyBase(Double.valueOf(list.get(0)), 10));
+                    result = String.valueOf(Maths.antiLogToAnyBase(Double.parseDouble(list.get(0)), 10));
                     list.clear();
                     list.add(result);
                     return list;
                 } else if (sz == 2) {
-                    result = String.valueOf(Maths.antiLogToAnyBase(Double.valueOf(list.get(0)), Double.valueOf(list.get(1))));
+                    result = String.valueOf(Maths.antiLogToAnyBase(Double.parseDouble(list.get(0)), Double.parseDouble(list.get(1))));
                     list.clear();
                     list.add(result);
                     return list;
@@ -733,73 +727,73 @@ public class Method {
                     if (!list.get(0).equals("Infinity") && isNumber(list.get(0))) {
                         if (DRG == DRG_MODE.DEG) {
                             if (name.equals(SIN)) {
-                                result = String.valueOf(Maths.sinDegToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.sinDegToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SINH)) {
-                                result = String.valueOf(Math.sinh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.sinh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COS)) {
-                                result = String.valueOf(Maths.cosDegToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.cosDegToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COSH)) {
-                                result = String.valueOf(Math.cosh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.cosh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(TAN)) {
-                                result = String.valueOf(Maths.tanDegToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.tanDegToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(TANH)) {
-                                result = String.valueOf(Math.tanh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.tanh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SEC)) {
-                                result = String.valueOf(1 / Maths.cosDegToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Maths.cosDegToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SECH)) {
-                                result = String.valueOf(1 / Math.cosh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Math.cosh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COSEC)) {
-                                result = String.valueOf(1 / Maths.sinDegToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Maths.sinDegToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COSECH)) {
-                                result = String.valueOf(1 / Math.sinh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Math.sinh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COT)) {
-                                result = String.valueOf(1 / Maths.tanDegToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Maths.tanDegToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COTH)) {
-                                result = String.valueOf(Math.tanh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.tanh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(EXP) || name.equals(LN_INV_ALT) || name.equals(LN_INV)) {
-                                result = String.valueOf(Math.exp(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.exp(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LN)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.log(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LG)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0))) / Math.log(10.0));
+                                result = String.valueOf(Math.log(Double.parseDouble(list.get(0))) / Math.log(10.0));
                             } else if (name.equals(ARC_SIN) || name.equals(ARC_SIN_ALT)) {
-                                result = String.valueOf(Maths.asinRadToDeg(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.asinRadToDeg(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COS) || name.equals(ARC_COS_ALT)) {
-                                result = String.valueOf(Maths.acosRadToDeg(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.acosRadToDeg(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_TAN) || name.equals(ARC_TAN_ALT)) {
-                                result = String.valueOf(Maths.atanRadToDeg(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.atanRadToDeg(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SINH) || name.equals(ARC_SINH_ALT)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0)) + Math.sqrt(Math.pow(Double.valueOf(list.get(0)), 2) + 1)));
+                                result = String.valueOf(Math.log(Double.parseDouble(list.get(0)) + Math.sqrt(Math.pow(Double.parseDouble(list.get(0)), 2) + 1)));
                             } else if (name.equals(ARC_COSH) || name.equals(ARC_COSH_ALT)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0)) + Math.sqrt(Math.pow(Double.valueOf(list.get(0)), 2) - 1)));
+                                result = String.valueOf(Math.log(Double.parseDouble(list.get(0)) + Math.sqrt(Math.pow(Double.parseDouble(list.get(0)), 2) - 1)));
                             } else if (name.equals(ARC_TANH) || name.equals(ARC_TANH_ALT)) {
-                                result = String.valueOf(0.5 * Math.log((1 + Double.valueOf(list.get(0))) / (1 - Double.valueOf(list.get(0)))));
+                                result = String.valueOf(0.5 * Math.log((1 + Double.parseDouble(list.get(0))) / (1 - Double.parseDouble(list.get(0)))));
                             } else if (name.equals(ARC_SEC) || name.equals("asec")) {
-                                result = String.valueOf(Maths.acosRadToDeg(1 / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.acosRadToDeg(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COSEC) || name.equals("acsc")) {
-                                result = String.valueOf(Maths.asinRadToDeg(1 / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.asinRadToDeg(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COT) || name.equals("acot")) {
-                                result = String.valueOf(Maths.atanRadToDeg(1 / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.atanRadToDeg(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SECH) || name.equals(ARC_SECH_ALT)) {
-                                result = String.valueOf(Math.log((1 + Math.sqrt(1 - Math.pow(Double.valueOf(list.get(0)), 2))) / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.log((1 + Math.sqrt(1 - Math.pow(Double.parseDouble(list.get(0)), 2))) / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COSECH) || name.equals(ARC_COSECH_ALT)) {
-                                result = String.valueOf(Math.log((1 + Math.sqrt(1 + Math.pow(Double.valueOf(list.get(0)), 2))) / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.log((1 + Math.sqrt(1 + Math.pow(Double.parseDouble(list.get(0)), 2))) / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COTH) || name.equals(ARC_COTH_ALT)) {
-                                result = String.valueOf(0.5 * Math.log((Double.valueOf(list.get(0)) + 1) / (Double.valueOf(list.get(0)) - 1)));
+                                result = String.valueOf(0.5 * Math.log((Double.parseDouble(list.get(0)) + 1) / (Double.parseDouble(list.get(0)) - 1)));
                             } else if (name.equals(LG_INV) || name.equals(LG_INV_ALT)) {
-                                result = String.valueOf(Math.pow(10, Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.pow(10, Double.parseDouble(list.get(0))));
                             } else if (name.equals(SQRT)) {
-                                result = String.valueOf(Math.sqrt(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.sqrt(Double.parseDouble(list.get(0))));
                             } else if (name.equals(CBRT)) {
-                                result = String.valueOf(Math.cbrt(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.cbrt(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SQUARE)) {
-                                double val = Double.valueOf(list.get(0));
+                                double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(val * val);
                             } else if (name.equals(CUBE)) {
-                                double val = Double.valueOf(list.get(0));
+                                double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(val * val * val);
                             } else if (name.equals(INVERSE)) {
-                                double val = Double.valueOf(list.get(0));
+                                double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(1 / val);
                             } else if (name.equals(FACT)) {
                                 result = Maths.fact(list.get(0));
@@ -813,41 +807,41 @@ public class Method {
                         }//end if DRG == 0
                         else if (DRG == DRG_MODE.RAD) {
                             if (name.equals(SIN)) {
-                                result = String.valueOf(Math.sin(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.sin(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SINH)) {
-                                result = String.valueOf(Math.sinh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.sinh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COS)) {
-                                result = String.valueOf(Math.cos(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.cos(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COSH)) {
-                                result = String.valueOf(Math.cosh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.cosh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(TAN)) {
-                                result = String.valueOf(Math.tan(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.tan(Double.parseDouble(list.get(0))));
                             } else if (name.equals(TANH)) {
-                                result = String.valueOf(Math.tanh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.tanh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SEC)) {
-                                result = String.valueOf(1 / Math.cos(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Math.cos(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SECH)) {
-                                result = String.valueOf(1 / Math.cosh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Math.cosh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COSEC)) {
-                                result = String.valueOf(1 / Math.sin(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Math.sin(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COSECH)) {
-                                result = String.valueOf(1 / Math.sinh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Math.sinh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COT)) {
-                                result = String.valueOf(1 / Math.tan(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Math.tan(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COTH)) {
-                                result = String.valueOf(Math.tanh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.tanh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(EXP) || name.equals(LN_INV_ALT) || name.equals(LN_INV)) {
-                                result = String.valueOf(Math.exp(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.exp(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LN)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.log(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LG)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0))) / Math.log(10.0));
+                                result = String.valueOf(Math.log(Double.parseDouble(list.get(0))) / Math.log(10.0));
                             } else if (name.equals(ARC_SIN) || name.equals(ARC_SIN_ALT)) {
-                                result = String.valueOf(Math.asin(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.asin(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COS) || name.equals(ARC_COS_ALT)) {
-                                result = String.valueOf(Math.acos(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.acos(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_TAN) || name.equals(ARC_TAN_ALT)) {
-                                result = String.valueOf(Math.atan(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.atan(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SINH) || name.equals(ARC_SINH_ALT)) {
                                 result = String.valueOf(Maths.asinh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COSH) || name.equals(ARC_COSH_ALT)) {
@@ -855,11 +849,11 @@ public class Method {
                             } else if (name.equals(ARC_TANH) || name.equals(ARC_TANH_ALT)) {
                                 result = String.valueOf(Maths.atanh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SEC) || name.equals("asec")) {
-                                result = String.valueOf(Math.acos(1 / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.acos(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COSEC) || name.equals("acsc")) {
-                                result = String.valueOf(Math.asin(1 / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.asin(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COT) || name.equals("acot")) {
-                                result = String.valueOf(Math.atan(1 / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.atan(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SECH) || name.equals(ARC_SECH_ALT)) {
                                 result = String.valueOf(Maths.asech(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COSECH) || name.equals(ARC_COSECH_ALT)) {
@@ -867,19 +861,19 @@ public class Method {
                             } else if (name.equals(ARC_COTH) || name.equals(ARC_COTH_ALT)) {
                                 result = String.valueOf(Maths.acoth(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LG_INV) || name.equals(LG_INV_ALT)) {
-                                result = String.valueOf(Math.pow(10, Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.pow(10, Double.parseDouble(list.get(0))));
                             } else if (name.equals(SQRT)) {
-                                result = String.valueOf(Math.sqrt(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.sqrt(Double.parseDouble(list.get(0))));
                             } else if (name.equals(CBRT)) {
-                                result = String.valueOf(Math.cbrt(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.cbrt(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SQUARE)) {
-                                double val = Double.valueOf(list.get(0));
+                                double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(val * val);
                             } else if (name.equals(CUBE)) {
-                                double val = Double.valueOf(list.get(0));
+                                double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(val * val * val);
                             } else if (name.equals(INVERSE)) {
-                                double val = Double.valueOf(list.get(0));
+                                double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(1 / val);
                             } else if (name.equals(FACT)) {
                                 result = Maths.fact(list.get(0));
@@ -893,41 +887,41 @@ public class Method {
                         }//end else if DRG == 1
                         else if (DRG == DRG_MODE.GRAD) {
                             if (name.equals(SIN)) {
-                                result = String.valueOf(Maths.sinGradToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.sinGradToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SINH)) {
-                                result = String.valueOf(Math.sinh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.sinh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COS)) {
-                                result = String.valueOf(Maths.cosGradToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.cosGradToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COSH)) {
-                                result = String.valueOf(Math.cosh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.cosh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(TAN)) {
-                                result = String.valueOf(Maths.tanGradToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.tanGradToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(TANH)) {
-                                result = String.valueOf(Math.tanh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.tanh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SEC)) {
-                                result = String.valueOf(1 / Maths.cosGradToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Maths.cosGradToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SECH)) {
-                                result = String.valueOf(1 / Math.cosh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Math.cosh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COSEC)) {
-                                result = String.valueOf(1 / Maths.sinGradToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Maths.sinGradToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COSECH)) {
-                                result = String.valueOf(1 / Math.sinh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Math.sinh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COT)) {
-                                result = String.valueOf(1 / Maths.tanGradToRad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(1 / Maths.tanGradToRad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(COTH)) {
-                                result = String.valueOf(Math.tanh(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.tanh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(EXP) || name.equals(LN_INV_ALT) || name.equals(LN_INV)) {
-                                result = String.valueOf(Math.exp(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.exp(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LN)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.log(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LG)) {
-                                result = String.valueOf(Math.log(Double.valueOf(list.get(0))) / Math.log(10.0));
+                                result = String.valueOf(Math.log(Double.parseDouble(list.get(0))) / Math.log(10.0));
                             } else if (name.equals(ARC_SIN) || name.equals(ARC_SIN_ALT)) {
-                                result = String.valueOf(Maths.asinRadToGrad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.asinRadToGrad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COS) || name.equals(ARC_COS_ALT)) {
-                                result = String.valueOf(Maths.acosRadToGrad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.acosRadToGrad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_TAN) || name.equals(ARC_TAN_ALT)) {
-                                result = String.valueOf(Maths.atanRadToGrad(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.atanRadToGrad(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SINH) || name.equals(ARC_SINH_ALT)) {
                                 result = String.valueOf(Maths.asinh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COSH) || name.equals(ARC_COSH_ALT)) {
@@ -935,11 +929,11 @@ public class Method {
                             } else if (name.equals(ARC_TANH) || name.equals(ARC_TANH_ALT)) {
                                 result = String.valueOf(Maths.atanh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SEC) || name.equals("asec")) {
-                                result = String.valueOf(Maths.acosRadToGrad(1 / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.acosRadToGrad(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COSEC) || name.equals("acsc")) {
-                                result = String.valueOf(Maths.asinRadToGrad(1 / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.asinRadToGrad(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COT) || name.equals("acot")) {
-                                result = String.valueOf(Maths.atanRadToGrad(1 / Double.valueOf(list.get(0))));
+                                result = String.valueOf(Maths.atanRadToGrad(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SECH) || name.equals(ARC_SECH_ALT)) {
                                 result = String.valueOf(Maths.asech(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_COSECH) || name.equals(ARC_COSECH_ALT)) {
@@ -947,19 +941,19 @@ public class Method {
                             } else if (name.equals(ARC_COTH) || name.equals(ARC_COTH_ALT)) {
                                 result = String.valueOf(Maths.acoth(Double.parseDouble(list.get(0))));
                             } else if (name.equals(LG_INV) || name.equals(LG_INV_ALT)) {
-                                result = String.valueOf(Math.pow(10, Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.pow(10, Double.parseDouble(list.get(0))));
                             } else if (name.equals(SQRT)) {
-                                result = String.valueOf(Math.sqrt(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.sqrt(Double.parseDouble(list.get(0))));
                             } else if (name.equals(CBRT)) {
-                                result = String.valueOf(Math.cbrt(Double.valueOf(list.get(0))));
+                                result = String.valueOf(Math.cbrt(Double.parseDouble(list.get(0))));
                             } else if (name.equals(SQUARE)) {
-                                double val = Double.valueOf(list.get(0));
+                                double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(val * val);
                             } else if (name.equals(CUBE)) {
-                                double val = Double.valueOf(list.get(0));
+                                double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(val * val * val);
                             } else if (name.equals(INVERSE)) {
-                                double val = Double.valueOf(list.get(0));
+                                double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(1 / val);
                             } else if (name.equals(FACT)) {
                                 result = Maths.fact(list.get(0));
@@ -1078,36 +1072,47 @@ public class Method {
         }
     }//end method
 
-    /**
+  
+    
+    //////////////////////////////////////////////////////////////////////
+
+    
+
+// Fast char-based method-name builder check
+public static boolean isMethodNameBuilderChar(char c) {
+    // allow letters, digits, underscore, dollar sign, and any other allowed builder chars
+    // reuse isMethodNameBeginnerChar semantics for letters/underscore/$
+    return isMethodNameBeginnerChar(c) || isDigitChar(c);
+}
+
+  /**
      *
-     * @param name The string to check.
+     * @param s The string to check.
      * @return true if the string is part of the valid characters that can be
      * used to build a method name.
      */
-    public static boolean isMethodNameBuilder(String name) {
-        if (isMethodNameBeginner(name) || isDigit(name)) {
-            return true;
-        }//end if
-        return false;
-    }//end method
+   
+public static boolean isMethodNameBuilder(String s) {
+    if (s == null || s.length() != 1) return false;
+    return isMethodNameBuilderChar(s.charAt(0));
+}
 
-    public static boolean isMethodNameBeginner(String name) {
-        if (name == null || name.isEmpty()) {
-            return false;
-        }
+// Fast char-based method-name beginner check
+public static boolean isMethodNameBeginnerChar(char c) {
+    if (c == '_' || c == '$') return true;
+    // Character.isLetter is a bit heavier but necessary for Unicode letters;
+    // if you only need ASCII letters, use (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+    return Character.isLetter(c) && !parser.Operator.isPermOrComb(Character.toString(c));
+}
 
-        // First character
-        char first = name.charAt(0);
-
-        // Allow underscore or dollar sign directly
-        if (first == '_' || first == '$') {
-            return true;
-        }
-
-        // If it's a letter and not a perm/comb operator, it's valid
-        return Character.isLetter(first) && !parser.Operator.isPermOrComb(name);
-    }
-
+// Backwards-compatible wrapper
+public static boolean isMethodNameBeginner(String s) {
+    if (s == null || s.isEmpty()) return false;
+    return isMethodNameBeginnerChar(s.charAt(0));
+}
+    
+    
+    ///////////////////////////////////////////////////////////////////////
     @Override
     public String toString() {
         String out = name.concat("(");

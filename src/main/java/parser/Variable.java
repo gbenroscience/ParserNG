@@ -3,8 +3,6 @@
  * and open the template in the editor.
  */
 package parser;
- 
- 
 
 import interfaces.Savable;
 import java.io.StringReader;
@@ -20,7 +18,7 @@ import util.Serializer;
  *
  * template for modeling/creating variable objects
  */
-public class Variable implements Savable{
+public class Variable implements Savable {
 
 //a String variable that represents the String property of the varriable
     private String name;
@@ -128,7 +126,7 @@ public class Variable implements Savable{
     }
 
     public String getFullName() {
-        return fullName == null || fullName.isEmpty() ? name: fullName;
+        return fullName == null || fullName.isEmpty() ? name : fullName;
     }
 
     /**
@@ -354,11 +352,12 @@ public class Variable implements Savable{
      * @return the value stored in the variable
      */
     public String getValue() {
-        if (isPI(getName())) {
+        String name = getName();
+        if (isPI(name)) {
             return value = Maths.PI();
-        } else if (isLastEvaluatedAnswer(getName())) {
+        } else if (isLastEvaluatedAnswer(name)) {
             return value = MathExpression.lastResult;
-        } else if (isExpNumber(getName())) {
+        } else if (isExpNumber(name)) {
             return value;
         } else if (isConstant()) {
             return value;
@@ -382,132 +381,51 @@ public class Variable implements Savable{
      * @return The index of the Variable object that has this String property.
      */
     public static int getSimpleVarIndex(String var) {
-        int index = 0;
-        if (var.equals("A")) {
-            index = 0;
-        } else if (var.equals("B")) {
-            index = 1;
-        } else if (var.equals("C")) {
-            index = 2;
-        } else if (var.equals("D")) {
-            index = 3;
-        } else if (var.equals("E")) {
-            index = 4;
-        } else if (var.equals("F")) {
-            index = 5;
-        } else if (var.equals("G")) {
-            index = 6;
-        } else if (var.equals("H")) {
-            index = 7;
-        } else if (var.equals("I")) {
-            index = 8;
-        } else if (var.equals("J")) {
-            index = 9;
-        } else if (var.equals("K")) {
-            index = 10;
-        } else if (var.equals("L")) {
-            index = 11;
-        } else if (var.equals("M")) {
-            index = 12;
-        } else if (var.equals("N")) {
-            index = 13;
-        } else if (var.equals("O")) {
-            index = 14;
-        } else if (var.equals("P")) {
-            index = 15;
-        } else if (var.equals("Q")) {
-            index = 16;
-        } else if (var.equals("R")) {
-            index = 17;
-        } else if (var.equals("S")) {
-            index = 18;
-        } else if (var.equals("T")) {
-            index = 19;
-        } else if (var.equals("U")) {
-            index = 20;
-        } else if (var.equals("V")) {
-            index = 21;
-        } else if (var.equals("W")) {
-            index = 22;
-        } else if (var.equals("X")) {
-            index = 23;
-        } else if (var.equals("Y")) {
-            index = 24;
-        } else if (var.equals("Z")) {
-            index = 25;
-        } else if (var.equals("θ")) {
-            index = 26;
-        } else {
-            throw new NoSuchElementException("Only A-Z And The Theta Symbol Are Supported.");
+        if (var == null || var.isEmpty()) {
+            throw new NoSuchElementException("Variable cannot be empty.");
         }
-        return index;
-    }// end method simpleVariableIndex
+
+        char c = var.charAt(0);
+
+        // 1. Handle A-Z (ASCII 65 to 90)
+        // Subtracting 'A' from the character gives its 0-based index
+        if (c >= 'A' && c <= 'Z') {
+            return c - 'A';
+        }
+
+        // 2. Handle the special Theta symbol
+        if (c == 'θ') {
+            return 26;
+        }
+
+        throw new NoSuchElementException("Only A-Z And The Theta Symbol Are Supported.");
+    }
 
     /**
      *
      * @return
      */
     public int getSimpleVarIndex() {
-        int index = 0;
-        if (getName().equals("A")) {
-            index = 0;
-        } else if (getName().equals("B")) {
-            index = 1;
-        } else if (getName().equals("C")) {
-            index = 2;
-        } else if (getName().equals("D")) {
-            index = 3;
-        } else if (getName().equals("E")) {
-            index = 4;
-        } else if (getName().equals("F")) {
-            index = 5;
-        } else if (getName().equals("G")) {
-            index = 6;
-        } else if (getName().equals("H")) {
-            index = 7;
-        } else if (getName().equals("I")) {
-            index = 8;
-        } else if (getName().equals("J")) {
-            index = 9;
-        } else if (getName().equals("K")) {
-            index = 10;
-        } else if (getName().equals("L")) {
-            index = 11;
-        } else if (getName().equals("M")) {
-            index = 12;
-        } else if (getName().equals("N")) {
-            index = 13;
-        } else if (getName().equals("O")) {
-            index = 14;
-        } else if (getName().equals("P")) {
-            index = 15;
-        } else if (getName().equals("Q")) {
-            index = 16;
-        } else if (getName().equals("R")) {
-            index = 17;
-        } else if (getName().equals("S")) {
-            index = 18;
-        } else if (getName().equals("T")) {
-            index = 19;
-        } else if (getName().equals("U")) {
-            index = 20;
-        } else if (getName().equals("V")) {
-            index = 21;
-        } else if (getName().equals("W")) {
-            index = 22;
-        } else if (getName().equals("X")) {
-            index = 23;
-        } else if (getName().equals("Y")) {
-            index = 24;
-        } else if (getName().equals("Z")) {
-            index = 25;
-        } else if (getName().equals("θ")) {
-            index = 26;
-        } else {
-            throw new NoSuchElementException("Only A-Z And The Theta Symbol Are Supported.");
+        String name = getName();
+        if (name == null || name.isEmpty()) {
+            throw new NoSuchElementException("Variable name is missing.");
         }
-        return index;
-    }// end method simpleVariableIndex
+
+        char c = name.charAt(0);
+
+        // ASCII 'A' is 65. Subtracting 65 from any uppercase letter 
+        // gives its 0-based position (A=0, B=1, etc.)
+        if (c >= 'A' && c <= 'Z') {
+            return c - 'A';
+        }
+
+        // Handle special Theta symbol
+        if (c == 'θ') {
+            return 26;
+        }
+
+        throw new NoSuchElementException("Only A-Z And The Theta Symbol Are Supported.");
+    }
 
     @Override
     public boolean equals(Object obj) {
@@ -518,12 +436,13 @@ public class Variable implements Savable{
             return false;
         }//end else
     }//end method
-    
-/**
- * 
- * @param enc The encoded format of the byte array: [num1, num2, num3, num4, ...]
- * @return the Variable object that represents the encoded data
- */
+
+    /**
+     *
+     * @param enc The encoded format of the byte array: [num1, num2, num3, num4,
+     * ...]
+     * @return the Variable object that represents the encoded data
+     */
     public static Variable parse(String enc) {
         return (Variable) Serializer.deserialize(enc);
     }
