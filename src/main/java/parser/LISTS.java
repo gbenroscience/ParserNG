@@ -89,32 +89,36 @@ public class LISTS {
      * @return the index of the first occurrence of the object behind index
      * start or -1 if the object is not found.
      */
-    public static int prevIndexOf(List list, int start, Object sought) {
-        int index = -1;
-        if (list.isEmpty()) {
+    public static int prevIndexOf(List<String> list, int start, String sought) {
+        if (list == null) {
+            throw new NullPointerException("list is null");
+        }
+        int size = list.size();
+        if (start < 0 || start > size) {
+            throw new IndexOutOfBoundsException("start out of range: " + start);
+        }
+        // start == 0 -> nothing to search
+        if (start == 0 || size == 0) {
             return -1;
         }
-        if (sought.getClass() == list.get(0).getClass()) {
-            if (start >= 0) {
-                for (int i = start - 1; i >= 0; i--) {
-                    if (list.get(i).equals(sought)) {
-                        index = i;
-                        break;
-                    }//end if
-                }//end for
 
-            }//end if
-            else {
-                throw new IndexOutOfBoundsException("Attempt to access index less than 0");
+        // Fast local references
+        if (sought == null) {
+            for (int i = start - 1; i >= 0; i--) {
+                if (list.get(i) == null) {
+                    return i;
+                }
             }
-        }//end if
-        else {
-            throw new ClassCastException("The object types must be the same for the list"
-                    + " and the object been searched for in the list");
+        } else {
+            for (int i = start - 1; i >= 0; i--) {
+                String e = list.get(i);
+                if (sought.equals(e)) {
+                    return i;
+                }
+            }
         }
-
-        return index;
-    }//end method prevIndexOf
+        return -1;
+    }
 
     /**
      *
@@ -127,32 +131,36 @@ public class LISTS {
      * @return the index of the first occurrence of the object after start or -1
      * if the object is not found.
      */
-    public static int nextIndexOf(List list, int start, Object sought) {
-        int index = -1;
-        if (list.isEmpty()) {
+    public static int nextIndexOf(List<String> list, int start, String sought) {
+        if (list == null) {
+            throw new NullPointerException("list is null");
+        }
+        int size = list.size();
+        if (start < 0 || start > size) {
+            throw new IndexOutOfBoundsException("start out of range: " + start);
+        }
+        // start at end -> nothing to search
+        if (start >= size - 1 || size == 0) {
             return -1;
         }
-        if (sought.getClass() == list.get(0).getClass()) {
-            if (start < list.size() && !list.isEmpty()) {
-                for (int i = start + 1; i < list.size(); i++) {
-                    if (list.get(i).equals(sought)) {
-                        index = i;
-                        break;
-                    }//end if
-                }//end for
 
-            }//end if
-            else {
-                throw new IndexOutOfBoundsException("Empty list or end of list reached");
+        // Fast local references
+        if (sought == null) {
+            for (int i = start + 1; i < size; i++) {
+                if (list.get(i) == null) {
+                    return i;
+                }
             }
-        }//end if
-        else {
-            throw new ClassCastException("The object types must be the same for the list"
-                    + " and the object been searched for in the list");
+        } else {
+            for (int i = start + 1; i < size; i++) {
+                String e = list.get(i);
+                if (sought.equals(e)) {
+                    return i;
+                }
+            }
         }
-
-        return index;
-    }//end method
+        return -1;
+    }
 
     /**
      * Searches a List of String objects forwards for the first occurrence of a

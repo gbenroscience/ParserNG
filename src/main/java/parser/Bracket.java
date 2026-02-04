@@ -4,8 +4,10 @@
  */
 package parser;
 
+import java.util.ArrayDeque;
 import util.SimplePoint;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.InputMismatchException;
 import java.util.List;
 import util.VariableManager;
@@ -389,52 +391,46 @@ public class Bracket extends Operator {
      * object
      */
     public static int getComplementIndex(boolean isOpenBracket, int start, String expr) {
-
         int open = 0;
         int close = 0;
         int stop = 0;
-        int size = expr.length();
+        if (expr == null) {
+            return -1;
+        }
+        final int n = expr.length();
         if (isOpenBracket) {
-            try {
-                for (int i = start; i < size; i++) {
-                    char c = expr.charAt(i);
-                    if (c == '(') {
-                        open++;
-                    } else if (c == ')') {
-                        close++;
-                    }
-                    if (open == close) {
-                        stop = i;
-                        break;
-                    }
-
-                }//end for
-            }//end try
-            catch (IndexOutOfBoundsException ind) {
+            if (start < 0 || start >= n) {
+                return stop;
             }
+            for (int i = start; i < n; i++) {
+                char c = expr.charAt(i);
+                if (c == '(') {
+                    open++;
+                } else if (c == ')') {
+                    close++;
+                }
+                if (open == close) {
+                    stop = i;
+                    break;
+                }
+            }//end for
         }//end if
         else if (!isOpenBracket) {
-            try {
-                for (int i = start; i >= 0; i--) {
-                    try {
-                          char c = expr.charAt(i);
-                        if  (c == '(') {
-                            open++;
-                        }  else if (c == ')') {
-                            close++;
-                        }
-                        if (open == close) {
-                            stop = i;
-                            break;
-                        }
-                    }//end try
-                    catch (IndexOutOfBoundsException ind) {
-                    }
-                }//end for
-            }//end try
-            catch (IndexOutOfBoundsException ind) {
+            if (start < 0 || start >= n) {
+                return stop;
             }
-
+            for (int i = start; i >= 0; i--) {
+                char c = expr.charAt(i);
+                if (c == '(') {
+                    open++;
+                } else if (c == ')') {
+                    close++;
+                }
+                if (open == close) {
+                    stop = i;
+                    break;
+                }
+            }//end for 
         }
         return stop;
     }
@@ -585,57 +581,52 @@ public class Bracket extends Operator {
     }
 
     /**
-     * method mapBrackets goes over an input equation and maps all positions
-     * that have corresponding brackets
+     * Fast, single-pass validation and pairing of parentheses.
      *
-     * @param scanner The ArrayList object that contains the scanned math
-     * function.
-     * @return true if the structure of the bracket is valid.
+     * - Scans the input once (O(n)). - Uses an index stack to match '(' with
+     * ')'. - Avoids copying the input list and repeated indexOf/prevIndexOf
+     * calls. - Builds the same SimplePoint and Bracket pairs as the original.
+     *
+     * Assumes SimplePoint and Bracket classes exist with the same API used
+     * previously.
      */
     private static boolean validateBracketStructure(List<String> scanner) {
-        boolean correctFunction = false;
+        if (scanner == null) {
+            return false;
+        }
 
-        ArrayList<String> scan = new ArrayList<>();
-        ArrayList<SimplePoint> map = new ArrayList<>();
-        ArrayList<Bracket> bracs = new ArrayList<>();
+        final int n = scanner.size();
+        // stack of indices of unmatched '('
+        Deque<Integer> stack = new ArrayDeque<>(Math.max(16, n / 4));
+        List<SimplePoint> map = new ArrayList<>();
+        List<Bracket> bracs = new ArrayList<>();
 
-        scan.addAll(scanner);
-        int open = 0;//tracks the index of an opening bracket
-        int close = scan.indexOf(")");//tracks the index of a closing bracket
-        int i = 0;
-        while (close != -1) {
-            try {
-                open = LISTS.prevIndexOf(scan, close, "(");
-                map.add(new SimplePoint(open, close));
+        for (int i = 0; i < n; i++) {
+            String token = scanner.get(i);
+            if ("(".equals(token)) {
+                stack.push(i);
+            } else if (")".equals(token)) {
+                if (stack.isEmpty()) {
+                    // unmatched closing bracket -> invalid structure
+                    return false;
+                }
+                int openIndex = stack.pop();
+                map.add(new SimplePoint(openIndex, i));
+
                 Bracket openBrac = new Bracket("(");
                 Bracket closeBrac = new Bracket(")");
-                openBrac.setIndex(open);
-                closeBrac.setIndex(close);
+                openBrac.setIndex(openIndex);
+                closeBrac.setIndex(i);
                 openBrac.setComplement(closeBrac);
                 closeBrac.setComplement(openBrac);
 
                 bracs.add(openBrac);
                 bracs.add(closeBrac);
-
-                scan.set(open, "");
-                scan.set(close, "");
-
-                close = scan.indexOf(")");
-                ++i;
-            }//end try
-            catch (IndexOutOfBoundsException ind) {
-                break;
             }
-        }//end while
-
-//after the mapping, the algorithm demands that all ( and ) should have been used up in the function
-        if (scan.indexOf("(") == -1 && scan.indexOf(")") == -1) {
-            correctFunction = true;
-        } else {
-            correctFunction = false;
         }
 
-        return correctFunction;
+        // valid only if no unmatched opening brackets remain
+        return stack.isEmpty();
     }
 
     /**
@@ -682,4 +673,29 @@ public class Bracket extends Operator {
                 name, index, evaluated, complement.name, complement.index, complement.evaluated
         );
     }
+
+    public static void main(String... args) {
+
+        String s1 = "sin(1)+cos(1)+tan(1)+log(10)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));";
+
+        MathExpression m = new MathExpression(s1);
+
+        double N = 10000;
+        double start = System.nanoTime();
+        boolean s = false;
+        for (int i = 0; i < N; i++) {
+            s = Bracket.validateBracketStructure(m.scanner);
+        }
+        double interval = (System.nanoTime() - start) / N;
+        System.out.println("soln: " + s + ", " + (interval / 1000) + " microns");
+
+        start = System.nanoTime();
+        s = false;
+        for (int i = 0; i < N; i++) {
+            s = Bracket.validateBracketStructure(m.scanner);
+        }
+        interval = (System.nanoTime() - start) / N;
+        System.out.println("soln: " + s + ", " + (interval / 1000) + " microns");
+
+    }//end method
 }//end class Bracket

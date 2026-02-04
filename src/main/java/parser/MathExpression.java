@@ -275,6 +275,25 @@ public class MathExpression implements Savable, Solvable {
     public void setDRG(DRG_MODE DRG) {
         this.DRG = DRG;
     }
+    
+    
+    public void setDRG(int mode) { 
+        switch (mode) {
+            case 0:
+                this.DRG = DRG_MODE.DEG;
+                break;
+            case 1:
+                this.DRG = DRG_MODE.RAD;
+                break;
+            case 2:
+                this.DRG = DRG_MODE.GRAD;
+                break;
+            default:
+                break;
+        } 
+    }
+    
+    
 
     /**
      *

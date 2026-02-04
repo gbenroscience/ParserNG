@@ -37,6 +37,7 @@ public class PolynomialExpression extends MathExpression {
      *
      * @param expression A valid polynomial expression, having powers of the
      * variable as only non-negative integers.
+     * @param precision
      */
     public PolynomialExpression(String expression, int precision) {
         super(expression);
@@ -120,51 +121,51 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
                 try {
                     if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
                         if (list.get(i).equals("^") && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.valueOf(list.get(i - 1)), Double.valueOf(list.get(i + 1)))));
+                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)), Double.parseDouble(list.get(i + 1)))));
                             list.set(i - 1, "");
                             list.set(i, "");
                         }//end if
                     }//end if
                     else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (Double.valueOf(list.get(i + 1)) > 1) {
+                        if (Double.parseDouble(list.get(i + 1)) > 1) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i + 1)) == 1) {
+                        } else if (Double.parseDouble(list.get(i + 1)) == 1) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i + 1)) < 1 && Double.valueOf(list.get(i + 1)) > 0) {
+                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) > 0) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i + 1)) < 1 && Double.valueOf(list.get(i + 1)) == 0) {
+                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) == 0) {
                             list.set(i + 1, "1.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i + 1)) < 1 && Double.valueOf(list.get(i + 1)) < 0) {
+                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) < 0) {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
                         }
                     } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        if (Double.valueOf(list.get(i - 1)) > 1) {
+                        if (Double.parseDouble(list.get(i - 1)) > 1) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i - 1)) == 1) {
+                        } else if (Double.parseDouble(list.get(i - 1)) == 1) {
                             list.set(i + 1, "1.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i - 1)) < 1 && Double.valueOf(list.get(i - 1)) > 0) {
+                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) > 0) {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i - 1)) < 1 && Double.valueOf(list.get(i - 1)) == 0) {
+                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) == 0) {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i - 1)) < 1 && Double.valueOf(list.get(i - 1)) < 0) {
+                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) < 0) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
@@ -200,7 +201,7 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
 
                     if (list.get(i).equals(Operator.MULTIPLY)) {
                         if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.valueOf(list.get(i - 1)) * Double.valueOf(list.get(i + 1))));
+                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) * Double.parseDouble(list.get(i + 1))));
                             list.set(i - 1, "");
                             list.set(i, "");
                             skip = true;
@@ -224,7 +225,7 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
                     }//end if
                     else if (list.get(i).equals(Operator.DIVIDE)) {
                         if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.valueOf(list.get(i - 1)) / Double.valueOf(list.get(i + 1))));
+                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) / Double.parseDouble(list.get(i + 1))));
                             list.set(i - 1, "");
                             list.set(i, "");
                             skip = true;
@@ -269,12 +270,12 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
                     if (list.get(i).equals(Operator.PLUS) || list.get(i).equals(Operator.MINUS)) {
                         if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
                             if (list.get(i).equals(Operator.PLUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.valueOf(list.get(i - 1)) + Double.valueOf(list.get(i + 1))));
+                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) + Double.parseDouble(list.get(i + 1))));
                                 list.set(i - 1, "");
                                 list.set(i, "");
                             }//end else
                             else if (list.get(i).equals(Operator.MINUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.valueOf(list.get(i - 1)) - Double.valueOf(list.get(i + 1))));
+                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))));
                                 list.set(i - 1, "");
                                 list.set(i, "");
                             }//end else if
@@ -287,14 +288,9 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
                     }
 
                 }//end try
-                catch (NullPointerException nolerr) {
+                catch (NullPointerException | NumberFormatException | IndexOutOfBoundsException nolerr) {
 
-                }//end catch
-                catch (NumberFormatException numerr) {
-
-                }//end catch
-                catch (IndexOutOfBoundsException inderr) {
-                }//end catch
+                }
             }//end for
         }//end if
 
@@ -356,51 +352,51 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
                         if (list.get(i).equals("^") && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
                             BigDecimal lhs = new BigDecimal(list.get(i - 1));
                             String rhs = list.get(i + 1);
-                            list.set(i + 1, String.valueOf(lhs.pow(Integer.valueOf(rhs), MathContext.DECIMAL128)));
+                            list.set(i + 1, String.valueOf(lhs.pow(Integer.parseInt(rhs), MathContext.DECIMAL128)));
                             list.set(i - 1, "");
                             list.set(i, "");
                         }//end if
                     }//end if
                     else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (Double.valueOf(list.get(i + 1)) > 1) {
+                        if (Double.parseDouble(list.get(i + 1)) > 1) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i + 1)) == 1) {
+                        } else if (Double.parseDouble(list.get(i + 1)) == 1) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i + 1)) < 1 && Double.valueOf(list.get(i + 1)) > 0) {
+                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) > 0) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i + 1)) < 1 && Double.valueOf(list.get(i + 1)) == 0) {
+                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) == 0) {
                             list.set(i + 1, "1.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i + 1)) < 1 && Double.valueOf(list.get(i + 1)) < 0) {
+                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) < 0) {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
                         }
                     } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        if (Double.valueOf(list.get(i - 1)) > 1) {
+                        if (Double.parseDouble(list.get(i - 1)) > 1) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i - 1)) == 1) {
+                        } else if (Double.parseDouble(list.get(i - 1)) == 1) {
                             list.set(i + 1, "1.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i - 1)) < 1 && Double.valueOf(list.get(i - 1)) > 0) {
+                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) > 0) {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i - 1)) < 1 && Double.valueOf(list.get(i - 1)) == 0) {
+                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) == 0) {
                             list.set(i + 1, "0.0");
                             list.set(i - 1, "");
                             list.set(i, "");
-                        } else if (Double.valueOf(list.get(i - 1)) < 1 && Double.valueOf(list.get(i - 1)) < 0) {
+                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) < 0) {
                             list.set(i + 1, "Infinity");
                             list.set(i - 1, "");
                             list.set(i, "");

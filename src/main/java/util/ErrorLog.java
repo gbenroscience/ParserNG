@@ -20,7 +20,7 @@ public void writeLog(String error){
 logBook.add(error);
 }
 /**
- * Displays the contents of this logBook on a JTextArea object and then clears its memory.
+ * Prints the contents of this logBook on a to a StringBuilder and then clears its memory.
  */
 public void printLog(){
 	StringBuilder builder = new StringBuilder(logBook.toString());
