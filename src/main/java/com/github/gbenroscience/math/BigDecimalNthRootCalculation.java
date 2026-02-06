@@ -1,4 +1,4 @@
-package math;
+package com.github.gbenroscience.math;
 
 import java.math.BigDecimal;
 import java.math.MathContext;

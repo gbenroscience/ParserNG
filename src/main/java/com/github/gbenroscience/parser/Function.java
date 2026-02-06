@@ -2,19 +2,19 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
-import interfaces.Savable;
-import parser.methods.Method;
+import com.github.gbenroscience.interfaces.Savable;
+import com.github.gbenroscience.parser.methods.Method;
 
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.List;
-import math.matrix.expressParser.Matrix;
-import util.FunctionManager;
-import util.Serializer;
-import util.VariableManager;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.Serializer;
+import com.github.gbenroscience.util.VariableManager;
 
 /**
  *
@@ -732,10 +732,10 @@ public class Function implements Savable {
             rangeDescr = rangeDescr.substring(rangeDescr.indexOf(":") + 1);
             String xEnd = rangeDescr.substring(0, rangeDescr.indexOf(":"));
             rangeDescr = rangeDescr.substring(rangeDescr.indexOf(":") + 1);
-            double xStep = Double.valueOf(rangeDescr);
+            double xStep = Double.parseDouble(rangeDescr);
 
-            double x1 = Double.valueOf(xStart);
-            double x2 = Double.valueOf(xEnd);
+            double x1 = Double.parseDouble(xStart);
+            double x2 = Double.parseDouble(xEnd);
             int sz = (int) ((x2 - x1) / xStep);
 
             String[][] results = new String[2][sz + 1];

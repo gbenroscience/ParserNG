@@ -2,20 +2,20 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.numericalmethods;
+package com.github.gbenroscience.math.numericalmethods;
 
-import parser.Function;
+import com.github.gbenroscience.parser.Function;
 import java.util.InputMismatchException;
-import parser.MathExpression;
-import parser.MathScanner;
-import static parser.Operator.*;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.MathScanner;
+import static com.github.gbenroscience.parser.Operator.*;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 
-import math.matrix.expressParser.Matrix;
-import math.matrix.expressParser.PrecisionMatrix;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.math.matrix.expressParser.PrecisionMatrix;
 import static java.lang.Math.*;
-import math.differentialcalculus.Formula;
+import com.github.gbenroscience.math.differentialcalculus.Formula;
 
 /**
  *

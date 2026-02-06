@@ -3,10 +3,10 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus;
 
-import static math.differentialcalculus.Utilities.getText;
-import static math.differentialcalculus.Utilities.print;
+import static com.github.gbenroscience.math.differentialcalculus.Utilities.getText;
+import static com.github.gbenroscience.math.differentialcalculus.Utilities.print;
 
 import java.util.ArrayList;
 import java.util.logging.Level;

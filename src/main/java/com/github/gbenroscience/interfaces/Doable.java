@@ -1,4 +1,4 @@
-package interfaces;
+package com.github.gbenroscience.interfaces;
 
 /**
  * Models something that can be performed.

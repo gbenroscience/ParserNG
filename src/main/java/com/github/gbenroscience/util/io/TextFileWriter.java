@@ -1,4 +1,4 @@
-package util.io;
+package com.github.gbenroscience.util.io;
 
 /*
  * To change this template, choose Tools | Templates

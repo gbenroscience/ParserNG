@@ -4,10 +4,10 @@
  * and open the template in the editor.
  */
 
-package math.numericalmethods;
+package com.github.gbenroscience.math.numericalmethods;
 
  
-import parser.Function;
+import com.github.gbenroscience.parser.Function;
 import java.util.*;
  
 /*

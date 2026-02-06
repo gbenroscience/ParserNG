@@ -3,15 +3,15 @@
  * and open the template in the editor.
  */
 
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
-import parser.Precedence;
-import parser.Validatable;
+import com.github.gbenroscience.parser.Precedence;
+import com.github.gbenroscience.parser.Validatable;
 
 
 import java.util.ArrayList;
-import static parser.Number.*;
-import static parser.Variable.*;
+import static com.github.gbenroscience.parser.Number.*;
+import static com.github.gbenroscience.parser.Variable.*;
  
 
 /**
@@ -96,7 +96,7 @@ public boolean  validate(ArrayList<String>scan){
          if(!isNumber(scan.get(index-1))&&!isClosingBracket(scan.get(index-1))&&
           !isVariableString(scan.get(index-1))&&!isUnaryPostOperator(scan.get(index-1))
           ){
-           util.Utils.logError(
+           com.github.gbenroscience.util.Utils.logError(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index-1)+"\" And \""+scan.get(index)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector For Post-number operators!" );
@@ -108,7 +108,7 @@ public boolean  validate(ArrayList<String>scan){
      !isBinaryOperator(scan.get(index+1))&&!isUnaryPostOperator(scan.get(index+1))
           &&!isClosingBracket(scan.get(index+1))
               ){
-             util.Utils.logError(
+             com.github.gbenroscience.util.Utils.logError(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index)+"\" And \""+scan.get(index+1)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector Post-number operators!" );

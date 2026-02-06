@@ -1,7 +1,7 @@
-package parser.methods.ext;
+package com.github.gbenroscience.parser.methods.ext;
 
 
-import parser.MathExpression;
+import com.github.gbenroscience.parser.MathExpression;
 
 import java.math.BigDecimal;
 import java.math.MathContext;

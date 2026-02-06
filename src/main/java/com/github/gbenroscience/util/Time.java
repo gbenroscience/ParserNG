@@ -1,6 +1,6 @@
-package util;
+package com.github.gbenroscience.util;
 
-import parser.STRING;
+import com.github.gbenroscience.parser.STRING;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.InputMismatchException;

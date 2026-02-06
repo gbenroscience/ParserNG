@@ -3,9 +3,9 @@
  * and open the template in the editor.
  */
 
-package math;
+package com.github.gbenroscience.math;
 
-import util.Dimension;
+import com.github.gbenroscience.util.Dimension;
 
 
 /**

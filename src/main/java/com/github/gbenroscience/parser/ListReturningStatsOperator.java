@@ -3,8 +3,8 @@
  * and open the template in the editor.
  */
 
-package parser;
-import parser.methods.Method;
+package com.github.gbenroscience.parser;
+import com.github.gbenroscience.parser.methods.Method;
 
 import java.util.ArrayList;
 

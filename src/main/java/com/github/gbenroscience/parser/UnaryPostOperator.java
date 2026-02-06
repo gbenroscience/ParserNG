@@ -3,13 +3,13 @@
  * and open the template in the editor.
  */
 
-package parser;
+package com.github.gbenroscience.parser;
 
-import parser.methods.Method;
+import com.github.gbenroscience.parser.methods.Method;
 
 import java.util.ArrayList;
-import static parser.Number.*;
-import static parser.Variable.*;
+import static com.github.gbenroscience.parser.Number.*;
+import static com.github.gbenroscience.parser.Variable.*;
 
 
 /**
@@ -91,7 +91,7 @@ public boolean validate(ArrayList<String>scan){
          if(!isNumber(scan.get(index-1))&&!isClosingBracket(scan.get(index-1))&&
           !isVariableString(scan.get(index-1))&&!isUnaryPostOperator(scan.get(index-1))
           ){
-           util.Utils.logError(
+           com.github.gbenroscience.util.Utils.logError(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index-1)+"\" And \""+scan.get(index)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector For Post-number operators!" );
@@ -106,7 +106,7 @@ public boolean validate(ArrayList<String>scan){
           &&!Method.isNumberReturningStatsMethod(scan.get(index+1))
           &&!isLogicOperator(scan.get(index+1))
               ){
-             util.Utils.logError(
+             com.github.gbenroscience.util.Utils.logError(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index)+"\" And \""+scan.get(index+1)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector Post-number operators!" );

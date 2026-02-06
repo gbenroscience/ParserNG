@@ -3,16 +3,16 @@
  * and open the template in the editor.
  */
 
-package math.numericalmethods;
+package com.github.gbenroscience.math.numericalmethods;
 
-import parser.Function;
-import parser.MathExpression;
-import parser.Variable;
+import com.github.gbenroscience.parser.Function;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.Variable;
 import java.util.InputMismatchException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import math.differentialcalculus.Derivative;
-import util.FunctionManager;
+import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.util.FunctionManager;
 
 /**
  *

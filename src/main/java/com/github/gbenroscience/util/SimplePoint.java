@@ -1,4 +1,4 @@
-package util;
+package com.github.gbenroscience.util;
 
 public class SimplePoint {
 

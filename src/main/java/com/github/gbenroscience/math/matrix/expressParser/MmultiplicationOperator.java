@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
 
 import java.util.ArrayList;

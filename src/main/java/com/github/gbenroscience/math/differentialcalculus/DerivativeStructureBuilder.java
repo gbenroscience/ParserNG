@@ -2,19 +2,19 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus;
 
 import java.util.ArrayList;
 import java.util.List;
-import parser.Bracket;
-import static parser.Number.*;
-import static parser.Operator.*;
-import static parser.Variable.*;
-import static parser.methods.Method.*;
+import com.github.gbenroscience.parser.Bracket;
+import static com.github.gbenroscience.parser.Number.*;
+import static com.github.gbenroscience.parser.Operator.*;
+import static com.github.gbenroscience.parser.Variable.*;
+import static com.github.gbenroscience.parser.methods.Method.*;
 
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import static math.differentialcalculus.Utilities.*;
+import static com.github.gbenroscience.math.differentialcalculus.Utilities.*;
 
 /**
  *

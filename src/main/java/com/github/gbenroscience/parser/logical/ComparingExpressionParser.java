@@ -1,4 +1,4 @@
-package parser.logical;
+package com.github.gbenroscience.parser.logical;
 
 import java.math.BigDecimal;
 import java.util.Arrays;

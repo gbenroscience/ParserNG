@@ -8,18 +8,15 @@
 package com.github.gbenroscience.math.matrix.expressParser;
 
 import com.github.gbenroscience.parser.MathExpression;
-  
-
 
 /**
  *
  * @author GBENRO
  */
 
-public class MatrixFunction extends MathExpression{
- 
+public class MatrixExpression extends MathExpression{
 
- 
+
 
 
 

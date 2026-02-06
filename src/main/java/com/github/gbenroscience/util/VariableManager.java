@@ -2,12 +2,12 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package util;
+package com.github.gbenroscience.util;
 
-import parser.CustomScanner;
-import parser.MathExpression;
-import parser.Operator;
-import parser.Variable;
+import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.Operator;
+import com.github.gbenroscience.parser.Variable;
 
 import java.util.*;
 
@@ -36,7 +36,6 @@ public class VariableManager {
         VARIABLES.put(Variable.PI.getName(), Variable.PI);
         VARIABLES.put(Variable.ans.getName(), Variable.ans);
         VARIABLES.put(Variable.e.getName(), Variable.e);
-
         commandParser = new CommandInterpreter();
     }
 

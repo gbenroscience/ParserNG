@@ -1,4 +1,6 @@
-package parser.logical;
+package com.github.gbenroscience.parser.logical;
+
+import com.github.gbenroscience.parser.logical.ExpressionLogger;
 
 public class PrintingExpressionLogger implements  ExpressionLogger {
 

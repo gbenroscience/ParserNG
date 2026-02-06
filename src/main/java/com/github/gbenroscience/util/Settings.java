@@ -1,7 +1,7 @@
-package util;
+package com.github.gbenroscience.util;
 
 
-import interfaces.Savable;
+import com.github.gbenroscience.interfaces.Savable;
 
 /**
  * Created by hp on 7/7/2016.

@@ -6,28 +6,29 @@
  * To change this template, choose Tools | Templates and open the template in
  * the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
 /**
  * TASK: build regex for matching input expressions...e.g. ^([-+/*]\d+(\.\d+)?)*
  */
 //sin2+cos3-9tan(A+3B)
 //[sin,2,+,cos,3,-,9,tan (,A,+,3,B,)]
-import parser.methods.Declarations;
-import parser.methods.Method;
+import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.VariableManager;
+import com.github.gbenroscience.parser.methods.Declarations;
+import com.github.gbenroscience.parser.methods.Method;
 
-import math.numericalmethods.RootFinder;
+import com.github.gbenroscience.math.numericalmethods.RootFinder;
 import java.util.*;
 import java.util.ArrayList;
 
-import math.numericalmethods.NumericalIntegral;
-import util.*;
-import static parser.STRING.*;
-import static parser.Operator.*;
-import static parser.Variable.*;
-import static parser.Number.*;
+import com.github.gbenroscience.math.numericalmethods.NumericalIntegral;
+import static com.github.gbenroscience.parser.STRING.*;
+import static com.github.gbenroscience.parser.Operator.*;
+import static com.github.gbenroscience.parser.Variable.*;
+import static com.github.gbenroscience.parser.Number.*;
 
-import math.differentialcalculus.Parser;
+import com.github.gbenroscience.math.differentialcalculus.Parser;
 
 /**
  *

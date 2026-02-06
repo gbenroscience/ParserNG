@@ -2,14 +2,14 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
 import java.util.HashMap;
 import java.util.InputMismatchException;
 import java.util.List;
 import java.util.Random;
-import parser.CustomScanner;
-import parser.Operator;
+import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Operator;
 
 /**
  *
@@ -1027,12 +1027,12 @@ public class Matrix {
         //looks like (2-n)(3-n)-(4)(2)
 
         String v1 = "", v2 = "";
-        if (parser.Number.validNumber(m[1][0]) && parser.Number.validNumber(m[0][1])) {
+        if (com.github.gbenroscience.parser.Number.validNumber(m[1][0]) && com.github.gbenroscience.parser.Number.validNumber(m[0][1])) {
             double val = Double.parseDouble(m[1][0]) * Double.parseDouble(m[0][1]);
             v1 = String.valueOf(val);
         }
 
-        if (parser.Number.validNumber(m[0][0]) && parser.Number.validNumber(m[1][1])) {
+        if (com.github.gbenroscience.parser.Number.validNumber(m[0][0]) && com.github.gbenroscience.parser.Number.validNumber(m[1][1])) {
             double val = Double.parseDouble(m[0][0]) * Double.parseDouble(m[1][1]);
             v2 = String.valueOf(val);
         }
@@ -1624,7 +1624,7 @@ return detMultiplier;
         }
 
         if (scan.get(0).equals(Operator.MINUS)) {
-            if (parser.Number.isNumber(scan.get(1))) {
+            if (com.github.gbenroscience.parser.Number.isNumber(scan.get(1))) {
                 scan.set(1, (-1 * Double.parseDouble(scan.get(1))) + "");
                 scan.remove(0);
             }
@@ -1635,7 +1635,7 @@ return detMultiplier;
          */
         for (int i = 0; i < scan.size(); i++) {
             if (i > 0 && scan.get(i).equals(variableName)) {
-                if (parser.Number.isNumber(scan.get(i - 1))) {
+                if (com.github.gbenroscience.parser.Number.isNumber(scan.get(i - 1))) {
                     scan.add(i, "*");
                     i += 1;
                 }
@@ -1704,7 +1704,7 @@ return detMultiplier;
                     }
                 }
 
-            } /*locate a number*/ else if (parser.Number.isNumber(scan.get(i))) {
+            } /*locate a number*/ else if (com.github.gbenroscience.parser.Number.isNumber(scan.get(i))) {
 
                 if (i == 0) {  //if at start: make its x coefficient 0
                     if (i + 1 < scan.size()) {

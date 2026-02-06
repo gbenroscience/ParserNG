@@ -2,15 +2,15 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
 import java.util.ArrayDeque;
-import util.SimplePoint;
+import com.github.gbenroscience.util.SimplePoint;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.InputMismatchException;
 import java.util.List;
-import util.VariableManager;
+import com.github.gbenroscience.util.VariableManager;
 
 /**
  *

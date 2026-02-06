@@ -2,15 +2,15 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
-import interfaces.Savable;
+import com.github.gbenroscience.interfaces.Savable;
 import java.io.StringReader;
 import java.util.InputMismatchException;
 
-import math.Maths;
+import com.github.gbenroscience.math.Maths;
 import java.util.NoSuchElementException;
-import util.Serializer;
+import com.github.gbenroscience.util.Serializer;
 
 /**
  *

@@ -1,9 +1,9 @@
-package parser.expanding;
+package com.github.gbenroscience.parser.expanding;
 
-import parser.LogicalExpression;
-import parser.logical.ComparingExpressionParser;
-import parser.logical.ExpressionLogger;
-import parser.logical.LogicalExpressionMemberFactory;
+import com.github.gbenroscience.parser.LogicalExpression;
+import com.github.gbenroscience.parser.logical.ComparingExpressionParser;
+import com.github.gbenroscience.parser.logical.ExpressionLogger;
+import com.github.gbenroscience.parser.logical.LogicalExpressionMemberFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;

@@ -1,5 +1,6 @@
-package math;
+package com.github.gbenroscience.math;
 
+import com.github.gbenroscience.math.BigDecimalNthRootCalculation;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 

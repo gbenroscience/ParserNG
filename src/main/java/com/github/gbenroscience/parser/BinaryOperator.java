@@ -2,9 +2,9 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
-import parser.methods.Method;
+import com.github.gbenroscience.parser.methods.Method;
 
 import java.util.ArrayList;
 
@@ -98,7 +98,7 @@ public class BinaryOperator extends Operator implements Validatable {
 
                 if (!Number.isNumber(scan.get(index - 1)) && !Variable.isVariableString(scan.get(index - 1))
                         && !isUnaryPostOperator(scan.get(index - 1)) && !isClosingBracket(scan.get(index - 1)) && !isOpeningBracket(scan.get(index - 1))) {
-                    util.Utils.logError(
+                    com.github.gbenroscience.util.Utils.logError(
                             "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + scan.get(index - 1) + "\" And \"" + scan.get(index) + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
@@ -112,7 +112,7 @@ public class BinaryOperator extends Operator implements Validatable {
                         && !isOpeningBracket(scan.get(index + 1))
                         && !Method.isUnaryPreOperatorORDefinedMethod(scan.get(index + 1)) && !Method.isNumberReturningStatsMethod(scan.get(index + 1))
                         && !Method.isLogToAnyBase(scan.get(index + 1)) && !Method.isAntiLogToAnyBase(scan.get(index + 1))) {
-                    util.Utils.logError(
+                    com.github.gbenroscience.util.Utils.logError(
                             "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + scan.get(index) + "\" And \"" + scan.get(index + 1) + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
@@ -125,7 +125,7 @@ public class BinaryOperator extends Operator implements Validatable {
             else if (!isPlusOrMinus(scan.get(index))) {
                 if (!Number.isNumber(scan.get(index - 1)) && !Variable.isVariableString(scan.get(index - 1))
                         && !isUnaryPostOperator(scan.get(index - 1)) && !isClosingBracket(scan.get(index - 1))) {
-                    util.Utils.logError(
+                    com.github.gbenroscience.util.Utils.logError(
                             "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + scan.get(index - 1) + "\" And \"" + scan.get(index) + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
@@ -138,7 +138,7 @@ public class BinaryOperator extends Operator implements Validatable {
                         && !isOpeningBracket(scan.get(index + 1))
                         && !Method.isUnaryPreOperatorORDefinedMethod(scan.get(index + 1)) && !Method.isNumberReturningStatsMethod(scan.get(index + 1))
                         && !Method.isLogToAnyBase(scan.get(index + 1)) && !Method.isAntiLogToAnyBase(scan.get(index + 1))) {
-                    util.Utils.logError(
+                    com.github.gbenroscience.util.Utils.logError(
                             "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + scan.get(index) + "\" And \"" + scan.get(index + 1) + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");

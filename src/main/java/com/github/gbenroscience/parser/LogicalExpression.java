@@ -1,13 +1,13 @@
-package parser;
+package com.github.gbenroscience.parser;
 
-import interfaces.Solvable;
-import math.Main;
-import parser.logical.ComparingExpressionParser;
-import parser.logical.ExpressionLogger;
-import parser.logical.LogicalExpressionMemberFactory;
-import parser.logical.LogicalExpressionMemberFactory.LogicalExpressionMember;
-import parser.logical.LogicalExpressionParser;
-import parser.methods.Declarations;
+import com.github.gbenroscience.interfaces.Solvable;
+import com.github.gbenroscience.math.Main;
+import com.github.gbenroscience.parser.logical.ComparingExpressionParser;
+import com.github.gbenroscience.parser.logical.ExpressionLogger;
+import com.github.gbenroscience.parser.logical.LogicalExpressionMemberFactory;
+import com.github.gbenroscience.parser.logical.LogicalExpressionMemberFactory.LogicalExpressionMember;
+import com.github.gbenroscience.parser.logical.LogicalExpressionParser;
+import com.github.gbenroscience.parser.methods.Declarations;
 
 import java.util.Arrays;
 

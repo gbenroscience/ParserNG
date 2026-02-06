@@ -1,11 +1,11 @@
-package util;
+package com.github.gbenroscience.util;
 
 import java.io.File;
 
-import util.io.FunctionsBackup;
-import util.io.VariableBackup;
-import util.io.TextFileReader;
-import util.io.TextFileWriter;
+import com.github.gbenroscience.util.io.FunctionsBackup;
+import com.github.gbenroscience.util.io.VariableBackup;
+import com.github.gbenroscience.util.io.TextFileReader;
+import com.github.gbenroscience.util.io.TextFileWriter;
 
 public class Utils {
 

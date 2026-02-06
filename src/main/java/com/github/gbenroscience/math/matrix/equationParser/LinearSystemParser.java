@@ -3,18 +3,18 @@
  * and open the template in the editor.
  */
 
-package math.matrix.equationParser;
+package com.github.gbenroscience.math.matrix.equationParser;
 
-import math.matrix.expressParser.Matrix;
-import parser.CustomScanner;
-import parser.STRING;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.STRING;
 import java.util.ArrayList;
 import java.util.List;
-import util.ErrorLog;
-import static parser.STRING.*;
-import static parser.Operator.*;
-import static parser.Variable.*;
-import static parser.Number.*;
+import com.github.gbenroscience.util.ErrorLog;
+import static com.github.gbenroscience.parser.STRING.*;
+import static com.github.gbenroscience.parser.Operator.*;
+import static com.github.gbenroscience.parser.Variable.*;
+import static com.github.gbenroscience.parser.Number.*;
 /**
  *
  * @author JIBOYE Oluwagbemiro Olaoluwa
@@ -688,9 +688,9 @@ public static void main(String args[]){
                                                        "4x-9y+12d-13w=9:" +
                                                        "-9.0123E-5x+6.02E-8w=12-d-d:" +
                                                        "13-123x-7y=9:");
-     util.Utils.logError(  parser.getEquationMatrix().toString() );
-  util.Utils.logError(  parser.interpretedSystem() );
-  util.Utils.logError(  parser.valid+"" );
+     com.github.gbenroscience.util.Utils.logError(  parser.getEquationMatrix().toString() );
+  com.github.gbenroscience.util.Utils.logError(  parser.interpretedSystem() );
+  com.github.gbenroscience.util.Utils.logError(  parser.valid+"" );
 
                                                       /*"2a+3b-9c-3u+6d+6e=3-4u-9d:" +
                                                        "-5a+b+9c-3u+6e+d-10=3-4u+7d:" +

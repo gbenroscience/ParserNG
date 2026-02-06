@@ -2,16 +2,16 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus;
 
-import parser.Bracket;
-import parser.CustomScanner;
-import parser.Operator;
-import parser.Variable;
-import static parser.Operator.*;
-import static math.differentialcalculus.Methods.*;
-import parser.STRING;
-import static parser.Variable.*;
+import com.github.gbenroscience.parser.Bracket;
+import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Operator;
+import com.github.gbenroscience.parser.Variable;
+import static com.github.gbenroscience.parser.Operator.*;
+import static com.github.gbenroscience.math.differentialcalculus.Methods.*;
+import com.github.gbenroscience.parser.STRING;
+import static com.github.gbenroscience.parser.Variable.*;
 import java.util.ArrayList;
 /**
  *

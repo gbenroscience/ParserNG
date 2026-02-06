@@ -2,10 +2,10 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package util;
+package com.github.gbenroscience.util;
 
-import parser.Function;
-import parser.Variable;
+import com.github.gbenroscience.parser.Function;
+import com.github.gbenroscience.parser.Variable;
 
 import java.util.ArrayList;
 import java.util.Collections;

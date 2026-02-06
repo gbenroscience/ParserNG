@@ -1,6 +1,6 @@
-package parser.logical;
+package com.github.gbenroscience.parser.logical;
 
-import parser.MathExpression;
+import com.github.gbenroscience.parser.MathExpression;
 
 import java.math.BigDecimal;
 

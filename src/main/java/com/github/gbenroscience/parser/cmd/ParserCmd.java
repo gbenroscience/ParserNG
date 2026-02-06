@@ -3,7 +3,7 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser.cmd;
+package com.github.gbenroscience.parser.cmd;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -11,12 +11,12 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 
-import interfaces.Solvable;
-import math.Main;
-import parser.ExpandingExpression;
-import parser.LogicalExpression;
-import parser.MathExpression;
-import parser.logical.ExpressionLogger;
+import com.github.gbenroscience.interfaces.Solvable;
+import com.github.gbenroscience.math.Main;
+import com.github.gbenroscience.parser.ExpandingExpression;
+import com.github.gbenroscience.parser.LogicalExpression;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.logical.ExpressionLogger;
 
 /** 
  *

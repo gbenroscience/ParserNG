@@ -2,10 +2,10 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
-import math.BigDecimalNthRootCalculation;
-import math.numericalmethods.RootFinder;
+import com.github.gbenroscience.math.BigDecimalNthRootCalculation;
+import com.github.gbenroscience.math.numericalmethods.RootFinder;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -13,17 +13,17 @@ import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.NoSuchElementException;
 import java.util.Random;
-import math.Maths;
-import math.numericalmethods.NumericalIntegral;
-import parser.methods.ext.Utils;
-import util.FunctionManager;
+import com.github.gbenroscience.math.Maths;
+import com.github.gbenroscience.math.numericalmethods.NumericalIntegral;
+import com.github.gbenroscience.parser.methods.ext.Utils;
+import com.github.gbenroscience.util.FunctionManager;
 
 import java.util.Arrays;
-import math.differentialcalculus.Derivative;
-import math.matrix.expressParser.Matrix;
-import math.quadratic.Quadratic_Equation;
-import math.tartaglia.Tartaglia_Equation;
-import util.VariableManager;
+import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
+import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
+import com.github.gbenroscience.util.VariableManager;
 
 /**
  * Class that provides utility methods for carrying out statistical analysis on
@@ -1193,7 +1193,7 @@ public class Set {
                     }
                 }
 
-            }else if(parser.Number.isNumber(token)){
+            }else if(com.github.gbenroscience.parser.Number.isNumber(token)){
                 printImpl(token);
             }
        

@@ -1,13 +1,13 @@
-package parser.methods.ext;
+package com.github.gbenroscience.parser.methods.ext;
 
 import java.io.File;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import parser.TYPE;
-import parser.methods.BasicNumericalMethod;
-import parser.methods.Help;
+import com.github.gbenroscience.parser.TYPE;
+import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
+import com.github.gbenroscience.parser.methods.Help;
 
 public class Echo implements BasicNumericalMethod {
 

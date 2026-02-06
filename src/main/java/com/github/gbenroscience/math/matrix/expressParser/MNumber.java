@@ -2,15 +2,15 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import static parser.STRING.*;
-import static parser.Operator.*;
-import static parser.Variable.*;
+import static com.github.gbenroscience.parser.STRING.*;
+import static com.github.gbenroscience.parser.Operator.*;
+import static com.github.gbenroscience.parser.Variable.*;
 
-import static parser.methods.Method.*;
+import static com.github.gbenroscience.parser.methods.Method.*;
 
 /**
  *
@@ -179,7 +179,7 @@ public class MNumber {
                     && !isLogicOperator(scan.get(index - 1)) && !isUnaryPreOperator(scan.get(index - 1))
                     && !isBinaryOperator(scan.get(index - 1)) && !isAssignmentOperator(scan.get(index - 1))
                     && !isStatsMethod(scan.get(index - 1)) && !isNumber(scan.get(index - 1)) && !isVariableString(scan.get(index - 1))) {
-                util.Utils.logError(
+                com.github.gbenroscience.util.Utils.logError(
                         "ParserNG Does Not Allow " + num + " To Combine The Function Members \"" + scan.get(index - 1) + "\" And \"" + scan.get(index) + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Numbers!");
@@ -192,7 +192,7 @@ public class MNumber {
                     && !isLogicOperator(scan.get(index + 1))
                     && !isUnaryPreOperator(scan.get(index + 1)) && !isNumberReturningStatsMethod(scan.get(index + 1))
                     && !isLogToAnyBase(scan.get(index + 1)) && !isAntiLogToAnyBase(scan.get(index + 1)) && !isNumber(scan.get(index + 1)) && !isVariableString(scan.get(index + 1))) {
-                util.Utils.logError(
+                com.github.gbenroscience.util.Utils.logError(
                         "ParserNG Does Not Allow " + num + " To Combine The Function Members \"" + scan.get(index) + "\" And \"" + scan.get(index + 1) + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Numbers!");

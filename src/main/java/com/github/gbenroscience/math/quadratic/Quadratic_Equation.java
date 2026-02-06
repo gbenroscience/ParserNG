@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package math.quadratic;
+package com.github.gbenroscience.math.quadratic;
 
 import java.util.ArrayList;
 

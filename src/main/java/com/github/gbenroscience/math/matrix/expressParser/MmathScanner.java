@@ -10,18 +10,18 @@
  * and open the template in the editor.
  */
 
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
 
-import parser.STRING;
-import parser.Variable;
+import com.github.gbenroscience.util.VariableManager;
+import com.github.gbenroscience.parser.STRING;
+import com.github.gbenroscience.parser.Variable;
 import java.util.*;
 import java.util.ArrayList;
-import util.*;
-import static parser.STRING.*;
-import static parser.Operator.*;
-import static parser.Variable.*;
-import static parser.Number.*;
+import static com.github.gbenroscience.parser.STRING.*;
+import static com.github.gbenroscience.parser.Operator.*;
+import static com.github.gbenroscience.parser.Variable.*;
+import static com.github.gbenroscience.parser.Number.*;
 /**
  *
  * @author GBEMIRO

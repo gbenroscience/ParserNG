@@ -1,13 +1,16 @@
-package parser;
+package com.github.gbenroscience.parser;
 
+import com.github.gbenroscience.parser.Function;
+import com.github.gbenroscience.parser.TYPE;
+import com.github.gbenroscience.parser.MathExpression;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import math.matrix.expressParser.Matrix;
-import parser.methods.BasicNumericalMethod;
-import parser.methods.Declarations;
-import util.FunctionManager;
-import util.VariableManager;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
+import com.github.gbenroscience.parser.methods.Declarations;
+import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.VariableManager;
 
 import java.util.ArrayList;
 import java.util.Collections;

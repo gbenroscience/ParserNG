@@ -1,7 +1,7 @@
-package math;
+package com.github.gbenroscience.math;
 
 
-import parser.STRING;
+import com.github.gbenroscience.parser.STRING;
 
 import static java.lang.Math.*;
 

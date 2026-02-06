@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -254,7 +254,7 @@ matrix[row][column]=(array[row][column]).add(array1[row][column]);
 
         }//end if
         else{
-             util.Utils.logError("ERROR IN MATRIX INPUT!!");
+             com.github.gbenroscience.util.Utils.logError("ERROR IN MATRIX INPUT!!");
         }
 
 return new PrecisionMatrix(matrix);
@@ -289,7 +289,7 @@ matrix[row][column]=(array[row][column]).subtract((array1[row][column]));
 
         }//end ifghjjk
         else{
-             util.Utils.logError("ERROR IN MATRIX INPUT!!");
+             com.github.gbenroscience.util.Utils.logError("ERROR IN MATRIX INPUT!!");
         }//end else
 return new PrecisionMatrix(matrix);
     }//end method subtract
@@ -368,7 +368,7 @@ sum = sum.add( matrice1.array[i][column].multiply(matrice2.array[column][row],Ma
         }//end outermost for
         }//end if
         else{
-             util.Utils.logError("ERROR IN MATRIX INPUT!!");
+             com.github.gbenroscience.util.Utils.logError("ERROR IN MATRIX INPUT!!");
         }
  return m;
     }//end method
@@ -634,7 +634,7 @@ PrecisionMatrix matrix=new PrecisionMatrix(this.getRows(),this.getCols()-column)
 this.setArray(matrix.array);
       }
       else{
-     util.Utils.logError("COLUMN VALUE SHOULD " +
+     com.github.gbenroscience.util.Utils.logError("COLUMN VALUE SHOULD " +
             "RANGE FROM ZERO TO THE NUMBER OF COLUMNS IN THIS MATRIX.");
       }
  }//end method columnDeleteFromEnd
@@ -680,7 +680,7 @@ PrecisionMatrix matrix=new PrecisionMatrix(this.getRows(),this.getCols()-column)
 this.setArray(matrix.array);
      }
      else{
-     util.Utils.logError("COLUMN VALUE SHOULD " +
+     com.github.gbenroscience.util.Utils.logError("COLUMN VALUE SHOULD " +
             "RANGE FROM ZERO TO THE NUMBER OF COLUMNS IN THIS MATRIX.");
      }
      }//end method columnDeleteFromStart
@@ -728,7 +728,7 @@ this.setArray(matrix.array);
 this.setArray(matrix.array);
      }
      else{
-     util.Utils.logError("NUMBER OF ROWS TO BE DELETED SHOULD " +
+     com.github.gbenroscience.util.Utils.logError("NUMBER OF ROWS TO BE DELETED SHOULD " +
             "RANGE FROM ZERO TO (AND INCLUDING) THE NUMBER OF ROWS IN THIS MATRIX.");
      }
  }//end method rowDeleteFromEnd
@@ -779,7 +779,7 @@ PrecisionMatrix matrix=new PrecisionMatrix(this.getRows()-numOfRows,this.getCols
 this.setArray(matrix.array);
      }
      else{
-     util.Utils.logError("NUMBER OF ROWS TO BE DELETED SHOULD " +
+     com.github.gbenroscience.util.Utils.logError("NUMBER OF ROWS TO BE DELETED SHOULD " +
             "RANGE FROM ZERO TO (AND INCLUDING) THE NUMBER OF ROWS IN THIS MATRIX.");
      }
      }//end method rowDeleteFromStart

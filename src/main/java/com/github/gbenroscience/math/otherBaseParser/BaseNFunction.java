@@ -3,15 +3,15 @@
  * and open the template in the editor.
  */
 
-package math.otherBaseParser;
+package com.github.gbenroscience.math.otherBaseParser;
 
-import parser.MathExpression;
-import parser.Number;
-import static parser.Number.*;
-import static parser.methods.Method.*;
-import static parser.Variable.*;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.Number;
+import static com.github.gbenroscience.parser.Number.*;
+import static com.github.gbenroscience.parser.methods.Method.*;
+import static com.github.gbenroscience.parser.Variable.*;
 import java.util.ArrayList;
-import math.Maths;
+import com.github.gbenroscience.math.Maths;
 
 /**
  *

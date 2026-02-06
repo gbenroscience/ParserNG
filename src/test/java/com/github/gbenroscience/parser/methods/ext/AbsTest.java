@@ -1,11 +1,11 @@
-package parser.methods.ext;
+package com.github.gbenroscience.math.parser.methods.ext;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import parser.MathExpression;
+import com.github.gbenroscience.parser.MathExpression;
 
 class AbsTest {
 

@@ -1,4 +1,4 @@
-package interfaces;
+package com.github.gbenroscience.interfaces;
 
 /**
  * Created by Imaxinacion on 2/13/2018.

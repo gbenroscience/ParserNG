@@ -1,4 +1,4 @@
-package util.io;
+package com.github.gbenroscience.util.io;
 
 
 import java.io.BufferedReader;
@@ -8,7 +8,7 @@ import java.util.Map;
 import java.io.BufferedWriter;
 import java.io.FileWriter;
 
-import parser.Function;
+import com.github.gbenroscience.parser.Function;
 
 /**
  *
@@ -89,7 +89,7 @@ public class FunctionsBackup {
             in = new BufferedReader( stream );
         }
         catch (Exception e) {
-            util.Utils.logError(
+            com.github.gbenroscience.util.Utils.logError(
                     "Sorry, but an error occurred \nwhile trying to open the file:/n" + e);
             return;
         }
@@ -107,7 +107,7 @@ public class FunctionsBackup {
 
         }//end try
         catch (Exception e) {
-            util.Utils.logError("Sorry, but an error occurred \nwhile trying to read the data:/n" + e);
+            com.github.gbenroscience.util.Utils.logError("Sorry, but an error occurred \nwhile trying to read the data:/n" + e);
         }
         finally {
             if(in!=null) {

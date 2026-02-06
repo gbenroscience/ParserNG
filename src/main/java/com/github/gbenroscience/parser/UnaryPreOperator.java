@@ -3,13 +3,13 @@
  * and open the template in the editor.
  */
 
-package parser;
+package com.github.gbenroscience.parser;
 
-import parser.methods.Method;
+import com.github.gbenroscience.parser.methods.Method;
 
 import java.util.ArrayList;
-import static parser.Number.*;
-import static parser.Variable.*;
+import static com.github.gbenroscience.parser.Number.*;
+import static com.github.gbenroscience.parser.Variable.*;
 
 
 /**
@@ -94,7 +94,7 @@ boolean correct = true;
           !isLogicOperator(scan.get(index-1))
           &&!isAssignmentOperator(scan.get(index-1))
           ){
-                util.Utils.logError(
+                com.github.gbenroscience.util.Utils.logError(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index-1)+"\" And \""+scan.get(index)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector For Pre-number operators!" );
@@ -107,7 +107,7 @@ boolean correct = true;
           !isVariableString(scan.get(index+1))&&!Method.isNumberReturningStatsMethod(scan.get(index+1))
           &&!Method.isLogToAnyBase(scan.get(index+1))&&!Method.isAntiLogToAnyBase(scan.get(index+1))
           ){
-          util.Utils.logError(
+          com.github.gbenroscience.util.Utils.logError(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index)+"\" And \""+scan.get(index+1)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector For Pre-number operators!" );

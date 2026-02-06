@@ -1,9 +1,8 @@
-package parser.methods;
+package com.github.gbenroscience.parser.methods;
 
-import logic.DRG_MODE;
-import parser.ExpandingExpression;
-
-import static  parser.methods.Declarations.*;
+import com.github.gbenroscience.logic.DRG_MODE;
+import com.github.gbenroscience.parser.ExpandingExpression;
+import static  com.github.gbenroscience.parser.methods.Declarations.*;
 
 public class Help {
 

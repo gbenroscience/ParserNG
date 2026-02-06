@@ -3,9 +3,9 @@
  * and open the template in the editor.
  */
 
-package math;
+package com.github.gbenroscience.math;
 
-import util.SimplePoint;
+import com.github.gbenroscience.util.SimplePoint;
 
 import static java.lang.Math.*;
 /**

@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package util;
+package com.github.gbenroscience.util;
 
 /**
  *

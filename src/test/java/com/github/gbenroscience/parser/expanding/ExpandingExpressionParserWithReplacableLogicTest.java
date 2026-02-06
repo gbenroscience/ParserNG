@@ -1,17 +1,16 @@
-package parser.expanding;
+package com.github.gbenroscience.parser.expanding;
 
+import com.github.gbenroscience.parser.expanding.ExpandingExpressionParser;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 
 import java.util.Arrays;
 
-import parser.ExpandingExpression;
-import parser.logical.LogicalExpressionFactoryTest;
-import parser.logical.PrintingExpressionLogger;
-
-
-import static parser.expanding.ExpandingExpressionParserTest.revert;
+import com.github.gbenroscience.parser.ExpandingExpression;
+import com.github.gbenroscience.parser.logical.LogicalExpressionFactoryTest;
+import com.github.gbenroscience.parser.logical.PrintingExpressionLogger;
+import static com.github.gbenroscience.parser.expanding.ExpandingExpressionParserTest.revert;
 
 class ExpandingExpressionParserWithReplacableLogicTest {
 

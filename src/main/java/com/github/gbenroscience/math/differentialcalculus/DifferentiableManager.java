@@ -2,12 +2,12 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus;
 
 import java.util.ArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import static parser.Number.*;
+import static com.github.gbenroscience.parser.Number.*;
 
 /**
  *

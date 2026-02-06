@@ -3,18 +3,18 @@
  * and open the template in the editor.
  */
 
-package math.quadratic;
-import parser.STRING;
-import parser.CustomScanner;
-import parser.LISTS;
-import parser.MathScanner;
+package com.github.gbenroscience.math.quadratic;
+import com.github.gbenroscience.parser.STRING;
+import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.LISTS;
+import com.github.gbenroscience.parser.MathScanner;
 import java.util.ArrayList;
-import static parser.STRING.*;
-import static parser.Operator.*;
-import static parser.Variable.*;
-import static parser.Number.*;
+import static com.github.gbenroscience.parser.STRING.*;
+import static com.github.gbenroscience.parser.Operator.*;
+import static com.github.gbenroscience.parser.Variable.*;
+import static com.github.gbenroscience.parser.Number.*;
 import java.util.List;
-import math.differentialcalculus.Formula;
+import com.github.gbenroscience.math.differentialcalculus.Formula;
 /**
  *
  * @author JIBOYE Oluwagbemiro Olaoluwa

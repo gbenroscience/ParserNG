@@ -3,14 +3,14 @@
  * and open the template in the editor.
  */
 
-package util;
+package com.github.gbenroscience.util;
 
 /**
  *
  * @author GBEMIRO
  */
-import parser.Variable;
-import static parser.STRING.*;
+import com.github.gbenroscience.parser.Variable;
+import static com.github.gbenroscience.parser.STRING.*;
 public class Formulae {
 private String expression="";
 private String variable="";

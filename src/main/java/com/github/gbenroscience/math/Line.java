@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package math; 
+package com.github.gbenroscience.math; 
 
 import static java.lang.Math.*;
 /**

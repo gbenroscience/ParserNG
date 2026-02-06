@@ -4,7 +4,7 @@
  * and open the template in the editor.
  */
 
-package math.numericalmethods;
+package com.github.gbenroscience.math.numericalmethods;
 
 /*
 *   Class   Fmath

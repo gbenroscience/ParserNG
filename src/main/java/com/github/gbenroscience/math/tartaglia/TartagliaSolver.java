@@ -3,9 +3,9 @@
  * and open the template in the editor.
  */
 
-package math.tartaglia;
+package com.github.gbenroscience.math.tartaglia;
  
-import math.quadratic.QuadraticSolver;
+import com.github.gbenroscience.math.quadratic.QuadraticSolver;
 import static java.lang.Math.*;
 
 /**
@@ -71,7 +71,7 @@ public void normalizeCofficients(){
 
     }
     catch(ArithmeticException arit){
-        util.Utils.logError( "THE COEFFICIENT OF x^3 MUST NOT BE ZERO".toUpperCase());
+        com.github.gbenroscience.util.Utils.logError( "THE COEFFICIENT OF x^3 MUST NOT BE ZERO".toUpperCase());
     }
 }
 /**

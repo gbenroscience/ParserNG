@@ -1,4 +1,4 @@
-package parser.methods;
+package com.github.gbenroscience.parser.methods;
 
 import java.util.List;
 

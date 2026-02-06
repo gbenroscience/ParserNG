@@ -4,4 +4,4 @@
  * @author JIBOYE, Oluwagbemiro Olaoluwa
  *
  */
-package parser;
+package com.github.gbenroscience.parser;

@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package util.io;
+package com.github.gbenroscience.util.io;
 
 import java.io.*;
  
@@ -45,7 +45,7 @@ String text = "";
       in = new BufferedReader( stream );
    }
    catch (Exception e) {
-      util.Utils.logError(
+      com.github.gbenroscience.util.Utils.logError(
             "Sorry, but an error occurred \nwhile trying to open the file:/n" + e);
       return "";
    }
@@ -59,7 +59,7 @@ String text = "";
    }//end while
      }//end try
    catch (Exception e) {
-      util.Utils.logError( "Sorry, but an error occurred \nwhile trying to read the data:/n" + e);
+      com.github.gbenroscience.util.Utils.logError( "Sorry, but an error occurred \nwhile trying to read the data:/n" + e);
    }
    return text;
 }//end read method

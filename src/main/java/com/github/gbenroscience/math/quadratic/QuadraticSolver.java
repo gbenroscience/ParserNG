@@ -1,4 +1,4 @@
-package math.quadratic;
+package com.github.gbenroscience.math.quadratic;
 import static java.lang.Math.*;
 /*
  * To change this template, choose Tools | Templates

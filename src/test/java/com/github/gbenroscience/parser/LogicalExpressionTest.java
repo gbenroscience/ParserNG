@@ -1,8 +1,9 @@
-package parser;
+package com.github.gbenroscience.parser;
 
+import com.github.gbenroscience.parser.LogicalExpression;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import parser.logical.PrintingExpressionLogger;
+import com.github.gbenroscience.parser.logical.PrintingExpressionLogger;
 
 class LogicalExpressionTest {
 

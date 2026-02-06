@@ -3,22 +3,22 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus;
 
-import parser.Number;
-import parser.Bracket;
-import parser.DataSetFormatter;
-import parser.Function;
-import parser.LISTS;
-import parser.MathExpression;
-import parser.MathScanner;
-import parser.Operator;
-import parser.Parser_Result;
-import parser.Variable;
+import com.github.gbenroscience.parser.Number;
+import com.github.gbenroscience.parser.Bracket;
+import com.github.gbenroscience.parser.DataSetFormatter;
+import com.github.gbenroscience.parser.Function;
+import com.github.gbenroscience.parser.LISTS;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.MathScanner;
+import com.github.gbenroscience.parser.Operator;
+import com.github.gbenroscience.parser.Parser_Result;
+import com.github.gbenroscience.parser.Variable;
 import java.util.Arrays;
 import java.util.List;
-import util.FunctionManager;
-import util.VariableManager;
+import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.VariableManager;
 
 /**
  *

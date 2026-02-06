@@ -2,9 +2,9 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
-import parser.methods.Method;
+import com.github.gbenroscience.parser.methods.Method;
 
 import java.util.ArrayList;
 import java.util.List;

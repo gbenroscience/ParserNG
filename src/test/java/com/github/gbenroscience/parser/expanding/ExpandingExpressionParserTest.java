@@ -1,8 +1,9 @@
-package parser.expanding;
+package com.github.gbenroscience.parser.expanding;
 
+import com.github.gbenroscience.parser.expanding.ExpandingExpressionParser;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import parser.logical.PrintingExpressionLogger;
+import com.github.gbenroscience.parser.logical.PrintingExpressionLogger;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -16,7 +17,7 @@ import java.util.List;
  * Which is surprisingly hard to keep rotating in mind
  *
  * So each input array is comming in declared as 0,1,2...N and then it is reverted before passing in,
- * so it behaves naturaly  - we see it as real N .. 1,0  and parser is reading it as declared before revert, thuis 0,1..N
+ * so it behaves naturally  - we see it as real N .. 1,0  and parser is reading it as declared before revert, thuis 0,1..N
  *
  */
 class ExpandingExpressionParserTest {

@@ -1,18 +1,18 @@
-package math;
+package com.github.gbenroscience.math;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import interfaces.Solvable;
-import logic.DRG_MODE;
-import parser.ExpandingExpression;
-import parser.LogicalExpression;
-import parser.MathExpression;
-import parser.cmd.ParserCmd;
-import parser.logical.ExpressionLogger;
-import parser.methods.Help;
+import com.github.gbenroscience.interfaces.Solvable;
+import com.github.gbenroscience.logic.DRG_MODE;
+import com.github.gbenroscience.parser.ExpandingExpression;
+import com.github.gbenroscience.parser.LogicalExpression;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.cmd.ParserCmd;
+import com.github.gbenroscience.parser.logical.ExpressionLogger;
+import com.github.gbenroscience.parser.methods.Help;
 
 public class Main {
 

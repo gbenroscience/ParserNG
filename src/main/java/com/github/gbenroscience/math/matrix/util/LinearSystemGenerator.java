@@ -3,9 +3,9 @@
  * and open the template in the editor.
  */
 
-package math.matrix.util;
+package com.github.gbenroscience.math.matrix.util;
 
-import parser.STRING;
+import com.github.gbenroscience.parser.STRING;
 import java.util.ArrayList;
 import java.util.Random;
 

@@ -3,15 +3,15 @@
  * and open the template in the editor.
  */
 
-package math.matrix;
+package com.github.gbenroscience.math.matrix;
 
 import java.util.ArrayList;
 
-import util.Utils;
+import com.github.gbenroscience.util.Utils;
 
-import math.matrix.expressParser.MatrixValueParser;
-import math.matrix.expressParser.MatrixVariable;
-import parser.STRING;
+import com.github.gbenroscience.math.matrix.expressParser.MatrixValueParser;
+import com.github.gbenroscience.math.matrix.expressParser.MatrixVariable;
+import com.github.gbenroscience.parser.STRING;
 
 
 /**
@@ -247,7 +247,7 @@ varStore.remove(i);
 
 }//end try
 catch(IndexOutOfBoundsException indErr){
-    util.Utils.logError("Variable "+varName +" Does Not Exist.");
+    com.github.gbenroscience.util.Utils.logError("Variable "+varName +" Does Not Exist.");
 }
 
 }//end method
@@ -260,7 +260,7 @@ public void deleteVar(int index){
 varStore.remove(index);
      }//end try
 catch(IndexOutOfBoundsException indErr){
-    util.Utils.logError("No Variable Exists At Location "+(index));
+    com.github.gbenroscience.util.Utils.logError("No Variable Exists At Location "+(index));
 }
 
 

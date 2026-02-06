@@ -13,9 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package util;
+package com.github.gbenroscience.util;
 
-import interfaces.Savable;
+import com.github.gbenroscience.interfaces.Savable;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -23,7 +23,7 @@ import java.io.ObjectInput;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.List;
-import parser.CustomScanner;
+import com.github.gbenroscience.parser.CustomScanner;
 
 /**
  *

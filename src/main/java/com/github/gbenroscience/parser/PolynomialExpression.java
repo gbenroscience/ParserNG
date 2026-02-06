@@ -2,7 +2,7 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.List;
 
-import static parser.Number.*;
+import static com.github.gbenroscience.parser.Number.*;
 
 /**
  *
@@ -45,7 +45,7 @@ public class PolynomialExpression extends MathExpression {
         if (isHasLogicOperators() || isHasListReturningOperators() || isHasPreNumberOperators() || isHasNumberReturningStatsOperators()
                 || isHasPermOrCombOperators() || isHasRemainderOperators() || isHasPostNumberOperators()) {
             setCorrectFunction(false);
-            util.Utils.logError("Only Polynomial Expressions Treated Here!");
+            com.github.gbenroscience.util.Utils.logError("Only Polynomial Expressions Treated Here!");
         }//end if
     }//end constructor
 

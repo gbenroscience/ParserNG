@@ -1,15 +1,15 @@
-package logic;
+package com.github.gbenroscience.logic;
  
-import interfaces.Savable;
+import com.github.gbenroscience.interfaces.Savable;
 
 import java.util.ArrayList;
 
-import util.FormulaeManager;
-import util.HistoryManager;
-import util.MathExpressionManager;
-import util.Mode;
-import util.Serializer;
-import util.Settings;
+import com.github.gbenroscience.util.FormulaeManager;
+import com.github.gbenroscience.util.HistoryManager;
+import com.github.gbenroscience.util.MathExpressionManager;
+import com.github.gbenroscience.util.Mode;
+import com.github.gbenroscience.util.Serializer;
+import com.github.gbenroscience.util.Settings;
 
 
 public class CalcLogic implements Savable{

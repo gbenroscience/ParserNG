@@ -1,4 +1,4 @@
-package parser.methods;
+package com.github.gbenroscience.parser.methods;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -6,20 +6,20 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
-import logic.DRG_MODE;
-import parser.TYPE;
-import parser.methods.ext.Avg;
-import parser.methods.ext.Abs;
-import parser.methods.ext.AvgN;
-import parser.methods.ext.CeilFloor;
-import parser.methods.ext.Count;
-import parser.methods.ext.Echo;
-import parser.methods.ext.Geom;
-import parser.methods.ext.GeomN;
-import parser.methods.ext.Gsum;
-import parser.methods.ext.Sum;
-import parser.methods.ext.Lengths;
-import parser.methods.ext.Rounding;
+import com.github.gbenroscience.logic.DRG_MODE;
+import com.github.gbenroscience.parser.TYPE;
+import com.github.gbenroscience.parser.methods.ext.Avg;
+import com.github.gbenroscience.parser.methods.ext.Abs;
+import com.github.gbenroscience.parser.methods.ext.AvgN;
+import com.github.gbenroscience.parser.methods.ext.CeilFloor;
+import com.github.gbenroscience.parser.methods.ext.Count;
+import com.github.gbenroscience.parser.methods.ext.Echo;
+import com.github.gbenroscience.parser.methods.ext.Geom;
+import com.github.gbenroscience.parser.methods.ext.GeomN;
+import com.github.gbenroscience.parser.methods.ext.Gsum;
+import com.github.gbenroscience.parser.methods.ext.Sum;
+import com.github.gbenroscience.parser.methods.ext.Lengths;
+import com.github.gbenroscience.parser.methods.ext.Rounding;
 
 public class Declarations {
 

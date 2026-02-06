@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package math.tartaglia;
+package com.github.gbenroscience.math.tartaglia;
 
 import java.util.ArrayList;
 

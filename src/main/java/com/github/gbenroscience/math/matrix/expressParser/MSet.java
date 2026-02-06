@@ -3,15 +3,15 @@
  * and open the template in the editor.
  */
 
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
-import parser.STRING;
+import com.github.gbenroscience.parser.STRING;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.NoSuchElementException;
 import java.util.Random;
-import math.Maths;
-import util.FunctionManager;
+import com.github.gbenroscience.math.Maths;
+import com.github.gbenroscience.util.FunctionManager;
 
 /**
  *Class that provides utility methods for carrying

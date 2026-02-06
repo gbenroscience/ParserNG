@@ -3,10 +3,10 @@
  * and open the template in the editor.
  */
 
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
-import parser.STRING;
-import parser.Variable;
+import com.github.gbenroscience.parser.STRING;
+import com.github.gbenroscience.parser.Variable;
  
 
 
@@ -39,7 +39,7 @@ private Matrix matrix;
           this.matrix = matrix;
         }
         else{
-            util.Utils.logError( "Error In Matrix Name Format.");
+            com.github.gbenroscience.util.Utils.logError( "Error In Matrix Name Format.");
         }
     }
 /**

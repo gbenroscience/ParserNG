@@ -3,11 +3,11 @@
  * and open the template in the editor.
  */
 
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
-import parser.MathExpression;
-import parser.Precedence;
-import parser.UnaryPreOperator;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.Precedence;
+import com.github.gbenroscience.parser.UnaryPreOperator;
 
 
 import java.util.ArrayList;

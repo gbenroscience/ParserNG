@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package math.fractions;
+package com.github.gbenroscience.math.fractions;
 
  
 import static java.lang.Math.*;

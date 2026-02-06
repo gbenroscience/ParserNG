@@ -1,11 +1,11 @@
-package util.help;
+package com.github.gbenroscience.util.help;
 
 
 
 
-import interfaces.Savable;
+import com.github.gbenroscience.interfaces.Savable;
 import java.io.StringReader;
-import util.Serializer;
+import com.github.gbenroscience.util.Serializer;
 
 /**
  * Created by JIBOYE Oluwagbemiro Olaoluwa on 8/5/2016.

@@ -2,9 +2,9 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
-import parser.methods.Method;
+import com.github.gbenroscience.parser.methods.Method;
 
 import java.util.ArrayList;
 
@@ -145,7 +145,7 @@ public class Number {
                     && !Operator.isLogicOperator(scan.get(index - 1)) && !Operator.isUnaryPreOperator(scan.get(index - 1))
                     && !Operator.isBinaryOperator(scan.get(index - 1)) && !Operator.isAssignmentOperator(scan.get(index - 1))
                     && !Method.isStatsMethod(scan.get(index - 1)) && !isNumber(scan.get(index - 1)) && !Variable.isVariableString(scan.get(index - 1))) {
-                util.Utils.logError(
+                com.github.gbenroscience.util.Utils.logError(
                         "ParserNG Does Not Allow " + num + " To Combine The Function Members \"" + scan.get(index - 1) + "\" And \"" + scan.get(index) + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Numbers!");
@@ -158,7 +158,7 @@ public class Number {
                     && !Operator.isLogicOperator(scan.get(index + 1))
                     && !Operator.isUnaryPreOperator(scan.get(index + 1)) && !Method.isNumberReturningStatsMethod(scan.get(index + 1))
                     && !Method.isLogToAnyBase(scan.get(index + 1)) && !Method.isAntiLogToAnyBase(scan.get(index + 1)) && !isNumber(scan.get(index + 1)) && !Variable.isVariableString(scan.get(index + 1))) {
-                util.Utils.logError(
+                com.github.gbenroscience.util.Utils.logError(
                         "ParserNG Does Not Allow " + num + " To Combine The Function Members \"" + scan.get(index) + "\" And \"" + scan.get(index + 1) + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Numbers!");

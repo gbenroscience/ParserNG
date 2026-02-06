@@ -1,9 +1,9 @@
-package parser.logical;
+package com.github.gbenroscience.parser.logical;
 
 
 import java.util.Arrays;
 
-import parser.methods.Declarations;
+import com.github.gbenroscience.parser.methods.Declarations;
 
 public class LogicalExpressionParser extends AbstractSplittingParser implements LogicalExpressionMemberFactory.LogicalExpressionMember {
 

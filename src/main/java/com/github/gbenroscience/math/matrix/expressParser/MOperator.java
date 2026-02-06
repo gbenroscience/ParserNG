@@ -2,15 +2,15 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
 
-import parser.Precedence;
-import parser.UnaryPreOperator;
-import static parser.Operator.*;
+import com.github.gbenroscience.parser.Precedence;
+import com.github.gbenroscience.parser.UnaryPreOperator;
+import static com.github.gbenroscience.parser.Operator.*;
 
 import java.util.ArrayList;
-import parser.Operator;
+import com.github.gbenroscience.parser.Operator;
 
 /**
  *

@@ -1,13 +1,13 @@
-package parser.methods.ext;
+package com.github.gbenroscience.parser.methods.ext;
 
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
 
-import math.BigDecimalNthRootCalculation;
-import parser.TYPE;
-import parser.methods.BasicNumericalMethod;
-import parser.methods.Help;
+import com.github.gbenroscience.math.BigDecimalNthRootCalculation;
+import com.github.gbenroscience.parser.TYPE;
+import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
+import com.github.gbenroscience.parser.methods.Help;
 
 public class GeomN implements BasicNumericalMethod {
 

@@ -1,4 +1,4 @@
-package util.io;
+package com.github.gbenroscience.util.io;
  
 
 import java.io.BufferedReader;
@@ -9,8 +9,8 @@ import java.util.Scanner;
 import java.io.BufferedWriter;
 import java.io.FileWriter;
 
-import parser.Variable;
-import util.Serializer;
+import com.github.gbenroscience.parser.Variable;
+import com.github.gbenroscience.util.Serializer;
 
 /**
  *
@@ -130,7 +130,7 @@ if(fw!=null){
             in = new BufferedReader( stream );
         }
         catch (Exception e) {
-            util.Utils.logError(
+            com.github.gbenroscience.util.Utils.logError(
                     "Sorry, but an error occurred \nwhile trying to open the file:/n" + e);
             return;
         }
@@ -148,7 +148,7 @@ if(fw!=null){
 
         }//end try
         catch (Exception e) {
-            util.Utils.logError("Sorry, but an error occurred \nwhile trying to read the data:/n" + e);
+            com.github.gbenroscience.util.Utils.logError("Sorry, but an error occurred \nwhile trying to read the data:/n" + e);
         }
         finally {
             if(in!=null) {

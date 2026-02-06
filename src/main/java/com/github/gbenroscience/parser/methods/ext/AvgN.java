@@ -1,8 +1,8 @@
-package parser.methods.ext;
+package com.github.gbenroscience.parser.methods.ext;
 
-import parser.TYPE;
-import parser.methods.BasicNumericalMethod;
-import parser.methods.Help;
+import com.github.gbenroscience.parser.TYPE;
+import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
+import com.github.gbenroscience.parser.methods.Help;
 
 import java.math.BigDecimal;
 import java.math.MathContext;

@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package util;
+package com.github.gbenroscience.util;
 
 /**
  *
@@ -15,7 +15,7 @@ package util;
  *
  */
 
-import parser.Variable;
+import com.github.gbenroscience.parser.Variable;
 import java.util.Random;
 public class VariableGenerator {
 

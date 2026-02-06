@@ -2,24 +2,24 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser.methods;
+package com.github.gbenroscience.parser.methods;
 
-import logic.DRG_MODE;
-import parser.CustomScanner;
-import parser.Function;
-import static parser.STRING.*;
-import static parser.Number.*;
-import static parser.methods.Declarations.*;
-import parser.Set;
+import com.github.gbenroscience.logic.DRG_MODE;
+import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Function;
+import static com.github.gbenroscience.parser.STRING.*;
+import static com.github.gbenroscience.parser.Number.*;
+import static com.github.gbenroscience.parser.methods.Declarations.*;
+import com.github.gbenroscience.parser.Set;
 
 import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.List;
-import math.Maths;
-import math.matrix.expressParser.Matrix;
-import parser.MathExpression;
-import parser.Operator;
-import util.FunctionManager;
+import com.github.gbenroscience.math.Maths;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.Operator;
+import com.github.gbenroscience.util.FunctionManager;
 
 /**
  * Models the methods that perform calculations in the parser.
@@ -995,7 +995,7 @@ public class Method {
      * the parser.
      */
     public static boolean isUnaryPreOperatorORDefinedMethod(String methodName) {
-        return isDefinedMethod(methodName) || parser.Operator.isUnaryPreOperator(methodName);
+        return isDefinedMethod(methodName) || com.github.gbenroscience.parser.Operator.isUnaryPreOperator(methodName);
     }//end method
 
     /**
@@ -1102,7 +1102,7 @@ public static boolean isMethodNameBeginnerChar(char c) {
     if (c == '_' || c == '$') return true;
     // Character.isLetter is a bit heavier but necessary for Unicode letters;
     // if you only need ASCII letters, use (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-    return Character.isLetter(c) && !parser.Operator.isPermOrComb(Character.toString(c));
+    return Character.isLetter(c) && !com.github.gbenroscience.parser.Operator.isPermOrComb(Character.toString(c));
 }
 
 // Backwards-compatible wrapper

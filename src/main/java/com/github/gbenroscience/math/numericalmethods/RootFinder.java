@@ -3,22 +3,22 @@
  * and open the template in the editor.
  */
 
-package math.numericalmethods;
+package com.github.gbenroscience.math.numericalmethods;
 
-import parser.Number;
-import parser.Bracket;
-import parser.Variable;
+import com.github.gbenroscience.parser.Number;
+import com.github.gbenroscience.parser.Bracket;
+import com.github.gbenroscience.parser.Variable;
 import java.util.InputMismatchException;
-import parser.Function;
-import parser.LISTS;
-import parser.MathExpression;
-import parser.Operator;
-import util.FunctionManager;
+import com.github.gbenroscience.parser.Function;
+import com.github.gbenroscience.parser.LISTS;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.Operator;
+import com.github.gbenroscience.util.FunctionManager;
 import static java.lang.Math.*;
 import java.util.Arrays;
 import java.util.List;
-import math.differentialcalculus.Derivative;
-import util.VariableManager;
+import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.util.VariableManager;
 
 
 /**

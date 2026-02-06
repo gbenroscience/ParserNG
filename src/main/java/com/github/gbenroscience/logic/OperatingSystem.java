@@ -1,10 +1,10 @@
-package logic;
+package com.github.gbenroscience.logic;
  
 
 import java.util.ArrayList;
 
-import interfaces.Doable;
-import util.Log;
+import com.github.gbenroscience.interfaces.Doable;
+import com.github.gbenroscience.util.Log;
 
 /**
  * Objects of this class will control the running modes of the calculator.

@@ -1,17 +1,17 @@
-package parser;
+package com.github.gbenroscience.parser;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import interfaces.Solvable;
-import math.Main;
-import parser.expanding.ExpandingExpressionParser;
-import parser.logical.ComparingExpressionParser;
-import parser.logical.ExpressionLogger;
-import parser.logical.LogicalExpressionMemberFactory;
-import parser.methods.Declarations;
+import com.github.gbenroscience.interfaces.Solvable;
+import com.github.gbenroscience.math.Main;
+import com.github.gbenroscience.parser.expanding.ExpandingExpressionParser;
+import com.github.gbenroscience.parser.logical.ComparingExpressionParser;
+import com.github.gbenroscience.parser.logical.ExpressionLogger;
+import com.github.gbenroscience.parser.logical.LogicalExpressionMemberFactory;
+import com.github.gbenroscience.parser.methods.Declarations;
 
 public class ExpandingExpression implements Solvable {
 

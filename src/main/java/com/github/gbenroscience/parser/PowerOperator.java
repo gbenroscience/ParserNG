@@ -3,12 +3,12 @@
  * and open the template in the editor.
  */
 
-package parser;
+package com.github.gbenroscience.parser;
 
-import parser.methods.Method;
+import com.github.gbenroscience.parser.methods.Method;
 
 import java.util.ArrayList;
-import static parser.Number.*;
+import static com.github.gbenroscience.parser.Number.*;
 
 
 /**

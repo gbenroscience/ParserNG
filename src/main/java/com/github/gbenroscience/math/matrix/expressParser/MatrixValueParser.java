@@ -2,17 +2,17 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.matrix.expressParser;
+package com.github.gbenroscience.math.matrix.expressParser;
 
-import parser.STRING;
+import com.github.gbenroscience.parser.STRING;
 
-import util.Dimension;
+import com.github.gbenroscience.util.Dimension;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import util.MatrixFormatException;
-import static parser.Number.*;
-import static parser.Operator.*;
+import com.github.gbenroscience.util.MatrixFormatException;
+import static com.github.gbenroscience.parser.Number.*;
+import static com.github.gbenroscience.parser.Operator.*;
 
 /**
  *

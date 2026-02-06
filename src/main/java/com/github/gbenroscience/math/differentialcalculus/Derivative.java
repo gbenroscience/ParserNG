@@ -2,17 +2,17 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus;
 
-import parser.MathExpression;
-import static parser.Number.*;
-import parser.Parser_Result;
-import static parser.Variable.*;
+import com.github.gbenroscience.parser.MathExpression;
+import static com.github.gbenroscience.parser.Number.*;
+import com.github.gbenroscience.parser.Parser_Result;
+import static com.github.gbenroscience.parser.Variable.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import static math.differentialcalculus.Utilities.*;
+import static com.github.gbenroscience.math.differentialcalculus.Utilities.*;
 
 /**
  *

@@ -2,18 +2,21 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package parser;
+package com.github.gbenroscience.parser;
 
-import interfaces.Savable;
-import interfaces.Solvable;
+import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.Serializer;
+import com.github.gbenroscience.util.VariableManager;
+import com.github.gbenroscience.interfaces.Savable;
+import com.github.gbenroscience.interfaces.Solvable;
 import java.util.ArrayDeque;
-import logic.DRG_MODE;
-import math.Main;
-import parser.methods.Declarations;
-import parser.methods.Help;
-import parser.methods.Method;
+import com.github.gbenroscience.logic.DRG_MODE;
+import com.github.gbenroscience.math.Main;
+import com.github.gbenroscience.parser.methods.Declarations;
+import com.github.gbenroscience.parser.methods.Help;
+import com.github.gbenroscience.parser.methods.Method;
 
-import math.Maths;
+import com.github.gbenroscience.math.Maths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
@@ -21,13 +24,12 @@ import java.util.InputMismatchException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.function.Predicate;
-import util.*;
 
-import static parser.Variable.*;
-import static parser.Number.*;
-import static parser.Operator.*;
+import static com.github.gbenroscience.parser.Variable.*;
+import static com.github.gbenroscience.parser.Number.*;
+import static com.github.gbenroscience.parser.Operator.*;
 
-import math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 
 /**
  *
@@ -154,8 +156,13 @@ public class MathExpression implements Savable, Solvable {
      *
      */
     public MathExpression(String input) {
+        this(input, new VariableManager());
+    }//end constructor MathExpression
+
+    public MathExpression(String input, VariableManager variableManager) {
+
         setAutoInitOn(false);
-        this.variableManager = new VariableManager();
+        this.variableManager = variableManager;
 
         CustomScanner cs = new CustomScanner(STRING.purifier(input), false, VariableManager.endOfLine);
 
@@ -186,7 +193,7 @@ public class MathExpression implements Savable, Solvable {
             setExpression("(0.0)");
         }
 
-    }//end constructor MathExpression
+    }
 
     public String getExpression() {
         return expression;
@@ -275,9 +282,8 @@ public class MathExpression implements Savable, Solvable {
     public void setDRG(DRG_MODE DRG) {
         this.DRG = DRG;
     }
-    
-    
-    public void setDRG(int mode) { 
+
+    public void setDRG(int mode) {
         switch (mode) {
             case 0:
                 this.DRG = DRG_MODE.DEG;
@@ -290,10 +296,8 @@ public class MathExpression implements Savable, Solvable {
                 break;
             default:
                 break;
-        } 
+        }
     }
-    
-    
 
     /**
      *
@@ -1424,7 +1428,7 @@ public class MathExpression implements Savable, Solvable {
             return Help.getHelp();
         }
         if (correctFunction && !hasFunctionOrVariableInitStatement) {
-            final ArrayList<String> myScan = new ArrayList<String>();
+            final ArrayList<String> myScan = new ArrayList<>();
 
             myScan.addAll(scanner);
             Bracket[] brac = mapBrackets(myScan);
@@ -1494,29 +1498,29 @@ public class MathExpression implements Savable, Solvable {
                                     executable.add(")");
                                     executable.add(1, "(");
                                     Method.run(executable, DRG);
-
                                 }
-
-                            } catch (IndexOutOfBoundsException indexErr) {
+                            } catch (IndexOutOfBoundsException | NullPointerException indexErr) {
                                 break;
                             } catch (IllegalArgumentException ill) {
+                                returnType = TYPE.ERROR;
                                 return "SYNTAX ERROR";
-                            } catch (NullPointerException nolException) {
-                                break;
                             }
                         }//end else if
                         brac = mapBrackets(myScan);
                     }//end try
                     catch (IndexOutOfBoundsException indexErr) {
                         indexErr.printStackTrace();
+                        returnType = TYPE.ERROR;
                         return "SYNTAX ERROR";
                     }//end catch
                     catch (NumberFormatException numErr) {
                         numErr.printStackTrace();
+                        returnType = TYPE.ERROR;
                         return "SYNTAX ERROR";
                     }//end catch
                     catch (InputMismatchException exception) {
                         exception.printStackTrace();
+                        returnType = TYPE.ERROR;
                         return "SYNTAX ERROR";
                     }
                 }//end else
@@ -1573,14 +1577,16 @@ public class MathExpression implements Savable, Solvable {
         else if (hasFunctionOrVariableInitStatement) {
             return "Variable Storage Process Finished!";
         } else {
+                returnType = TYPE.ERROR;
             return "SYNTAX ERROR";
         }
 
     }//end method solve()
 
-      protected List<String> solve(List<String> list) {
-          return expressionSolver.solve(list);
-      }
+    protected List<String> solve(List<String> list) {
+        return expressionSolver.solve(list);
+    }
+
     /**
      * used by the main parser solve to figure out SBP portions of a
      * multi-bracketed expression (MBP)

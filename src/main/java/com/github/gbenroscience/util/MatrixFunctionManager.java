@@ -3,11 +3,11 @@
  * and open the template in the editor.
  */
 
-package util;
+package com.github.gbenroscience.util;
 
 import java.util.ArrayList;
  
-import math.matrix.expressParser.MatrixFunction;
+import com.github.gbenroscience.math.matrix.expressParser.MatrixFunction;
 
 /**
  *

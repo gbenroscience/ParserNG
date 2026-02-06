@@ -1,4 +1,4 @@
-package logic;
+package com.github.gbenroscience.logic;
 
 public enum BASE_MODE {
 

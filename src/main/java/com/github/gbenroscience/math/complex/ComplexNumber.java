@@ -3,7 +3,7 @@
  * and open the template in the editor.
  */
 
-package math.complex;
+package com.github.gbenroscience.math.complex;
 
 
 /**
