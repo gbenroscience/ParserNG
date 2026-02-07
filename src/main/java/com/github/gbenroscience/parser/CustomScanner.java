@@ -97,31 +97,27 @@ public class CustomScanner {
             }
         });
 
-        for (int i = 0; i < in.length(); i++) {
+        for (int cursor = 0; cursor < in.length(); cursor++) {
 
             for (String token : tokens) {
                 int len = token.length();
 
-
-                if (len > 0 && i + len <= in.length()) {
-                    String portion = in.substring(i, i + len);
+                if (len > 0 && cursor + len <= in.length()) {
+                    String portion = in.substring(cursor, cursor + len);
 
                     if (portion.equals(token)) {
-                        if (i != 0) {//avoid empty spaces
-                            parse.add(in.substring(0, i));
+                        if (cursor != 0) {//avoid empty spaces
+                            parse.add(in.substring(0, cursor));
                         }
                         if (includeTokensInOutput) {
                             parse.add(token);
                         }
-                        in = in.substring(i + len);
-                        i = -1;
+                        in = in.substring(cursor + len);
+                        cursor = -1;
                         break;
                     }
-
                 }
-
             }
-
         }
         if (!in.isEmpty()) {
             parse.add(in);
@@ -189,23 +185,7 @@ public class CustomScanner {
     }
 
 
-
-
-    public static void main1( String[] args ){
-   /* String code = "function Matrix applyTouch( Integer a1, Matrix a2 )";
-    CustomScanner customScanner = new CustomScanner(code, true,",","(",")"," ");
-    System.out.println(customScanner.scan());
-    */
-        String code = "28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)";
-
-        CustomScanner customScanner = new CustomScanner(code, true,"sinh","+","-",")","(","sin","cos","/");
-        System.out.println(customScanner.scan());
-
-
-        System.out.println(customScanner.scan());
-
-
-    }
+ 
 
 
 

@@ -229,7 +229,7 @@ public class  ExpandingExpressionParser {
     private String evalDirect(String s, ExpressionLogger logger) {
         ExpandingExpressionParser lex = new ExpandingExpressionParser(s, points, logger, false, logicalExpressionMemberFactory);
         String r = lex.solve();
-        int rr = new Double(r).intValue();//L2.0 is not valid value, but L2 is
+        int rr = Double.valueOf(r).intValue();//L2.0 is not valid value, but L2 is
         logger.log(s + " = " + rr + " (" + r + ")");
         return "" + rr;
     }
