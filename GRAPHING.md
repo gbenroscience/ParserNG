@@ -152,6 +152,8 @@ class AndroidDrawingContext implements DrawingContext {
     private final Canvas canvas;
     private final Paint paint = new Paint();
     private final float scale;
+// Reuse this object to avoid memory churn/GC overhead
+    private final RectF rectBuffer = new RectF();
 
     public AndroidDrawingContext(Canvas canvas, float density) {
         this.canvas = canvas;
