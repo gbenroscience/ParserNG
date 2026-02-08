@@ -164,7 +164,7 @@ public class MathExpression implements Savable, Solvable {
         setAutoInitOn(false);
         this.variableManager = variableManager;
 
-        CustomScanner cs = new CustomScanner(STRING.purifier(input), false, VariableManager.endOfLine);
+        Scanner cs = new Scanner(STRING.purifier(input), false, VariableManager.endOfLine);
 
         List<String> scanned = cs.scan();
 

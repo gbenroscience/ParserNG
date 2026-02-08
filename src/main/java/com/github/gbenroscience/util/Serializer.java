@@ -23,7 +23,7 @@ import java.io.ObjectInput;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.List;
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 
 /**
  *
@@ -53,7 +53,7 @@ public class Serializer {
      * @return the byte array from the serialized format of the object
      */
     public static final byte[] getBytes(String ser) {
-         CustomScanner cs = new CustomScanner(ser , false, "[" ,"]", "," );
+         Scanner cs = new Scanner(ser , false, "[" ,"]", "," );
         List<String> list = cs.scan();
         
         
@@ -204,7 +204,7 @@ public class Serializer {
        
        String bytes = "[23, 44, 78, 233, 56, 91, 90, 22, 23, -92]";
        
-        CustomScanner cs = new CustomScanner(bytes , false, "[" ,"]", "," );
+        Scanner cs = new Scanner(bytes , false, "[" ,"]", "," );
         List<String> list = cs.scan();
         
         System.out.println(list);

@@ -148,8 +148,8 @@ public class DataSetFormatter {
     public final void scanCommaSeparatedData(String myStr) {
 
         // data = data.replace("@(", "@?");
-        //CustomScanner csc = new CustomScanner(data, true, getAllFunctions(), operators);
-        CustomScanner csc = new CustomScanner(myStr, true, Method.getAllFunctions(), Operator.COMMA, Operator.OPEN_CIRC_BRAC, Operator.CLOSE_CIRC_BRAC);
+        //Scanner csc = new Scanner(data, true, getAllFunctions(), operators);
+        Scanner csc = new Scanner(myStr, true, Method.getAllFunctions(), Operator.COMMA, Operator.OPEN_CIRC_BRAC, Operator.CLOSE_CIRC_BRAC);
 
         this.dataset = csc.scan();
 

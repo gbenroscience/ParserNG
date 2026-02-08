@@ -127,7 +127,7 @@ public class Function implements Savable {
             }
 
             String paramsList = input.substring(openIndex + 1, close);
-            List<String> params = new CustomScanner(paramsList, false, ",").scan();
+            List<String> params = new Scanner(paramsList, false, ",").scan();
 
             int size = params.size();
             boolean notAlgebraic = true;
@@ -161,7 +161,7 @@ public class Function implements Savable {
                     }
                     list = list.substring(1, list.length() - 1);
 
-                    List<String> matrixData = new CustomScanner(list, false, ",").scan();
+                    List<String> matrixData = new Scanner(list, false, ",").scan();
                     if (rows * cols == matrixData.size()) {
                         matrixData.add(0, cols + "");
                         matrixData.add(0, rows + "");
@@ -265,7 +265,7 @@ public class Function implements Savable {
                 if (Variable.isVariableString(newFuncName)) {
                     VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, rhs, false));
                 } else if (isVarNamesList) {
-                    List<String> vars = new CustomScanner(newFuncName, false, ",").scan();
+                    List<String> vars = new Scanner(newFuncName, false, ",").scan();
                     for (String var : vars) {
                         VariableManager.VARIABLES.put(var, new Variable(var, rhs, false));
                     }
@@ -309,7 +309,7 @@ public class Function implements Savable {
                             break;
                         case NUMBER:
                             if (isVarNamesList && hasCommas) {
-                                List<String> vars = new CustomScanner(newFuncName, false, ",").scan();
+                                List<String> vars = new Scanner(newFuncName, false, ",").scan();
                                 for (String var : vars) {
                                     VariableManager.VARIABLES.put(var, new Variable(var, val, false));
                                 }
@@ -366,7 +366,7 @@ public class Function implements Savable {
             cutUpInput[1] = input.substring(input.indexOf("@") + 1, input.indexOf(")") + 1).trim();//---(x,y,....)..params list
             cutUpInput[2] = input.substring(input.indexOf(")") + 1);//--the expression
 
-            CustomScanner cs = new CustomScanner(cutUpInput[1], false, ",", "(", ")");
+            Scanner cs = new Scanner(cutUpInput[1], false, ",", "(", ")");
             List<String> scan = cs.scan();
        
             if (Variable.isVariableString(cutUpInput[0]) && isParameterList(cutUpInput[1])) {
@@ -464,7 +464,7 @@ public class Function implements Savable {
      */
     private static boolean isDimensionsList(String list) {
         list = STRING.purifier(list);
-        CustomScanner cs = new CustomScanner(list, true, "(", ",", ")");
+        Scanner cs = new Scanner(list, true, "(", ",", ")");
         List<String> scan = cs.scan();
 
         if (scan.get(0).equals("(") && scan.get(scan.size() - 1).equals(")")) {
@@ -510,7 +510,7 @@ public class Function implements Savable {
      */
     private static boolean isParameterList(String list) {
         list = STRING.purifier(list);
-        CustomScanner cs = new CustomScanner(list, true, "(", ",", ")");
+        Scanner cs = new Scanner(list, true, "(", ",", ")");
         List<String> scan = cs.scan();
 
         if (scan.get(0).equals("(") && scan.get(scan.size() - 1).equals(")")) {
@@ -605,7 +605,7 @@ public class Function implements Savable {
      */
     public static String[] getParameters(String paramList) {
         paramList = STRING.purifier(paramList);
-        CustomScanner cs = new CustomScanner(paramList, false, "(", ",", ")");
+        Scanner cs = new Scanner(paramList, false, "(", ",", ")");
         List<String> scan = cs.scan();
 
         String str[] = new String[scan.size()];
@@ -677,7 +677,7 @@ public class Function implements Savable {
         }
         String str = getFullName();
 //StringBuilder;
-        CustomScanner cs = new CustomScanner(args, false, "(", ")", ",");
+        Scanner cs = new Scanner(args, false, "(", ")", ",");
         List<String> l = cs.scan();
 
         if (l.get(0).equals(dependentVariable.getName())) {
@@ -831,7 +831,7 @@ public class Function implements Savable {
     public static boolean isFunctionFullName(String str) {
         if (str.contains("(") && str.contains(")")) {
             str = STRING.purifier(str);
-            CustomScanner cs = new CustomScanner(str, false, "(", ")", ",");
+            Scanner cs = new Scanner(str, false, "(", ")", ",");
             List<String> l = cs.scan();
             if (Variable.isVariableString(l.get(0))) {
                 int sz = l.size();

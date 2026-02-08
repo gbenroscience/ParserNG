@@ -4,7 +4,7 @@
  */
 package com.github.gbenroscience.util;
 
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.STRING;
 import com.github.gbenroscience.parser.Function;
@@ -272,7 +272,7 @@ public class MathExpressionManager {
      */
     public String solve(String expr) throws NullPointerException {
         try {
-            CustomScanner cs = new CustomScanner(STRING.purifier(expr), false, VariableManager.endOfLine);
+            Scanner cs = new Scanner(STRING.purifier(expr), false, VariableManager.endOfLine);
 
             List<String> scanned = cs.scan();
             String mathExpr = null;

@@ -4,7 +4,7 @@
  */
 package com.github.gbenroscience.util;
 
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.Operator;
 import com.github.gbenroscience.parser.Variable;
@@ -408,8 +408,8 @@ public class VariableManager {
          */
         private List<String> generateLines() {
 
-            CustomScanner customScanner = new CustomScanner(command, false, endOfLine);
-            List<String> lines = customScanner.scan();
+            Scanner scanner = new Scanner(command, false, endOfLine);
+            List<String> lines = scanner.scan();
 
             if (command.length() == 0) {
                 Utils.logError("No Command Input!");
@@ -477,8 +477,8 @@ public class VariableManager {
 
                 String part1 = line.substring(0, ind);
                 String part2 = line.substring(ind + 1);
-                CustomScanner customScanner = new CustomScanner(part1, true, ",", " ");
-                List<String> scan = customScanner.scan();
+                Scanner scanner = new Scanner(part1, true, ",", " ");
+                List<String> scan = scanner.scan();
                 List<String> whitespaceremover = new ArrayList<String>();
                 whitespaceremover.add(" ");
                 scan.removeAll(whitespaceremover);
@@ -557,8 +557,8 @@ public class VariableManager {
 
                     String part1 = line.substring(0, ind);
                     String part2 = line.substring(ind + 1);
-                    CustomScanner customScanner = new CustomScanner(part1, false, ",", " ");
-                    List<String> scan = customScanner.scan();
+                    Scanner scanner = new Scanner(part1, false, ",", " ");
+                    List<String> scan = scanner.scan();
                     List<String> whitespaceremover = new ArrayList<String>();
                     whitespaceremover.add(" ");
                     whitespaceremover.add(",");
@@ -688,7 +688,7 @@ public class VariableManager {
         while (true) {
             try {
                 System.out.println(" Enter Command " + (i + 1));
-                String comd = new Scanner(System.in).nextLine();
+                String comd = new java.util.Scanner(System.in).nextLine();
                 manager.parseCommand(comd);
                 System.out.println(" varStore = " + VariableManager.VARIABLES);
                 ++i;

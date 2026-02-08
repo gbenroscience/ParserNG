@@ -8,7 +8,7 @@ import java.util.HashMap;
 import java.util.InputMismatchException;
 import java.util.List;
 import java.util.Random;
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.Operator;
 
 /**
@@ -1787,9 +1787,9 @@ return detMultiplier;
      */
     private static final String uniVariableExpressionExpander(String variableName, String expr1, String expr2) {
 
-        List<String> tokens1 = new CustomScanner(expr1, true, Operator.PLUS, Operator.MINUS, Operator.MULTIPLY, Operator.DIVIDE, Operator.POWER, variableName).scan();
+        List<String> tokens1 = new Scanner(expr1, true, Operator.PLUS, Operator.MINUS, Operator.MULTIPLY, Operator.DIVIDE, Operator.POWER, variableName).scan();
 
-        List<String> tokens2 = new CustomScanner(expr2, true, Operator.PLUS, Operator.MINUS, Operator.MULTIPLY, Operator.DIVIDE, Operator.POWER, variableName).scan();
+        List<String> tokens2 = new Scanner(expr2, true, Operator.PLUS, Operator.MINUS, Operator.MULTIPLY, Operator.DIVIDE, Operator.POWER, variableName).scan();
 
         HashMap<Double, Double> map1 = generateExpressionMap(variableName, tokens1);
         HashMap<Double, Double> map2 = generateExpressionMap(variableName, tokens2);

@@ -21,7 +21,7 @@ import com.github.gbenroscience.parser.*;
 import com.github.gbenroscience.math.*;
 import static java.lang.Math.*;
 
-import static com.github.gbenroscience.parser.STRING.*;  
+import static com.github.gbenroscience.parser.STRING.*;
 import com.github.gbenroscience.util.Dimension;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
@@ -538,7 +538,6 @@ public class Grid {
         t.start();
     }
 
-    
     public boolean isShowGridLines() {
         return showGridLines;
     }
@@ -827,7 +826,7 @@ public class Grid {
 
         try {
             g.setFont(font);
-            
+
             drawHorizontalLines:
             {
                 if (showGridLines) {
@@ -864,7 +863,10 @@ public class Grid {
                 double graphXPosOfLeftSideOfScreen = this.convertScreenPointToGraphCoords(x - this.gridSize.width, 0)[0];
                 double graphXPosOfRightSideOfScreen = this.convertScreenPointToGraphCoords(this.component.getWidth(), 0)[0];
 
-                GraphElement graphElementOne = this.gridExpressionParser.getGraphElements().get(0);
+                GraphElement graphElementOne = this.gridExpressionParser.getFirstFunctionPlotTypeGraphElement();
+                if(graphElementOne == null){//no function plot type
+                    graphElementOne = this.gridExpressionParser.getGraphElements().get(0);
+                }
                 int count = graphElementOne.getHorizontalCoordinates().length;
 
                 double firstXCoordinateInArray = graphElementOne.getHorizontalCoordinates()[0];
@@ -884,9 +886,8 @@ public class Grid {
                                 double xx = 0;
                                 while (beginIndex <= endIndex - 1) {
 
-                                    double[] horCoords = gr.getHorizontalCoordinates();
-                                    double[] verCoords = gr.getVerticalCoordinates();
-
+                                double[] horCoords = gr.getHorizontalCoordinates();
+                                double[] verCoords = gr.getVerticalCoordinates();
                                     xx = horCoords[beginIndex];
                                     double yy = verCoords[beginIndex];
 
@@ -903,10 +904,11 @@ public class Grid {
 
                             } else {
                                 int i = 0;
-                                while (i < gr.getHorizontalCoordinates().length - 1) { 
-                                    double[] horCoords = gr.getHorizontalCoordinates();
-                                    double[] verCoords = gr.getVerticalCoordinates();
-                                    
+
+                                double[] horCoords = gr.getHorizontalCoordinates();
+                                double[] verCoords = gr.getVerticalCoordinates();
+                                while (i < horCoords.length - 1) {
+
                                     double xx = horCoords[i];
                                     double yy = verCoords[i];
                                     double xx_next = horCoords[i + 1];

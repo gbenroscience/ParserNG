@@ -5,17 +5,17 @@
 package com.github.gbenroscience.math.graph;
 
 import java.util.List;
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 
 import java.util.ArrayList;
 import static com.github.gbenroscience.parser.STRING.*;
+import java.util.Objects;
 
 /**
  * Objects of this class take a compound plot instruction, scan it into all
  * smaller plot instructions, and then analyze each instruction to determine its
- * type. They store a record of each smaller plot instruction in an ArrayList
- * object(plottable) and a record of the type of each of those instructions in
- * another ArrayList object(graphType)
+ * type. They store a record of each smaller plot instruction in an ArrayList of
+ * {@link GraphElement} objects
  *
  * @author JIBOYE Oluwagbemiro Olaoluwa
  */
@@ -80,6 +80,20 @@ public class GridExpressionParser {
 
     /**
      *
+     * @return the first {@link GraphElement} that is of type
+     * {@link GraphType#FunctionPlot}
+     */
+    public GraphElement getFirstFunctionPlotTypeGraphElement() {
+        for (GraphElement elem : graphElements) {
+            if (elem != null && elem.getGraphType() != null && elem.getGraphType().isFunctionPlot()) {
+                return elem;
+            }
+        }
+        return null;
+    }
+
+    /**
+     *
      * @param gep Another GridExpressionParser object. Appends the function
      * definitions in the other GridExpressionParser object to the functions in
      * this one.
@@ -99,7 +113,7 @@ public class GridExpressionParser {
         graphElements.clear();
 //[-200,200,300,-200:][1,3,-2,1:];y=@(x)3x+1;
         try {
-            List<String> instructionTokens = new CustomScanner(purifier(input), false, ";").scan();
+            List<String> instructionTokens = new Scanner(purifier(input), false, ";").scan();
             int sz = instructionTokens.size();
             for (int i = 0; i < sz; i++) {
                 try {
@@ -108,13 +122,14 @@ public class GridExpressionParser {
                     final GraphElement elem = new GraphElement(instructionToken, determineType(instructionToken));
                     elem.fillCoords(dataSharer.xLower, dataSharer.xUpper, dataSharer.xStep, dataSharer.yStep, dataSharer.drg);
                     graphElements.add(elem);
-                } catch (Exception nol) {
+                } catch (NullPointerException nol) {
+                    nol.printStackTrace();
                     setCanPlot(false);
                 }
             }
         }//end try
         catch (IndexOutOfBoundsException indexErr) {
-            return;
+            indexErr.printStackTrace();
         }
 
     }//end method

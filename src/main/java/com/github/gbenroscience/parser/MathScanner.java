@@ -523,7 +523,7 @@ public class MathScanner {
      * Split the {@link MathScanner#scannerInput} String on the operators.
      */
     public void splitStringOnMethods_Variables_And_Operators() {
-        CustomScanner cs = new CustomScanner(scannerInput, true, VariableManager.VARIABLES.keySet().toArray(new String[]{}), Method.getAllFunctions(), operators);
+        Scanner cs = new Scanner(scannerInput, true, VariableManager.VARIABLES.keySet().toArray(new String[]{}), Method.getAllFunctions(), operators);
         ArrayList<String> filter = new ArrayList<>();
         filter.add("");
         filter.add(",");
@@ -1401,7 +1401,7 @@ public class MathScanner {
         //A*B*C*D*E+3*A+4*B-22*A^2*det(A)
         //String expr = "matrix_mul(M,((((M)))))";
         String expr = "matrix_mul(M,3,((det(M))))";
-        CustomScanner cs = new CustomScanner(expr, true, "matrix_mul", "sum", ",", "(", ")", "^", "a", "b", "x");
+        Scanner cs = new Scanner(expr, true, "matrix_mul", "sum", ",", "(", ")", "^", "a", "b", "x");
         List<String> scan = cs.scan();
         System.err.println("----" + scan);
         removeExcessBrackets(scan);

@@ -5,7 +5,7 @@
 package com.github.gbenroscience.math.differentialcalculus;
 
 import com.github.gbenroscience.parser.Bracket;
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.Operator;
 import com.github.gbenroscience.parser.Variable;
 import static com.github.gbenroscience.parser.Operator.*;
@@ -78,7 +78,7 @@ if(expr.substring(i, i+1).equals("+")&&expr.substring(i+1, i+2).equals("-")){
 
         this.expression = expression;
         
-        CustomScanner cs = new CustomScanner(expression, true, Methods.inbuiltMethods,Methods.inbuiltOperators);
+        Scanner cs = new Scanner(expression, true, Methods.inbuiltMethods,Methods.inbuiltOperators);
         scanner = (ArrayList<String>) cs.scan();
         orderNumberTokens();
 
@@ -174,7 +174,7 @@ return false;
     
     /**
      * Scans the list and arranges scattered parts of a single number token.
-     * CustomScanner is not built to leave numbers intact..but rather splits
+     * Scanner is not built to leave numbers intact..but rather splits
      * according to the supplied tokens. So since - and + were supplied
      * as splitting tokens here, a number such as 3.2E9 would be left intact,
      * whereas 3.2E-9 would be split into 3.2E,-,9

@@ -15,9 +15,10 @@
  */
 package com.github.gbenroscience.math.graph;
 
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.util.FunctionManager;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -91,24 +92,28 @@ public class GraphElement {
             double[][] values = f.evalRange(xLower, xUpper, xStep, horVariableName, drg);
             this.verticalCoordinates = values[0];
             this.horizontalCoordinates = values[1];
-
+ //System.err.println("functionPlot: "+toString());
         } //[-200,200,300,-200:][1,3,-2,1:]
         else if (graphType.isVerticePlot()) {
             this.function = this.function.trim();
             String horizontal = this.function.substring(this.function.indexOf("["), this.function.indexOf("]")).trim();
             String vertical = this.function.substring(this.function.lastIndexOf("[") + 1, this.function.lastIndexOf("]")).trim();
-            CustomScanner hor_cs = new CustomScanner(horizontal, false, ":", ",");
-            CustomScanner ver_cs = new CustomScanner(vertical, false, ":", ",");
+            Scanner horCs = new Scanner(horizontal, false, ":", ",", "[","]");
+            Scanner verCs = new Scanner(vertical, false, ":", ",", "[","]");
 
-            List<String> horValues = hor_cs.scan();
-            List<String> verValues = ver_cs.scan();
-            int sz = 0;
-            if (sz == verValues.size() && !horValues.isEmpty()) {
-                for (int i=0;i<sz;i++) {
+            List<String> horValues = horCs.scan();
+            List<String> verValues = verCs.scan();
+           
+            int sz = horValues.size();
+            if (sz > 0 && sz == verValues.size()) {
+            this.horizontalCoordinates = new double[sz];
+            this.verticalCoordinates = new double[sz];
+                for (int i = 0; i < sz; i++) {
                     this.horizontalCoordinates[i] = Double.parseDouble(horValues.get(i));
                     this.verticalCoordinates[i] = Double.parseDouble(verValues.get(i));
                 }
             }
+           // System.err.println("verticesPlot: "+toString());
 
         }
 
@@ -162,4 +167,28 @@ public class GraphElement {
         return -1;
     }
 
+    @Override
+    public String toString() {
+        return String.format("{\n"
+                + "  \"function\": \"%s\",\n"
+                + "  \"functionName\": \"%s\",\n"
+                + "  \"horizontalCoordinates\": \"%s\",\n"
+                + "  \"verticalCoordinates\": \"%s\"\n"
+                + "  }", function, functionName, Arrays.toString(horizontalCoordinates), Arrays.toString(verticalCoordinates));
+    }
+
+    
+  
+    public static void main(String[] args) {
+        Grid.GraphDataSharer dataSharer = new Grid.GraphDataSharer();
+        dataSharer.drg = 1;
+        dataSharer.xLower = -100;
+        dataSharer.xUpper = 100;
+        dataSharer.yStep = 0.1;
+        dataSharer.xStep = 0.1; 
+        
+        GridExpressionParser gridExpressionParser = new GridExpressionParser("[-3,-1,0,4,-3:][0,3,4,-1,0:];y(x)=sin(x-3*pi);v(x,y)=3*x!-10*y", dataSharer);
+       
+    }
+    
 }

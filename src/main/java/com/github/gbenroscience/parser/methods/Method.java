@@ -5,7 +5,7 @@
 package com.github.gbenroscience.parser.methods;
 
 import com.github.gbenroscience.logic.DRG_MODE;
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.Function;
 import static com.github.gbenroscience.parser.STRING.*;
 import static com.github.gbenroscience.parser.Number.*;
@@ -101,7 +101,7 @@ public class Method {
      */
     public final void parseExpression(String expression) {
 
-        CustomScanner cs = new CustomScanner(expression, false, "(", ")", ",");
+        Scanner cs = new Scanner(expression, false, "(", ")", ",");
         List<String> l = cs.scan();
         int sz = l.size();
         if (isMethodName(l.get(0))) {
@@ -1177,7 +1177,7 @@ public static boolean isMethodNameBeginner(String s) {
      * @return true if it finds statistical operators in the expression.
      */
     public static boolean hasStatsMethod(String expr) {
-        CustomScanner cs = new CustomScanner(expr, true, getStatsMethods());
+        Scanner cs = new Scanner(expr, true, getStatsMethods());
         List<String> scan = cs.scan();
         int size = scan.size();
         for (int i = 0; i < size; i++) {

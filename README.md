@@ -13,6 +13,7 @@ Looking for a leaner parser in native C for even faster execution? checkout [tin
     * [User defined functions](#user-defined-functions)
     * [User hardcoded functions](#user-hardcoded-functions)
     * [Differential Calculus](#differential-Calculus)
+    * [ParserNG for Graphing](#graphing-on-various-java-platforms)
 * [More Examples](#more-examples)
     * [Or using variables and calculating simple expressions](#or-using-variables-and-calculating-simple-expressions)
     * [Or using functions](#or-using-functions)
@@ -341,7 +342,7 @@ It uses its very own implementation of a symbolic differentiator.
  
         27.0
 
-
+#### ParserNG for Graphing
  
 
 ## More Examples

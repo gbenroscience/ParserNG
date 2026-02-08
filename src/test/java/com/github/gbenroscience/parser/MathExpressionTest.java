@@ -325,6 +325,7 @@ class MathExpressionTest {
         }
         long elapsedNanos = (System.nanoTime() - start) / iterations;
         double durationms = (double) elapsedNanos / 1.0E6;
+        System.out.println("DONE: " + durationms + " ms");
         if (print) System.out.println("DONE: " + durationms + " ms");
         Assertions.assertTrue(durationms < 1);
 

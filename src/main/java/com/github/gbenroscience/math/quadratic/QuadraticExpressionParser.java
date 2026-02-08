@@ -5,7 +5,7 @@
 
 package com.github.gbenroscience.math.quadratic;
 import com.github.gbenroscience.parser.STRING;
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.LISTS;
 import com.github.gbenroscience.parser.MathScanner;
 import java.util.ArrayList;
@@ -307,7 +307,7 @@ public class QuadraticExpressionParser {
         ArrayList<String>remover=new ArrayList<String>();
 
         remover.add("");
-        CustomScanner cs = new CustomScanner(expression, true,
+        Scanner cs = new Scanner(expression, true,
                 new String[]{"*","+","-","=","^",});
         scanner = (ArrayList<String>) cs.scan();
 /*

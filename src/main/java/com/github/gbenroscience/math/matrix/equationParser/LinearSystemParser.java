@@ -6,7 +6,7 @@
 package com.github.gbenroscience.math.matrix.equationParser;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.STRING;
 import java.util.ArrayList;
 import java.util.List;
@@ -217,7 +217,7 @@ private void scan(){
   ArrayList<String>remover=new ArrayList<String>();
 
 remover.add("");
-CustomScanner cs = new CustomScanner(systemOfEquations, true,
+Scanner cs = new Scanner(systemOfEquations, true,
         new String[]{"*","+","-",endOfLine,"=",});
 scanner = (ArrayList<String>) cs.scan();
 /*

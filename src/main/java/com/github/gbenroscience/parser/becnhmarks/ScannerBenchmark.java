@@ -16,7 +16,7 @@
 package com.github.gbenroscience.parser.becnhmarks;
 
  
-import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.CustomScanner; 
 import com.github.gbenroscience.parser.Scanner;
 import java.util.*;
 /*
@@ -24,12 +24,12 @@ Sampel output gains:
 Input Size: 1054 KB
 --- Starting Benchmark ---
 
-CustomScanner (Original) Time: 19085 ms
+Scanner (Original) Time: 19085 ms
 Scanner (Optimized) Time: 55 ms
 
 Speedup Factor: 347.00x faster
 
-So Scanner will replace CustomScanner in all parser code
+So Scanner will replace Scanner in all parser code
 */
 public class ScannerBenchmark {
     public static void main(String[] args) {
@@ -50,14 +50,14 @@ public class ScannerBenchmark {
         System.out.println("--- Starting Benchmark ---\n");
 
         // Warm up the JVM (important for JIT compiler optimization)
-        runCustomScanner(largeInput, tokens);
+        runScanner(largeInput, tokens);
         runOptimizedScanner(largeInput, tokens);
 
-        // 3. Test CustomScanner (Original)
+        // 3. Test Scanner (Original)
         long start1 = System.currentTimeMillis();
-        runCustomScanner(largeInput, tokens);
+        runScanner(largeInput, tokens);
         long end1 = System.currentTimeMillis();
-        System.out.println("CustomScanner (Original) Time: " + (end1 - start1) + " ms");
+        System.out.println("Scanner (Original) Time: " + (end1 - start1) + " ms");
 
         // 4. Test Scanner (Optimized)
         long start2 = System.currentTimeMillis();
@@ -69,7 +69,7 @@ public class ScannerBenchmark {
         System.out.println("\nSpeedup Factor: " + String.format("%.2f", speedup) + "x faster");
     }
 
-    private static void runCustomScanner(String input, String[] tokens) {
+    private static void runScanner(String input, String[] tokens) {
         new CustomScanner(input, true, tokens).scan();
     }
 
