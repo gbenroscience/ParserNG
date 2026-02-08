@@ -342,14 +342,7 @@ class JavaFXDrawingContext implements DrawingContext {
 }
 ```
 
-📐 Scaling Consideration
-If you’re using getScale() for DPI adjustments, multiply all coordinates and dimensions by ctx.getScale() before passing them to drawOval.
-
-Example in Grid:
-
-java
-float s = ctx.getScale();
-ctx.drawOval((int)(10*s), (int)(20*s), (int)(100*s), (int)(50*s));
+ 
 
 
 ## Example Usage: GraphPanel in Swing
