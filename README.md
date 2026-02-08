@@ -344,6 +344,7 @@ It uses its very own implementation of a symbolic differentiator.
 
 #### ParserNG for Graphing
  
+[View the Graphing Guide](./GRAPHING.md)
 
 ## More Examples
 
