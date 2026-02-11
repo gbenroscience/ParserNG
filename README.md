@@ -1,5 +1,5 @@
 # ParserNG
-<b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. 
+<b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. Its latest release on mavn-central (version 0.2.1) can be used to plot 2D graphs(Geometric plots and function plots) It works seamlessly on all Java platforms.
 
 Looking for a leaner parser in native C for even faster execution? checkout [tinymath](https://github.com/gbenroscience/tinymath) 
 
@@ -41,9 +41,6 @@ Looking for a leaner parser in native C for even faster execution? checkout [tin
 
 
 ## Usage and note
-
-If you need to use the parser directly in your Android project, go to:
-[parserng-android](https://github.com/gbenroscience/parserng-android) by the same author
 <br>
 
 If you need to access this library via Maven Central, do:
