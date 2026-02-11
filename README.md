@@ -52,7 +52,7 @@ If you need to access this library via Maven Central, do:
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
-            <version>0.1.9-release</version>
+            <version>0.2.0</version>
         </dependency>
        
 
@@ -85,20 +85,20 @@ ParserNG is written completely in (pure) Java and so is as cross-platform as Jav
 ## Using ParserNG as commandline tool
 You can use jar directly as commandline calculus. Unless the tool is packed to your distribution:
 ```
-java -jar parser-ng-0.1.9-release.jar  1+1
+java -jar parser-ng-0.2.0.jar  1+1
 2.0
 ```
 Or as logical parser
 ```
-java -jar parser-ng-0.1.9-release.jar -l true and true
+java -jar parser-ng-0.2.0.jar -l true and true
 true
-java -jar parser-ng-0.1.9-release.jar -l "2 == (4-2)"
+java -jar parser-ng-0.2.0.jar -l "2 == (4-2)"
 true
 ```
 You can get help by 
 ```
-java -jar parser-ng-0.1.9-release.jar  -h
-  ParserNG 0.1.9-release math.Main
+java -jar parser-ng-0.2.0.jar  -h
+  ParserNG 0.2.0 math.Main
 -h/-H/--help         this text; do not change for help (witout dashes), which lists functions
 -v/-V/--verbose      output is reprinted to stderr with some inter-steps
 -l/-L/--logic        will add logical expression wrapper around the expression
@@ -120,11 +120,11 @@ java -jar parser-ng-0.1.9-release.jar  -h
 ```
 You  can get examples by verbose help:
 ```
-java -jar parser-ng-0.1.9-release.jar  -h -v
+java -jar parser-ng-0.2.0.jar  -h -v
 ```
 you can list functions:
 ```
-java -jar parser-ng-0.1.9-release.jar  help
+java -jar parser-ng-0.2.0.jar  help
 List of currently known methods:
 acos        - help not yet written. See https://github.com/gbenroscience/ParserNG
 ...
@@ -133,7 +133,7 @@ List of functions is just tip of iceberg, see: https://github.com/gbenroscience/
 ```
 you can list logical operators:
 ```
-java -jar parser-ng-0.1.9-release.jar  -l help
+java -jar parser-ng-0.2.0.jar  -l help
 Comparing operators: !=, ==, >=, <=, le, ge, lt, gt, <, >
 Logical operators: impl, xor, imp, eq, or, and, |, &
 As Mathematical parts are using () as brackets, Logical parts must be grouped by [] eg.
@@ -148,40 +148,40 @@ Program can work with stdin, out and err properly. Can work with multiline input
 ### cmdline examples
 Following lines describes, how stdin/arguments are processed, and how different is input/output with `-t` on/off
 ```
-   java -jar parser-ng-0.1.9-release.jar -h
+   java -jar parser-ng-0.2.0.jar -h
     this help
-  java -jar parser-ng-0.1.9-release.jar 1+1
+  java -jar parser-ng-0.2.0.jar 1+1
     2.0
-  java -jar parser-ng-0.1.9-release.jar "1+1
+  java -jar parser-ng-0.2.0.jar "1+1
                                  +2+2"
     2.0
     4.0
-  java -jar parser-ng-0.1.9-release.jar -t "1+1
+  java -jar parser-ng-0.2.0.jar -t "1+1
                                     +2+2"
     6.0
-  java -jar parser-ng-0.1.9-release.jar -i  1+1
+  java -jar parser-ng-0.2.0.jar -i  1+1
     nothing, will expect manual output, and calculate line by line
-  java -jar parser-ng-0.1.9-release.jar -i -t  1+1
+  java -jar parser-ng-0.2.0.jar -i -t  1+1
     nothing, will expect manual output and calcualte it all as one expression
-  echo 2+2 | java -jar parser-ng-0.1.9-release.jar  1+1
+  echo 2+2 | java -jar parser-ng-0.2.0.jar  1+1
     2.0
   echo "1+1 
-        +2+2 | java -jar parser-ng-0.1.9-release.jar -i
+        +2+2 | java -jar parser-ng-0.2.0.jar -i
     2.0
     4.0
   echo "1+1 
-        +2+2 | java -jar parser-ng-0.1.9-release.jar -i -t
+        +2+2 | java -jar parser-ng-0.2.0.jar -i -t
     6.0
-  java -cp parser-ng-0.1.9-release.jar parser.cmd.ParserCmd "1+1
+  java -cp parser-ng-0.2.0.jar parser.cmd.ParserCmd "1+1
     will ask for manual imput en evaluate per line
   echo "1+1 
-        +2+2 | java -cp parser-ng-0.1.9-release.jar parser.cmd.ParserCmd 2>/dev/null
+        +2+2 | java -cp parser-ng-0.2.0.jar parser.cmd.ParserCmd 2>/dev/null
     2.0
     4.0
-  java -cp parser-ng-0.1.9-release.jar parser.MathExpression "1+1
+  java -cp parser-ng-0.2.0.jar parser.MathExpression "1+1
                                                       +2+2"
     6.0
-  java -cp parser-ng-0.1.9-release.jar parser.LogicalExpression "true or false"
+  java -cp parser-ng-0.2.0.jar parser.LogicalExpression "true or false"
     true
 
 ```
@@ -427,7 +427,7 @@ This variable can be used within other `MathExpression`s that you create within 
 
 ## Matrices
 
-ParserNG deals with matrices; howbeit on a functional level. On the way though is a pure Matrix Algebra parser component which is one of the targets set for the platform.
+**ParserNG** deals with matrices; howbeit on a functional level. On the way though is a pure Matrix Algebra parser component which is one of the targets set for the platform.
 
 Currently you can define matrices and even store them like functions...
 
@@ -484,7 +484,7 @@ To represent the linear system:
     2x + 3y = -5
     3x - 4y = 20
  
- in ParserNG, do:
+ in **ParserNG**, do:
  
  
          MathExpression linear = new MathExpression("linear_sys(2,3,-5,3,-4,20)");
@@ -528,7 +528,7 @@ This would give:
 
 #### 6. Matrix multiplication
 
-ParserNG of course allows matrix multiplication with ease.
+**ParserNG** of course allows matrix multiplication with ease.
 
 To multiply 2 matrices in 1 step: Do,
 
@@ -553,7 +553,7 @@ This would give:
 
 #### 7. Matrix addition
 
-ParserNG allows easy addition of matrices.
+**ParserNG** allows easy addition of matrices.
 
 To add 2 matrices in 1 step: Do,
 
@@ -579,7 +579,7 @@ This would give:
 
 #### 8. Matrix subtraction
 
-ParserNG also allows matrix subtraction.
+**ParserNG** also allows matrix subtraction.
 
 To find the difference of 2 matrices in 1 step: Do,
 
@@ -605,7 +605,7 @@ This would give:
 
 #### 9. Powers of a Matrix
 
-ParserNG also allows quick computation of powers of a matrix.
+**ParserNG** also allows quick computation of powers of a matrix.
 
 Here, given a matrix `M` , M<sup>2</sup> is defined as `MxM` and M<sup>n</sup> is defined as `MxMxM...(n times)`
 
@@ -633,7 +633,7 @@ This would give:
 
 #### 10. Transpose of a Matrix
 
-ParserNG also allows quick computation of the transpose of a matrix.
+**ParserNG** also allows quick computation of the transpose of a matrix.
 
 
 To find the transpose of a matrix, `M`, do:
@@ -659,7 +659,7 @@ This would give:
 
 #### 11. Editing a Matrix
 
-ParserNG also allows the entries in a matrix to be edited.
+**ParserNG** also allows the entries in a matrix to be edited.
 
 The command for this is: `matrix_edit(M,2,2,-90)`
 
@@ -689,12 +689,12 @@ This would give:
     9.0  ,    1.0  ,  -90.0           
 
 
-Note that matrix indexes in ParserNG are zero-based, so be advised accordingly as entering an invalid row/column combination will throw an error in your code.
+Note that matrix indexes in **ParserNG** are zero-based, so be advised accordingly as entering an invalid row/column combination will throw an error in your code.
 
 
 #### 12. Finding the characteristic polynomial of a Matrix
 
-ParserNG allows the quick evaluation of the characteristic polynomial of a square matrix; this polynomial can then be solved to find the eigenvalues, and hence the eigenvector of the Matrix.
+**ParserNG** allows the quick evaluation of the characteristic polynomial of a square matrix; this polynomial can then be solved to find the eigenvalues, and hence the eigenvector of the Matrix.
 
 The function is called `eigpoly`
 
@@ -729,7 +729,7 @@ This would give:
 
 ## Logical Calculus
 
-The logical expressions in math engine have theirs intentional limitations. Thus allmighty logical expression parser was added around individually evaluated Mathematical expressions which results can be later compared, and logically grouped.  The simplest way to evaluate an logical  expression in ParserNG is to use the <code>LogicalExpression</code> class.
+The logical expressions in math engine have theirs intentional limitations. Thus allmighty logical expression parser was added around individually evaluated Mathematical expressions which results can be later compared, and logically grouped.  The simplest way to evaluate an logical  expression in **ParserNG** is to use the <code>LogicalExpression</code> class.
 <code>LogicalExpression</code> is the class responsible for basic comaprsions and logica  expression parsing and evaluation. It calls <code>MathExpression</code> to ech of its basic non-logical parts. The default <code>MathExpression</code> can be repalced by any custom implementation of <code>Solvable</code>, but it is only for highly specialized usages. Highlight, where MathExpression is using <code>()</code> for mathematical bracketing, LogicalExpression - as () can be part of underlying comapred mathematical expressiosn  uses <code>[]</code> brackets.<br>
 <br>
 In CLI, you can use -l/-L/--logic switch to work with LogicalExpression. Although it is fully compatible with MathExpression you may face unknown issue<br>
@@ -862,7 +862,7 @@ In CLI, you can use -e/-E/--expanding switch to work with Expanding expressions.
 <br>
 Example:<br>
 ```
-VALUES_PNG="1 8 5 2" java -jar target/parser-ng-0.1.9.jar -e "avg(..L{MN/2})*1.1-MN <  L0 | (L1+L{MN-1})*1.3 + MN<  L0" -v
+VALUES_PNG="1 8 5 2" java -jar target/parser-ng-0.2.0.jar -e "avg(..L{MN/2})*1.1-MN <  L0 | (L1+L{MN-1})*1.3 + MN<  L0" -v
 avg(..L{MN/2})*1.1-MN <  L0 | (L1+L{MN-1})*1.3 + MN<  L0 
 Expression : avg(..L{MN/2})*1.1-MN <L0 | (L1+L{MN-1})*1.3 + MN<L0 
 Upon       : 1,8,5,2
