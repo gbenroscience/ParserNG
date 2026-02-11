@@ -2,7 +2,7 @@
 
 
 Back with a bang!
-ParserNG 0.2.1 has been released on maven-central!
+ParserNG 0.2.2 has been released on maven-central!
 
 
 ## What's new?
