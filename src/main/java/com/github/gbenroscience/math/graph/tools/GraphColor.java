@@ -209,8 +209,64 @@ public class GraphColor {
     }
  
     
+    public int getARGB() {
+        return getARGB(this.r, this.g, this.b, this.a);
+    }
+
+    public int getRGB() {
+        return getRGB(this.r, this.g, this.b);
+    }
+
+    public static int getPixel(int[] pixels, int width, int x, int y) {
+        return pixels[width * y + x];
+    }
+
+    public boolean equals(GraphColor c) {
+        return c.r == this.r && c.g == this.g && c.b == this.b && c.a == this.a;
+    }
+
+    public static int getRGB(int r, int g, int b) {
+        return getARGB(r, g, b, 255);
+    }
+
+    public static int getRGB(int pixels) {
+        int r = pixels >> 16 & 255;
+        int g = pixels >> 8 & 255;
+        int b = pixels & 255;
+        return getRGB(r, g, b);
+    }
+
+    public static int getARGB(int r, int g, int b, int alpha) {
+        return alpha << 24 | r << 16 | g << 8 | b;
+    }
     
     
-    
+     public GraphColor brighter() {
+        int r = this.getRedComponent();
+        int g = this.getGreenComponent();
+        int b = this.getBlueComponent();
+        int i = 3;
+        if (r == 0 && g == 0 && b == 0) {
+            return new GraphColor(i, i, i);
+        } else {
+            if (r > 0 && r < i) {
+                r = i;
+            }
+
+            if (g > 0 && g < i) {
+                g = i;
+            }
+
+            if (b > 0 && b < i) {
+                b = i;
+            }
+
+            return new GraphColor(Math.min((int)((double)r / 0.7), 255), Math.min((int)((double)g / 0.7), 255), Math.min((int)((double)b / 0.7), 255));
+        }
+    }
+
+    public GraphColor darker() {
+        return new GraphColor(Math.max((int)((double)this.getRedComponent() * 0.7), 0), Math.max((int)((double)this.getGreenComponent() * 0.7), 0), Math.max((int)((double)this.getBlueComponent() * 0.7), 0));
+    }
 
 }
