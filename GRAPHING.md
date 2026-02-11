@@ -553,7 +553,7 @@ class JavaFXView implements AbstractView {
     @Override
     public void repaint(int x, int y, int width, int height) {
         canvas.getGraphicsContext2D().clearRect(x, y, width, height);
-        // trigger partial redraw logic here if needed
+        // trigger the partial redraw logic here if needed
     }
 }
 ```
