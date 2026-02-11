@@ -5,19 +5,17 @@
     <artifactId>parser-ng</artifactId>
     <version>0.2.0</version>
     <packaging>jar</packaging>
-    
+   
     <name>ParserNG</name>
     <description>Rich and Performant, Cross Platform Java Library(100% Java)... Comes with a massive speed boost. Anywhere from 10x to 40x!
         Now supports Java Platform Agnostic Graphing Tool! Just implement DrawingContext for your target Java Platform and start plotting!</description>
     <url>https://github.com/gbenroscience/ParserNG</url>
-
     <licenses>
         <license>
             <name>The Apache Software License, Version 2.0</name>
             <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
         </license>
     </licenses>
-
     <developers>
         <developer>
             <name>Gbemiro Jiboye</name>
@@ -26,11 +24,10 @@
             <organizationUrl></organizationUrl>
         </developer>
     </developers>
-
     <scm>
         <connection>scm:git:git://github.com/gbenroscience/ParserNG.git</connection>
         <developerConnection>scm:git:ssh://github.com/gbenroscience/ParserNG.git</developerConnection>
-        <url>http://github.com/gbenroscience/ParserNG/tree/master</url>
+        <url>https://github.com/gbenroscience/ParserNG</url>
     </scm>
     <dependencies>
         <!-- For tests -->
@@ -46,61 +43,65 @@
             <version>5.8.2</version>
             <scope>test</scope>
         </dependency>
-
- 
     </dependencies>
-   
-   
-    <distributionManagement>
-        <snapshotRepository>
-            <id>ossrh</id>
-            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
-        </snapshotRepository>
-        <repository>
-            <id>ossrh</id>
-            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
-        </repository>
-    </distributionManagement>
-
-
-   
+  
     <build>
         <plugins>
+            <!-- Central Publishing Plugin (new way to deploy to Maven Central) -->
+            <plugin>
+                <groupId>org.sonatype.central</groupId>
+                <artifactId>central-publishing-maven-plugin</artifactId>
+                <version>0.10.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <publishingServerId>central</publishingServerId>
+                    <!-- Optional: auto-publish after validation (set to true if you want automatic release) -->
+                     <autoPublish>true</autoPublish>
+                    <!-- Optional: wait until fully published (requires autoPublish=true) -->
+                    <!-- <waitUntil>published</waitUntil> -->
+                </configuration>
+            </plugin>
+
             <plugin>
                 <artifactId>maven-jar-plugin</artifactId>
                 <version>3.0.2</version>
                 <configuration>
                     <archive>
                         <manifest>
-                            <!--<addClasspath>true</addClasspath>-->
                             <mainClass>math.Main</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
             </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-source-plugin</artifactId>
-                <version>2.2.1</version>
+                <version>3.3.1</version>
                 <executions>
                     <execution>
                         <id>attach-sources</id>
                         <goals>
-                            <goal>jar-no-fork</goal>
+                            <goal>jar</goal>
                         </goals>
                     </execution>
                 </executions>
             </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.6.3</version>
                 <configuration>
-                    <additionalparam>-Xdoclint:none</additionalparam>
+                    <!-- This disables all doclint checks (including missing class descriptions) -->
+                    <doclint>none</doclint>
                     <source>8</source>
                     <target>8</target>
                     <detectJavaApiLink>false</detectJavaApiLink>
+                    <!-- Extra safety: do not fail the build on any Javadoc issues -->
+                    <failOnError>false</failOnError>
+                    <failOnWarnings>false</failOnWarnings>
                 </configuration>
-                <version>2.9.1</version>
                 <executions>
                     <execution>
                         <id>attach-javadocs</id>
@@ -110,10 +111,11 @@
                     </execution>
                 </executions>
             </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-gpg-plugin</artifactId>
-                <version>1.5</version>
+                <version>3.2.4</version>
                 <executions>
                     <execution>
                         <id>sign-artifacts</id>
@@ -127,13 +129,16 @@
                     <keyname>42028AF0</keyname>
                 </configuration>
             </plugin>
+
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version> 3.0.0-M5</version>
+                <version>3.0.0-M5</version>
             </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
                 <configuration>
                     <source>8</source>
                     <target>8</target>
@@ -141,12 +146,8 @@
             </plugin>
         </plugins>
     </build>
-   
-   
+  
     <properties>
-        <doclint>none</doclint>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>1.7</maven.compiler.source>
-        <maven.compiler.target>1.7</maven.compiler.target>
     </properties>
 </project>
