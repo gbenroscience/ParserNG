@@ -18,7 +18,8 @@ and pass the instance to
 com.github.gbenroscience.math.graph.Grid
 ```
 
-So you can use the same codebase to plot graphs on Android, JavaFX, Swing and other Java platforms. We have made the required implementations of DrawingContext(so called adapters) available in [GRAPHING.md](./GRAPHING.md)
+So you can use the same codebase to plot graphs on Android, JavaFX, Swing and other Java platforms. We have made the required implementations of DrawingContext(so called adapters) for the most popular Java platforms(Android, Swing and JavaFX) available in [GRAPHING.md](./GRAPHING.md)
+If you have more platforms in mind, we will be excited to have you contribute the code and make the **ParserNG** even more versatile.
 Enjoy!
 
 Fun fact: here are some interactions with ParserNG hosted on maven-central within Dec 2025 and Feb 11 2026:
