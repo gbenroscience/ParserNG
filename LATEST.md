@@ -2,17 +2,21 @@
 
 
 Back with a bang!
-ParserNG 0.2.0 has been released on maven-central!
+ParserNG 0.2.1 has been released on maven-central!
 
 
 ## What's new?
 
 1. Breaking change!!! Package name change. **ParserNG** now has a proper root package name, com.github.gbenroscience
 2. Really cool!!! -> Speed upgrades of up to 10x to 40x in the base algebraic expression parser. This means more speedy and energy efficient iterative calculations and graphing!
-3. Very nice to have -> **ParserNG** now comes with a Java platform agnostic graphing capability. All the developer needs to do is to implement an interface: 
+3. Very nice to have -> **ParserNG** now comes with a Java platform agnostic graphing capability. All the developer needs to do is to implement 2 interfaces: 
 ```java
 com.github.gbenroscience.math.graph.DrawingContext
 ``` 
+```java
+com.github.gbenroscience.math.graph.AbstractView
+``` 
+
 and pass the instance to  
 ```java
 com.github.gbenroscience.math.graph.Grid

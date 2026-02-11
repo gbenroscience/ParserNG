@@ -23,8 +23,6 @@ import static java.lang.Math.*;
 
 import static com.github.gbenroscience.parser.STRING.*;
 import com.github.gbenroscience.util.Dimension;
-import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
 
 /**
  *
@@ -173,7 +171,7 @@ public class Grid {
     /**
      * The panel on which this grid will be laid.
      */
-    private JPanel component;
+    private AbstractView component;
 
     private volatile boolean lockedForMathCalc = false;
     /**
@@ -217,7 +215,7 @@ public class Grid {
             int gridSize, GraphColor gridColor, GraphColor majorAxesColor, GraphColor tickColor, GraphColor plotColor,
             int majorTickLength, int minorTickLength,
             double lowerXLimit, double upperXLimit,
-            double xStep, double yStep, GraphFont font, JPanel component) {
+            double xStep, double yStep, GraphFont font, AbstractView component) {
         /**
          * identifies the kind of input, be it a vertices based plot or an
          * algebraic one. Based on the recommendations of this section, it then
@@ -234,7 +232,7 @@ public class Grid {
         setMajorTickLength(majorTickLength);
         setMinorTickLength(minorTickLength);
 
-        this.locationOfOrigin = new Point(component.getSize().width / 2, component.getSize().height / 2);
+        this.locationOfOrigin = new Point(component.getWidth() / 2, component.getHeight() / 2);
 
         computeXMinBoundPossibleOnScreen();
         computeXMaxBoundPossibleOnScreen();
@@ -276,11 +274,11 @@ public class Grid {
         }
     }
 
-    public void setComponent(JPanel component) {
+    public void setComponent(AbstractView component) {
         this.component = component;
     }
 
-    public JPanel getComponent() {
+    public AbstractView getComponent() {
         return component;
     }
 
@@ -522,14 +520,12 @@ public class Grid {
                     // ALWAYS release the locks here, no matter what happens in the try block
                     lockedForMathCalc = false;
 
-                    // Request a repaint on the EDT
-                    SwingUtilities.invokeLater(() -> {
-                        component.repaint();
+                    // Request a redraw on the component
+                    component.repaint();
 // Only trigger if an update was requested while we were locked
-                        if (updateHappenedDuringLock) {
-                            setRefreshingIndices(true);
-                        }
-                    });
+                    if (updateHappenedDuringLock) {
+                        setRefreshingIndices(true);
+                    }
                 }
             }
         });
@@ -662,8 +658,8 @@ public class Grid {
      */
     public void drawMajorAxes(DrawingContext g) {
 
-        Point compLoc = new Point(0, 0);//component.getLocation();
-        Dimension compSize = new Dimension(component.getWidth(), component.getHeight());//component.getSize();
+        Point compLoc = new Point(0, 0);
+        Dimension compSize = new Dimension(component.getWidth(), component.getHeight());
         int xLocOfRightSideOfComponent = (int) compLoc.x + compSize.width;
         int yLocOfBottomSideOfComponent = (int) compLoc.y + compSize.height;
 
@@ -812,9 +808,7 @@ public class Grid {
             }//end while
 
         }
-        // art.fillOval(g, locationOfOrigin.x, locationOfOrigin.y, gridSize.width, gridSize.height + 3);
 
-        // component.drawBitmap(g.getBitmap(),0,0,null);
     }//end method drawMajorAxes
 
     /**
@@ -864,7 +858,7 @@ public class Grid {
                 double graphXPosOfRightSideOfScreen = this.convertScreenPointToGraphCoords(this.component.getWidth(), 0)[0];
 
                 GraphElement graphElementOne = this.gridExpressionParser.getFirstFunctionPlotTypeGraphElement();
-                if(graphElementOne == null){//no function plot type
+                if (graphElementOne == null) {//no function plot type
                     graphElementOne = this.gridExpressionParser.getGraphElements().get(0);
                 }
                 int count = graphElementOne.getHorizontalCoordinates().length;
@@ -886,8 +880,8 @@ public class Grid {
                                 double xx = 0;
                                 while (beginIndex <= endIndex - 1) {
 
-                                double[] horCoords = gr.getHorizontalCoordinates();
-                                double[] verCoords = gr.getVerticalCoordinates();
+                                    double[] horCoords = gr.getHorizontalCoordinates();
+                                    double[] verCoords = gr.getVerticalCoordinates();
                                     xx = horCoords[beginIndex];
                                     double yy = verCoords[beginIndex];
 
@@ -1065,14 +1059,6 @@ public class Grid {
      *
      */
     public final void computeXMinBoundPossibleOnScreen() {
-        /*  int width = component.getWidth();
-        int gridWidth = gridSize.width;
-        int originX = locationOfOrigin.getX();
-
-        double xMinBound = -(1.0 * locationOfOrigin.getX() ) / xStep;
-
-        return xMinBound;
-         */
         this.lowerVisibleX = convertScreenPointToGraphCoords(0, 0)[0];
     }
 
@@ -1080,15 +1066,6 @@ public class Grid {
      *
      */
     public final void computeXMaxBoundPossibleOnScreen() {
-        /* int width = component.getWidth();
-        int gridWidth = gridSize.width;
-        int originX = locationOfOrigin.getX();
-        double widthOfNegativeXAxis = width - originX;
-
-        double xMaxBound = widthOfNegativeXAxis / xStep;
-
-        return xMaxBound;
-         */
         this.upperVisibleX = convertScreenPointToGraphCoords(component.getWidth(), 0)[0];
     }
 
@@ -1096,12 +1073,6 @@ public class Grid {
      *
      */
     public final void computeYMinBoundPossibleOnScreen() {
-        /*   int width = component.getHeight();
-        int gridHeight = gridSize.height;
-        int originX = locationOfOrigin.getY();
-
-        double yMinBound = -(1.0 * locationOfOrigin.getY() ) / yStep;
-         */
         this.lowerVisibleY = convertScreenPointToGraphCoords(0, component.getHeight())[1];
     }
 
@@ -1109,15 +1080,6 @@ public class Grid {
      *
      */
     public final void computeYMaxBoundPossibleOnScreen() {
-        /* int width = component.getHeight();
-        int gridHeight = gridSize.height;
-        int originX = locationOfOrigin.getY();
-        double widthOfNegativeXAxis = width - originX;
-
-        double yMaxBound = widthOfNegativeXAxis / yStep;
-
-        return yMaxBound;*/
-
         this.upperVisibleY = convertScreenPointToGraphCoords(0, 0)[1];
     }
 

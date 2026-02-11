@@ -52,7 +52,7 @@ If you need to access this library via Maven Central, do:
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
-            <version>0.2.0</version>
+            <version>0.2.1</version>
         </dependency>
        
 

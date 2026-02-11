@@ -2,13 +2,13 @@
 
 **ParserNG** now enables easy graphing in any Java UI framework, including Swing, JavaFX, Android, and others.
 
-The library provides a `DrawingContext` interface that can be implemented to render graphs on the target UI component (e.g., `javax.swing.JPanel` in Swing, `android.view.View` in Android, or `javafx.scene.canvas.Canvas` in JavaFX).
+The library provides `DrawingContext` and `AbstractView` interfaces that can be implemented to render graphs on the target UI component (e.g., `javax.swing.JPanel` in Swing, `android.view.View` in Android, or `javafx.scene.canvas.Canvas` in JavaFX).
 
 Key packages:
 - `com.github.gbenroscience.math.graph` – Core graphing classes
 - `com.github.gbenroscience.math.graph.tools` – Supporting tools (colors, fonts, etc.)
 
-The main class for rendering graphs is `Grid` in `com.github.gbenroscience.math.graph`. To use it, implement the `DrawingContext` interface for your target framework and pass the implementation to the `Grid` instance.
+The main class for rendering graphs is `Grid` in `com.github.gbenroscience.math.graph`. To use it, implement the `DrawingContext` interface and the `AbstractView` for your target framework and pass the implementation to the `Grid` instance.
 
 ## Table of Contents
 
@@ -344,8 +344,15 @@ class JavaFXDrawingContext implements DrawingContext {
 }
 ```
 
- 
 
+### AbstractView
+
+The `com.github.gbenroscience.math.graph.AbstractView` is a generic way by which **ParserNG** defines the  Views that it draws on.
+For `javax.swing` it could be a `JPanel`, for Android it may be a `View` or a `SurfaceView` or even an `ImageView` etc.
+
+ 
+#### Usage of AbstractView
+Make your view implement `AbstracView` and then pass the instance of your view to the `Grid` constructor as in the `GraphPanel` example below.
 
 ## Example Usage: GraphPanel in Swing
 
@@ -363,7 +370,7 @@ import com.github.gbenroscience.math.graph.tools.FontStyle;
 import com.github.gbenroscience.math.graph.tools.GraphColor;
 import com.github.gbenroscience.math.graph.tools.GraphFont;
 
-public class GraphPanel extends javax.swing.JPanel implements Printable {
+public class GraphPanel extends javax.swing.JPanel implements Printable, AbstractView {
     private Point startCoords = new Point();
     private Dimension shiftCoords = new Dimension();
 
@@ -446,6 +453,111 @@ public class GraphPanel extends javax.swing.JPanel implements Printable {
 <br><br>
 This `GraphPanel` can be added to any Swing application and supports interactive features like panning, tooltips showing coordinates, customizable appearance, and printing.
 
+
+We provide simple implementations of the AbstractView for various platforms
+
+#### Swing - AbstractView implementation
+```Java
+import javax.swing.JComponent;
+
+class SwingView implements AbstractView {
+    private final JComponent component;
+
+    public SwingView(JComponent component) {
+        this.component = component;
+    }
+
+    @Override
+    public int getWidth() {
+        return component.getWidth();
+    }
+
+    @Override
+    public int getHeight() {
+        return component.getHeight();
+    }
+
+    @Override
+    public void repaint() {
+        component.repaint();
+    }
+
+    @Override
+    public void repaint(int x, int y, int width, int height) {
+        component.repaint(x, y, width, height);
+    }
+}
+```
+
+#### Android - AbstractView implementation
+```Java
+import android.view.View;
+
+class AndroidView implements AbstractView {
+    private final View view;
+
+    public AndroidView(View view) {
+        this.view = view;
+    }
+
+    @Override
+    public int getWidth() {
+        return view.getWidth();
+    }
+
+    @Override
+    public int getHeight() {
+        return view.getHeight();
+    }
+
+    @Override
+    public void repaint() {
+        view.invalidate();
+    }
+
+    @Override
+    public void repaint(int x, int y, int width, int height) {
+        view.invalidate(x, y, x + width, y + height);
+    }
+}
+```
+
+
+#### JavFX - AbstractView implementation
+```Java
+import javafx.scene.canvas.Canvas;
+
+class JavaFXView implements AbstractView {
+    private final Canvas canvas;
+
+    public JavaFXView(Canvas canvas) {
+        this.canvas = canvas;
+    }
+
+    @Override
+    public int getWidth() {
+        return (int) canvas.getWidth();
+    }
+
+    @Override
+    public int getHeight() {
+        return (int) canvas.getHeight();
+    }
+
+    @Override
+    public void repaint() {
+        canvas.getGraphicsContext2D().clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
+        // trigger redraw logic here if needed
+    }
+
+    @Override
+    public void repaint(int x, int y, int width, int height) {
+        canvas.getGraphicsContext2D().clearRect(x, y, width, height);
+        // trigger partial redraw logic here if needed
+    }
+}
+```
+
 ### Grid
 Since `Grid` is what you will add to your UI to make the graph, here is its API:
 
@@ -475,7 +587,7 @@ public Grid(
     double xStep,
     double yStep,
     GraphFont font,
-    JPanel component
+    AbstractView component
 )
 ```
 Initializes the grid with a function string (or empty for later addition), visual settings, scale limits, resolution steps, font, and the Swing panel to draw on.
@@ -484,8 +596,8 @@ Initializes the grid with a function string (or empty for later addition), visua
 
 **Component and Basic Settings**
 ```java
-public void setComponent(JPanel component)
-public JPanel getComponent()
+public void setComponent(AbstractView component)
+public AbstractView getComponent()
 
 public void setDRG(int DRG)                  // 0=degrees, 1=radians, 2=grads (default: 1)
 public int getDRG()
