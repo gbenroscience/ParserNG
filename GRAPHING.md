@@ -148,11 +148,20 @@ import com.github.gbenroscience.math.graph.tools.GraphColor;
 import com.github.gbenroscience.math.graph.tools.GraphFont;
 import com.github.gbenroscience.math.graph.tools.TextDimensions;
 
-class AndroidDrawingContext implements DrawingContext {
+ package math.graph.gui.adapter;
+
+import android.graphics.*;
+import com.github.gbenroscience.math.graph.DrawingContext;
+import com.github.gbenroscience.math.graph.tools.FontStyle;
+import com.github.gbenroscience.math.graph.tools.GraphColor;
+import com.github.gbenroscience.math.graph.tools.GraphFont;
+import com.github.gbenroscience.math.graph.tools.TextDimensions;
+
+public class AndroidDrawingContext implements DrawingContext {
     private final Canvas canvas;
     private final Paint paint = new Paint();
     private final float scale;
-// Reuse this object to avoid memory churn/GC overhead
+    // Reuse this object to avoid memory churn/GC overhead
     private final RectF rectBuffer = new RectF();
 
     public AndroidDrawingContext(Canvas canvas, float density) {
@@ -170,75 +179,98 @@ class AndroidDrawingContext implements DrawingContext {
         paint.setStrokeWidth(w);
     }
 
+
+    @Override
+    public void setFont(GraphFont f) {
+
+        int face = Typeface.NORMAL;
+        switch (f.getStyle()){
+            case PLAIN:
+                face = Typeface.NORMAL;
+                break;
+            case ITALIC:
+                face = Typeface.ITALIC;
+                break;
+            case BOLD:
+                face = Typeface.BOLD;
+                break;
+            case BOLD_ITALIC:
+                face = Typeface.BOLD_ITALIC;
+                break;
+            default:
+                break;
+        }
+
+        paint.setTypeface(Typeface.create(f.getFamily(), face));
+        paint.setTextSize(f.getSize() * scale);
+    }
+/// ////////////////////////////////////////////////////
+
 @Override
+public void drawLine(float x1, float y1, float x2, float y2) {
+    canvas.drawLine(x1 * scale, y1 * scale, x2 * scale, y2 * scale, paint);
+}
+
+    @Override
+    public void drawRect(float x, float y, float w, float h) {
+        paint.setStyle(Paint.Style.STROKE);
+        canvas.drawRect(x * scale, y * scale, (x + w) * scale, (y + h) * scale, paint);
+    }
+
+    @Override
+    public void fillRect(float x, float y, float w, float h) {
+        paint.setStyle(Paint.Style.FILL);
+        canvas.drawRect(x * scale, y * scale, (x + w) * scale, (y + h) * scale, paint);
+    }
+
+    @Override
     public void drawOval(int x, int y, int width, int height) {
         paint.setStyle(Paint.Style.STROKE);
-        updateRectBuffer(x, y, width, height);
+        updateRectBuffer(x, y, width, height); // already applies scale
         canvas.drawOval(rectBuffer, paint);
     }
 
     @Override
     public void fillOval(int x, int y, int width, int height) {
         paint.setStyle(Paint.Style.FILL);
-        updateRectBuffer(x, y, width, height);
+        updateRectBuffer(x, y, width, height); // already applies scale
         canvas.drawOval(rectBuffer, paint);
     }
 
     @Override
-    public void setFont(GraphFont f) {
-        int androidStyle = switch (f.getStyle()) {
-            case BOLD -> Typeface.BOLD;
-            case ITALIC -> Typeface.ITALIC;
-            case BOLD_ITALIC -> Typeface.BOLD_ITALIC;
-            default -> Typeface.NORMAL;
-        };
-        paint.setTypeface(Typeface.create(f.getFamily(), androidStyle));
-        paint.setTextSize(f.getSize() * scale);
-    }
-
-    @Override
-    public void drawLine(float x1, float y1, float x2, float y2) {
-        canvas.drawLine(x1, y1, x2, y2, paint);
-    }
-
-    @Override
-    public void drawRect(float x, float y, float w, float h) {
-        paint.setStyle(Paint.Style.STROKE);
-        canvas.drawRect(x, y, x + w, y + h, paint);
-    }
-
-    @Override
-    public void fillRect(float x, float y, float w, float h) {
-        paint.setStyle(Paint.Style.FILL);
-        canvas.drawRect(x, y, x + w, y + h, paint);
-    }
-
-private void updateRectBuffer(float x, float y, float w, float h) {
-        // Replaces 'new RectF()' to keep the heap clean
-        rectBuffer.set(
-            x * scale, 
-            y * scale, 
-            (x + w) * scale, 
-            (y + h) * scale
-        );
-    }
-
-@Override
     public void drawText(String text, float x, float y) {
-        // Correcting for the Baseline: 
-        // Android draws from the baseline. To make (x,y) the top-left, 
-        // we shift the Y coordinate down by the absolute value of the ascent.
         float offsetY = Math.abs(paint.ascent());
         canvas.drawText(text, x * scale, (y * scale) + offsetY, paint);
     }
 
-@Override
+
+
+
+    //////////////////////////////
+
+
+
+
+
+
+    private void updateRectBuffer(float x, float y, float w, float h) {
+        // Replaces 'new RectF()' to keep the heap clean
+        rectBuffer.set(
+                x * scale,
+                y * scale,
+                (x + w) * scale,
+                (y + h) * scale
+        );
+    }
+
+
+    @Override
     public TextDimensions measureText(String text) {
         float pixelWidth = paint.measureText(text);
         Paint.FontMetrics m = paint.getFontMetrics();
-        
+
         // Logical height is the distance from the very top to the very bottom
-        float pixelHeight = m.descent - m.ascent; 
+        float pixelHeight = m.descent - m.ascent;
 
         return new TextDimensions(pixelWidth / scale, pixelHeight / scale);
     }
