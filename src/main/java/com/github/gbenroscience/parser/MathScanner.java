@@ -1412,6 +1412,9 @@ public class MathScanner {
         scanner.scanner();
         System.out.println(scanner.scanner);
         System.out.println(scanner.parser_Result);*/
+        
+        MathScanner sc = new MathScanner("2^3+4%2-5-6-7*8+5.345!+2e-9-0.00002+70000/32.34^2^3-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12");
+        System.out.println(sc.scanner());
 
     }//end method main
 }

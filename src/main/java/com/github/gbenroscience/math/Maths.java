@@ -17,13 +17,14 @@ public class Maths {                       //3.14159265358979323846;
         return "3.1415926535897932";
     }
 
-    @SuppressWarnings("empty-statement")
-    public static String fact(String p) {
+    
+    public static String fact(double p){
+        
         String fact5 = "";
         double i = 1;
         double prod = 1;
         double fact = 0;
-        double dbVal = Double.parseDouble(p);
+        double dbVal = p;
         double n = Math.floor(dbVal);
         double k = dbVal - n;
         double d = 160 + k;
@@ -72,6 +73,12 @@ public class Maths {                       //3.14159265358979323846;
 
         fact5 = String.valueOf(fact);
         return fact5;
+   
+    }
+    
+    @SuppressWarnings("empty-statement")
+    public static String fact(String p) {
+      return fact(Double.parseDouble(p));
     }//end method fact
 
 

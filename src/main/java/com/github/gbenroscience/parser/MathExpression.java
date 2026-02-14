@@ -116,11 +116,6 @@ public class MathExpression implements Savable, Solvable {
     private VariableManager variableManager;
 
     /**
-     * Utility attribute used throughout the class for string appending
-     * operations.
-     */
-    StringBuilder utility = new StringBuilder("");
-    /**
      * The type of output returned by the parser.
      */
     TYPE returnType = TYPE.NUMBER;
@@ -914,6 +909,7 @@ public class MathExpression implements Savable, Solvable {
         PowerOperator.assignCompoundTokens(this.scanner);
 
         if (correctFunction) {
+            StringBuilder utility = new StringBuilder();
             /**
              * This stage serves for negative number detection. Prior to this
              * stage, all numbers are seen as positive ones. For example: turns
@@ -1577,7 +1573,177 @@ public class MathExpression implements Savable, Solvable {
         else if (hasFunctionOrVariableInitStatement) {
             return "Variable Storage Process Finished!";
         } else {
-                returnType = TYPE.ERROR;
+            returnType = TYPE.ERROR;
+            return "SYNTAX ERROR";
+        }
+
+    }//end method solve()
+
+    public String solveNew() {
+        if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
+            return Help.getHelp();
+        }
+        if (correctFunction && !hasFunctionOrVariableInitStatement) {
+            final ArrayList<String> myScan = new ArrayList<>();
+
+            int siz = scanner.size();
+            for (int i = 0; i < siz; i++) {
+                int closeBracIndex = scanner.indexOf(Operator.CLOSE_CIRC_BRAC);
+                int openBracIndex = closeBracIndex - 1;
+                while (openBracIndex >= 0 && scanner.get(openBracIndex--).charAt(0) != Bracket.CIRC_OPEN_BRAC){}
+                boolean isMethod = openBracIndex > 0 && Method.isMethodName(scanner.get(openBracIndex - 1));
+                i = isMethod ? openBracIndex-1 : openBracIndex;
+
+            }
+
+            myScan.addAll(scanner);
+            Bracket[] brac = mapBrackets(myScan);
+            int indexOpenInMyScan = 0;
+            int indexCloseInMyScan = 0;
+
+            setVariableValuesInFunction(myScan);
+
+            while (brac.length > 0) {
+
+                if (!correctFunction) {
+                    break;
+                }//end if
+                else {
+                    try {
+                        indexOpenInMyScan = brac[0].getIndex();
+                        indexCloseInMyScan = brac[1].getIndex();
+
+                        boolean isMethod = false;//only list returning data sets e.g sort,rnd...
+
+                        List<String> executable = null;
+                        try {
+                            isMethod = Method.isMethodName(myScan.get(indexOpenInMyScan - 1));
+                        }//end try
+                        catch (IndexOutOfBoundsException indexErr) {
+                            isMethod = false;
+                        }
+
+                        try {
+                            executable = myScan.subList(indexOpenInMyScan, indexCloseInMyScan + 1);//
+                        }//end try
+                        catch (IndexOutOfBoundsException indexErr) {
+                        }
+                        if (!isMethod) {
+                            solve(executable);
+                        }//end if
+                        else if (isMethod) {
+
+                            try {
+                                /**
+                                 * Get the view of the scanner between the
+                                 * method and the closing bracket.. e.g.
+                                 * [....sin,(,3,),....] stores [sin,(,3,)] in
+                                 * executable.
+                                 */
+                                executable = myScan.subList(indexOpenInMyScan - 1, indexCloseInMyScan + 1);
+                                if (Method.isStatsMethod(executable.get(0))) {
+
+                                    if (!Method.isUserDefinedFunction(executable.get(0))) {
+                                        Method.run(executable, DRG);
+                                    }//end if
+                                    else if (Method.isUserDefinedFunction(executable.get(0))) {
+                                        Function f = FunctionManager.lookUp(executable.get(0));
+
+                                        if (f.getIndependentVariables().size() <= 1) {
+                                            solve(executable.subList(1, executable.size()));
+                                            executable.add(")");
+                                            executable.add(1, "(");
+                                            Method.run(executable, DRG);
+                                        } else {
+                                            Method.run(executable, DRG);
+                                        }//end else
+                                    }//end else if
+                                }//end if
+                                else {
+                                    solve(executable.subList(1, executable.size()));
+                                    executable.add(")");
+                                    executable.add(1, "(");
+                                    Method.run(executable, DRG);
+                                }
+                            } catch (IndexOutOfBoundsException | NullPointerException indexErr) {
+                                break;
+                            } catch (IllegalArgumentException ill) {
+                                returnType = TYPE.ERROR;
+                                return "SYNTAX ERROR";
+                            }
+                        }//end else if
+                        brac = mapBrackets(myScan);
+                    }//end try
+                    catch (IndexOutOfBoundsException indexErr) {
+                        indexErr.printStackTrace();
+                        returnType = TYPE.ERROR;
+                        return "SYNTAX ERROR";
+                    }//end catch
+                    catch (NumberFormatException numErr) {
+                        numErr.printStackTrace();
+                        returnType = TYPE.ERROR;
+                        return "SYNTAX ERROR";
+                    }//end catch
+                    catch (InputMismatchException exception) {
+                        exception.printStackTrace();
+                        returnType = TYPE.ERROR;
+                        return "SYNTAX ERROR";
+                    }
+                }//end else
+
+            }//end while
+
+            String listAppender = listToString(myScan);
+            if (listAppender.startsWith("(")) {
+                listAppender = listAppender.substring(1);
+                listAppender = listAppender.substring(0, listAppender.length() - 1);
+
+                if (isComma(listAppender.substring(0, 1))) {
+                    listAppender = listAppender.replace(",", "");
+                }
+
+            }
+
+            if (validNumber(listAppender)) {
+                returnType = TYPE.NUMBER;
+            } else if (listAppender.contains(",")) {
+                returnType = TYPE.STRING;
+            }
+            Function f;
+            if ((f = FunctionManager.lookUp(listAppender)) != null) {
+                if (f.getType() == Function.MATRIX) {
+                    listAppender = f.getMatrix().toString();
+                    returnType = TYPE.MATRIX;
+                } else if (f.getType() == Function.LIST) {
+                    listAppender = f.toString();
+                    returnType = TYPE.LIST;
+                } else if (f.getType() == Function.ALGEBRAIC) {
+                    returnType = TYPE.ALGEBRAIC_EXPRESSION;
+                    listAppender = f.toString();
+                }
+
+            }
+
+            //designed to deduce if or not the evaluating loop executed normally.
+            //If it didn't the statements in the else will execute
+            if (correctFunction) {
+                lastResult = listAppender;
+
+            }//end if
+            //give an error statement and then reset correctFunction to true;
+            else {
+                listAppender = "A SYNTAX ERROR OCCURRED";
+                correctFunction = true;
+            }
+            if (myScan.size() == 1) {
+                returnObjectName = myScan.get(0);
+            }
+            return listAppender;
+        }//end if
+        else if (hasFunctionOrVariableInitStatement) {
+            return "Variable Storage Process Finished!";
+        } else {
+            returnType = TYPE.ERROR;
             return "SYNTAX ERROR";
         }
 

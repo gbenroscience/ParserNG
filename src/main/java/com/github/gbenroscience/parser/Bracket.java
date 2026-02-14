@@ -36,6 +36,23 @@ public class Bracket extends Operator {
      * Return true if the contents of the bracket have been evaluated
      */
     private boolean evaluated = false;
+    
+    public static final char CIRC_OPEN_BRAC ='(';
+    public static final char CIRC_CLOSE_BRAC =')';
+    
+    
+    public static final char SQUARE_OPEN_BRAC ='[';
+    public static final char SQUARE_CLOSE_BRAC =']';
+    
+    public static final char CURVED_OPEN_BRAC ='{';
+    public static final char CURVED_CLOSE_BRAC ='}';
+    
+    public static final char ANGULAR_OPEN_BRAC ='<';
+    public static final char ANGULAR_CLOSE_BRAC ='>';
+    
+    
+    
+    
 
     /**
      * Constructor of this class for creating its objects and initializing their
