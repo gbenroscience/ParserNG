@@ -1360,7 +1360,7 @@ public class MathExpression implements Savable, Solvable {
      * @return the string version of the ArrayList and removes the braces i.e.
      * []
      */
-    protected String listToString(ArrayList<String> scan) {
+    protected String listToString(List<String> scan) {
         if (scan == null || scan.isEmpty()) {
             return "";
         }
@@ -1418,6 +1418,270 @@ public class MathExpression implements Savable, Solvable {
      *
      * @return the result of the evaluation
      */
+    public String solveOld() {
+        if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
+            return Help.getHelp();
+        }
+        if (correctFunction && !hasFunctionOrVariableInitStatement) {
+            final ArrayList<String> myScan = new ArrayList<>();
+
+            myScan.addAll(scanner);
+            Bracket[] brac = mapBrackets(myScan);
+            int indexOpenInMyScan = 0;
+            int indexCloseInMyScan = 0;
+
+            setVariableValuesInFunction(myScan);
+
+            while (brac.length > 0) {
+
+                if (!correctFunction) {
+                    break;
+                }//end if
+                else {
+                    try {
+                        indexOpenInMyScan = brac[0].getIndex();
+                        indexCloseInMyScan = brac[1].getIndex();
+
+                        boolean isMethod = false;//only list returning data sets e.g sort,rnd...
+
+                        List<String> executable = null;
+                        try {
+                            isMethod = Method.isMethodName(myScan.get(indexOpenInMyScan - 1));
+                        }//end try
+                        catch (IndexOutOfBoundsException indexErr) {
+                            isMethod = false;
+                        }
+
+                        try {
+                            executable = myScan.subList(indexOpenInMyScan, indexCloseInMyScan + 1);//
+                        }//end try
+                        catch (IndexOutOfBoundsException indexErr) {
+                        }
+                        if (!isMethod) {
+                            solve(executable);
+                        }//end if
+                        else if (isMethod) {
+
+                            try {
+                                /**
+                                 * Get the view of the scanner between the
+                                 * method and the closing bracket.. e.g.
+                                 * [....sin,(,3,),....] stores [sin,(,3,)] in
+                                 * executable.
+                                 */
+                                executable = myScan.subList(indexOpenInMyScan - 1, indexCloseInMyScan + 1);
+                                if (Method.isStatsMethod(executable.get(0))) {
+
+                                    if (!Method.isUserDefinedFunction(executable.get(0))) {
+                                        Method.run(executable, DRG);
+                                    }//end if
+                                    else if (Method.isUserDefinedFunction(executable.get(0))) {
+                                        Function f = FunctionManager.lookUp(executable.get(0));
+
+                                        if (f.getIndependentVariables().size() <= 1) {
+                                            solve(executable.subList(1, executable.size()));
+                                            executable.add(")");
+                                            executable.add(1, "(");
+                                            Method.run(executable, DRG);
+                                        } else {
+                                            Method.run(executable, DRG);
+                                        }//end else
+                                    }//end else if
+                                }//end if
+                                else {
+                                    solve(executable.subList(1, executable.size()));
+                                    executable.add(")");
+                                    executable.add(1, "(");
+                                    Method.run(executable, DRG);
+                                }
+                            } catch (IndexOutOfBoundsException | NullPointerException indexErr) {
+                                break;
+                            } catch (IllegalArgumentException ill) {
+                                returnType = TYPE.ERROR;
+                                return "SYNTAX ERROR";
+                            }
+                        }//end else if
+                        brac = mapBrackets(myScan);
+                    }//end try
+                    catch (IndexOutOfBoundsException indexErr) {
+                        indexErr.printStackTrace();
+                        returnType = TYPE.ERROR;
+                        return "SYNTAX ERROR";
+                    }//end catch
+                    catch (NumberFormatException numErr) {
+                        numErr.printStackTrace();
+                        returnType = TYPE.ERROR;
+                        return "SYNTAX ERROR";
+                    }//end catch
+                    catch (InputMismatchException exception) {
+                        exception.printStackTrace();
+                        returnType = TYPE.ERROR;
+                        return "SYNTAX ERROR";
+                    }
+                }//end else
+
+            }//end while
+
+            String listAppender = listToString(myScan);
+            if (listAppender.startsWith("(")) {
+                listAppender = listAppender.substring(1);
+                listAppender = listAppender.substring(0, listAppender.length() - 1);
+
+                if (isComma(listAppender.substring(0, 1))) {
+                    listAppender = listAppender.replace(",", "");
+                }
+
+            }
+
+            if (validNumber(listAppender)) {
+                returnType = TYPE.NUMBER;
+            } else if (listAppender.contains(",")) {
+                returnType = TYPE.STRING;
+            }
+            Function f;
+            if ((f = FunctionManager.lookUp(listAppender)) != null) {
+                if (f.getType() == Function.MATRIX) {
+                    listAppender = f.getMatrix().toString();
+                    returnType = TYPE.MATRIX;
+                } else if (f.getType() == Function.LIST) {
+                    listAppender = f.toString();
+                    returnType = TYPE.LIST;
+                } else if (f.getType() == Function.ALGEBRAIC) {
+                    returnType = TYPE.ALGEBRAIC_EXPRESSION;
+                    listAppender = f.toString();
+                }
+
+            }
+
+            //designed to deduce if or not the evaluating loop executed normally.
+            //If it didn't the statements in the else will execute
+            if (correctFunction) {
+                lastResult = listAppender;
+
+            }//end if
+            //give an error statement and then reset correctFunction to true;
+            else {
+                listAppender = "A SYNTAX ERROR OCCURRED";
+                correctFunction = true;
+            }
+            if (myScan.size() == 1) {
+                returnObjectName = myScan.get(0);
+            }
+            return listAppender;
+        }//end if
+        else if (hasFunctionOrVariableInitStatement) {
+            return "Variable Storage Process Finished!";
+        } else {
+            returnType = TYPE.ERROR;
+            return "SYNTAX ERROR";
+        }
+
+    }//end method solve()
+
+    private String resolveSegment(List<String> scan, int openIdx, int closeIdx, boolean isMethod) {
+        if (isMethod) {
+            try {
+                /**
+                 * Get the view of the scanner between the method and the
+                 * closing bracket.. e.g. [....sin,(,3,),....] stores
+                 * [sin,(,3,)] in executable.
+                 */
+
+                List<String> executable = isMethod ? scan.subList(openIdx - 1, closeIdx + 1) : scan.subList(openIdx, closeIdx + 1);
+ 
+                String methodName = isMethod ? executable.get(0) : null;
+
+                //[,sin,(,2,),] should be allowed to pass here to Method.run, else, evaluate the contents of the bracket and reduce to a number before passing
+                if (executable.size() == 4) {
+                    List<String> out = Method.run(new ArrayList<>(executable), DRG); 
+                    return out.get(0);
+                } else {//e.g [,cos,(,3,+,5,-2,^,3,),]-> First evaluate the expression before evaluating the method
+                    if (Method.isStatsMethod(methodName)) {
+                        List<String> out = Method.run(new ArrayList<>(executable), DRG); 
+                        return Method.isNumberReturningStatsMethod(methodName) ? out.get(0) : listToString(out);
+                    } else { 
+                        double val = hiSpeedSolver(executable.subList(2, executable.size() - 1));
+                        ArrayList<String>newList = new ArrayList<>(Arrays.asList(methodName, "(", val + "", ")"));
+                        List<String> out = Method.run(newList, DRG);
+               
+                          return out.get(0);
+                    }
+                }
+/*
+                if (Method.isStatsMethod(methodName)) {
+
+                    if (!Method.isUserDefinedFunction(methodName)) {
+                        System.out.println("1");
+                        Method.run(new ArrayList<>(executable), DRG);
+                    }//end if
+                    else if (Method.isUserDefinedFunction(methodName)) {
+                        Function f = FunctionManager.lookUp(methodName);
+
+                        if (f.getIndependentVariables().size() <= 1) {
+                            System.out.println("2a");
+                            solve(new ArrayList<>(executable.subList(1, executable.size())));
+                            executable.add(")");
+                            executable.add(1, "(");
+                            Method.run(executable, DRG);
+                        } else {
+                            System.out.println("2b");
+                            Method.run(executable, DRG);
+                        }//end else
+                    }//end else if
+                    System.out.println("executable-after stats-method run: " + executable);
+                    return executable.get(0);
+                }//end if
+                else {
+                    System.out.println("3");
+                    solve(executable.subList(2, executable.size() - 1));
+                    System.out.println("3. executable-after-solve: " + executable);
+                    Method.run(executable, DRG);
+                    System.out.println("3. executable-after-Method.run: " + executable);
+                    System.out.println("3. scan-after-Method.run: " + scan);
+                    return executable.get(0);
+                }*/
+            } catch (IndexOutOfBoundsException | NullPointerException | IllegalArgumentException indexErr) {
+                returnType = TYPE.ERROR;
+                return "SYNTAX ERROR";
+            }
+        } else { 
+            // Range: [(, tokens..., )]
+            // Extract only the inner tokens for the fast evaluator
+            // Using subList here is okay as it's just a view for the evaluator
+            List<String> inner = scan.subList(openIdx + 1, closeIdx);
+             double val = hiSpeedSolver(inner);
+       
+
+            // Return as string for the main list
+            return String.valueOf(val);
+        }
+    }
+
+    private String solveNoBrackets(List<String> tokens) {
+        if (tokens.isEmpty()) {
+            return "0";
+        }
+
+        // Check if it's already a single value to avoid overhead
+        if (tokens.size() == 1) {
+            return tokens.get(0);
+        }
+
+        try {
+            // Call the 'Gemini Nitro' winner code
+            double result = hiSpeedSolver(tokens);
+
+            // Clean up the output: if it's 5.0, return "5"
+            if (result == (long) result) {
+                return String.valueOf((long) result);
+            }
+            return String.valueOf(result);
+
+        } catch (Exception e) {
+            return "SYNTAX ERROR";
+        }
+    }
+
     @Override
     public String solve() {
         if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
@@ -1426,272 +1690,59 @@ public class MathExpression implements Savable, Solvable {
         if (correctFunction && !hasFunctionOrVariableInitStatement) {
             final ArrayList<String> myScan = new ArrayList<>();
 
-            myScan.addAll(scanner);
-            Bracket[] brac = mapBrackets(myScan);
-            int indexOpenInMyScan = 0;
-            int indexCloseInMyScan = 0;
-
-            setVariableValuesInFunction(myScan);
-
-            while (brac.length > 0) {
-
-                if (!correctFunction) {
-                    break;
-                }//end if
-                else {
-                    try {
-                        indexOpenInMyScan = brac[0].getIndex();
-                        indexCloseInMyScan = brac[1].getIndex();
-
-                        boolean isMethod = false;//only list returning data sets e.g sort,rnd...
-
-                        List<String> executable = null;
-                        try {
-                            isMethod = Method.isMethodName(myScan.get(indexOpenInMyScan - 1));
-                        }//end try
-                        catch (IndexOutOfBoundsException indexErr) {
-                            isMethod = false;
-                        }
-
-                        try {
-                            executable = myScan.subList(indexOpenInMyScan, indexCloseInMyScan + 1);//
-                        }//end try
-                        catch (IndexOutOfBoundsException indexErr) {
-                        }
-                        if (!isMethod) {
-                            solve(executable);
-                        }//end if
-                        else if (isMethod) {
-
-                            try {
-                                /**
-                                 * Get the view of the scanner between the
-                                 * method and the closing bracket.. e.g.
-                                 * [....sin,(,3,),....] stores [sin,(,3,)] in
-                                 * executable.
-                                 */
-                                executable = myScan.subList(indexOpenInMyScan - 1, indexCloseInMyScan + 1);
-                                if (Method.isStatsMethod(executable.get(0))) {
-
-                                    if (!Method.isUserDefinedFunction(executable.get(0))) {
-                                        Method.run(executable, DRG);
-                                    }//end if
-                                    else if (Method.isUserDefinedFunction(executable.get(0))) {
-                                        Function f = FunctionManager.lookUp(executable.get(0));
-
-                                        if (f.getIndependentVariables().size() <= 1) {
-                                            solve(executable.subList(1, executable.size()));
-                                            executable.add(")");
-                                            executable.add(1, "(");
-                                            Method.run(executable, DRG);
-                                        } else {
-                                            Method.run(executable, DRG);
-                                        }//end else
-                                    }//end else if
-                                }//end if
-                                else {
-                                    solve(executable.subList(1, executable.size()));
-                                    executable.add(")");
-                                    executable.add(1, "(");
-                                    Method.run(executable, DRG);
-                                }
-                            } catch (IndexOutOfBoundsException | NullPointerException indexErr) {
-                                break;
-                            } catch (IllegalArgumentException ill) {
-                                returnType = TYPE.ERROR;
-                                return "SYNTAX ERROR";
-                            }
-                        }//end else if
-                        brac = mapBrackets(myScan);
-                    }//end try
-                    catch (IndexOutOfBoundsException indexErr) {
-                        indexErr.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
-                    }//end catch
-                    catch (NumberFormatException numErr) {
-                        numErr.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
-                    }//end catch
-                    catch (InputMismatchException exception) {
-                        exception.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
-                    }
-                }//end else
-
-            }//end while
-
-            String listAppender = listToString(myScan);
-            if (listAppender.startsWith("(")) {
-                listAppender = listAppender.substring(1);
-                listAppender = listAppender.substring(0, listAppender.length() - 1);
-
-                if (isComma(listAppender.substring(0, 1))) {
-                    listAppender = listAppender.replace(",", "");
-                }
-
-            }
-
-            if (validNumber(listAppender)) {
-                returnType = TYPE.NUMBER;
-            } else if (listAppender.contains(",")) {
-                returnType = TYPE.STRING;
-            }
-            Function f;
-            if ((f = FunctionManager.lookUp(listAppender)) != null) {
-                if (f.getType() == Function.MATRIX) {
-                    listAppender = f.getMatrix().toString();
-                    returnType = TYPE.MATRIX;
-                } else if (f.getType() == Function.LIST) {
-                    listAppender = f.toString();
-                    returnType = TYPE.LIST;
-                } else if (f.getType() == Function.ALGEBRAIC) {
-                    returnType = TYPE.ALGEBRAIC_EXPRESSION;
-                    listAppender = f.toString();
-                }
-
-            }
-
-            //designed to deduce if or not the evaluating loop executed normally.
-            //If it didn't the statements in the else will execute
-            if (correctFunction) {
-                lastResult = listAppender;
-
-            }//end if
-            //give an error statement and then reset correctFunction to true;
-            else {
-                listAppender = "A SYNTAX ERROR OCCURRED";
-                correctFunction = true;
-            }
-            if (myScan.size() == 1) {
-                returnObjectName = myScan.get(0);
-            }
-            return listAppender;
-        }//end if
-        else if (hasFunctionOrVariableInitStatement) {
-            return "Variable Storage Process Finished!";
-        } else {
-            returnType = TYPE.ERROR;
-            return "SYNTAX ERROR";
-        }
-
-    }//end method solve()
-
-    public String solveNew() {
-        if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
-            return Help.getHelp();
-        }
-        if (correctFunction && !hasFunctionOrVariableInitStatement) {
-            final ArrayList<String> myScan = new ArrayList<>();
-
             int siz = scanner.size();
-            for (int i = 0; i < siz; i++) {
-                int closeBracIndex = scanner.indexOf(Operator.CLOSE_CIRC_BRAC);
-                int openBracIndex = closeBracIndex - 1;
-                while (openBracIndex >= 0 && scanner.get(openBracIndex--).charAt(0) != Bracket.CIRC_OPEN_BRAC){}
-                boolean isMethod = openBracIndex > 0 && Method.isMethodName(scanner.get(openBracIndex - 1));
-                i = isMethod ? openBracIndex-1 : openBracIndex;
+            setVariableValuesInFunction(myScan);
+            myScan.addAll(scanner);
 
+            // Indices stack to track nested brackets
+           
+
+            // Using a primitive array as a stack for speed
+            int[] openIdxStack = new int[myScan.size()];
+            int stackPtr = -1;
+
+            for (int i = 0; i < myScan.size(); i++) {
+                String token = myScan.get(i);
+
+                // 1. When we find an open bracket, just remember its position
+                if (token.equals("(")) {
+                    openIdxStack[++stackPtr] = i;
+                } // 2. When we find a closing bracket, we resolve the innermost pair
+                else if (token.equals(")")) {
+                    if (stackPtr < 0) {
+                        return "SYNTAX ERROR: Mismatched brackets";
+                    }
+
+                    int openIdx = openIdxStack[stackPtr--];
+                    int closeIdx = i;
+
+                    // Check if there is a method name before the opening bracket
+                    boolean isMethod = openIdx > 0 && Method.isMethodName(myScan.get(openIdx - 1));
+                    int replaceStart = isMethod ? openIdx - 1 : openIdx;
+
+                    // Extract the result for this specific pair
+                    String result = resolveSegment(myScan, openIdx, closeIdx, isMethod);
+
+                    // 3. REPLACEMENT BLOCK (The most critical part for speed)
+                    // Remove the processed tokens from the list
+                    int countToRemove = closeIdx - replaceStart + 1;
+                    for (int k = 0; k < countToRemove; k++) {
+                        myScan.remove(replaceStart);
+                    }
+
+                    // Insert the computed value
+                    myScan.add(replaceStart, result);
+
+                    // 4. RESET INDEX: Move the pointer back to where the result was inserted
+                    // so the 'for' loop continues scanning the rest of the expression correctly.
+                    i = replaceStart;
+                }
             }
 
-            myScan.addAll(scanner);
-            Bracket[] brac = mapBrackets(myScan);
-            int indexOpenInMyScan = 0;
-            int indexCloseInMyScan = 0;
-
-            setVariableValuesInFunction(myScan);
-
-            while (brac.length > 0) {
-
-                if (!correctFunction) {
-                    break;
-                }//end if
-                else {
-                    try {
-                        indexOpenInMyScan = brac[0].getIndex();
-                        indexCloseInMyScan = brac[1].getIndex();
-
-                        boolean isMethod = false;//only list returning data sets e.g sort,rnd...
-
-                        List<String> executable = null;
-                        try {
-                            isMethod = Method.isMethodName(myScan.get(indexOpenInMyScan - 1));
-                        }//end try
-                        catch (IndexOutOfBoundsException indexErr) {
-                            isMethod = false;
-                        }
-
-                        try {
-                            executable = myScan.subList(indexOpenInMyScan, indexCloseInMyScan + 1);//
-                        }//end try
-                        catch (IndexOutOfBoundsException indexErr) {
-                        }
-                        if (!isMethod) {
-                            solve(executable);
-                        }//end if
-                        else if (isMethod) {
-
-                            try {
-                                /**
-                                 * Get the view of the scanner between the
-                                 * method and the closing bracket.. e.g.
-                                 * [....sin,(,3,),....] stores [sin,(,3,)] in
-                                 * executable.
-                                 */
-                                executable = myScan.subList(indexOpenInMyScan - 1, indexCloseInMyScan + 1);
-                                if (Method.isStatsMethod(executable.get(0))) {
-
-                                    if (!Method.isUserDefinedFunction(executable.get(0))) {
-                                        Method.run(executable, DRG);
-                                    }//end if
-                                    else if (Method.isUserDefinedFunction(executable.get(0))) {
-                                        Function f = FunctionManager.lookUp(executable.get(0));
-
-                                        if (f.getIndependentVariables().size() <= 1) {
-                                            solve(executable.subList(1, executable.size()));
-                                            executable.add(")");
-                                            executable.add(1, "(");
-                                            Method.run(executable, DRG);
-                                        } else {
-                                            Method.run(executable, DRG);
-                                        }//end else
-                                    }//end else if
-                                }//end if
-                                else {
-                                    solve(executable.subList(1, executable.size()));
-                                    executable.add(")");
-                                    executable.add(1, "(");
-                                    Method.run(executable, DRG);
-                                }
-                            } catch (IndexOutOfBoundsException | NullPointerException indexErr) {
-                                break;
-                            } catch (IllegalArgumentException ill) {
-                                returnType = TYPE.ERROR;
-                                return "SYNTAX ERROR";
-                            }
-                        }//end else if
-                        brac = mapBrackets(myScan);
-                    }//end try
-                    catch (IndexOutOfBoundsException indexErr) {
-                        indexErr.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
-                    }//end catch
-                    catch (NumberFormatException numErr) {
-                        numErr.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
-                    }//end catch
-                    catch (InputMismatchException exception) {
-                        exception.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
-                    }
-                }//end else
-
-            }//end while
+// Final reduction for any remaining tokens without brackets
+            if (myScan.size() > 1) {
+                solveNoBrackets(myScan);
+            }
 
             String listAppender = listToString(myScan);
             if (listAppender.startsWith("(")) {
@@ -1701,7 +1752,6 @@ public class MathExpression implements Savable, Solvable {
                 if (isComma(listAppender.substring(0, 1))) {
                     listAppender = listAppender.replace(",", "");
                 }
-
             }
 
             if (validNumber(listAppender)) {
@@ -1746,11 +1796,15 @@ public class MathExpression implements Savable, Solvable {
             returnType = TYPE.ERROR;
             return "SYNTAX ERROR";
         }
-
     }//end method solve()
 
     protected List<String> solve(List<String> list) {
-        return expressionSolver.solve(list);
+        expressionSolver.evaluate(list);
+        return list;
+    }
+
+    protected double hiSpeedSolver(List<String> list) {
+        return expressionSolver.evaluate(list);
     }
 
     /**
@@ -2401,7 +2455,119 @@ public class MathExpression implements Savable, Solvable {
  * - Operator constants are defined here for clarity; adjust to match your
  *   existing constants if different.
  */
-public final class ExpressionSolver {
+ 
+    
+     
+
+ final class ExpressionSolver {
+
+        public double evaluate(List<String> tokens) {
+   
+            // Convert to array to eliminate List.get() overhead and bounds checking
+            final String[] ts = tokens.toArray(new String[0]);
+            final int n = ts.length;
+
+            // Primitive stacks to avoid Object boxing
+            final double[] valStack = new double[n];
+            final int[] opStack = new int[n];
+            int vIdx = -1;
+            int oIdx = -1;
+
+            for (int i = 0; i < n; i++) {
+                final String s = ts[i];
+                final char c0 = s.charAt(0);
+                final int sLen = s.length();
+
+                // 1. NUMERIC CHECK: Hand-parse for speed, fallback to standard for accuracy
+                if ((c0 >= '0' && c0 <= '9') || (c0 == '-' && sLen > 1 && s.charAt(1) >= '0' && s.charAt(1) <= '9')) {
+                    valStack[++vIdx] = Double.parseDouble(s); // Standard parse is safest for exactness
+                    continue;
+                }
+
+                // 2. UNARY POSTFIX
+                if (c0 == '!' || c0 == '²' || c0 == '³' || (c0 == '-' && sLen > 1 && s.charAt(1) == '¹')) {
+                    final double a = valStack[vIdx];
+                    if (c0 == '!') {
+                        valStack[vIdx] = Maths.fact(a);
+                    } else if (c0 == '²') {
+                        valStack[vIdx] = Math.pow(a, 2.0);
+                    } else if (c0 == '³') {
+                        valStack[vIdx] = Math.pow(a, 3.0);
+                    } else {
+                        valStack[vIdx] = 1.0 / a; // Inverse -¹
+                    }
+                    continue;
+                }
+
+                // 3. BINARY OPERATORS (Shunting-Yard logic)
+                final int currentPrec = getPrec(c0);
+                while (oIdx >= 0) {
+                    final int topOp = opStack[oIdx];
+                    if (c0 == '^' ? getPrec((char) topOp) > currentPrec : getPrec((char) topOp) >= currentPrec) {
+                        final double b = valStack[vIdx--];
+                        final double a = valStack[vIdx--];
+                        valStack[++vIdx] = applyBinary((char) topOp, a, b);
+                        oIdx--;
+                    } else {
+                        break;
+                    }
+                }
+                opStack[++oIdx] = c0;
+            }
+
+            // Final reduction of remaining operators
+            while (oIdx >= 0) {
+                final double b = valStack[vIdx--];
+                final double a = valStack[vIdx--];
+                valStack[++vIdx] = applyBinary((char) opStack[oIdx--], a, b);
+            }
+            return valStack[0];
+        }
+
+        private int getPrec(char op) {
+            switch (op) {
+                case '+':
+                case '-':
+                    return 1;
+                case '*':
+                case '/':
+                case '%':
+                case 'Р':
+                case 'Č':
+                    return 2;
+                case '^':
+                    return 3;
+                default:
+                    return 0;
+            }
+        }
+
+        private double applyBinary(final char op, final double a, final double b) {
+            switch (op) {
+                case '+':
+                    return a + b;
+                case '-':
+                    return a - b;
+                case '*':
+                    return a * b;
+                case '/':
+                    return a / b;
+                case '%':
+                    return a % b;
+                case '^':
+                    return Math.pow(a, b);
+                case 'Р':
+                    return Maths.fact(a) / Maths.fact(a - b);
+                case 'Č':
+                    return Maths.fact(a) / (Maths.fact(b) * Maths.fact(a - b));
+                default:
+                    return 0;
+            }
+        }
+
+    }
+
+    public final class ExpressionSolverOld {
 
         // Operator constants (adjust to match your project's constants if needed)
         private static final String INFINITY = "Infinity";
@@ -3044,12 +3210,22 @@ public final class ExpressionSolver {
 
     public static void main(String... args) {
 
-        String s1 = "sin(1)+cos(1)+tan(1)+log(10)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));";
+         String s0= "(((4+2*(3)))/3-(4-1)+3^4^2)";
+         MathExpression me = new MathExpression(s0);
+         System.out.println("me.solve(): "+me.solve()); 
+         
+        String s5 = "2^3+4%2-5-6-7*8+5!+2E-9-0.00002+70000/32.34^2^3-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12";
+        MathExpression m5 = new MathExpression(s5);
+        System.out.println("True solution: " + m5.solve());
+
+        String s1 = "x=2;f(x)=sin(x)-tan(x);f(3);sin(1.75)+cos(1.23)+tan(1.86-0.26)+log(10,3)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));";
         String s2 = "((sin(4+cos(3)))/ln(4-1)+3^(4*2))";
+        
+         
 
         MathExpression m = new MathExpression(s1);
 
-        double N = 10000;
+        double N = 1;
         double start = System.nanoTime();
         String s = null;
         for (int i = 0; i < N; i++) {

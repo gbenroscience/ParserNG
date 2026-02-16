@@ -273,7 +273,7 @@ public class Function implements Savable {
 
                 success = true;
             } else {
-                MathExpression expr = new MathExpression(rhs);
+                MathExpression expr = new MathExpression(rhs);System.out.println("rhs="+rhs);
                 String val = expr.solve();
                 String referenceName = expr.getReturnObjectName();
 

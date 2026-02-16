@@ -14,6 +14,6 @@ import java.io.Serializable;
  */
 public enum TYPE implements Serializable{
 
-    MATRIX, LIST, NUMBER, STRING, VOID, ALGEBRAIC_EXPRESSION, ERROR
+    MATRIX, LIST, NUMBER, STRING, VOID, ALGEBRAIC_EXPRESSION, ERROR, BOOLEAN
 
 }

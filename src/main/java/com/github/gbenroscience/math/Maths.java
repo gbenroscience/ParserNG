@@ -18,7 +18,7 @@ public class Maths {                       //3.14159265358979323846;
     }
 
     
-    public static String fact(double p){
+    public static double fact(double p){
         
         String fact5 = "";
         double i = 1;
@@ -70,15 +70,18 @@ public class Maths {                       //3.14159265358979323846;
             fact = fact1;
 
         }
-
-        fact5 = String.valueOf(fact);
-        return fact5;
-   
+        return fact;
+    }
+    
+    
+    public static String factorialStr(double p){
+        double v = fact(p);
+        return String.valueOf(v);
     }
     
     @SuppressWarnings("empty-statement")
     public static String fact(String p) {
-      return fact(Double.parseDouble(p));
+      return factorialStr(Double.parseDouble(p));
     }//end method fact
 
 

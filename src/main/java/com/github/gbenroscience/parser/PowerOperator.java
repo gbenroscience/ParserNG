@@ -75,7 +75,7 @@ public final class PowerOperator extends BinaryOperator{
          * is a number or a bracketed expression first and then if true applying the production. Else,
          * it does not apply the production.
          *
-         */
+         
         for(int i=0;i<scan.size();i++){
             try{
                 if(isPower(scan.get(i))){
@@ -229,7 +229,7 @@ public final class PowerOperator extends BinaryOperator{
 
             }//end catch
         }//end for
-
+*/
     }//end method assignCompoundTokens
 
 
