@@ -705,9 +705,9 @@ public class MathExpression implements Savable, Solvable {
 
         }//end for
 
-        correctFunction = ListReturningStatsOperator.validateFunction(this.scanner);
+        correctFunction = ListReturningStatsMethod.validateFunction(this.scanner);
         parser_Result = correctFunction ? Parser_Result.VALID : Parser_Result.SYNTAX_ERROR;
-        //processLogger.writeLog(ListReturningStatsOperator.getErrorMessage());
+        //processLogger.writeLog(ListReturningStatsMethod.getErrorMessage());
 
         if (noOfListReturningOperators > 0 && correctFunction) {
             setHasListReturningOperators(true);
@@ -1592,7 +1592,7 @@ public class MathExpression implements Savable, Solvable {
                 String methodName = isMethod ? executable.get(0) : null;
 
                 //[,sin,(,2,),] should be allowed to pass here to Method.run, else, evaluate the contents of the bracket and reduce to a number before passing
-                if (executable.size() == 4) { 
+                if (executable.size() == 4) {
                     List<String> out = Method.run(new ArrayList<>(executable), DRG);
                     return out.get(0);
                 } else {//e.g [,cos,(,3,+,5,-2,^,3,),]-> First evaluate the expression before evaluating the method
@@ -1654,16 +1654,15 @@ public class MathExpression implements Savable, Solvable {
         }
         if (correctFunction && !hasFunctionOrVariableInitStatement) {
             final ArrayList<String> myScan = new ArrayList<>();
- 
+
             myScan.addAll(scanner);
-            
-            setVariableValuesInFunction(myScan); 
+
+            setVariableValuesInFunction(myScan);
             // Indices stack to track nested brackets
             // Using a primitive array as a stack for speed
             int[] openIdxStack = new int[myScan.size()];
             int stackPtr = -1;
-            
-            
+
             for (int i = 0; i < myScan.size(); i++) {
                 String token = myScan.get(i);
 
@@ -1685,8 +1684,8 @@ public class MathExpression implements Savable, Solvable {
                     try {
                         // Extract the result for this specific pair
                         String result = resolveSegment(myScan, openIdx, closeIdx, isMethod);
-                 
-                         // 3. REPLACEMENT BLOCK (The most critical part for speed)
+
+                        // 3. REPLACEMENT BLOCK (The most critical part for speed)
                         // Remove the processed tokens from the list
                         int countToRemove = closeIdx - replaceStart + 1;
                         for (int k = 0; k < countToRemove; k++) {
@@ -1709,7 +1708,7 @@ public class MathExpression implements Savable, Solvable {
             if (myScan.size() > 1) {
                 solveNoBrackets(myScan);
             }
-        
+
             String listAppender = listToString(myScan);
             if (listAppender.startsWith("(")) {
                 listAppender = listAppender.substring(1);
@@ -2441,8 +2440,8 @@ public final class ExpressionSolver {
         }
 
         public double evaluate(List<String> tokens) {
-            if(tokens.size() == 1 && isNumber(tokens.get(0))){
-                return Double.parseDouble(tokens.get(0));
+            if (tokens.size() == 1 && isNumber(tokens.get(0))) {
+                return fastParseDouble(tokens.get(0));
             }
             String[] toks = tokens.toArray(new String[0]); // faster array access
             int n = toks.length;
@@ -2596,7 +2595,7 @@ public final class ExpressionSolver {
                 applyTop(values, operators);
             }
 
-           MathExpression.this.parser_Result = Parser_Result.VALID;
+            MathExpression.this.parser_Result = Parser_Result.VALID;
             return values.data[0];
         }
 
@@ -2643,66 +2642,159 @@ public final class ExpressionSolver {
 
         // Custom fast parser (2-4x faster than Double.parseDouble for these short valid strings)
         private double fastParseDouble(String s) {
-        boolean isNeg = s.charAt(0) == '-';
-
-        int len = s.length();
-        int idx = isNeg ? 1 : 0;
-        double value = 0.0;
-
-        // Integer part
-        while (idx < len) {
-            char c = s.charAt(idx);
-            if (c >= '0' && c <= '9') {
-                value = value * 10.0 + (c - '0');
-                idx++;
-            } else {
-                break;
+            int len = s.length();
+            if (len == 0) {
+                return 0.0; // or throw if empty not allowed
             }
-        }
+            int idx = 0;
+            boolean negative = false;
+            char first = s.charAt(0);
 
-        // Fractional part
-        if (idx < len && s.charAt(idx) == '.') {
-            idx++;
-            double frac = 0.0;
-            double div = 1.0;
+            // Handle sign
+            if (first == '-') {
+                negative = true;
+                idx = 1;
+            } else if (first == '+') {
+                idx = 1;
+            }
+
+            double value = 0.0;
+
+            // Integer part
+            boolean hasIntPart = false;
             while (idx < len) {
                 char c = s.charAt(idx);
                 if (c >= '0' && c <= '9') {
-                    div *= 10.0;
-                    frac = frac * 10.0 + (c - '0');
+                    value = value * 10.0 + (c - '0');
+                    hasIntPart = true;
                     idx++;
                 } else {
                     break;
                 }
             }
-            value += frac / div;
+
+            // Fractional part
+            boolean hasFracPart = false;
+            if (idx < len && s.charAt(idx) == '.') {
+                idx++;
+                double frac = 0.0;
+                double div = 1.0;
+                while (idx < len) {
+                    char c = s.charAt(idx);
+                    if (c >= '0' && c <= '9') {
+                        div *= 10.0;
+                        frac = frac * 10.0 + (c - '0');
+                        hasFracPart = true;
+                        idx++;
+                    } else {
+                        break;
+                    }
+                }
+                value += frac / div;
+            }
+
+            // Scientific notation
+            if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
+                idx++;
+                boolean negExp = false;
+                if (idx < len && s.charAt(idx) == '-') {
+                    negExp = true;
+                    idx++;
+                } else if (idx < len && s.charAt(idx) == '+') {
+                    idx++;
+                }
+
+                long exp = 0;
+                boolean hasExpDigits = false;
+                while (idx < len) {
+                    char c = s.charAt(idx);
+                    if (c >= '0' && c <= '9') {
+                        exp = exp * 10 + (c - '0');
+                        hasExpDigits = true;
+                        if (exp > 1000000000L) { // Prevent insane overflow
+                            value = negative ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+                            break;
+                        }
+                        idx++;
+                    } else {
+                        break;
+                    }
+                }
+                if (hasExpDigits) {
+                    value *= Math.pow(10.0, negExp ? -exp : exp);
+                }
+            }
+
+            // Basic validation (since scanner is trusted, but good to have)
+            if (idx != len || (!hasIntPart && !hasFracPart)) {
+                return 0.0; // or throw if strict
+            }
+
+            return negative ? -value : value;
         }
 
-        // Scientific notation
-        if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
-            idx++;
-            int exp = 0;
-            boolean negExp = false;
-            if (idx < len && s.charAt(idx) == '-') {
-                negExp = true;
-                idx++;
-            } else if (idx < len && s.charAt(idx) == '+') {
-                idx++;
-            }
+        private double fastParseDouble1(String s) {
+            boolean isNeg = s.charAt(0) == '-';
+
+            int len = s.length();
+            int idx = isNeg ? 1 : 0;
+            double value = 0.0;
+
+            // Integer part
             while (idx < len) {
                 char c = s.charAt(idx);
-                exp = exp * 10 + (c - '0');
-                idx++;
+                if (c >= '0' && c <= '9') {
+                    value = value * 10.0 + (c - '0');
+                    idx++;
+                } else {
+                    break;
+                }
             }
-            value *= Math.pow(10.0, negExp ? -exp : exp);
+
+            // Fractional part
+            if (idx < len && s.charAt(idx) == '.') {
+                idx++;
+                double frac = 0.0;
+                double div = 1.0;
+                while (idx < len) {
+                    char c = s.charAt(idx);
+                    if (c >= '0' && c <= '9') {
+                        div *= 10.0;
+                        frac = frac * 10.0 + (c - '0');
+                        idx++;
+                    } else {
+                        break;
+                    }
+                }
+                value += frac / div;
+            }
+
+            // Scientific notation
+            if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
+                idx++;
+                int exp = 0;
+                boolean negExp = false;
+                if (idx < len && s.charAt(idx) == '-') {
+                    negExp = true;
+                    idx++;
+                } else if (idx < len && s.charAt(idx) == '+') {
+                    idx++;
+                }
+                while (idx < len) {
+                    char c = s.charAt(idx);
+                    exp = exp * 10 + (c - '0');
+                    idx++;
+                }
+                value *= Math.pow(10.0, negExp ? -exp : exp);
+            }
+            return isNeg ? -value : value;
         }
-        return isNeg ? -value : value;
-    }
-       double permutation(double n, double r) {
+
+        double permutation(double n, double r) {
             return Maths.fact(n) / Maths.fact(n - r);
         }
 
-         double combination(double n, double r) {
+        double combination(double n, double r) {
             return Maths.fact(n) / (Maths.fact(n - r) * Maths.fact(r));
         }
 
@@ -3371,20 +3463,20 @@ public final class ExpressionSolver {
 
     public static void main(String... args) {
 
-      String s1 = "x=9;g(x)=((sin(x)-tan(x)));v(x)=((ln(x)/tan(x)));f(x)=g(x);sin(1.75)+cos(1.23)+tan(1.86-0.26)+log(10,3)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));v(3);";
-      String s2 = "v(x)=((ln(x)/tan(x)));2+v(3);";
-      String s3 = "2+sin(3)-ln(12)+1/3.689";
-      String s4 = "sin(2)+cos(3)-sum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
-      
+        String s1 = "x=9;g(x)=((sin(x)-tan(x)));v(x)=((ln(x)/tan(x)));f(x)=g(x);sin(1.75)+cos(1.23)+tan(1.86-0.26)+log(10,3)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));v(3);";
+        String s2 = "v(x)=((ln(x)/tan(x)));2+v(3);";
+        String s3 = "2+sin(3)-ln(12)+1/3.689";
+        String s4 = "sin(2)+cos(3)-sum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
+        String s5 = "sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23))";
 
-        MathExpression m = new MathExpression(s4);
-        System.out.println("m.solve(): "+m.solve());
- 
+        MathExpression m = new MathExpression(s5);
+        System.out.println("m.solve(): " + m.solve());
+
         double N = 100;
-        
+
         Shootouts.benchmark(s2, (int) N);
         Shootouts.benchmark(s3, (int) N);
-        
+
     }//end method
 
     @Override
