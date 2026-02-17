@@ -55,13 +55,11 @@ public class Serializer {
     public static final byte[] getBytes(String ser) {
          Scanner cs = new Scanner(ser , false, "[" ,"]", "," );
         List<String> list = cs.scan();
-        
-        
         byte[]data = new byte[list.size()];
         
         int i=0;
         for(String txt : list){
-            data[i] = Byte.valueOf(txt);
+            data[i] = Byte.parseByte(txt);
             i++;
         }
         

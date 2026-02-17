@@ -28,10 +28,6 @@ public class Matrix {
      * the data array used to create this Matrix object
      */
     private double array[][];
-    /**
-     * attribute used to cofactorDet the detMultiplier of the Matrix object.
-     */
-    private static double det = 0;
 
     /**
      *
@@ -139,22 +135,6 @@ public class Matrix {
 
     public double getElem(int row, int col) {
         return array[row][col];
-    }
-
-    /**
-     *
-     * @param det the detMultiplier attribute of objects of this class
-     */
-    private static void setDet(double det) {
-        Matrix.det = det;
-    }
-
-    /**
-     *
-     * @return the detMultiplier
-     */
-    private static double getDet() {
-        return det;
     }
 
     /**
@@ -929,10 +909,12 @@ public class Matrix {
         }
         return null;
     }
-/**
- * 
- * @return a matrix that contains the cofactors of the elements of this Matrix.
- */
+
+    /**
+     *
+     * @return a matrix that contains the cofactors of the elements of this
+     * Matrix.
+     */
     public Matrix getCofactorMatrix() {
 
         if (isSquareMatrix()) {
@@ -944,13 +926,13 @@ public class Matrix {
             int count = 0;
             for (int row = 0; row < rows; row++) {
                 for (int col = 0; col < cols; col++, count++) {
-                    matrix[row][col] = (count%2==0 ? 1 : -1)*getCofactor(row, col).determ();
+                    matrix[row][col] = (count % 2 == 0 ? 1 : -1) * getCofactor(row, col).determ();
                 }//end inner for
             }//end outer for    
 
             return new Matrix(matrix);
         }
-        
+
         return null;
     }
 
@@ -1058,7 +1040,6 @@ public class Matrix {
      * operation during the evaluation of a detMultiplier.
      */
     private static Matrix topRowScalarMultiply(Matrix m, double scalar) {
-
         for (int col = 0; col < m.getCols(); col++) {
             m.array[0][col] *= scalar;
         }
@@ -1074,10 +1055,9 @@ public class Matrix {
      * @param m the Matrix object whose detMultiplier is desired.
      * @return the detMultiplier of the matrix
      */
-    private static double det(Matrix m) {
+    private static final double det(Matrix m, double acc) {
         //must be square matrix
         if (m.getRows() == m.getCols()) {
-
             if (m.getRows() == 2) {
                 return $2X2determinant(m);
             }//end else
@@ -1087,22 +1067,32 @@ public class Matrix {
                     Matrix mat = topRowScalarMultiply(m.minor(0, col), topRow);
 
                     if (mat.getRows() > 2) {
-                        det(mat);
+                        acc = det(mat, acc);
                     } else {
-                        det += $2X2determinant(mat);
+                        acc += $2X2determinant(mat);
                     }
-
                 }//end for
-
-                return det;
+                return acc;
             }//end else
-
         }//end if
         else {
             return Double.POSITIVE_INFINITY;
         }//end else
-
     }//end method detMultiplier
+
+    /**
+     * Sarus' rule for computing determinants. This technique is too slow and
+     * memory intensive for large matrices..n>=10. Please use the determ()
+     * instance method. It uses a O(cube_n) algorithm as against this method's
+     * O(n!)
+     *
+     * @param m the Matrix object whose detMultiplier is desired.
+     * @return the detMultiplier of the matrix
+     */
+    private double sarusDet() {
+        double acc = 1;
+        return det(this, acc);
+    }//end method
 
     /**
      *
@@ -1366,30 +1356,24 @@ public class Matrix {
 
         if (rows == cols) {
             for (int row = 0; row < rows; row++) {
-
                 double pivot = mat.array[row][row];
-
                 /**
                  * The division coefficient must not be zero. If zero, search
                  * for a lower row, and swap.
                  */
                 if (pivot == 0.0) {
-
                     for (int rw = row; rw < rows; rw++) {
                         pivot = mat.array[rw][row];
-
                         if (pivot != 0.0) {
                             mat.swapRow(row, rw);
                             detMultiplier *= -1;
                             break;
                         }//end if
-
                     }//end for loop
-
                     if (pivot == 0.0) {
                         throw new InputMismatchException("INVERSE DOES NOT EXISTS!");
                     }
-                }//end if   
+                }//end if
                 for (int col = row; col < cols; col++) {
                     mat.array[row][col] /= pivot;
                 }//end inner for loop
@@ -1399,15 +1383,12 @@ public class Matrix {
                     for (int col = row; col < cols; col++) {
                         mat.array[rw][col] = newRowMultiplier * mat.array[row][col] + mat.array[rw][col];
                     }
-
                 }//end inner for loop
-
             }//end for
-
             for (int row = 0; row < rows; row++) {
                 detMultiplier *= mat.array[row][row];
             }//end for
-return detMultiplier;
+            return detMultiplier;
         }
 
         throw new InputMismatchException("The input to the determinant function be a square matrix!");
@@ -1456,9 +1437,10 @@ return detMultiplier;
         }
     }
 
-    public final String getCharacteristicPolynomialForEigenVector(){
+    public final String getCharacteristicPolynomialForEigenVector() {
         return findCharacteristicPolynomialForEigenValues(this);
     }
+
     /**
      *
      * @param m The Matrix object
@@ -1528,13 +1510,15 @@ return detMultiplier;
         return null;
 
     }
-/**
- * 
- * @param rw The row of a given element
- * @param cl The position of that element
- * @return the cofactor sub-matrix used to calculate the cofactor element of the specified position
- */
-    private  Matrix getCofactor(int rw, int cl) {
+
+    /**
+     *
+     * @param rw The row of a given element
+     * @param cl The position of that element
+     * @return the cofactor sub-matrix used to calculate the cofactor element of
+     * the specified position
+     */
+    private Matrix getCofactor(int rw, int cl) {
         if (rw >= 0 && cl >= 0) {
 
             int rows = getRows();
@@ -1564,13 +1548,15 @@ return detMultiplier;
 
         return null;
     }
-/**
- * 
- * @param matrix A 2d matrix array
- * @param rw The row of a given element
- * @param cl The position of that element
- * @return the cofactor sub-matrix used to calculate the cofactor element of the specified position
- */
+
+    /**
+     *
+     * @param matrix A 2d matrix array
+     * @param rw The row of a given element
+     * @param cl The position of that element
+     * @return the cofactor sub-matrix used to calculate the cofactor element of
+     * the specified position
+     */
     private static String[][] getCofactorTextArray(String[][] matrix, int rw, int cl) {
         if (rw >= 0 && cl >= 0) {
 
@@ -1750,8 +1736,8 @@ return detMultiplier;
         //a.x^n
         for (int i = 0; i < scan.size(); i++) {
             if (scan.get(i).equals(Operator.POWER)) {
-                double exp = Double.valueOf(scan.get(i + 1));
-                double coeff = Double.valueOf(scan.get(i - 3));//3*x^2
+                double exp = Double.parseDouble(scan.get(i + 1));
+                double coeff = Double.parseDouble(scan.get(i - 3));//3*x^2
 
                 if (i - 4 >= 0 && scan.get(i - 4).equals(Operator.MINUS)) {
                     coeff *= -1;
@@ -1815,7 +1801,6 @@ return detMultiplier;
             }
 
         }
-        
 
         int i = 0;
         StringBuilder result = new StringBuilder();
@@ -1848,21 +1833,21 @@ return detMultiplier;
         res = res.replace("-+", "-");
         res = res.replace("--", "+");
         res = res.replace("++", "+");
-*/
+         */
         return res;
     }
-    private static String appendLogic(double coeff ,String variableName , double exp){
-        if(exp == 0.0){
-            return coeff+"";
-        }else if(exp == 1){
-            return coeff+"*"+variableName;
-        }else{
-            return coeff+"*"+variableName+Operator.POWER+exp;
+
+    private static String appendLogic(double coeff, String variableName, double exp) {
+        if (exp == 0.0) {
+            return coeff + "";
+        } else if (exp == 1) {
+            return coeff + "*" + variableName;
+        } else {
+            return coeff + "*" + variableName + Operator.POWER + exp;
         }
     }
-    
-    
-    public void print(){
+
+    public void print() {
         System.out.println(toString());
     }
 
@@ -1877,18 +1862,18 @@ return detMultiplier;
         String expanded = uniVariableExpressionExpander("x", "2-x", "-8-7*x+x^2");
         System.out.println("expanded: " + expanded);
 
-         double array1[][] = {
+        double array1[][] = {
             {1, 2, 3},
             {0, 4, 5},
             {1, 0, 6}
         };
         Matrix ma = new Matrix(array1);
-      
+
         System.out.println("Matrix...");
         ma.print();
-        
+
         Matrix cof = ma.getCofactorMatrix();
-        
+
         System.out.println("Cofactor Matrix...");
         cof.print();
 
@@ -1937,7 +1922,7 @@ return detMultiplier;
         Matrix m1 = new Matrix(4, 4);
         double array[][] = {{1, -8, 2, 5}, {4, 8, 2, 4}, {6, 5, 2, 1}, {2, 1, 6, 8}};
         m1.array = array;
-        System.out.printf("Matrix: %s\nDeterminant:\n %f\n", m1.toString(), det(m1));
+        System.out.printf("Matrix: %s\nDeterminant:\n %f\n", m1.toString(), det(m1, 0));
         Matrix triMatrix = m1.reduceToRowEchelonMatrix();
 
         System.out.printf("Echelon-matrix of above: %s\n", triMatrix.toString());
@@ -1952,7 +1937,7 @@ return detMultiplier;
 
         double t0 = System.nanoTime();
 
-        double det = det(m);// 
+        double det = m.sarusDet();// 
 
         double t1 = System.nanoTime() - t0;
         System.out.printf("Old method for determinant gives %4f in %4f %2s \n", det, (t1 * 1.0E-6), "ms");

@@ -712,7 +712,6 @@ public class Method {
                 list.add(ref);
                 return list;
             } else if (name.equals(PRINT)) {
-
                 Set set = new Set(list);
                 set.print();
                 list.clear();
@@ -1072,46 +1071,48 @@ public class Method {
         }
     }//end method
 
-  
-    
     //////////////////////////////////////////////////////////////////////
 
     
 
 // Fast char-based method-name builder check
 public static boolean isMethodNameBuilderChar(char c) {
-    // allow letters, digits, underscore, dollar sign, and any other allowed builder chars
-    // reuse isMethodNameBeginnerChar semantics for letters/underscore/$
-    return isMethodNameBeginnerChar(c) || isDigitChar(c);
-}
+        // allow letters, digits, underscore, dollar sign, and any other allowed builder chars
+        // reuse isMethodNameBeginnerChar semantics for letters/underscore/$
+        return isMethodNameBeginnerChar(c) || isDigitChar(c);
+    }
 
-  /**
+    /**
      *
      * @param s The string to check.
      * @return true if the string is part of the valid characters that can be
      * used to build a method name.
      */
-   
-public static boolean isMethodNameBuilder(String s) {
-    if (s == null || s.length() != 1) return false;
-    return isMethodNameBuilderChar(s.charAt(0));
-}
+    public static boolean isMethodNameBuilder(String s) {
+        if (s == null || s.length() != 1) {
+            return false;
+        }
+        return isMethodNameBuilderChar(s.charAt(0));
+    }
 
 // Fast char-based method-name beginner check
-public static boolean isMethodNameBeginnerChar(char c) {
-    if (c == '_' || c == '$') return true;
-    // Character.isLetter is a bit heavier but necessary for Unicode letters;
-    // if you only need ASCII letters, use (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-    return Character.isLetter(c) && !com.github.gbenroscience.parser.Operator.isPermOrComb(Character.toString(c));
-}
+    public static boolean isMethodNameBeginnerChar(char c) {
+        if (c == '_' || c == '$') {
+            return true;
+        }
+        // Character.isLetter is a bit heavier but necessary for Unicode letters;
+        // if you only need ASCII letters, use (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+        return Character.isLetter(c) && !com.github.gbenroscience.parser.Operator.isPermOrComb(Character.toString(c));
+    }
 
 // Backwards-compatible wrapper
-public static boolean isMethodNameBeginner(String s) {
-    if (s == null || s.isEmpty()) return false;
-    return isMethodNameBeginnerChar(s.charAt(0));
-}
-    
-    
+    public static boolean isMethodNameBeginner(String s) {
+        if (s == null || s.isEmpty()) {
+            return false;
+        }
+        return isMethodNameBeginnerChar(s.charAt(0));
+    }
+
     ///////////////////////////////////////////////////////////////////////
     @Override
     public String toString() {

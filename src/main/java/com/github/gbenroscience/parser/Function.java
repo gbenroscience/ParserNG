@@ -144,12 +144,12 @@ public class Function implements Savable {
                     break;
                 }
             }//end for loop
-        
+
             if (notAlgebraic) {
-                if (size == 1) {   
+                if (size == 1) {
                     int listSize = Integer.parseInt(params.get(0));
                     type = LIST;
-                } else if (size == 2) {  
+                } else if (size == 2) {
                     //A matrix definition...A(2,3)=(3,2,4,5,3,1)------A=@(3,3)(3,4,32,3,4,4,3,3,4)
                     int rows = Integer.parseInt(params.get(0));
                     int cols = Integer.parseInt(params.get(1));
@@ -165,7 +165,7 @@ public class Function implements Savable {
                     if (rows * cols == matrixData.size()) {
                         matrixData.add(0, cols + "");
                         matrixData.add(0, rows + "");
-  
+
                         //Validate the entries
                         for (int i = 0; i < matrixData.size(); i++) {
                             try {
@@ -217,14 +217,13 @@ public class Function implements Savable {
             for (Variable var : independentVariables) {
                 mathExpression.setValue(var.getName(), String.valueOf(x[i++]));
             }
-
-            return Double.parseDouble(mathExpression.solve());
+            
+           return Double.parseDouble(mathExpression.solve());
         }
         return Double.NaN;
     }
 
-    public static boolean assignObject(String input) {
-
+    public static boolean assignObject(String input) { 
         /**
          * Check if it is a function assignment operation...e.g:
          * f=matrix_mul(A,B)
@@ -273,10 +272,23 @@ public class Function implements Savable {
 
                 success = true;
             } else {
-                MathExpression expr = new MathExpression(rhs);System.out.println("rhs="+rhs);
+                MathExpression expr = new MathExpression(rhs);
+                List<String> scanner = expr.getScanner(); 
+                if (scanner.size() == 3 && scanner.get(1).startsWith("anon")) {//function assigments will always be like this: [(,anon1,)] when they get here
+                    Function f = FunctionManager.lookUp(scanner.get(1));
+                    if (f != null) {
+                        FunctionManager.delete(scanner.get(1));
+                        f.setDependentVariable(new Variable(newFuncName));
+                        FunctionManager.add(f); 
+                    } else {
+                        f = new Function(newFuncName + "=" + rhs + ";");
+                        FunctionManager.add(f);
+                    }
+                    return true;
+                }
                 String val = expr.solve();
-                String referenceName = expr.getReturnObjectName();
-
+                String referenceName = expr.getReturnObjectName(); 
+                
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
                     Function f;
                     switch (expr.getReturnType()) {
@@ -351,10 +363,10 @@ public class Function implements Savable {
      *
      */
     private void parseInput(String input) {
-    
+
         input = input.trim();
         if (input.contains("@")) {
-  
+
             boolean anonymous = input.startsWith("@");
             if (anonymous) {
                 input = "anon" + (FunctionManager.countAnonymousFunctions() + 1) + "=".concat(input);
@@ -368,7 +380,7 @@ public class Function implements Savable {
 
             Scanner cs = new Scanner(cutUpInput[1], false, ",", "(", ")");
             List<String> scan = cs.scan();
-       
+
             if (Variable.isVariableString(cutUpInput[0]) && isParameterList(cutUpInput[1])) {
                 if (cutUpInput[0].startsWith("anon") && !anonymous) {
                     throw new InputMismatchException("Function Name Cannot Start With \'anon\'.\n \'anon\' is a reserved name for anonymous functions.");
@@ -389,11 +401,11 @@ public class Function implements Savable {
                         break;
                     }//end catch
                 }//end for
- 
+
                 while (cutUpInput[2].startsWith("(") && cutUpInput[2].endsWith(")") && Bracket.getComplementIndex(true, 0, cutUpInput[2]) == cutUpInput[2].length() - 1) {
                     cutUpInput[2] = cutUpInput[2].substring(1, cutUpInput[2].length() - 1).trim();
                 }
- 
+
                 setMathExpression(new MathExpression(vars.concat(cutUpInput[2].trim())));
                 if (!mathExpression.isCorrectFunction()) {
                     throw new InputMismatchException("SYNTAX ERROR IN FUNCTION");
@@ -412,7 +424,7 @@ public class Function implements Savable {
         else {
             throw new InputMismatchException("Syntax Error: Format Is: F=@(x,y,z,...)mathexpr");
         }//end else
- 
+
     }//end method
 
     public void setDependentVariable(Variable dependentVariable) {
@@ -641,29 +653,25 @@ public class Function implements Savable {
         FunctionManager.add(new Function(matrix));
         return name;
     }
-    
-    
+
     /**
      *
-     * @param expression The expression used to create the function...e.g @(x)sin(x-1)^cos(x)
+     * @param expression The expression used to create the function...e.g
+     * @(x)sin(x-1)^cos(x)
      * @return the name assigned to the anonymous function created.
      */
     public static synchronized String storeAnonymousFunction(String expression) {
         int num = FunctionManager.countAnonymousFunctions();
         String name = "anon" + (num + 1);
-        
-        
-        String tempName = "temp"+System.nanoTime();
-        
-        Function f = new Function(tempName+"="+expression);
+
+        String tempName = "temp" + System.nanoTime();
+
+        Function f = new Function(tempName + "=" + expression);
         f.dependentVariable.setName(name);
 
-      
         FunctionManager.add(f);
         return name;
     }
-    
-    
 
     /**
      * @param args
@@ -685,7 +693,7 @@ public class Function implements Savable {
             int sz = l.size();
             int sz1 = independentVariables.size();
             if (sz == sz1) {
-              
+
                 String vars = "";
                 for (int i = 0; i < sz; i++) {
                     String token = l.get(i);
@@ -1092,34 +1100,31 @@ public class Function implements Savable {
     }
 
     public static void main(String args[]) {
-        
-       MathExpression addMat = new MathExpression("w=6*5;K=@(2,3)(2,3,4,9,8,1);M=@(3,3)(1,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);v=eigpoly(@(3,3)(2,1,5,6,9,2,4,3,8));c=v(30);3*M+N;");
-  
-       System.out.println("soln: "+addMat.solve());
-        
-               System.out.println(FunctionManager.FUNCTIONS);
-        
-       
+
+        MathExpression addMat = new MathExpression("w=6*5;K=@(2,3)(2,3,4,9,8,1);M=@(3,3)(1,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);v=eigpoly(@(3,3)(2,1,5,6,9,2,4,3,8));c=v(30);3*M+N;");
+
+        System.out.println("soln: " + addMat.solve());
+
+        System.out.println(FunctionManager.FUNCTIONS);
+
         Function func = new Function("p=@(x)sin(x)+x+x^2");
         FunctionManager.add(func);
         System.out.println(func.calc(4));
-        
+
         int count = 10000;
-        
-        
+
         double start = System.nanoTime();
-        for(int i=1;i<=count;i++){
-            String val = func.evalArgs("p("+i+")");
+        for (int i = 1; i <= count; i++) {
+            String val = func.evalArgs("p(" + i + ")");
         }
         double duration = System.nanoTime() - start;
-        System.out.println("Eval took: "+(duration/(count*1.0E6))+"ms");
-        
-        
-        for(int i=1;i<=count;i++){
-            String val = func.evalArgs("p("+i+")");
+        System.out.println("Eval took: " + (duration / (count * 1.0E6)) + "ms");
+
+        for (int i = 1; i <= count; i++) {
+            String val = func.evalArgs("p(" + i + ")");
         }
-         duration = System.nanoTime() - start;
-        System.out.println("Eval took: "+(duration/(count*1.0E6))+"ms");
+        duration = System.nanoTime() - start;
+        System.out.println("Eval took: " + (duration / (count * 1.0E6)) + "ms");
 
     }//end method
 

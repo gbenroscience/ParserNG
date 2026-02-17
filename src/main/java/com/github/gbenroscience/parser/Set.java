@@ -1157,14 +1157,14 @@ public class Set {
        /**
      * The list must have been originally supplied: eigvec(A) {where A is a
      * Matrix} It finds the eigenvalues of A and returns the result as a list.
-     *
-     * @return a {@link Matrix} containing the matrix transpose.
+     * 
      */
     public void print() {
 
         if (data.size() == 1) {
 
             String token = data.get(0);
+            System.out.println("printer->token: "+token);
 
             if (Variable.isVariableString(token)) {
                 Function f = FunctionManager.lookUp(token);
@@ -1270,14 +1270,14 @@ public class Set {
 
     /**
      *
-     * @param operator The operator.
+     * @param fName The function's name.
      * @return the value of the user defined function.
      * @throws ClassNotFoundException if the function was never defined by the
      * user.
      */
-    public String evaluateUserDefinedFunction(String operator) throws ClassNotFoundException {
+    public String evaluateUserDefinedFunction(String fName) throws ClassNotFoundException {
         int sz = data.size();
-        String fullname = operator.concat("(");
+        String fullname = fName.concat("(");
         for (int i = 0; i < sz; i++) {
             fullname = fullname.concat(data.get(i).concat(","));
         }//end for loop
@@ -1285,7 +1285,7 @@ public class Set {
         fullname = fullname.substring(0, fullname.length() - 1);
         fullname = fullname.concat(")");
         try {
-            return FunctionManager.getFunction(operator).evalArgs(fullname);
+            return FunctionManager.lookUp(fName).evalArgs(fullname);
         }//end try
         catch (Exception cnfe) {
             throw new ClassNotFoundException("Could Not Find Function! " + fullname);
