@@ -7,6 +7,7 @@ package com.github.gbenroscience.parser;
 import com.github.gbenroscience.parser.methods.Method;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  *
@@ -94,7 +95,7 @@ public class Number {
      */
     public static boolean validNumber(String num) {
         try {
-            double number = Double.parseDouble(num);
+            Double.parseDouble(num);
             return true;
         } catch (NumberFormatException numErr) {
             return false;
@@ -114,21 +115,24 @@ public class Number {
         boolean verily = false;
         if (STRING.isDigit(STRING.firstElement(num))) {
             verily = true;
-        } else if (STRING.firstElement(num).equals(Operator.PLUS) || STRING.firstElement(num).equals(Operator.MINUS)) {
+        } else if (STRING.firstChar(num) == Operator.PLUS.charAt(0) || STRING.firstChar(num) == Operator.MINUS.charAt(0)) {
             if (num.length() > 1) {
-                if (STRING.isDigit(num.substring(1, 2)) || num.substring(1, 2).equals(".")) {
+                if (STRING.isDigitChar(num.charAt(1)) || num.charAt(1) == '.') {
                     verily = true;
                 }
             }
-        } else if (STRING.firstElement(num).equals(".")) {
+        } else if (STRING.firstElement(num).charAt(0) == '.') {
             verily = true;
         }
-
         return verily;
     }
 
     public static boolean isNegative(String num) {
-        return isNumber(num) && num.substring(0, 1).equals("-");
+        return isNumber(num) && num.charAt(0) == '-';
+    }
+    
+   public static boolean isPositive(String num) {
+        return isNumber(num) && num.charAt(0) != '-';
     }
 
     public Number getNumber() {
@@ -136,7 +140,7 @@ public class Number {
     }
 
     public void validateNumber(MathExpression function) {
-        ArrayList<String> scan = function.getScanner();
+        List<String> scan = function.getScanner();
         //Numbers
 
         try {
@@ -173,7 +177,7 @@ public class Number {
     }
 
     public static void main(String args[]) {
-        System.out.println(isNumber("-90g"));
+        System.out.println(isNumber("-"));
         System.out.println(validNumber("-90g"));
     }
 }

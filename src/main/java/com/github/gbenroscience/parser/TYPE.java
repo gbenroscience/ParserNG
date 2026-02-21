@@ -13,7 +13,5 @@ import java.io.Serializable;
  * @author JIBOYE Oluwagbemiro Olaoluwa
  */
 public enum TYPE implements Serializable{
-
     MATRIX, LIST, NUMBER, STRING, VOID, ALGEBRAIC_EXPRESSION, ERROR, BOOLEAN
-
 }

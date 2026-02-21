@@ -6,6 +6,7 @@
 package com.github.gbenroscience.math.tartaglia;
  
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
+import com.github.gbenroscience.parser.MathExpression;
 import static java.lang.Math.*;
 
 /**
@@ -96,7 +97,7 @@ String allSolutions=x1+",\n"+solver.solve();
 return allSolutions;
 }//end try
 catch(NumberFormatException numErr){
-    return "SYNTAX ERROR";
+    return MathExpression.SYNTAX_ERROR;
 }//end catch
 
 }//end if

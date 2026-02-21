@@ -20,7 +20,6 @@ import com.github.gbenroscience.parser.methods.Method;
 
 import com.github.gbenroscience.math.numericalmethods.RootFinder;
 import java.util.*;
-import java.util.ArrayList;
 
 import com.github.gbenroscience.math.numericalmethods.NumericalIntegral;
 import static com.github.gbenroscience.parser.STRING.*;
@@ -59,7 +58,7 @@ public class MathScanner {
     /**
      * Contains the scanned expression
      */
-    private ArrayList<String> scanner = new ArrayList<>();
+    private List<String> scanner = new ArrayList<>();
 
     /**
      *
@@ -147,7 +146,7 @@ public class MathScanner {
      *
      * @return the ArrayList object that holds the scanned output.
      */
-    public ArrayList<String> getScanner() {
+    public List<String> getScanner() {
         return scanner;
     }
 
@@ -412,7 +411,7 @@ public class MathScanner {
      *
      *
      */
-    public ArrayList<String> splitStringAtFirstNumber(String val) {
+    public List<String> splitStringAtFirstNumber(String val) {
         int firstOccDigit = getFirstIndexOfDigitOrPoint(val);//record the index where a digit or point first occurs.
 
         if (firstOccDigit > -1) {
@@ -447,10 +446,10 @@ public class MathScanner {
      * the other substrings of the input.
      * @throws StringIndexOutOfBoundsException
      */
-    public ArrayList<String> splitStringOnNumbers(String val) {
+    public List<String> splitStringOnNumbers(String val) {
 
-        ArrayList<String> scan = new ArrayList<>();
-        ArrayList<String> split = new ArrayList<>();
+        List<String> scan = new ArrayList<>();
+        List<String> split = new ArrayList<>();
 
         boolean canSplit = getFirstIndexOfDigitOrPoint(val) > -1;
         if (canSplit) {
@@ -523,7 +522,7 @@ public class MathScanner {
      * Split the {@link MathScanner#scannerInput} String on the operators.
      */
     public void splitStringOnMethods_Variables_And_Operators() {
-        Scanner cs = new Scanner(scannerInput, true, VariableManager.VARIABLES.keySet().toArray(new String[]{}), Method.getAllFunctions(), operators);
+        Scanner cs = new Scanner(scannerInput, true, VariableManager.VARIABLES.keySet().toArray(new String[0]), Method.getAllFunctions(), operators);
         ArrayList<String> filter = new ArrayList<>();
         filter.add("");
         filter.add(",");
@@ -636,7 +635,7 @@ public class MathScanner {
             String nextToken = scanner.get(i + 1);
 
             if (token.equals("diff") && nextToken.equals("(")) {
-///diff,(,@,(x),log,(,x, , ,2,), , ,4,)
+                ///diff,(,@,(x),log,(,x, , ,2,), , ,4,)
 
                 int close = Bracket.getComplementIndex(true, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
@@ -684,7 +683,6 @@ public class MathScanner {
             }//end else if
         }//end for.
 
-        
         //Catch errors like: sin(2,3+4) or cosh(4,9-2) etc
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
@@ -807,9 +805,106 @@ public class MathScanner {
     }//end validateTokens
 
     /**
-     * Handles repeated concatenations of plus and minus operators.
+     * Handles unary plus and minus operations on the numbers that come after
+     * them Also handles repeated concatenations of plus and minus operators.
      */
     public void plusAndMinusStringHandler() {
+
+        for (int i = 0; i < scanner.size() - 1; i++) {
+            String tk = scanner.get(i);
+            String next_tk = scanner.get(i + 1);
+            int tk_len = tk.length();
+
+            int next_tk_len = next_tk.length();
+
+            char token = tk_len == 1 ? tk.charAt(0) : '\u0000';// if token contains a null char, then it is a token of length greater than 1
+            char nextToken = next_tk_len == 1 ? next_tk.charAt(0) : '\u0000';// may be a number or a + or -, if nextToken contains a null char, then it is a string of length more than 1
+
+            if (token == '\u0000') {//skip
+                continue;
+            }
+
+            if (i > 0 && scanner.get(i - 1).equals("(")) {
+                //Process possible unary minus and plus interacting with positive and negative numbers in the next position
+                if (token == '+' && isNegative(next_tk)) {
+                    scanner.set(i, next_tk);
+                    scanner.remove(i + 1);
+                    continue;
+                }
+                if (token == '+' && isPositive(next_tk)) {
+                    scanner.set(i, next_tk.charAt(0) == '+' ? next_tk.substring(1) : next_tk);
+                    scanner.remove(i + 1);
+                    continue;
+                }
+                if (token == '-' && isNegative(next_tk)) {
+                    scanner.set(i, next_tk.substring(1));
+                    scanner.remove(i + 1);
+                    continue;
+                }
+                if (token == '-' && isPositive(next_tk)) {
+                    scanner.set(i, next_tk.charAt(0) == '+' ? "-" + next_tk.substring(1) : "-" + next_tk);
+                    scanner.remove(i + 1);
+                    continue;
+                }
+            }
+            // Simplified Operator Logic
+            if ((token == '-' || token == '+') && (nextToken == '-' || nextToken == '+')) {
+                String result = (token == nextToken) ? "+" : "-";
+                scanner.set(i, result);
+                scanner.remove(i + 1);
+                i--;
+            }
+            
+        
+        
+         //   System.out.println("index: "+i+", scanner- "+scanner);
+       
+       // String s5 = "(--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*----3)";
+        }//end for loop
+        
+        
+        for(int i=0;i<scanner.size()-1;i++){
+                String tk = scanner.get(i);
+            String next_tk = scanner.get(i + 1);
+            int tk_len = tk.length();
+
+            int next_tk_len = next_tk.length();
+
+            char token = tk_len == 1 ? tk.charAt(0) : '\u0000';// if token contains a null char, then it is a token of length greater than 1
+            char nextToken = next_tk_len == 1 ? next_tk.charAt(0) : '\u0000';// may be a number or a + or -, if nextToken contains a null char, then it is a string of length more than 1
+
+            if (token == '\u0000') {//skip
+                continue;
+            }
+                 if ((token == '*' || token == '/' || token == '^') && (nextToken == '-' || nextToken == '+')) {
+                String veryNext = i + 2 < scanner.size() ? scanner.get(i + 2) : null;
+                if (veryNext != null && isNumber(veryNext)) {
+                    if (isNegative(veryNext)) {
+                        if (nextToken == '-') {
+                            scanner.set(i + 1, veryNext.substring(1));
+                        } else if (nextToken == '+') {
+                            scanner.set(i + 1, veryNext);
+                        }
+                    } else {
+                        if(veryNext.charAt(0) == '+'){
+                            veryNext = veryNext.substring(1);
+                        }
+                        if (nextToken == '-') {
+                            scanner.set(i + 1, "-"+veryNext);
+                        } else if (nextToken == '+') {
+                            scanner.set(i + 1, veryNext);
+                        }
+                    }
+                    scanner.remove(i + 2);
+                }
+            }
+        }
+    }// end method
+
+    /**
+     * Handles repeated concatenations of plus and minus operators.
+     */
+    public void plusAndMinusStringHandler1() {
 
         for (int i = 0; i < scanner.size(); i++) {
 
@@ -859,7 +954,8 @@ public class MathScanner {
      * write minor code to concatenate the - and the 2.873 and so on.
      *
      */
-    public ArrayList<String> scanner() {
+    public List<String> scanner() {
+        VariableManager variableManager = new VariableManager();
         splitStringOnMethods_Variables_And_Operators();
         if (parser_Result != Parser_Result.VALID) {
             scanner.clear();
@@ -901,7 +997,7 @@ public class MathScanner {
                         scanner.set(i + 1, String.valueOf(-1 * Double.parseDouble(scanner.get(i + 2))));
                         scanner.remove(i + 2);
                     } else if (scanner.get(i + 1).equals("+") && validNumber(scanner.get(i + 2))) {
-                        scanner.set(i + 1, String.valueOf(Double.parseDouble(scanner.get(i + 2))));
+                        scanner.set(i + 1, String.valueOf(Double.parseDouble(scanner.get(i + 2)))); 
                         scanner.remove(i + 2);
                     }
                 }//end if
@@ -938,8 +1034,23 @@ public class MathScanner {
                 errorList.add("Syntax Error! Strange Object Found: " + scanner.get(i));
                 setRunnable(false);
                 parser_Result = Parser_Result.STRANGE_INPUT;
-                System.err.println(errorList.get(errorList.size() - 1));
             }
+                 if (MathExpression.isAutoInitOn()) {
+                if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !variableManager.contains(scanner.get(i))
+                        && !FunctionManager.contains(scanner.get(i))) {
+                    variableManager.parseCommand(scanner.get(i) + "=0.0;");
+                }//end if
+            }//end if
+            else {
+                if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !variableManager.contains(scanner.get(i))
+                        && !FunctionManager.contains(scanner.get(i))) {
+                    errorList.add(" Unknown Variable: " + scanner.get(i) + "\n Please Declare And Initialize This Variable Before Using It.\n"
+                            + "Use The Command, \'variableName=value\' To Accomplish This.");
+                    parser_Result = Parser_Result.STRANGE_INPUT;
+                    setRunnable(false);
+
+                }//end if
+            }//end else
         }
 
         if (!runnable) {
@@ -972,7 +1083,7 @@ public class MathScanner {
      * write minor code to concatenate the - and the 2.873 and so on.
      *
      */
-    public ArrayList<String> scanner(VariableManager varMan) {
+    public List<String> scanner(VariableManager varMan) {
         splitStringOnMethods_Variables_And_Operators();
         validateInputAfterSplitOnMethodsAndOps();
 
@@ -1056,7 +1167,6 @@ public class MathScanner {
                 errorList.add("Syntax Error! Strange Object Found: " + scanner.get(i));
                 parser_Result = Parser_Result.STRANGE_INPUT;
                 setRunnable(false);
-                System.err.println(errorList.get(errorList.size() - 1));
             }
             if (MathExpression.isAutoInitOn()) {
                 if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(scanner.get(i))
@@ -1069,8 +1179,6 @@ public class MathScanner {
                         && !FunctionManager.contains(scanner.get(i))) {
                     errorList.add(" Unknown Variable: " + scanner.get(i) + "\n Please Declare And Initialize This Variable Before Using It.\n"
                             + "Use The Command, \'variableName=value\' To Accomplish This.");
-
-                    System.err.println("DETECTED ERROR! IN " + scanner);
                     parser_Result = Parser_Result.STRANGE_INPUT;
                     setRunnable(false);
 
@@ -1126,18 +1234,13 @@ public class MathScanner {
                             List<String> sub = scanner.subList(indexOfAt, i);
                             sub.clear();
                             sub.add(f.getName());
-
                             break;
                         }
-
                     }
-
                 }
-
             } else {
                 throw new InputMismatchException("Syntax Error occurred while scanning math expression.\nReason: The @ symbol is used exclusively to create functions. Expected: `(`, found: `" + scanner.get(indexOfAt + 1) + "`");
             }
-
         }
         //System.out.println("scanner-debug: "+scanner);
     }
@@ -1280,7 +1383,6 @@ public class MathScanner {
                     if (sz == 4 && isClosingBracket(list.get(3))) {
                         Method.run(list, Declarations.degGradRadFromVariable());
                     } else if (sz == 5 && (Method.isUserDefinedFunction(list.get(3)) || isNumber(list.get(3)) || isVariableString(list.get(3))) && isClosingBracket(list.get(4))) {
-                        System.out.println("Debug--4");
                         Method.run(list, Declarations.degGradRadFromVariable());
                     }
 
@@ -1299,8 +1401,6 @@ public class MathScanner {
             }
         } else {
             for (int i = 0; i < list.size(); i++) {
-
-                //System.out.println("looping it! i = "+i+" of "+list.size()+"--now on: '"+list.get(i)+"' out of "+list);
                 if (isClosingBracket(list.get(i))) {
                     int open = Bracket.getComplementIndex(false, i, list);
                     if (open > 0) {
@@ -1308,7 +1408,6 @@ public class MathScanner {
                         if (Method.isMatrixMethod(token)) {
                             List l = list.subList(open - 1, i + 1);
                             int siz = l.size();
-                            System.err.println("list: " + list);
                             extractFunctionStringFromExpressionForMatrixMethods(l);
 
                             i = i - (siz - l.size());
@@ -1398,22 +1497,9 @@ public class MathScanner {
      */
     public static void main(String args[]) {//tester method for STRING methods
 
-        //A*B*C*D*E+3*A+4*B-22*A^2*det(A)
-        //String expr = "matrix_mul(M,((((M)))))";
-        String expr = "matrix_mul(M,3,((det(M))))";
-        Scanner cs = new Scanner(expr, true, "matrix_mul", "sum", ",", "(", ")", "^", "a", "b", "x");
-        List<String> scan = cs.scan();
-        System.err.println("----" + scan);
-        removeExcessBrackets(scan);
-        System.err.println("----" + scan);
-        /*
-        MathScanner scanner = new MathScanner("matrix_mul(@(2,2)(3,1,4,2),@(2,2)(2,9,-4,3))");
-        System.out.println(scanner.scanner);
-        scanner.scanner();
-        System.out.println(scanner.scanner);
-        System.out.println(scanner.parser_Result);*/
-        
-        MathScanner sc = new MathScanner("2^3+4%2-5-6-7*8+5.345!+2e-9-0.00002+70000/32.34^2^3-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12");
+        String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3";
+        //String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
+        MathScanner sc = new MathScanner(s5);
         System.out.println(sc.scanner());
 
     }//end method main

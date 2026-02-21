@@ -10,6 +10,7 @@ import java.util.ArrayList;
 
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import java.util.List;
 
 /**
  *
@@ -34,7 +35,7 @@ public class LogicOperator extends Operator implements Validatable {
      * @param scan the Function object that this LogicOperator object belongs
      * to.
      */
-    public LogicOperator(String name, int index, ArrayList<String> scan) {
+    public LogicOperator(String name, int index,  List<String> scan) {
         super(isLogicOperator(name) ? name : "");
 
         if (this.getName().equals("")) {
@@ -92,17 +93,22 @@ public class LogicOperator extends Operator implements Validatable {
      * @return true if valid
      */
     @Override
-    public boolean validate(ArrayList<String> scan) {
+    public boolean validate(List<String> scan) {
 
+        int leftInd = index-1;
+        int rightInd = index+1;
+        int sz = scan.size();
         boolean correct = true;
-
-        try {
+        String prev = leftInd >= 0 ? scan.get(leftInd) : null;
+        String curr = scan.get(index);
+        String next = rightInd < sz ? scan.get(rightInd) : null;
+  
             //specify valid tokens that can come before a logic operator
-            if (!isNumber(scan.get(index - 1))
-                    && !isVariableString(scan.get(index - 1)) && !isUnaryPostOperator(scan.get(index - 1))
-                    && !isClosingBracket(scan.get(index - 1))) {
+            if (leftInd>=0 && !isNumber(prev)
+                    && !isVariableString(prev) && !isUnaryPostOperator(prev)
+                    && !isClosingBracket(prev)) {
                 com.github.gbenroscience.util.Utils.logError(
-                        "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + scan.get(index - 1) + "\" And \"" + scan.get(index) + "\""
+                        "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Logic operators!");
                 correct = false;
@@ -110,21 +116,18 @@ public class LogicOperator extends Operator implements Validatable {
 
             }//end if
             //specify valid tokens that can come after a logic operator
-            if (!isNumber(scan.get(index + 1)) && !isVariableString(scan.get(index + 1))
-                    && !isOpeningBracket(scan.get(index + 1))
-                    && !Method.isUnaryPreOperatorORDefinedMethod(scan.get(index + 1)) && !Method.isNumberReturningStatsMethod(scan.get(index + 1))
-                    && !Method.isLogToAnyBase(scan.get(index + 1)) && !Method.isAntiLogToAnyBase(scan.get(index + 1))) {
+            if (rightInd<sz && isNumber(next) && !isVariableString(next)
+                    && !isOpeningBracket(next)
+                    && !Method.isUnaryPreOperatorORDefinedMethod(next) && !Method.isNumberReturningStatsMethod(next)
+                    && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
                 com.github.gbenroscience.util.Utils.logError(
-                        "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + scan.get(index) + "\" And \"" + scan.get(index + 1) + "\""
+                        "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Logic operators!");
                 correct = false;
                 scan.clear();
             }//end if
-        }//end try
-        catch (IndexOutOfBoundsException ind) {
-
-        }//end catch
+ 
         return correct;
     }//end method
 

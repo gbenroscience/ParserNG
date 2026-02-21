@@ -508,7 +508,7 @@ public class Set {
      *
      * @return the mode of a number set as a list
      */
-    public String mode() {
+    public List<String> mode() {
         int[] freq = new int[data.size()];
         int g = freq.length;
         int count = 0;
@@ -538,9 +538,7 @@ public class Set {
             }//end if
 
         }// end for
-        String dMode = String.valueOf(mode);
-        dMode = STRING.delete(STRING.delete(dMode, "["), "]");
-        return dMode;
+        return mode;
         //return "The number(s) "+mode+" with "+big+" occurences has/have the highest frequency ";
     }
 
@@ -1172,13 +1170,13 @@ public class Set {
                 if (f != null) {
                     
                     switch(f.getType()){
-                        case Function.ALGEBRAIC:
+                        case ALGEBRAIC_EXPRESSION:
                              printImpl(f.toString());
                               break;
-                        case Function.MATRIX:
+                        case MATRIX:
                             printImpl(f.getMatrix().toString());
                               break;
-                        case Function.LIST:
+                        case LIST:
                             printImpl(f.getMatrix().toString());
                               break;
                         default:

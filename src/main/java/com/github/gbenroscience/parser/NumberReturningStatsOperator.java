@@ -11,6 +11,7 @@ import java.util.ArrayList;
  
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import java.util.List;
 
 /**
  *
@@ -86,7 +87,7 @@ public class NumberReturningStatsOperator extends Operator implements Validatabl
  * @return true if valid
  */
     @Override
-public boolean validate(ArrayList<String>scan){
+public boolean validate(List<String>scan){
 boolean correct = true;
 
         //Number returning stats operators

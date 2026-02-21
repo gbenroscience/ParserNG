@@ -12,6 +12,7 @@ import static com.github.gbenroscience.parser.methods.Method.*;
 import static com.github.gbenroscience.parser.Variable.*;
 import java.util.ArrayList;
 import com.github.gbenroscience.math.Maths;
+import java.util.List;
 
 /**
  *
@@ -66,7 +67,7 @@ public class BaseNFunction extends MathExpression {
  * of all numbers in the scanner.
  */
 private ArrayList<Integer> isBaseCompatible(){
-ArrayList<String>scanner = getScanner();
+    List<String>scanner = getScanner();
 ArrayList<Integer>numIndices= new ArrayList<Integer>();//stores the indices of all numbers.
 
 for(int j=0;j<scanner.size();j++) {
@@ -101,7 +102,7 @@ return numIndices;
  * Converts all numbers to base 10 system.
  */
 private void convertNumbersToDecimal() {
-ArrayList<String>scanner = getScanner();
+    List<String>scanner = getScanner();
 ArrayList<Integer>numIndices = isBaseCompatible();
 
 ArrayList<String>handledVariables = new ArrayList<String>();

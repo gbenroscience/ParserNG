@@ -5,7 +5,8 @@
 
 package com.github.gbenroscience.parser;
 
-import java.util.ArrayList;
+
+import java.util.List;
 
 /**
  *
@@ -13,6 +14,6 @@ import java.util.ArrayList;
  */
 public interface Validatable {
 
-public boolean validate(ArrayList<String> scan);
+public boolean validate(List<String> scan);
 
 }

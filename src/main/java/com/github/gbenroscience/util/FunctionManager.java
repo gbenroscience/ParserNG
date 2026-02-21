@@ -125,6 +125,7 @@ public class FunctionManager {
 
     /**
      * Removes a Function object from this FunctionManager.
+     * @param fName 
      */
     public static void delete(String fName) {
         FUNCTIONS.remove(fName);

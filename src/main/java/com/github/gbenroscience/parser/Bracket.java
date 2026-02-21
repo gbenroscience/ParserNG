@@ -515,7 +515,7 @@ public class Bracket extends Operator {
      * @return true if between this Bracket and its complement, a Variable
      * object is found.
      */
-    public boolean simpleBracketPairHasVariables(ArrayList<String> scan) {
+    public boolean simpleBracketPairHasVariables(List<String> scan) {
 
         if (isOpenBracket(name)) {
             int i = this.index;
@@ -560,7 +560,7 @@ public class Bracket extends Operator {
      * bracket and its complement are also returned. e.g in 5+(2+3-sin2).. This
      * method will return (2+3-sin2).
      */
-    public String getDomainContents(ArrayList<String> scan) {
+    public String getDomainContents(List<String> scan) {
 
         StringBuilder contents = new StringBuilder();
         if (isOpenBracket(name)) {
@@ -588,7 +588,7 @@ public class Bracket extends Operator {
      * @param scan the ArrayList containing the scanner output for a Function
      * @return the bracket pair and its contents.
      */
-    public List<String> getBracketDomainContents(ArrayList<String> scan) {
+    public List<String> getBracketDomainContents(List<String> scan) {
         if (isOpeningBracket(this.getName())) {
             return scan.subList(this.getIndex(), this.getComplement().getIndex() + 1);
         } else if (isClosingBracket(this.getName())) {

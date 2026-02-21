@@ -12,6 +12,7 @@ import com.github.gbenroscience.parser.Validatable;
 import java.util.ArrayList;
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import java.util.List;
  
 
 /**
@@ -87,7 +88,7 @@ public class MUnaryPostOperator extends MOperator implements Validatable {
  * tokens to the left and to the right is correct.
  */
     @Override
-public boolean  validate(ArrayList<String>scan){
+public boolean  validate(List<String>scan){
 
     boolean correct = true;
 

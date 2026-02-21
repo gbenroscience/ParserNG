@@ -11,6 +11,7 @@ import java.util.ArrayList;
 
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import java.util.List;
 
 /**
  *
@@ -90,7 +91,7 @@ public class MatrixBinaryOperator extends MOperator implements Validatable {
      * right is correct.
      */
     @Override
-    public boolean validate(ArrayList<String> scan) {
+    public boolean validate(List<String> scan) {
 
         boolean correct = true;
         try {

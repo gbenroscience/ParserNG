@@ -947,7 +947,7 @@ public static boolean isDigitChar(char c) {
     /**
      * boolean Method isDigit can be used to check for single digits i.e 0-9.
      *
-     * @param a the String to check.
+     * @param s the String to check.
      * @return true if the string is a valid digit.
      */
     public static boolean isDigit(String s) {

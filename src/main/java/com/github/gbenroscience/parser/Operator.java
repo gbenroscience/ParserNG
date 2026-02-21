@@ -458,8 +458,7 @@ public class Operator {
 
     /**
      * @param op the String to check
-     * @return true if the operator is a pre-number operator e.g the trig
-     * operators,exponential operators,logarithmic operators(not to any base)
+     * @return true if the operator is a pre-number operator
      */
     public static boolean isUnaryPreOperator(String op) {
        
@@ -544,7 +543,7 @@ public class Operator {
      * @param scan An ArrayList object containing a scanned function.
      * @return true if validated
      */
-    public static boolean validateAll(ArrayList<String> scan) {
+    public static boolean validateAll(List<String> scan) {
         boolean correct = true;
         for (int i = 0; i < scan.size(); i++) {
             if (isBinaryOperator(scan.get(i))) {

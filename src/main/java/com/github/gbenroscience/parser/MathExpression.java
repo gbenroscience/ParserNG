@@ -17,6 +17,7 @@ import com.github.gbenroscience.parser.methods.Help;
 import com.github.gbenroscience.parser.methods.Method;
 
 import com.github.gbenroscience.math.Maths;
+import com.github.gbenroscience.math.Point;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
@@ -81,7 +82,7 @@ public class MathExpression implements Savable, Solvable {
     private String expression;
     protected boolean correctFunction = true;//checks if the function is valid.
     protected int noOfListReturningOperators;
-    protected ArrayList<String> scanner = new ArrayList<>();//the ArrayList that stores the scanner input function
+    protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scanner input function
     private boolean optimizable;
     private Bracket[] bracket;
     protected boolean hasListReturningOperators;
@@ -131,6 +132,7 @@ public class MathExpression implements Savable, Solvable {
      * function name...So we cache this value here.
      */
     private String returnObjectName;
+    public static final String SYNTAX_ERROR = "SYNTAX ERROR";
 
     /**
      * default no argument constructor for class MathExpression. It creates a
@@ -248,10 +250,16 @@ public class MathExpression implements Savable, Solvable {
         parser_Result = opScanner.parser_Result;
         if (parser_Result == Parser_Result.VALID) {
             bracket = null;
+            //System.out.println("scanner before cdm: " + scanner);
             codeModifier();
+            //System.out.println("scanner after cdm: " + scanner);
+
             removeCommas();
+
             mapBrackets();
+
             functionComponentsAssociation();
+
         }//end if
 
     }//end method initializing(args)
@@ -352,7 +360,7 @@ public class MathExpression implements Savable, Solvable {
      *
      * @return the ArrayList object that the input is scanned into.
      */
-    public ArrayList<String> getScanner() {
+    public List<String> getScanner() {
         return scanner;
     }
 
@@ -727,11 +735,10 @@ public class MathExpression implements Savable, Solvable {
                                 correctFunction = false;
                                 break;
                             }
-                            if (isBracket(scanner.get(i - 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i - 2))
+                            if (isOpeningBracket(scanner.get(i - 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i - 2))
                                     && !Method.isListReturningStatsMethod(scanner.get(i - 2))) {
                                 //processLogger.writeLog("Invalid Association Discovered For: \"(\" And "+scanner.get(i-2)+" And \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n ");
                                 correctFunction = false;
-
                                 break;
                             }
 
@@ -908,10 +915,11 @@ public class MathExpression implements Savable, Solvable {
         evaluateCompoundStructuresInStatisticalInput();
         unBracketDataSetReturningStatsOperators();
         UnaryPostOperator.assignCompoundTokens(this.scanner);
-        PowerOperator.assignCompoundTokens(this.scanner);
+        //PowerOperator.assignCompoundTokens(this.scanner);
 
         if (correctFunction) {
             StringBuilder utility = new StringBuilder();
+
             /**
              * This stage serves for negative number detection. Prior to this
              * stage, all numbers are seen as positive ones. For example: turns
@@ -950,24 +958,48 @@ public class MathExpression implements Savable, Solvable {
              * TOKENS IF NEEDED!!!!!!!!!!!!!!!!
              */
             scanner.removeAll(whitespaceremover);
+            ParseContext context = null;
             for (int i = 0; i < scanner.size(); i++) {
 
-                /**
-                 * Remember to do for the format:
-                 * 3^sin2^sin3===3^sin(2^sin3)...correct not..(3^sin2)^sin3
-                 * change things like 2sin3 to ( 2 * sin 3 ) Prevent the logic
-                 * error: 3/4sin2==3/4*sin2 The LHS == 3/(4*sin2) THE RHS ==
-                 * (3/4)*sin2
-                 */
-                try {
-                    if ((isNumber(scanner.get(i)) || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i)))) && (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))
-                            || Method.isNumberReturningStatsMethod(scanner.get(i + 1)) || Method.isLogOrAntiLogToAnyBase(scanner.get(i + 1)))) {
+                String prev = i - 1 >= 0 ? scanner.get(i - 1) : null;
+                String curr = scanner.get(i);
+                String next = i + 1 < scanner.size() ? scanner.get(i + 1) : null;
+                if (isOpeningBracket(curr)) {
+                    if (Method.isDefinedMethod(prev)) {
+                        if (Method.isStatsMethod(prev)) {
+                            if (context == null) {
+                                context = new ParseContext(i, curr, ParseContext.CONTEXT_IS_STAT_METHOD);
+                            } else {
+                                context.addChild(new ParseContext(i, curr, ParseContext.CONTEXT_IS_STAT_METHOD));
+                            }
+                        } else {
+                            if (context == null) {
+                                context = new ParseContext(i, curr, ParseContext.CONTEXT_IS_NON_STAT_METHOD);
+                            } else {
+                                context.addChild(new ParseContext(i, curr, ParseContext.CONTEXT_IS_NON_STAT_METHOD));
+                            }
+                        }
+                    } else {
+                        if (context == null) {
+                            context = new ParseContext(i, curr, ParseContext.CONTEXT_IS_ALGEBRAIC);
+                        } else {
+                            context.addChild(new ParseContext(i, curr, ParseContext.CONTEXT_IS_ALGEBRAIC));
+                        }
+                    }
+                }
 
+                try {
+                    ParseContext currCon = context != null ? context.getLast() : null;
+                    if (currCon != null && currCon.type != ParseContext.CONTEXT_IS_STAT_METHOD && (isNumber(scanner.get(i)) || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))))
+                            && (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))
+                            || Method.isNumberReturningStatsMethod(scanner.get(i + 1)) || Method.isLogOrAntiLogToAnyBase(scanner.get(i + 1)))) {
                         //Determine the placement of the close bracket
                         int j = i + 1;
                         while (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(j)) || Method.isNumberReturningStatsMethod(scanner.get(j)) || Method.isLogOrAntiLogToAnyBase(scanner.get(j))) {
+                            System.out.println("j=" + j);
                             ++j;
                         }
+
                         if (isNumber(scanner.get(j)) || isVariableString(scanner.get(j))) {
                             scanner.add(j + 1, ")");
                             scanner.add(i, "(");
@@ -977,7 +1009,6 @@ public class MathExpression implements Savable, Solvable {
                             scanner.add(ind + 1, ")");
                             scanner.add(i, "(");
                             scanner.add(i + 2, MULTIPLY);
-
                         }
 
                     }//end if
@@ -1073,7 +1104,7 @@ public class MathExpression implements Savable, Solvable {
      * scanned function.
      * @return a Bracket array that holds related brackets pairs.
      */
-    public static Bracket[] mapBrackets(ArrayList<String> scanner) {
+    public static Bracket[] mapBrackets(List<String> scanner) {
         for (Iterator<String> it = scanner.iterator(); it.hasNext();) {
             if (" ".equals(it.next())) {
                 it.remove();
@@ -1131,9 +1162,9 @@ public class MathExpression implements Savable, Solvable {
 
     /**
      *
-     * method finishUpScanner does final adjustments to the scanner function e.g
-     * it will check for errors in operator combination in the scanner function
-     * and so on
+     * method functionComponentsAssociation does final adjustments to the
+     * scanner function e.g it will check for errors in operator combination in
+     * the scanner function and so on
      */
     public void functionComponentsAssociation() {
 
@@ -1141,14 +1172,15 @@ public class MathExpression implements Savable, Solvable {
             scanner.removeAll(whitespaceremover);//remove white spaces that may result from past parser actions
 //check for good combinations of operators and numbers and dis-allow any other.
 
+            int sz = scanner.size();
             for (int i = 0; i < scanner.size(); i++) {
 //check for the various valid arrangements for all members of the function.
                 String token = scanner.get(i);
                 //Variables
-                if (isVariableString(scanner.get(i)) && !Method.isUserDefinedFunction(token)) {
+                if (isVariableString(scanner.get(i)) && !Method.isUserDefinedFunction(token) && !Method.isDefinedMethod(token)) {
                     try {
                         //specify valid tokens that can come before a variable
-                        if (!isOpeningBracket(scanner.get(i - 1))
+                        if (i - 1 >= 0 && !isOpeningBracket(scanner.get(i - 1))
                                 && !isLogicOperator(scanner.get(i - 1)) && !isUnaryPreOperator(scanner.get(i - 1))
                                 && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1)) && !isNumber(scanner.get(i - 1))
                                 && !isVariableString(scanner.get(i - 1))) {
@@ -1158,20 +1190,20 @@ public class MathExpression implements Savable, Solvable {
                             break;
                         }//end if
                         //specify valid tokens that can come after a variable
-                        if (!isBracket(scanner.get(i + 1)) && !isBinaryOperator(scanner.get(i + 1))
+                        if (i + 1 < sz && !isBracket(scanner.get(i + 1)) && !isBinaryOperator(scanner.get(i + 1))
                                 && !isUnaryPostOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
                                 && !isLogicOperator(scanner.get(i + 1)) && !isAssignmentOperator(scanner.get(i + 1))
                                 && !isUnaryPreOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
                                 && !Method.isLogToAnyBase(scanner.get(i + 1)) && !Method.isAntiLogToAnyBase(scanner.get(i + 1)) && !isNumber(scanner.get(i + 1))
                                 && !isVariableString(scanner.get(i + 1))) {
                             //processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i)+"\" And \""+scanner.get(i+1)+"\"PLUS As You Have Done.\n");
-
                             correctFunction = false;
                             scanner.clear();
                             break;
                         }//end if
                     }//end try
                     catch (IndexOutOfBoundsException ind) {
+                        ind.printStackTrace();
                     }//end catch
                 }//end else if
 
@@ -1210,7 +1242,7 @@ public class MathExpression implements Savable, Solvable {
      *
      * @param scan the data it is to process
      */
-    public void setVariableValuesInFunction(ArrayList<String> scan) {
+    public void setVariableValuesInFunction(List<String> scan) {
 
         int sz = scan.size();
         for (int i = 0; i < sz; i++) {
@@ -1388,6 +1420,57 @@ public class MathExpression implements Savable, Solvable {
     }
 
     /**
+     * [-6, -4, 2, 3, 4, 5, 5, 13, 62, 2024]
+     *
+     * @param text
+     * @return
+     */
+    private List<String> readNumbersFromCommaSeparatedList(String text) {
+        if (text == null || text.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // Pre-size ArrayList if possible to avoid resizing overhead
+        List<String> numbers = new ArrayList<>(16);
+        int len = text.length();
+        int start = -1;
+
+        for (int i = 0; i < len; i++) {
+            char c = text.charAt(i);
+
+            // Check if character is part of a valid number
+            if ((c >= '0' && c <= '9') || c == '-' || c == '.'
+                    || c == 'e' || c == 'E' || c == '+') {
+                if (start == -1) {
+                    start = i; // Mark the beginning of a number
+                }
+            } else {
+                // We hit a delimiter (comma, space, bracket, etc.)
+                if (start != -1) {
+                    numbers.add(text.substring(start, i));
+                    start = -1;
+                }
+
+                // Validation for '[' only at start
+                if (c == '[' && i != 0) {
+                    throw new InputMismatchException("Invalid character [ at index " + i);
+                }
+            }
+        }
+
+        // CRITICAL: Catch the last number if the string doesn't end with a delimiter
+        if (start != -1) {
+            // If the last char is ']', exclude it from the substring
+            int end = text.charAt(len - 1) == ']' ? len - 1 : len;
+            if (end > start) {
+                numbers.add(text.substring(start, end));
+            }
+        }
+
+        return numbers;
+    }
+
+    /**
      *
      * @return an Array object containing duplicate contents of the List object
      * alone
@@ -1500,7 +1583,7 @@ public class MathExpression implements Savable, Solvable {
                                 break;
                             } catch (IllegalArgumentException ill) {
                                 returnType = TYPE.ERROR;
-                                return "SYNTAX ERROR";
+                                return SYNTAX_ERROR;
                             }
                         }//end else if
                         brac = mapBrackets(myScan);
@@ -1508,17 +1591,17 @@ public class MathExpression implements Savable, Solvable {
                     catch (IndexOutOfBoundsException indexErr) {
                         indexErr.printStackTrace();
                         returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
+                        return SYNTAX_ERROR;
                     }//end catch
                     catch (NumberFormatException numErr) {
                         numErr.printStackTrace();
                         returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
+                        return SYNTAX_ERROR;
                     }//end catch
                     catch (InputMismatchException exception) {
                         exception.printStackTrace();
                         returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
+                        return SYNTAX_ERROR;
                     }
                 }//end else
 
@@ -1542,14 +1625,14 @@ public class MathExpression implements Savable, Solvable {
             }
             Function f;
             if ((f = FunctionManager.lookUp(listAppender)) != null) {
-                if (f.getType() == Function.MATRIX) {
+                if (f.getType() == TYPE.MATRIX) {
                     listAppender = f.getMatrix().toString();
-                    returnType = TYPE.MATRIX;
-                } else if (f.getType() == Function.LIST) {
+                    returnType = f.getType();
+                } else if (f.getType() == TYPE.LIST) {
                     listAppender = f.toString();
-                    returnType = TYPE.LIST;
-                } else if (f.getType() == Function.ALGEBRAIC) {
-                    returnType = TYPE.ALGEBRAIC_EXPRESSION;
+                    returnType = f.getType();
+                } else if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
+                    returnType = f.getType();
                     listAppender = f.toString();
                 }
 
@@ -1575,12 +1658,13 @@ public class MathExpression implements Savable, Solvable {
             return "Variable Storage Process Finished!";
         } else {
             returnType = TYPE.ERROR;
-            return "SYNTAX ERROR";
+            return SYNTAX_ERROR;
         }
 
     }//end method solve()
 
     private String resolveSegment(List<String> scan, int openIdx, int closeIdx, boolean isMethod) {
+
         if (isMethod) {
             try {
                 /**
@@ -1589,35 +1673,57 @@ public class MathExpression implements Savable, Solvable {
                  * [sin,(,3,)] in executable.
                  */
                 List<String> executable = isMethod ? scan.subList(openIdx - 1, closeIdx + 1) : scan.subList(openIdx, closeIdx + 1);
+                int execSize = executable.size();
+                //System.out.println("resolveSegment->isMethod: executable " + executable);
                 String methodName = isMethod ? executable.get(0) : null;
-
+                System.out.println("methodName: " + methodName + ", executable = " + executable);
+                // System.out.println("resolveSegment->isMethod: methodName " + methodName);
                 //[,sin,(,2,),] should be allowed to pass here to Method.run, else, evaluate the contents of the bracket and reduce to a number before passing
-                if (executable.size() == 4) {
+                if (execSize == 4) {
                     List<String> out = Method.run(new ArrayList<>(executable), DRG);
+                    //  System.out.println("resolveSegment->isMethod: executable is size=4 e.g: [sin,(,3,)] --> will call Method.run");
                     return out.get(0);
                 } else {//e.g [,cos,(,3,+,5,-2,^,3,),]-> First evaluate the expression before evaluating the method
                     if (Method.isStatsMethod(methodName)) {
+                        boolean isNotListReturner = Method.isNumberReturningStatsMethod(methodName);
+                       //  System.out.println("resolveSegment->isMethod: executable is stats-method e.g: \n"+executable+"\n --> will " +  (isNotListReturner ? "not call" : "call") + " listToString on result of Method.run");
                         List<String> out = Method.run(new ArrayList<>(executable), DRG);
-                        return Method.isNumberReturningStatsMethod(methodName) ? out.get(0) : listToString(out);
+                        if (!isNotListReturner) {//return a list... write the list in the original executable and then return null, the solve method will take it from there.
+                            executable.clear();
+                            executable.addAll(out);
+                        }
+                        //  System.out.println("out: " + out);
+                        return isNotListReturner ? out.get(0) : null;
                     } else {
                         double val = hiSpeedSolver(executable.subList(2, executable.size() - 1));
                         ArrayList<String> newList = new ArrayList<>(Arrays.asList(methodName, "(", val + "", ")"));
                         List<String> out = Method.run(newList, DRG);
-
+                        //      System.out.println("resolveSegment->isMethod: executable is not stats-method. Will evaluate with hiSpeedResolver");
                         return out.get(0);
                     }
                 }
             } catch (IndexOutOfBoundsException | NullPointerException | IllegalArgumentException indexErr) {
+                indexErr.printStackTrace();
+                //System.out.println("resolveSegment->isMethod: error happened while evaluating. Check stacktrace");
+                correctFunction = false;
                 returnType = TYPE.ERROR;
-                return "SYNTAX ERROR";
+                return SYNTAX_ERROR;
             }
         } else {
             // Range: [(, tokens..., )]
             // Extract only the inner tokens for the fast evaluator
             // Using subList here is okay as it's just a view for the evaluator
             List<String> inner = scan.subList(openIdx + 1, closeIdx);
-            double val = hiSpeedSolver(inner);
 
+            int sz = (closeIdx - 1) - openIdx;
+            // System.out.println("resolveSegment->isNotMethod: will call hiSpeedResolver on " + inner);
+            if (sz == 1) {
+                if (inner.get(0).startsWith("anon")) {//[(,anon1,)]// 
+                    Function f = FunctionManager.lookUp(inner.get(0));
+                    return f != null ? f.getMatrix().toString() : SYNTAX_ERROR;
+                }
+            }
+            double val = hiSpeedSolver(inner);
             // Return as string for the main list
             return String.valueOf(val);
         }
@@ -1643,7 +1749,7 @@ public class MathExpression implements Savable, Solvable {
             return String.valueOf(result);
 
         } catch (Exception e) {
-            return "SYNTAX ERROR";
+            return SYNTAX_ERROR;
         }
     }
 
@@ -1684,22 +1790,26 @@ public class MathExpression implements Savable, Solvable {
                     try {
                         // Extract the result for this specific pair
                         String result = resolveSegment(myScan, openIdx, closeIdx, isMethod);
-
-                        // 3. REPLACEMENT BLOCK (The most critical part for speed)
-                        // Remove the processed tokens from the list
-                        int countToRemove = closeIdx - replaceStart + 1;
-                        for (int k = 0; k < countToRemove; k++) {
-                            myScan.remove(replaceStart);
+                         if (result != null) {
+                            // 3. REPLACEMENT BLOCK (The most critical part for speed)
+                            // Remove the processed tokens from the list
+                            int countToRemove = closeIdx - replaceStart + 1;
+                            for (int k = 0; k < countToRemove; k++) {
+                                myScan.remove(replaceStart);
+                            }
+                            // Insert the computed value
+                            myScan.add(replaceStart, result);
+                            // 4. RESET INDEX: Move the pointer back to where the result was inserted
+                            // so the 'for' loop continues scanning the rest of the expression correctly.
+                            i = replaceStart;
+                        } else {//list returning operator has already mutated the scanner with the result of its computations on the portion of the list
+                            i = replaceStart;
                         }
-                        // Insert the computed value
-                        myScan.add(replaceStart, result);
-                        // 4. RESET INDEX: Move the pointer back to where the result was inserted
-                        // so the 'for' loop continues scanning the rest of the expression correctly.
-                        i = replaceStart;
+
                     } catch (Exception e) {
                         e.printStackTrace();
                         returnType = TYPE.ERROR;
-                        return "SYNTAX ERROR";
+                        return SYNTAX_ERROR;
                     }
                 }
             }
@@ -1726,14 +1836,14 @@ public class MathExpression implements Savable, Solvable {
             }
             Function f;
             if ((f = FunctionManager.lookUp(listAppender)) != null) {
-                if (f.getType() == Function.MATRIX) {
+                if (f.getType() == TYPE.MATRIX) {
                     listAppender = f.getMatrix().toString();
-                    returnType = TYPE.MATRIX;
-                } else if (f.getType() == Function.LIST) {
+                    returnType = f.getType();
+                } else if (f.getType() == TYPE.LIST) {
                     listAppender = f.toString();
-                    returnType = TYPE.LIST;
-                } else if (f.getType() == Function.ALGEBRAIC) {
-                    returnType = TYPE.ALGEBRAIC_EXPRESSION;
+                    returnType = f.getType();
+                } else if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
+                    returnType = f.getType();
                     listAppender = f.toString();
                 }
 
@@ -1758,7 +1868,7 @@ public class MathExpression implements Savable, Solvable {
             return "Variable Storage Process Finished!";
         } else {
             returnType = TYPE.ERROR;
-            return "SYNTAX ERROR";
+            return SYNTAX_ERROR;
         }
     }//end method solve()
 
@@ -2440,13 +2550,21 @@ public final class ExpressionSolver {
         }
 
         public double evaluate(List<String> tokens) {
+            if (tokens == null || tokens.isEmpty()) {
+                throw new IllegalArgumentException("Empty expression");
+            }
+
+            // Special case: single number
             if (tokens.size() == 1 && isNumber(tokens.get(0))) {
                 return fastParseDouble(tokens.get(0));
             }
-            String[] toks = tokens.toArray(new String[0]); // faster array access
+
+            String[] toks = tokens.toArray(new String[0]);
             int n = toks.length;
+
             DoubleStack values = new DoubleStack();
             IntStack operators = new IntStack();
+
             int i = 0;
             boolean expectOperand = true;
 
@@ -2454,7 +2572,7 @@ public final class ExpressionSolver {
                 String token = toks[i];
                 int len = token.length();
 
-                // Inline fast operator/postfix classification
+                // Function or operator classification
                 int code = -1;
                 if (len == 1) {
                     char c = token.charAt(0);
@@ -2492,16 +2610,23 @@ public final class ExpressionSolver {
                         case '³':
                             code = OP_CU;
                             break;
+                        case '√':
+                            code = OP_SQRT;
+                            break;
                         default:
                             code = -1;
                     }
-                } else if (len == 2 && token.charAt(0) == '-' && token.charAt(1) == '¹') {
-                    code = OP_INV;
+                } else if (len == 2) {
+                    if (token.charAt(0) == '-' && token.charAt(1) == '¹') {
+                        code = OP_INV;
+                    } else if (token.charAt(0) == '³' && token.charAt(1) == '√') {
+                        code = OP_CBRT;
+                    }
                 }
 
                 if (code != -1) {
                     if (expectOperand) {
-                        if (code == OP_ADD) { // unary +
+                        if (code == OP_ADD) {
                             i++;
                             continue;
                         }
@@ -2510,7 +2635,6 @@ public final class ExpressionSolver {
                         }
                     }
 
-                    // Reduce pending (direct array access, no peek/pop calls)
                     int prec = precedence(code);
                     boolean right = isRightAssociative(code);
                     while (operators.size > 0) {
@@ -2526,64 +2650,17 @@ public final class ExpressionSolver {
                     expectOperand = true;
                     i++;
                 } else {
-                    // Fast custom parser (handles all benchmark token formats perfectly)
                     double val = fastParseDouble(token);
                     i++;
 
-                    // Inline postfix folding
+                    // Postfix folding
                     while (i < n) {
                         String next = toks[i];
-                        int plen = next.length();
-                        int postCode = -1;
-                        if (plen == 1) {
-                            char pc = next.charAt(0);
-                            switch (pc) {
-                                case '!':
-                                    postCode = OP_FACT;
-                                    break;
-                                case '²':
-                                    postCode = OP_SQ;
-                                    break;
-                                case '³':
-                                    postCode = OP_CU;
-                                    break;
-                                case '√':
-                                    postCode = OP_SQRT;
-                                    break;
-                                default:
-                                    postCode = -1;
-                            }
-                        } else if (plen == 2) {
-                            if (next.charAt(0) == '-' && next.charAt(1) == '¹') {
-                                postCode = OP_INV;
-                            } else if (next.charAt(0) == '³' && next.charAt(1) == '√') {
-                                postCode = OP_CBRT;
-                            }
-                        }
+                        int postCode = getPostfixCode(next);
                         if (postCode == -1) {
                             break;
                         }
-
-                        switch (postCode) {
-                            case OP_FACT:
-                                val = Maths.fact(val);
-                                break;
-                            case OP_SQ:
-                                val = val * val;
-                                break;
-                            case OP_CU:
-                                val = val * val * val;
-                                break;
-                            case OP_INV:
-                                val = 1.0 / val;
-                                break;
-                            case OP_SQRT:
-                                val = Math.sqrt(val);
-                                break;
-                            case OP_CBRT:
-                                val = Math.cbrt(val);
-                                break;
-                        }
+                        val = applyPostfix(postCode, val);
                         i++;
                     }
                     values.push(val);
@@ -2595,19 +2672,91 @@ public final class ExpressionSolver {
                 applyTop(values, operators);
             }
 
-            MathExpression.this.parser_Result = Parser_Result.VALID;
+            if (values.size != 1) {
+                throw new IllegalArgumentException("Invalid expression");
+            }
+
             return values.data[0];
+        }
+
+        private int getPostfixCode(String s) {
+            int len = s.length();
+            if (len == 1) {
+                char c = s.charAt(0);
+                switch (c) {
+                    case '!':
+                        return OP_FACT;
+                    case '²':
+                        return OP_SQ;
+                    case '³':
+                        return OP_CU;
+                    case '√':
+                        return OP_SQRT;
+                    default:
+                        return -1;
+                }
+            } else if (len == 2) {
+                if (s.charAt(0) == '-' && s.charAt(1) == '¹') {
+                    return OP_INV;
+                }
+                if (s.charAt(0) == '³' && s.charAt(1) == '√') {
+                    return OP_CBRT;
+                }
+            }
+            return -1;
+        }
+
+        private double applyPostfix(int code, double x) {
+            switch (code) {
+                case OP_FACT:
+                    return Maths.fact(x);
+                case OP_SQ:
+                    return x * x;
+                case OP_CU:
+                    return x * x * x;
+                case OP_INV:
+                    return 1.0 / x;
+                case OP_SQRT:
+                    return (x < 0) ? Double.NaN : Math.sqrt(x);
+                case OP_CBRT:
+                    return Math.cbrt(x);
+                default:
+                    return x;
+            }
         }
 
         private void applyTop(DoubleStack values, IntStack operators) {
             int code = operators.data[--operators.size];
+
             if (code == OP_UMINUS) {
-                int vidx = values.size - 1;
-                values.data[vidx] = -values.data[vidx];
+                values.data[values.size - 1] = -values.data[values.size - 1];
+                return;
+            }
+
+            double b = values.data[--values.size];
+            double a = values.data[--values.size];
+            double res;
+
+            // Infinity / NaN safeguards
+            if (Double.isNaN(a) || Double.isNaN(b)) {
+                res = Double.NaN;
+            } else if (Double.isInfinite(a) || Double.isInfinite(b)) {
+                switch (code) {
+                    case OP_ADD:
+                    case OP_SUB:
+                    case OP_MUL:
+                        res = Double.POSITIVE_INFINITY;
+                        break;
+                    case OP_DIV:
+                        res = (b == 0) ? Double.NaN : Double.POSITIVE_INFINITY;
+                        break;
+                    case OP_POW:
+                        res = Math.pow(a, b);
+                        break;
+                    default:
+                        res = Double.NaN;
+                }
             } else {
-                double b = values.data[--values.size];
-                double a = values.data[--values.size];
-                double res;
                 switch (code) {
                     case OP_ADD:
                         res = a + b;
@@ -2636,8 +2785,17 @@ public final class ExpressionSolver {
                     default:
                         res = 0.0;
                 }
-                values.data[values.size++] = res;
             }
+
+            values.data[values.size++] = res;
+        }
+
+        double permutation(double n, double r) {
+            return Maths.fact(n) / Maths.fact(n - r);
+        }
+
+        double combination(double n, double r) {
+            return Maths.fact(n) / (Maths.fact(n - r) * Maths.fact(r));
         }
 
         // Custom fast parser (2-4x faster than Double.parseDouble for these short valid strings)
@@ -2733,89 +2891,202 @@ public final class ExpressionSolver {
             return negative ? -value : value;
         }
 
-        private double fastParseDouble1(String s) {
-            boolean isNeg = s.charAt(0) == '-';
-
-            int len = s.length();
-            int idx = isNeg ? 1 : 0;
-            double value = 0.0;
-
-            // Integer part
-            while (idx < len) {
-                char c = s.charAt(idx);
-                if (c >= '0' && c <= '9') {
-                    value = value * 10.0 + (c - '0');
-                    idx++;
-                } else {
-                    break;
-                }
-            }
-
-            // Fractional part
-            if (idx < len && s.charAt(idx) == '.') {
-                idx++;
-                double frac = 0.0;
-                double div = 1.0;
-                while (idx < len) {
-                    char c = s.charAt(idx);
-                    if (c >= '0' && c <= '9') {
-                        div *= 10.0;
-                        frac = frac * 10.0 + (c - '0');
-                        idx++;
-                    } else {
-                        break;
-                    }
-                }
-                value += frac / div;
-            }
-
-            // Scientific notation
-            if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
-                idx++;
-                int exp = 0;
-                boolean negExp = false;
-                if (idx < len && s.charAt(idx) == '-') {
-                    negExp = true;
-                    idx++;
-                } else if (idx < len && s.charAt(idx) == '+') {
-                    idx++;
-                }
-                while (idx < len) {
-                    char c = s.charAt(idx);
-                    exp = exp * 10 + (c - '0');
-                    idx++;
-                }
-                value *= Math.pow(10.0, negExp ? -exp : exp);
-            }
-            return isNeg ? -value : value;
-        }
-
-        double permutation(double n, double r) {
-            return Maths.fact(n) / Maths.fact(n - r);
-        }
-
-        double combination(double n, double r) {
-            return Maths.fact(n) / (Maths.fact(n - r) * Maths.fact(r));
-        }
-
-        // Fixed-size primitive stacks (zero bounds checks/resizing)
+// Fixed-size primitive stacks (increased to 128 for extra safety)
         private class DoubleStack {
 
-            private final double[] data = new double[64];
+            private double[] data = new double[128];
             private int size = 0;
 
             void push(double v) {
+                if (size == data.length) {
+                    data = Arrays.copyOf(data, data.length * 2);
+                }
                 data[size++] = v;
             }
         }
 
         private class IntStack {
 
-            private final int[] data = new int[64];
+            private int[] data = new int[128];
             private int size = 0;
 
             void push(int v) {
+                if (size == data.length) {
+                    data = Arrays.copyOf(data, data.length * 2);
+                }
                 data[size++] = v;
+            }
+        }
+
+        private boolean isNumber(String s) {
+            // Simple check used in single-number case
+            return s != null && !s.isEmpty() && Character.isDigit(s.charAt(0)) || s.charAt(0) == '-' || s.charAt(0) == '+';
+        }
+    }
+ 
+    /**
+     * While traversing a list of tokens, sometimes its good to know if a token
+     * is existing in the context of a stat function, or is a free token within
+     * an algebraic expression etc Represents a scope within a mathematical
+     * expression. Used to track if we are inside a statistical function,
+     * algebraic group, or standard function.
+     */
+    static class ParseContext {
+
+        public static final int CONTEXT_IS_STAT_METHOD = 1;
+        public static final int CONTEXT_IS_ALGEBRAIC = 2;
+        public static final int CONTEXT_IS_NON_STAT_METHOD = 3;
+
+        /**
+         * The index of the start of the context identifier(the token that
+         * identifies the context -> e.g. sum for sum(...)
+         */
+        int start;
+        /**
+         * The token that identifies the context. e.g. sum for sum(...) or ( for
+         * a normal algebraic expression
+         */
+        private String token;
+        /**
+         * The type of the context
+         */
+        private int type;
+        /**
+         * A context encountered while in another context was executing e.g.
+         * sum,(,3,4,sort,(,-3,2,1,-4,),)... The scan got to sum and changed its
+         * context to {@link ParseContext#CONTEXT_IS_STAT_METHOD}, while
+         * traversing sum's elements, it came across sort, which is a nested
+         * context within sum, so it changes its context to
+         * {@link ParseContext#CONTEXT_IS_STAT_METHOD} within and sets the
+         * {@link ParseContext#next} field of the original context. When it
+         * emerges from the close bracket of the sort(, it must null the next
+         * field and then make the current context the original or the parent of
+         * {@link ParseContext#next}
+         */
+        private ParseContext child;
+
+        private ParseContext parent;
+
+        public ParseContext(int start, String token, int type) {
+            this.start = start;
+            this.token = token;
+            this.type = type;
+        }
+
+        /**
+         * Finds the root context (the very first opening scope).
+         */
+        public ParseContext getFirst() {
+            ParseContext curr = this;
+            while (curr.parent != null) {
+                curr = curr.parent;
+            }
+            return curr;
+        }
+
+        /**
+         * Finds the current deepest nested context.
+         */
+        public ParseContext getLast() {
+            ParseContext curr = this;
+            while (curr.child != null) {
+                curr = curr.child;
+            }
+            return curr;
+        }
+
+        /**
+         * Correctly removes the deepest context and returns the new "last"
+         * context. This is vital for "emerging" from a close bracket.
+         */
+        public ParseContext removeLast() {
+            ParseContext last = getLast();
+            ParseContext newLast = last.parent;
+            if (newLast != null) {
+                newLast.child = null; // Sever the link to the child
+                last.parent = null;   // Clean up references for GC
+            }
+            return newLast;
+        }
+
+        /**
+         * Adds a new nested context to the current chain.
+         */
+        public void addChild(ParseContext newChild) {
+            ParseContext last = getLast();
+            last.child = newChild;
+            newChild.parent = last;
+        }
+
+        // --- Getters and Setters ---
+        public int getType() {
+            return type;
+        }
+
+        public void setType(int type) {
+            this.type = type;
+        }
+
+        public int getStart() {
+            return start;
+        }
+
+        public void setStart(int start) {
+            this.start = start;
+        }
+
+        public String getToken() {
+            return token;
+        }
+
+        public void setToken(String token) {
+            this.token = token;
+        }
+
+        public ParseContext getChild() {
+            return child;
+        }
+
+        public ParseContext getParent() {
+            return parent;
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            buildString(sb, 0);
+            return sb.toString();
+        }
+
+        private void buildString(StringBuilder sb, int depth) {
+            // Create indentation based on nesting depth
+            for (int i = 0; i < depth; i++) {
+                sb.append("  ");
+            }
+
+            // Append context details
+            sb.append("Context{")
+                    .append("type=").append(getTypeName(type))
+                    .append(", token='").append(token).append('\'')
+                    .append(", start=").append(start)
+                    .append("}\n");
+
+            // Recurse into the child if it exists
+            if (child != null) {
+                child.buildString(sb, depth + 1);
+            }
+        }
+
+        private String getTypeName(int type) {
+            switch (type) {
+                case CONTEXT_IS_STAT_METHOD:
+                    return "STAT";
+                case CONTEXT_IS_ALGEBRAIC:
+                    return "ALGEBRAIC";
+                case CONTEXT_IS_NON_STAT_METHOD:
+                    return "FUNCTION";
+                default:
+                    return "UNKNOWN";
             }
         }
     }
@@ -3462,21 +3733,30 @@ public final class ExpressionSolver {
     }//end method
 
     public static void main(String... args) {
-
+        System.out.println(new MathExpression("x=0;sin(ln(x));").solve());
+        MathExpression ml = new MathExpression("D=@(3,3)(3,4,1,2,4,7,9,1,-2);tri_mat(D)");
+        System.out.println("ml.solve():" + ml.solve());
+        MathExpression linear = new MathExpression("a=4;a11=3.14159265357;b=2.718281828;M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");
+        System.out.println("VARIABLES: " + VariableManager.VARIABLES);
+        System.out.println("M:" + FunctionManager.lookUp("M").getMatrix());
+        System.out.println("N:" + FunctionManager.lookUp("N").getMatrix());
+        System.out.println("C:" + FunctionManager.lookUp("C").getMatrix());
+        String ls = linear.solve();
+        System.out.println("ls = " + ls);
+        String s = "sum(sum(5),sin(5))";
+        System.out.println("--->" + new MathExpression(s).solve());
         String s1 = "x=9;g(x)=((sin(x)-tan(x)));v(x)=((ln(x)/tan(x)));f(x)=g(x);sin(1.75)+cos(1.23)+tan(1.86-0.26)+log(10,3)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));v(3);";
         String s2 = "v(x)=((ln(x)/tan(x)));2+v(3);";
         String s3 = "2+sin(3)-ln(12)+1/3.689";
         String s4 = "sin(2)+cos(3)-sum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
-        String s5 = "sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23))";
+        String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), 12, sum(3,4,8,9,2000)),12000, mode(3,2,2,1),32.897, mode(1,5,7,7,1,1,7))";
 
         MathExpression m = new MathExpression(s5);
         System.out.println("m.solve(): " + m.solve());
 
-        double N = 100;
-
-        Shootouts.benchmark(s2, (int) N);
-        Shootouts.benchmark(s3, (int) N);
-
+        //   double N = 100; 
+        //   Shootouts.benchmark(s2, (int) N);
+        //   Shootouts.benchmark(s3, (int) N);
     }//end method
 
     @Override

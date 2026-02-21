@@ -24,7 +24,7 @@ import static com.github.gbenroscience.parser.Bracket.*;
  */
 public class DataSetFormatter {
 
-    private List<String> dataset = new ArrayList<String>();
+    private List<String> dataset = new ArrayList<>();
     /**
      * used to mask the commas after they have been processed.
      */
@@ -42,12 +42,12 @@ public class DataSetFormatter {
      * Takes a comma separated string of data values and scans them into its
      * dataset attribute.
      *
-     * @param datastring A comma separated data set. e.g 2,3,......or
+     * @param text  A comma separated data set. e.g 2,3,......or
      * sort(2,3,1,5,...) or mode(1,8,...)
      */
-    public DataSetFormatter(String datastring) {
+    public DataSetFormatter(String text) {
 //scan(datastring);
-        scanCommaSeparatedData(datastring);
+        scanCommaSeparatedData(text);
     }
 
     public void setDataset(ArrayList<String> dataset) {
@@ -67,7 +67,7 @@ public class DataSetFormatter {
         for (String c : dataset) {
             formatted.append(c);
         }
-        return formatted.toString();//change back
+        return formatted.substring(0, formatted.length());//change back
     }
 
     /**
@@ -87,7 +87,7 @@ public class DataSetFormatter {
             String token = sbpList.get(lastIndexCursor);
             /**
              * The logic of this if statement. This list is a comma-separated
-             * list We intend to place brackets about every group of tokens that
+             * list. We intend to place brackets about every group of tokens that
              * occurs either between 2 commas, or between the beginning of the
              * list and the first comma, or between the last comma and the end
              * of the list. RULES: If only 1 token occurs in the said space,
@@ -198,45 +198,11 @@ public class DataSetFormatter {
     public static void main(String args[]) {
         //String func = "sum(@(x)x^3+2*x+1,3,@(x)cos(x+4),5,-6,7,-8,8)";//"sort(sin(2),cosh(4),-6,log(12,10),-12,2*sin(3),cos(4),34)";
         String func = "sum(1+1,3*2)";
-        //String func = "sum(1+1)";
-//String func = "(root(f,2,4))";
-        MathExpression e = new MathExpression(func);
-        System.out.println(e.solve());
+        String fn = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
+         
 
-        func = "sum(1+1*8+9)";
-        e = new MathExpression(func);
-        System.out.println(e.solve());
-
-        func = "sum(sin(5)+cosh(ln(5)))";
-        e = new MathExpression(func);
-        System.out.println(e.solve());
-
-        func = "prod(5,2+2)";
-        e = new MathExpression(func);
-        System.out.println(e.solve());
-
-        func = "a=2;geom((2+((2-2)),(8+8)-(((8))),4))";
-        e = new MathExpression(func);
-        System.err.println("scanner: " + e.scanner);
-        System.out.println(e.solve());
-
-        func = "sin(10)";
-        e = new MathExpression(func);
-        System.err.println("scanner: " + e.scanner);
-        System.out.println(e.solve());
-
-        func = "sin(2,1+4)";
-        e = new MathExpression(func);
-        System.err.println("scanner: " + e.scanner);
-        System.out.println(e.solve());
-
-        func = "sin(34+3,(15-3),2,1+4)";
-        e = new MathExpression(func);
-        System.err.println("scanner: " + e.scanner);
-        System.out.println(e.solve());
-
-        DataSetFormatter f = new DataSetFormatter(func);
-        System.out.println("Before scan-processing, the data = " + func);
+        DataSetFormatter f = new DataSetFormatter(fn);
+        System.out.println("Before scan-processing, the data = " + fn);
         System.out.println("After scan-processing, the dataset = " + f.dataset);
         System.out.println("After scan-processing, the processed string  = " + f.getFormattedDataSet());
     }

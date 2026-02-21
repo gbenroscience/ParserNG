@@ -94,12 +94,12 @@ class MathExpressionTest {
             }
         };
         MathExpression me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals("SYNTAX ERROR", me.solve());
+        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b1);
         me = new MathExpression("b1(1,2,3)");
         Assertions.assertEquals("1", me.solve());
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals("SYNTAX ERROR", me.solve());
+        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b2);
         me = new MathExpression("b2(1,2,3)");
         Assertions.assertEquals("2", me.solve());
@@ -109,12 +109,12 @@ class MathExpressionTest {
         Assertions.assertEquals("3.0", me.solve());
         Declarations.unregisterBasicNumericalMethod(b1.getClass());
         me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals("SYNTAX ERROR", me.solve());
+        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
         me = new MathExpression("b2(1,2,3)");
         Assertions.assertEquals("2", me.solve());
         Declarations.unregisterBasicNumericalMethod(b2.getClass());
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals("SYNTAX ERROR", me.solve());
+        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
     }
 
     @Test

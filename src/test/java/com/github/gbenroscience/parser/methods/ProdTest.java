@@ -1,4 +1,4 @@
-package com.github.gbenroscience.math.parser.methods;
+package com.github.gbenroscience.parser.methods;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;

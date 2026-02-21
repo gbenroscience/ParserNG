@@ -16,6 +16,7 @@ import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.math.matrix.expressParser.PrecisionMatrix;
 import static java.lang.Math.*;
 import com.github.gbenroscience.math.differentialcalculus.Formula;
+import java.util.List;
 
 /**
  *
@@ -427,7 +428,7 @@ public class FunctionExpander {
      */
     private class PolynomialCalculus {
 
-        private ArrayList<String> scanner = new ArrayList<String>();
+        private List<String> scanner = new ArrayList<String>();
 
         public PolynomialCalculus() {
             scan();

@@ -7,7 +7,6 @@ package com.github.gbenroscience.parser;
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.parser.methods.Method;
 
-import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.List;
@@ -34,11 +33,7 @@ public class Function implements Savable {
     /**
      * The type of the function
      */
-    private int type = ALGEBRAIC;
-
-    public static final int ALGEBRAIC = 1;
-    public static final int MATRIX = 2;
-    public static final int LIST = 3;
+    private TYPE type = TYPE.ALGEBRAIC_EXPRESSION;
 
     /**
      * If the object is an algebraic expression, its details are stored here.
@@ -56,7 +51,7 @@ public class Function implements Savable {
      */
     public Function(Matrix matrix) {
         this.matrix = matrix;
-        this.type = MATRIX;
+        this.type = TYPE.MATRIX;
         FunctionManager.add(this);
     }
 
@@ -148,7 +143,7 @@ public class Function implements Savable {
             if (notAlgebraic) {
                 if (size == 1) {
                     int listSize = Integer.parseInt(params.get(0));
-                    type = LIST;
+                    type = TYPE.LIST;
                 } else if (size == 2) {
                     //A matrix definition...A(2,3)=(3,2,4,5,3,1)------A=@(3,3)(3,4,32,3,4,4,3,3,4)
                     int rows = Integer.parseInt(params.get(0));
@@ -175,7 +170,7 @@ public class Function implements Savable {
                             }
                         }
                         this.matrix = listToMatrix(matrixData);
-                        type = MATRIX;
+                        type = TYPE.MATRIX;
                         this.matrix.setName(name);
 
                     } else {
@@ -196,11 +191,11 @@ public class Function implements Savable {
 
     }//end constructor
 
-    public void setType(int type) {
+    public void setType(TYPE type) {
         this.type = type;
     }
 
-    public int getType() {
+    public TYPE getType() {
         return type;
     }
 
@@ -217,13 +212,14 @@ public class Function implements Savable {
             for (Variable var : independentVariables) {
                 mathExpression.setValue(var.getName(), String.valueOf(x[i++]));
             }
-            
-           return Double.parseDouble(mathExpression.solve());
+
+            return Double.parseDouble(mathExpression.solve());
         }
         return Double.NaN;
     }
 
-    public static boolean assignObject(String input) { 
+    public static boolean assignObject(String input) {
+        
         /**
          * Check if it is a function assignment operation...e.g:
          * f=matrix_mul(A,B)
@@ -272,23 +268,32 @@ public class Function implements Savable {
 
                 success = true;
             } else {
+
                 MathExpression expr = new MathExpression(rhs);
                 List<String> scanner = expr.getScanner(); 
                 if (scanner.size() == 3 && scanner.get(1).startsWith("anon")) {//function assigments will always be like this: [(,anon1,)] when they get here
                     Function f = FunctionManager.lookUp(scanner.get(1));
+
                     if (f != null) {
+                
                         FunctionManager.delete(scanner.get(1));
-                        f.setDependentVariable(new Variable(newFuncName));
-                        FunctionManager.add(f); 
+                        if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
+                            f.setDependentVariable(new Variable(newFuncName));
+                            FunctionManager.add(f);
+                        } else if (f.getType() == TYPE.MATRIX) {
+                             f.getMatrix().setName(newFuncName);
+                            FunctionManager.add(f);
+                        }
                     } else {
                         f = new Function(newFuncName + "=" + rhs + ";");
                         FunctionManager.add(f);
                     }
+
                     return true;
                 }
                 String val = expr.solve();
                 String referenceName = expr.getReturnObjectName(); 
-                
+
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
                     Function f;
                     switch (expr.getReturnType()) {
@@ -457,10 +462,10 @@ public class Function implements Savable {
      * object.
      */
     public int numberOfParameters() {
-        if (type == LIST) {
+        if (type == TYPE.LIST) {
             return 1;
         }
-        if (type == MATRIX) {
+        if (type == TYPE.MATRIX) {
             return 2;
         }
 
@@ -583,7 +588,7 @@ public class Function implements Savable {
      *
      */
     public Variable getIndependentVariable(String name) {
-        if (type != ALGEBRAIC) {
+        if (type != TYPE.ALGEBRAIC_EXPRESSION) {
             return null;
         }
         int sz = independentVariables.size();
@@ -602,7 +607,7 @@ public class Function implements Savable {
      * given name.
      */
     public boolean hasIndependentVariable(String var) {
-        if (type != ALGEBRAIC) {
+        if (type != TYPE.ALGEBRAIC_EXPRESSION) {
             return false;
         }
         Variable v = new Variable(var);
@@ -680,7 +685,7 @@ public class Function implements Savable {
      * could be passed..f(3,-4,9)
      */
     public String evalArgs(String args) {
-        if (type != ALGEBRAIC) {
+        if (type != TYPE.ALGEBRAIC_EXPRESSION) {
             return null;
         }
         String str = getFullName();
@@ -869,7 +874,7 @@ public class Function implements Savable {
         String fullname = getFullName();
         String paramList = fullname.substring(fullname.indexOf("("));
         switch (type) {
-            case ALGEBRAIC:
+            case ALGEBRAIC_EXPRESSION:
                 return getName() + "=@" + paramList + mathExpression.getExpression();
             case MATRIX:
                 return getName() + "=@" + paramList + "(" + matrixToCommaList(matrix) + ")";
@@ -887,7 +892,7 @@ public class Function implements Savable {
 
     public static boolean isAnonymous(Function f) {
         switch (f.type) {
-            case ALGEBRAIC:
+            case ALGEBRAIC_EXPRESSION:
                 return f.dependentVariable.getName().startsWith("anon");
             case MATRIX:
                 return f.matrix.getName().startsWith("anon");
@@ -920,7 +925,7 @@ public class Function implements Savable {
      */
     public String getFullName() {
         switch (type) {
-            case ALGEBRAIC:
+            case ALGEBRAIC_EXPRESSION:
 
                 String str = dependentVariable.getName() + "(";
                 int sz = independentVariables.size();
@@ -945,7 +950,7 @@ public class Function implements Savable {
      */
     public String getName() {
         switch (type) {
-            case ALGEBRAIC:
+            case ALGEBRAIC_EXPRESSION:
                 return dependentVariable.getName();
             case MATRIX:
                 return matrix.getName();
@@ -963,7 +968,7 @@ public class Function implements Savable {
      * {@link Function#MATRIX} Otherwise it returns {@link Double#NaN}
      */
     public double calcDet() {
-        if (type == MATRIX) {
+        if (type == TYPE.MATRIX) {
             return matrix.determinant();
         }
         return Double.NaN;
@@ -975,7 +980,7 @@ public class Function implements Savable {
      * {@link Function#MATRIX} Otherwise it returns null
      */
     public Matrix calcInverse() {
-        if (type == MATRIX) {
+        if (type == TYPE.MATRIX) {
             return matrix.inverse();
         }
         return null;
@@ -987,7 +992,7 @@ public class Function implements Savable {
      * {@link Function#MATRIX} Otherwise it returns null
      */
     public Matrix triangularMatrix() {
-        if (type == MATRIX) {
+        if (type == TYPE.MATRIX) {
             return matrix.reduceToTriangularMatrix();
         }
         return null;
@@ -999,7 +1004,7 @@ public class Function implements Savable {
      * {@link Function#MATRIX} Otherwise it returns null
      */
     public Matrix reduceToEchelon() {
-        if (type == MATRIX) {
+        if (type == TYPE.MATRIX) {
             return matrix.reduceToRowEchelonMatrix();
         }
         return null;
@@ -1100,7 +1105,9 @@ public class Function implements Savable {
     }
 
     public static void main(String args[]) {
+        FunctionManager.add("K=@(2,3)(2,3,4,9,8,1);");
 
+        System.out.println("K=" + FunctionManager.lookUp("K").getMatrix());
         MathExpression addMat = new MathExpression("w=6*5;K=@(2,3)(2,3,4,9,8,1);M=@(3,3)(1,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);v=eigpoly(@(3,3)(2,1,5,6,9,2,4,3,8));c=v(30);3*M+N;");
 
         System.out.println("soln: " + addMat.solve());

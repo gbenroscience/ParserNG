@@ -171,6 +171,7 @@ public class Declarations {
     /**
      * A list of all inbuilt methods of the parser of this software.The user is
      * free to define his own functions.
+     * @return Array of strings
      */
     public static String[] getInbuiltMethods() {
         return createInBuiltMethods();

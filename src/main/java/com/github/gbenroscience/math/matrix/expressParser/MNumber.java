@@ -11,6 +11,7 @@ import static com.github.gbenroscience.parser.Operator.*;
 import static com.github.gbenroscience.parser.Variable.*;
 
 import static com.github.gbenroscience.parser.methods.Method.*;
+import java.util.List;
 
 /**
  *
@@ -170,7 +171,7 @@ public class MNumber {
     }
 
     public void validateNumber(MatrixFunction function) {
-        ArrayList<String> scan = function.getScanner();
+        List<String> scan = function.getScanner();
         //Numbers
 
         try {

@@ -1,4 +1,4 @@
-package com.github.gbenroscience.math.parser.methods.ext;
+package com.github.gbenroscience.parser.methods.ext;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -367,7 +367,7 @@ public class FloorCeilTests {
         Assertions.assertEquals("0.9893582466233818", me.solve());
         //ParserNG iincorrectly solve sin(1+1,2+2) as  sin(2*4)
         me = new MathExpression("sin(1+1,2+2)");
-        Assertions.assertEquals("SYNTAX ERROR", me.solve());
+        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
     }
 
     @Test

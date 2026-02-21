@@ -1,4 +1,4 @@
-package com.github.gbenroscience.math.parser.methods;
+package com.github.gbenroscience.parser.methods;
 
 import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
 import com.github.gbenroscience.parser.methods.Declarations;

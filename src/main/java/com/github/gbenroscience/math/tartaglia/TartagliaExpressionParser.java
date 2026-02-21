@@ -80,7 +80,7 @@ public class TartagliaExpressionParser {
                         !scanner.get(i).equals(";")
                         &&!validNumber(scanner.get(i))&&!isVariableString(scanner.get(i))){
                     MathScanner scan=new MathScanner(scanner.get(i));
-                    ArrayList<String> split=scan.splitStringAtFirstNumber(scanner.get(i));
+                     List<String> split=scan.splitStringAtFirstNumber(scanner.get(i));
                     if( validNumber( split.get(0) )&&isVariableString(split.get(1)) ){
                         scanner.remove(i);
                         scanner.addAll(i, split);

@@ -20,7 +20,7 @@ public class MOperator extends Operator {
 
     public static final String ROW_JOIN = "rowJoin";
     public static final String COL_JOIN = "colJoin";
-    public static final String TRI_MATRIX = "tri";
+    public static final String TRI_MATRIX = "tri_mat";
     public static final String DET_BRACE = "|";
     public static final String UNIT = "unit";
     public static final String DET = "det";

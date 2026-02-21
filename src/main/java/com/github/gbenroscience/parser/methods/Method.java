@@ -142,8 +142,8 @@ public class Method {
 
     /**
      * @param op the String to check
-     * @return true if the operator is a statistical operator that returns items
-     * in a list e.g sort(
+     * @return true if the operator is a statistical method that returns items
+     * in a list e.g sort or mode
      */
     public static boolean isListReturningStatsMethod(String op) {
         return (op.equals(SORT) || op.equals(MODE) || op.equals(RANDOM) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS)
@@ -587,9 +587,9 @@ public class Method {
                 return list;
             } else if (name.equals(MODE)) {
                 Set set = new Set(list);
-                result = String.valueOf(set.mode());
+                List<String>res = set.mode();
                 list.clear();
-                list.add(result);
+                list.addAll(res);
                 return list;
             } else if (name.equals(RANDOM) && sz >= 0 && sz <= 2) {
                 Set set = new Set(list);
@@ -599,9 +599,9 @@ public class Method {
                 return list;
             } else if (name.equals(SORT)) {
                 Set set = new Set(list);
-                result = String.valueOf(set.sort());
+                List<String>res = set.sort();
                 list.clear();
-                list.add(result);
+                list.addAll(res);
                 return list;
             } else if (name.equals(INVERSE_MATRIX)) {
                 Set set = new Set(list);

@@ -8,6 +8,7 @@ import static com.github.gbenroscience.parser.Operator.*;
 import com.github.gbenroscience.parser.methods.Method;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Examples are sort function, mode function and other methods that will
@@ -54,7 +55,7 @@ one.
      * @param scan the ArrayList object that contains the scanned function that
      * has this ListReturningStatsOperator object
      */
-    public ListReturningStatsMethod(String name, int index, ArrayList<String> scan) {
+    public ListReturningStatsMethod(String name, int index, List<String> scan) {
         this.name = name;
         this.index = (scan.get(index).equals(name)) ? index : -1;
         this.openBracket = new Bracket("(");
@@ -78,7 +79,7 @@ one.
      * @return true if this object is the superParent i.e the container for all
      * data in the function.
      */
-    private void determineSuperParentStatus(ArrayList<String> scan) {
+    private void determineSuperParentStatus(List<String> scan) {
         boolean isSuper = true;
         int scanStartIndex = getCloseBracket().getIndex();
         loopForwards:
@@ -227,7 +228,7 @@ this one.
      * @return true if the first ListReturningStatsMethod object to its left
 is its parent. So it can have a parent and yet return false here.
      */
-    public boolean hasParent(ArrayList<String> scan) {
+    public boolean hasParent(List<String> scan) {
         boolean isEnveloped = false;
         int i = index;
 
@@ -266,7 +267,7 @@ is its parent. So it can have a parent and yet return false here.
      * and to the right and sees a valid bracket structure around itself
      */
     @Override
-    public boolean validate(ArrayList<String> scan) {
+    public boolean validate(List<String> scan) {
         boolean valid = true;
 
         if (!isSuperParent()) {
@@ -380,7 +381,7 @@ is its parent. So it can have a parent and yet return false here.
      * @param scan the scanner output
      * @return true if valid
      */
-    public static boolean validateFunction(ArrayList<String> scan) {
+    public static boolean validateFunction(List<String> scan) {
 
         ListReturningStatsMethod list;
         boolean validity = true;

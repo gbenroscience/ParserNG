@@ -11,6 +11,7 @@ import com.github.gbenroscience.parser.UnaryPreOperator;
 
 
 import java.util.ArrayList;
+import java.util.List;
 
 
 /**
@@ -51,7 +52,7 @@ public String getName(){
 /**
  *
  * @param op The string to check.
- * @return true if the operator is a valid mathronian operator
+ * @return true if the operator is a valid operator
  */
 public static boolean isOperatorString(String op){
 
@@ -280,7 +281,7 @@ return null;
  *
  */
 public static void orderCompoundTokens(MathExpression function){
-ArrayList<String>scanner=function.getScanner();
+    List<String>scanner=function.getScanner();
 
 for(int i=0;i<scanner.size();i++){
     if( isPower(scanner.get(i)) ){

@@ -11,6 +11,7 @@ import java.util.ArrayList;
  
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import java.util.List;
 
 /**
  *
@@ -94,7 +95,7 @@ public MBinaryOperator(String name, int index, ArrayList<String>scan){
  * in its immediate environment i.e to its left and right is correct.
  */
     @Override
-public boolean validate(ArrayList<String>scan){
+public boolean validate(List<String>scan){
 
 boolean correct=true;
  try{
