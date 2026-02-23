@@ -17,7 +17,6 @@ import com.github.gbenroscience.parser.methods.Help;
 import com.github.gbenroscience.parser.methods.Method;
 
 import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.math.Point;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
@@ -31,8 +30,8 @@ import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Operator.*;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
-import com.github.gbenroscience.parser.benchmarks.Grok;
-import com.github.gbenroscience.parser.benchmarks.Shootouts;
+import com.github.gbenroscience.parser.methods.MethodRegistry;
+import java.util.Stack;
 
 /**
  *
@@ -95,6 +94,11 @@ public class MathExpression implements Savable, Solvable {
     private boolean hasRemainderOperators;
     private boolean hasPermOrCombOperators;
     private boolean hasLogicOperators;
+    /**
+     * A single, reusable buffer for string operations. Used by EvalResult to
+     * process string results
+     */
+    private final StringBuilder textBuilder = new StringBuilder(1024);
     private ExpressionSolver expressionSolver = new ExpressionSolver();
     /**
      * If set to true, MathExpression objects will automatically initialize
@@ -118,10 +122,16 @@ public class MathExpression implements Savable, Solvable {
      */
     private VariableManager variableManager;
 
+    // A simple pre-allocated array of results to act as a stack
+    private final EvalResult[] pool = new EvalResult[64];
+    private int poolPointer = 0;
+
     /**
-     * The type of output returned by the parser.
+     * The kind of output returned by the parser.
      */
     TYPE returnType = TYPE.NUMBER;
+
+    private List<Token> tokens = new ArrayList<>();
 
     /**
      * Sometimes, after evaluation the evaluation list which is a local
@@ -133,6 +143,70 @@ public class MathExpression implements Savable, Solvable {
      */
     private String returnObjectName;
     public static final String SYNTAX_ERROR = "SYNTAX ERROR";
+
+    static class Token {
+
+        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5;
+
+        public int kindInt;
+        public double value;
+        public String name;     // REQUIRED for functions (e.g., "sum") and variables (e.g., "x")
+        public int id;
+        public char opChar;
+        public int precedence;
+        public boolean isRightAssoc;
+        public boolean isPostfix;
+        public int arity;
+
+        // Constructor for Numbers
+        public Token(double value) {
+            this.kindInt = NUMBER;
+            this.value = value;
+            this.precedence = -1;
+            this.isRightAssoc = false;
+        }
+
+        // Constructor for everything else
+        public Token(int kindInt, String name, double value, char opChar, int precedence, boolean isRightAssoc, boolean isPostfix, int arity) {
+            this.kindInt = kindInt;
+            this.name = name;
+            this.value = value;
+            this.opChar = opChar;
+            this.precedence = precedence;
+            this.isRightAssoc = isRightAssoc;
+            this.isPostfix = isPostfix;
+            this.arity = arity;
+        }
+
+        public static int getPrec(char op) {
+            switch (op) {
+                case '+':
+                case '-':
+                    return 1;
+                case '*':
+                case '/':
+                case '%':
+                case 'Р':
+                case 'Č':
+                    return 2;
+                case '^':
+                    return 3;
+                case '√':
+                case 'R':
+                    return 4;
+                case '!':
+                case '²':
+                case '³':
+                    return 5; // Added precedence for postfix
+                default:
+                    return 0;
+            }
+        }
+
+        public static boolean isRightAssociative(char op) {
+            return op == '^';
+        }
+    }
 
     /**
      * default no argument constructor for class MathExpression. It creates a
@@ -159,7 +233,9 @@ public class MathExpression implements Savable, Solvable {
     }//end constructor MathExpression
 
     public MathExpression(String input, VariableManager variableManager) {
-
+        for (int i = 0; i < 64; i++) {
+            pool[i] = new EvalResult();
+        }
         setAutoInitOn(false);
         this.variableManager = variableManager;
 
@@ -190,6 +266,9 @@ public class MathExpression implements Savable, Solvable {
         }//end if
         else {
             setExpression("(0.0)");
+        }
+        if (correctFunction) {
+            compileToPostfix();
         }
 
     }
@@ -320,6 +399,10 @@ public class MathExpression implements Savable, Solvable {
      */
     public void setBracket(Bracket[] bracket) {
         this.bracket = bracket;
+    }
+
+    public List<Token> getTokens() {
+        return tokens;
     }
 
     /**
@@ -1253,7 +1336,7 @@ public class MathExpression implements Savable, Solvable {
                     if (isVariableString(scan.get(i)) && !isOpeningBracket(scan.get(i + 1))) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
-                            scan.set(i, v.getValue());
+                            scan.set(i, String.valueOf(v.getValue()));
                         }
 
                     }//end if
@@ -1261,7 +1344,7 @@ public class MathExpression implements Savable, Solvable {
                     if (isVariableString(scan.get(i))) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
-                            scan.set(i, v.getValue());
+                            scan.set(i, String.valueOf(v.getValue()));
                         }
 
                     }//end if
@@ -1282,9 +1365,9 @@ public class MathExpression implements Savable, Solvable {
      * @throws NullPointerException if a Variable object that has that name id
      * not found.
      */
-    public String getValue(String name) throws NullPointerException {
+    public double getValue(String name) throws NullPointerException {
         Variable var = variableManager.lookUp(name);
-        return var == null ? null : var.getValue();
+        return var == null ? Double.NaN : var.getValue();
     }
 
     /**
@@ -1686,7 +1769,7 @@ public class MathExpression implements Savable, Solvable {
                 } else {//e.g [,cos,(,3,+,5,-2,^,3,),]-> First evaluate the expression before evaluating the method
                     if (Method.isStatsMethod(methodName)) {
                         boolean isNotListReturner = Method.isNumberReturningStatsMethod(methodName);
-                       //  System.out.println("resolveSegment->isMethod: executable is stats-method e.g: \n"+executable+"\n --> will " +  (isNotListReturner ? "not call" : "call") + " listToString on result of Method.run");
+                        //  System.out.println("resolveSegment->isMethod: executable is stats-method e.g: \n"+executable+"\n --> will " +  (isNotListReturner ? "not call" : "call") + " listToString on result of Method.run");
                         List<String> out = Method.run(new ArrayList<>(executable), DRG);
                         if (!isNotListReturner) {//return a list... write the list in the original executable and then return null, the solve method will take it from there.
                             executable.clear();
@@ -1790,7 +1873,7 @@ public class MathExpression implements Savable, Solvable {
                     try {
                         // Extract the result for this specific pair
                         String result = resolveSegment(myScan, openIdx, closeIdx, isMethod);
-                         if (result != null) {
+                        if (result != null) {
                             // 3. REPLACEMENT BLOCK (The most critical part for speed)
                             // Remove the processed tokens from the list
                             int countToRemove = closeIdx - replaceStart + 1;
@@ -1873,15 +1956,506 @@ public class MathExpression implements Savable, Solvable {
     }//end method solve()
 
     protected List<String> solve(List<String> list) {
-        expressionSolver.evaluate(list);
+        expressionSolver.evaluate(list.toArray(new Token[0]));
         return list;
     }
 
     protected double hiSpeedSolver(List<String> list) {
-        return expressionSolver.evaluate(list);
+        return expressionSolver.evaluate(tokens.toArray(new Token[0]));
     }
 
-    /**
+    public StringBuilder getTextBuilder() {
+        textBuilder.setLength(0);
+        return textBuilder;
+    }
+
+    public Token translate(String s) {
+        if (s == null || s.isEmpty()) {
+            return null;
+        }
+
+        char c0 = s.charAt(0);
+        int len = s.length();
+
+        // 1. Identify Numbers
+        // (Assuming isNumber() handles negative signs and decimals correctly)
+        if (isNumber(s)) {
+            return new Token(fastParseDouble(s));
+        }
+        
+
+        // 2. Identify Brackets (Commas completely removed)
+        if (len == 1) {
+            switch (c0) {
+                case '(':
+                    return new Token(Token.LPAREN, null, 0.0, '(', -1, false, false, -1);
+                case ')':
+                    return new Token(Token.RPAREN, null, 0.0, ')', -1, false, false, -1);
+            }
+        }
+
+        // 3. Identify Operators
+        if (isOperator(s)) {
+            boolean isPostfix = (c0 == '!' || c0 == '²' || c0 == '³');
+
+            // Map "³√" to 'R' so your switch statement can stay ultra-fast
+            char internalOp = (len > 1 && s.equals("³√")) ? 'R' : c0;
+
+            return new Token(
+                    Token.OPERATOR,
+                    null,
+                    0.0,
+                    internalOp,
+                    Token.getPrec(internalOp),
+                    Token.isRightAssociative(internalOp),
+                    isPostfix,
+                    -1
+            );
+        }
+
+        // 4. Identify Functions (Built-in or User-Defined)
+        if (FunctionManager.FUNCTIONS.containsKey(s)) {
+            return new Token(
+                    Token.FUNCTION,
+                    s, // Store the function name!
+                    0.0,
+                    '\0',
+                    5, // Functions have high precedence
+                    false,
+                    false,
+                    FunctionManager.getFunction(s).getArity()
+            );
+        }
+        // 4. Identify Built-in or User-Defined
+        if (Method.isInBuiltMethod(s)) {
+            Token t = new Token(
+                    Token.METHOD,
+                    s, // Store the function name!
+                    0.0,
+                    '\0',
+                    5, // Functions have high precedence
+                    false,
+                    false,
+                    -1
+            );
+            int methodId = MethodRegistry.getMethodID(s);
+            t.id = methodId;
+
+        }
+
+        // 5. Fallback: Treat as a Variable/Constant (e.g., 'x', 'pi')
+        // We set kindInt to NUMBER, but store the name so the evaluator can resolve it.
+        return new Token(
+                Token.NUMBER,
+                s, // Store the variable name!
+                0.0,
+                '\0',
+                -1,
+                false,
+                false,
+                -1
+        );
+    }
+
+// Helper to reliably catch all your custom operators
+    private boolean isOperator(String s) {
+        if (s.length() == 1) {
+            char c = s.charAt(0);
+            return "+-*/%^√!²³ČР".indexOf(c) != -1;
+        }
+        return s.equals("³√");
+    }
+
+    private boolean isABinaryOperator(char opChar) {
+        // Unary operators (√, R, !, ², ³) do NOT reduce the argument count
+        return opChar == '+' || opChar == '-' || opChar == '*'
+                || opChar == '/' || opChar == '%' || opChar == '^'
+                || opChar == 'Č' || opChar == 'Р';
+    }
+
+    public final void compileToPostfix() {
+        Stack<Token> stack = new Stack<>();
+
+        // Primitive stack to track the number of arguments at each nesting level.
+        // Assuming a maximum function nesting depth of 256.
+        int[] argCounts = new int[256];
+        int argPtr = 0;
+        argCounts[0] = 0; // Base level count
+
+        for (String s : scanner) {
+            Token t = translate(s);
+            if (t == null) {
+                continue;
+            }
+
+            switch (t.kindInt) {
+                case Token.NUMBER:
+                    tokens.add(t);
+                    // A number is 1 completed value
+                    argCounts[argPtr]++;
+                    break;
+                // Treat METHOD and FUNCTION identically for scope tracking
+                case Token.METHOD:
+                case Token.FUNCTION:
+                    stack.push(t);
+                    argCounts[++argPtr] = 0;
+                    break;
+
+                case Token.LPAREN:
+                    stack.push(t);
+                    break;
+
+                case Token.RPAREN:
+                    // Pop operators to the output queue until we hit '('
+                    while (!stack.isEmpty() && stack.peek().kindInt != Token.LPAREN) {
+                        Token op = stack.pop();
+                        tokens.add(op);
+                        if (isABinaryOperator(op.opChar)) {
+                            argCounts[argPtr]--;
+                        }
+                    }
+
+                    if (!stack.isEmpty() && stack.peek().kindInt == Token.LPAREN) {
+                        stack.pop(); // Discard the '('
+                    }
+
+// Check if the scope belongs to a METHOD or FUNCTION
+                    if (!stack.isEmpty() && (stack.peek().kindInt == Token.FUNCTION || stack.peek().kindInt == Token.METHOD)) {
+                        Token callable = stack.pop();
+                        callable.arity = argCounts[argPtr]; // Bake the arity!
+                        tokens.add(callable);
+
+                        argPtr--;
+                        argCounts[argPtr]++;
+                    }
+                    break;
+
+                case Token.OPERATOR:
+                    if (t.isPostfix) {
+                        // Postfix operators (!, ², ³) apply immediately
+                        tokens.add(t);
+                        // Net stack effect is 0, so argCounts[argPtr] doesn't change
+                    } else {
+                        while (!stack.isEmpty() && stack.peek().kindInt == Token.OPERATOR) {
+                            Token top = stack.peek();
+
+                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
+                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
+
+                                Token op = stack.pop();
+                                tokens.add(op);
+                                if (isABinaryOperator(op.opChar)) {
+                                    argCounts[argPtr]--;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        stack.push(t);
+                    }
+                    break;
+            }
+        }
+
+        // Flush any remaining operators
+        while (!stack.isEmpty()) {
+            Token op = stack.pop();
+            tokens.add(op);
+            // Note: Tracking argCounts here isn't strictly necessary for execution, 
+            // but keeps the internal state mathematically pure if you want to validate it later.
+            if (op.kindInt == Token.OPERATOR && isABinaryOperator(op.opChar)) {
+                argCounts[argPtr]--;
+            }
+        }
+    }
+
+ 
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+     
+
+public final class ExpressionSolver {
+
+        public double evaluate(Token[] postfix) {
+            // Allocation-free tip: Reuse this array across evaluations if possible!
+            final double[] stack = new double[postfix.length];
+            int ptr = -1;
+
+            for (int i = 0; i < postfix.length; i++) {
+                final Token t = postfix[i];
+
+                switch (t.kindInt) {
+                    case Token.NUMBER:
+                        // Handle variables vs literal numbers
+                        if (t.name != null) {
+                            stack[++ptr] = VariableManager.getVariable(t.name).getValue();
+                        } else {
+                            stack[++ptr] = t.value;
+                        }
+                        break;
+
+                    case Token.OPERATOR:
+                        // Unary operators only pop ONE, Binary pop TWO
+                        if (t.isPostfix || t.opChar == '√' || t.opChar == 'R') {
+                            double val = stack[ptr];
+                            switch (t.opChar) {
+                                case '√':
+                                    stack[ptr] = Math.sqrt(val);
+                                    break;
+                                case 'R':
+                                    stack[ptr] = Math.cbrt(val);
+                                    break;
+                                case '!':
+                                    stack[ptr] = Maths.fact(val);
+                                    break;
+                                case '²':
+                                    stack[ptr] = val * val;
+                                    break;
+                                case '³':
+                                    stack[ptr] = val * val * val;
+                                    break;
+                            }
+                        } else {
+                            double b = stack[ptr--];
+                            double a = stack[ptr];
+                            switch (t.opChar) {
+                                case '+':
+                                    stack[ptr] = a + b;
+                                    break;
+                                case '-':
+                                    stack[ptr] = a - b;
+                                    break;
+                                case '*':
+                                    stack[ptr] = a * b;
+                                    break;
+                                case '/':
+                                    stack[ptr] = a / b;
+                                    break;
+                                case '%':
+                                    stack[ptr] = a % b;
+                                    break;
+                                case '^':
+                                    stack[ptr] = Math.pow(a, b);
+                                    break;
+                                case 'Č':
+                                    stack[ptr] = Maths.combination(a, b);
+                                    break;
+                                case 'Р':
+                                    stack[ptr] = Maths.permutation(a, b);
+                                    break;
+                            }
+                        }
+                        break;
+                    case Token.METHOD:
+                        int mArity = t.arity;
+                        double[] mArgs = new double[mArity];
+                        for (int j = mArity - 1; j >= 0; j--) {
+                            mArgs[j] = stack[ptr--];
+                        }
+                        
+                        // Route to Built-in execution
+                       EvalResult res = Method.exec(MathExpression.this, t.name, t.id, mArity, mArgs, DRG);
+                        stack[++ptr] = 
+                        break;
+
+                    case Token.FUNCTION:
+                        int arity = t.arity;
+                        double[] args = new double[arity];
+                        // Pop args in reverse order to maintain mathematical order
+                        for (int j = arity - 1; j >= 0; j--) {
+                            args[j] = stack[ptr--];
+                        }
+                        stack[++ptr] = FunctionManager.lookUp(t.name).calc(args);
+                        break;
+                }
+            }
+            return stack[0];
+        }
+    }
+
+
+    public static final class EvalResult {
+
+        public double scalar;      // For single numbers
+        public double[] vector;    // For stats/lists
+        public Matrix matrix;  // For matrices
+        public int type;           // 0=Scalar, 1=Vector, 2=Matrix, 3=String
+        /**
+         * Use this to return string results, e.g. formulas, function results,
+         * etc.
+         */
+        public String textRes;
+
+        // Helper to reset the object for reuse
+        public EvalResult wrap(double s) {
+            this.scalar = s;
+            this.type = 0;
+            return this;
+        }
+
+        public EvalResult wrap(double[] v) {
+            this.vector = v;
+            this.type = 1;
+            return this;
+        }
+
+        public EvalResult wrap(Matrix m) {
+            this.matrix = m;
+            this.type = 2;
+            return this;
+        }
+
+        public EvalResult wrap(String s) {
+            this.textRes = s;
+            this.type = 3;
+            return this;
+        }
+    }
+
+    public EvalResult getNextResult() {
+        return pool[poolPointer++];
+    }
+
+    public void release(int count) {
+        poolPointer -= count;
+    }
+
+
+    public final class ExpressionSolver1 {
+
+        public double evaluate(List<String> tokens) {
+            final String[] ts = tokens.toArray(new String[0]);
+            final int n = ts.length;
+
+            final double[] valStack = new double[n];
+            final int[] opStack = new int[n];
+            int vIdx = -1;
+            int oIdx = -1;
+
+            for (int i = 0; i < n; i++) {
+                final String s = ts[i];
+                final char c0 = s.charAt(0);
+                final int sLen = s.length();
+
+                // 1. NUMERIC CHECK
+                if ((c0 >= '0' && c0 <= '9') || (c0 == '-' && sLen > 1 && s.charAt(1) >= '0' && s.charAt(1) <= '9')) {
+                    valStack[++vIdx] = fastParseDouble(s);
+                    continue;
+                }
+
+                // 2. UNARY PREFIX (ROOTS)
+                // We treat ³√ as a single internal char 'R' for the switch speed
+                if (c0 == '√' || s.equals("³√")) {
+                    opStack[++oIdx] = (c0 == '√') ? '√' : 'R';
+                    continue;
+                }
+
+                // 3. UNARY POSTFIX (FACTORIAL/POWERS)
+                if (c0 == '!' || c0 == '²' || c0 == '³' || (c0 == '-' && sLen > 1 && s.charAt(1) == '¹')) {
+                    final double a = valStack[vIdx];
+                    if (c0 == '!') {
+                        valStack[vIdx] = Maths.fact(a);
+                    } else if (c0 == '²') {
+                        valStack[vIdx] = a * a;
+                    } else if (c0 == '³') {
+                        valStack[vIdx] = a * a * a;
+                    } else {
+                        valStack[vIdx] = 1.0 / a;
+                    }
+                    continue;
+                }
+
+                // 4. BINARY OPERATORS
+                final int currentPrec = getPrec(c0);
+                while (oIdx >= 0) {
+                    final char topOp = (char) opStack[oIdx];
+                    final int topPrec = getPrec(topOp);
+
+                    // Right-associative logic for '^'
+                    if (c0 == '^' ? topPrec > currentPrec : topPrec >= currentPrec) {
+                        vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
+                    } else {
+                        break;
+                    }
+                }
+                opStack[++oIdx] = c0;
+            }
+
+            // Final Stack Reduction
+            while (oIdx >= 0) {
+                vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
+            }
+            return valStack[0];
+        }
+
+        private int getPrec(char op) {
+            switch (op) {
+                case '+':
+                case '-':
+                    return 1;
+                case '*':
+                case '/':
+                case '%':
+                case 'Р':
+                case 'Č':
+                    return 2;
+                case '^':
+                    return 3;
+                case '√':
+                case 'R':
+                    return 4; // Highest precedence for prefix roots
+                default:
+                    return 0;
+            }
+        }
+
+        private int applyOp(char op, double[] valStack, int vIdx) {
+            // Handle Unary Prefix first (takes only one operand)
+            if (op == '√') {
+                valStack[vIdx] = Math.sqrt(valStack[vIdx]);
+                return vIdx;
+            }
+            if (op == 'R') { // Internal ID for ³√
+                valStack[vIdx] = Math.cbrt(valStack[vIdx]);
+                return vIdx;
+            }
+
+            // Handle Binary (takes two operands)
+            double b = valStack[vIdx--];
+            double a = valStack[vIdx];
+            switch (op) {
+                case '+':
+                    valStack[vIdx] = a + b;
+                    break;
+                case '-':
+                    valStack[vIdx] = a - b;
+                    break;
+                case '*':
+                    valStack[vIdx] = a * b;
+                    break;
+                case '/':
+                    valStack[vIdx] = a / b;
+                    break;
+                case '%':
+                    valStack[vIdx] = a % b;
+                    break;
+                case '^':
+                    valStack[vIdx] = Math.pow(a, b);
+                    break;
+                case 'Р':
+                    valStack[vIdx] = Maths.fact(a) / Maths.fact(a - b);
+                    break;
+                case 'Č':
+                    valStack[vIdx] = Maths.fact(a) / (Maths.fact(b) * Maths.fact(a - b));
+                    break;
+            }
+            return vIdx;
+        }
+ 
+    }
+
+    
+    
+       /**
      * used by the main parser solve to figure out SBP portions of a
      * multi-bracketed expression (MBP)
      *
@@ -2502,428 +3076,6 @@ public class MathExpression implements Savable, Solvable {
 
     }//end method solve
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-     
-
-
-public final class ExpressionSolver {
-
-        // Operator codes
-        private static final int OP_ADD = 1;
-        private static final int OP_SUB = 2;
-        private static final int OP_MUL = 3;
-        private static final int OP_DIV = 4;
-        private static final int OP_MOD = 5;
-        private static final int OP_POW = 6;
-        private static final int OP_PERM = 7;
-        private static final int OP_COMB = 8;
-        private static final int OP_UMINUS = 13;
-        private static final int OP_FACT = 9;
-        private static final int OP_SQ = 10;
-        private static final int OP_CU = 11;
-        private static final int OP_INV = 12;
-        private static final int OP_SQRT = 14;
-        private static final int OP_CBRT = 15;
-
-        private int precedence(int code) {
-            switch (code) {
-                case OP_UMINUS:
-                    return 100;
-                case OP_POW:
-                    return 90;
-                case OP_MUL:
-                case OP_DIV:
-                case OP_MOD:
-                case OP_PERM:
-                case OP_COMB:
-                    return 80;
-                case OP_ADD:
-                case OP_SUB:
-                    return 70;
-                default:
-                    return 0;
-            }
-        }
-
-        private boolean isRightAssociative(int code) {
-            return code == OP_POW || code == OP_UMINUS;
-        }
-
-        public double evaluate(List<String> tokens) {
-            if (tokens == null || tokens.isEmpty()) {
-                throw new IllegalArgumentException("Empty expression");
-            }
-
-            // Special case: single number
-            if (tokens.size() == 1 && isNumber(tokens.get(0))) {
-                return fastParseDouble(tokens.get(0));
-            }
-
-            String[] toks = tokens.toArray(new String[0]);
-            int n = toks.length;
-
-            DoubleStack values = new DoubleStack();
-            IntStack operators = new IntStack();
-
-            int i = 0;
-            boolean expectOperand = true;
-
-            while (i < n) {
-                String token = toks[i];
-                int len = token.length();
-
-                // Function or operator classification
-                int code = -1;
-                if (len == 1) {
-                    char c = token.charAt(0);
-                    switch (c) {
-                        case '+':
-                            code = OP_ADD;
-                            break;
-                        case '-':
-                            code = OP_SUB;
-                            break;
-                        case '*':
-                            code = OP_MUL;
-                            break;
-                        case '/':
-                            code = OP_DIV;
-                            break;
-                        case '%':
-                            code = OP_MOD;
-                            break;
-                        case '^':
-                            code = OP_POW;
-                            break;
-                        case 'Р':
-                            code = OP_PERM;
-                            break;
-                        case 'Č':
-                            code = OP_COMB;
-                            break;
-                        case '!':
-                            code = OP_FACT;
-                            break;
-                        case '²':
-                            code = OP_SQ;
-                            break;
-                        case '³':
-                            code = OP_CU;
-                            break;
-                        case '√':
-                            code = OP_SQRT;
-                            break;
-                        default:
-                            code = -1;
-                    }
-                } else if (len == 2) {
-                    if (token.charAt(0) == '-' && token.charAt(1) == '¹') {
-                        code = OP_INV;
-                    } else if (token.charAt(0) == '³' && token.charAt(1) == '√') {
-                        code = OP_CBRT;
-                    }
-                }
-
-                if (code != -1) {
-                    if (expectOperand) {
-                        if (code == OP_ADD) {
-                            i++;
-                            continue;
-                        }
-                        if (code == OP_SUB) {
-                            code = OP_UMINUS;
-                        }
-                    }
-
-                    int prec = precedence(code);
-                    boolean right = isRightAssociative(code);
-                    while (operators.size > 0) {
-                        int top = operators.data[operators.size - 1];
-                        int topPrec = precedence(top);
-                        if (topPrec > prec || (topPrec == prec && !right)) {
-                            applyTop(values, operators);
-                        } else {
-                            break;
-                        }
-                    }
-                    operators.push(code);
-                    expectOperand = true;
-                    i++;
-                } else {
-                    double val = fastParseDouble(token);
-                    i++;
-
-                    // Postfix folding
-                    while (i < n) {
-                        String next = toks[i];
-                        int postCode = getPostfixCode(next);
-                        if (postCode == -1) {
-                            break;
-                        }
-                        val = applyPostfix(postCode, val);
-                        i++;
-                    }
-                    values.push(val);
-                    expectOperand = false;
-                }
-            }
-
-            while (operators.size > 0) {
-                applyTop(values, operators);
-            }
-
-            if (values.size != 1) {
-                throw new IllegalArgumentException("Invalid expression");
-            }
-
-            return values.data[0];
-        }
-
-        private int getPostfixCode(String s) {
-            int len = s.length();
-            if (len == 1) {
-                char c = s.charAt(0);
-                switch (c) {
-                    case '!':
-                        return OP_FACT;
-                    case '²':
-                        return OP_SQ;
-                    case '³':
-                        return OP_CU;
-                    case '√':
-                        return OP_SQRT;
-                    default:
-                        return -1;
-                }
-            } else if (len == 2) {
-                if (s.charAt(0) == '-' && s.charAt(1) == '¹') {
-                    return OP_INV;
-                }
-                if (s.charAt(0) == '³' && s.charAt(1) == '√') {
-                    return OP_CBRT;
-                }
-            }
-            return -1;
-        }
-
-        private double applyPostfix(int code, double x) {
-            switch (code) {
-                case OP_FACT:
-                    return Maths.fact(x);
-                case OP_SQ:
-                    return x * x;
-                case OP_CU:
-                    return x * x * x;
-                case OP_INV:
-                    return 1.0 / x;
-                case OP_SQRT:
-                    return (x < 0) ? Double.NaN : Math.sqrt(x);
-                case OP_CBRT:
-                    return Math.cbrt(x);
-                default:
-                    return x;
-            }
-        }
-
-        private void applyTop(DoubleStack values, IntStack operators) {
-            int code = operators.data[--operators.size];
-
-            if (code == OP_UMINUS) {
-                values.data[values.size - 1] = -values.data[values.size - 1];
-                return;
-            }
-
-            double b = values.data[--values.size];
-            double a = values.data[--values.size];
-            double res;
-
-            // Infinity / NaN safeguards
-            if (Double.isNaN(a) || Double.isNaN(b)) {
-                res = Double.NaN;
-            } else if (Double.isInfinite(a) || Double.isInfinite(b)) {
-                switch (code) {
-                    case OP_ADD:
-                    case OP_SUB:
-                    case OP_MUL:
-                        res = Double.POSITIVE_INFINITY;
-                        break;
-                    case OP_DIV:
-                        res = (b == 0) ? Double.NaN : Double.POSITIVE_INFINITY;
-                        break;
-                    case OP_POW:
-                        res = Math.pow(a, b);
-                        break;
-                    default:
-                        res = Double.NaN;
-                }
-            } else {
-                switch (code) {
-                    case OP_ADD:
-                        res = a + b;
-                        break;
-                    case OP_SUB:
-                        res = a - b;
-                        break;
-                    case OP_MUL:
-                        res = a * b;
-                        break;
-                    case OP_DIV:
-                        res = a / b;
-                        break;
-                    case OP_MOD:
-                        res = a % b;
-                        break;
-                    case OP_POW:
-                        res = Math.pow(a, b);
-                        break;
-                    case OP_PERM:
-                        res = permutation(a, b);
-                        break;
-                    case OP_COMB:
-                        res = combination(a, b);
-                        break;
-                    default:
-                        res = 0.0;
-                }
-            }
-
-            values.data[values.size++] = res;
-        }
-
-        double permutation(double n, double r) {
-            return Maths.fact(n) / Maths.fact(n - r);
-        }
-
-        double combination(double n, double r) {
-            return Maths.fact(n) / (Maths.fact(n - r) * Maths.fact(r));
-        }
-
-        // Custom fast parser (2-4x faster than Double.parseDouble for these short valid strings)
-        private double fastParseDouble(String s) {
-            int len = s.length();
-            if (len == 0) {
-                return 0.0; // or throw if empty not allowed
-            }
-            int idx = 0;
-            boolean negative = false;
-            char first = s.charAt(0);
-
-            // Handle sign
-            if (first == '-') {
-                negative = true;
-                idx = 1;
-            } else if (first == '+') {
-                idx = 1;
-            }
-
-            double value = 0.0;
-
-            // Integer part
-            boolean hasIntPart = false;
-            while (idx < len) {
-                char c = s.charAt(idx);
-                if (c >= '0' && c <= '9') {
-                    value = value * 10.0 + (c - '0');
-                    hasIntPart = true;
-                    idx++;
-                } else {
-                    break;
-                }
-            }
-
-            // Fractional part
-            boolean hasFracPart = false;
-            if (idx < len && s.charAt(idx) == '.') {
-                idx++;
-                double frac = 0.0;
-                double div = 1.0;
-                while (idx < len) {
-                    char c = s.charAt(idx);
-                    if (c >= '0' && c <= '9') {
-                        div *= 10.0;
-                        frac = frac * 10.0 + (c - '0');
-                        hasFracPart = true;
-                        idx++;
-                    } else {
-                        break;
-                    }
-                }
-                value += frac / div;
-            }
-
-            // Scientific notation
-            if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
-                idx++;
-                boolean negExp = false;
-                if (idx < len && s.charAt(idx) == '-') {
-                    negExp = true;
-                    idx++;
-                } else if (idx < len && s.charAt(idx) == '+') {
-                    idx++;
-                }
-
-                long exp = 0;
-                boolean hasExpDigits = false;
-                while (idx < len) {
-                    char c = s.charAt(idx);
-                    if (c >= '0' && c <= '9') {
-                        exp = exp * 10 + (c - '0');
-                        hasExpDigits = true;
-                        if (exp > 1000000000L) { // Prevent insane overflow
-                            value = negative ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-                            break;
-                        }
-                        idx++;
-                    } else {
-                        break;
-                    }
-                }
-                if (hasExpDigits) {
-                    value *= Math.pow(10.0, negExp ? -exp : exp);
-                }
-            }
-
-            // Basic validation (since scanner is trusted, but good to have)
-            if (idx != len || (!hasIntPart && !hasFracPart)) {
-                return 0.0; // or throw if strict
-            }
-
-            return negative ? -value : value;
-        }
-
-// Fixed-size primitive stacks (increased to 128 for extra safety)
-        private class DoubleStack {
-
-            private double[] data = new double[128];
-            private int size = 0;
-
-            void push(double v) {
-                if (size == data.length) {
-                    data = Arrays.copyOf(data, data.length * 2);
-                }
-                data[size++] = v;
-            }
-        }
-
-        private class IntStack {
-
-            private int[] data = new int[128];
-            private int size = 0;
-
-            void push(int v) {
-                if (size == data.length) {
-                    data = Arrays.copyOf(data, data.length * 2);
-                }
-                data[size++] = v;
-            }
-        }
-
-        private boolean isNumber(String s) {
-            // Simple check used in single-number case
-            return s != null && !s.isEmpty() && Character.isDigit(s.charAt(0)) || s.charAt(0) == '-' || s.charAt(0) == '+';
-        }
-    }
- 
     /**
      * While traversing a list of tokens, sometimes its good to know if a token
      * is existing in the context of a stat function, or is a free token within
@@ -2948,7 +3100,7 @@ public final class ExpressionSolver {
          */
         private String token;
         /**
-         * The type of the context
+         * The kind of the context
          */
         private int type;
         /**
@@ -3752,6 +3904,8 @@ public final class ExpressionSolver {
         String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), 12, sum(3,4,8,9,2000)),12000, mode(3,2,2,1),32.897, mode(1,5,7,7,1,1,7))";
 
         MathExpression m = new MathExpression(s5);
+        System.out.println("scanner:\n" + m.scanner);
+        System.out.println("tokens:\n" + m.tokens);
         System.out.println("m.solve(): " + m.solve());
 
         //   double N = 100; 

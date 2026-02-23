@@ -397,6 +397,13 @@ public class Method {
 
     }
 
+    
+    
+    
+        public static MathExpression.EvalResult exec(MathExpression ctx, String funcName, int methodId, int arity, double[]args, DRG_MODE DRG) {
+            return MethodRegistry.getAction(methodId).execute(ctx, funcName, arity, args);
+        }
+        
     /**
      *
      * @param list A list containing a portion of a scanned function that has
@@ -767,11 +774,11 @@ public class Method {
                                 result = String.valueOf(Math.log(Double.parseDouble(list.get(0)) + Math.sqrt(Math.pow(Double.parseDouble(list.get(0)), 2) - 1)));
                             } else if (name.equals(ARC_TANH) || name.equals(ARC_TANH_ALT)) {
                                 result = String.valueOf(0.5 * Math.log((1 + Double.parseDouble(list.get(0))) / (1 - Double.parseDouble(list.get(0)))));
-                            } else if (name.equals(ARC_SEC) || name.equals("asec")) {
+                            } else if (name.equals(ARC_SEC) || name.equals(ARC_SEC_ALT)) {
                                 result = String.valueOf(Maths.acosRadToDeg(1 / Double.parseDouble(list.get(0))));
-                            } else if (name.equals(ARC_COSEC) || name.equals("acsc")) {
+                            } else if (name.equals(ARC_COSEC) || name.equals(ARC_COSEC_ALT)) {
                                 result = String.valueOf(Maths.asinRadToDeg(1 / Double.parseDouble(list.get(0))));
-                            } else if (name.equals(ARC_COT) || name.equals("acot")) {
+                            } else if (name.equals(ARC_COT) || name.equals(ARC_COT_ALT)) {
                                 result = String.valueOf(Maths.atanRadToDeg(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SECH) || name.equals(ARC_SECH_ALT)) {
                                 result = String.valueOf(Math.log((1 + Math.sqrt(1 - Math.pow(Double.parseDouble(list.get(0)), 2))) / Double.parseDouble(list.get(0))));
@@ -847,11 +854,11 @@ public class Method {
                                 result = String.valueOf(Maths.acosh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_TANH) || name.equals(ARC_TANH_ALT)) {
                                 result = String.valueOf(Maths.atanh(Double.parseDouble(list.get(0))));
-                            } else if (name.equals(ARC_SEC) || name.equals("asec")) {
+                            } else if (name.equals(ARC_SEC) || name.equals(ARC_SEC_ALT)) {
                                 result = String.valueOf(Math.acos(1 / Double.parseDouble(list.get(0))));
-                            } else if (name.equals(ARC_COSEC) || name.equals("acsc")) {
+                            } else if (name.equals(ARC_COSEC) || name.equals(ARC_COSEC_ALT)) {
                                 result = String.valueOf(Math.asin(1 / Double.parseDouble(list.get(0))));
-                            } else if (name.equals(ARC_COT) || name.equals("acot")) {
+                            } else if (name.equals(ARC_COT) || name.equals(ARC_COT_ALT)) {
                                 result = String.valueOf(Math.atan(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SECH) || name.equals(ARC_SECH_ALT)) {
                                 result = String.valueOf(Maths.asech(Double.parseDouble(list.get(0))));
@@ -927,11 +934,11 @@ public class Method {
                                 result = String.valueOf(Maths.acosh(Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_TANH) || name.equals(ARC_TANH_ALT)) {
                                 result = String.valueOf(Maths.atanh(Double.parseDouble(list.get(0))));
-                            } else if (name.equals(ARC_SEC) || name.equals("asec")) {
+                            } else if (name.equals(ARC_SEC) || name.equals(ARC_SEC_ALT)) {
                                 result = String.valueOf(Maths.acosRadToGrad(1 / Double.parseDouble(list.get(0))));
-                            } else if (name.equals(ARC_COSEC) || name.equals("acsc")) {
+                            } else if (name.equals(ARC_COSEC) || name.equals(ARC_COSEC_ALT)) {
                                 result = String.valueOf(Maths.asinRadToGrad(1 / Double.parseDouble(list.get(0))));
-                            } else if (name.equals(ARC_COT) || name.equals("acot")) {
+                            } else if (name.equals(ARC_COT) || name.equals(ARC_COT_ALT)) {
                                 result = String.valueOf(Maths.atanRadToGrad(1 / Double.parseDouble(list.get(0))));
                             } else if (name.equals(ARC_SECH) || name.equals(ARC_SECH_ALT)) {
                                 result = String.valueOf(Maths.asech(Double.parseDouble(list.get(0))));

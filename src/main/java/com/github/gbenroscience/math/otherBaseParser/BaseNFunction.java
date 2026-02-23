@@ -68,21 +68,21 @@ public class BaseNFunction extends MathExpression {
  */
 private ArrayList<Integer> isBaseCompatible(){
     List<String>scanner = getScanner();
-ArrayList<Integer>numIndices= new ArrayList<Integer>();//stores the indices of all numbers.
+ArrayList<Integer>numIndices= new ArrayList<>();//stores the indices of all numbers.
 
 for(int j=0;j<scanner.size();j++) {
     String mathObject = scanner.get(j);
-    String num = "";
+    double num = 0;
     if (!isDefinedMethod(mathObject) && isVariableString(mathObject)) {
         num = getValue(mathObject);
         numIndices.add(j);
     } else if (validNumber(mathObject)) {
-        num = mathObject;
+        num = Double.parseDouble(mathObject);
         numIndices.add(j);
 
-    for (int i = 0; i < num.length(); i++) {
-        String val = num.substring(i, i + 1);
-        if (Character.isDigit(val.toCharArray()[0]) && Integer.valueOf(val) >= baseOfOperation) {
+    for (int i = 0; i < mathObject.length(); i++) {
+        String val = mathObject.substring(i, i + 1);
+        if (Character.isDigit(val.toCharArray()[0]) && Integer.parseInt(val) >= baseOfOperation) {
             setCorrectFunction(false);
             break;
         }//end if
@@ -113,7 +113,7 @@ for(int i=0;i<numIndices.size();i++){
     String mathObject = scanner.get(indexInScanner);
 
     if(isVariableString(mathObject) && !handledVariables.contains(mathObject)) {
-          String value = Maths.changeBase(getValue(mathObject),"10",String.valueOf(baseOfOperation) );
+          String value = Maths.changeBase(getValue(mathObject)+"","10",String.valueOf(baseOfOperation) );
         setValue(mathObject,value);
         handledVariables.add(mathObject);//to avoid changing the value of a variable more than once.
     }

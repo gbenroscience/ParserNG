@@ -258,11 +258,11 @@ public class Function implements Savable {
 
             if (Number.validNumber(rhs)) {
                 if (Variable.isVariableString(newFuncName)) {
-                    VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, rhs, false));
+                    VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(rhs), false));
                 } else if (isVarNamesList) {
                     List<String> vars = new Scanner(newFuncName, false, ",").scan();
                     for (String var : vars) {
-                        VariableManager.VARIABLES.put(var, new Variable(var, rhs, false));
+                        VariableManager.VARIABLES.put(var, new Variable(var, Double.parseDouble(rhs), false));
                     }
                 }
 
@@ -328,11 +328,11 @@ public class Function implements Savable {
                             if (isVarNamesList && hasCommas) {
                                 List<String> vars = new Scanner(newFuncName, false, ",").scan();
                                 for (String var : vars) {
-                                    VariableManager.VARIABLES.put(var, new Variable(var, val, false));
+                                    VariableManager.VARIABLES.put(var, new Variable(var, Double.parseDouble(val), false));
                                 }
                                 success = true;
                             } else {
-                                VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, val, false));
+                                VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(val), false));
                                 success = true;
                             }
 
@@ -398,7 +398,7 @@ public class Function implements Savable {
                 for (int i = 0; i < scan.size(); i++) {
                     try {
                         if (Variable.isVariableString(scan.get(i))) {
-                            independentVariables.add(new Variable(scan.get(i), "0.0", false));
+                            independentVariables.add(new Variable(scan.get(i), 0.0, false));
                             vars = vars.concat(scan.get(i) + "=" + "0.0;");//build variable command list
                         }//end if
                     }//end try
@@ -431,6 +431,8 @@ public class Function implements Savable {
         }//end else
 
     }//end method
+    
+
 
     public void setDependentVariable(Variable dependentVariable) {
         this.dependentVariable = dependentVariable;
@@ -472,6 +474,10 @@ public class Function implements Savable {
         return independentVariables.size();
     }
 
+        
+    public int getArity(){
+        return this.independentVariables.size();
+    }
     /**
      *
      * @param list A string containing info. about the arguments to be passed to
@@ -812,6 +818,7 @@ public class Function implements Savable {
 
     /**
      * Prints the content of a 2D array
+     * @param obj 
      */
     public static void print2DArray(Object[][] obj) {
         int rows = obj.length;

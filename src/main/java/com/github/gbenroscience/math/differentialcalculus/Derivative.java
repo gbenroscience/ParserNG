@@ -228,7 +228,6 @@ public class Derivative {
                     expr = expr.substring(5, expr.length() - 1);
                     return expr;
                 }
-
             }
 
             return "Input Error";

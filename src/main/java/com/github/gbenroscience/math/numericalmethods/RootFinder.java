@@ -343,8 +343,8 @@ public class RootFinder {
                             l.add(args1);
                         }
                         else if(Variable.isVariableString(list.get(i))){
-                            String val = VariableManager.getVariable(list.get(i)).getValue();
-                            list.set(i, val);
+                            double val = VariableManager.getVariable(list.get(i)).getValue();
+                            list.set(i, String.valueOf(val));
                         }
 
 
@@ -408,7 +408,7 @@ public class RootFinder {
 
         String ans = new Newtonian().findRoot();
 
-        double val = Double.valueOf( function.evalArgs(function.getDependentVariable().getName()+"("+ans+")") );
+        double val = Double.parseDouble(function.evalArgs(function.getDependentVariable().getName()+"("+ans+")") );
         System.err.println("Using Newton's Method: f("+ans+") = "+val);
 
         if( approxEqualsZero(val) || lenientApproxEqualsZero(val)  ){

@@ -26,7 +26,7 @@ public class Variable implements Savable {
     private TYPE type;
 
     //the value stored by this variable
-    private String value;
+    private double value;
     //the units stored by this variable..not compulsory
     private String units = "";
 
@@ -39,14 +39,14 @@ public class Variable implements Savable {
     /**
      * The constant PI
      */
-    public static final Variable PI = new Variable("pi", Maths.PI(), true);
+    public static final Variable PI = new Variable("pi", Math.PI, true);
 
     /**
      * The last answer variable used for flexibility on computational systems.
      */
-    public static Variable ans = new Variable("ans", "0.0", false);
+    public static Variable ans = new Variable("ans", 0.0, false);
 
-    public static Variable e = new Variable("e", String.valueOf(Math.E), true);
+    public static Variable e = new Variable("e", Math.E, true);
 
     static {
         ans.type = TYPE.NUMBER;
@@ -58,7 +58,7 @@ public class Variable implements Savable {
 
         if (isVariableString(name)) {
             this.name = name;
-            this.value = "0.0";
+            this.value = 0.0;
             this.type = TYPE.NUMBER;
         } else {
 
@@ -74,7 +74,7 @@ public class Variable implements Savable {
      * represents a constant, whose value cannot be altered.Else,it represents a
      * Variable object whose value can change.
      */
-    public Variable(String name, String value, boolean constant) {
+    public Variable(String name, double value, boolean constant) {
         this(name, "", value, constant);
     }
 
@@ -89,7 +89,7 @@ public class Variable implements Savable {
      * represents a constant, whose value cannot be altered.Else,it represents a
      * Variable object whose value can change.
      */
-    public Variable(String name, String fullName, String value, boolean constant) {
+    public Variable(String name, String fullName, double value, boolean constant) {
 
         if (isVariableString(name)) {
             this.name = name;
@@ -106,19 +106,6 @@ public class Variable implements Savable {
 
     public TYPE getType() {
         return type;
-    }
-
-    /**
-     *
-     * @param name the name of the Variable object e.g A,B...e.t.c
-     * @param value the value stored by the Variable object
-     * @param constant the nature of the Variable object whether it is
-     * modifiable or not. If constant = true , then the Variable object
-     * represents a constant, whose value cannot be altered.Else,it represents a
-     * Variable object whose value can change.
-     */
-    public Variable(String name, double value, boolean constant) {
-        this(name, value + "", constant);
     }
 
     public void setFullName(String fullName) {
@@ -330,7 +317,7 @@ public class Variable implements Savable {
      * units.
      *
      */
-    public void setValue(String value) {
+    public final void setValue(String value) {
 
         if (value.contains(" ")) {
             String[] vals = value.split(" ");
@@ -339,11 +326,15 @@ public class Variable implements Savable {
         }
 
         if (Number.validNumber(value)) {
-            this.value = value;
+            this.value = Double.parseDouble(value);
         } else {
             throw new NumberFormatException("Bad Value! " + value + ".\nVariables store only valid real numbers.");
         }
 
+    }
+
+    public final void setValue(double value) {
+        this.value = value;
     }
 
     /**
@@ -351,12 +342,14 @@ public class Variable implements Savable {
      *
      * @return the value stored in the variable
      */
-    public String getValue() {
+    public double getValue() {
         String name = getName();
         if (isPI(name)) {
-            return value = Maths.PI();
+            return value = Math.PI;
         } else if (isLastEvaluatedAnswer(name)) {
-            return value = MathExpression.lastResult;
+            if (Number.isNumber(MathExpression.lastResult)) {
+                return value = Double.parseDouble(MathExpression.lastResult);
+            }
         } else if (isExpNumber(name)) {
             return value;
         } else if (isConstant()) {

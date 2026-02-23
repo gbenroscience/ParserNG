@@ -1,6 +1,17 @@
 /*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
+ * Copyright 2026 GBEMIRO.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package com.github.gbenroscience.math.matrix.expressParser;
 
@@ -27,16 +38,23 @@ public class Matrix {
     /**
      * the data array used to create this Matrix object
      */
-    private double array[][];
+    private double[] array;
+    /**
+     * Number of rows in the matrix.
+     */
+    private int rows;
+    /**
+     * Number of columns in the matrix.
+     */
+    private int cols;
 
     /**
      *
-     * @param rows The number of row in the Matrix.
+     * @param rows The number of rows in the Matrix.
      * @param cols The number of columns in the Matrix.
      */
     public Matrix(int rows, int cols) {
-        this("NEW");
-        array = new double[rows][cols];
+        this("NEW", rows, cols);
     }//end constructor
 
     /**
@@ -48,8 +66,15 @@ public class Matrix {
      *
      */
     public Matrix(String name) {
+        this(name, 1, 1);
+        array[0] = 0;
+    }
+
+    private Matrix(String name, int rows, int cols) {
         this.name = name;
-        this.array = new double[][]{{0}};
+        this.rows = rows;
+        this.cols = cols;
+        this.array = new double[rows * cols];
     }
 
     /**
@@ -67,35 +92,16 @@ public class Matrix {
      * the one passed as argument, but holding no reference to its data.
      */
     public Matrix(Matrix matrix) {
-        this("NEW");
-        double arr[][] = new double[matrix.getRows()][matrix.getCols()];
-        /* Copy the array of the Matrix object parameter into
-         * a separate array object and use for the
-         * Matrix object about to be created.
-         * This ensures that the new Matrix object
-         * has no connection to the one from which it is created
-         * so that it is a true twin or duplicate of the other one.
-         * The user is free to perform operations on this one without fear
-         * that it will cause changes in the other one.
-         *
-         *
-         */
-
-        for (int row = 0; row < matrix.getRows(); row++) {
-            for (int col = 0; col < matrix.getCols(); col++) {
-                double val = matrix.array[row][col];
-                arr[row][col] = val;
-            }//end inner loop
-        }//end outer loop
-        this.array = arr;
+        this("NEW", matrix.rows, matrix.cols);
+        System.arraycopy(matrix.array, 0, this.array, 0, this.array.length);
     }//end constructor
 
     /**
      *
-     * @return the number of row in this matrix object
+     * @return the number of rows in this matrix object
      */
     public int getRows() {
-        return array.length;
+        return rows;
     }
 
     /**
@@ -103,25 +109,27 @@ public class Matrix {
      * @return the number of columns in this matrix object
      */
     public int getCols() {
-        return array[0].length;
+        return cols;
     }
 
     /**
      *
      * @param array sets the data of this matrix
      */
-    public void setArray(double[][] array) {
-
-        if (array.length > 0) {
-            this.array = new double[array.length][array[0].length];
-            for (int row = 0; row < array.length; row++) {
-                for (int col = 0; col < array[0].length; col++) {
-
-                    this.array[row][col] = array[row][col];
+    public final void setArray(double[][] array) {
+        if (array.length > 0 && array[0].length > 0) {
+            this.rows = array.length;
+            this.cols = array[0].length;
+            this.array = new double[rows * cols];
+            for (int row = 0; row < rows; row++) {
+                for (int col = 0; col < cols; col++) {
+                    this.array[row * cols + col] = array[row][col];
                 }//end inner loop
             }//end outer loop
         } else {
-            this.array = new double[][]{{0}, {0}};
+            this.rows = 2;
+            this.cols = 1;
+            this.array = new double[rows * cols];
         }
     }//end method
 
@@ -130,11 +138,17 @@ public class Matrix {
      * @return the data of this matrix
      */
     public double[][] getArray() {
-        return this.array;
+        double[][] arr = new double[rows][cols];
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < cols; col++) {
+                arr[row][col] = array[row * cols + col];
+            }
+        }
+        return arr;
     }
 
     public double getElem(int row, int col) {
-        return array[row][col];
+        return array[row * cols + col];
     }
 
     /**
@@ -157,18 +171,6 @@ public class Matrix {
 
     /**
      *
-     * @param row The row whose contents we desire.
-     * @return the contents of the row.
-     */
-    private double[] getRow(int row) {
-        if (row < getRows()) {
-            return array[row];
-        }
-        throw new IndexOutOfBoundsException("Bad Index, " + row);
-    }//end method.
-
-    /**
-     *
      * @param row1 The first row.
      * @param row2 The second row.
      *
@@ -179,12 +181,12 @@ public class Matrix {
      *
      */
     public void swapRow(int row1, int row2) {
-        for (int column = 0; column < getCols(); column++) {
-            double v1 = array[row1][column];
-            double v2 = array[row2][column];
+        for (int column = 0; column < cols; column++) {
+            double v1 = array[row1 * cols + column];
+            double v2 = array[row2 * cols + column];
             double v3 = v1;
-            array[row1][column] = v2;
-            array[row2][column] = v3;
+            array[row1 * cols + column] = v2;
+            array[row2 * cols + column] = v3;
         }//end for
     }//end method.
 
@@ -200,12 +202,12 @@ public class Matrix {
      *
      */
     public void swapColumn(int col1, int col2) {
-        for (int row = 0; row < getRows(); row++) {
-            double v1 = array[row][col1];
-            double v2 = array[row][col2];
+        for (int row = 0; row < rows; row++) {
+            double v1 = array[row * cols + col1];
+            double v2 = array[row * cols + col2];
             double v3 = v1;
-            array[row][col1] = v2;
-            array[row][col2] = v3;
+            array[row * cols + col1] = v2;
+            array[row * cols + col2] = v3;
         }//end for
     }//end method.
 
@@ -215,10 +217,10 @@ public class Matrix {
     public void fill() {
         java.util.Scanner scanner = new java.util.Scanner(System.in);
 
-        for (int row = 0; row < getRows(); row++) {
+        for (int row = 0; row < rows; row++) {
 
-            for (int column = 0; column < getCols(); column++) {
-                array[row][column] = scanner.nextDouble();
+            for (int column = 0; column < cols; column++) {
+                array[row * cols + column] = scanner.nextDouble();
             }
         }
     }//end method fill.
@@ -231,23 +233,18 @@ public class Matrix {
      */
     public Matrix add(Matrix matrice) {
 
-        double array1[][] = matrice.array;
-
-        double matrix[][] = new double[getRows()][getCols()];
-
-        if (getRows() == matrice.getCols() && getCols() == matrice.getRows()) {
-            for (int row = 0; row < getRows(); row++) {
-                for (int column = 0; column < getCols(); column++) {
-                    matrix[row][column] = (array[row][column]) + (array1[row][column]);
-                }//end inner for
-            }//end outer for
-
-        }//end if
-        else {
+        if (rows != matrice.rows || cols != matrice.cols) {
             System.out.println("ERROR IN MATRIX INPUT!!");
+            return new Matrix(1, 1);
         }
 
-        return new Matrix(matrix);
+        Matrix matrix = new Matrix(rows, cols);
+
+        for (int i = 0; i < array.length; i++) {
+            matrix.array[i] = array[i] + matrice.array[i];
+        }
+
+        return matrix;
     }//end method add
 
     /**
@@ -258,27 +255,18 @@ public class Matrix {
      */
     public Matrix subtract(Matrix matrice) {
 
-        double array1[][] = matrice.array;
-
-        double matrix[][] = new double[getRows()][getCols()];
-
-        if (getRows() == matrice.getCols() && getCols() == matrice.getRows()) {
-            for (int row = 0; row < getRows(); row++) {
-
-                for (int column = 0; column < getCols(); column++) {
-
-                    matrix[row][column] = (array[row][column]) - (array1[row][column]);
-
-                }//end inner for
-
-            }//end outer for
-
-        }//end ifghjjk
-        else {
+        if (rows != matrice.rows || cols != matrice.cols) {
             System.out.println("ERROR IN MATRIX INPUT!!");
+            return new Matrix(1, 1);
         }
 
-        return new Matrix(matrix);
+        Matrix matrix = new Matrix(rows, cols);
+
+        for (int i = 0; i < array.length; i++) {
+            matrix.array[i] = array[i] - matrice.array[i];
+        }
+
+        return matrix;
     }//end method subtract
 
     /**
@@ -288,13 +276,11 @@ public class Matrix {
      * @return an array containing the product matrix.
      */
     public Matrix scalarMultiply(double scalar) {
-        double matrix[][] = new double[getRows()][getCols()];
-        for (int row = 0; row < getRows(); row++) {
-            for (int column = 0; column < getCols(); column++) {
-                matrix[row][column] = scalar * (array[row][column]);
-            }//end inner for
-        }//end outer for
-        return new Matrix(matrix);
+        Matrix matrix = new Matrix(rows, cols);
+        for (int i = 0; i < array.length; i++) {
+            matrix.array[i] = scalar * array[i];
+        }
+        return matrix;
     }//end method scalarMultiply
 
     /**
@@ -304,23 +290,21 @@ public class Matrix {
      * @return an array containing the scaled matrix.
      */
     public Matrix scalarDivide(double scalar) {
-        double matrix[][] = new double[getRows()][getCols()];
-        for (int row = 0; row < getRows(); row++) {
-            for (int column = 0; column < getCols(); column++) {
-                matrix[row][column] = (array[row][column]) / scalar;
-            }//end inner for
-        }//end outer for
-        return new Matrix(matrix);
+        Matrix matrix = new Matrix(rows, cols);
+        for (int i = 0; i < array.length; i++) {
+            matrix.array[i] = array[i] / scalar;
+        }
+        return matrix;
     }//end method scalarDivide
 
     /**
      *
      * The operation of matrix multiplication. For this method to run, The
      * pre-multiplying matrix must have its number of columns equal to the
-     * number of row in the pre-multiplying one.
+     * number of rows in the pre-multiplying one.
      *
      * The product matrix is one that has its number of columns equal to the
-     * number of columns in the pre-multiplying matrix, and its row equal to
+     * number of columns in the pre-multiplying matrix, and its rows equal to
      * that in the post-multiplying matrix.
      *
      *
@@ -336,25 +320,27 @@ public class Matrix {
      */
     public static Matrix multiply(Matrix matrice1, Matrix matrice2) {
 
-        Matrix m = new Matrix(matrice1.getRows(), matrice2.getCols());
+        int r1 = matrice1.rows;
+        int c1 = matrice1.cols;
+        int r2 = matrice2.rows;
+        int c2 = matrice2.cols;
 
-        if (matrice1.getCols() == matrice2.getRows()) {
-
-            for (int i = 0; i < matrice1.getRows(); i++) {
-                for (int row = 0; row < matrice2.getCols(); row++) {
-                    double sum = 0;
-                    for (int column = 0; column < matrice1.getCols(); column++) {
-                        sum += matrice1.array[i][column] * matrice2.array[column][row];
-                    }//end inner for
-
-                    m.array[i][row] = sum;
-                }//end outer for
-            }//end outermost for
-
-        }//end if
-        else {
+        if (c1 != r2) {
             System.out.println("ERROR IN MATRIX INPUT!!");
+            return new Matrix(1, 1);
         }
+
+        Matrix m = new Matrix(r1, c2);
+
+        for (int i = 0; i < r1; i++) {
+            for (int j = 0; j < c2; j++) {
+                double sum = 0;
+                for (int k = 0; k < c1; k++) {
+                    sum += matrice1.array[i * c1 + k] * matrice2.array[k * c2 + j];
+                }//end inner for
+                m.array[i * c2 + j] = sum;
+            }//end outer for
+        }//end outermost for
 
         return m;
     }
@@ -366,7 +352,10 @@ public class Matrix {
      * matrix The operation is ( this X matrice )
      */
     public void multiply(Matrix matrice) {
-        setArray(Matrix.multiply(this, matrice).array);
+        Matrix product = Matrix.multiply(this, matrice);
+        this.rows = product.rows;
+        this.cols = product.cols;
+        this.array = product.array;
     }
 
     /**
@@ -376,7 +365,7 @@ public class Matrix {
      * @return the
      */
     public static Matrix pow(Matrix mat, int pow) {
-        Matrix m = new Matrix(mat.array);
+        Matrix m = new Matrix(mat);
         for (int i = 0; i < pow - 1; i++) {
             m = Matrix.multiply(m, mat);
 
@@ -388,7 +377,7 @@ public class Matrix {
         assert (pow >= 0);
         switch (pow) {
             case 0:
-                return unitMatrix(mat.getRows(), mat.getCols());
+                return unitMatrix(mat.rows, mat.cols);
             case 1:
                 return mat;
             default:
@@ -408,42 +397,30 @@ public class Matrix {
      * @return a unit matrix of the same dimension as this matrix object
      */
     public Matrix unitMatrix() {
-        double matrix[][] = new double[getRows()][getCols()];
-
-        for (int row = 0; row < getRows(); row++) {
-            for (int column = 0; column < getCols(); column++) {
-                if (column == row) {
-                    matrix[row][column] = 1;
-                } else {
-                    matrix[row][column] = 0;
-                }
-
-            }//end inner for loop
-        }//end outer for loop
-        return new Matrix(matrix);
+        return unitMatrix(rows, cols);
     }//end method unitMatrix
 
     /**
      *
-     * @param rowSize the number of row that the unit matrix will have
+     * @param rowSize the number of rows that the unit matrix will have
      * @param colSize the number of columns that the unit matrix will have
-     * @return a unit matrix having number of row = rowSize and number of
+     * @return a unit matrix having number of rows = rowSize and number of
      * columns=colSize.
      */
     public static Matrix unitMatrix(int rowSize, int colSize) {
-        double matrix[][] = new double[rowSize][colSize];
+        Matrix matrix = new Matrix(rowSize, colSize);
 
         for (int row = 0; row < rowSize; row++) {
             for (int column = 0; column < colSize; column++) {
                 if (column == row) {
-                    matrix[row][column] = 1;
+                    matrix.array[row * colSize + column] = 1;
                 } else {
-                    matrix[row][column] = 0;
+                    matrix.array[row * colSize + column] = 0;
                 }
 
             }//end inner for loop
         }//end outer for loop
-        return new Matrix(matrix);
+        return matrix;
     }//end method unitMatrix
 
     /**
@@ -453,21 +430,7 @@ public class Matrix {
      * @return a unit matrix of equal dimensions as this unit matrix.
      */
     public static Matrix unitMatrix(Matrix mat) {
-        int rowSize = mat.getRows();
-        int colSize = mat.getCols();
-        double matrix[][] = new double[rowSize][colSize];
-
-        for (int row = 0; row < rowSize; row++) {
-            for (int column = 0; column < colSize; column++) {
-                if (column == row) {
-                    matrix[row][column] = 1;
-                } else {
-                    matrix[row][column] = 0;
-                }
-
-            }//end inner for loop
-        }//end outer for loop
-        return new Matrix(matrix);
+        return unitMatrix(mat.rows, mat.cols);
     }//end method unitMatrix
 
     /**
@@ -479,7 +442,7 @@ public class Matrix {
      *
      *
      * e.g 3 4 5 7 5 9 2 3 1 4 2 6 1 6 7 5 7 3 A necessary condition for this
-     * method to run is that the 2 objects must have an equal number of row. IF
+     * method to run is that the 2 objects must have an equal number of rows. IF
      * THIS CONDITION IS NOT MET, THE METHOD RETURNS A ZERO MATRIX.
      *
      *
@@ -490,23 +453,25 @@ public class Matrix {
      */
     public static Matrix columnJoin(Matrix mat1, Matrix mat2) {
 
-        Matrix join = new Matrix(mat1.getRows(), mat1.getCols() + mat2.getCols());
-        if (mat1.getRows() == mat2.getRows()) {
-            int columnextender = 0;
-            for (int row = 0; row < mat1.getRows(); row++) {
+        if (mat1.rows != mat2.rows) {
+            return new Matrix(1, 1);
+        }
 
-                for (int col = 0; col < join.getCols(); col++) {
-                    if (col < mat1.getCols()) {
-                        columnextender = 0;//reset to zero
-                        join.array[row][col] = mat1.array[row][col];
-                    } else if (col >= mat1.getCols()) {
-                        join.array[row][col] = mat2.array[row][columnextender];
-                        columnextender++;
-                    }
-                }//end inner for
-            }//end outer for
+        int r = mat1.rows;
+        int c1 = mat1.cols;
+        int c2 = mat2.cols;
 
-        }//end if
+        Matrix join = new Matrix(r, c1 + c2);
+
+        for (int row = 0; row < r; row++) {
+            for (int col = 0; col < c1; col++) {
+                join.array[row * (c1 + c2) + col] = mat1.array[row * c1 + col];
+            }
+            for (int col = 0; col < c2; col++) {
+                join.array[row * (c1 + c2) + (c1 + col)] = mat2.array[row * c2 + col];
+            }
+        }//end outer for
+
         return join;
     }
 
@@ -517,8 +482,8 @@ public class Matrix {
      * @param column The column where the value is to be inserted.
      */
     public boolean update(double value, int row, int column) {
-        if (row < getRows() && column < getCols()) {
-            array[row][column] = value;
+        if (row < rows && column < cols) {
+            array[row * cols + column] = value;
             return true;
         }
         return false;
@@ -545,24 +510,28 @@ public class Matrix {
      */
     public static Matrix rowJoin(Matrix mat1, Matrix mat2) {
 
-        Matrix join = new Matrix(mat1.getRows() + mat2.getRows(), mat1.getCols());
-        if (mat1.getCols() == mat2.getCols()) {
-            int rowextender = 0;
-            for (int row = 0; row < join.getRows(); row++) {
-                for (int col = 0; col < join.getCols(); col++) {
-                    if (row < mat1.getRows()) {
-                        join.array[row][col] = mat1.array[row][col];
-                    } else if (row >= mat1.getRows()) {
-                        join.array[row][col] = mat2.array[rowextender][col];
-                    }
+        if (mat1.cols != mat2.cols) {
+            return new Matrix(1, 1);
+        }
 
-                }//end inner for
-                if (row >= mat1.getRows()) {
-                    rowextender++;
-                }
-            }//end outer for
+        int r1 = mat1.rows;
+        int r2 = mat2.rows;
+        int c = mat1.cols;
 
-        }//end if
+        Matrix join = new Matrix(r1 + r2, c);
+
+        for (int row = 0; row < r1; row++) {
+            for (int col = 0; col < c; col++) {
+                join.array[row * c + col] = mat1.array[row * c + col];
+            }
+        }
+
+        for (int row = 0; row < r2; row++) {
+            for (int col = 0; col < c; col++) {
+                join.array[(r1 + row) * c + col] = mat2.array[row * c + col];
+            }
+        }
+
         return join;
     }//end method rowJoin
 
@@ -590,14 +559,16 @@ public class Matrix {
      *
      */
     public void columnDeleteFromEnd(int column) {
-        if (column >= 0 && column <= getCols()) {
-            Matrix matrix = new Matrix(this.getRows(), this.getCols() - column);
-            for (int row = 0; row < getRows(); row++) {
-                for (int col = 0; col < matrix.getCols(); col++) {
-                    matrix.array[row][col] = this.array[row][col];
+        if (column >= 0 && column <= cols) {
+            int newCols = cols - column;
+            double[] newArray = new double[rows * newCols];
+            for (int row = 0; row < rows; row++) {
+                for (int col = 0; col < newCols; col++) {
+                    newArray[row * newCols + col] = array[row * cols + col];
                 }//end inner for
             }//end outer for
-            this.setArray(matrix.array);
+            this.array = newArray;
+            this.cols = newCols;
         } else {
             System.out.println("COLUMN VALUE SHOULD "
                     + "RANGE FROM ZERO TO THE NUMBER OF COLUMNS IN THIS MATRIX.");
@@ -627,16 +598,16 @@ public class Matrix {
      *
      */
     public void columnDeleteFromStart(int column) {
-        if (column >= 0 && column <= getCols()) {
-            Matrix matrix = new Matrix(this.getRows(), this.getCols() - column);
-            for (int row = 0; row < getRows(); row++) {
-                int counter = 0;
-                for (int col = column; col < getCols(); col++, counter++) {
-                    matrix.array[row][counter] = this.array[row][col];
+        if (column >= 0 && column <= cols) {
+            int newCols = cols - column;
+            double[] newArray = new double[rows * newCols];
+            for (int row = 0; row < rows; row++) {
+                for (int col = 0; col < newCols; col++) {
+                    newArray[row * newCols + col] = array[row * cols + (column + col)];
                 }//end inner for
             }//end outer for
-
-            this.setArray(matrix.array);
+            this.array = newArray;
+            this.cols = newCols;
         } else {
             System.out.println("COLUMN VALUE SHOULD "
                     + "RANGE FROM ZERO TO THE NUMBER OF COLUMNS IN THIS MATRIX.");
@@ -644,9 +615,9 @@ public class Matrix {
     }//end method columnDeleteFromStart
 
     /**
-     * Deletes the specified number of row from the end of the Matrix object
+     * Deletes the specified number of rows from the end of the Matrix object
      *
-     * @param numOfRows the number of row to remove from the Matrix object's
+     * @param numOfRows the number of rows to remove from the Matrix object's
      * beginning. This method will take the object that calls it and perform
      * this operation on it. So it modifies the Matrix object that calls it. Be
      * careful, as data will be lost.
@@ -655,7 +626,7 @@ public class Matrix {
      *
      * A.rowDeleteFromEnd(3)
      *
-     * will delete the last three row in this object leaving:
+     * will delete the last three rows in this object leaving:
      *
      *
      * 3 4 5 6
@@ -665,16 +636,18 @@ public class Matrix {
      *
      */
     public void rowDeleteFromEnd(int numOfRows) {
-        if (numOfRows >= 0 && numOfRows <= getRows()) {
-            Matrix matrix = new Matrix(this.getRows() - numOfRows, this.getCols());
-            for (int row = 0; row < matrix.getRows(); row++) {
-                for (int col = 0; col < getCols(); col++) {
-                    matrix.array[row][col] = this.array[row][col];
+        if (numOfRows >= 0 && numOfRows <= rows) {
+            int newRows = rows - numOfRows;
+            double[] newArray = new double[newRows * cols];
+            for (int row = 0; row < newRows; row++) {
+                for (int col = 0; col < cols; col++) {
+                    newArray[row * cols + col] = array[row * cols + col];
                 }//end inner for
 
             }//end outer for
 
-            this.setArray(matrix.array);
+            this.array = newArray;
+            this.rows = newRows;
         } else {
             System.out.println("NUMBER OF ROWS TO BE DELETED SHOULD "
                     + "RANGE FROM ZERO TO (AND INCLUDING) THE NUMBER OF ROWS IN THIS MATRIX.");
@@ -682,10 +655,10 @@ public class Matrix {
     }//end method rowDeleteFromEnd
 
     /**
-     * Deletes the specified number of row from the beginning of the Matrix
+     * Deletes the specified number of rows from the beginning of the Matrix
      * object
      *
-     * @param numOfRows the number of row to remove from the Matrix object's
+     * @param numOfRows the number of rows to remove from the Matrix object's
      * beginning. This method will take the object that calls it and perform
      * this operation on it. So it modifies the Matrix object that calls it. Be
      * careful, as data will be lost.
@@ -694,7 +667,7 @@ public class Matrix {
      *
      * A.rowDeleteFromStart(3)
      *
-     * will delete the last three row in this object leaving:
+     * will delete the last three rows in this object leaving:
      *
      *
      * A = 7 8 9 2
@@ -704,18 +677,18 @@ public class Matrix {
      *
      */
     public void rowDeleteFromStart(int numOfRows) {
-        if (numOfRows >= 0 && numOfRows <= getRows()) {
-            Matrix matrix = new Matrix(this.getRows() - numOfRows, this.getCols());
-            int counter = 0;
-            for (int row = numOfRows; row < getRows(); row++, counter++) {
-
-                for (int col = 0; col < getCols(); col++) {
-                    matrix.array[counter][col] = this.array[row][col];
+        if (numOfRows >= 0 && numOfRows <= rows) {
+            int newRows = rows - numOfRows;
+            double[] newArray = new double[newRows * cols];
+            for (int row = 0; row < newRows; row++) {
+                for (int col = 0; col < cols; col++) {
+                    newArray[row * cols + col] = array[(numOfRows + row) * cols + col];
                 }//end inner for
 
             }//end outer for
 
-            this.setArray(matrix.array);
+            this.array = newArray;
+            this.rows = newRows;
         } else {
             System.out.println("NUMBER OF ROWS TO BE DELETED SHOULD "
                     + "RANGE FROM ZERO TO (AND INCLUDING) THE NUMBER OF ROWS IN THIS MATRIX.");
@@ -731,11 +704,11 @@ public class Matrix {
         Matrix mat = new Matrix(this);
         //Now we row-reduce.
 
-        for (int row = 0; row < mat.getRows(); row++) {
-            if (row >= this.getCols()) {
+        for (int row = 0; row < mat.rows; row++) {
+            if (row >= this.cols) {
                 break;
             }
-            double val = mat.array[row][row];
+            double val = mat.array[row * mat.cols + row];
 
             /**
              * The division coefficient must not be zero. If zero, search for a
@@ -743,8 +716,8 @@ public class Matrix {
              */
             if (val == 0.0) {
 
-                for (int rw = row; rw < mat.getRows(); rw++) {
-                    val = mat.array[rw][row];
+                for (int rw = row; rw < mat.rows; rw++) {
+                    val = mat.array[rw * mat.cols + row];
 
                     if (val != 0.0) {
                         mat.swapRow(row, rw);
@@ -758,14 +731,14 @@ public class Matrix {
                 }
             }//end if
 
-            for (int col = row; col < mat.getCols(); col++) {
-                mat.array[row][col] /= val;
+            for (int col = row; col < mat.cols; col++) {
+                mat.array[row * mat.cols + col] /= val;
             }//end inner for loop
 
-            for (int rowed = row + 1; rowed < mat.getRows(); rowed++) {
-                double mul = mat.array[rowed][row];
-                for (int coled = row; coled < mat.getCols(); coled++) {
-                    mat.array[rowed][coled] = mat.array[rowed][coled] - mul * mat.array[row][coled];
+            for (int rowed = row + 1; rowed < mat.rows; rowed++) {
+                double mul = mat.array[rowed * mat.cols + row];
+                for (int coled = row; coled < mat.cols; coled++) {
+                    mat.array[rowed * mat.cols + coled] = mat.array[rowed * mat.cols + coled] - mul * mat.array[row * mat.cols + coled];
                 }//end for
 
             }//end for
@@ -784,11 +757,11 @@ public class Matrix {
         Matrix mat = new Matrix(this);
         //Now we row-reduce.
 
-        for (int row = 0; row < mat.getRows(); row++) {
-            if (row >= this.getCols()) {
+        for (int row = 0; row < mat.rows; row++) {
+            if (row >= this.cols) {
                 break;
             }
-            double val = mat.array[row][row];
+            double val = mat.array[row * mat.cols + row];
 
             /**
              * The division coefficient must not be zero. If zero, search for a
@@ -796,8 +769,8 @@ public class Matrix {
              */
             if (val == 0.0) {
 
-                for (int rw = row; rw < mat.getRows(); rw++) {
-                    val = mat.array[rw][row];
+                for (int rw = row; rw < mat.rows; rw++) {
+                    val = mat.array[rw * mat.cols + row];
 
                     if (val != 0.0) {
                         mat.swapRow(row, rw);
@@ -811,10 +784,10 @@ public class Matrix {
                 }
             }//end if
 
-            for (int rowed = row + 1; rowed < mat.getRows(); rowed++) {
-                double mul = mat.array[rowed][row];
-                for (int coled = row; coled < mat.getCols(); coled++) {
-                    mat.array[rowed][coled] = val * mat.array[rowed][coled] - mul * mat.array[row][coled];
+            for (int rowed = row + 1; rowed < mat.rows; rowed++) {
+                double mul = mat.array[rowed * mat.cols + row];
+                for (int coled = row; coled < mat.cols; coled++) {
+                    mat.array[rowed * mat.cols + coled] = val * mat.array[rowed * mat.cols + coled] - mul * mat.array[row * mat.cols + coled];
                 }//end for
 
             }//end for
@@ -843,25 +816,25 @@ public class Matrix {
      * @return a Matrix object containing the solution matrix.
      */
     public static Matrix solveEquation(Matrix matrix) {
-        Matrix solnMatrix = new Matrix(matrix.getRows(), 1);
+        Matrix solnMatrix = new Matrix(matrix.rows, 1);
 
         Matrix matrixLoader = matrix.reduceToTriangularMatrix();
         // System.out.println( matrixLoader  );
 
-        if (matrix.getRows() == matrix.getCols() - 1) {
+        if (matrix.rows == matrix.cols - 1) {
             //Back-Substitution Algorithm.
             double sum = 0;//summation variable
             int counter = 1;
-            for (int row = matrixLoader.getRows() - 1; row >= 0; row--) {
-                for (int col = row + 1; col < matrixLoader.getCols(); col++) {
+            for (int row = matrixLoader.rows - 1; row >= 0; row--) {
+                for (int col = row + 1; col < matrixLoader.cols; col++) {
 
-                    if (col < matrixLoader.getCols() - 1) {
-                        sum += (matrixLoader.array[row][col] * solnMatrix.array[col][0]);//sum the product of each coefficient and its unknown's value in the solution matrix
-                    } else if (col == matrixLoader.getCols() - 1) {
-                        sum = matrixLoader.array[row][col] - sum;//end of summing.Now subtract the sum from the last entry on the row
+                    if (col < matrixLoader.cols - 1) {
+                        sum += (matrixLoader.array[row * matrixLoader.cols + col] * solnMatrix.array[col * solnMatrix.cols + 0]);//sum the product of each coefficient and its unknown's value in the solution matrix
+                    } else if (col == matrixLoader.cols - 1) {
+                        sum = matrixLoader.array[row * matrixLoader.cols + col] - sum;//end of summing.Now subtract the sum from the last entry on the row
                     }
                 }//end inner loop
-                solnMatrix.array[matrixLoader.getRows() - counter][0] = sum / matrixLoader.array[row][row];
+                solnMatrix.array[(matrixLoader.rows - counter) * solnMatrix.cols + 0] = sum / matrixLoader.array[row * matrixLoader.cols + row];
                 counter++;// increment counter
                 sum = 0;//reset sum
             }//end outer loop
@@ -881,31 +854,29 @@ public class Matrix {
      * Matrix object.
      */
     public Matrix transpose() {
-        double matrix[][] = new double[getCols()][getRows()];
+        Matrix matrix = new Matrix(cols, rows);
 
-        for (int row = 0; row < getRows(); row++) {
-            for (int col = 0; col < getCols(); col++) {
-                matrix[col][row] = array[row][col];
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < cols; col++) {
+                matrix.array[col * rows + row] = array[row * cols + col];
             }//end inner for
 
         }//end outer for
 
-        return new Matrix(matrix);
+        return matrix;
     }//end method transpose
 
     public Matrix adjoint() {
         if (isSquareMatrix()) {
-            int rows = getRows();
-            int cols = getCols();
-            double matrix[][] = new double[rows][cols];
+            Matrix matrix = new Matrix(rows, cols);
 
             for (int row = 0; row < rows; row++) {
                 for (int col = 0; col < cols; col++) {
-                    matrix[row][col] = getCofactor(row, col).determ();
+                    matrix.array[row * cols + col] = getCofactor(row, col).determ();
                 }//end inner for
             }//end outer for
 
-            return new Matrix(matrix).transpose();
+            return matrix.transpose();
         }
         return null;
     }
@@ -919,18 +890,16 @@ public class Matrix {
 
         if (isSquareMatrix()) {
 
-            int rows = getRows();
-            int cols = getCols();
-            double matrix[][] = new double[rows][cols];
+            Matrix matrix = new Matrix(rows, cols);
 
             int count = 0;
             for (int row = 0; row < rows; row++) {
                 for (int col = 0; col < cols; col++, count++) {
-                    matrix[row][col] = (count % 2 == 0 ? 1 : -1) * getCofactor(row, col).determ();
+                    matrix.array[row * cols + col] = (count % 2 == 0 ? 1 : -1) * getCofactor(row, col).determ();
                 }//end inner for
             }//end outer for    
 
-            return new Matrix(matrix);
+            return matrix;
         }
 
         return null;
@@ -944,25 +913,25 @@ public class Matrix {
      */
     public Matrix minor(int i, int j) {
 
-        double matrix[][] = new double[getRows() - 1][getCols() - 1];
+        Matrix matrix = new Matrix(rows - 1, cols - 1);
 
-        for (int row = 0; row < getRows(); row++) {
-
-            for (int column = 0; column < getCols(); column++) {
-                if (row < i && column < j) {
-                    matrix[row][column] = array[row][column];
-                } else if (row < i && column > j) {
-                    matrix[row][column - 1] = array[row][column];
-                } else if (row > i && column < j) {
-                    matrix[row - 1][column] = array[row][column];
-                } else if (row > i && column > j) {
-                    matrix[row - 1][column - 1] = array[row][column];
+        int subRow = 0;
+        for (int row = 0; row < rows; row++) {
+            if (row == i) {
+                continue;
+            }
+            int subCol = 0;
+            for (int col = 0; col < cols; col++) {
+                if (col == j) {
+                    continue;
                 }
+                matrix.array[subRow * matrix.cols + subCol] = array[row * this.cols + col];
+                subCol++;
             }//end inner for
-
+            subRow++;
         }//end outer for
 
-        return new Matrix(matrix);
+        return matrix;
     }//end method minor
 
     /**
@@ -970,7 +939,7 @@ public class Matrix {
      * @return true if this Matrix object is a square matrix.
      */
     public boolean isSquareMatrix() {
-        return getRows() == getCols();
+        return rows == cols;
     }
 
     /**
@@ -979,22 +948,22 @@ public class Matrix {
      * solvable by reduction to triangular form and subsequent evaluation.
      */
     public boolean isSystemOfEquations() {
-        return getRows() == getCols() - 1;
+        return rows == cols - 1;
     }
 
     /**
      *
      * @param m a 2 X 2 matrix
-     * @return the detMultiplier of this matrix
+     * @return the determinant of this matrix
      */
     private static double $2X2determinant(Matrix m) {
-        return m.array[0][0] * m.array[1][1] - m.array[1][0] * m.array[0][1];
+        return m.array[0 * m.cols + 0] * m.array[1 * m.cols + 1] - m.array[1 * m.cols + 0] * m.array[0 * m.cols + 1];
     }
 
     /**
      *
      * @param m a 2 X 2 matrix
-     * @return the detMultiplier of this matrix
+     * @return the determinant of this matrix
      */
     private static String $2X2determinantForEigen(String[][] m) {
         /*
@@ -1037,13 +1006,13 @@ public class Matrix {
     /**
      * @param m the matrix whose top row is to be multiplied by a scalar
      * Multiplies the top row of a matrix by a scalar. This is an important
-     * operation during the evaluation of a detMultiplier.
+     * operation during the evaluation of a determinant.
      */
     private static Matrix topRowScalarMultiply(Matrix m, double scalar) {
-        for (int col = 0; col < m.getCols(); col++) {
-            m.array[0][col] *= scalar;
+        for (int col = 0; col < m.cols; col++) {
+            m.array[0 * m.cols + col] *= scalar;
         }
-        return new Matrix(m.array);
+        return new Matrix(m);
     }
 
     /**
@@ -1052,21 +1021,21 @@ public class Matrix {
      * instance method. It uses a O(cube_n) algorithm as against this method's
      * O(n!)
      *
-     * @param m the Matrix object whose detMultiplier is desired.
-     * @return the detMultiplier of the matrix
+     * @param m the Matrix object whose determinant is desired.
+     * @return the determinant of the matrix
      */
     private static final double det(Matrix m, double acc) {
         //must be square matrix
-        if (m.getRows() == m.getCols()) {
-            if (m.getRows() == 2) {
+        if (m.rows == m.cols) {
+            if (m.rows == 2) {
                 return $2X2determinant(m);
             }//end else
             else {
-                for (int col = 0; col < m.getCols(); col++) {
-                    double topRow = m.array[0][col] * Math.pow(-1, col);
+                for (int col = 0; col < m.cols; col++) {
+                    double topRow = m.array[0 * m.cols + col] * Math.pow(-1, col);
                     Matrix mat = topRowScalarMultiply(m.minor(0, col), topRow);
 
-                    if (mat.getRows() > 2) {
+                    if (mat.rows > 2) {
                         acc = det(mat, acc);
                     } else {
                         acc += $2X2determinant(mat);
@@ -1078,7 +1047,7 @@ public class Matrix {
         else {
             return Double.POSITIVE_INFINITY;
         }//end else
-    }//end method detMultiplier
+    }//end method determinant
 
     /**
      * Sarus' rule for computing determinants. This technique is too slow and
@@ -1086,8 +1055,8 @@ public class Matrix {
      * instance method. It uses a O(cube_n) algorithm as against this method's
      * O(n!)
      *
-     * @param m the Matrix object whose detMultiplier is desired.
-     * @return the detMultiplier of the matrix
+     * @param m the Matrix object whose determinant is desired.
+     * @return the determinant of the matrix
      */
     private double sarusDet() {
         double acc = 1;
@@ -1107,14 +1076,9 @@ public class Matrix {
      */
     public void randomFill() {
         Random ran = new Random();
-        for (int row = 0; row < getRows(); row++) {
-            for (int col = 0; col < getCols(); col++) {
-                array[row][col] = 1 + (double) ran.nextInt(101);
-
-            }//end inner for
-
-        }//end outer for
-
+        for (int i = 0; i < array.length; i++) {
+            array[i] = 1 + (double) ran.nextInt(101);
+        }
     }//end method randomFill
 
     /**
@@ -1124,14 +1088,9 @@ public class Matrix {
      */
     public void randomFill(int n) {
         Random ran = new Random();
-        for (int row = 0; row < getRows(); row++) {
-            for (int col = 0; col < getCols(); col++) {
-                array[row][col] = 1 + ran.nextInt(n);
-
-            }//end inner for
-
-        }//end outer for
-
+        for (int i = 0; i < array.length; i++) {
+            array[i] = 1 + ran.nextInt(n);
+        }
     }//end method randomFill
 
     /**
@@ -1151,20 +1110,20 @@ public class Matrix {
 
     /**
      *
-     * @return a string representation of the matrix in row and columns.
+     * @return a string representation of the matrix in rows and columns.
      */
     @Override
     public String toString() {
         String output = "\n";
         String appender = "";
-        for (int row = 0; row < getRows(); row++) {
+        for (int row = 0; row < rows; row++) {
 
-            for (int column = 0; column < getCols(); column++) {
+            for (int column = 0; column < cols; column++) {
 
-                if (column < getCols()) {
-                    appender += String.format("%7s%3s", array[row][column], ",");
+                if (column < cols) {
+                    appender += String.format("%7s%3s", array[row * cols + column], ",");
                 }
-                if (column == getCols() - 1) {
+                if (column == cols - 1) {
                     appender = appender.substring(0, appender.length() - 1);
                     appender += "          \n";
                 }
@@ -1215,11 +1174,11 @@ public class Matrix {
      * row matrix.
      */
     public Matrix getRowMatrix(int row) {
-        double[][] arr = new double[1][getCols()];
-        for (int col = 0; col < getCols(); col++) {
-            arr[0][col] = array[row][col];
+        Matrix arr = new Matrix(1, cols);
+        for (int col = 0; col < cols; col++) {
+            arr.array[col] = array[row * cols + col];
         }//end for
-        return new Matrix(arr);
+        return arr;
     }
 
     /**
@@ -1228,11 +1187,11 @@ public class Matrix {
      * operation generates a new Matrix object which is a column matrix.
      */
     public Matrix getColumnMatrix(int column) {
-        double[][] arr = new double[getRows()][1];
-        for (int row = 0; row < getRows(); row++) {
-            arr[row][0] = array[row][column];
+        Matrix arr = new Matrix(rows, 1);
+        for (int row = 0; row < rows; row++) {
+            arr.array[row] = array[row * cols + column];
         }//end for
-        return new Matrix(arr);
+        return arr;
     }
 
     /**
@@ -1247,14 +1206,14 @@ public class Matrix {
 
         Matrix m = new Matrix(this);
         Matrix unit = m.unitMatrix();
-        Matrix inverse = new Matrix(new double[m.getRows()][m.getCols()]);
+        Matrix inverse = new Matrix(m.rows, m.cols);
         if (m.isSquareMatrix()) {
-            for (int rows = 0; rows < m.getCols(); rows++) {
-                Matrix c = Matrix.columnJoin(m, unit.getColumnMatrix(rows));
+            for (int rws = 0; rws < m.cols; rws++) {
+                Matrix c = Matrix.columnJoin(m, unit.getColumnMatrix(rws));
                 inverse = Matrix.columnJoin(inverse, c.solveEquation());
             }//end for
         }//end if
-        inverse.columnDeleteFromStart(m.getRows());
+        inverse.columnDeleteFromStart(m.rows);
         return inverse;
     }
 
@@ -1271,11 +1230,11 @@ public class Matrix {
             Matrix unit = m.unitMatrix();
             Matrix inverse = Matrix.columnJoin(this, unit);
 
-            int rows = inverse.getRows();
-            int cols = inverse.getCols();
-            for (int row = 0; row < rows; row++) {
+            int rws = inverse.rows;
+            int cls = inverse.cols;
+            for (int row = 0; row < rws; row++) {
 
-                double pivot = inverse.array[row][row];
+                double pivot = inverse.array[row * cls + row];
 
                 /**
                  * The division coefficient must not be zero. If zero, search
@@ -1283,8 +1242,8 @@ public class Matrix {
                  */
                 if (pivot == 0.0) {
 
-                    for (int rw = row; rw < rows; rw++) {
-                        pivot = inverse.array[rw][row];
+                    for (int rw = row; rw < rws; rw++) {
+                        pivot = inverse.array[rw * cls + row];
 
                         if (pivot != 0.0) {
                             inverse.swapRow(row, rw);
@@ -1298,25 +1257,25 @@ public class Matrix {
                     }
                 }//end if   
 
-                for (int col = row; col < cols; col++) {
-                    inverse.array[row][col] /= pivot;
+                for (int col = row; col < cls; col++) {
+                    inverse.array[row * cls + col] /= pivot;
                 }//end inner for loop
 
-                for (int rw = row + 1; rw < rows; rw++) {
-                    double newRowMultiplier = -1 * inverse.array[rw][row];
-                    for (int col = row; col < cols; col++) {
-                        inverse.array[rw][col] = newRowMultiplier * inverse.array[row][col] + inverse.array[rw][col];
+                for (int rw = row + 1; rw < rws; rw++) {
+                    double newRowMultiplier = -1 * inverse.array[rw * cls + row];
+                    for (int col = row; col < cls; col++) {
+                        inverse.array[rw * cls + col] = newRowMultiplier * inverse.array[row * cls + col] + inverse.array[rw * cls + col];
                     }
                 }//end inner for loop
 
             }//end for
             //////////////Now reduce upwards from the right border of the main matrix...on the partition between the 2 matrices.
 
-            for (int row = rows - 1; row >= 0; row--) {
+            for (int row = rws - 1; row >= 0; row--) {
 
                 for (int rw = row - 1; rw >= 0; rw--) {
 
-                    double newRowMultiplier = -1 * inverse.array[rw][row];
+                    double newRowMultiplier = -1 * inverse.array[rw * cls + row];
                     /**
                      * The division coefficient must not be zero. If zero,
                      * search for a lower row, and swap.
@@ -1324,14 +1283,14 @@ public class Matrix {
                     if (newRowMultiplier == 0.0) {
                         continue;
                     }//end if  
-                    for (int col = row; col < cols; col++) {
-                        inverse.array[rw][col] = newRowMultiplier * inverse.array[row][col] + inverse.array[rw][col];
+                    for (int col = row; col < cls; col++) {
+                        inverse.array[rw * cls + col] = newRowMultiplier * inverse.array[row * cls + col] + inverse.array[rw * cls + col];
                     }
                 }
 
             }//end for
 
-            inverse.columnDeleteFromStart(m.getRows());
+            inverse.columnDeleteFromStart(m.rows);
             return inverse;
         }//end if
         return null;
@@ -1351,19 +1310,19 @@ public class Matrix {
 
         Matrix mat = new Matrix(this);
         //Now we row-reduce.
-        int rows = mat.getRows();
-        int cols = mat.getCols();
+        int rws = mat.rows;
+        int cls = mat.cols;
 
-        if (rows == cols) {
-            for (int row = 0; row < rows; row++) {
-                double pivot = mat.array[row][row];
+        if (rws == cls) {
+            for (int row = 0; row < rws; row++) {
+                double pivot = mat.array[row * cls + row];
                 /**
                  * The division coefficient must not be zero. If zero, search
                  * for a lower row, and swap.
                  */
                 if (pivot == 0.0) {
-                    for (int rw = row; rw < rows; rw++) {
-                        pivot = mat.array[rw][row];
+                    for (int rw = row; rw < rws; rw++) {
+                        pivot = mat.array[rw * cls + row];
                         if (pivot != 0.0) {
                             mat.swapRow(row, rw);
                             detMultiplier *= -1;
@@ -1374,19 +1333,19 @@ public class Matrix {
                         throw new InputMismatchException("INVERSE DOES NOT EXISTS!");
                     }
                 }//end if
-                for (int col = row; col < cols; col++) {
-                    mat.array[row][col] /= pivot;
+                for (int col = row; col < cls; col++) {
+                    mat.array[row * cls + col] /= pivot;
                 }//end inner for loop
                 detMultiplier *= pivot;
-                for (int rw = row + 1; rw < rows; rw++) {
-                    double newRowMultiplier = -1 * mat.array[rw][row];
-                    for (int col = row; col < cols; col++) {
-                        mat.array[rw][col] = newRowMultiplier * mat.array[row][col] + mat.array[rw][col];
+                for (int rw = row + 1; rw < rws; rw++) {
+                    double newRowMultiplier = -1 * mat.array[rw * cls + row];
+                    for (int col = row; col < cls; col++) {
+                        mat.array[rw * cls + col] = newRowMultiplier * mat.array[row * cls + col] + mat.array[rw * cls + col];
                     }
                 }//end inner for loop
             }//end for
-            for (int row = 0; row < rows; row++) {
-                detMultiplier *= mat.array[row][row];
+            for (int row = 0; row < rws; row++) {
+                detMultiplier *= mat.array[row * cls + row];
             }//end for
             return detMultiplier;
         }
@@ -1450,20 +1409,20 @@ public class Matrix {
 
         if (m.isSquareMatrix()) {
 
-            int rows = m.getRows();
-            int cols = m.getCols();
+            int rws = m.rows;
+            int cls = m.cols;
 
-            String[][] mat = new String[rows][cols];
+            String[][] mat = new String[rws][cls];
 
             //Create matrix array in string format
-            for (int row = 0; row < rows; row++) {
-                for (int col = 0; col < cols; col++) {
-                    mat[row][col] = String.valueOf(m.array[row][col]);
+            for (int row = 0; row < rws; row++) {
+                for (int col = 0; col < cls; col++) {
+                    mat[row][col] = String.valueOf(m.array[row * cls + col]);
                 }
             }
 
             //Create A-λ array in string format
-            for (int row = 0, col = 0; row < rows; row++, col++) {
+            for (int row = 0, col = 0; row < rws; row++, col++) {
                 String c = mat[row][col];
                 mat[row][col] = c + "-" + lambda;
             }
@@ -1472,7 +1431,7 @@ public class Matrix {
             StringBuilder eqnBuilder = new StringBuilder();
 
             int row = 0;
-            for (int col = 0; col < cols; col++) {
+            for (int col = 0; col < cls; col++) {
                 String entry = mat[row][col];
                 String cofactorDet;
                 if (mat.length == 2) {
@@ -1521,27 +1480,22 @@ public class Matrix {
     private Matrix getCofactor(int rw, int cl) {
         if (rw >= 0 && cl >= 0) {
 
-            int rows = getRows();
-            int cols = getCols();
-
             Matrix mat = new Matrix(rows - 1, cols - 1);
 
-            int subRow = 0, subCol = 0;
-
+            int subRow = 0;
             for (int row = 0; row < rows; row++) {
-
-                if (row != rw) {
-                    for (int col = 0; col < cols; col++) {
-
-                        if (col != cl) {// , 
-                            mat.array[subRow][subCol] = array[row][col];
-                            subCol++;
-                        }
-                    }
-                    subCol = 0;
-                    subRow++;
+                if (row == rw) {
+                    continue;
                 }
-
+                int subCol = 0;
+                for (int col = 0; col < cols; col++) {
+                    if (col == cl) {
+                        continue;
+                    }
+                    mat.array[subRow * mat.cols + subCol] = array[row * this.cols + col];
+                    subCol++;
+                }
+                subRow++;
             }
             return mat;
         }
@@ -1560,32 +1514,283 @@ public class Matrix {
     private static String[][] getCofactorTextArray(String[][] matrix, int rw, int cl) {
         if (rw >= 0 && cl >= 0) {
 
-            int rows = matrix.length;
-            int cols = matrix[0].length;
+            int rws = matrix.length;
+            int cls = matrix[0].length;
 
-            String[][] mat = new String[rows - 1][cols - 1];
+            String[][] mat = new String[rws - 1][cls - 1];
 
-            int subRow = 0, subCol = 0;
-
-            for (int row = 0; row < rows; row++) {
-
-                if (row != rw) {
-                    for (int col = 0; col < cols; col++) {
-
-                        if (col != cl) {// , 
-                            mat[subRow][subCol] = matrix[row][col];
-                            subCol++;
-                        }
-                    }
-                    subCol = 0;
-                    subRow++;
+            int subRow = 0;
+            for (int row = 0; row < rws; row++) {
+                if (row == rw) {
+                    continue;
                 }
-
+                int subCol = 0;
+                for (int col = 0; col < cls; col++) {
+                    if (col == cl) {
+                        continue;
+                    }
+                    mat[subRow][subCol] = matrix[row][col];
+                    subCol++;
+                }
+                subRow++;
             }
             return mat;
         }
 
         return null;
+    }
+
+    private void reduceToHessenberg(double[][] H, int n) {
+        // We only need to go up to n-2 because the last 2x2 block is already Hessenberg
+        for (int k = 0; k < n - 2; k++) {
+            double[] v = new double[n];
+            double sigma = 0;
+
+            // 1. Calculate the norm of the column below the sub-diagonal
+            for (int i = k + 1; i < n; i++) {
+                sigma += H[i][k] * H[i][k];
+            }
+
+            if (sigma < 1e-15) {
+                continue; // Already zeroed
+            }
+            double vk1 = H[k + 1][k];
+            double mag = Math.sqrt(sigma);
+
+            // Choose sign to avoid catastrophic cancellation
+            double u1 = (vk1 >= 0) ? vk1 + mag : vk1 - mag;
+
+            // 2. Create the Householder vector v
+            v[k + 1] = 1.0;
+            for (int i = k + 2; i < n; i++) {
+                v[i] = H[i][k] / u1;
+            }
+
+            double beta = 2.0 / (1.0 + (sigma - vk1 * vk1) / (u1 * u1));
+
+            // 3. Apply Householder Reflection from the left: H = (I - beta*v*vT) * H
+            for (int j = k; j < n; j++) {
+                double sum = 0;
+                for (int i = k + 1; i < n; i++) {
+                    sum += v[i] * H[i][j];
+                }
+                sum *= beta;
+                for (int i = k + 1; i < n; i++) {
+                    H[i][j] -= sum * v[i];
+                }
+            }
+
+            // 4. Apply Householder Reflection from the right: H = H * (I - beta*v*vT)
+            // This preserves the eigenvalues (Similarity Transformation)
+            for (int i = 0; i < n; i++) {
+                double sum = 0;
+                for (int j = k + 1; j < n; j++) {
+                    sum += v[j] * H[i][j];
+                }
+                sum *= beta;
+                for (int j = k + 1; j < n; j++) {
+                    H[i][j] -= sum * v[j];
+                }
+            }
+        }
+    }
+
+    private double calculateWilkinsonShift(double[][] H, int m) {
+        // Indices for the bottom 2x2 submatrix
+        double a = H[m - 2][m - 2];
+        double b = H[m - 2][m - 1];
+        double c = H[m - 1][m - 2];
+        double d = H[m - 1][m - 1];
+
+        // d is the current best guess for the eigenvalue
+        // we calculate the shift based on the characteristic equation of the 2x2 block
+        double delta = (a - d) / 2.0;
+
+        // sign of delta to ensure we choose the eigenvalue closer to d
+        double signDelta = (delta >= 0) ? 1.0 : -1.0;
+
+        // Calculate the shift: mu = d - (sign(delta) * b * c) / (|delta| + sqrt(delta^2 + b*c))
+        // This is a numerically stable version of the quadratic formula
+        double denom = Math.abs(delta) + Math.sqrt(delta * delta + b * c);
+
+        if (denom == 0) {
+            return d; // Fallback to the last diagonal element
+        }
+
+        double shift = d - (signDelta * b * c) / denom;
+
+        return shift;
+    }
+
+    private void qrStepHessenberg(double[][] H, int m) {
+        double[] sin = new double[m - 1];
+        double[] cos = new double[m - 1];
+
+        // 1. QR Decomposition: Eliminate the sub-diagonal using Givens Rotations
+        // This transforms H into R
+        for (int i = 0; i < m - 1; i++) {
+            double a = H[i][i];
+            double b = H[i + 1][i];
+
+            // Numerically stable calculation of Givens coefficients (c = cos, s = sin)
+            if (b == 0) {
+                cos[i] = 1;
+                sin[i] = 0;
+            } else {
+                if (Math.abs(b) > Math.abs(a)) {
+                    double tau = -a / b;
+                    sin[i] = 1.0 / Math.sqrt(1 + tau * tau);
+                    cos[i] = sin[i] * tau;
+                } else {
+                    double tau = -b / a;
+                    cos[i] = 1.0 / Math.sqrt(1 + tau * tau);
+                    sin[i] = cos[i] * tau;
+                }
+            }
+
+            // Apply rotation to the columns of H (Left multiplication)
+            for (int j = i; j < m; j++) {
+                double h1 = H[i][j];
+                double h2 = H[i + 1][j];
+                H[i][j] = cos[i] * h1 - sin[i] * h2;
+                H[i + 1][j] = sin[i] * h1 + cos[i] * h2;
+            }
+        }
+
+        // 2. Complete the similarity transformation: H = R * Q
+        // We apply the same rotations from the right (Right multiplication)
+        for (int i = 0; i < m - 1; i++) {
+            double c = cos[i];
+            double s = sin[i];
+
+            // Apply rotation to the rows of H
+            for (int j = 0; j <= i + 1; j++) {
+                double h1 = H[j][i];
+                double h2 = H[j][i + 1];
+                H[j][i] = c * h1 - s * h2;
+                H[j][i + 1] = s * h1 + c * h2;
+            }
+        }
+    }
+
+    public double[] computeEigenValues() {
+        int n = this.rows;
+        double[][] H = this.getArray(); // Working copy
+
+        // 1. Transform to Hessenberg Form (using Householder reflections)
+        reduceToHessenberg(H, n);
+
+        // 2. Iterative QR with shifts
+        int maxIterations = 100 * n;
+        int iter = 0;
+        int m = n;
+
+        while (m > 1 && iter < maxIterations) {
+            // Look for convergence at the bottom of the matrix
+            if (Math.abs(H[m - 1][m - 2]) < 1e-12) {
+                m--; // Found an eigenvalue at H[m][m]
+                continue;
+            }
+
+            // Wilkinson Shift calculation (using the bottom 2x2 submatrix)
+            double mu = calculateWilkinsonShift(H, m);
+
+            // Apply Shift: H = H - mu*I
+            for (int i = 0; i < m; i++) {
+                H[i][i] -= mu;
+            }
+
+            // QR Factorization (using Givens Rotations for O(n^2) efficiency)
+            qrStepHessenberg(H, m);
+
+            // Apply back: H = RQ + mu*I
+            for (int i = 0; i < m; i++) {
+                H[i][i] += mu;
+            }
+
+            iter++;
+        }
+
+        // 3. Extract eigenvalues from the diagonal
+        double[] eigenvalues = new double[n];
+        for (int i = 0; i < n; i++) {
+            eigenvalues[i] = H[i][i];
+        }
+        return eigenvalues;
+    }
+/**
+ * 
+ * <code>A = VɅV-¹</code>
+ Check: Is ||A*v - lambda*v|| close to zero?
+double[] Av = matrixMultiply(A, v);
+double[] lv = scalarMultiply(lambda, v);
+double residual = computeNorm(subtract(Av, lv));
+
+if (residual > 1e-9) {
+   // This eigenvalue/vector pair might be inaccurate
+}
+ * @param lambda
+ * @return 
+ */
+    public double[] computeEigenVector(double lambda) {
+        Matrix A = new Matrix(this);
+        int n = A.rows;
+        // 1. Construct (A - λI)
+        double[][] mat = new double[n][n];
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                mat[i][j] = A.getElem(i, j);
+            }
+            mat[i][i] -= lambda;
+        }
+
+        // 2. Gaussian Elimination with Partial Pivoting
+        for (int i = 0; i < n - 1; i++) {
+            // Pivot selection for numerical stability
+            int pivot = i;
+            for (int j = i + 1; j < n; j++) {
+                if (Math.abs(mat[j][i]) > Math.abs(mat[pivot][i])) {
+                    pivot = j;
+                }
+            }
+            double[] temp = mat[i];
+            mat[i] = mat[pivot];
+            mat[pivot] = temp;
+
+            for (int j = i + 1; j < n; j++) {
+                double factor = mat[j][i] / mat[i][i];
+                for (int k = i; k < n; k++) {
+                    mat[j][k] -= factor * mat[i][k];
+                }
+            }
+        }
+
+        // 3. Back-substitution
+        // Since the matrix is singular, we expect the last row to be 0.
+        // We set v[n-1] = 1.0 and solve upwards.
+        double[] v = new double[n];
+        v[n - 1] = 1.0;
+
+        for (int i = n - 2; i >= 0; i--) {
+            double sum = 0;
+            for (int j = i + 1; j < n; j++) {
+                sum += mat[i][j] * v[j];
+            }
+            // If mat[i][i] is nearly zero, this indicates a higher geometric multiplicity
+            v[i] = (Math.abs(mat[i][i]) < 1e-12) ? 0 : -sum / mat[i][i];
+        }
+
+        // 4. Normalize the vector (World-Class Step)
+        double norm = 0;
+        for (double component : v) {
+            norm += component * component;
+        }
+        norm = Math.sqrt(norm);
+        for (int i = 0; i < n; i++) {
+            v[i] /= norm;
+        }
+
+        return v;
     }
 
     /**
@@ -1921,7 +2126,7 @@ public class Matrix {
 
         Matrix m1 = new Matrix(4, 4);
         double array[][] = {{1, -8, 2, 5}, {4, 8, 2, 4}, {6, 5, 2, 1}, {2, 1, 6, 8}};
-        m1.array = array;
+        m1.setArray(array);
         System.out.printf("Matrix: %s\nDeterminant:\n %f\n", m1.toString(), det(m1, 0));
         Matrix triMatrix = m1.reduceToRowEchelonMatrix();
 
@@ -1949,11 +2154,10 @@ public class Matrix {
 
         System.out.printf("New method for determinant gives %4f in %4f %2s \n", det_1, (t3 * 1.0E-6), "ms");
 
-        /*
-        Matrix m1 = new Matrix( new double[][]{{5, -6, 8, 9}, {3,1,0,6}, {2,10,4,5}, {16,12,2,4}});
+        Matrix m11 = new Matrix(new double[][]{{5, -6, 8, 9}, {3, 1, 0, 6}, {2, 10, 4, 5}, {16, 12, 2, 4}});
 
-        System.out.println("--------------------------Matrix:\n" + m1);
-        System.out.println("Inverse: " + m1.inverse());
+        System.out.println("--------------------------Matrix:\n" + m11);
+        System.out.println("Inverse: " + m11.inverse());
 
         Matrix m2 = new Matrix(2, 2);
         m2.randomFill(20);
@@ -1975,7 +2179,7 @@ public class Matrix {
         Matrix m5 = m3.inverse();
         System.out.println("INVERSE: " + m5);
 
-        System.out.println("Product using new method: M X 1/M: " + Matrix.multiply(m3, m5));*/
+        System.out.println("Product using new method: M X 1/M: " + Matrix.multiply(m3, m5));
         /**
          * double t0 = System.nanoTime(); Matrix m = new Matrix(3024,3025);
          * double t1 = System.nanoTime() - t0; System.out.println( "Creating the

@@ -22,7 +22,7 @@ import java.util.logging.Logger;
  */
 public class FunctionManager {
 
-    public static final Map<String, Function> FUNCTIONS = Collections.synchronizedMap(new HashMap<String, Function>());
+    public static final Map<String, Function> FUNCTIONS = Collections.synchronizedMap(new HashMap<>());
 
     /**
      *

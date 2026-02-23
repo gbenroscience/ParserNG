@@ -57,6 +57,10 @@ public String solutions(){
    return algorithm.solve();
 }
 
+public QuadraticSolver getSolver(){
+    return algorithm;
+}
+
 
 
 public static void main(String args[]){

@@ -142,7 +142,6 @@ public class Set {
      *
      * @return the product of all elements in the data set.
      */
-
     public double prod() {
         double u = 1;
         for (int i = 0; i < data.size(); i++) {
@@ -189,7 +188,7 @@ public class Set {
 
     /**
      *
-     * @return the meanor average value of a data set
+     * @return the mean or average value of a data set
      */
     public double avg() {
         return sum() / size();
@@ -265,19 +264,19 @@ public class Set {
      * proceeds.
      */
     private List<String> displayOuputLineByLine() {
-        List<String> sort = new ArrayList<String>();
+        List<String> sort = new ArrayList<>();
         for (int i = 0; i < size(); i++) {
             sort.add(data.get(i));
         }
         return sort;
     }
-    
+
     /**
      *
      * @return a number list sorted in ascending order
      */
     public List<String> sort() {
-        List<String> sort = new ArrayList<String>();
+        List<String> sort = new ArrayList<>();
         double[] array = new double[data.size()];
         int count = 0;
         for (String a : data) {
@@ -287,11 +286,12 @@ public class Set {
         count = 0;
         for (double d : array) {
             String c = String.valueOf(d);
-            sort.add(c.endsWith(".0") ? c.substring(0 , c.length()-2) : c);
+            sort.add(c.endsWith(".0") ? c.substring(0, c.length() - 2) : c);
         }
 
         return sort;
     }//end result
+
     /**
      *
      * @return the inverse of the Matrix as a number list
@@ -340,16 +340,13 @@ public class Set {
             return f.getMatrix().solveEquation();
         }
 
-        List<String> result = new ArrayList<String>();
         int size = data.size();
 
         double dimen = Math.sqrt(size);
 
         int numRows = (int) dimen;
         int numCols = numRows + 1;
-
         if (numRows * numCols == size) {
-
             double arr[][] = new double[numRows][numCols];
             int row = 0;
             int col = 0;
@@ -363,7 +360,6 @@ public class Set {
                 }
             }
             return new Matrix(arr).solveEquation();
-
         }
         return null;
     }
@@ -417,7 +413,7 @@ public class Set {
             return f.reduceToEchelon();
         }
 
-        List<String> result = new ArrayList<String>();
+        List<String> result = new ArrayList<>();
 
         int numRows = Integer.parseInt(data.get(0));
         int numCols = Integer.parseInt(data.get(1));
@@ -490,9 +486,8 @@ public class Set {
      */
     public double median() {
         double median = 0;
- 
-        List<String> scan = new ArrayList<String>();
-        scan = sort();
+
+        List<String> scan = sort();
         int g = size();
         if (STRING.isEven(g)) {
             double med = (Double.parseDouble(scan.get(g / 2)) + Double.parseDouble(scan.get((g / 2) - 1))) / 2;
@@ -531,7 +526,7 @@ public class Set {
         }//end for
 
 //Now get the values with the highest frequency calculated above.
-        List<String> mode = new ArrayList<String>();
+        List<String> mode = new ArrayList<>();
         for (int i = 0; i < freq.length; i++) {
             if (freq[i] == big && !mode.contains(data.get(i))) {
                 mode.add(data.get(i));
@@ -557,7 +552,7 @@ public class Set {
      * the random command.
      */
     public List<String> random() {
-        List<String> vals = new ArrayList<String>();
+        List<String> vals = new ArrayList<>();
         Random rnd = new Random();
 //check if the random command came with only one argument
         if (size() == 1) {
@@ -641,35 +636,32 @@ public class Set {
 
         int sz = data.size();
         switch (sz) {
-            case 1:
-            {
+            case 1: {
                 String anonFunc = data.get(0);
                 String solution = Derivative.eval("diff(" + anonFunc + ",1)");
-                
+
                 return solution;
             }
-            case 2:
-            {
+            case 2: {
                 String anonFunc = data.get(0);
                 double value = Double.parseDouble(data.get(1));
-                
+
                 String solution = Derivative.eval("diff(" + anonFunc + "," + value + ")");
                 /*  NumericalDerivative der = new NumericalDerivative(new Function(anonFunc), value );
                 return der.findDerivativeByPolynomialExpander();*/
                 return solution;
-            }//end if
-            case 3:
-            {
+            }
+            case 3: {
                 String anonFunc = data.get(0);
                 double value = Double.parseDouble(data.get(1));
                 int order = Integer.parseInt(data.get(2));
                 /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.parseDouble(data.get(1)));
                 return der.findDerivativeByPolynomialExpander();
-                */
+                 */
                 String solution = Derivative.eval("diff(" + anonFunc + "," + value + "," + order + ")");
-                
+
                 return solution;
-            }//end else if
+            }
             default:
                 throw new InputMismatchException(" Parameter List " + data + " Is Invalid!");
         }
@@ -724,7 +716,7 @@ public class Set {
             input = input.substring(1, input.length() - 1);
             input = input.concat("=0");
         }
- 
+
         Tartaglia_Equation solver = new Tartaglia_Equation(input);
 
         String reducedForm = solver.interpretedSystem();
@@ -741,11 +733,9 @@ public class Set {
     public String rootOfEquation() {
         int sz = data.size();
         boolean has2NumberArguments = false;
- System.out.println("LIST: "+data);
         if (Number.validNumber((String) data.get(sz - 1)) && !Number.validNumber((String) data.get(sz - 2))) {
             has2NumberArguments = true;
         }//end if
-
         //The function may come as a Function name to be looked up or as an anonymous Function.
         //If it comes as an anonymous Function,then the scanning process of the parser may
         //have broken it down into unmeaningful parts,whatever the situation, piece them together again!
@@ -766,7 +756,7 @@ public class Set {
      * Finds the numerical integral of a Function which has been pre-defined in
      * the Workspace.
      *
-     * @return the derivative at the specified value of the horizontal
+     * @return the numerical integral at the specified value of the horizontal
      * coordinate.
      */
     public String integrate() {
@@ -776,13 +766,13 @@ public class Set {
         boolean has2NumberArguments = false;
         if (Number.validNumber(data.get(sz - 1)) && Number.validNumber(data.get(sz - 2)) && Number.validNumber(data.get(sz - 3))) {
             has3NumberArguments = true;
-       
+
         }//end if
         if (Number.validNumber(data.get(sz - 1)) && Number.validNumber(data.get(sz - 2)) && !Number.validNumber(data.get(sz - 3))) {
             has2NumberArguments = true;
         }//end if
 
-        //The function may come asa Function name to be looked up or as an anonmous Function.
+        //The function may come as a Function name to be looked up or as an anonymous Function.
         //If it comes as an anonymous Function,then the scanning process of the parser may
         //have broken it down into unmeaningful parts,whatever the situation, piece them together again!
         String function = "";
@@ -874,7 +864,7 @@ public class Set {
                     } else {
                         Variable v = VariableManager.lookUp(nextToken);
                         if (v != null) {
-                            double val = Double.parseDouble(v.getValue());
+                            double val = v.getValue();
                             return f.getMatrix().scalarMultiply(val);
                         }
 
@@ -922,7 +912,7 @@ public class Set {
                     } else {
                         Variable v = VariableManager.lookUp(nextToken);
                         if (v != null) {
-                            double val = Double.parseDouble(v.getValue());
+                            double val =  v.getValue();
                             return f.getMatrix().scalarDivide(val);
                         }
 
@@ -949,27 +939,19 @@ public class Set {
      * vector).
      */
     public Matrix addMatrix() {
-
         if (data.size() == 2) {
-
             String token = data.get(0);
             String nextToken = data.get(1);
-
             if (Variable.isVariableString(token)) {
                 if (Variable.isVariableString(nextToken)) {
                     Function f = FunctionManager.lookUp(token);
-
                     Function f1 = FunctionManager.lookUp(nextToken);
                     if (f != null && f1 != null) {
                         return f.getMatrix().add(f1.getMatrix());
                     }
-
                 }
-
             }
-
         }
-
         return new Matrix("");
 
     }
@@ -1024,7 +1006,7 @@ public class Set {
             if (Variable.isVariableString(token)) {
                 if (Variable.isVariableString(nextToken) || Number.validNumber(nextToken)) {
                     Function f = FunctionManager.lookUp(token);
-                    double pow = Variable.isVariableString(nextToken) ? Double.parseDouble(VariableManager.lookUp(nextToken).getValue()) : Double.parseDouble(nextToken);
+                    double pow = Variable.isVariableString(nextToken) ?  VariableManager.lookUp(nextToken).getValue() : Double.parseDouble(nextToken);
 
                     if (f != null) {
                         return Matrix.pow(f.getMatrix(), (int) pow);
@@ -1036,7 +1018,7 @@ public class Set {
 
         }
 
-              throw new InputMismatchException("Bad args for matrix powers");
+        throw new InputMismatchException("Bad args for matrix powers");
 
     }
 
@@ -1062,12 +1044,12 @@ public class Set {
             }
 
         }
-        
+
         throw new InputMismatchException("Bad args for matrix transpose");
- 
 
     }
-   /**
+
+    /**
      * The list must have been originally supplied: adjoint(A) {where A is a
      * Matrix} It finds the adjoint of A and returns the result as a list.
      *
@@ -1089,12 +1071,12 @@ public class Set {
             }
 
         }
-        
+
         throw new InputMismatchException("Bad args for matrix adjoint");
- 
 
     }
-      /**
+
+    /**
      * The list must have been originally supplied: adjoint(A) {where A is a
      * Matrix} It finds the adjoint of A and returns the result as a list.
      *
@@ -1116,12 +1098,12 @@ public class Set {
             }
 
         }
-        
+
         throw new InputMismatchException("Bad args for matrix cofactors");
- 
 
     }
-      /**
+
+    /**
      * The list must have been originally supplied: eigvec(A) {where A is a
      * Matrix} It finds the eigenvalues of A and returns the result as a list.
      *
@@ -1139,73 +1121,69 @@ public class Set {
                 if (f != null) {
                     return f.getMatrix().transpose();
                 }
-
             }
-
         }
-        
         throw new InputMismatchException("Bad args for matrix eigenValues");
- 
+    }
 
+    private static final void printImpl(String data) {
+        System.out.println("ParserNG> " + data);
     }
-    
-    private static final void printImpl(String data){
-        System.out.println("ParserNG> "+data);
-    }
-       /**
+
+    /**
      * The list must have been originally supplied: eigvec(A) {where A is a
      * Matrix} It finds the eigenvalues of A and returns the result as a list.
-     * 
+     *
      */
     public void print() {
 
         if (data.size() == 1) {
 
             String token = data.get(0);
-            System.out.println("printer->token: "+token);
+            System.out.println("printer->token: " + token);
 
             if (Variable.isVariableString(token)) {
                 Function f = FunctionManager.lookUp(token);
-                
+
                 if (f != null) {
-                    
-                    switch(f.getType()){
+
+                    switch (f.getType()) {
                         case ALGEBRAIC_EXPRESSION:
-                             printImpl(f.toString());
-                              break;
+                            printImpl(f.toString());
+                            break;
                         case MATRIX:
                             printImpl(f.getMatrix().toString());
-                              break;
+                            break;
                         case LIST:
                             printImpl(f.getMatrix().toString());
-                              break;
+                            break;
                         default:
                             printImpl(f.toString());
-                              break;
+                            break;
                     }
-          
-                }else{
+
+                } else {
                     Variable v = VariableManager.getVariable(token);
-                    if(v != null){
-                      printImpl(v.toString());  
+                    if (v != null) {
+                        printImpl(v.toString());
                     }
                 }
 
-            }else if(com.github.gbenroscience.parser.Number.isNumber(token)){
+            } else if (com.github.gbenroscience.parser.Number.isNumber(token)) {
                 printImpl(token);
             }
-       
 
             return;
         }
-        
+
         throw new InputMismatchException("Bad args for printing");
- 
 
     }
-      /**
+
+    /**
      * The list must have been originally supplied: eigPoly(A) {where A is a
-     * Matrix} It finds the characterisic polynomial whose solution yields the eigenvalues of A and returns the result as a list.
+     * Matrix} It finds the characterisic polynomial whose solution yields the
+     * eigenvalues of A and returns the result as a list.
      *
      * @return a {@link Matrix} containing the matrix transpose.
      */
@@ -1214,7 +1192,6 @@ public class Set {
         if (data.size() == 1) {
 
             String token = data.get(0);
- 
 
             if (Variable.isVariableString(token)) {
                 Function f = FunctionManager.lookUp(token);
@@ -1226,11 +1203,11 @@ public class Set {
             }
 
         }
-        
+
         throw new InputMismatchException("Bad args for matrix eigenVectors");
- 
 
     }
+
     /**
      * The list must have been originally supplied: transpose(A) {where A is a
      * Matrix} It transposes A and returns the result as a list.
@@ -1239,7 +1216,6 @@ public class Set {
      */
     public Matrix editMatrix() {
 
- 
         if (data.size() == 4) {
 
             String token = data.get(0);
@@ -1250,19 +1226,17 @@ public class Set {
                     Matrix m = f.getMatrix();
                     int row = Integer.parseInt(data.get(1));
                     int col = Integer.parseInt(data.get(2));
-                    
-                    
+
                     double val = Double.parseDouble(data.get(3));
                     boolean updated = m.update(val, row, col);
-                    if(!updated){
-                        throw new InputMismatchException("Trying to update outside matrix bounds. Matrix has: "+m.getRows()+" rows and "+m.getCols()+" columns\n But input was: row = "+row+" rows and columns = "+col);
+                    if (!updated) {
+                        throw new InputMismatchException("Trying to update outside matrix bounds. Matrix has: " + m.getRows() + " rows and " + m.getCols() + " columns\n But input was: row = " + row + " rows and columns = " + col);
                     }
                     return m;
                 }
             }
         }
-         throw new InputMismatchException("Bad args for matrix edit");
- 
+        throw new InputMismatchException("Bad args for matrix edit");
 
     }
 

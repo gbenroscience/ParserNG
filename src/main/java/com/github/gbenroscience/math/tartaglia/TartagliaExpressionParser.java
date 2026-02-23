@@ -22,11 +22,11 @@ import com.github.gbenroscience.math.differentialcalculus.Formula;
  */
 public class TartagliaExpressionParser {
     private String expression="";
-    private ArrayList<String>scanner=new ArrayList<String>();
+    private ArrayList<String>scanner=new ArrayList<>();
     private boolean valid=true;
-    private ArrayList<String>vars=new ArrayList<String>();
+    private ArrayList<String>vars=new ArrayList<>();
     //store that contains the coefficients of a,b,c as extracted by the parsing action.
-    private final ArrayList<Double>coefficients=new ArrayList<Double>();
+    private final ArrayList<Double>coefficients=new ArrayList<>();
     public TartagliaExpressionParser(String expression) {
         expression=purifier(expression);
 

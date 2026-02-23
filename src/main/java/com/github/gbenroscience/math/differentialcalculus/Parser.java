@@ -180,8 +180,8 @@ public class Parser {
                             l.clear();
                             l.add(args1);
                         } else if (Variable.isVariableString(list.get(i))) {
-                            String val = VariableManager.getVariable(list.get(i)).getValue();
-                            list.set(i, val);
+                            double val = VariableManager.getVariable(list.get(i)).getValue();
+                            list.set(i, String.valueOf(val));
                         }
 
                     }
@@ -254,8 +254,8 @@ public class Parser {
                             l.clear();
                             l.add(args1);
                         } else if (Variable.isVariableString(list.get(i))) {
-                            String val = VariableManager.getVariable(list.get(i)).getValue();
-                            list.set(i, val);
+                            double val = VariableManager.getVariable(list.get(i)).getValue();
+                            list.set(i, String.valueOf(val));
                         }
 
                     }

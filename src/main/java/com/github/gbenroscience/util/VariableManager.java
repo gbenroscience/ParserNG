@@ -139,7 +139,7 @@ public class VariableManager {
                 }
                 try {
                     String value = new MathExpression(cmd.substring(indexOfEqual + 1)).solve();
-                    Variable vv = new Variable(var, value, false);
+                    Variable vv = new Variable(var, Double.parseDouble(value), false);
                     VARIABLES.put(vv.getName(), vv);
                     update();
                     return vv;
@@ -580,14 +580,14 @@ public class VariableManager {
                                         try {
                                             boolean variable = isVariable(scan.get(i));
                                             if (variable) {
-                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), getValue(part2), false));
+                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), Double.parseDouble(getValue(part2)), false));
                                             }//end else if
                                             else if (!variable && !contains(scan.get(i))) {
                                                 boolean isFunction = FunctionManager.contains(scan.get(i));
                                                 if (isFunction) {
                                                     FunctionManager.delete(scan.get(i));
                                                 }
-                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), getValue(part2), false));
+                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), Double.parseDouble(getValue(part2)), false));
                                             }//end else if.
                                         }//end try
                                         catch (Exception e) {
@@ -612,7 +612,7 @@ public class VariableManager {
                                         boolean variable = isVariable(scan.get(0));
 
                                         if (variable) {
-                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), getValue(part2), false));
+                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), Double.parseDouble(getValue(part2)), false));
                                         }//end else if
                                         else if (!variable && !contains(scan.get(0))) {
                                             boolean isFunction = FunctionManager.contains(scan.get(0));
@@ -620,7 +620,7 @@ public class VariableManager {
                                                 FunctionManager.delete(scan.get(0));
                                             }
 
-                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), getValue(part2), false));
+                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), Double.parseDouble(getValue(part2)), false));
                                         }//end else if.
                                     }//end try
                                     catch (Exception e) {
