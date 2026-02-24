@@ -49,7 +49,7 @@ public class LogicalExpression implements Solvable {
         }
         if (new LogicalExpressionParser("", ExpressionLogger.DEV_NULL, logicalExpressionMemberFactory).isLogicalExpressionMember(originalExpression)) {
             return evalBrackets(originalExpression, mainLogger);
-        } else {
+        } else {System.out.println("FROM MAIN PARSER!!!!---originalExpression: "+originalExpression+", solve: "+new MathExpression(originalExpression).solve());
             return new MathExpression(originalExpression).solve();
         }
     }

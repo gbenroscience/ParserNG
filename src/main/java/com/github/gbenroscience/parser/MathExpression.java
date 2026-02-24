@@ -30,6 +30,9 @@ import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Operator.*;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.parser.benchmarks.Gemini;
+import com.github.gbenroscience.parser.benchmarks.Gemini2;
+import com.github.gbenroscience.parser.benchmarks.GrokMBP;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
 import java.util.Stack;
 
@@ -66,6 +69,7 @@ import java.util.Stack;
  */
 public class MathExpression implements Savable, Solvable {
 
+    
     public Parser_Result parser_Result = Parser_Result.VALID;
     //determines the mode in which trig operations will be carried out on numbers.if DRG==0,it is done in degrees
 //if DRG==1, it is done in radians and if it is 2, it is done in grads.
@@ -1625,13 +1629,14 @@ public class MathExpression implements Savable, Solvable {
         if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
             return Help.getHelp();
         }
+        System.out.println("scannER: "+scanner);
         compileToPostfix();  // Compile once if not already done
+        System.out.println("check postfix: "+Arrays.toString(cachedPostfix));
         return expressionSolver.evaluate(cachedPostfix).scalar + "";  // Just evaluate
     }//end method solve()
 
-    protected List<String> solve(List<String> list) {
-        expressionSolver.evaluate(list.toArray(new Token[0]));
-        return list;
+    protected List<String> solve(List<String> list) { 
+        return Arrays.asList(String.valueOf(new Gemini2().evaluate(list)));
     }
 
     // Your translate method (with small updates for Java 8)
@@ -1700,90 +1705,7 @@ public class MathExpression implements Savable, Solvable {
                 || opChar == 'Č' || opChar == 'Р';
     }
 
-    public final void compileToPostfix1() {
-        if (cachedPostfix != null) {
-            return; // Already compiled
-        }
-        Stack<Token> opStack = new Stack<>();
-        Token[] postfix = new Token[scanner.size() * 2]; // Safe upper bound
-        int p = 0;
-
-        int[] argCount = new int[64];   // Max nesting depth
-        int depth = 0;
-        argCount[0] = 0;
-
-        for (String s : scanner) {
-            Token t = translate(s);
-            if (t == null) {
-                continue;
-            }
-
-            switch (t.kind) {
-                case Token.NUMBER:
-                    postfix[p++] = t;
-                    argCount[depth]++;
-                    break;
-
-                case Token.FUNCTION:
-                case Token.METHOD:
-                    opStack.push(t);
-                    argCount[++depth] = 0;   // Start new argument count for this function
-                    break;
-
-                case Token.LPAREN:
-                    opStack.push(t);
-                    break;
-
-                case Token.RPAREN:
-                    // Pop all operators until matching '('
-                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                        Token op = opStack.pop();
-                        postfix[p++] = op;
-                    }
-                    if (!opStack.isEmpty()) {
-                        opStack.pop(); // discard '('
-                    }
-
-                    // If the thing just before this group was a FUNCTION or METHOD, it's now complete
-                    if (!opStack.isEmpty()
-                            && (opStack.peek().kind == Token.FUNCTION || opStack.peek().kind == Token.METHOD)) {
-                        Token callable = opStack.pop();
-                        callable.arity = argCount[depth];   // Number of arguments collected inside
-                        postfix[p++] = callable;
-                        depth--;                            // Return to outer scope
-                        argCount[depth]++;                  // One complete value for outer function
-                    }
-                    break;
-
-                case Token.OPERATOR:
-                    if (t.isPostfix) {
-                        postfix[p++] = t;                   // Postfix ops apply immediately
-                    } else {
-                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
-                            Token top = opStack.peek();
-                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
-                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
-                                postfix[p++] = opStack.pop();
-                            } else {
-                                break;
-                            }
-                        }
-                        opStack.push(t);
-                    }
-                    break;
-            }
-        }
-
-        // Flush remaining operators
-        while (!opStack.isEmpty()) {
-            postfix[p++] = opStack.pop();
-        }
-
-        // Trim and cache
-        cachedPostfix = new Token[p];
-        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
-    }
-
+  
     public final void compileToPostfix() {
         if (cachedPostfix != null) {
             return;   // already compiled
@@ -1903,7 +1825,7 @@ public class MathExpression implements Savable, Solvable {
 
                     case Token.METHOD:
                     case Token.FUNCTION:
-                        int arity = t.arity;
+                        int arity = t.arity;System.out.println("arity of "+t.name+" = "+t.arity);
                         EvalResult[] args = new EvalResult[arity];
                         for (int j = arity - 1; j >= 0; j--) {
                             args[j] = stack[ptr--];
@@ -1912,11 +1834,11 @@ public class MathExpression implements Savable, Solvable {
                         // 2. CRITICAL: Move pointer back BEFORE execution.
                         // This allows the method to use the argument slots for its result.
                         poolPointer -= arity;
-                       // System.out.println("--------------------------------Method Input: method-name=" + t.name + ", args=" + Arrays.toString(args));
+                        System.out.println("--------------------------------Method Input: method-name=" + t.name + ", type: "+ t.kind+", args=" + Arrays.toString(args));
                         EvalResult result = (t.kind == Token.METHOD)
                                 ? MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, arity, args)
                                 : FunctionManager.lookUp(t.name).calc(args);
-                       // System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>Method output " + result.toString());
+                        System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>Method output " + result.toString());
                         stack[++ptr] = result;
                         // 3. REMOVE the old release(arity) call here.
                         break;
@@ -2006,25 +1928,25 @@ return stack[0];
         // Helper to reset the object for reuse
         public EvalResult wrap(double s) {
             this.scalar = s;
-            this.type = 0;
+            this.type = TYPE_SCALAR;
             return this;
         }
 
         public EvalResult wrap(double[] v) {
             this.vector = v;
-            this.type = 1;
+            this.type = TYPE_VECTOR;
             return this;
         }
 
         public EvalResult wrap(Matrix m) {
             this.matrix = m;
-            this.type = 2;
+            this.type = TYPE_MATRICES;
             return this;
         }
 
         public EvalResult wrap(String s) {
             this.textRes = s;
-            this.type = 3;
+            this.type = TYPE_STRING;
             return this;
         }
 
@@ -3646,19 +3568,23 @@ return stack[0];
         System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
         String ls = linear.solve();
         System.out.println("ls = " + ls);
-        String s = "sum(sum(5),sin(5))";
-        System.out.println("--->" + new MathExpression(s).solve());
-        String s1 = "x=9;g(x)=((sin(x)-tan(x)));v(x)=((ln(x)/tan(x)));f(x)=g(x);sin(1.75)+cos(1.23)+tan(1.86-0.26)+log(10,3)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));v(3);";
+        String s = "listsum(listsum(5),sin(5))";
+        MathExpression ms = new MathExpression(s);
+        System.out.println("ms.scanner: "+ms.scanner);
+        System.out.println("s--->" + ms.solve());
+        String ss = "listsum(sin(5),sin(5))";
+        System.out.println("ss--->" + new MathExpression(ss).solve());
+        String s1 = "x=9;g(x)=((sin(x)-tan(x)));v(x)=((ln(x)/tan(x)));f(x)=g(x);sin(1.75)+cos(1.23)+tan(1.86-0.26)+log(10,3)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+listsum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));v(3);";
         String s2 = "v(x)=((ln(x)/tan(x)));2+v(3);";
         String s3 = "2+sin(3)-ln(12)+1/3.689";
         String s4 = "sin(2)+cos(3)-sum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
-        String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), 12, sum(3,4,8,9, 2000)), 12000, mode(3,2,2,1),32.897, mode(1,5,7,7,1,1,7))";
+        String s5 = "listsum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,listsum(3,4,5,6,9,12,23), 12, listsum(3,4,8,9, 2000)), 12000, mode(3,2,2,1),32.897, mode(1,5,7,7,1,1,7))";
 
         MathExpression m = new MathExpression(s5);
         System.out.println("scanner:\n" + m.scanner);
         System.out.println("m.solve(): " + m.solve());
         
-        System.out.println(new MathExpression("avg(1+13)").solve());
+        System.out.println(new MathExpression("avgN(0,4+0,2+0)").solve());
 
         //   double N = 100; 
         //   Shootouts.benchmark(s2, (int) N);

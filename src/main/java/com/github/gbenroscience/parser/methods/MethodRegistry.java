@@ -32,7 +32,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -94,7 +93,10 @@ public class MethodRegistry {
     }
 
     // --- Pre-register Built-ins ---
-    static {
+   static{
+     loadInBuiltMethods();
+   }
+    private static void loadInBuiltMethods(){
         registerMethod(Declarations.SIN, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
             result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.sinDegToRad(args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Math.sin(args[0].scalar) : Maths.sinGradToRad(args[0].scalar)));
@@ -299,13 +301,15 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(x);
         });
          */
-        registerMethod(Declarations.SUM, (ctx, name, arity, args) -> {
+        registerMethod(Declarations.LIST_SUM, (ctx, name, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
             double total = 0.0;
+               System.out.println("arg-type-in-registryp-call: "+args[0].type+", arg: "+args[0].toString());
             for (MathExpression.EvalResult arg : args) {
-                if (arg.type == 0) {                    // scalar
+                System.out.println("arg-type-in-registryp-call: "+arg.type+", arg: "+arg.toString());
+                if (arg.type == MathExpression.EvalResult.TYPE_SCALAR) {                    // scalar
                     total += arg.scalar;
-                } else if (arg.type == 1 && arg.vector != null) {   // list/vector from sort/mode
+                } else if (arg.type == MathExpression.EvalResult.TYPE_VECTOR && arg.vector != null) {   // list/vector from sort/mode
                     for (double v : arg.vector) {
                         total += v;
                     }
@@ -325,7 +329,8 @@ public class MethodRegistry {
             double n = args.length;
             return ctx.getNextResult().wrap(getAction(getMethodID(Declarations.SUM)).execute(ctx, funcName, arity, args).scalar / n);
         });
-        registerMethod(Declarations.AVG, (ctx, funcName, arity, args) -> getAction(getMethodID(Declarations.MEAN)).execute(ctx, funcName, arity, args));
+      //Registered under BasicNumeral
+      //registerMethod(Declarations.AVG, (ctx, funcName, arity, args) -> getAction(getMethodID(Declarations.MEAN)).execute(ctx, funcName, arity, args));
 
         registerMethod(Declarations.MEDIAN, (ctx, funcName, arity, args) -> {
             if (args == null || args.length == 0) {
@@ -893,8 +898,8 @@ public class MethodRegistry {
         });
 
         // Users can call MethodRegistry.registerMethod("custom", (ctx, funcName, arity, args) -> ...) at runtime!
+    
     }
-
     public static boolean isInBuiltMethod(String name) {
         return methodIds.containsKey(name);
     }

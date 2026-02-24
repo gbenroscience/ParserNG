@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.List;
 
 import com.github.gbenroscience.logic.DRG_MODE;
+import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.TYPE;
 import com.github.gbenroscience.parser.methods.ext.Avg;
 import com.github.gbenroscience.parser.methods.ext.Abs;
@@ -78,10 +79,11 @@ public class Declarations {
     public static final String FACT = "fact";
     public static final String COMBINATION = "comb";
     public static final String PERMUTATION = "perm";
+    public static final String LIST_SUM = "listsum";
     public static final String SUM = "sum";
     public static final String PROD = "prod";
     public static final String MEAN = "mean";
-    public static final String AVG = "avg";
+    public static final String AVG = "listavg";
     public static final String MEDIAN = "med";
     public static final String MODE = "mode";
     public static final String RANGE = "rng";
@@ -132,6 +134,20 @@ public class Declarations {
     public static void registerBasicNumericalMethod(BasicNumericalMethod basicNumericalMethod) {
         unregisterBasicNumericalMethod(basicNumericalMethod.getClass());
         BASIC_NUMERICAL_METHODS.add(basicNumericalMethod);
+        /**
+         * Add to the new method registry also
+         */
+        MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression ctx, String funcName, int arity, MathExpression.EvalResult[] args) -> {
+            List<String> tokens = new ArrayList<>();
+            for (MathExpression.EvalResult arg : args) {
+                if (arg.type == MathExpression.EvalResult.TYPE_STRING) {
+                    tokens.add(arg.textRes);
+                }
+            }
+            MathExpression.EvalResult result = ctx.getNextResult();
+            result.wrap(basicNumericalMethod.solve(tokens));
+            return result;
+        });
     }
 
     public static void unregisterBasicNumericalMethod(Class clazz) {
@@ -142,7 +158,22 @@ public class Declarations {
         }
     }
 
+    public static void registerBasicNumericalMethodInMethodRegistry(BasicNumericalMethod basicNumericalMethod) {
+        MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression ctx, String funcName, int arity, MathExpression.EvalResult[] args) -> {
+            List<String> tokens = new ArrayList<>();
+            for (MathExpression.EvalResult arg : args) {
+                if (arg.type == MathExpression.EvalResult.TYPE_STRING) {
+                    tokens.add(arg.textRes);
+                }
+            }
+            MathExpression.EvalResult result = ctx.getNextResult();
+            result.wrap(basicNumericalMethod.solve(tokens));
+            return result;
+        });
+    }
+
     static {
+
         registerBasicNumericalMethod(new Echo());
         registerBasicNumericalMethod(new Echo.EchoN());
         registerBasicNumericalMethod(new Echo.EchoNI());
@@ -425,7 +456,7 @@ public class Declarations {
      * @return all the statistical methods used by the parser.
      */
     static String[] getStatsMethods() {
-        return new String[]{PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT};
+        return new String[]{LIST_SUM, PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT};
 
     }
 

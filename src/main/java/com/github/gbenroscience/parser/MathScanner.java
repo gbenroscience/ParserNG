@@ -114,7 +114,7 @@ public class MathScanner {
         }//sort(5,3,2,1,-8,-9,12,34,98,-900,34,23,12,340)
 
         DataSetFormatter dsf = new DataSetFormatter(scannerInput);
-        this.scannerInput = scannerInput;//dsf.getFormattedDataSet();
+        this.scannerInput = scannerInput;// dsf.getFormattedDataSet();
 
     }
 
@@ -701,7 +701,6 @@ public class MathScanner {
                         break;
                     }
                 }
-
             }
         }
 
@@ -966,7 +965,7 @@ public class MathScanner {
             scanner.clear();
             return scanner;
         }
-
+      
         /*
          * The for loop above does not properly handle
          * negative exponents of 10, e.g -3E-10
@@ -988,7 +987,7 @@ public class MathScanner {
                 }//end catch
             }//end if
         }//end for
-
+ 
 //enable interpretation of things like 3^-4 or 3^+4 i.e ^- or ^+ patterns
         for (int i = 0; i < scanner.size(); i++) {
             try {
@@ -1009,9 +1008,9 @@ public class MathScanner {
 
             }
         }//end for
-
+ 
         validateTokens();
-
+        
         /**
          * Automatically initialize and store undeclared variables to 0 in the
          * first if block. To enforce variable declaration and initialization,
@@ -1052,7 +1051,7 @@ public class MathScanner {
                 }//end if
             }//end else
         }
-
+ 
         if (!runnable) {
             errorList.add("\n"
                     + "Sorry, Errors Were Found In Your Expression."
@@ -1062,8 +1061,9 @@ public class MathScanner {
             errorList.add("Scan SuccessFul.No Illegal Object Found.\n"
                     + "Putting Scanner On StandBy");
         }
-
+    
         plusAndMinusStringHandler();
+        
         return scanner;
     }
 
@@ -1497,8 +1497,8 @@ public class MathScanner {
      */
     public static void main(String args[]) {//tester method for STRING methods
 
-        String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3";
-        //String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
+        //String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3";
+        String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
         MathScanner sc = new MathScanner(s5);
         System.out.println(sc.scanner());
 

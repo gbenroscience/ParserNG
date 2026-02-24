@@ -233,13 +233,11 @@ public class Function implements Savable {
                 for (Variable var : independentVariables) {
                     mathExpression.setValue(var.getName(), x[i++].scalar);
                 }
-
                 res.wrap(Double.parseDouble(mathExpression.solve()));
             }
         } else if (type == TYPE.MATRIX) {
             return res.wrap(matrix);
         }
-
         return res;
     }
 
