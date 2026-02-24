@@ -87,7 +87,7 @@ public class NumericalDerivative {
         MathExpression polyDerivative = new MathExpression( expander.getPolynomialDerivative() );
 
         String  variable = function.getIndependentVariables().get(0).getName();
-        polyDerivative.setValue(variable, String.valueOf(xPoint) );
+        polyDerivative.setValue(variable,  xPoint);
         return polyDerivative.solve();
     }
 
@@ -101,10 +101,10 @@ public class NumericalDerivative {
      */
     public String findDerivativeByLimit(double dx){
         MathExpression func = function.getMathExpression();
-        func.setValue(function.getIndependentVariables().get(0).getName(), String.valueOf(xPoint+dx));
+        func.setValue(function.getIndependentVariables().get(0).getName(), xPoint+dx);
         String upper = func.solve();
 
-        func.setValue(function.getIndependentVariables().get(0).getName(), String.valueOf(xPoint-dx));
+        func.setValue(function.getIndependentVariables().get(0).getName(),  xPoint-dx);
         String lower = func.solve();
 
         double derived = ( Double.parseDouble(upper) -  Double.parseDouble(lower) )/(2.0*dx);

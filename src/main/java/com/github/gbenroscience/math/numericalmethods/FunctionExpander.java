@@ -196,9 +196,9 @@ public class FunctionExpander {
                     arr[rows][cols] = pow(xLower + rows * dx, cols);
                 }//end if
                 else if (cols == degree + 1) {
-                    fun.setValue(function.getIndependentVariables().get(0).getName(), String.valueOf((xLower + rows * dx)));
+                    fun.setValue(function.getIndependentVariables().get(0).getName(), (xLower + rows * dx));
                     try {
-                        arr[rows][cols] = Double.valueOf(fun.solve());
+                        arr[rows][cols] = Double.parseDouble(fun.solve());
                     }//end try
                     catch (NumberFormatException numException) {
 
@@ -226,7 +226,7 @@ public class FunctionExpander {
                     arr[rows][cols] = BigDecimal.valueOf(pow(xLower + rows * dx, cols));
                 }//end if
                 else if (cols == degree + 1) {
-                    fun.setValue(function.getIndependentVariables().get(0).getName(), String.valueOf((xLower + rows * dx)));
+                    fun.setValue(function.getIndependentVariables().get(0).getName(),  (xLower + rows * dx));
                     try {
                         arr[rows][cols] = new BigDecimal(fun.solve());
                     }//end try
@@ -511,7 +511,7 @@ public class FunctionExpander {
         String poly = expand.getPolynomial();
         System.out.println("polynomial function = " + poly + "\n\n\n");
         MathExpression me = new MathExpression(poly);
-        me.setValue("x", "0.9999");
+        me.setValue("x", 0.9999);
         System.out.println("evaluating polynomial function with normal parser = " + me.solve());
         expand.getFunction().getIndependentVariable("x").setValue("0.9999");
         System.out.println("evaluating function = " + expand.getFunction().eval());

@@ -40,7 +40,6 @@ public class LogicalExpression implements Solvable {
         String in = Main.joinArgs(Arrays.asList(args), true);
         verboseStderrLogger.log(in);
         System.out.println(new LogicalExpression(in, verboseStderrLogger).solve());
-
     }//end method
 
     @Override

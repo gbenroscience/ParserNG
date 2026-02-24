@@ -400,7 +400,7 @@ public class Method {
     
     
     
-        public static MathExpression.EvalResult exec(MathExpression ctx, String funcName, int methodId, int arity, double[]args, DRG_MODE DRG) {
+        public static MathExpression.EvalResult exec(MathExpression ctx, String funcName, int methodId, int arity, MathExpression.EvalResult[]args, DRG_MODE DRG) {
             return MethodRegistry.getAction(methodId).execute(ctx, funcName, arity, args);
         }
         

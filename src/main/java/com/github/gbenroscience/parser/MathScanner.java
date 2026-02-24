@@ -114,7 +114,7 @@ public class MathScanner {
         }//sort(5,3,2,1,-8,-9,12,34,98,-900,34,23,12,340)
 
         DataSetFormatter dsf = new DataSetFormatter(scannerInput);
-        this.scannerInput = dsf.getFormattedDataSet();
+        this.scannerInput = scannerInput;//dsf.getFormattedDataSet();
 
     }
 

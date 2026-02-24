@@ -31,6 +31,7 @@ import com.github.gbenroscience.util.FunctionManager;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -53,7 +54,7 @@ public class MethodRegistry {
          * @param args The args passed to the function
          * @return
          */
-        MathExpression.EvalResult execute(MathExpression ctx, String funcName, int arity, double[] args);
+        MathExpression.EvalResult execute(MathExpression ctx, String funcName, int arity, MathExpression.EvalResult[] args);
     }
 
     // 1. Map for compilation phase (String -> ID)
@@ -95,17 +96,17 @@ public class MethodRegistry {
     static {
         registerMethod(Declarations.SIN, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.sinDegToRad(args[0]) : (ctx.getDRG() == DRG_MODE.RAD ? Math.sin(args[0]) : Maths.sinGradToRad(args[0])));
+            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.sinDegToRad(args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Math.sin(args[0].scalar) : Maths.sinGradToRad(args[0].scalar)));
             return result;
         });
         registerMethod(Declarations.COS, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.cosDegToRad(args[0]) : (ctx.getDRG() == DRG_MODE.RAD ? Math.cos(args[0]) : Maths.cosGradToRad(args[0])));
+            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.cosDegToRad(args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Math.cos(args[0].scalar) : Maths.cosGradToRad(args[0].scalar)));
             return result;
         });
         registerMethod(Declarations.TAN, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.tanDegToRad(args[0]) : (ctx.getDRG() == DRG_MODE.RAD ? Math.tan(args[0]) : Maths.tanGradToRad(args[0])));
+            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.tanDegToRad(args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Math.tan(args[0].scalar) : Maths.tanGradToRad(args[0].scalar)));
             return result;
         });
         registerMethod(Declarations.SEC, (ctx, funcName, arity, args) -> {
@@ -126,7 +127,7 @@ public class MethodRegistry {
 
         registerMethod(Declarations.ARC_SIN, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.asinRadToDeg(args[0]) : (ctx.getDRG() == DRG_MODE.RAD ? Math.asin(args[0]) : Maths.asinRadToGrad(args[0])));
+            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.asinRadToDeg(args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Math.asin(args[0].scalar) : Maths.asinRadToGrad(args[0].scalar)));
             return result;
         });
         registerMethod(Declarations.ARC_SIN_ALT, (ctx, funcName, arity, args) -> {
@@ -136,7 +137,7 @@ public class MethodRegistry {
         });
         registerMethod(Declarations.ARC_COS, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.acosRadToDeg(args[0]) : (ctx.getDRG() == DRG_MODE.RAD ? Math.acos(args[0]) : Maths.acosRadToGrad(args[0])));
+            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.acosRadToDeg(args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Math.acos(args[0].scalar) : Maths.acosRadToGrad(args[0].scalar)));
             return result;
         });
         registerMethod(Declarations.ARC_COS_ALT, (ctx, funcName, arity, args) -> {
@@ -146,7 +147,7 @@ public class MethodRegistry {
         });
         registerMethod(Declarations.ARC_TAN, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.atanRadToDeg(args[0]) : (ctx.getDRG() == DRG_MODE.RAD ? Math.atan(args[0]) : Maths.atanRadToGrad(args[0])));
+            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.atanRadToDeg(args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Math.atan(args[0].scalar) : Maths.atanRadToGrad(args[0].scalar)));
             return result;
         });
         registerMethod(Declarations.ARC_TAN_ALT, (ctx, funcName, arity, args) -> {
@@ -157,7 +158,7 @@ public class MethodRegistry {
 
         registerMethod(Declarations.ARC_SEC, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.acosRadToDeg(1 / args[0]) : (ctx.getDRG() == DRG_MODE.RAD ? Maths.acos(1 / args[0]) : Maths.acosRadToGrad(1 / args[0])));
+            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.acosRadToDeg(1 / args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Maths.acos(1 / args[0].scalar) : Maths.acosRadToGrad(1 / args[0].scalar)));
             return result;
         });
         registerMethod(Declarations.ARC_SEC_ALT, (ctx, funcName, arity, args) -> {
@@ -167,7 +168,7 @@ public class MethodRegistry {
         });
         registerMethod(Declarations.ARC_COSEC, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.asinRadToDeg(1 / args[0]) : (ctx.getDRG() == DRG_MODE.RAD ? Maths.asin(1 / args[0]) : Maths.asinRadToGrad(1 / args[0])));
+            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.asinRadToDeg(1 / args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Maths.asin(1 / args[0].scalar) : Maths.asinRadToGrad(1 / args[0].scalar)));
             return result;
 
         });
@@ -178,7 +179,7 @@ public class MethodRegistry {
         });
         registerMethod(Declarations.ARC_COT, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.atanRadToDeg(1 / args[0]) : (ctx.getDRG() == DRG_MODE.RAD ? Maths.atan(1 / args[0]) : Maths.atanRadToGrad(1 / args[0])));
+            result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.atanRadToDeg(1 / args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Maths.atan(1 / args[0].scalar) : Maths.atanRadToGrad(1 / args[0].scalar)));
             return result;
         });
         registerMethod(Declarations.ARC_COT_ALT, (ctx, funcName, arity, args) -> {
@@ -187,59 +188,59 @@ public class MethodRegistry {
             return result;
         });
 
-        registerMethod(Declarations.SINH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.sinh(args[0])));
-        registerMethod(Declarations.COSH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.cosh(args[0])));
-        registerMethod(Declarations.TANH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.tanh(args[0])));
-        registerMethod(Declarations.SECH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(1.0 / Math.cosh(args[0])));
-        registerMethod(Declarations.COSECH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(1.0 / Math.sinh(args[0])));
-        registerMethod(Declarations.COTH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(1.0 / Math.tanh(args[0])));
+        registerMethod(Declarations.SINH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.sinh(args[0].scalar)));
+        registerMethod(Declarations.COSH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.cosh(args[0].scalar)));
+        registerMethod(Declarations.TANH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.tanh(args[0].scalar)));
+        registerMethod(Declarations.SECH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(1.0 / Math.cosh(args[0].scalar)));
+        registerMethod(Declarations.COSECH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(1.0 / Math.sinh(args[0].scalar)));
+        registerMethod(Declarations.COTH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(1.0 / Math.tanh(args[0].scalar)));
 
-        registerMethod(Declarations.ARC_SINH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.asinh(args[0])));
-        registerMethod(Declarations.ARC_SINH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.asinh(args[0])));
-        registerMethod(Declarations.ARC_COSH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acosh(args[0])));
-        registerMethod(Declarations.ARC_COSH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acosh(args[0])));
-        registerMethod(Declarations.ARC_TANH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.atanh(args[0])));
-        registerMethod(Declarations.ARC_TANH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.atanh(args[0])));
+        registerMethod(Declarations.ARC_SINH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.asinh(args[0].scalar)));
+        registerMethod(Declarations.ARC_SINH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.asinh(args[0].scalar)));
+        registerMethod(Declarations.ARC_COSH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acosh(args[0].scalar)));
+        registerMethod(Declarations.ARC_COSH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acosh(args[0].scalar)));
+        registerMethod(Declarations.ARC_TANH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.atanh(args[0].scalar)));
+        registerMethod(Declarations.ARC_TANH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.atanh(args[0].scalar)));
 
-        registerMethod(Declarations.ARC_SECH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.asech(args[0])));
-        registerMethod(Declarations.ARC_SECH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.asech(args[0])));
-        registerMethod(Declarations.ARC_COSECH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acsch(args[0])));
-        registerMethod(Declarations.ARC_COSECH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acsch(args[0])));
-        registerMethod(Declarations.ARC_COTH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acoth(args[0])));
-        registerMethod(Declarations.ARC_COTH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acoth(args[0])));
+        registerMethod(Declarations.ARC_SECH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.asech(args[0].scalar)));
+        registerMethod(Declarations.ARC_SECH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.asech(args[0].scalar)));
+        registerMethod(Declarations.ARC_COSECH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acsch(args[0].scalar)));
+        registerMethod(Declarations.ARC_COSECH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acsch(args[0].scalar)));
+        registerMethod(Declarations.ARC_COTH, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acoth(args[0].scalar)));
+        registerMethod(Declarations.ARC_COTH_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.acoth(args[0].scalar)));
 
         registerMethod(Declarations.CUBE, (ctx, funcName, arity, args) -> {
-            double x = args[0];
+            double x = args[0].scalar;
             MathExpression.EvalResult result = ctx.getNextResult();
             result.wrap(x * x * x);
             return result;
         });
         registerMethod(Declarations.SQUARE, (ctx, funcName, arity, args) -> {
-            double x = args[0];
+            double x = args[0].scalar;
             MathExpression.EvalResult result = ctx.getNextResult();
             result.wrap(x * x);
             return result;
         });
-        registerMethod(Declarations.CBRT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.cbrt(args[0])));
-        registerMethod(Declarations.SQRT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.sqrt(args[0])));
-        registerMethod(Declarations.POW, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.pow(args[0], args[1])));
-        registerMethod(Declarations.EXP, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.exp(args[0])));
+        registerMethod(Declarations.CBRT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.cbrt(args[0].scalar)));
+        registerMethod(Declarations.SQRT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.sqrt(args[0].scalar)));
+        registerMethod(Declarations.POW, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.pow(args[0].scalar, args[1].scalar)));
+        registerMethod(Declarations.EXP, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.exp(args[0].scalar)));
 
-        registerMethod(Declarations.LG, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.log10(args[0])));
-        registerMethod(Declarations.LG_INV, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.pow(10, args[0])));
-        registerMethod(Declarations.LG_INV_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.pow(10, args[0])));
-        registerMethod(Declarations.LOG, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.logToAnyBase(args[0], args[1])));
-        registerMethod(Declarations.LOG_INV, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.antiLogToAnyBase(args[0], args[1])));
-        registerMethod(Declarations.LOG_INV_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.antiLogToAnyBase(args[0], args[1])));
+        registerMethod(Declarations.LG, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.log10(args[0].scalar)));
+        registerMethod(Declarations.LG_INV, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.pow(10, args[0].scalar)));
+        registerMethod(Declarations.LG_INV_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.pow(10, args[0].scalar)));
+        registerMethod(Declarations.LOG, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.logToAnyBase(args[0].scalar, args[1].scalar)));
+        registerMethod(Declarations.LOG_INV, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.antiLogToAnyBase(args[0].scalar, args[1].scalar)));
+        registerMethod(Declarations.LOG_INV_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.antiLogToAnyBase(args[0].scalar, args[1].scalar)));
 
-        registerMethod(Declarations.LN, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.log(args[0])));
-        registerMethod(Declarations.LN_INV, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.exp(args[0])));
-        registerMethod(Declarations.LN_INV_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.exp(args[0])));
-        registerMethod(Declarations.INVERSE, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(1.0 / args[0]));
+        registerMethod(Declarations.LN, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.log(args[0].scalar)));
+        registerMethod(Declarations.LN_INV, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.exp(args[0].scalar)));
+        registerMethod(Declarations.LN_INV_ALT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Math.exp(args[0].scalar)));
+        registerMethod(Declarations.INVERSE, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(1.0 / args[0].scalar));
 
-        registerMethod(Declarations.FACT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.fact(args[0])));
-        registerMethod(Declarations.COMBINATION, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.combination(args[0], args[1])));
-        registerMethod(Declarations.PERMUTATION, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.permutation(args[0], args[1])));
+        registerMethod(Declarations.FACT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.fact(args[0].scalar)));
+        registerMethod(Declarations.COMBINATION, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.combination(args[0].scalar, args[1].scalar)));
+        registerMethod(Declarations.PERMUTATION, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.permutation(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.DIFFERENTIATION, (ctx, funcName, arity, args) -> {
             int sz = args.length;
             switch (sz) {
@@ -249,15 +250,15 @@ public class MethodRegistry {
                 }
                 case 2: {
                     String anonFunc = funcName;
-                    double value = args[0];
+                    double value = args[0].scalar;
 
                     String solution = Derivative.eval("diff(" + anonFunc + "," + value + ")");
                     return ctx.getNextResult().wrap(com.github.gbenroscience.parser.Number.isNumber(solution) ? Double.parseDouble(solution) : Double.NaN);
                 }
                 case 3: {
                     String anonFunc = funcName;
-                    double value = args[1];
-                    int order = (int) args[2];
+                    double value = args[1].scalar;
+                    int order = (int) args[2].scalar;
                     /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.parseDouble(data.get(1)));
                 return der.findDerivativeByPolynomialExpander();
                      */
@@ -272,11 +273,11 @@ public class MethodRegistry {
             boolean has2NumberArguments = args.length == 2;
             boolean has3NumberArguments = args.length == 3;
             if (has2NumberArguments) {
-                NumericalIntegral intg = new NumericalIntegral(args[0], args[1], 0, funcName);
+                NumericalIntegral intg = new NumericalIntegral(args[0].scalar, args[1].scalar, 0, funcName);
                 return ctx.getNextResult().wrap(intg.findHighRangeIntegral());
             }//end if
             else if (has3NumberArguments) {
-                NumericalIntegral intg = new NumericalIntegral(args[0], args[1], (int) args[2], funcName);
+                NumericalIntegral intg = new NumericalIntegral(args[0].scalar, args[1].scalar, (int) args[2].scalar, funcName);
                 return ctx.getNextResult().wrap(intg.findHighRangeIntegral());
             }//end else if
             return ctx.getNextResult().wrap(Double.NaN);
@@ -284,22 +285,22 @@ public class MethodRegistry {
         registerMethod(Declarations.PLOT, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(-1));
 
         registerMethod(Declarations.PRINT, (ctx, funcName, arity, args) -> {
-            for (double arg : args) {
+            for (MathExpression.EvalResult arg : args) {
                 System.out.println(arg);
             }
             return ctx.getNextResult().wrap(-1);
         });
         registerMethod(Declarations.SUM, (ctx, funcName, arity, args) -> {
             double x = 0;
-            for (double i : args) {
-                x += i;
+            for (MathExpression.EvalResult i : args) {
+                x += i.scalar;
             }
             return ctx.getNextResult().wrap(x);
         });
         registerMethod(Declarations.PROD, (ctx, funcName, arity, args) -> {
             double x = 1;
-            for (double i : args) {
-                x *= i;
+            for (MathExpression.EvalResult i : args) {
+                x *= i.scalar;
             }
             return ctx.getNextResult().wrap(x);
         });
@@ -336,8 +337,14 @@ public class MethodRegistry {
 
             // 1. Sort to group identical values (O(n log n))
             // We work on a copy to avoid side effects if 'args' is shared
-            double[] data = args.clone();
-            java.util.Arrays.sort(data);
+            MathExpression.EvalResult[] data = args.clone();
+            java.util.Arrays.sort(data, (MathExpression.EvalResult o1, MathExpression.EvalResult o2) -> {
+                // Assuming primary sorting by scalar (type 0) - adjust if needed for other types
+                // If non-scalar, treat as equal or handle specifically (e.g., compare lengths for vectors)
+                double v1 = (o1.type == 0) ? o1.scalar : 0.0;
+                double v2 = (o2.type == 0) ? o2.scalar : 0.0;
+                return Double.compare(v1, v2);  // Ascending order
+            });
 
             int n = data.length;
             int maxFrequency = 0;
@@ -379,7 +386,7 @@ public class MethodRegistry {
                     currentFrequency++;
                 } else {
                     if (currentFrequency == maxFrequency) {
-                        modes[modeIdx++] = data[i - 1];
+                        modes[modeIdx++] = data[i - 1].scalar;
                     }
                     currentFrequency = 1;
                 }
@@ -399,12 +406,12 @@ public class MethodRegistry {
                 return res;
             }
 
-            double min = args[0];
-            double max = args[0];
+            double min = args[0].scalar;
+            double max = args[0].scalar;
 
             // Single pass O(n) - The fastest possible way to find range
             for (int i = 1; i < args.length; i++) {
-                double val = args[i];
+                double val = args[i].scalar;
                 if (val < min) {
                     min = val;
                 } else if (val > max) {
@@ -428,12 +435,12 @@ public class MethodRegistry {
                 return res;
             }
 
-            double min = args[0];
-            double max = args[0];
+            double min = args[0].scalar;
+            double max = args[0].scalar;
 
             // Single pass O(n) scan to find extrema
             for (int i = 1; i < args.length; i++) {
-                double val = args[i];
+                double val = args[i].scalar;
                 if (val < min) {
                     min = val;
                 } else if (val > max) {
@@ -460,7 +467,7 @@ public class MethodRegistry {
                 result = rng.nextDouble();
             } else {
                 // Case: random(n) -> [0.0, n)
-                result = rng.nextDouble() * args[0];
+                result = rng.nextDouble() * args[0].scalar;
             }
 
             // Wrap as a scalar and return from the pool
@@ -481,7 +488,7 @@ public class MethodRegistry {
 
             // Welford's Algorithm: Single pass, numerically stable
             for (int i = 0; i < n; i++) {
-                double x = args[i];
+                double x = args[i].scalar;
                 double oldMean = mean;
                 mean += (x - oldMean) / (i + 1);
                 s += (x - oldMean) * (x - mean);
@@ -510,7 +517,7 @@ public class MethodRegistry {
 
             // Welford's Algorithm for numerical stability
             for (int i = 0; i < n; i++) {
-                double x = args[i];
+                double x = args[i].scalar;
                 double oldMean = mean;
                 mean += (x - oldMean) / (i + 1);
                 s += (x - oldMean) * (x - mean);
@@ -541,7 +548,7 @@ public class MethodRegistry {
             // Welford's Algorithm: Single pass, numerically stable
             // Accumulates the sum of squares of differences from the mean
             for (int i = 0; i < n; i++) {
-                double x = args[i];
+                double x = args[i].scalar;
                 double oldMean = mean;
                 mean += (x - oldMean) / (i + 1);
                 s += (x - oldMean) * (x - mean);
@@ -566,14 +573,24 @@ public class MethodRegistry {
 
             // 2. Clone the array to ensure the original dataset (args) remains 
             // unchanged for other parts of the expression evaluation.
-            double[] sortedData = args.clone();
+            MathExpression.EvalResult[] sortedData = args.clone();
 
-            // 3. Perform the high-speed Dual-Pivot Quicksort
-            java.util.Arrays.sort(sortedData);
+            // 3. Perform the high-speed Dual-Pivot Quicksort 
+            java.util.Arrays.sort(sortedData, (MathExpression.EvalResult o1, MathExpression.EvalResult o2) -> {
+                // Assuming primary sorting by scalar (type 0) - adjust if needed for other types
+                // If non-scalar, treat as equal or handle specifically (e.g., compare lengths for vectors)
+                double v1 = (o1.type == 0) ? o1.scalar : 0.0;
+                double v2 = (o2.type == 0) ? o2.scalar : 0.0;
+                return Double.compare(v1, v2);  // Ascending order
+            });
+            double[]out=new double[sortedData.length];
+            for(int i=0;i<out.length;i++){
+                out[i] = sortedData[i].scalar;
+            }
 
             // 4. Wrap the result as a Vector (type 1) and return from the pool
             MathExpression.EvalResult res = ctx.getNextResult();
-            res.wrap(sortedData);
+            res.wrap(out);
             return res;
         });
 
@@ -584,11 +601,11 @@ public class MethodRegistry {
                 return res;
             }
 
-            double min = args[0];
+            double min = args[0].scalar;
             // Start loop from 1 since index 0 is already the initial min
             for (int i = 1; i < args.length; i++) {
-                if (args[i] < min) {
-                    min = args[i];
+                if (args[i].scalar < min) {
+                    min = args[i].scalar;
                 }
             }
 
@@ -604,10 +621,10 @@ public class MethodRegistry {
                 return res;
             }
 
-            double max = args[0];
+            double max = args[0].scalar;
             for (int i = 1; i < args.length; i++) {
-                if (args[i] > max) {
-                    max = args[i];
+                if (args[i].scalar > max) {
+                    max = args[i].scalar;
                 }
             }
 
@@ -627,8 +644,8 @@ public class MethodRegistry {
             int n = args.length;
 
             // Standard O(n) pass
-            for (double val : args) {
-                sumSquares += val * val;
+            for (MathExpression.EvalResult val : args) {
+                sumSquares += val.scalar * val.scalar;
             }
 
             double rms = Math.sqrt(sumSquares / n);
@@ -650,7 +667,7 @@ public class MethodRegistry {
 
             // Welford's Algorithm for stability
             for (int i = 0; i < n; i++) {
-                double x = args[i];
+                double x = args[i].scalar;
                 double oldMean = mean;
                 mean += (x - oldMean) / (i + 1);
                 s += (x - oldMean) * (x - mean);
@@ -672,14 +689,14 @@ public class MethodRegistry {
         });
 
         registerMethod(Declarations.GENERAL_ROOT, (ctx, funcName, arity, args) -> {
-            RootFinder rf = new RootFinder(FunctionManager.lookUp(funcName), args[0]);
+            RootFinder rf = new RootFinder(FunctionManager.lookUp(funcName), args[0].scalar);
             String root = rf.findRoots();
             MathExpression.EvalResult res = ctx.getNextResult();
             res.wrap(com.github.gbenroscience.parser.Number.isNumber(root) ? Double.parseDouble(root) : Double.NaN);
             return res;
         });
         registerMethod(Declarations.QUADRATIC, (ctx, funcName, arity, args) -> {
-            QuadraticSolver qs = new QuadraticSolver(args[0], args[1], args[2]);
+            QuadraticSolver qs = new QuadraticSolver(args[0].scalar, args[1].scalar, args[2].scalar);
             MathExpression.EvalResult res = ctx.getNextResult();
             if (qs.isComplex()) {
                 // Return a vector [real1, imag1, real2, imag2]
@@ -811,9 +828,9 @@ public class MethodRegistry {
         registerMethod(Declarations.MATRIX_EDIT, (ctx, funcName, arity, args) -> {
             Function f = FunctionManager.lookUp(funcName);
             Matrix m = f.getMatrix();
-            int row = (int) args[0];
-            int col = (int) args[1];
-            double val = args[2];
+            int row = (int) args[0].scalar;
+            int col = (int) args[1].scalar;
+            double val = args[2].scalar;
             boolean updated = m.update(val, row, col);
             return ctx.getNextResult().wrap(m);
         });
@@ -857,7 +874,7 @@ public class MethodRegistry {
         registerMethod(Declarations.MATRIX_POWER, (ctx, funcName, arity, args) -> {
             Function f = FunctionManager.lookUp(funcName);
             Matrix mA = f.getMatrix();
-            return ctx.getNextResult().wrap(Matrix.pow(mA, (int) args[0]));
+            return ctx.getNextResult().wrap(Matrix.pow(mA, (int) args[0].scalar));
 
         });
         registerMethod(Declarations.MATRIX_SUBTRACT, (ctx, funcName, arity, args) -> {
@@ -898,11 +915,11 @@ public class MethodRegistry {
         return methodIds.containsKey(name);
     }
 
-    private static double quickSelect(double[] arr, int left, int right, int k) {
+    private static double quickSelect(MathExpression.EvalResult[] arr, int left, int right, int k) {
         while (left < right) {
             if (right - left < 10) { // Optimization: Use Insertion Sort for tiny ranges
                 insertionSort(arr, left, right);
-                return arr[k];
+                return arr[k].scalar;
             }
             int pivotIndex = partition(arr, left, right);
             if (k <= pivotIndex) {
@@ -911,38 +928,38 @@ public class MethodRegistry {
                 left = pivotIndex + 1;
             }
         }
-        return arr[left];
+        return arr[left].scalar;
     }
 
-    private static int partition(double[] arr, int left, int right) {
-        double pivot = arr[left + (right - left) / 2];
+    private static int partition(MathExpression.EvalResult[] arr, int left, int right) {
+        double pivot = arr[left + (right - left) / 2].scalar;
         int i = left - 1;
         int j = right + 1;
         while (true) {
             do {
                 i++;
-            } while (arr[i] < pivot);
+            } while (arr[i].scalar < pivot);
             do {
                 j--;
-            } while (arr[j] > pivot);
+            } while (arr[j].scalar > pivot);
             if (i >= j) {
                 return j;
             }
-            double temp = arr[i];
-            arr[i] = arr[j];
-            arr[j] = temp;
+            double temp = arr[i].scalar;
+            arr[i].scalar = arr[j].scalar;
+            arr[j].scalar = temp;
         }
     }
 
-    private static void insertionSort(double[] arr, int left, int right) {
+    private static void insertionSort(MathExpression.EvalResult[] arr, int left, int right) {
         for (int i = left + 1; i <= right; i++) {
-            double val = arr[i];
+            double val = arr[i].scalar;
             int j = i - 1;
-            while (j >= left && arr[j] > val) {
+            while (j >= left && arr[j].scalar > val) {
                 arr[j + 1] = arr[j];
                 j--;
             }
-            arr[j + 1] = val;
+            arr[j + 1].scalar = val;
         }
     }
 }

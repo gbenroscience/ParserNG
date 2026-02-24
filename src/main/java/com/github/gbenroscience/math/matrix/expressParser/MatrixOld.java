@@ -1858,6 +1858,14 @@ public class MatrixOld {
      * @param args The command line args
      */
     public static void main(String... args) {
+        
+        double[][]d = {
+            {3,4,1},
+            {2,4,7},
+            {9,1,-2}
+        };
+        MatrixOld md = new MatrixOld(d);
+        md.reduceToTriangularMatrixOld().print();
 
         String expanded = uniVariableExpressionExpander("x", "2-x", "-8-7*x+x^2");
         System.out.println("expanded: " + expanded);

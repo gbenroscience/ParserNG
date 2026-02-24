@@ -210,7 +210,7 @@ public class Function implements Savable {
         int i = 0;
         if (x.length == independentVariables.size()) {
             for (Variable var : independentVariables) {
-                mathExpression.setValue(var.getName(), String.valueOf(x[i++]));
+                mathExpression.setValue(var.getName(), x[i++]);
             }
 
             return Double.parseDouble(mathExpression.solve());
@@ -218,8 +218,33 @@ public class Function implements Savable {
         return Double.NaN;
     }
 
+    /**
+     *
+     * @param x A list of variable values to set for the function. The supplied
+     * value list is applied to the function's parameter list in the order they
+     * were supplied in the original question.
+     * @return the value of the function with these variables set.
+     */
+    public MathExpression.EvalResult calc(MathExpression.EvalResult... x) {
+        MathExpression.EvalResult res = new MathExpression.EvalResult();
+        if (type == TYPE.ALGEBRAIC_EXPRESSION) {
+            int i = 0;
+            if (x.length == independentVariables.size()) {
+                for (Variable var : independentVariables) {
+                    mathExpression.setValue(var.getName(), x[i++].scalar);
+                }
+
+                res.wrap(Double.parseDouble(mathExpression.solve()));
+            }
+        } else if (type == TYPE.MATRIX) {
+            return res.wrap(matrix);
+        }
+
+        return res;
+    }
+
     public static boolean assignObject(String input) {
-        
+
         /**
          * Check if it is a function assignment operation...e.g:
          * f=matrix_mul(A,B)
@@ -270,18 +295,18 @@ public class Function implements Savable {
             } else {
 
                 MathExpression expr = new MathExpression(rhs);
-                List<String> scanner = expr.getScanner(); 
+                List<String> scanner = expr.getScanner();
                 if (scanner.size() == 3 && scanner.get(1).startsWith("anon")) {//function assigments will always be like this: [(,anon1,)] when they get here
                     Function f = FunctionManager.lookUp(scanner.get(1));
 
                     if (f != null) {
-                
+
                         FunctionManager.delete(scanner.get(1));
                         if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
                             f.setDependentVariable(new Variable(newFuncName));
                             FunctionManager.add(f);
                         } else if (f.getType() == TYPE.MATRIX) {
-                             f.getMatrix().setName(newFuncName);
+                            f.getMatrix().setName(newFuncName);
                             FunctionManager.add(f);
                         }
                     } else {
@@ -292,7 +317,7 @@ public class Function implements Savable {
                     return true;
                 }
                 String val = expr.solve();
-                String referenceName = expr.getReturnObjectName(); 
+                String referenceName = expr.getReturnObjectName();
 
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
                     Function f;
@@ -431,8 +456,6 @@ public class Function implements Savable {
         }//end else
 
     }//end method
-    
-
 
     public void setDependentVariable(Variable dependentVariable) {
         this.dependentVariable = dependentVariable;
@@ -474,10 +497,10 @@ public class Function implements Savable {
         return independentVariables.size();
     }
 
-        
-    public int getArity(){
+    public int getArity() {
         return this.independentVariables.size();
     }
+
     /**
      *
      * @param list A string containing info. about the arguments to be passed to
@@ -767,10 +790,9 @@ public class Function implements Savable {
             int i = 0;
             int len = sz + 1;
             for (double x = x1; i < len && x <= x2; x += xStep, i++) {
-                String xStr = String.valueOf(x);
-                mathExpression.setValue(variableName, xStr);
+                mathExpression.setValue(variableName, x);
                 results[0][i] = mathExpression.solve();
-                results[1][i] = xStr;
+                results[1][i] = String.valueOf(x);
             }//end for
             return results;
         }//end if
@@ -807,7 +829,7 @@ public class Function implements Savable {
         int len = sz + 1;
         int i = 0;
         for (double x = xLower; i < len && x <= xUpper; x += xStep, i++) {
-            mathExpression.setValue(variableName, String.valueOf(x));
+            mathExpression.setValue(variableName, x);
             results[0][i] = Double.parseDouble(mathExpression.solve());
             results[1][i] = x;
         }//end for
@@ -818,7 +840,8 @@ public class Function implements Savable {
 
     /**
      * Prints the content of a 2D array
-     * @param obj 
+     *
+     * @param obj
      */
     public static void print2DArray(Object[][] obj) {
         int rows = obj.length;

@@ -304,16 +304,16 @@ class MathExpressionTest {
 
         MathExpression expression = new MathExpression("x=0;sin(ln(x))");
 
-        expression.setValue("x", 0 + "");
+        expression.setValue("x", 0);
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals("A SYNTAX ERROR OCCURRED", expression.solve());
-        expression.setValue("x", 1 + "");
+        expression.setValue("x", 1 );
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals("0.0", expression.solve());
-        expression.setValue("x", 50 + "");
+        expression.setValue("x", 50);
         if (print) System.out.println(expression.solve());
         Assertions.assertTrue("-0.6964441283311967".equals(expression.solve()) || "-0.6964441283311968".equals(expression.solve()));
-        expression.setValue("x", 100 + "");
+        expression.setValue("x", 100 );
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals("-0.9942575694137897", expression.solve());
 
