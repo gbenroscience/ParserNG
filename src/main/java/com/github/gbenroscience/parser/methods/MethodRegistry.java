@@ -31,6 +31,7 @@ import com.github.gbenroscience.util.FunctionManager;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
@@ -345,75 +346,42 @@ public class MethodRegistry {
             }
         });
         registerMethod(Declarations.MODE, (ctx, funcName, arity, args) -> {
-            if (args == null || args.length == 0) {
-                MathExpression.EvalResult res = ctx.getNextResult();
-                res.wrap(new double[0]);
-                return res;
+            if (arity == 0) {
+                return ctx.getNextResult().wrap(new double[0]);
             }
 
-            // 1. Sort to group identical values (O(n log n))
-            // We work on a copy to avoid side effects if 'args' is shared
-            MathExpression.EvalResult[] data = args.clone();
-            java.util.Arrays.sort(data, (MathExpression.EvalResult o1, MathExpression.EvalResult o2) -> {
-                // Assuming primary sorting by scalar (type 0) - adjust if needed for other types
-                // If non-scalar, treat as equal or handle specifically (e.g., compare lengths for vectors)
-                double v1 = (o1.type == 0) ? o1.scalar : 0.0;
-                double v2 = (o2.type == 0) ? o2.scalar : 0.0;
-                return Double.compare(v1, v2);  // Ascending order
-            });
+            double[] vals = new double[arity];
+            for (int i = 0; i < arity; i++) {
+                vals[i] = args[i].scalar;
+            }
+            Arrays.sort(vals);
 
-            int n = data.length;
-            int maxFrequency = 0;
-            int currentFrequency = 1;
-
-            // First pass: Find the maximum frequency
-            for (int i = 1; i <= n; i++) {
-                if (i < n && data[i] == data[i - 1]) {
-                    currentFrequency++;
-                } else {
-                    if (currentFrequency > maxFrequency) {
-                        maxFrequency = currentFrequency;
-                    }
-                    currentFrequency = 1;
+            // Find the highest frequency
+            int maxFreq = 0, currFreq = 0;
+            for (int i = 0; i < vals.length; i++) {
+                currFreq = (i > 0 && vals[i] == vals[i - 1]) ? currFreq + 1 : 1;
+                if (currFreq > maxFreq) {
+                    maxFreq = currFreq;
                 }
             }
 
-            // Second pass: Identify how many values hit that maxFrequency
-            // (Used to size the result array perfectly)
-            int modeCount = 0;
-            currentFrequency = 1;
-            for (int i = 1; i <= n; i++) {
-                if (i < n && data[i] == data[i - 1]) {
-                    currentFrequency++;
-                } else {
-                    if (currentFrequency == maxFrequency) {
-                        modeCount++;
-                    }
-                    currentFrequency = 1;
+            // Collect all values matching that frequency (supports multimodal)
+            java.util.List<Double> modes = new java.util.ArrayList<>();
+            currFreq = 0;
+            for (int i = 0; i < vals.length; i++) {
+                currFreq = (i > 0 && vals[i] == vals[i - 1]) ? currFreq + 1 : 1;
+                if (currFreq == maxFreq) {
+                    modes.add(vals[i]);
                 }
             }
 
-            // 3. Extract the modes into the result array
-            double[] modes = new double[modeCount];
-            int modeIdx = 0;
-            currentFrequency = 1;
-            for (int i = 1; i <= n; i++) {
-                if (i < n && data[i] == data[i - 1]) {
-                    currentFrequency++;
-                } else {
-                    if (currentFrequency == maxFrequency) {
-                        modes[modeIdx++] = data[i - 1].scalar;
-                    }
-                    currentFrequency = 1;
-                }
+            double[] result = new double[modes.size()];
+            for (int i = 0; i < modes.size(); i++) {
+                result[i] = modes.get(i);
             }
 
-            // 4. Wrap and return from the pool
-            MathExpression.EvalResult res = ctx.getNextResult();
-            res.wrap(modes); // Wrapped as a Vector (type 1)
-            return res;
+            return ctx.getNextResult().wrap(result);
         });
-
         registerMethod(Declarations.RANGE, (ctx, funcName, arity, args) -> {
             // Handle empty or null datasets
             if (args == null || args.length == 0) {
