@@ -69,7 +69,6 @@ import java.util.Stack;
  */
 public class MathExpression implements Savable, Solvable {
 
-    
     public Parser_Result parser_Result = Parser_Result.VALID;
     //determines the mode in which trig operations will be carried out on numbers.if DRG==0,it is done in degrees
 //if DRG==1, it is done in radians and if it is 2, it is done in grads.
@@ -84,7 +83,7 @@ public class MathExpression implements Savable, Solvable {
     protected int noOfListReturningOperators;
     protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scanner input function
     private boolean optimizable;
-    private Bracket[] bracket;
+
     protected boolean hasListReturningOperators;
     private boolean hasNumberReturningStatsOperators;
     private boolean hasPlusOrMinusOperators;
@@ -377,10 +376,9 @@ public class MathExpression implements Savable, Solvable {
 
         parser_Result = opScanner.parser_Result;
         if (parser_Result == Parser_Result.VALID) {
-            bracket = null;
-            //System.out.println("scanner before cdm: " + scanner);
+
+            statsVerifier();
             codeModifier();
-            //System.out.println("scanner after cdm: " + scanner);
 
             removeCommas();
 
@@ -430,24 +428,6 @@ public class MathExpression implements Savable, Solvable {
             default:
                 break;
         }
-    }
-
-    /**
-     *
-     * @return the Brackets ArrayList containing all Bracket objects found in
-     * the input.
-     */
-    public Bracket[] getBracket() {
-        return bracket;
-    }
-
-    /**
-     *
-     * @param bracket the Brackets ArrayList containing all Bracket objects
-     * found in the input.
-     */
-    public void setBracket(Bracket[] bracket) {
-        this.bracket = bracket;
     }
 
     /**
@@ -780,56 +760,6 @@ public class MathExpression implements Savable, Solvable {
 
     }
 
-    /**
-     * Removes encapsulating brackets from data set returning statistical
-     * operators. For example, (((sort(3,sin(4),5,-1))) does not need the two
-     * enclosing bracket pairs so turn it into... sort(3,sin(4),5,-1).
-     *
-     *
-     */
-    public void unBracketDataSetReturningStatsOperators() {
-
-        for (int i = 0; i < scanner.size(); i++) {
-
-            boolean exitForLoop = false;
-            if (Method.isListReturningStatsMethod(scanner.get(i))) {
-                int I = i - 1;
-                /**
-                 * Loop backwards from the operator itself and if the object at
-                 * the index is not the open bracket of a
-                 * ListReturningStatsOperator,remove it.Keep doing this till the
-                 * test fails. If the test keeps succeeding, then watch out for
-                 * the starting index,0. If the element at the starting index is
-                 * also an open bracket, remove it and exit the loop.
-                 *
-                 */
-                while (isOpeningBracket(scanner.get(I))) {
-                    int closeBracIndex = Bracket.getComplementIndex(true, I, scanner);
-                    if (I > 0 && !Method.isListReturningStatsMethod(scanner.get(I - 1))) {
-                        scanner.set(closeBracIndex, "");
-                        scanner.set(I, "");
-                        --I;
-                        exitForLoop = closeBracIndex <= scanner.size();
-                    } else if (I == 0 && isOpeningBracket(scanner.get(0))) {
-                        scanner.set(closeBracIndex, "");
-                        scanner.set(0, "");
-                        exitForLoop = closeBracIndex <= scanner.size();
-                        break;
-                    }
-                }//end while
-
-            }//end if
-
-            if (exitForLoop) {
-                break;
-            }
-
-        }//end for
-
-        scanner.removeAll(whitespaceremover);
-
-    }//end method
-
     public void statsVerifier() {
         scanner.removeAll(whitespaceremover);
 
@@ -852,8 +782,8 @@ public class MathExpression implements Savable, Solvable {
 
             if (isHasListReturningOperators()) {
 
-                scanner.remove(0);//temporarily remove the starting bracket
-                scanner.remove(scanner.size() - 1);//temporarily remove the ending bracket
+                scanner.remove(0);//temporarily remove the starting brackets
+                scanner.remove(scanner.size() - 1);//temporarily remove the ending brackets
 
                 for (int i = 0; i < scanner.size(); i++) {
                     try {
@@ -891,159 +821,12 @@ public class MathExpression implements Savable, Solvable {
     }//end method statsVerifier
 
     /**
-     * e.g in structures like sort(3,sin2,2sin3,5,3,2,sin(4+5),4!...) This
-     * method will help to reduce the input to the simple form i.e
-     * sort(num1,num2,num3....)
-     */
-    private void evaluateCompoundStructuresInStatisticalInput() {
-        if (hasListReturningOperators || hasNumberReturningStatsOperators) {
-            for (int i = 0; i < scanner.size(); i++) {
-                try {
-                    if (Operator.isClosingBracket(scanner.get(i))) {
-                        int open = Bracket.getComplementIndex(false, i, scanner);
-
-                        int preIndex = open - 1;
-
-                        if (preIndex >= 0) {
-                            String entry = scanner.get(preIndex);
-                            if (!Method.isMethodName(entry)) {
-                                Bracket opener = new Bracket("(");
-                                opener.setIndex(open);
-                                Bracket closer = new Bracket(")");
-                                closer.setIndex(i);
-                                opener.setComplement(closer);
-                                closer.setComplement(opener);
-
-                                if (opener.simpleBracketPairHasVariables(scanner)) {
-                                    continue;
-                                }
-
-                                String fun = opener.getDomainContents(scanner);
-                                while (fun.startsWith("(") && fun.endsWith(")")) {
-                                    fun = fun.substring(1);
-                                    fun = fun.substring(0, fun.length() - 1);
-                                    fun = fun.trim();
-                                }//end while
-                                MathExpression f = new MathExpression(fun);
-                                String val = f.solve();
-                                scanner.add(open, val);
-                                scanner.subList(open + 1, i + 2).clear();
-                            }//end if
-                            else if (Method.isDefinedMethod(entry)) {
-                                int ind = open - 2;
-
-                                if (Method.isStatsMethod(entry)) {
-                                    Bracket opener = new Bracket("(");
-                                    opener.setIndex(open);
-                                    Bracket closer = new Bracket(")");
-                                    closer.setIndex(i);
-                                    opener.setComplement(closer);
-                                    closer.setComplement(opener);
-
-                                    if (opener.simpleBracketPairHasVariables(scanner)) {
-                                        continue;
-                                    }
-
-                                    //This for loop checks if it is the fix's scenario. e.g. statmethodName(num_or_var operator num_or_var)...e.g. sum(2+3*2...)
-                                    // If sum(2, 3+4) WRONG scenario, prod(3*2)  CORRECT etc.
-                                    for (int c = open; c < i; c++) {
-                                        String tkn = scanner.get(c);
-                                        String nextTkn = scanner.get(c + 1);
-                                        if ((isNumber(tkn) || isVariableString(tkn)) && (isNumber(nextTkn) || isVariableString(nextTkn))) {
-                                            return;
-                                        }
-                                    }
-
-                                    List<String> domain = new ArrayList<>(opener.getBracketDomainContents(scanner));
-
-                                    String fun = opener.getDomainContents(scanner);
-
-                                    while (fun.startsWith("(") && fun.endsWith(")")) {
-                                        fun = fun.substring(1);
-                                        fun = fun.substring(0, fun.length() - 1);
-                                        fun = fun.trim();
-                                    }//end while
-
-                                    if (fun.contains(OPEN_CIRC_BRAC)) {
-
-                                        int op = 0, cl = 0;
-
-                                        while ((cl = LISTS.nextIndexOf(domain, cl, CLOSE_CIRC_BRAC)) != -1) {
-                                            op = Bracket.getComplementIndex(false, cl, domain);
-                                            List<String> l = domain.subList(op, cl + 1);
-                                            List<String> val = solve(l);
-                                            l.clear();
-                                            l.addAll(val);
-                                            cl = op;
-                                        }
-
-                                    } else {
-                                        MathExpression f = new MathExpression(fun);
-                                        String val = f.solve();
-                                        scanner.add(open, val);
-                                        scanner.subList(open + 1, i + 2).clear();
-                                        scanner.add(open + 1, ")");
-                                        scanner.add(open, "(");
-                                    }
-
-                                } else {
-
-                                    while (ind >= 0 && Operator.isOpeningBracket(scanner.get(ind))) {
-                                        --ind;
-                                    }//end while
-
-                                    if (ind >= 0) {
-                                        String v = scanner.get(ind);
-                                        if (v.equals("intg") || v.equals("quad") || v.equals("diff") || v.equals("root")) {
-                                            Bracket opener = new Bracket("(");
-                                            opener.setIndex(open);
-                                            Bracket closer = new Bracket(")");
-                                            closer.setIndex(i);
-                                            opener.setComplement(closer);
-                                            closer.setComplement(opener);
-                                            if (opener.simpleBracketPairHasVariables(scanner)) {
-                                                continue;
-                                            }
-                                            String fun = opener.getDomainContents(scanner);
-                                            while (fun.startsWith("(") && fun.endsWith(")")) {
-                                                fun = fun.substring(1);
-                                                fun = fun.substring(0, fun.length() - 1);
-                                                fun = fun.trim();
-                                            }
-                                            MathExpression f = new MathExpression(fun);
-                                            String val = f.solve();
-                                            scanner.add(open, val);
-                                            scanner.subList(open + 1, i + 2).clear();
-                                        }//end if
-                                    }
-                                }
-
-                            }//end else if
-                        }
-
-                    }//end if
-                }//end try
-                catch (IndexOutOfBoundsException boundsException) {
-                    boundsException.printStackTrace();
-                }
-            }//end for
-        }//end if
-    }//end method
-
-    /**
      * The method establishes meaning to some shorthand techniques in math that
      * the average mathematician might expect to see in a math device.
      * :e.g(3+4)(1+2) will become (3+4)*(1+2).It is essentially a stage that
      * generates code.
      */
     public void codeModifier() {
-
-        detectKeyOperators();
-        statsVerifier();
-        evaluateCompoundStructuresInStatisticalInput();
-        unBracketDataSetReturningStatsOperators();
-        UnaryPostOperator.assignCompoundTokens(this.scanner);
-        //PowerOperator.assignCompoundTokens(this.scanner);
 
         if (correctFunction) {
             StringBuilder utility = new StringBuilder();
@@ -1076,155 +859,13 @@ public class MathExpression implements Savable, Solvable {
 
             }//end for
 
-            /**
-             * The theory behind this is that any sub-expression that lies
-             * between any 2 inBetweenOperators or between an in between
-             * operator and the enclosing bracket: is a compound token and as
-             * such must be evaluated first before execution of other parts of
-             * the expression can proceed. For example: 3/2sin4+5 is scanned as:
-             * [3,/,(,2,sin,4,),+,5] COME HEREEEEEEEEEEEEEE!!!!FOR COMPOUND
-             * TOKENS IF NEEDED!!!!!!!!!!!!!!!!
-             */
-            scanner.removeAll(whitespaceremover);
-            ParseContext context = null;
-            for (int i = 0; i < scanner.size(); i++) {
-
-                String prev = i - 1 >= 0 ? scanner.get(i - 1) : null;
-                String curr = scanner.get(i);
-                String next = i + 1 < scanner.size() ? scanner.get(i + 1) : null;
-                if (isOpeningBracket(curr)) {
-                    if (Method.isDefinedMethod(prev)) {
-                        if (Method.isStatsMethod(prev)) {
-                            if (context == null) {
-                                context = new ParseContext(i, curr, ParseContext.CONTEXT_IS_STAT_METHOD);
-                            } else {
-                                context.addChild(new ParseContext(i, curr, ParseContext.CONTEXT_IS_STAT_METHOD));
-                            }
-                        } else {
-                            if (context == null) {
-                                context = new ParseContext(i, curr, ParseContext.CONTEXT_IS_NON_STAT_METHOD);
-                            } else {
-                                context.addChild(new ParseContext(i, curr, ParseContext.CONTEXT_IS_NON_STAT_METHOD));
-                            }
-                        }
-                    } else {
-                        if (context == null) {
-                            context = new ParseContext(i, curr, ParseContext.CONTEXT_IS_ALGEBRAIC);
-                        } else {
-                            context.addChild(new ParseContext(i, curr, ParseContext.CONTEXT_IS_ALGEBRAIC));
-                        }
-                    }
-                }
-
-                try {
-                    ParseContext currCon = context != null ? context.getLast() : null;
-                    if (currCon != null && currCon.type != ParseContext.CONTEXT_IS_STAT_METHOD && (isNumber(scanner.get(i)) || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))))
-                            && (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))
-                            || Method.isNumberReturningStatsMethod(scanner.get(i + 1)) || Method.isLogOrAntiLogToAnyBase(scanner.get(i + 1)))) {
-                        //Determine the placement of the close bracket
-                        int j = i + 1;
-                        while (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(j)) || Method.isNumberReturningStatsMethod(scanner.get(j)) || Method.isLogOrAntiLogToAnyBase(scanner.get(j))) {
-                            System.out.println("j=" + j);
-                            ++j;
-                        }
-
-                        if (isNumber(scanner.get(j)) || isVariableString(scanner.get(j))) {
-                            scanner.add(j + 1, ")");
-                            scanner.add(i, "(");
-                            scanner.add(i + 2, MULTIPLY);
-                        } else if (isOpeningBracket(scanner.get(j))) {
-                            int ind = Bracket.getComplementIndex(true, j, scanner);
-                            scanner.add(ind + 1, ")");
-                            scanner.add(i, "(");
-                            scanner.add(i + 2, MULTIPLY);
-                        }
-
-                    }//end if
-                }//end try.
-                catch (IndexOutOfBoundsException indErr) {
-                }//end catch
-
-                try {
-                    /**
-                     * tackles situations like sin-(2+3) by converting them into
-                     * sin(-1*(2+3)). The generic situation is
-                     * "preNumberOperator-(expr)"
-                     */
-                    if (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
-                        if (scanner.get(i).equals(MINUS)) {
-                            List<String> subList = scanner.subList(i - 1, Bracket.getComplementIndex(true, i + 1, scanner) + 1);
-
-                            subList.set(1, "(");
-                            subList.add(2, "-1");
-                            subList.add(3, MULTIPLY);
-                            subList.add(")");
-                        }//end if
-                        else if (scanner.get(i).equals(PLUS)) {
-                            scanner.set(i, "");
-                        }
-
-                    }//end if
-                }//end try
-                catch (IndexOutOfBoundsException ind) {
-                }//end catch
-
-                try {
-                    /**
-                     * tackles situations like (-sin2+3) which it converts into
-                     * -1*sin2+3 if this is not done, it would be evaluated as
-                     * -(sin2+3)
-                     */
-                    if (isOpeningBracket(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))) {
-                        if (scanner.get(i).equals(MINUS)) {
-                            scanner.set(i, "-1");
-                            scanner.add(i + 1, MULTIPLY);
-                        } else if (scanner.get(i).equals(PLUS)) {
-                            scanner.set(i, "");
-                        }
-                    }
-                }//end try
-                catch (IndexOutOfBoundsException ind) {
-                }//end catch
-
-            }//end for
-
             scanner.removeAll(whitespaceremover);
 
         } else if (!correctFunction) {
             //processLogger.writeLog("Beginning Parser Shutdown Tasks Due To Errors In User Input.");
         }
 
-        detectKeyOperators();
     }//end method codeModifier
-
-    /**
-     * Serves as a powerful optimizer of the evaluation section as it can govern
-     * what sections of code will be executed and which ones will be ignored.
-     */
-    public void detectKeyOperators() {
-        for (int i = 0; i < scanner.size(); i++) {
-            if (isPlusOrMinus(scanner.get(i))) {
-                setHasPlusOrMinusOperators(true);
-            } else if (isUnaryPreOperator(scanner.get(i))) {
-                setHasPreNumberOperators(true);
-            } else if (isUnaryPostOperator(scanner.get(i))) {
-                setHasPostNumberOperators(true);
-            } else if (isMulOrDiv(scanner.get(i))) {
-                setHasMulOrDivOperators(true);
-            } else if (isPermOrComb(scanner.get(i))) {
-                setHasPermOrCombOperators(true);
-            } else if (isRemainder(scanner.get(i))) {
-                setHasRemainderOperators(true);
-            } else if (Method.isNumberReturningStatsMethod(scanner.get(i))) {
-                setHasNumberReturningStatsOperators(true);
-            } else if (isPower(scanner.get(i))) {
-                setHasPowerOperators(true);
-            } else if (isLogicOperator(scanner.get(i))) {
-                setHasLogicOperators(true);
-            }
-        }//end for
-
-    }
 
     /**
      *
@@ -1278,8 +919,8 @@ public class MathExpression implements Savable, Solvable {
      */
     public void mapBrackets() {
         try {
-            setBracket(mapBrackets(scanner));
-        }//end method
+            mapBrackets(scanner);
+        }//end method//end method
         catch (InputMismatchException ime) {
             parser_Result = Parser_Result.PARENTHESES_ERROR;
             setCorrectFunction(false);
@@ -1311,7 +952,7 @@ public class MathExpression implements Savable, Solvable {
                         if (i - 1 >= 0 && !isOpeningBracket(scanner.get(i - 1))
                                 && !isLogicOperator(scanner.get(i - 1)) && !isUnaryPreOperator(scanner.get(i - 1))
                                 && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1)) && !isNumber(scanner.get(i - 1))
-                                && !isVariableString(scanner.get(i - 1))) {
+                                && !isVariableString(scanner.get(i - 1)) && !isComma(scanner.get(i - 1))) {
                             //processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n");
                             correctFunction = false;
                             scanner.clear();
@@ -1323,7 +964,7 @@ public class MathExpression implements Savable, Solvable {
                                 && !isLogicOperator(scanner.get(i + 1)) && !isAssignmentOperator(scanner.get(i + 1))
                                 && !isUnaryPreOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
                                 && !Method.isLogToAnyBase(scanner.get(i + 1)) && !Method.isAntiLogToAnyBase(scanner.get(i + 1)) && !isNumber(scanner.get(i + 1))
-                                && !isVariableString(scanner.get(i + 1))) {
+                                && !isVariableString(scanner.get(i + 1)) && !isComma(scanner.get(i + 1))) {
                             //processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i)+"\" And \""+scanner.get(i+1)+"\"PLUS As You Have Done.\n");
                             correctFunction = false;
                             scanner.clear();
@@ -1345,14 +986,12 @@ public class MathExpression implements Savable, Solvable {
             }//end if
             else {
                 scanner.clear();
-                bracket = null;
                 parser_Result = Parser_Result.SYNTAX_ERROR;
             }//end else
 
         }//end if
         else {
             scanner.clear();
-            bracket = null;
             parser_Result = Parser_Result.SYNTAX_ERROR;
         }
 
@@ -1462,7 +1101,7 @@ public class MathExpression implements Savable, Solvable {
      * @param brac the Bracket store to modify
      * @param startPosition the index in the ArrayList where the modification is
      * to start
-     * @param increment the amount by which each bracket index is to be
+     * @param increment the amount by which each brackets index is to be
      * decreased
      * @param run will run this method if given the sign to do so.
      */
@@ -1475,8 +1114,8 @@ public class MathExpression implements Savable, Solvable {
 
                 for (int i = startPosition; i < brac.length; i++) {
                     valAtBracIndex = brac[i].getIndex();
-//values greater than the value stored by the bracket from which looping was started the
-// last time represent the indices of bracket in the function list that the compression function
+//values greater than the value stored by the brackets from which looping was started the
+// last time represent the indices of brackets in the function list that the compression function
 // will affect.So apply the decrement to them.
                     try {
                         if (valAtBracIndex > valAtLastEvaluatedBracIndex) {
@@ -1500,22 +1139,9 @@ public class MathExpression implements Savable, Solvable {
 //(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)
 
     /**
-     * Display the indices of all brackets in the function,bracket pair by
-     * bracket pair
+     * Display the indices of all brackets in the function,brackets pair by
+     * brackets pair
      */
-    private void displayIndicesStoredInBrackets() {
-        ArrayList<Integer> arr = new ArrayList<Integer>();
-        int size = bracket.length;
-        for (int i = 0; i < size; i++) {
-            arr.add(bracket[i].getIndex());
-        }
-        /**
-         * This method is not a useful one in the overall running. It is only
-         * used by the coder to make sure that the system is parsing the
-         * brackets properly.
-         */
-    }
-
     /**
      *
      * @param scan The ArrayList object.
@@ -1573,7 +1199,7 @@ public class MathExpression implements Savable, Solvable {
                     start = i; // Mark the beginning of a number
                 }
             } else {
-                // We hit a delimiter (comma, space, bracket, etc.)
+                // We hit a delimiter (comma, space, brackets, etc.)
                 if (start != -1) {
                     numbers.add(text.substring(start, i));
                     start = -1;
@@ -1598,24 +1224,6 @@ public class MathExpression implements Savable, Solvable {
         return numbers;
     }
 
-    /**
-     *
-     * @return an Array object containing duplicate contents of the List object
-     * alone
-     */
-    protected Bracket[] copyArrayToArray() {
-        int size = bracket.length;
-        Bracket[] obj = new Bracket[size];
-        if (bracket != null) {
-            for (int i = 0; i < size; i++) {
-                obj[i] = bracket[i].createTwinBracket();
-            }
-        } else {
-            throw new NullPointerException("Null List Cannot Be Copied");
-        }
-        return obj;
-    }
-
     public void setReturnType(TYPE returnType) {
         this.returnType = returnType;
     }
@@ -1629,13 +1237,13 @@ public class MathExpression implements Savable, Solvable {
         if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
             return Help.getHelp();
         }
-        System.out.println("scannER: "+scanner);
+        System.out.println("scannER: " + scanner);
         compileToPostfix();  // Compile once if not already done
-        System.out.println("check postfix: "+Arrays.toString(cachedPostfix));
+        System.out.println("check postfix: " + Arrays.toString(cachedPostfix));
         return expressionSolver.evaluate(cachedPostfix).scalar + "";  // Just evaluate
     }//end method solve()
 
-    protected List<String> solve(List<String> list) { 
+    protected List<String> solve(List<String> list) {
         return Arrays.asList(String.valueOf(new Gemini2().evaluate(list)));
     }
 
@@ -1705,7 +1313,6 @@ public class MathExpression implements Savable, Solvable {
                 || opChar == 'Č' || opChar == 'Р';
     }
 
-  
     public final void compileToPostfix() {
         if (cachedPostfix != null) {
             return;   // already compiled
@@ -1825,7 +1432,8 @@ public class MathExpression implements Savable, Solvable {
 
                     case Token.METHOD:
                     case Token.FUNCTION:
-                        int arity = t.arity;System.out.println("arity of "+t.name+" = "+t.arity);
+                        int arity = t.arity;
+                        System.out.println("arity of " + t.name + " = " + t.arity);
                         EvalResult[] args = new EvalResult[arity];
                         for (int j = arity - 1; j >= 0; j--) {
                             args[j] = stack[ptr--];
@@ -1834,7 +1442,7 @@ public class MathExpression implements Savable, Solvable {
                         // 2. CRITICAL: Move pointer back BEFORE execution.
                         // This allows the method to use the argument slots for its result.
                         poolPointer -= arity;
-                        System.out.println("--------------------------------Method Input: method-name=" + t.name + ", type: "+ t.kind+", args=" + Arrays.toString(args));
+                        System.out.println("--------------------------------Method Input: method-name=" + t.name + ", type: " + t.kind + ", args=" + Arrays.toString(args));
                         EvalResult result = (t.kind == Token.METHOD)
                                 ? MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, arity, args)
                                 : FunctionManager.lookUp(t.name).calc(args);
@@ -1845,8 +1453,8 @@ public class MathExpression implements Savable, Solvable {
 
                 }
             }
-return stack[0];
-     
+            return stack[0];
+
         }
 
         private void applyUnary(char op, EvalResult res) {
@@ -2782,7 +2390,7 @@ return stack[0];
          * context within sum, so it changes its context to
          * {@link ParseContext#CONTEXT_IS_STAT_METHOD} within and sets the
          * {@link ParseContext#next} field of the original context. When it
-         * emerges from the close bracket of the sort(, it must null the next
+         * emerges from the close brackets of the sort(, it must null the next
          * field and then make the current context the original or the parent of
          * {@link ParseContext#next}
          */
@@ -3534,7 +3142,7 @@ return stack[0];
             passes++;
             try {
                 i = scanner.indexOf(")");//index of first )
-                j = LISTS.prevIndexOf(scanner, i, "("); //index of enclosing bracket of ) above
+                j = LISTS.prevIndexOf(scanner, i, "("); //index of enclosing brackets of ) above
                 List<String> sub = scanner.subList(j, i + 1);
                 solve(sub);
 
@@ -3570,7 +3178,7 @@ return stack[0];
         System.out.println("ls = " + ls);
         String s = "listsum(listsum(5),sin(5))";
         MathExpression ms = new MathExpression(s);
-        System.out.println("ms.scanner: "+ms.scanner);
+        System.out.println("ms.scanner: " + ms.scanner);
         System.out.println("s--->" + ms.solve());
         String ss = "listsum(sin(5),sin(5))";
         System.out.println("ss--->" + new MathExpression(ss).solve());
@@ -3583,8 +3191,8 @@ return stack[0];
         MathExpression m = new MathExpression(s5);
         System.out.println("scanner:\n" + m.scanner);
         System.out.println("m.solve(): " + m.solve());
-        
-        System.out.println(new MathExpression("avgN(0,4+0,2+0)").solve());
+
+        System.out.println(new MathExpression("sort(0,4+0,2+0)").solve());
 
         //   double N = 100; 
         //   Shootouts.benchmark(s2, (int) N);

@@ -740,7 +740,7 @@ public class MathScanner {
                  * func_name(expr....) Users dont have to enter products of
                  * numbers and bracketed expressions as number*(expr)
                  */
-                else if ((isNumber(scanner.get(i)) || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))))
+                else if ( (isNumber(scanner.get(i)) || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))))
                         && scanner.get(i + 1).equals("(")) {
                     scanner.add(i + 1, "*");
                     i++;
@@ -1224,7 +1224,6 @@ public class MathScanner {
                         List<String> sub = scanner.subList(indexOfAt, i);
                         sub.clear();
                         sub.add(f.getName());
-
                         break;
                     } else if (isClosingBracket(token)) {
                         int open = Bracket.getComplementIndex(false, i, scanner);
