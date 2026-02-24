@@ -133,7 +133,6 @@ public class MathExpression implements Savable, Solvable {
     private static final int PREC_MULDIV = 3;   // *, /, %, Р, Č
     private static final int PREC_ADDSUB = 2;   // +, -
     private static final int PREC_UNARY = 100;  // Unary minus
-    private List<Token> tokens = new ArrayList<>();
     private Token[] cachedPostfix = null;  // Cache the compiled postfix
 
     /**
@@ -224,6 +223,36 @@ public class MathExpression implements Savable, Solvable {
         public static boolean isRightAssociative(char op) {
             return op == '^';
         }
+
+        public String toJsonString() {
+            return "{\n"
+                    + "\"kind\": " + kind + ",\n"
+                    + "\"value\": " + value + ",\n"
+                    + "\"name\": " + name + ",\n"
+                    + "\"id\": " + id + ",\n"
+                    + "\"opChar\": " + opChar + ",\n"
+                    + "\"precedence\": " + precedence + ",\n"
+                    + "\"isRightAssoc\": " + isRightAssoc + ",\n"
+                    + "\"isPostfix\": " + isPostfix + ",\n"
+                    + "\"arity\": " + arity + "\n"
+                    + "}\n";
+        }
+
+        @Override
+        public String toString() {
+            return "{"
+                    + "\"kind\": " + kind + ","
+                    + "\"value\": " + value + ","
+                    + "\"name\": " + name + ","
+                    + "\"id\": " + id + ","
+                    + "\"opChar\": " + opChar + ","
+                    + "\"precedence\": " + precedence + ","
+                    + "\"isRightAssoc\": " + isRightAssoc + ","
+                    + "\"isPostfix\": " + isPostfix + ","
+                    + "\"arity\": " + arity
+                    + "}";
+        }
+
     }
 
     /**
@@ -415,10 +444,6 @@ public class MathExpression implements Savable, Solvable {
      */
     public void setBracket(Bracket[] bracket) {
         this.bracket = bracket;
-    }
-
-    public List<Token> getTokens() {
-        return tokens;
     }
 
     /**
@@ -1609,97 +1634,6 @@ public class MathExpression implements Savable, Solvable {
         return list;
     }
 
-    public final void compileToPostfix() {
-        if (cachedPostfix != null) {
-            return;  // Already compiled — skip
-        }
-        Stack<Token> stack = new Stack<>();
-        Token[] postfix = new Token[scanner.size()];  // Upper bound
-        int postfixPtr = 0;
-        int[] argCounts = new int[256];
-        int argPtr = 0;
-        argCounts[0] = 0;
-
-        for (String s : scanner) {
-            Token t = translate(s);
-            if (t == null) {
-                continue;
-            }
-
-            switch (t.kind) {
-                case NUMBER:
-                    postfix[postfixPtr++] = t;
-                    argCounts[argPtr]++;
-                    break;
-                case FUNCTION:
-                case METHOD:
-                    stack.push(t);
-                    argCounts[++argPtr] = 0;
-                    break;
-                case LPAREN:
-                    stack.push(t);
-                    break;
-                case RPAREN:
-                    while (!stack.isEmpty() && stack.peek().kind != LPAREN) {
-                        Token op = stack.pop();
-                        postfix[postfixPtr++] = op;
-                        if (op.kind == OPERATOR && op.arity == 2) {
-                            argCounts[argPtr]--;
-                        }
-                    }
-                    if (!stack.isEmpty() && stack.peek().kind == LPAREN) {
-                        stack.pop();
-                    }
-
-                    if (!stack.isEmpty() && (stack.peek().kind == FUNCTION || stack.peek().kind == METHOD)) {
-                        Token callable = stack.pop();
-                        callable.arity = argCounts[argPtr];
-                        postfix[postfixPtr++] = callable;
-                        argPtr--;
-                        argCounts[argPtr]++;
-                    }
-                    break;
-                case OPERATOR:
-                    if (t.isPostfix) {
-                        postfix[postfixPtr++] = t;
-                    } else {
-                        while (!stack.isEmpty() && stack.peek().kind == OPERATOR) {
-                            Token top = stack.peek();
-                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
-                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
-                                Token op = stack.pop();
-                                postfix[postfixPtr++] = op;
-                                if (op.arity == 2) {
-                                    argCounts[argPtr]--;
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-                        stack.push(t);
-                    }
-                    break;
-            }
-        }
-
-        while (!stack.isEmpty()) {
-            Token op = stack.pop();
-            postfix[postfixPtr++] = op;
-            if (op.kind == OPERATOR && op.arity == 2) {
-                argCounts[argPtr]--;
-            }
-        }
-
-        // Trim postfix
-        Token[] trimmed = new Token[postfixPtr];
-        System.arraycopy(postfix, 0, trimmed, 0, postfixPtr);
-        tokens = Arrays.asList(trimmed); // Or keep as array for speed
-
-        // Trim and cache
-        cachedPostfix = new Token[postfixPtr];
-        System.arraycopy(postfix, 0, cachedPostfix, 0, postfixPtr);
-    }
-
     // Your translate method (with small updates for Java 8)
     public Token translate(String s) {
         if (s == null || s.isEmpty()) {
@@ -1766,14 +1700,191 @@ public class MathExpression implements Savable, Solvable {
                 || opChar == 'Č' || opChar == 'Р';
     }
 
+    public final void compileToPostfix1() {
+        if (cachedPostfix != null) {
+            return; // Already compiled
+        }
+        Stack<Token> opStack = new Stack<>();
+        Token[] postfix = new Token[scanner.size() * 2]; // Safe upper bound
+        int p = 0;
+
+        int[] argCount = new int[64];   // Max nesting depth
+        int depth = 0;
+        argCount[0] = 0;
+
+        for (String s : scanner) {
+            Token t = translate(s);
+            if (t == null) {
+                continue;
+            }
+
+            switch (t.kind) {
+                case Token.NUMBER:
+                    postfix[p++] = t;
+                    argCount[depth]++;
+                    break;
+
+                case Token.FUNCTION:
+                case Token.METHOD:
+                    opStack.push(t);
+                    argCount[++depth] = 0;   // Start new argument count for this function
+                    break;
+
+                case Token.LPAREN:
+                    opStack.push(t);
+                    break;
+
+                case Token.RPAREN:
+                    // Pop all operators until matching '('
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        Token op = opStack.pop();
+                        postfix[p++] = op;
+                    }
+                    if (!opStack.isEmpty()) {
+                        opStack.pop(); // discard '('
+                    }
+
+                    // If the thing just before this group was a FUNCTION or METHOD, it's now complete
+                    if (!opStack.isEmpty()
+                            && (opStack.peek().kind == Token.FUNCTION || opStack.peek().kind == Token.METHOD)) {
+                        Token callable = opStack.pop();
+                        callable.arity = argCount[depth];   // Number of arguments collected inside
+                        postfix[p++] = callable;
+                        depth--;                            // Return to outer scope
+                        argCount[depth]++;                  // One complete value for outer function
+                    }
+                    break;
+
+                case Token.OPERATOR:
+                    if (t.isPostfix) {
+                        postfix[p++] = t;                   // Postfix ops apply immediately
+                    } else {
+                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
+                            Token top = opStack.peek();
+                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
+                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
+                                postfix[p++] = opStack.pop();
+                            } else {
+                                break;
+                            }
+                        }
+                        opStack.push(t);
+                    }
+                    break;
+            }
+        }
+
+        // Flush remaining operators
+        while (!opStack.isEmpty()) {
+            postfix[p++] = opStack.pop();
+        }
+
+        // Trim and cache
+        cachedPostfix = new Token[p];
+        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
+    }
+
+    
+    
+    public final void compileToPostfix() { 
+    if (cachedPostfix != null) return;   // already compiled
+
+    Stack<Token> opStack = new Stack<>();
+    Token[] postfix = new Token[scanner.size() * 2];
+    int p = 0;
+
+    int[] argCount = new int[64];
+    int depth = 0;
+    argCount[0] = 0;
+
+    for (String s : scanner) {
+        Token t = translate(s);
+        if (t == null) continue;
+
+        switch (t.kind) {
+            case Token.NUMBER:
+                postfix[p++] = t;
+                argCount[depth]++;
+                break;
+
+            case Token.FUNCTION:
+            case Token.METHOD:
+                opStack.push(t);
+                argCount[++depth] = 0;           // start counting arguments for this function
+                break;
+
+            case Token.LPAREN:
+                opStack.push(t);
+                break;
+
+            case Token.RPAREN:
+                // Pop operators until matching '('
+                while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                    postfix[p++] = opStack.pop();
+                }
+                if (!opStack.isEmpty()) {
+                    opStack.pop(); // discard '('
+                }
+
+                // === KEY FIX: Check what this closing ) completed ===
+                if (!opStack.isEmpty() && 
+                    (opStack.peek().kind == Token.FUNCTION || opStack.peek().kind == Token.METHOD)) {
+                    
+                    // This ) completed a function call
+                    Token callable = opStack.pop();
+                    callable.arity = argCount[depth];
+                    postfix[p++] = callable;
+
+                    depth--;
+                    argCount[depth]++;        // one complete value for outer function
+                } 
+                else {
+                    // This ) completed a grouped argument like (sin(3)) or (12)
+                    // → it counts as ONE argument for the outer function
+                    argCount[depth]++;
+                }
+                break;
+
+            case Token.OPERATOR:
+                if (t.isPostfix) {
+                    postfix[p++] = t;
+                } else {
+                    while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
+                        Token top = opStack.peek();
+                        if ((!t.isRightAssoc && t.precedence <= top.precedence) ||
+                            (t.isRightAssoc && t.precedence < top.precedence)) {
+                            postfix[p++] = opStack.pop();
+                        } else {
+                            break;
+                        }
+                    }
+                    opStack.push(t);
+                }
+                break;
+        }
+    }
+
+    // Flush remaining operators
+    while (!opStack.isEmpty()) {
+        postfix[p++] = opStack.pop();
+    }
+
+    // Trim and cache
+    cachedPostfix = new Token[p];
+    System.arraycopy(postfix, 0, cachedPostfix, 0, p);
+    
+        System.out.println("cachedPostfix: " + Arrays.toString(cachedPostfix));
+}
+
     public final class ExpressionSolver {
 
         public EvalResult evaluate(Token[] postfix) {
             final EvalResult[] stack = new EvalResult[postfix.length];
             int ptr = -1;
+
             for (Token t : postfix) {
                 switch (t.kind) {
-                    case NUMBER:
+                    case Token.NUMBER:
                         EvalResult numRes = getNextResult();
                         if (t.name != null) {
                             numRes.wrap(VariableManager.getVariable(t.name).getValue());
@@ -1782,10 +1893,11 @@ public class MathExpression implements Savable, Solvable {
                         }
                         stack[++ptr] = numRes;
                         break;
-                    case OPERATOR:
+
+                    case Token.OPERATOR:
                         if (t.isPostfix || t.opChar == '√' || t.opChar == 'R') {
                             EvalResult valRes = stack[ptr];
-                            double val = valRes.scalar; // Assume scalar for postfix
+                            double val = valRes.scalar; // postfix ops are scalar-only
                             EvalResult res = getNextResult();
                             switch (t.opChar) {
                                 case '√':
@@ -1808,8 +1920,9 @@ public class MathExpression implements Savable, Solvable {
                         } else {
                             EvalResult bRes = stack[ptr--];
                             EvalResult aRes = stack[ptr];
+                            // Assume binary operators work on scalars only
                             double b = bRes.scalar;
-                            double a = aRes.scalar; // Assume scalars for binary ops
+                            double a = aRes.scalar;
                             EvalResult res = getNextResult();
                             switch (t.opChar) {
                                 case '+':
@@ -1839,48 +1952,39 @@ public class MathExpression implements Savable, Solvable {
                             }
                             stack[ptr] = res;
                         }
-                        release(2); // Release aRes and bRes
+                        release(2); // release aRes and bRes
                         break;
-                    case METHOD:
-                        int mArity = t.arity;
-                        EvalResult[] mArgs = new EvalResult[mArity];
-                        for (int j = mArity - 1; j >= 0; j--) {
-                            mArgs[j] = stack[ptr--];
-                        }
-                        EvalResult mRes = MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, mArity, mArgs); // Updated to EvalResult[]
-                                  System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>> "+mRes.toString());
-                        stack[++ptr] = mRes;
-                        release(mArity); // Release args
-                        break;
-                    case FUNCTION:
+
+                    case Token.METHOD:
+                    case Token.FUNCTION:
                         int arity = t.arity;
                         EvalResult[] args = new EvalResult[arity];
                         for (int j = arity - 1; j >= 0; j--) {
                             args[j] = stack[ptr--];
                         }
-                        EvalResult fRes = getNextResult();
-                        Function f = FunctionManager.lookUp(t.name);
-                        EvalResult ev = f.calc(args);
-              
-                        switch (f.getType()) {
-                            case ALGEBRAIC_EXPRESSION:
-                                fRes.wrap(ev.scalar);
-                                break;
-                            case MATRIX:
-                                fRes.wrap(ev.matrix);
-                                break;
-                            default:
-                                break;
+
+                        EvalResult result;
+                        if (t.kind == Token.METHOD) {
+                            System.out.println("--------------------------------Method Input: method-name=" + t.name + ", args=" + Arrays.toString(args));
+                            result = MethodRegistry.getAction(t.id)
+                                    .execute(MathExpression.this, t.name, arity, args);
+                            System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>Method output " + result.toString());
+                        } else {
+                            // For FUNCTION (if you still have pure Function objects)
+                            Function f = FunctionManager.lookUp(t.name);
+                            result = f.calc(args);   // assume it returns EvalResult
                         }
-                        // Assume calc returns double; update if needed
-                        stack[++ptr] = fRes;
-                        release(arity); // Release args
+
+                        // Optional debug print (remove in production)
+                        stack[++ptr] = result;
+                        release(arity); // release the arguments
                         break;
                 }
             }
-            EvalResult finalRes = stack[0];
-            release(ptr); // Release all but final
-            return finalRes;
+
+            EvalResult finalResult = stack[0];
+            release(ptr); // release everything except final result
+            return finalResult;
         }
     }
 
@@ -1954,9 +2058,9 @@ public class MathExpression implements Savable, Solvable {
                 case TYPE_STRING:
                     return textRes;
                 default:
-                     return "0.0";
+                    return "0.0";
             }
-           
+
         }
 
     }
@@ -3554,7 +3658,6 @@ public class MathExpression implements Savable, Solvable {
 
         MathExpression m = new MathExpression(s5);
         System.out.println("scanner:\n" + m.scanner);
-        System.out.println("tokens:\n" + m.tokens);
         System.out.println("m.solve(): " + m.solve());
 
         //   double N = 100; 

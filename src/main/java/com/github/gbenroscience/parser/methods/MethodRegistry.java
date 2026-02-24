@@ -290,12 +290,28 @@ public class MethodRegistry {
             }
             return ctx.getNextResult().wrap(-1);
         });
-        registerMethod(Declarations.SUM, (ctx, funcName, arity, args) -> {
+        /*registerMethod(Declarations.SUM, (ctx, funcName, arity, args) -> {
             double x = 0;
             for (MathExpression.EvalResult i : args) {
                 x += i.scalar;
             }
             return ctx.getNextResult().wrap(x);
+        });
+         */
+        registerMethod(Declarations.SUM, (ctx, name, arity, args) -> {
+            MathExpression.EvalResult result = ctx.getNextResult();
+            double total = 0.0;
+            for (MathExpression.EvalResult arg : args) {
+                if (arg.type == 0) {                    // scalar
+                    total += arg.scalar;
+                } else if (arg.type == 1 && arg.vector != null) {   // list/vector from sort/mode
+                    for (double v : arg.vector) {
+                        total += v;
+                    }
+                }
+            }
+            result.wrap(total);
+            return result;
         });
         registerMethod(Declarations.PROD, (ctx, funcName, arity, args) -> {
             double x = 1;
@@ -583,8 +599,8 @@ public class MethodRegistry {
                 double v2 = (o2.type == 0) ? o2.scalar : 0.0;
                 return Double.compare(v1, v2);  // Ascending order
             });
-            double[]out=new double[sortedData.length];
-            for(int i=0;i<out.length;i++){
+            double[] out = new double[sortedData.length];
+            for (int i = 0; i < out.length; i++) {
                 out[i] = sortedData[i].scalar;
             }
 
