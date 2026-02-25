@@ -115,6 +115,7 @@ public class Declarations {
     public static final String MATRIX_COFACTORS = "cofactor";
     public static final String MATRIX_ADJOINT = "adjoint";
     public static final String MATRIX_EIGENVEC = "eigvec";
+    public static final String MATRIX_EIGENVALUES = "eigvalues";
     public static final String MATRIX_EIGENPOLY = "eigpoly";
     public static final String HELP = "help";
 

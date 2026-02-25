@@ -1137,7 +1137,12 @@ public class Set {
                 Function f = FunctionManager.lookUp(token);
 
                 if (f != null) {
-                    return f.getMatrix().transpose();
+                    Matrix m = f.getMatrix();
+                    double[]eigValues = m.computeEigenValues();
+                    for(double lambda : eigValues){
+                        double[] vector = m.computeEigenVector(lambda);
+                    }
+                    
                 }
 
             }
