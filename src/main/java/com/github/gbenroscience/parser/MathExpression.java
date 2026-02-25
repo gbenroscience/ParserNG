@@ -30,9 +30,7 @@ import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Operator.*;
 
-import com.github.gbenroscience.math.matrix.expressParser.Matrix;
-import com.github.gbenroscience.parser.benchmarks.Grok;
-import com.github.gbenroscience.parser.benchmarks.Shootouts;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix; 
 
 /**
  *
@@ -94,8 +92,7 @@ public class MathExpression implements Savable, Solvable {
     private boolean hasPreNumberOperators;
     private boolean hasRemainderOperators;
     private boolean hasPermOrCombOperators;
-    private boolean hasLogicOperators;
-    private ExpressionSolver expressionSolver = new ExpressionSolver();
+    private boolean hasLogicOperators; 
     /**
      * If set to true, MathExpression objects will automatically initialize
      * undeclared variables to zero and store them.
@@ -1646,7 +1643,7 @@ public class MathExpression implements Savable, Solvable {
             }//end if
             //give an error statement and then reset correctFunction to true;
             else {
-                listAppender = "A SYNTAX ERROR OCCURRED";
+                listAppender = SYNTAX_ERROR;
                 correctFunction = true;
             }
             if (myScan.size() == 1) {
@@ -1725,7 +1722,7 @@ public class MathExpression implements Savable, Solvable {
             }
             double val = hiSpeedSolver(inner);
             // Return as string for the main list
-            return String.valueOf(val);
+            return (val != Double.POSITIVE_INFINITY && val != Double.NEGATIVE_INFINITY) ? String.valueOf(val) : MathExpression.SYNTAX_ERROR;
         }
     }
 
@@ -1805,6 +1802,11 @@ public class MathExpression implements Savable, Solvable {
                         } else {//list returning operator has already mutated the scanner with the result of its computations on the portion of the list
                             i = replaceStart;
                         }
+                         if(result.equals(SYNTAX_ERROR)){
+                             correctFunction = false;
+                             returnType = TYPE.ERROR;
+                             return SYNTAX_ERROR;
+                         }
 
                     } catch (Exception e) {
                         e.printStackTrace();
@@ -1856,7 +1858,7 @@ public class MathExpression implements Savable, Solvable {
             }//end if
             //give an error statement and then reset correctFunction to true;
             else {
-                listAppender = "A SYNTAX ERROR OCCURRED";
+                listAppender = SYNTAX_ERROR;
                 correctFunction = true;
             }
             if (myScan.size() == 1) {
@@ -1873,12 +1875,12 @@ public class MathExpression implements Savable, Solvable {
     }//end method solve()
 
     protected List<String> solve(List<String> list) {
-        expressionSolver.evaluate(list);
+        ExpressionSolver.evaluate(list);
         return list;
     }
 
     protected double hiSpeedSolver(List<String> list) {
-        return expressionSolver.evaluate(list);
+        return ExpressionSolver.evaluate(list);
     }
 
     /**
@@ -2505,424 +2507,7 @@ public class MathExpression implements Savable, Solvable {
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
      
 
-
-public final class ExpressionSolver {
-
-        // Operator codes
-        private static final int OP_ADD = 1;
-        private static final int OP_SUB = 2;
-        private static final int OP_MUL = 3;
-        private static final int OP_DIV = 4;
-        private static final int OP_MOD = 5;
-        private static final int OP_POW = 6;
-        private static final int OP_PERM = 7;
-        private static final int OP_COMB = 8;
-        private static final int OP_UMINUS = 13;
-        private static final int OP_FACT = 9;
-        private static final int OP_SQ = 10;
-        private static final int OP_CU = 11;
-        private static final int OP_INV = 12;
-        private static final int OP_SQRT = 14;
-        private static final int OP_CBRT = 15;
-
-        private int precedence(int code) {
-            switch (code) {
-                case OP_UMINUS:
-                    return 100;
-                case OP_POW:
-                    return 90;
-                case OP_MUL:
-                case OP_DIV:
-                case OP_MOD:
-                case OP_PERM:
-                case OP_COMB:
-                    return 80;
-                case OP_ADD:
-                case OP_SUB:
-                    return 70;
-                default:
-                    return 0;
-            }
-        }
-
-        private boolean isRightAssociative(int code) {
-            return code == OP_POW || code == OP_UMINUS;
-        }
-
-        public double evaluate(List<String> tokens) {
-            if (tokens == null || tokens.isEmpty()) {
-                throw new IllegalArgumentException("Empty expression");
-            }
-
-            // Special case: single number
-            if (tokens.size() == 1 && isNumber(tokens.get(0))) {
-                return fastParseDouble(tokens.get(0));
-            }
-
-            String[] toks = tokens.toArray(new String[0]);
-            int n = toks.length;
-
-            DoubleStack values = new DoubleStack();
-            IntStack operators = new IntStack();
-
-            int i = 0;
-            boolean expectOperand = true;
-
-            while (i < n) {
-                String token = toks[i];
-                int len = token.length();
-
-                // Function or operator classification
-                int code = -1;
-                if (len == 1) {
-                    char c = token.charAt(0);
-                    switch (c) {
-                        case '+':
-                            code = OP_ADD;
-                            break;
-                        case '-':
-                            code = OP_SUB;
-                            break;
-                        case '*':
-                            code = OP_MUL;
-                            break;
-                        case '/':
-                            code = OP_DIV;
-                            break;
-                        case '%':
-                            code = OP_MOD;
-                            break;
-                        case '^':
-                            code = OP_POW;
-                            break;
-                        case 'Р':
-                            code = OP_PERM;
-                            break;
-                        case 'Č':
-                            code = OP_COMB;
-                            break;
-                        case '!':
-                            code = OP_FACT;
-                            break;
-                        case '²':
-                            code = OP_SQ;
-                            break;
-                        case '³':
-                            code = OP_CU;
-                            break;
-                        case '√':
-                            code = OP_SQRT;
-                            break;
-                        default:
-                            code = -1;
-                    }
-                } else if (len == 2) {
-                    if (token.charAt(0) == '-' && token.charAt(1) == '¹') {
-                        code = OP_INV;
-                    } else if (token.charAt(0) == '³' && token.charAt(1) == '√') {
-                        code = OP_CBRT;
-                    }
-                }
-
-                if (code != -1) {
-                    if (expectOperand) {
-                        if (code == OP_ADD) {
-                            i++;
-                            continue;
-                        }
-                        if (code == OP_SUB) {
-                            code = OP_UMINUS;
-                        }
-                    }
-
-                    int prec = precedence(code);
-                    boolean right = isRightAssociative(code);
-                    while (operators.size > 0) {
-                        int top = operators.data[operators.size - 1];
-                        int topPrec = precedence(top);
-                        if (topPrec > prec || (topPrec == prec && !right)) {
-                            applyTop(values, operators);
-                        } else {
-                            break;
-                        }
-                    }
-                    operators.push(code);
-                    expectOperand = true;
-                    i++;
-                } else {
-                    double val = fastParseDouble(token);
-                    i++;
-
-                    // Postfix folding
-                    while (i < n) {
-                        String next = toks[i];
-                        int postCode = getPostfixCode(next);
-                        if (postCode == -1) {
-                            break;
-                        }
-                        val = applyPostfix(postCode, val);
-                        i++;
-                    }
-                    values.push(val);
-                    expectOperand = false;
-                }
-            }
-
-            while (operators.size > 0) {
-                applyTop(values, operators);
-            }
-
-            if (values.size != 1) {
-                throw new IllegalArgumentException("Invalid expression");
-            }
-
-            return values.data[0];
-        }
-
-        private int getPostfixCode(String s) {
-            int len = s.length();
-            if (len == 1) {
-                char c = s.charAt(0);
-                switch (c) {
-                    case '!':
-                        return OP_FACT;
-                    case '²':
-                        return OP_SQ;
-                    case '³':
-                        return OP_CU;
-                    case '√':
-                        return OP_SQRT;
-                    default:
-                        return -1;
-                }
-            } else if (len == 2) {
-                if (s.charAt(0) == '-' && s.charAt(1) == '¹') {
-                    return OP_INV;
-                }
-                if (s.charAt(0) == '³' && s.charAt(1) == '√') {
-                    return OP_CBRT;
-                }
-            }
-            return -1;
-        }
-
-        private double applyPostfix(int code, double x) {
-            switch (code) {
-                case OP_FACT:
-                    return Maths.fact(x);
-                case OP_SQ:
-                    return x * x;
-                case OP_CU:
-                    return x * x * x;
-                case OP_INV:
-                    return 1.0 / x;
-                case OP_SQRT:
-                    return (x < 0) ? Double.NaN : Math.sqrt(x);
-                case OP_CBRT:
-                    return Math.cbrt(x);
-                default:
-                    return x;
-            }
-        }
-
-        private void applyTop(DoubleStack values, IntStack operators) {
-            int code = operators.data[--operators.size];
-
-            if (code == OP_UMINUS) {
-                values.data[values.size - 1] = -values.data[values.size - 1];
-                return;
-            }
-
-            double b = values.data[--values.size];
-            double a = values.data[--values.size];
-            double res;
-
-            // Infinity / NaN safeguards
-            if (Double.isNaN(a) || Double.isNaN(b)) {
-                res = Double.NaN;
-            } else if (Double.isInfinite(a) || Double.isInfinite(b)) {
-                switch (code) {
-                    case OP_ADD:
-                    case OP_SUB:
-                    case OP_MUL:
-                        res = Double.POSITIVE_INFINITY;
-                        break;
-                    case OP_DIV:
-                        res = (b == 0) ? Double.NaN : Double.POSITIVE_INFINITY;
-                        break;
-                    case OP_POW:
-                        res = Math.pow(a, b);
-                        break;
-                    default:
-                        res = Double.NaN;
-                }
-            } else {
-                switch (code) {
-                    case OP_ADD:
-                        res = a + b;
-                        break;
-                    case OP_SUB:
-                        res = a - b;
-                        break;
-                    case OP_MUL:
-                        res = a * b;
-                        break;
-                    case OP_DIV:
-                        res = a / b;
-                        break;
-                    case OP_MOD:
-                        res = a % b;
-                        break;
-                    case OP_POW:
-                        res = Math.pow(a, b);
-                        break;
-                    case OP_PERM:
-                        res = permutation(a, b);
-                        break;
-                    case OP_COMB:
-                        res = combination(a, b);
-                        break;
-                    default:
-                        res = 0.0;
-                }
-            }
-
-            values.data[values.size++] = res;
-        }
-
-        double permutation(double n, double r) {
-            return Maths.fact(n) / Maths.fact(n - r);
-        }
-
-        double combination(double n, double r) {
-            return Maths.fact(n) / (Maths.fact(n - r) * Maths.fact(r));
-        }
-
-        // Custom fast parser (2-4x faster than Double.parseDouble for these short valid strings)
-        private double fastParseDouble(String s) {
-            int len = s.length();
-            if (len == 0) {
-                return 0.0; // or throw if empty not allowed
-            }
-            int idx = 0;
-            boolean negative = false;
-            char first = s.charAt(0);
-
-            // Handle sign
-            if (first == '-') {
-                negative = true;
-                idx = 1;
-            } else if (first == '+') {
-                idx = 1;
-            }
-
-            double value = 0.0;
-
-            // Integer part
-            boolean hasIntPart = false;
-            while (idx < len) {
-                char c = s.charAt(idx);
-                if (c >= '0' && c <= '9') {
-                    value = value * 10.0 + (c - '0');
-                    hasIntPart = true;
-                    idx++;
-                } else {
-                    break;
-                }
-            }
-
-            // Fractional part
-            boolean hasFracPart = false;
-            if (idx < len && s.charAt(idx) == '.') {
-                idx++;
-                double frac = 0.0;
-                double div = 1.0;
-                while (idx < len) {
-                    char c = s.charAt(idx);
-                    if (c >= '0' && c <= '9') {
-                        div *= 10.0;
-                        frac = frac * 10.0 + (c - '0');
-                        hasFracPart = true;
-                        idx++;
-                    } else {
-                        break;
-                    }
-                }
-                value += frac / div;
-            }
-
-            // Scientific notation
-            if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
-                idx++;
-                boolean negExp = false;
-                if (idx < len && s.charAt(idx) == '-') {
-                    negExp = true;
-                    idx++;
-                } else if (idx < len && s.charAt(idx) == '+') {
-                    idx++;
-                }
-
-                long exp = 0;
-                boolean hasExpDigits = false;
-                while (idx < len) {
-                    char c = s.charAt(idx);
-                    if (c >= '0' && c <= '9') {
-                        exp = exp * 10 + (c - '0');
-                        hasExpDigits = true;
-                        if (exp > 1000000000L) { // Prevent insane overflow
-                            value = negative ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-                            break;
-                        }
-                        idx++;
-                    } else {
-                        break;
-                    }
-                }
-                if (hasExpDigits) {
-                    value *= Math.pow(10.0, negExp ? -exp : exp);
-                }
-            }
-
-            // Basic validation (since scanner is trusted, but good to have)
-            if (idx != len || (!hasIntPart && !hasFracPart)) {
-                return 0.0; // or throw if strict
-            }
-
-            return negative ? -value : value;
-        }
-
-// Fixed-size primitive stacks (increased to 128 for extra safety)
-        private class DoubleStack {
-
-            private double[] data = new double[128];
-            private int size = 0;
-
-            void push(double v) {
-                if (size == data.length) {
-                    data = Arrays.copyOf(data, data.length * 2);
-                }
-                data[size++] = v;
-            }
-        }
-
-        private class IntStack {
-
-            private int[] data = new int[128];
-            private int size = 0;
-
-            void push(int v) {
-                if (size == data.length) {
-                    data = Arrays.copyOf(data, data.length * 2);
-                }
-                data[size++] = v;
-            }
-        }
-
-        private boolean isNumber(String s) {
-            // Simple check used in single-number case
-            return s != null && !s.isEmpty() && Character.isDigit(s.charAt(0)) || s.charAt(0) == '-' || s.charAt(0) == '+';
-        }
-    }
+ 
  
     /**
      * While traversing a list of tokens, sometimes its good to know if a token
@@ -3091,601 +2676,205 @@ public final class ExpressionSolver {
         }
     }
 
-    public final class ExpressionSolverOld {
+    
+public static final class ExpressionSolver {
 
-        // Operator constants (adjust to match your project's constants if needed)
-        private static final String INFINITY = "Infinity";
+  // List-based wrapper for compatibility
+    public static double evaluate(List<String> tokens) {
+        return evaluate(tokens.toArray(new String[0]));
+    }
+    /**
+     * Array-based entry point for maximum performance.
+     */
+    public static double evaluate(String[] ts) {
+        final int n = ts.length;
+        final double[] valStack = new double[n];
+        final int[] opStack = new int[n];
+        int vIdx = -1;
+        int oIdx = -1;
 
-        // -------------------------
-        // Public entry point
-        // -------------------------
-        protected List<String> solve(List<String> list) {
-            if (list == null) {
-                return null;
+        for (int i = 0; i < n; i++) {
+            final String s = ts[i];
+            if (s == null || s.isEmpty()) continue;
+
+            final char c0 = s.charAt(0);
+            final int sLen = s.length();
+
+            // 1. NUMERIC CHECK 
+            // Ensures -5 is a number, but -¹ and - are not.
+            if ((c0 >= '0' && c0 <= '9') || (c0 == '-' && sLen > 1 && s.charAt(1) >= '0' && s.charAt(1) <= '9')) {
+                valStack[++vIdx] = fastParseDouble(s);
+                continue;
             }
 
-            // 1) Fix leading "( - number" anomaly -> mark the minus slot for removal and
-            //    convert the number to negative (or remove leading '-' if already negative).
-            fixLeadingParenthesisMinus(list);
-
-            // 2) Remove garbage tokens quickly (single pass)
-            cleanList(list);
-
-            // 3) Post-number operators (factorial, square, cube, inverse)
-            if (isHasPostNumberOperators()) {
-                applyPostNumberOperators(list);
-                cleanList(list);
+            // 2. UNARY PREFIX (ROOTS)
+            if (c0 == '√' || s.equals("³√")) {
+                opStack[++oIdx] = (c0 == '√') ? '√' : 'R'; 
+                continue;
             }
 
-            // 4) Primary power pass (handles numeric ^ numeric)
-            if (isHasPowerOperators()) {
-                applyPowerOperators(list);
-                cleanList(list);
+            // 3. UNARY POSTFIX (FACTORIAL/POWERS/INVERSE)
+            // Explicitly handles the "-¹" token
+            if (c0 == '!' || c0 == '²' || c0 == '³' || s.equals("-¹")) {
+                final double a = valStack[vIdx];
+                if (c0 == '!') valStack[vIdx] = Maths.fact(a);
+                else if (c0 == '²') valStack[vIdx] = a * a;
+                else if (c0 == '³') valStack[vIdx] = a * a * a;
+                else if (s.equals("-¹")) valStack[vIdx] = 1.0 / a; // Fixed: Explicit inverse
+                continue;
             }
 
-            // 5) Pre-number operators (root, cube root, etc.)
-            if (isHasPreNumberOperators()) {
-                applyPreNumberOperators(list);
-                cleanList(list);
-            }
+            // 4. BINARY OPERATORS
+            final int currentPrec = getPrec(c0);
+            while (oIdx >= 0) {
+                final char topOp = (char) opStack[oIdx];
+                final int topPrec = getPrec(topOp);
 
-            // 6) Secondary power pass (if original logic required a second pass)
-            //    The original code ran power handling in two places; keep a second pass
-            //    to preserve semantics where functions and powers interact.
-            if (isHasPowerOperators()) {
-                applyPowerOperators(list);
-                cleanList(list);
+                if (c0 == '^' ? topPrec > currentPrec : topPrec >= currentPrec) {
+                    vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
+                } else {
+                    break;
+                }
             }
-
-            // 7) Permutation / Combination
-            if (isHasPermOrCombOperators()) {
-                applyPermCombOperators(list);
-                cleanList(list);
-            }
-
-            // 8) Multiplication / Division / Remainder and logical numeric operators
-            if (isHasMulOrDivOperators() || isHasRemainderOperators() || isHasLogicOperators()) {
-                applyMulDivRemainderAndLogic(list);
-                cleanList(list);
-            }
-
-            // 9) Plus / Minus (final pass)
-            if (isHasPlusOrMinusOperators()) {
-                applyAddSubOperators(list);
-                cleanList(list);
-            }
-
-            // Final packaging: if more than one token remains, mark syntax error
-            if (list.size() != 1) {
-                MathExpression.this.parser_Result = (MathExpression.this.parser_Result == Parser_Result.VALID)
-                        ? Parser_Result.SYNTAX_ERROR
-                        : MathExpression.this.parser_Result;
-                MathExpression.this.correctFunction = false;
-                list.clear();
-                list.add(MathExpression.this.parser_Result.name());
-            }
-
-            return list;
+            opStack[++oIdx] = c0;
         }
 
-        // -------------------------
-        // Helper: fix leading "( - number" anomaly
-        // -------------------------
-        private void fixLeadingParenthesisMinus(List<String> list) {
-            if (list.size() >= 3 && "(".equals(list.get(0)) && MINUS.equals(list.get(1))) {
-                String third = list.get(2);
-                if (isNumber(third)) {
-                    // mark the minus slot for removal and flip sign on the number
-                    list.set(1, "");
-                    if (third.startsWith(MINUS)) {
-                        list.set(2, third.substring(1)); // "-5" -> "5"
-                    } else {
-                        list.set(2, MINUS + third); // "5" -> "-5"
-                    }
-                }
-            }
+        while (oIdx >= 0) {
+            vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
         }
-
-        // -------------------------
-        // Helper: remove garbage tokens quickly
-        // -------------------------
-        private void cleanList(List<String> list) {
-            // Remove empty strings and parentheses in one pass using removeIf (O(n))
-            Predicate<String> garbage = s -> s == null || s.isEmpty() || "(".equals(s) || ")".equals(s);
-            list.removeIf(garbage);
-        }
-
-        // -------------------------
-        // Post-number operators: factorial, square, cube, inverse
-        // -------------------------
-        private void applyPostNumberOperators(List<String> list) {
-            // iterate left-to-right; we examine token i (value) and i+1 (post-operator)
-            for (int i = 0; i + 1 < list.size(); i++) {
-                String val = list.get(i);
-                String op = list.get(i + 1);
-                if (op == null) {
-                    continue;
-                }
-
-                if (isFactorial(op)) {
-                    if (isNumber(val)) {
-                        list.set(i + 1, Maths.fact(val));
-                        list.set(i, "");
-                    } else if (INFINITY.equals(val)) {
-                        list.set(i + 1, INFINITY);
-                        list.set(i, "");
-                    }
-                } else if (isSquare(op)) {
-                    handlePowerEffect(list, i, val, 2.0);
-                } else if (isCube(op)) {
-                    handlePowerEffect(list, i, val, 3.0);
-                } else if (isInverse(op)) {
-                    if (isNumber(val)) {
-                        double d = parseDoubleSafe(val);
-                        list.set(i + 1, String.valueOf(1.0 / d));
-                        list.set(i, "");
-                    } else if (INFINITY.equals(val)) {
-                        list.set(i + 1, "0.0");
-                        list.set(i, "");
-                    }
-                }
-            }
-        }
-
-        // Small helper used by post-number operators to avoid duplication
-        private void handlePowerEffect(List<String> list, int i, String valStr, double pow) {
-            if (isNumber(valStr)) {
-                double base = parseDoubleSafe(valStr);
-                list.set(i + 1, String.valueOf(Math.pow(base, pow)));
-                list.set(i, "");
-            } else if (INFINITY.equals(valStr)) {
-                list.set(i + 1, INFINITY);
-                list.set(i, "");
-            }
-        }
-
-        // -------------------------
-        // Power operators (binary ^)
-        // -------------------------
-        private void applyPowerOperators(List<String> list) {
-            // iterate left-to-right; evaluate only when both neighbors are numbers or Infinity
-            // We iterate from left to right and collapse triples [left, ^, right] into right
-            for (int i = 1; i + 1 < list.size(); i++) {
-                String op = list.get(i);
-                if (!POWER.equals(op)) {
-                    continue;
-                }
-
-                String left = safeGet(list, i - 1);
-                String right = safeGet(list, i + 1);
-
-                // If either neighbor missing, skip
-                if (left == null || right == null) {
-                    continue;
-                }
-
-                // If both numeric
-                if (isNumber(left) && isNumber(right)) {
-                    double base = parseDoubleSafe(left);
-                    double exponent = parseDoubleSafe(right);
-                    double result = Math.pow(base, exponent);
-                    list.set(i + 1, String.valueOf(result));
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    i++; // skip past the replaced token
-                    continue;
-                }
-
-                // Handle Infinity cases with simplified but consistent rules:
-                // - Infinity ^ positive -> Infinity
-                // - Infinity ^ 0 -> 1.0
-                // - Infinity ^ negative -> 0.0
-                // - number ^ Infinity -> depends on base: >1 -> Infinity, ==1 -> 1.0, 0<base<1 -> 0.0, base<0 -> Infinity (original had many branches)
-                if (INFINITY.equals(left) && INFINITY.equals(right)) {
-                    list.set(i + 1, INFINITY);
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    continue;
-                }
-
-                if (INFINITY.equals(left) && isNumber(right)) {
-                    double r = parseDoubleSafe(right);
-                    if (r > 0) {
-                        list.set(i + 1, INFINITY);
-                    } else if (r == 0) {
-                        list.set(i + 1, "1.0");
-                    } else {
-                        list.set(i + 1, "0.0");
-                    }
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    continue;
-                }
-
-                if (isNumber(left) && INFINITY.equals(right)) {
-                    double l = parseDoubleSafe(left);
-                    if (l > 1) {
-                        list.set(i + 1, INFINITY);
-                    } else if (l == 1) {
-                        list.set(i + 1, "1.0");
-                    } else if (l > 0) {
-                        list.set(i + 1, "0.0");
-                    } else {
-                        list.set(i + 1, INFINITY);
-                    }
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                }
-            }
-        }
-
-        // -------------------------
-        // Pre-number operators (ROOT, CUBE_ROOT)
-        // -------------------------
-        private void applyPreNumberOperators(List<String> list) {
-            // iterate right-to-left to allow replacing operator with computed value
-            for (int i = list.size() - 2; i >= 0; i--) {
-                String op = list.get(i);
-                String next = safeGet(list, i + 1);
-                if (op == null || next == null) {
-                    continue;
-                }
-
-                if (INFINITY.equals(next)) {
-                    list.set(i, INFINITY);
-                    list.set(i + 1, "");
-                    continue;
-                }
-
-                if (isNumber(next)) {
-                    double val = parseDoubleSafe(next);
-                    if (ROOT.equals(op)) {
-                        list.set(i, String.valueOf(Math.sqrt(val)));
-                        list.set(i + 1, "");
-                    } else if (CUBE_ROOT.equals(op)) {
-                        list.set(i, String.valueOf(Math.cbrt(val)));
-                        list.set(i + 1, "");
-                    }
-                }
-            }
-        }
-
-        // -------------------------
-        // Permutation / Combination
-        // -------------------------
-        private void applyPermCombOperators(List<String> list) {
-            for (int i = 1; i + 1 < list.size(); i++) {
-                String op = list.get(i);
-                if (PERMUTATION.equals(op) || COMBINATION.equals(op)) {
-                    String left = safeGet(list, i - 1);
-                    String right = safeGet(list, i + 1);
-                    if (left == null || right == null) {
-                        continue;
-                    }
-
-                    if (INFINITY.equals(left) || INFINITY.equals(right)) {
-                        // If either side is Infinity, result is Infinity (original used many branches)
-                        list.set(i + 1, INFINITY);
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                        continue;
-                    }
-
-                    if (isNumber(left) && isNumber(right)) {
-                        // Use factorial-based formulas; guard against large factorials by parsing to integer where appropriate
-                        double n = parseDoubleSafe(left);
-                        double r = parseDoubleSafe(right);
-                        if (PERMUTATION.equals(op)) {
-                            // nPr = n! / (n-r)!
-                            String res = safePermutation(n, r);
-                            list.set(i + 1, res);
-                        } else {
-                            // nCr = n! / ((n-r)! * r!)
-                            String res = safeCombination(n, r);
-                            list.set(i + 1, res);
-                        }
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                    }
-                }
-            }
-        }
-
-        // Safe permutation using Maths.fact if available; fallback to 0.0 on error
-        private String safePermutation(double n, double r) {
-            try {
-                // Prefer integer factorial if values are integral and small
-                if (isIntegral(n) && isIntegral(r) && n >= r && n >= 0 && r >= 0) {
-                    return String.valueOf(Double.parseDouble(Maths.fact(String.valueOf((long) n)))
-                            / Double.parseDouble(Maths.fact(String.valueOf((long) (n - r)))));
-                }
-            } catch (Exception ignored) {
-            }
-            return "0.0";
-        }
-
-        private String safeCombination(double n, double r) {
-            try {
-                if (isIntegral(n) && isIntegral(r) && n >= r && n >= 0 && r >= 0) {
-                    double numerator = Double.parseDouble(Maths.fact(String.valueOf((long) n)));
-                    double denom = Double.parseDouble(Maths.fact(String.valueOf((long) (n - r))))
-                            * Double.parseDouble(Maths.fact(String.valueOf((long) r)));
-                    return String.valueOf(numerator / denom);
-                }
-            } catch (Exception ignored) {
-            }
-            return "0.0";
-        }
-
-        // -------------------------
-        // Multiplication / Division / Remainder and numeric logic (==, >, >=, <, <=)
-        // -------------------------
-        private void applyMulDivRemainderAndLogic(List<String> list) {
-            // We will do a single pass and handle multiply/divide/remainder first,
-            // then comparisons in the same pass to preserve precedence similar to original.
-            for (int i = 1; i + 1 < list.size(); i++) {
-                String op = list.get(i);
-                String left = safeGet(list, i - 1);
-                String right = safeGet(list, i + 1);
-                if (op == null || left == null || right == null) {
-                    continue;
-                }
-
-                // Multiplicative operators
-                if (MULTIPLY.equals(op) || DIVIDE.equals(op) || REMAINDER.equals(op)) {
-                    // Handle Infinity cases and numeric cases
-                    String result = computeMulDivRem(left, right, op);
-                    if (result != null) {
-                        list.set(i + 1, result);
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                        i++; // skip past replaced token
-                    }
-                    continue;
-                }
-
-                // Comparison / logical operators (==, >, >=, <, <=)
-                if (EQUALS.equals(op) || GREATER_THAN.equals(op) || GREATER_OR_EQUALS.equals(op)
-                        || LESS_THAN.equals(op) || LESS_OR_EQUALS.equals(op)) {
-                    String result = computeComparison(left, right, op);
-                    if (result != null) {
-                        list.set(i + 1, result);
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                        i++;
-                    }
-                }
-            }
-        }
-
-        private String computeMulDivRem(String left, String right, String op) {
-            // Handle Infinity strings explicitly
-            boolean leftInf = INFINITY.equals(left);
-            boolean rightInf = INFINITY.equals(right);
-
-            try {
-                if (leftInf && rightInf) {
-                    if (MULTIPLY.equals(op) || REMAINDER.equals(op)) {
-                        return INFINITY;
-                    }
-                    if (DIVIDE.equals(op)) {
-                        return INFINITY;
-                    }
-                }
-                if (leftInf && !rightInf) {
-                    double r = parseDoubleSafe(right);
-                    if (MULTIPLY.equals(op)) {
-                        return INFINITY;
-                    }
-                    if (DIVIDE.equals(op)) {
-                        return INFINITY;
-                    }
-                    if (REMAINDER.equals(op)) {
-                        return INFINITY;
-                    }
-                }
-                if (!leftInf && rightInf) {
-                    double l = parseDoubleSafe(left);
-                    if (MULTIPLY.equals(op)) {
-                        return INFINITY;
-                    }
-                    if (DIVIDE.equals(op)) {
-                        return "0.0";
-                    }
-                    if (REMAINDER.equals(op)) {
-                        return left; // x % Infinity -> x
-                    }
-                }
-
-                // Both numeric
-                if (isNumber(left) && isNumber(right)) {
-                    double l = parseDoubleSafe(left);
-                    double r = parseDoubleSafe(right);
-                    if (op.charAt(0) == MULTIPLY.charAt(0)) {
-                        return String.valueOf(l * r);
-                    } else if (op.charAt(0) == DIVIDE.charAt(0)) {
-                        return String.valueOf(l / r);
-                    } else if (op.charAt(0) == REMAINDER.charAt(0)) {
-                        return String.valueOf(l % r);
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-            return null;
-        }
-
-        private String computeComparison(String left, String right, String op) {
-            boolean leftInf = INFINITY.equals(left);
-            boolean rightInf = INFINITY.equals(right);
-
-            try {
-                if (leftInf && rightInf) {
-                    // Infinity compared to Infinity: == true, > true, >= true, < false, <= true
-                    if (isEqualsOperator(op)) {
-                        return "true";
-                    } else if (isGreaterThanOperator(op)) {
-                        return "true";
-                    } else if (isGreaterOrEqualsOperator(op)) {
-                        return "true";
-                    } else if (isLessThanOperator(op)) {
-                        return "false";
-                    } else if (isLessThanOrEqualsOperator(op)) {
-                        return "true";
-                    }
-                }
-                if (leftInf && !rightInf) {
-                    if (isEqualsOperator(op)) {
-                        return "false";
-                    } else if (isGreaterThanOperator(op)) {
-                        return "true";
-                    } else if (isGreaterOrEqualsOperator(op)) {
-                        return "true";
-                    } else if (isLessThanOperator(op)) {
-                        return "false";
-                    } else if (isLessThanOrEqualsOperator(op)) {
-                        return "false";
-                    }
-                }
-                if (!leftInf && rightInf) {
-                    if (isEqualsOperator(op)) {
-                        return "false";
-                    } else if (isGreaterThanOperator(op)) {
-                        return "false";
-                    } else if (isGreaterOrEqualsOperator(op)) {
-                        return "false";
-                    } else if (isLessThanOperator(op)) {
-                        return "true";
-                    } else if (isLessThanOrEqualsOperator(op)) {
-                        return "false";
-                    }
-                }
-
-                if (isNumber(left) && isNumber(right)) {
-                    double l = parseDoubleSafe(left);
-                    double r = parseDoubleSafe(right);
-
-                    if (isEqualsOperator(op)) {
-                        return String.valueOf((l - r) == 0);
-                    } else if (isGreaterThanOperator(op)) {
-                        return String.valueOf((l - r) > 0);
-                    } else if (isGreaterOrEqualsOperator(op)) {
-                        return String.valueOf((l - r) >= 0);
-                    } else if (isLessThanOperator(op)) {
-                        return String.valueOf((l - r) < 0);
-                    } else if (isLessThanOrEqualsOperator(op)) {
-                        return String.valueOf((l - r) <= 0);
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-            return null;
-        }
-
-        // -------------------------
-        // Plus / Minus (final pass)
-        // -------------------------
-        private void applyAddSubOperators(List<String> list) {
-            for (int i = 1; i + 1 < list.size(); i++) {
-                String op = list.get(i);
-                if (!PLUS.equals(op) && !MINUS.equals(op)) {
-                    continue;
-                }
-
-                String left = safeGet(list, i - 1);
-                String right = safeGet(list, i + 1);
-                if (left == null || right == null) {
-                    continue;
-                }
-
-                // Handle Infinity cases
-                if (INFINITY.equals(left) || INFINITY.equals(right)) {
-                    String res = computeAddSubInfinity(left, right, op);
-                    list.set(i + 1, res);
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    i++;
-                    continue;
-                }
-
-                if (isNumber(left) && isNumber(right)) {
-                    double l = parseDoubleSafe(left);
-                    double r = parseDoubleSafe(right);
-                    double result = PLUS.equals(op) ? (l + r) : (l - r);
-                    list.set(i + 1, String.valueOf(result));
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    i++;
-                }
-            }
-        }
-
-        private String computeAddSubInfinity(String left, String right, String op) {
-            // Simplified consistent rules:
-            if (INFINITY.equals(left) && INFINITY.equals(right)) {
-                if (PLUS.equals(op)) {
-                    return INFINITY;
-                }
-                if (MINUS.equals(op)) {
-                    return "NaN"; // Infinity - Infinity is undefined
-                }
-            }
-            if (INFINITY.equals(left) && !INFINITY.equals(right)) {
-                return INFINITY;
-            }
-            if (!INFINITY.equals(left) && INFINITY.equals(right)) {
-                return INFINITY;
-            }
-            return "0.0";
-        }
-
-        // -------------------------
-        // Utility helpers
-        // -------------------------
-        private String safeGet(List<String> list, int idx) {
-            if (idx < 0 || idx >= list.size()) {
-                return null;
-            }
-            return list.get(idx);
-        }
-
-        private boolean isIntegral(double d) {
-            return Math.floor(d) == d;
-        }
-
-        private double parseDoubleSafe(String s) {
-            try {
-                return Double.parseDouble(s);
-            } catch (Exception e) {
-                return Double.NaN;
-            }
-        }
-
-        // -------------------------
-        // Placeholder predicates and external calls
-        // -------------------------
-        // The original code referenced many helper methods (isNumber, isFactorial, etc.)
-        // which are assumed to exist in the original codebase. We keep the same names
-        // so this refactor can be dropped into the project and wired to the existing
-        // implementations.
-        protected boolean isNumber(String s) {
-            // Delegate to existing implementation in your codebase.
-            // Placeholder: treat numeric strings and "Infinity" as numbers.
-            if (s == null) {
-                return false;
-            }
-            if (INFINITY.equals(s)) {
-                return true;
-            }
-            try {
-                Double.parseDouble(s);
-                return true;
-            } catch (Exception e) {
-                return false;
-            }
-        }
-
+        return valStack[0];
     }
 
+    private static int getPrec(char op) {
+        switch (op) {
+            case '+': case '-': return 1;
+            case '*': case '/': case '%': case 'Р': case 'Č': return 2;
+            case '^': return 3;
+            case '√': case 'R': return 4;
+            default: return 0;
+        }
+    }
+
+    private static int applyOp(char op, double[] valStack, int vIdx) {
+        if (op == '√') {
+            valStack[vIdx] = Math.sqrt(valStack[vIdx]);
+            return vIdx;
+        }
+        if (op == 'R') {
+            valStack[vIdx] = Math.cbrt(valStack[vIdx]);
+            return vIdx;
+        }
+        
+        double b = valStack[vIdx--];
+        double a = valStack[vIdx];
+        switch (op) {
+            case '+': valStack[vIdx] = a + b; break;
+            case '-': valStack[vIdx] = a - b; break;
+            case '*': valStack[vIdx] = a * b; break;
+            case '/': valStack[vIdx] = a / b; break;
+            case '%': valStack[vIdx] = a % b; break;
+            case '^': valStack[vIdx] = Math.pow(a, b); break;
+            case 'Р': valStack[vIdx] = Maths.fact(a) / Maths.fact(a - b); break;
+            case 'Č': valStack[vIdx] = Maths.fact(a) / (Maths.fact(b) * Maths.fact(a - b)); break;
+        }
+        return vIdx;
+    }
+    
+    
+      private static double fastParseDouble(String s) {
+        int len = s.length();
+        if (len == 0) {
+            return 0.0; // or throw if empty not allowed
+        }
+        int idx = 0;
+        boolean negative = false;
+        char first = s.charAt(0);
+
+        // Handle sign
+        if (first == '-') {
+            negative = true;
+            idx = 1;
+        } else if (first == '+') {
+            idx = 1;
+        }
+
+        double value = 0.0;
+
+        // Integer part
+        boolean hasIntPart = false;
+        while (idx < len) {
+            char c = s.charAt(idx);
+            if (c >= '0' && c <= '9') {
+                value = value * 10.0 + (c - '0');
+                hasIntPart = true;
+                idx++;
+            } else {
+                break;
+            }
+        }
+
+        // Fractional part
+        boolean hasFracPart = false;
+        if (idx < len && s.charAt(idx) == '.') {
+            idx++;
+            double frac = 0.0;
+            double div = 1.0;
+            while (idx < len) {
+                char c = s.charAt(idx);
+                if (c >= '0' && c <= '9') {
+                    div *= 10.0;
+                    frac = frac * 10.0 + (c - '0');
+                    hasFracPart = true;
+                    idx++;
+                } else {
+                    break;
+                }
+            }
+            value += frac / div;
+        }
+
+        // Scientific notation
+        if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
+            idx++;
+            boolean negExp = false;
+            if (idx < len && s.charAt(idx) == '-') {
+                negExp = true;
+                idx++;
+            } else if (idx < len && s.charAt(idx) == '+') {
+                idx++;
+            }
+
+            long exp = 0;
+            boolean hasExpDigits = false;
+            while (idx < len) {
+                char c = s.charAt(idx);
+                if (c >= '0' && c <= '9') {
+                    exp = exp * 10 + (c - '0');
+                    hasExpDigits = true;
+                    if (exp > 1000000000L) { // Prevent insane overflow
+                        value = negative ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+                        break;
+                    }
+                    idx++;
+                } else {
+                    break;
+                }
+            }
+            if (hasExpDigits) {
+                value *= Math.pow(10.0, negExp ? -exp : exp);
+            }
+        }
+
+        // Basic validation (since scanner is trusted, but good to have)
+        if (idx != len || (!hasIntPart && !hasFracPart)) {
+            return 0.0; // or throw if strict
+        }
+
+        return negative ? -value : value;
+    }
+
+   
+}
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**
      *
@@ -3753,6 +2942,7 @@ public final class ExpressionSolver {
 
         MathExpression m = new MathExpression(s5);
         System.out.println("m.solve(): " + m.solve());
+        System.out.println("m.solve(): " + new MathExpression("avgN(0,4+0,2+3,-2)").solve());
 
         //   double N = 100; 
         //   Shootouts.benchmark(s2, (int) N);

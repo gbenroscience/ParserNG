@@ -175,7 +175,99 @@ public class Number {
         }//end catch
 
     }
+ public static double fastParseDouble(String s) {
+        int len = s.length();
+        if (len == 0) {
+            return 0.0; // or throw if empty not allowed
+        }
+        int idx = 0;
+        boolean negative = false;
+        char first = s.charAt(0);
 
+        // Handle sign
+        if (first == '-') {
+            negative = true;
+            idx = 1;
+        } else if (first == '+') {
+            idx = 1;
+        }
+
+        double value = 0.0;
+
+        // Integer part
+        boolean hasIntPart = false;
+        while (idx < len) {
+            char c = s.charAt(idx);
+            if (c >= '0' && c <= '9') {
+                value = value * 10.0 + (c - '0');
+                hasIntPart = true;
+                idx++;
+            } else {
+                break;
+            }
+        }
+
+        // Fractional part
+        boolean hasFracPart = false;
+        if (idx < len && s.charAt(idx) == '.') {
+            idx++;
+            double frac = 0.0;
+            double div = 1.0;
+            while (idx < len) {
+                char c = s.charAt(idx);
+                if (c >= '0' && c <= '9') {
+                    div *= 10.0;
+                    frac = frac * 10.0 + (c - '0');
+                    hasFracPart = true;
+                    idx++;
+                } else {
+                    break;
+                }
+            }
+            value += frac / div;
+        }
+
+        // Scientific notation
+        if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
+            idx++;
+            boolean negExp = false;
+            if (idx < len && s.charAt(idx) == '-') {
+                negExp = true;
+                idx++;
+            } else if (idx < len && s.charAt(idx) == '+') {
+                idx++;
+            }
+
+            long exp = 0;
+            boolean hasExpDigits = false;
+            while (idx < len) {
+                char c = s.charAt(idx);
+                if (c >= '0' && c <= '9') {
+                    exp = exp * 10 + (c - '0');
+                    hasExpDigits = true;
+                    if (exp > 1000000000L) { // Prevent insane overflow
+                        value = negative ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+                        break;
+                    }
+                    idx++;
+                } else {
+                    break;
+                }
+            }
+            if (hasExpDigits) {
+                value *= Math.pow(10.0, negExp ? -exp : exp);
+            }
+        }
+
+        // Basic validation (since scanner is trusted, but good to have)
+        if (idx != len || (!hasIntPart && !hasFracPart)) {
+            return 0.0; // or throw if strict
+        }
+
+        return negative ? -value : value;
+    }
+
+   
     public static void main(String args[]) {
         System.out.println(isNumber("-"));
         System.out.println(validNumber("-90g"));

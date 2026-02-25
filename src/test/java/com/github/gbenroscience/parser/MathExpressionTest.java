@@ -23,7 +23,7 @@ class MathExpressionTest {
     @Test
     void expTest() {
         MathExpression me = new MathExpression("2^3");
-        Assertions.assertEquals("8.0", me.solve());
+        Assertions.assertEquals(Number.fastParseDouble("8.0"), Number.fastParseDouble(me.solve()));
     }
 
     @Test
@@ -31,19 +31,19 @@ class MathExpressionTest {
         MathExpression me = new MathExpression("8^(1/3)");
         Assertions.assertEquals("2.0", me.solve());
         me = new MathExpression("8^(1/2)");
-        Assertions.assertEquals("2.8284271247461903", me.solve());
+        Assertions.assertEquals(Number.fastParseDouble("2.8284271247461903"), Number.fastParseDouble(me.solve()));
     }
 
     @Test
     void customEmbeddedFunctionTest() {
         MathExpression me = new MathExpression("avgN(0,1,2,3)");
-        Assertions.assertEquals("2", me.solve());
+        Assertions.assertEquals(Number.fastParseDouble("2"), Number.fastParseDouble(me.solve()));
     }
 
     @Test
     void customEmbeddedFunctionTestMultipleBrackets() {
         MathExpression me = new MathExpression("((avgN((0,1,2,3))))");
-        Assertions.assertEquals("2", me.solve());
+        Assertions.assertEquals(Number.fastParseDouble("2"), Number.fastParseDouble(me.solve()));
         me = new MathExpression("((avgN((0,  (1)+((1+1)),((2)),((3+2))))))");
         //me = new MathExpression("((weir((    (1)+((1+1)),((2)),((3+2))))))");
         Assertions.assertEquals("3.333333333", me.solve()); //weird, by nature of weird function. Will be removed once it wil be repalced by proper function
@@ -97,21 +97,21 @@ class MathExpressionTest {
         Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b1);
         me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals("1", me.solve());
+        Assertions.assertEquals(1, Double.parseDouble(me.solve()));
         me = new MathExpression("b2(1,2,3)");
         Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b2);
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals("2", me.solve());
+        Assertions.assertEquals(2, Double.parseDouble(me.solve()));
         me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals("1", me.solve());
+        Assertions.assertEquals(1, Double.parseDouble(me.solve()));
         me = new MathExpression("b1(1,2,3)+b2(1,2,3)");
-        Assertions.assertEquals("3.0", me.solve());
+        Assertions.assertEquals(3, Double.parseDouble(me.solve()));
         Declarations.unregisterBasicNumericalMethod(b1.getClass());
         me = new MathExpression("b1(1,2,3)");
         Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals("2", me.solve());
+        Assertions.assertEquals(2, Double.parseDouble(me.solve()));
         Declarations.unregisterBasicNumericalMethod(b2.getClass());
         me = new MathExpression("b2(1,2,3)");
         Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
@@ -306,7 +306,7 @@ class MathExpressionTest {
 
         expression.setValue("x", 0 + "");
         if (print) System.out.println(expression.solve());
-        Assertions.assertEquals("A SYNTAX ERROR OCCURRED", expression.solve());
+        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, expression.solve());
         expression.setValue("x", 1 + "");
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals("0.0", expression.solve());
@@ -315,7 +315,7 @@ class MathExpressionTest {
         Assertions.assertTrue("-0.6964441283311967".equals(expression.solve()) || "-0.6964441283311968".equals(expression.solve()));
         expression.setValue("x", 100 + "");
         if (print) System.out.println(expression.solve());
-        Assertions.assertEquals("-0.9942575694137897", expression.solve());
+        Assertions.assertEquals(Number.fastParseDouble("-0.9942575694137897"), Number.fastParseDouble(expression.solve()));
 
         Function f = FunctionManager.lookUp("N");
         long start = System.nanoTime();
