@@ -30,7 +30,7 @@ import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Operator.*;
 
-import com.github.gbenroscience.math.matrix.expressParser.Matrix; 
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 
 /**
  *
@@ -92,12 +92,12 @@ public class MathExpression implements Savable, Solvable {
     private boolean hasPreNumberOperators;
     private boolean hasRemainderOperators;
     private boolean hasPermOrCombOperators;
-    private boolean hasLogicOperators; 
+    private boolean hasLogicOperators;
     /**
      * If set to true, MathExpression objects will automatically initialize
      * undeclared variables to zero and store them.
      */
-    private static boolean autoInitOn;
+    private static boolean autoInitOn = true;
     /**
      * <b><i>
      * Set this attribute to true, if and only if the input into this system is
@@ -108,6 +108,7 @@ public class MathExpression implements Savable, Solvable {
      * <b><strong>where c has been declared before!</b></strong>
      */
     private boolean hasFunctionOrVariableInitStatement;
+     
 
     /**
      * The VariableManager object that allows an object of this class to
@@ -188,7 +189,7 @@ public class MathExpression implements Savable, Solvable {
         else {
             setExpression("(0.0)");
         }
-
+       
     }
 
     public String getExpression() {
@@ -1493,173 +1494,7 @@ public class MathExpression implements Savable, Solvable {
         return returnType;
     }
 
-    /**
-     * Method solve is the main parser used to evaluate the input multi-bracket
-     * pair (MBP) expressions used to initialize the constructor of class
-     * MathExpression
-     *
-     * @return the result of the evaluation
-     */
-    public String solveOld() {
-        if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
-            return Help.getHelp();
-        }
-        if (correctFunction && !hasFunctionOrVariableInitStatement) {
-            final ArrayList<String> myScan = new ArrayList<>();
-
-            myScan.addAll(scanner);
-            Bracket[] brac = mapBrackets(myScan);
-            int indexOpenInMyScan = 0;
-            int indexCloseInMyScan = 0;
-
-            setVariableValuesInFunction(myScan);
-
-            while (brac.length > 0) {
-
-                if (!correctFunction) {
-                    break;
-                }//end if
-                else {
-                    try {
-                        indexOpenInMyScan = brac[0].getIndex();
-                        indexCloseInMyScan = brac[1].getIndex();
-
-                        boolean isMethod = false;//only list returning data sets e.g sort,rnd...
-
-                        List<String> executable = null;
-                        try {
-                            isMethod = Method.isMethodName(myScan.get(indexOpenInMyScan - 1));
-                        }//end try
-                        catch (IndexOutOfBoundsException indexErr) {
-                            isMethod = false;
-                        }
-
-                        try {
-                            executable = myScan.subList(indexOpenInMyScan, indexCloseInMyScan + 1);//
-                        }//end try
-                        catch (IndexOutOfBoundsException indexErr) {
-                        }
-                        if (!isMethod) {
-                            solve(executable);
-                        }//end if
-                        else if (isMethod) {
-
-                            try {
-                                /**
-                                 * Get the view of the scanner between the
-                                 * method and the closing bracket.. e.g.
-                                 * [....sin,(,3,),....] stores [sin,(,3,)] in
-                                 * executable.
-                                 */
-                                executable = myScan.subList(indexOpenInMyScan - 1, indexCloseInMyScan + 1);
-                                if (Method.isStatsMethod(executable.get(0))) {
-
-                                    if (!Method.isUserDefinedFunction(executable.get(0))) {
-                                        Method.run(executable, DRG);
-                                    }//end if
-                                    else if (Method.isUserDefinedFunction(executable.get(0))) {
-                                        Function f = FunctionManager.lookUp(executable.get(0));
-
-                                        if (f.getIndependentVariables().size() <= 1) {
-                                            solve(executable.subList(1, executable.size()));
-                                            executable.add(")");
-                                            executable.add(1, "(");
-                                            Method.run(executable, DRG);
-                                        } else {
-                                            Method.run(executable, DRG);
-                                        }//end else
-                                    }//end else if
-                                }//end if
-                                else {
-                                    solve(executable.subList(1, executable.size()));
-                                    executable.add(")");
-                                    executable.add(1, "(");
-                                    Method.run(executable, DRG);
-                                }
-                            } catch (IndexOutOfBoundsException | NullPointerException indexErr) {
-                                break;
-                            } catch (IllegalArgumentException ill) {
-                                returnType = TYPE.ERROR;
-                                return SYNTAX_ERROR;
-                            }
-                        }//end else if
-                        brac = mapBrackets(myScan);
-                    }//end try
-                    catch (IndexOutOfBoundsException indexErr) {
-                        indexErr.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return SYNTAX_ERROR;
-                    }//end catch
-                    catch (NumberFormatException numErr) {
-                        numErr.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return SYNTAX_ERROR;
-                    }//end catch
-                    catch (InputMismatchException exception) {
-                        exception.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return SYNTAX_ERROR;
-                    }
-                }//end else
-
-            }//end while
-
-            String listAppender = listToString(myScan);
-            if (listAppender.startsWith("(")) {
-                listAppender = listAppender.substring(1);
-                listAppender = listAppender.substring(0, listAppender.length() - 1);
-
-                if (isComma(listAppender.substring(0, 1))) {
-                    listAppender = listAppender.replace(",", "");
-                }
-
-            }
-
-            if (validNumber(listAppender)) {
-                returnType = TYPE.NUMBER;
-            } else if (listAppender.contains(",")) {
-                returnType = TYPE.STRING;
-            }
-            Function f;
-            if ((f = FunctionManager.lookUp(listAppender)) != null) {
-                if (f.getType() == TYPE.MATRIX) {
-                    listAppender = f.getMatrix().toString();
-                    returnType = f.getType();
-                } else if (f.getType() == TYPE.LIST) {
-                    listAppender = f.toString();
-                    returnType = f.getType();
-                } else if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
-                    returnType = f.getType();
-                    listAppender = f.toString();
-                }
-
-            }
-
-            //designed to deduce if or not the evaluating loop executed normally.
-            //If it didn't the statements in the else will execute
-            if (correctFunction) {
-                lastResult = listAppender;
-
-            }//end if
-            //give an error statement and then reset correctFunction to true;
-            else {
-                listAppender = SYNTAX_ERROR;
-                correctFunction = true;
-            }
-            if (myScan.size() == 1) {
-                returnObjectName = myScan.get(0);
-            }
-            return listAppender;
-        }//end if
-        else if (hasFunctionOrVariableInitStatement) {
-            return "Variable Storage Process Finished!";
-        } else {
-            returnType = TYPE.ERROR;
-            return SYNTAX_ERROR;
-        }
-
-    }//end method solve()
-
+  
     private String resolveSegment(List<String> scan, int openIdx, int closeIdx, boolean isMethod) {
 
         if (isMethod) {
@@ -1673,7 +1508,7 @@ public class MathExpression implements Savable, Solvable {
                 int execSize = executable.size();
                 //System.out.println("resolveSegment->isMethod: executable " + executable);
                 String methodName = isMethod ? executable.get(0) : null;
-                System.out.println("methodName: " + methodName + ", executable = " + executable);
+                //System.out.println("methodName: " + methodName + ", executable = " + executable);
                 // System.out.println("resolveSegment->isMethod: methodName " + methodName);
                 //[,sin,(,2,),] should be allowed to pass here to Method.run, else, evaluate the contents of the bracket and reduce to a number before passing
                 if (execSize == 4) {
@@ -1683,7 +1518,7 @@ public class MathExpression implements Savable, Solvable {
                 } else {//e.g [,cos,(,3,+,5,-2,^,3,),]-> First evaluate the expression before evaluating the method
                     if (Method.isStatsMethod(methodName)) {
                         boolean isNotListReturner = Method.isNumberReturningStatsMethod(methodName);
-                       //  System.out.println("resolveSegment->isMethod: executable is stats-method e.g: \n"+executable+"\n --> will " +  (isNotListReturner ? "not call" : "call") + " listToString on result of Method.run");
+                        //  System.out.println("resolveSegment->isMethod: executable is stats-method e.g: \n"+executable+"\n --> will " +  (isNotListReturner ? "not call" : "call") + " listToString on result of Method.run");
                         List<String> out = Method.run(new ArrayList<>(executable), DRG);
                         if (!isNotListReturner) {//return a list... write the list in the original executable and then return null, the solve method will take it from there.
                             executable.clear();
@@ -1715,16 +1550,19 @@ public class MathExpression implements Savable, Solvable {
             int sz = (closeIdx - 1) - openIdx;
             // System.out.println("resolveSegment->isNotMethod: will call hiSpeedResolver on " + inner);
             if (sz == 1) {
-                if (inner.get(0).startsWith("anon")) {//[(,anon1,)]// 
+                String elem = inner.get(0);
+                if (elem.startsWith("anon")) {//[(,anon1,)]// 
                     Function f = FunctionManager.lookUp(inner.get(0));
                     return f != null ? f.getMatrix().toString() : SYNTAX_ERROR;
+                }else if(elem.equals("NaN") || elem.contains("Infinity")){
+                    return elem;
                 }
             }
             double val = hiSpeedSolver(inner);
-            // Return as string for the main list
-            return (val != Double.POSITIVE_INFINITY && val != Double.NEGATIVE_INFINITY) ? String.valueOf(val) : MathExpression.SYNTAX_ERROR;
+            return String.valueOf(val);
         }
     }
+
 
     private String solveNoBrackets(List<String> tokens) {
         if (tokens.isEmpty()) {
@@ -1749,7 +1587,6 @@ public class MathExpression implements Savable, Solvable {
             return SYNTAX_ERROR;
         }
     }
-
     @Override
     public String solve() {
         if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
@@ -1787,7 +1624,14 @@ public class MathExpression implements Savable, Solvable {
                     try {
                         // Extract the result for this specific pair
                         String result = resolveSegment(myScan, openIdx, closeIdx, isMethod);
-                         if (result != null) {
+                        if (result != null) {
+                             if (result.equals(SYNTAX_ERROR)) {
+                                correctFunction = false;
+                                returnType = TYPE.ERROR;
+                                return SYNTAX_ERROR;
+                            }else if(result.equals("NaN") || result.equals("Infinity") || result.equals("-Infinity")){
+                                return result;
+                            }
                             // 3. REPLACEMENT BLOCK (The most critical part for speed)
                             // Remove the processed tokens from the list
                             int countToRemove = closeIdx - replaceStart + 1;
@@ -1799,14 +1643,10 @@ public class MathExpression implements Savable, Solvable {
                             // 4. RESET INDEX: Move the pointer back to where the result was inserted
                             // so the 'for' loop continues scanning the rest of the expression correctly.
                             i = replaceStart;
+                           
                         } else {//list returning operator has already mutated the scanner with the result of its computations on the portion of the list
                             i = replaceStart;
                         }
-                         if(result.equals(SYNTAX_ERROR)){
-                             correctFunction = false;
-                             returnType = TYPE.ERROR;
-                             return SYNTAX_ERROR;
-                         }
 
                     } catch (Exception e) {
                         e.printStackTrace();
@@ -2676,205 +2516,256 @@ public class MathExpression implements Savable, Solvable {
         }
     }
 
-    
-public static final class ExpressionSolver {
+    public static final class ExpressionSolver {
 
-  // List-based wrapper for compatibility
-    public static double evaluate(List<String> tokens) {
-        return evaluate(tokens.toArray(new String[0]));
-    }
-    /**
-     * Array-based entry point for maximum performance.
-     */
-    public static double evaluate(String[] ts) {
-        final int n = ts.length;
-        final double[] valStack = new double[n];
-        final int[] opStack = new int[n];
-        int vIdx = -1;
-        int oIdx = -1;
+        // List-based wrapper for compatibility
+        public static double evaluate(List<String> tokens) {
+            return evaluate(tokens.toArray(new String[0]));
+        }
 
-        for (int i = 0; i < n; i++) {
-            final String s = ts[i];
-            if (s == null || s.isEmpty()) continue;
+        /**
+         * Array-based entry point for maximum performance.
+         */
+        public static double evaluate(String[] ts) {
+            final int n = ts.length;
+            final double[] valStack = new double[n];
+            final int[] opStack = new int[n];
+            int vIdx = -1;
+            int oIdx = -1;
 
-            final char c0 = s.charAt(0);
-            final int sLen = s.length();
-
-            // 1. NUMERIC CHECK 
-            // Ensures -5 is a number, but -¹ and - are not.
-            if ((c0 >= '0' && c0 <= '9') || (c0 == '-' && sLen > 1 && s.charAt(1) >= '0' && s.charAt(1) <= '9')) {
-                valStack[++vIdx] = fastParseDouble(s);
-                continue;
-            }
-
-            // 2. UNARY PREFIX (ROOTS)
-            if (c0 == '√' || s.equals("³√")) {
-                opStack[++oIdx] = (c0 == '√') ? '√' : 'R'; 
-                continue;
-            }
-
-            // 3. UNARY POSTFIX (FACTORIAL/POWERS/INVERSE)
-            // Explicitly handles the "-¹" token
-            if (c0 == '!' || c0 == '²' || c0 == '³' || s.equals("-¹")) {
-                final double a = valStack[vIdx];
-                if (c0 == '!') valStack[vIdx] = Maths.fact(a);
-                else if (c0 == '²') valStack[vIdx] = a * a;
-                else if (c0 == '³') valStack[vIdx] = a * a * a;
-                else if (s.equals("-¹")) valStack[vIdx] = 1.0 / a; // Fixed: Explicit inverse
-                continue;
-            }
-
-            // 4. BINARY OPERATORS
-            final int currentPrec = getPrec(c0);
-            while (oIdx >= 0) {
-                final char topOp = (char) opStack[oIdx];
-                final int topPrec = getPrec(topOp);
-
-                if (c0 == '^' ? topPrec > currentPrec : topPrec >= currentPrec) {
-                    vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
-                } else {
-                    break;
+            for (int i = 0; i < n; i++) {
+                final String s = ts[i];
+                if (s == null || s.isEmpty()) {
+                    continue;
                 }
-            }
-            opStack[++oIdx] = c0;
-        }
 
-        while (oIdx >= 0) {
-            vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
-        }
-        return valStack[0];
-    }
+                final char c0 = s.charAt(0);
+                final int sLen = s.length();
 
-    private static int getPrec(char op) {
-        switch (op) {
-            case '+': case '-': return 1;
-            case '*': case '/': case '%': case 'Р': case 'Č': return 2;
-            case '^': return 3;
-            case '√': case 'R': return 4;
-            default: return 0;
-        }
-    }
-
-    private static int applyOp(char op, double[] valStack, int vIdx) {
-        if (op == '√') {
-            valStack[vIdx] = Math.sqrt(valStack[vIdx]);
-            return vIdx;
-        }
-        if (op == 'R') {
-            valStack[vIdx] = Math.cbrt(valStack[vIdx]);
-            return vIdx;
-        }
-        
-        double b = valStack[vIdx--];
-        double a = valStack[vIdx];
-        switch (op) {
-            case '+': valStack[vIdx] = a + b; break;
-            case '-': valStack[vIdx] = a - b; break;
-            case '*': valStack[vIdx] = a * b; break;
-            case '/': valStack[vIdx] = a / b; break;
-            case '%': valStack[vIdx] = a % b; break;
-            case '^': valStack[vIdx] = Math.pow(a, b); break;
-            case 'Р': valStack[vIdx] = Maths.fact(a) / Maths.fact(a - b); break;
-            case 'Č': valStack[vIdx] = Maths.fact(a) / (Maths.fact(b) * Maths.fact(a - b)); break;
-        }
-        return vIdx;
-    }
-    
-    
-      private static double fastParseDouble(String s) {
-        int len = s.length();
-        if (len == 0) {
-            return 0.0; // or throw if empty not allowed
-        }
-        int idx = 0;
-        boolean negative = false;
-        char first = s.charAt(0);
-
-        // Handle sign
-        if (first == '-') {
-            negative = true;
-            idx = 1;
-        } else if (first == '+') {
-            idx = 1;
-        }
-
-        double value = 0.0;
-
-        // Integer part
-        boolean hasIntPart = false;
-        while (idx < len) {
-            char c = s.charAt(idx);
-            if (c >= '0' && c <= '9') {
-                value = value * 10.0 + (c - '0');
-                hasIntPart = true;
-                idx++;
-            } else {
-                break;
-            }
-        }
-
-        // Fractional part
-        boolean hasFracPart = false;
-        if (idx < len && s.charAt(idx) == '.') {
-            idx++;
-            double frac = 0.0;
-            double div = 1.0;
-            while (idx < len) {
-                char c = s.charAt(idx);
-                if (c >= '0' && c <= '9') {
-                    div *= 10.0;
-                    frac = frac * 10.0 + (c - '0');
-                    hasFracPart = true;
-                    idx++;
-                } else {
-                    break;
+                // 1. NUMERIC CHECK 
+                // Ensures -5 is a number, but -¹ and - are not.
+                if ((c0 >= '0' && c0 <= '9') || (c0 == '-' && sLen > 1 && s.charAt(1) >= '0' && s.charAt(1) <= '9')) {
+                    valStack[++vIdx] = fastParseDouble(s);
+                    continue;
                 }
-            }
-            value += frac / div;
-        }
 
-        // Scientific notation
-        if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
-            idx++;
-            boolean negExp = false;
-            if (idx < len && s.charAt(idx) == '-') {
-                negExp = true;
-                idx++;
-            } else if (idx < len && s.charAt(idx) == '+') {
-                idx++;
-            }
+                // 2. UNARY PREFIX (ROOTS)
+                if (c0 == '√' || s.equals("³√")) {
+                    opStack[++oIdx] = (c0 == '√') ? '√' : 'R';
+                    continue;
+                }
 
-            long exp = 0;
-            boolean hasExpDigits = false;
-            while (idx < len) {
-                char c = s.charAt(idx);
-                if (c >= '0' && c <= '9') {
-                    exp = exp * 10 + (c - '0');
-                    hasExpDigits = true;
-                    if (exp > 1000000000L) { // Prevent insane overflow
-                        value = negative ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+                // 3. UNARY POSTFIX (FACTORIAL/POWERS/INVERSE)
+                // Explicitly handles the "-¹" token
+                if (c0 == '!' || c0 == '²' || c0 == '³' || s.equals("-¹")) {
+                    final double a = valStack[vIdx];
+                    if (c0 == '!') {
+                        valStack[vIdx] = Maths.fact(a);
+                    } else if (c0 == '²') {
+                        valStack[vIdx] = a * a;
+                    } else if (c0 == '³') {
+                        valStack[vIdx] = a * a * a;
+                    } else if (s.equals("-¹")) {
+                        valStack[vIdx] = 1.0 / a; // Fixed: Explicit inverse
+                    }
+                    continue;
+                }
+
+                // 4. BINARY OPERATORS
+                final int currentPrec = getPrec(c0);
+                while (oIdx >= 0) {
+                    final char topOp = (char) opStack[oIdx];
+                    final int topPrec = getPrec(topOp);
+
+                    if (c0 == '^' ? topPrec > currentPrec : topPrec >= currentPrec) {
+                        vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
+                    } else {
                         break;
                     }
+                }
+                opStack[++oIdx] = c0;
+            }
+
+            while (oIdx >= 0) {
+                vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
+            }
+            return valStack[0];
+        }
+
+        private static int getPrec(char op) {
+            switch (op) {
+                case '+':
+                case '-':
+                    return 1;
+                case '*':
+                case '/':
+                case '%':
+                case 'Р':
+                case 'Č':
+                    return 2;
+                case '^':
+                    return 3;
+                case '√':
+                case 'R':
+                    return 4;
+                default:
+                    return 0;
+            }
+        }
+
+        private static int applyOp(char op, double[] valStack, int vIdx) {
+            if (op == '√') {
+                if (vIdx < 0) {
+                    return vIdx; // Safety guard
+                }
+                valStack[vIdx] = Math.sqrt(valStack[vIdx]);
+                return vIdx;
+            }
+            if (op == 'R') {
+                if (vIdx < 0) {
+                    return vIdx; // Safety guard
+                }
+                valStack[vIdx] = Math.cbrt(valStack[vIdx]);
+                return vIdx;
+            }
+
+            if (vIdx < 1) {
+                return vIdx; // CRITICAL: Prevents Index -1 crash if stack is too short
+            }
+            double b = valStack[vIdx--];
+            double a = valStack[vIdx];
+            switch (op) {
+                case '+':
+                    valStack[vIdx] = a + b;
+                    break;
+                case '-':
+                    valStack[vIdx] = a - b;
+                    break;
+                case '*':
+                    valStack[vIdx] = a * b;
+                    break;
+                case '/':
+                    valStack[vIdx] = a / b;
+                    break;
+                case '%':
+                    valStack[vIdx] = a % b;
+                    break;
+                case '^':
+                    valStack[vIdx] = Math.pow(a, b);
+                    break;
+                case 'Р':
+                    valStack[vIdx] = Maths.fact(a) / Maths.fact(a - b);
+                    break;
+                case 'Č':
+                    valStack[vIdx] = Maths.fact(a) / (Maths.fact(b) * Maths.fact(a - b));
+                    break;
+            }
+            return vIdx;
+        }
+
+        private static double fastParseDouble(String s) {
+            if (s.equals("NaN")) {
+                return Double.NaN;
+            }
+            if (s.equals("Infinity") || s.equals("+Infinity")) {
+                return Double.POSITIVE_INFINITY;
+            }
+            if (s.equals("-Infinity")) {
+                return Double.NEGATIVE_INFINITY;
+            }
+            int len = s.length();
+            if (len == 0) {
+                return 0.0; // or throw if empty not allowed
+            }
+            int idx = 0;
+            boolean negative = false;
+            char first = s.charAt(0);
+
+            // Handle sign
+            if (first == '-') {
+                negative = true;
+                idx = 1;
+            } else if (first == '+') {
+                idx = 1;
+            }
+
+            double value = 0.0;
+
+            // Integer part
+            boolean hasIntPart = false;
+            while (idx < len) {
+                char c = s.charAt(idx);
+                if (c >= '0' && c <= '9') {
+                    value = value * 10.0 + (c - '0');
+                    hasIntPart = true;
                     idx++;
                 } else {
                     break;
                 }
             }
-            if (hasExpDigits) {
-                value *= Math.pow(10.0, negExp ? -exp : exp);
+
+            // Fractional part
+            boolean hasFracPart = false;
+            if (idx < len && s.charAt(idx) == '.') {
+                idx++;
+                double frac = 0.0;
+                double div = 1.0;
+                while (idx < len) {
+                    char c = s.charAt(idx);
+                    if (c >= '0' && c <= '9') {
+                        div *= 10.0;
+                        frac = frac * 10.0 + (c - '0');
+                        hasFracPart = true;
+                        idx++;
+                    } else {
+                        break;
+                    }
+                }
+                value += frac / div;
             }
+
+            // Scientific notation
+            if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
+                idx++;
+                boolean negExp = false;
+                if (idx < len && s.charAt(idx) == '-') {
+                    negExp = true;
+                    idx++;
+                } else if (idx < len && s.charAt(idx) == '+') {
+                    idx++;
+                }
+
+                long exp = 0;
+                boolean hasExpDigits = false;
+                while (idx < len) {
+                    char c = s.charAt(idx);
+                    if (c >= '0' && c <= '9') {
+                        exp = exp * 10 + (c - '0');
+                        hasExpDigits = true;
+                        if (exp > 1000000000L) { // Prevent insane overflow
+                            value = negative ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+                            break;
+                        }
+                        idx++;
+                    } else {
+                        break;
+                    }
+                }
+                if (hasExpDigits) {
+                    value *= Math.pow(10.0, negExp ? -exp : exp);
+                }
+            }
+
+            // Basic validation (since scanner is trusted, but good to have)
+            if (idx != len || (!hasIntPart && !hasFracPart)) {
+                return 0.0; // or throw if strict
+            }
+
+            return negative ? -value : value;
         }
 
-        // Basic validation (since scanner is trusted, but good to have)
-        if (idx != len || (!hasIntPart && !hasFracPart)) {
-            return 0.0; // or throw if strict
-        }
-
-        return negative ? -value : value;
     }
 
-   
-}
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**
      *
@@ -2922,7 +2813,9 @@ public static final class ExpressionSolver {
     }//end method
 
     public static void main(String... args) {
-        System.out.println(new MathExpression("x=0;sin(ln(x));").solve());
+        System.out.println(new MathExpression("x=0.1;sqrt(0.64-x^2)").solve());
+        System.out.println(new MathExpression("x=0.9;sqrt(0.64-x^2)").solve());
+        System.out.println(new MathExpression("sin(ln(x));").solve() + ", autoInitOn: " + autoInitOn);
         MathExpression ml = new MathExpression("D=@(3,3)(3,4,1,2,4,7,9,1,-2);tri_mat(D)");
         System.out.println("ml.solve():" + ml.solve());
         MathExpression linear = new MathExpression("a=4;a11=3.14159265357;b=2.718281828;M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");

@@ -22,8 +22,8 @@ import java.util.List;
  
 public class GG2 {
  public double evaluate(List<String> toks) {
-    int len = toks.size();
-      final String[] tokens = toks.toArray(new String[0]);
+     String[]tokens = toks.toArray(new String[0]);
+ int len = tokens.length;
     double[] valStack = new double[len];
     char[] opStack = new char[len];
     int vPtr = 0;

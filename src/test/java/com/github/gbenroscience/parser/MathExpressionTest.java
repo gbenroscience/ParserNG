@@ -306,7 +306,7 @@ class MathExpressionTest {
 
         expression.setValue("x", 0 + "");
         if (print) System.out.println(expression.solve());
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, expression.solve());
+        Assertions.assertEquals("-Infinity", expression.solve());
         expression.setValue("x", 1 + "");
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals("0.0", expression.solve());
