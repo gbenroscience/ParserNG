@@ -131,6 +131,7 @@ public class MathExpression implements Savable, Solvable {
      */
     private String returnObjectName;
     public static final String SYNTAX_ERROR = "SYNTAX ERROR";
+     
 
     /**
      * default no argument constructor for class MathExpression. It creates a
@@ -189,7 +190,7 @@ public class MathExpression implements Savable, Solvable {
         else {
             setExpression("(0.0)");
         }
-       
+        
     }
 
     public String getExpression() {
@@ -1587,8 +1588,8 @@ public class MathExpression implements Savable, Solvable {
             return SYNTAX_ERROR;
         }
     }
-    @Override
-    public String solve() {
+    
+     public String solve() {
         if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
             return Help.getHelp();
         }
@@ -1713,7 +1714,10 @@ public class MathExpression implements Savable, Solvable {
             return SYNTAX_ERROR;
         }
     }//end method solve()
-
+     
+     
+     
+      
     protected List<String> solve(List<String> list) {
         ExpressionSolver.evaluate(list);
         return list;

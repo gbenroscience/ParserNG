@@ -1168,7 +1168,7 @@ public class MathScanner {
                 parser_Result = Parser_Result.STRANGE_INPUT;
                 setRunnable(false);
             }
-            if (MathExpression.isAutoInitOn()) {
+            if (MathExpression.isAutoInitOn()) {System.out.println("isAutoInitOn Found!!!");
                 if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(scanner.get(i))
                         && !FunctionManager.contains(scanner.get(i))) {
                     varMan.parseCommand(scanner.get(i) + "=0.0;");
@@ -1497,10 +1497,12 @@ public class MathScanner {
      */
     public static void main(String args[]) {//tester method for STRING methods
  
-        String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3";
+        String s5 = "sqrt(0.64-x^2)";
+        //String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3";
         //String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
         MathScanner sc = new MathScanner(s5);
-        System.out.println(sc.scanner());
+         
+        
 
     }//end method main
 }

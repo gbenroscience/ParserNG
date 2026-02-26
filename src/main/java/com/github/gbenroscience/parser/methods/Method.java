@@ -20,6 +20,7 @@ import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.Operator;
 import com.github.gbenroscience.util.FunctionManager;
+import java.util.Arrays;
 
 /**
  * Models the methods that perform calculations in the parser.
@@ -587,7 +588,7 @@ public class Method {
                 return list;
             } else if (name.equals(MODE)) {
                 Set set = new Set(list);
-                List<String>res = set.mode();
+                List<String> res = set.mode();
                 list.clear();
                 list.addAll(res);
                 return list;
@@ -599,7 +600,7 @@ public class Method {
                 return list;
             } else if (name.equals(SORT)) {
                 Set set = new Set(list);
-                List<String>res = set.sort();
+                List<String> res = set.sort();
                 list.clear();
                 list.addAll(res);
                 return list;
@@ -702,6 +703,13 @@ public class Method {
                 String ref = "anon" + (FunctionManager.countAnonymousFunctions() + 1);
 
                 Function.storeAnonymousFunction("@(" + Matrix.lambda + ")" + poly);
+                list.add(ref);
+                return list;
+            } else if (name.equals(MATRIX_EIGENVALUES)) {
+                Set set = new Set(list);
+                Matrix matrix = set.eigenValues();
+                list.clear();
+                String ref = Function.storeAnonymousMatrixFunction(matrix);
                 list.add(ref);
                 return list;
             } else if (name.equals(MATRIX_EIGENVEC)) {
@@ -978,7 +986,7 @@ public class Method {
 
                 }//end catch
 
-                list.add("Syntax Error!");
+                list.add(MathExpression.SYNTAX_ERROR);
                 return list;
             }//end if parameters.length==1
 
@@ -986,6 +994,23 @@ public class Method {
 
         throw new IllegalArgumentException(" Unknown function: " + name);
     }//end method
+
+    /**
+     *
+     * @param array An array containing a scanned function that has information
+     * about a method and its parameters..e.g. [sin,(,3.14,)] , or
+     * [matrix_edit,(,M,3,4,-90,)] may be grabbed from a scanner output and sent
+     * to this method to evaluate.
+     * @param startIndex
+     * @param endIndex The final index(inclusive) to process
+     * @param DRG The trigonometric mode in which to run the method.
+     * @return a {@link List} object which is the output of the method's
+     * operation.
+     */
+    public static List<String> run(String[] array, int startIndex, int endIndex, DRG_MODE DRG) {
+        List<String> list = new ArrayList<>(Arrays.asList(array).subList(startIndex, endIndex + 1));
+        return Method.run(list, DRG);
+    }
 
     /**
      *

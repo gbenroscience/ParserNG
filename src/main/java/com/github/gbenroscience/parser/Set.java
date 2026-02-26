@@ -38,16 +38,10 @@ public class Set {
      */
     private List<String> data = new ArrayList<>();
 
-    /**
-     *
-     * @param data
-     */
-    public Set(double... data) {
-
-        for (int i = 0; i < data.length; i++) {
-            this.data.add(data[i] + "");
-        }
-    }//end constructor
+    
+      public Set(String[]array, int startIndex, int endIndex) { 
+        this(new ArrayList<>(Arrays.asList(array).subList(startIndex, endIndex + 1)));
+    }
 
     /**
      * Creates a new Set object initialized with the specified data set.
@@ -142,7 +136,6 @@ public class Set {
      *
      * @return the product of all elements in the data set.
      */
-
     public double prod() {
         double u = 1;
         for (int i = 0; i < data.size(); i++) {
@@ -271,7 +264,7 @@ public class Set {
         }
         return sort;
     }
-    
+
     /**
      *
      * @return a number list sorted in ascending order
@@ -287,11 +280,12 @@ public class Set {
         count = 0;
         for (double d : array) {
             String c = String.valueOf(d);
-            sort.add(c.endsWith(".0") ? c.substring(0 , c.length()-2) : c);
+            sort.add(c.endsWith(".0") ? c.substring(0, c.length() - 2) : c);
         }
 
         return sort;
     }//end result
+
     /**
      *
      * @return the inverse of the Matrix as a number list
@@ -490,7 +484,7 @@ public class Set {
      */
     public double median() {
         double median = 0;
- 
+
         List<String> scan = new ArrayList<String>();
         scan = sort();
         int g = size();
@@ -641,33 +635,30 @@ public class Set {
 
         int sz = data.size();
         switch (sz) {
-            case 1:
-            {
+            case 1: {
                 String anonFunc = data.get(0);
                 String solution = Derivative.eval("diff(" + anonFunc + ",1)");
-                
+
                 return solution;
             }
-            case 2:
-            {
+            case 2: {
                 String anonFunc = data.get(0);
                 double value = Double.parseDouble(data.get(1));
-                
+
                 String solution = Derivative.eval("diff(" + anonFunc + "," + value + ")");
                 /*  NumericalDerivative der = new NumericalDerivative(new Function(anonFunc), value );
                 return der.findDerivativeByPolynomialExpander();*/
                 return solution;
             }//end if
-            case 3:
-            {
+            case 3: {
                 String anonFunc = data.get(0);
                 double value = Double.parseDouble(data.get(1));
                 int order = Integer.parseInt(data.get(2));
                 /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.parseDouble(data.get(1)));
                 return der.findDerivativeByPolynomialExpander();
-                */
+                 */
                 String solution = Derivative.eval("diff(" + anonFunc + "," + value + "," + order + ")");
-                
+
                 return solution;
             }//end else if
             default:
@@ -724,7 +715,7 @@ public class Set {
             input = input.substring(1, input.length() - 1);
             input = input.concat("=0");
         }
- 
+
         Tartaglia_Equation solver = new Tartaglia_Equation(input);
 
         String reducedForm = solver.interpretedSystem();
@@ -741,7 +732,7 @@ public class Set {
     public String rootOfEquation() {
         int sz = data.size();
         boolean has2NumberArguments = false;
- System.out.println("LIST: "+data);
+        System.out.println("LIST: " + data);
         if (Number.validNumber((String) data.get(sz - 1)) && !Number.validNumber((String) data.get(sz - 2))) {
             has2NumberArguments = true;
         }//end if
@@ -776,7 +767,7 @@ public class Set {
         boolean has2NumberArguments = false;
         if (Number.validNumber(data.get(sz - 1)) && Number.validNumber(data.get(sz - 2)) && Number.validNumber(data.get(sz - 3))) {
             has3NumberArguments = true;
-       
+
         }//end if
         if (Number.validNumber(data.get(sz - 1)) && Number.validNumber(data.get(sz - 2)) && !Number.validNumber(data.get(sz - 3))) {
             has2NumberArguments = true;
@@ -1036,7 +1027,7 @@ public class Set {
 
         }
 
-              throw new InputMismatchException("Bad args for matrix powers");
+        throw new InputMismatchException("Bad args for matrix powers");
 
     }
 
@@ -1062,12 +1053,12 @@ public class Set {
             }
 
         }
-        
+
         throw new InputMismatchException("Bad args for matrix transpose");
- 
 
     }
-   /**
+
+    /**
      * The list must have been originally supplied: adjoint(A) {where A is a
      * Matrix} It finds the adjoint of A and returns the result as a list.
      *
@@ -1089,12 +1080,12 @@ public class Set {
             }
 
         }
-        
+
         throw new InputMismatchException("Bad args for matrix adjoint");
- 
 
     }
-      /**
+
+    /**
      * The list must have been originally supplied: adjoint(A) {where A is a
      * Matrix} It finds the adjoint of A and returns the result as a list.
      *
@@ -1116,12 +1107,42 @@ public class Set {
             }
 
         }
-        
+
         throw new InputMismatchException("Bad args for matrix cofactors");
- 
 
     }
-      /**
+    
+    
+     public Matrix eigenValues() {
+
+        if (data.size() == 1) {
+
+            String token = data.get(0);
+
+            if (Variable.isVariableString(token)) {
+                Function f = FunctionManager.lookUp(token);
+                Matrix m = f.getMatrix();
+                double eigenValues[] = m.computeEigenValues();
+                int n = eigenValues.length;
+                return new Matrix(1, n);
+            }
+        }
+
+        throw new InputMismatchException("Bad args for matrix eigenValues");
+
+    }
+
+    /**
+     *
+     *
+     *  * <code>A = VɅV-¹</code> Check: Is ||A*v - lambda*v|| close to zero?
+     * double[] Av = matrixMultiply(A, v); double[] lv = scalarMultiply(lambda,
+     * v); double residual = computeNorm(subtract(Av, lv));
+     *
+     * if (residual > 1e-9) { // This eigenvalue/vector pair might be inaccurate
+     * }
+     *
+     *
      * The list must have been originally supplied: eigvec(A) {where A is a
      * Matrix} It finds the eigenvalues of A and returns the result as a list.
      *
@@ -1135,82 +1156,88 @@ public class Set {
 
             if (Variable.isVariableString(token)) {
                 Function f = FunctionManager.lookUp(token);
+                Matrix m = f.getMatrix();
+                double eigenValues[] = m.computeEigenValues();
+                int n = eigenValues.length;
 
-                if (f != null) {
-                    Matrix m = f.getMatrix();
-                    double[]eigValues = m.computeEigenValues();
-                    for(double lambda : eigValues){
-                        double[] vector = m.computeEigenVector(lambda);
+// 2. Prepare a Matrix to hold all eigenvectors as columns
+// Column 0 corresponds to lambda[0], Column 1 to lambda[1], etc.
+                double[][] eigenvectorMatrix = new double[n][n];
+
+                for (int i = 0; i < n; i++) {
+                    double lambda = eigenValues[i];
+                    double[] v = m.computeEigenVector(lambda);
+                    // Store v as a COLUMN in the result matrix
+                    for (int row = 0; row < n; row++) {
+                        eigenvectorMatrix[row][i] = v[row];
                     }
-                    
                 }
-
+                return new Matrix(eigenvectorMatrix);
             }
-
         }
-        
-        throw new InputMismatchException("Bad args for matrix eigenValues");
- 
+
+        throw new InputMismatchException("Bad args for matrix eigenVectors");
 
     }
-    
-    private static final void printImpl(String data){
-        System.out.println("ParserNG> "+data);
+
+    private static final void printImpl(String data) {
+        System.out.println("ParserNG> " + data);
     }
-       /**
+
+    /**
      * The list must have been originally supplied: eigvec(A) {where A is a
      * Matrix} It finds the eigenvalues of A and returns the result as a list.
-     * 
+     *
      */
     public void print() {
 
         if (data.size() == 1) {
 
             String token = data.get(0);
-            System.out.println("printer->token: "+token);
+            System.out.println("printer->token: " + token);
 
             if (Variable.isVariableString(token)) {
                 Function f = FunctionManager.lookUp(token);
-                
+
                 if (f != null) {
-                    
-                    switch(f.getType()){
+
+                    switch (f.getType()) {
                         case ALGEBRAIC_EXPRESSION:
-                             printImpl(f.toString());
-                              break;
+                            printImpl(f.toString());
+                            break;
                         case MATRIX:
                             printImpl(f.getMatrix().toString());
-                              break;
+                            break;
                         case LIST:
                             printImpl(f.getMatrix().toString());
-                              break;
+                            break;
                         default:
                             printImpl(f.toString());
-                              break;
+                            break;
                     }
-          
-                }else{
+
+                } else {
                     Variable v = VariableManager.getVariable(token);
-                    if(v != null){
-                      printImpl(v.toString());  
+                    if (v != null) {
+                        printImpl(v.toString());
                     }
                 }
 
-            }else if(com.github.gbenroscience.parser.Number.isNumber(token)){
+            } else if (com.github.gbenroscience.parser.Number.isNumber(token)) {
                 printImpl(token);
             }
-       
 
             return;
         }
-        
+
         throw new InputMismatchException("Bad args for printing");
- 
 
     }
-      /**
+
+    /**
      * The list must have been originally supplied: eigPoly(A) {where A is a
-     * Matrix} It finds the characterisic polynomial whose solution yields the eigenvalues of A and returns the result as a list.
+     * Matrix} It finds the characterisic polynomial whose solution yields the
+     * eigenvalues of A and returns the result as a list.
      *
      * @return a {@link Matrix} containing the matrix transpose.
      */
@@ -1219,7 +1246,6 @@ public class Set {
         if (data.size() == 1) {
 
             String token = data.get(0);
- 
 
             if (Variable.isVariableString(token)) {
                 Function f = FunctionManager.lookUp(token);
@@ -1231,11 +1257,11 @@ public class Set {
             }
 
         }
-        
+
         throw new InputMismatchException("Bad args for matrix eigenVectors");
- 
 
     }
+
     /**
      * The list must have been originally supplied: transpose(A) {where A is a
      * Matrix} It transposes A and returns the result as a list.
@@ -1244,7 +1270,6 @@ public class Set {
      */
     public Matrix editMatrix() {
 
- 
         if (data.size() == 4) {
 
             String token = data.get(0);
@@ -1255,19 +1280,17 @@ public class Set {
                     Matrix m = f.getMatrix();
                     int row = Integer.parseInt(data.get(1));
                     int col = Integer.parseInt(data.get(2));
-                    
-                    
+
                     double val = Double.parseDouble(data.get(3));
                     boolean updated = m.update(val, row, col);
-                    if(!updated){
-                        throw new InputMismatchException("Trying to update outside matrix bounds. Matrix has: "+m.getRows()+" rows and "+m.getCols()+" columns\n But input was: row = "+row+" rows and columns = "+col);
+                    if (!updated) {
+                        throw new InputMismatchException("Trying to update outside matrix bounds. Matrix has: " + m.getRows() + " rows and " + m.getCols() + " columns\n But input was: row = " + row + " rows and columns = " + col);
                     }
                     return m;
                 }
             }
         }
-         throw new InputMismatchException("Bad args for matrix edit");
- 
+        throw new InputMismatchException("Bad args for matrix edit");
 
     }
 
