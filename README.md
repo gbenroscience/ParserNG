@@ -1,10 +1,12 @@
 # ParserNG
-<b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. Its latest release on mavn-central (version 0.2.1) can be used to plot 2D graphs(Geometric plots and function plots) It works seamlessly on all Java platforms.
-<b>
+<b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. Its latest release on mavn-central (version 0.2.1) can be used to plot 2D graphs(Geometric plots and function plots) It works seamlessly on all Java platforms.<br><br>
+
+
+
  I started this project 2009 ending and have been upgrading it since then.
-      Sponsor Note: Please consider sponsoring me. That would be very helpful.
+      Please consider sponsoring me. That would be very helpful.
       Click the Sponsor button to do this.
-</b>
+
 
 ParserNG v0.2.3 breaks the barrier in fully featured math parser frequencies!
 With various other optimizations, v0.2.3 comes with inner loop optimizations which uses a blazing fast, post-fix style algorithm to quickly evaluate inner brackets with less checks and less string manipulations.
@@ -734,10 +736,6 @@ Note that matrix indexes in **ParserNG** are zero-based, so be advised according
 
 The function is called `eigpoly`
 
-<p style="font-weight:bold;color:brown;font-style:italic;font-size:1.3em">
-Actually, there is a function called `eigvec`, which in the future will allow the user to automatically generate the eigenvector from the Matrix; but at the moment, we cannot completely solve all generated polynomials completely, so the `eigvec` function is still in the works.
-</p>
-
 To generate the characteristic polynomial, do:
 
     MathExpression expression = new MathExpression("eigpoly(@(3,3)(4,2,1,3,1,8,-5,6,12))");
@@ -762,6 +760,25 @@ If you did:
 This would give:
 
      anon3=@(n)(20883.0*n^0.0+1155.0*n^1.0-1667.0*n^2.0+30.0*n^4.0-1.0*n^5.0+35.0*n^3.0)
+
+#### ParserNG and eigenvalues
+
+Version 0.2.3 of ParserNG allows you to quickly compute the eigenvalues of a Matrix.
+
+Do:
+```Java
+    MathExpression expression = new MathExpression("eigvalues(@(5,5)(12,1,4,2,9,3,1,8,-5,6,13,9,7,3,5,7,3,5,4,9,13,2,4,8,6))");
+    System.out.println("soln: "+ expression.solve());
+```
+#### ParsrNG and eigenvectors
+
+As of ParserNG 0.2.3 also, eigenvector computations have been added, do:
+Do:
+```Java
+    MathExpression expression = new MathExpression("eigvec(@(5,5)(12,1,4,2,9,3,1,8,-5,6,13,9,7,3,5,7,3,5,4,9,13,2,4,8,6))");
+    System.out.println("soln: "+ expression.solve());
+```
+
 
 ## TO BE CONTINUED
 And much more!
