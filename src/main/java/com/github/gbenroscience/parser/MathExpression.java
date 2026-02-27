@@ -2818,7 +2818,7 @@ public class MathExpression implements Savable, Solvable {
         System.out.println(new MathExpression("sin(ln(x));").solve());
         System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS);
         
-           MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);eigvalues(A);");
+           MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);B=eigvalues(A);B;");
         System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS);
         System.out.println("----------"+mex.solve());
         
