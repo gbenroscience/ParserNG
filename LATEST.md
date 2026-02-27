@@ -39,5 +39,5 @@ If you have more platforms in mind, we will be excited to have you contribute th
 Enjoy!
 
 Fun fact: here are some interactions with ParserNG hosted on maven-central within Dec 2025 and Feb 11 2026:
-We had 533 total downloads from 122 unique sources across 51 companies
+We had 970 total downloads from 193 unique sources across 82 companies
 [See here](./maven-central-3-month-data.png)
