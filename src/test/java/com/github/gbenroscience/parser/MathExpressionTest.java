@@ -167,21 +167,16 @@ class MathExpressionTest {
                 + "    0.0  ,    3.0  ,    4.0            \n"
                 + "    4.0  ,    0.0  ,  -11.0            \n", ls);
 
+
         MathExpression expr = new MathExpression("tri_mat(M)");
         String tm = expr.solve();
         if (print) System.out.println(tm);
-        Assertions.assertEquals("\n"
-                + "    1.0  ,1.3333333333333333  ,0.3333333333333333            \n"
-                + "    0.0  ,    1.0  ,4.749999999999999            \n"
-                + "    0.0  ,    0.0  ,    1.0            \n", tm);
+        Assertions.assertTrue(tm.endsWith("@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0)") );
 
         MathExpression expr2 = new MathExpression("echelon(M)");
         String echelon = expr2.solve();
         if (print) System.out.println(echelon);
-        Assertions.assertEquals("\n"
-                + "    3.0  ,    4.0  ,    1.0            \n"
-                + "    0.0  ,    4.0  ,   19.0            \n"
-                + "    0.0  ,    0.0  ,  567.0            \n", echelon);
+        Assertions.assertTrue(echelon.contains("@(3,3)(3.0,4.0,1.0,0.0,4.0,19.0,0.0,0.0,567.0)"));
 
         Function matrixFunction = FunctionManager.lookUp("M");
         Matrix matrix = matrixFunction.getMatrix();

@@ -1,6 +1,7 @@
 # Graphing with ParserNG
 
 **ParserNG** now enables easy graphing in any Java UI framework, including Swing, JavaFX, Android, and others.
+[See here](./graph.png)
 
 The library provides `DrawingContext` and `AbstractView` interfaces that can be implemented to render graphs on the target UI component (e.g., `javax.swing.JPanel` in Swing, `android.view.View` in Android, or `javafx.scene.canvas.Canvas` in JavaFX).
 
