@@ -38,8 +38,7 @@ public class Set {
      */
     private List<String> data = new ArrayList<>();
 
-    
-      public Set(String[]array, int startIndex, int endIndex) { 
+    public Set(String[] array, int startIndex, int endIndex) {
         this(new ArrayList<>(Arrays.asList(array).subList(startIndex, endIndex + 1)));
     }
 
@@ -641,26 +640,41 @@ public class Set {
 
                 return solution;
             }
-            case 2: {
+            case 2: {//diff(func,n) for integer values of n, differentiate func n times but for variable string values of n, say v, diff(func,v) diff func and store grad func in a func called v
                 String anonFunc = data.get(0);
-                double value = Double.parseDouble(data.get(1));
+                double value = 0;
+                String arg2 = data.get(1);
+                if (Number.isNumber(arg2)) {
+                    value = Double.parseDouble(arg2);
+                    return Derivative.eval("diff(" + anonFunc + "," + value + ")");
+                } else if (Variable.isVariableString(arg2)) {System.out.println("expr: "+data+"\n "+FunctionManager.FUNCTIONS);
+                    String derivFuncName = Derivative.eval("diff(" + anonFunc + "," + arg2 + ")");System.out.println("derivFuncName: "+derivFuncName);
+                    Function gradFunc = FunctionManager.lookUp(derivFuncName);
+                    gradFunc.setDependentVariable(new Variable(arg2));
+                    FunctionManager.add(gradFunc);
+                    return gradFunc.getName();
+                }
 
-                String solution = Derivative.eval("diff(" + anonFunc + "," + value + ")");
-                /*  NumericalDerivative der = new NumericalDerivative(new Function(anonFunc), value );
-                return der.findDerivativeByPolynomialExpander();*/
-                return solution;
             }//end if
-            case 3: {
+            case 3: {// diff(func,x, n) differentiate func n times, then if x is a number, evaluate the result at the value of x. If x is a variable string, store grad func in a func called v
                 String anonFunc = data.get(0);
-                double value = Double.parseDouble(data.get(1));
-                int order = Integer.parseInt(data.get(2));
-                /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.parseDouble(data.get(1)));
-                return der.findDerivativeByPolynomialExpander();
-                 */
-                String solution = Derivative.eval("diff(" + anonFunc + "," + value + "," + order + ")");
 
-                return solution;
-            }//end else if
+               
+                int order = 0;
+                String arg3 = data.get(2);
+
+                if (Number.isNumber(arg3)) {
+                    order = Integer.parseInt(arg3);
+                    return Derivative.eval("diff(" + anonFunc + "," + data.get(1) + "," + order + ")");
+                } else if (Variable.isVariableString(arg3)) {
+                    String derivFuncName = Derivative.eval("diff(" + anonFunc + "," + order + ")");System.out.println("derivFuncName: "+derivFuncName);
+                    Function gradFunc = FunctionManager.lookUp(derivFuncName);
+                    gradFunc.setDependentVariable(new Variable(arg3));
+                    FunctionManager.add(gradFunc);
+                    return gradFunc.getName();
+                }
+ 
+            }
             default:
                 throw new InputMismatchException(" Parameter List " + data + " Is Invalid!");
         }
@@ -1111,9 +1125,8 @@ public class Set {
         throw new InputMismatchException("Bad args for matrix cofactors");
 
     }
-    
-    
-     public Matrix eigenValues() {
+
+    public Matrix eigenValues() {
 
         if (data.size() == 1) {
 
@@ -1122,14 +1135,18 @@ public class Set {
             if (Variable.isVariableString(token)) {
                 Function f = FunctionManager.lookUp(token);
                 Matrix m = f.getMatrix();
-                double eigenValues[] = m.computeEigenValues();
-                int n = eigenValues.length;
-                return new Matrix(1, n);
+                double[] evals = m.computeEigenValues();
+
+                // Create a 1xN matrix
+                Matrix result = new Matrix(1, evals.length);
+                // Directly copy the array into the matrix's internal storage
+                double array[] = new double[evals.length];
+                System.arraycopy(evals, 0, array, 0, evals.length);
+                result.setArray(array, 1, evals.length);
+                return result;
             }
         }
-
         throw new InputMismatchException("Bad args for matrix eigenValues");
-
     }
 
     /**

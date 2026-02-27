@@ -15,6 +15,7 @@ import com.github.gbenroscience.parser.MathScanner;
 import com.github.gbenroscience.parser.Operator;
 import com.github.gbenroscience.parser.Parser_Result;
 import com.github.gbenroscience.parser.Variable;
+import com.github.gbenroscience.parser.methods.Method;
 import java.util.Arrays;
 import java.util.List;
 import com.github.gbenroscience.util.FunctionManager;
@@ -29,12 +30,11 @@ import com.github.gbenroscience.util.VariableManager;
  * diff(@(x)sin(x),5)... diff(@(x)sin(x),5,2)... diff(y,5)... diff(y,5,2)...
  *
  * The first command means the function, sin(x) is to be differentiated wrt x,
- * and evaluated at x = 5.
- * The second command means the function, sin(x) is to
- * be differentiated wrt x, twice and then evaluated at x = 5.
- * The third command means that a function called y has been pre-defined. The parser will load the
- * function and differentiate it wrt x, and then evaluate it at x = 5.
- * The fourth command means that a function called y has been pre-defined. The
+ * and evaluated at x = 5. The second command means the function, sin(x) is to
+ * be differentiated wrt x, twice and then evaluated at x = 5. The third command
+ * means that a function called y has been pre-defined. The parser will load the
+ * function and differentiate it wrt x, and then evaluate it at x = 5. The
+ * fourth command means that a function called y has been pre-defined. The
  * parser will load the function and differentiate it wrt x, twice, and then
  * evaluate it at x = 5.
  *
@@ -99,7 +99,6 @@ public class Parser {
 
         MathScanner.recognizeAnonymousFunctions(scanner);
 
-
         this.function = localParseDerivativeCommand(scanner);
     }//end constructor
 
@@ -117,6 +116,10 @@ public class Parser {
 
     public void setOrderOfDifferentiation(int orderOfDifferentiation) {
         this.orderOfDifferentiation = orderOfDifferentiation;
+    }
+
+    public boolean isNotSetOrderOfDiff() {
+        return orderOfDifferentiation == Integer.MAX_VALUE;
     }
 
     public int getDiffType() {
@@ -166,22 +169,23 @@ public class Parser {
 
             String functionName = list.get(2);
             if (Variable.isVariableString(functionName)) {
-
                 boolean exists = FunctionManager.contains(functionName);
-
                 if (exists) {
 
                     for (int i = 3; i < list.size(); i++) {
-
-                        if (Operator.isOpeningBracket(list.get(i))) {
+                        String tk = list.get(i);
+                        if (Operator.isOpeningBracket(tk)) {
                             int closeBracket = Bracket.getComplementIndex(true, i, list);
                             args1 = new MathExpression(LISTS.createStringFrom(list, i, closeBracket + 1)).solve();
                             List l = list.subList(i, closeBracket + 1);
                             l.clear();
                             l.add(args1);
-                        } else if (Variable.isVariableString(list.get(i))) {
-                            String val = VariableManager.getVariable(list.get(i)).getValue();
-                            list.set(i, val);
+                        } else if (Variable.isVariableString(tk) & !Method.isDefinedMethod(tk)) {
+                            Variable v = VariableManager.getVariable(list.get(i));
+                            if (v != null) {
+                                String val = v.getValue();
+                                list.set(i, val);
+                            }
                         }
 
                     }
@@ -190,19 +194,26 @@ public class Parser {
 
             }
 
-            if (Bracket.isCloseBracket(args1 = list.get(3))) {
+            if (Bracket.isCloseBracket(args1 = list.get(3))) {// diff(F)
                 this.diffType = GRAD_FUNC;
                 this.orderOfDifferentiation = 1;
-            } else if (Number.validNumber(args1)) {//detect first arg
-                if (Number.validNumber(args2 = list.get(4))) {//detect second arg
-                    this.diffType = GRAD_VAL;
-                    this.evalPoint = Double.parseDouble(args1);
-                    this.orderOfDifferentiation = (int) Double.parseDouble(args2);
-                } else {//second arg not available
+            } else if (Bracket.isCloseBracket(args1 = list.get(4))) {// diff(F,v|n)
+                if (Number.isNumber(args1 = list.get(3))) {// diff(F,v)
                     this.diffType = GRAD_FUNC;
-                    this.orderOfDifferentiation = (int) Double.parseDouble(args1);
+                    this.orderOfDifferentiation = (int) Double.parseDouble(list.get(3));
+                } else if (Variable.isVariableString(args1 = list.get(3))) {// diff(F,v)
+                    this.diffType = GRAD_FUNC;
+                    this.orderOfDifferentiation = 1;
                 }
-
+            } else if (Bracket.isCloseBracket(args1 = list.get(5))) {// diff(F,v|x, n)
+                if (Number.isNumber(list.get(3))) {//detect second arg
+                    this.diffType = GRAD_VAL;
+                    this.evalPoint = Double.parseDouble(list.get(3));
+                    this.orderOfDifferentiation = (int) Double.parseDouble(list.get(4));
+                } else if (Variable.isVariableString(args1 = list.get(3))) {//second arg not available
+                    this.diffType = GRAD_FUNC;
+                    this.orderOfDifferentiation = (int) Double.parseDouble(list.get(4));
+                }
             }
 
             return FunctionManager.lookUp(functionName);
@@ -211,6 +222,10 @@ public class Parser {
     }//end method
 
     /**
+     * This command currently assumes that all anonymous function expressions
+     * have been resolved into an anonymous function name and the name passed in
+     * here, no anonymous function expression should be passed in here directly,
+     * yet!
      *
      * @param list A list containing the scanned form of an expression
      * containing information about the function whose derivative is to be
@@ -230,9 +245,18 @@ public class Parser {
      * Direct examples would be: diff(@(x)sin(x+1),4) diff(F,5.32) where F is a
      * function that has been defined before in the workspace.. and so on.
      *
+     * diff(F) Evaluate F's grad func and return the result diff(F,v) Evaluate
+     * F's grad func and store the result in a function called v diff(F,n)
+     * Evaluate F's grad func n times diff(F,v,n) Evaluate F's grad func n times
+     * and store the result in a function called v diff(F,x,n) Evaluate F's grad
+     * func n times and calculate the result at x
+     *
      */
     public static void parseDerivativeCommand(List<String> list) {
-
+        /**
+         *
+         *
+         */
         list.removeAll(Arrays.asList(","));
 
         String args1, args2 = "";
@@ -246,16 +270,19 @@ public class Parser {
                 if (exists) {
 
                     for (int i = 3; i < list.size(); i++) {
-
-                        if (Operator.isOpeningBracket(list.get(i))) {
+                        String tk = list.get(i);
+                        if (Operator.isOpeningBracket(tk)) {
                             int closeBracket = Bracket.getComplementIndex(true, i, list);
                             args1 = new MathExpression(LISTS.createStringFrom(list, i, closeBracket + 1)).solve();
                             List l = list.subList(i, closeBracket + 1);
                             l.clear();
                             l.add(args1);
-                        } else if (Variable.isVariableString(list.get(i))) {
-                            String val = VariableManager.getVariable(list.get(i)).getValue();
-                            list.set(i, val);
+                        } else if (Variable.isVariableString(tk) & !Method.isDefinedMethod(tk)) {
+                            Variable v = VariableManager.getVariable(list.get(i));
+                            if (v != null) {
+                                String val = v.getValue();
+                                list.set(i, val);
+                            }
                         }
 
                     }

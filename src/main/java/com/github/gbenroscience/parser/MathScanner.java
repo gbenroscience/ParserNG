@@ -28,6 +28,7 @@ import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Number.*;
 
 import com.github.gbenroscience.math.differentialcalculus.Parser;
+import java.awt.Toolkit;
 
 /**
  *
@@ -739,12 +740,24 @@ public class MathScanner {
                 /**
                  * Enable the use of number(expr..)...and var(expr...) but avoid
                  * func_name(expr....) Users dont have to enter products of
-                 * numbers and bracketed expressions as number*(expr)
+                 * numbers and bracketed expressions as number*(expr) If
+                 * autoInitOn is true, then var(expr) is such that, if var is
+                 * not a defined method, and is a valid variable name, put a *
+                 * between the var and the bracket.
                  */
-                else if ((isNumber(scanner.get(i)) || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))))
-                        && scanner.get(i + 1).equals("(")) {
+                else if ((isNumber(scanner.get(i))) && isOpeningBracket(scanner.get(i + 1))) {
                     scanner.add(i + 1, "*");
                     i++;
+                }//end if
+                else if ((isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))) && isOpeningBracket(scanner.get(i + 1))) {
+                    if (MathExpression.isAutoInitOn()) {
+                        scanner.add(i + 1, "*");
+                        i++;
+                    } else {
+                        parser_Result = Parser_Result.UNDEFINED_ARG;
+                        setRunnable(false);
+                        errorList.add(scanner.get(i) + " is an undefined variable. Set MathExpression.setAutoInitOn to true to use a variable without defining it");
+                    }
                 }//end if
                 /**
                  * Enable the use of number-concat-funcName(...)...e.g.
@@ -854,17 +867,13 @@ public class MathScanner {
                 scanner.remove(i + 1);
                 i--;
             }
-            
-        
-        
-         //   System.out.println("index: "+i+", scanner- "+scanner);
-       
-       // String s5 = "(--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*----3)";
+
+            //   System.out.println("index: "+i+", scanner- "+scanner);
+            // String s5 = "(--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*----3)";
         }//end for loop
-        
-        
-        for(int i=0;i<scanner.size()-1;i++){
-                String tk = scanner.get(i);
+
+        for (int i = 0; i < scanner.size() - 1; i++) {
+            String tk = scanner.get(i);
             String next_tk = scanner.get(i + 1);
             int tk_len = tk.length();
 
@@ -876,7 +885,7 @@ public class MathScanner {
             if (token == '\u0000') {//skip
                 continue;
             }
-                 if ((token == '*' || token == '/' || token == '^') && (nextToken == '-' || nextToken == '+')) {
+            if ((token == '*' || token == '/' || token == '^') && (nextToken == '-' || nextToken == '+')) {
                 String veryNext = i + 2 < scanner.size() ? scanner.get(i + 2) : null;
                 if (veryNext != null && isNumber(veryNext)) {
                     if (isNegative(veryNext)) {
@@ -886,11 +895,11 @@ public class MathScanner {
                             scanner.set(i + 1, veryNext);
                         }
                     } else {
-                        if(veryNext.charAt(0) == '+'){
+                        if (veryNext.charAt(0) == '+') {
                             veryNext = veryNext.substring(1);
                         }
                         if (nextToken == '-') {
-                            scanner.set(i + 1, "-"+veryNext);
+                            scanner.set(i + 1, "-" + veryNext);
                         } else if (nextToken == '+') {
                             scanner.set(i + 1, veryNext);
                         }
@@ -997,7 +1006,7 @@ public class MathScanner {
                         scanner.set(i + 1, String.valueOf(-1 * Double.parseDouble(scanner.get(i + 2))));
                         scanner.remove(i + 2);
                     } else if (scanner.get(i + 1).equals("+") && validNumber(scanner.get(i + 2))) {
-                        scanner.set(i + 1, String.valueOf(Double.parseDouble(scanner.get(i + 2)))); 
+                        scanner.set(i + 1, String.valueOf(Double.parseDouble(scanner.get(i + 2))));
                         scanner.remove(i + 2);
                     }
                 }//end if
@@ -1035,10 +1044,11 @@ public class MathScanner {
                 setRunnable(false);
                 parser_Result = Parser_Result.STRANGE_INPUT;
             }
-                 if (MathExpression.isAutoInitOn()) {
-                if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !variableManager.contains(scanner.get(i))
-                        && !FunctionManager.contains(scanner.get(i))) {
-                    variableManager.parseCommand(scanner.get(i) + "=0.0;");
+            if (MathExpression.isAutoInitOn()) {
+                String tk = scanner.get(i);
+                if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1)) && !variableManager.contains(tk)
+                        && !FunctionManager.contains(tk) && !Method.isDefinedMethod(tk)) {
+                    variableManager.parseCommand(tk + "=0.0;");
                 }//end if
             }//end if
             else {
@@ -1168,10 +1178,11 @@ public class MathScanner {
                 parser_Result = Parser_Result.STRANGE_INPUT;
                 setRunnable(false);
             }
-            if (MathExpression.isAutoInitOn()) {System.out.println("isAutoInitOn Found!!!");
-                if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(scanner.get(i))
-                        && !FunctionManager.contains(scanner.get(i))) {
-                    varMan.parseCommand(scanner.get(i) + "=0.0;");
+            if (MathExpression.isAutoInitOn()) {
+                String tk = scanner.get(i);
+                if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(tk)
+                        && !FunctionManager.contains(tk) && !Method.isDefinedMethod(tk)) {
+                    varMan.parseCommand(tk + "=0.0;");
                 }//end if
             }//end if
             else {
@@ -1224,7 +1235,6 @@ public class MathScanner {
                         List<String> sub = scanner.subList(indexOfAt, i);
                         sub.clear();
                         sub.add(f.getName());
-
                         break;
                     } else if (isClosingBracket(token)) {
                         int open = Bracket.getComplementIndex(false, i, scanner);
@@ -1496,13 +1506,12 @@ public class MathScanner {
      * @param args Command line args (((2+3)^2))!-------((25))!-------
      */
     public static void main(String args[]) {//tester method for STRING methods
- 
+
         String s5 = "sqrt(0.64-x^2)";
         //String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3";
         //String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
         MathScanner sc = new MathScanner(s5);
-         
-        
+        System.out.println(sc.scanner(new VariableManager()));
 
     }//end method main
 }

@@ -397,6 +397,8 @@ public class Declarations {
                 return TYPE.ALGEBRAIC_EXPRESSION.toString();
             case MATRIX_EIGENVEC:
                 return TYPE.MATRIX.toString();
+            case MATRIX_EIGENVALUES:
+                return TYPE.MATRIX.toString();
             default:
                 return TYPE.NUMBER.toString();
         }

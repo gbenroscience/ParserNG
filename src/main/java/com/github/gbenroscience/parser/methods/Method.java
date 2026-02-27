@@ -292,7 +292,7 @@ public class Method {
                 || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX) || op.equals(MATRIX_MULTIPLY)
                 || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT)
                 || op.equals(MATRIX_POWER) || op.equals(MATRIX_EDIT) || op.equals(MATRIX_TRANSPOSE)
-                || op.equals(MATRIX_COFACTORS) || op.equals(MATRIX_ADJOINT) || op.equals(MATRIX_EIGENPOLY) || op.equals(MATRIX_EIGENVEC);
+                || op.equals(MATRIX_COFACTORS) || op.equals(MATRIX_ADJOINT) || op.equals(MATRIX_EIGENPOLY) || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES);
     }
 
     /**
@@ -700,12 +700,12 @@ public class Method {
                 String poly = set.eigenPoly();
 
                 list.clear();
-                String ref = "anon" + (FunctionManager.countAnonymousFunctions() + 1);
+                String ref = FunctionManager.ANON_PREFIX + (FunctionManager.ANON_CURSOR.get() + 1);
 
                 Function.storeAnonymousFunction("@(" + Matrix.lambda + ")" + poly);
                 list.add(ref);
                 return list;
-            } else if (name.equals(MATRIX_EIGENVALUES)) {
+            } else if (name.equals(MATRIX_EIGENVALUES)) { 
                 Set set = new Set(list);
                 Matrix matrix = set.eigenValues();
                 list.clear();

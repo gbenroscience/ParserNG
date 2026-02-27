@@ -16,15 +16,13 @@ import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.parser.methods.Help;
 import com.github.gbenroscience.parser.methods.Method;
 
-import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.math.Point;
+import com.github.gbenroscience.math.Maths; 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.InputMismatchException;
 import java.util.Iterator;
-import java.util.List;
-import java.util.function.Predicate;
+import java.util.List; 
 
 import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Number.*;
@@ -158,8 +156,7 @@ public class MathExpression implements Savable, Solvable {
     }//end constructor MathExpression
 
     public MathExpression(String input, VariableManager variableManager) {
-
-        setAutoInitOn(false);
+ 
         this.variableManager = variableManager;
 
         Scanner cs = new Scanner(STRING.purifier(input), false, VariableManager.endOfLine);
@@ -1497,8 +1494,7 @@ public class MathExpression implements Savable, Solvable {
 
   
     private String resolveSegment(List<String> scan, int openIdx, int closeIdx, boolean isMethod) {
-
-        if (isMethod) {
+         if (isMethod) {
             try {
                 /**
                  * Get the view of the scanner between the method and the
@@ -1517,15 +1513,14 @@ public class MathExpression implements Savable, Solvable {
                     //  System.out.println("resolveSegment->isMethod: executable is size=4 e.g: [sin,(,3,)] --> will call Method.run");
                     return out.get(0);
                 } else {//e.g [,cos,(,3,+,5,-2,^,3,),]-> First evaluate the expression before evaluating the method
-                    if (Method.isStatsMethod(methodName)) {
+                  if (Method.isStatsMethod(methodName)) {
                         boolean isNotListReturner = Method.isNumberReturningStatsMethod(methodName);
                         //  System.out.println("resolveSegment->isMethod: executable is stats-method e.g: \n"+executable+"\n --> will " +  (isNotListReturner ? "not call" : "call") + " listToString on result of Method.run");
                         List<String> out = Method.run(new ArrayList<>(executable), DRG);
                         if (!isNotListReturner) {//return a list... write the list in the original executable and then return null, the solve method will take it from there.
                             executable.clear();
                             executable.addAll(out);
-                        }
-                        //  System.out.println("out: " + out);
+                        } 
                         return isNotListReturner ? out.get(0) : null;
                     } else {
                         double val = hiSpeedSolver(executable.subList(2, executable.size() - 1));
@@ -1535,7 +1530,7 @@ public class MathExpression implements Savable, Solvable {
                         return out.get(0);
                     }
                 }
-            } catch (IndexOutOfBoundsException | NullPointerException | IllegalArgumentException indexErr) {
+            } catch (IndexOutOfBoundsException | NullPointerException | IllegalArgumentException indexErr) { 
                 indexErr.printStackTrace();
                 //System.out.println("resolveSegment->isMethod: error happened while evaluating. Check stacktrace");
                 correctFunction = false;
@@ -1552,9 +1547,9 @@ public class MathExpression implements Savable, Solvable {
             // System.out.println("resolveSegment->isNotMethod: will call hiSpeedResolver on " + inner);
             if (sz == 1) {
                 String elem = inner.get(0);
-                if (elem.startsWith("anon")) {//[(,anon1,)]// 
+                if (elem.startsWith(FunctionManager.ANON_PREFIX) || !isNumber(elem)) {//[(,anon1,)]// 
                     Function f = FunctionManager.lookUp(inner.get(0));
-                    return f != null ? f.getMatrix().toString() : SYNTAX_ERROR;
+                    return f != null ? f.toString() : SYNTAX_ERROR;
                 }else if(elem.equals("NaN") || elem.contains("Infinity")){
                     return elem;
                 }
@@ -1643,12 +1638,10 @@ public class MathExpression implements Savable, Solvable {
                             myScan.add(replaceStart, result);
                             // 4. RESET INDEX: Move the pointer back to where the result was inserted
                             // so the 'for' loop continues scanning the rest of the expression correctly.
-                            i = replaceStart;
-                           
+                            i = replaceStart; 
                         } else {//list returning operator has already mutated the scanner with the result of its computations on the portion of the list
                             i = replaceStart;
-                        }
-
+                        } 
                     } catch (Exception e) {
                         e.printStackTrace();
                         returnType = TYPE.ERROR;
@@ -2816,10 +2809,19 @@ public class MathExpression implements Savable, Solvable {
         System.out.println(new MathExpression(in).solve());
     }//end method
 
-    public static void main(String... args) {
-        System.out.println(new MathExpression("x=0.1;sqrt(0.64-x^2)").solve());
+    public static void main(String... args) { 
         System.out.println(new MathExpression("x=0.9;sqrt(0.64-x^2)").solve());
-        System.out.println(new MathExpression("sin(ln(x));").solve() + ", autoInitOn: " + autoInitOn);
+        System.out.println("differential calculus:>>1 "+new MathExpression("x=3;diff(@(x)sin(ln(x)),vw);").solve());
+        System.out.println("differential calculus:>>2 "+new MathExpression("diff(@(x)sin(ln(x)), b);").solve());
+        System.out.println("differential calculus:>>3 "+new MathExpression("diff(@(x)sin(ln(x)), 1);").solve());
+        System.out.println("differential calculus:>>4 "+new MathExpression("diff(@(x)x^10, m,1);").solve());
+        System.out.println(new MathExpression("sin(ln(x));").solve());
+        System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS);
+        
+           MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);eigvalues(A);");
+        System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS);
+        System.out.println("----------"+mex.solve());
+        
         MathExpression ml = new MathExpression("D=@(3,3)(3,4,1,2,4,7,9,1,-2);tri_mat(D)");
         System.out.println("ml.solve():" + ml.solve());
         MathExpression linear = new MathExpression("a=4;a11=3.14159265357;b=2.718281828;M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");

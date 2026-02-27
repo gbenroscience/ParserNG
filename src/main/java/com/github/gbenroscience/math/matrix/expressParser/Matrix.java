@@ -79,6 +79,23 @@ public class Matrix {
 
     /**
      *
+     * @param array the 2D data supplied as a 1D array used to create this
+     * @param rows
+     * @param columns Matrix object
+     */
+    public Matrix(double[] flatArray, int rows, int columns) {
+        this("NEW");
+        if (rows * columns == flatArray.length) {
+            this.array = flatArray;
+            this.rows = rows;
+            this.cols = columns;
+            return;
+        }
+        throw new IllegalArgumentException("the flat array representation should have rows*columns elements...flatArray size=" + flatArray.length + ", rowsXcolumns=" + rows * columns);
+    }//end constructor
+
+    /**
+     *
      * @param array the data array used to create this Matrix object
      */
     public Matrix(double[][] array) {
@@ -132,6 +149,20 @@ public class Matrix {
             this.array = new double[rows * cols];
         }
     }//end method
+
+    public final void setArray(double[] flatArray, int rows, int columns) {
+         if (rows * columns == flatArray.length) {
+            this.array = flatArray;
+            this.rows = rows;
+            this.cols = columns;
+            return;
+        }
+        throw new IllegalArgumentException("the flat array representation should have rows*columns elements...flatArray size=" + flatArray.length + ", rowsXcolumns=" + rows * columns);
+    }//end method
+
+    public double[] getFlatArray() {
+        return array;
+    }
 
     /**
      *
@@ -1718,20 +1749,19 @@ public class Matrix {
         }
         return eigenvalues;
     }
-/**
- * 
- * <code>A = VɅV-¹</code>
- Check: Is ||A*v - lambda*v|| close to zero?
-double[] Av = matrixMultiply(A, v);
-double[] lv = scalarMultiply(lambda, v);
-double residual = computeNorm(subtract(Av, lv));
 
-if (residual > 1e-9) {
-   // This eigenvalue/vector pair might be inaccurate
-}
- * @param lambda
- * @return 
- */
+    /**
+     *
+     * <code>A = VɅV-¹</code> Check: Is ||A*v - lambda*v|| close to zero?
+     * double[] Av = matrixMultiply(A, v); double[] lv = scalarMultiply(lambda,
+     * v); double residual = computeNorm(subtract(Av, lv));
+     *
+     * if (residual > 1e-9) { // This eigenvalue/vector pair might be inaccurate
+     * }
+     *
+     * @param lambda
+     * @return
+     */
     public double[] computeEigenVector(double lambda) {
         Matrix A = new Matrix(this);
         int n = A.rows;

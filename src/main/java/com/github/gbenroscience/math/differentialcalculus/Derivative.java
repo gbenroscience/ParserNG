@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import static com.github.gbenroscience.math.differentialcalculus.Utilities.*;
+import com.github.gbenroscience.parser.Function;
+import com.github.gbenroscience.util.FunctionManager;
 
 /**
  *
@@ -199,14 +201,15 @@ public class Derivative {
 //the anonymous function to be differentiated: e.g.diff(@(p)(3*p^3+2*p^2-8*p+1),1)
         try {
             Parser p = new Parser(expr);
-
+             
             if (p.result == Parser_Result.VALID) {
-
                 expr = "diff(" + p.getFunction().getMathExpression().getExpression() + ")";
-
                 String baseVariable = p.getFunction().getIndependentVariables().get(0).getName();
 
                 int orderOfDiff = p.getOrderOfDifferentiation();
+                if(p.isNotSetOrderOfDiff()){
+                    orderOfDiff = 1;
+                }
 
                 if (p.isGradEval()) {
                     double evalPoint = p.getEvalPoint();
@@ -226,14 +229,15 @@ public class Derivative {
                         expr = "diff(" + derivative.differentiate() + ")";
                     }//end for loop
                     expr = expr.substring(5, expr.length() - 1);
-                    return expr;
+                    String funcExpr = "@("+baseVariable+")"+expr;System.out.println("funcExpr: "+funcExpr);
+                    Function f = FunctionManager.add(funcExpr);
+                    return f.getName();
+                    //return funcExpr;
                 }
-
             }
-
-            return "Input Error";
-
+            return "Input Error!!!";
         } catch (Exception e) {
+            e.printStackTrace();
             return "Input Error";
         }
     }

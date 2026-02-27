@@ -1,8 +1,20 @@
 # ParserNG
 
+**ParserNG 0.2.3** is headed for maven central soon!<br>
+comes with couple microsecond (on decent hardware and) expression solving ability while maintaining its full feature stack. Graphing feels butter-smooth and iterations shouldn't feel so iterative. At 5 microsecond, moderately complex expressions such as
+```Java
+String s6 = "5*sin(3+2)/(4*3-2)";
+```
+ can be evaluated almost 200 thousand times per second.
 
-Back with a bang!
-ParserNG 0.2.2 has been released on maven-central!
+ The model of a `Matrix` has also been optimized to use a 1D array internally. This makes it faster due to memory locality of Matrix data.
+
+ Also, we support eigenvalues and eigenvectors as inbuilt methods, so enjoy! 
+
+
+
+**Back with a bang!
+ParserNG 0.2.2 has been released on maven-central!**
 
 
 ## What's new?

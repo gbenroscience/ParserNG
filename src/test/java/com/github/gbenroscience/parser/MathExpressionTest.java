@@ -93,13 +93,15 @@ class MathExpressionTest {
                 return TYPE.NUMBER.toString();
             }
         };
+        MathExpression.setAutoInitOn(false);
         MathExpression me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
+        System.out.println("scanner for b1: "+me.scanner+", autoInitOn: "+MathExpression.isAutoInitOn());
+        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b1);
         me = new MathExpression("b1(1,2,3)");
         Assertions.assertEquals(1, Double.parseDouble(me.solve()));
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
+        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b2);
         me = new MathExpression("b2(1,2,3)");
         Assertions.assertEquals(2, Double.parseDouble(me.solve()));
@@ -109,12 +111,12 @@ class MathExpressionTest {
         Assertions.assertEquals(3, Double.parseDouble(me.solve()));
         Declarations.unregisterBasicNumericalMethod(b1.getClass());
         me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
+        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
         me = new MathExpression("b2(1,2,3)");
         Assertions.assertEquals(2, Double.parseDouble(me.solve()));
         Declarations.unregisterBasicNumericalMethod(b2.getClass());
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
+        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
     }
 
     @Test

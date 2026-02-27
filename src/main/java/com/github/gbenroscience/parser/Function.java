@@ -219,7 +219,7 @@ public class Function implements Savable {
     }
 
     public static boolean assignObject(String input) {
-        
+          
         /**
          * Check if it is a function assignment operation...e.g:
          * f=matrix_mul(A,B)
@@ -234,7 +234,7 @@ public class Function implements Savable {
         if (equalsIndex == -1 && semiColonIndex == -1 && indexOfOpenBrac == -1) {
             throw new InputMismatchException("Wrong Input!");
         }
-
+    
         /**
          * Check if the user used the form f(x)=.... instead of f=@(x).... If so
          * convert to the latter format, and then recompute the necessary
@@ -271,7 +271,7 @@ public class Function implements Savable {
 
                 MathExpression expr = new MathExpression(rhs);
                 List<String> scanner = expr.getScanner(); 
-                if (scanner.size() == 3 && scanner.get(1).startsWith("anon")) {//function assigments will always be like this: [(,anon1,)] when they get here
+                if (scanner.size() == 3 && scanner.get(1).startsWith(FunctionManager.ANON_PREFIX)) {//function assigments will always be like this: [(,anon1,)] when they get here
                     Function f = FunctionManager.lookUp(scanner.get(1));
 
                     if (f != null) {
@@ -374,7 +374,7 @@ public class Function implements Savable {
 
             boolean anonymous = input.startsWith("@");
             if (anonymous) {
-                input = "anon" + (FunctionManager.countAnonymousFunctions() + 1) + "=".concat(input);
+                input = FunctionManager.ANON_PREFIX + (FunctionManager.ANON_CURSOR.get() + 1) + "=".concat(input);
             }
 
             String[] cutUpInput = new String[3];
@@ -385,10 +385,10 @@ public class Function implements Savable {
 
             Scanner cs = new Scanner(cutUpInput[1], false, ",", "(", ")");
             List<String> scan = cs.scan();
-
+            
             if (Variable.isVariableString(cutUpInput[0]) && isParameterList(cutUpInput[1])) {
-                if (cutUpInput[0].startsWith("anon") && !anonymous) {
-                    throw new InputMismatchException("Function Name Cannot Start With \'anon\'.\n \'anon\' is a reserved name for anonymous functions.");
+                if (cutUpInput[0].startsWith(FunctionManager.ANON_PREFIX) && !anonymous) {
+                    throw new InputMismatchException("Function Name Cannot Start With \'anon\'.\n \'anon\' is a reserved name for anonymous functions..culprit: "+cutUpInput[0]);
                 } else if (Method.isInBuiltMethod(cutUpInput[0])) {
                     throw new InputMismatchException(cutUpInput[0] + " is a reserved name for inbuilt methods.");
                 } else {
@@ -651,8 +651,8 @@ public class Function implements Savable {
      * @return the name assigned to the anonymous function created.
      */
     public static synchronized String storeAnonymousMatrixFunction(Matrix matrix) {
-        int num = FunctionManager.countAnonymousFunctions();
-        String name = "anon" + (num + 1);
+        int num = FunctionManager.ANON_CURSOR.get();
+        String name = FunctionManager.ANON_PREFIX + (num + 1);
 
         matrix.setName(name);
         FunctionManager.add(new Function(matrix));
@@ -666,8 +666,8 @@ public class Function implements Savable {
      * @return the name assigned to the anonymous function created.
      */
     public static synchronized String storeAnonymousFunction(String expression) {
-        int num = FunctionManager.countAnonymousFunctions();
-        String name = "anon" + (num + 1);
+        int num = FunctionManager.ANON_CURSOR.get();
+        String name = FunctionManager.ANON_PREFIX + (num + 1);
 
         String tempName = "temp" + System.nanoTime();
 
@@ -893,11 +893,11 @@ public class Function implements Savable {
     public static boolean isAnonymous(Function f) {
         switch (f.type) {
             case ALGEBRAIC_EXPRESSION:
-                return f.dependentVariable.getName().startsWith("anon");
+                return f.dependentVariable.getName().startsWith(FunctionManager.ANON_PREFIX);
             case MATRIX:
-                return f.matrix.getName().startsWith("anon");
+                return f.matrix.getName().startsWith(FunctionManager.ANON_PREFIX);
             case LIST:
-                return f.matrix.getName().startsWith("anon");
+                return f.matrix.getName().startsWith(FunctionManager.ANON_PREFIX);
             default:
                 return false;
 
@@ -906,7 +906,7 @@ public class Function implements Savable {
     }
 
     public static boolean isAnonymous(String name) {
-        return name.startsWith("anon");
+        return name.startsWith(FunctionManager.ANON_PREFIX);
     }
 
     @Override

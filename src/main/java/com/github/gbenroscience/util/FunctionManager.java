@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -22,7 +23,13 @@ import java.util.logging.Logger;
  */
 public class FunctionManager {
 
-    public static final Map<String, Function> FUNCTIONS = Collections.synchronizedMap(new HashMap<String, Function>());
+    
+    public static final String ANON_PREFIX = "anon";
+    /**
+     * This is an indicator of the total number of anonymous functions ever created since the code was run in this session.
+     */
+    public  static final AtomicInteger ANON_CURSOR = new AtomicInteger(0);
+    public static final Map<String, Function> FUNCTIONS = Collections.synchronizedMap(new HashMap<>());
 
     /**
      *
@@ -88,6 +95,9 @@ public class FunctionManager {
                 VariableManager.delete(fName);//if so delete it.
             }//end if
             FUNCTIONS.put(fName, f);
+            if(fName.startsWith(ANON_PREFIX)){
+                ANON_CURSOR.incrementAndGet();
+            }
         } else {
             update(f.toString());
         }
@@ -134,11 +144,15 @@ public class FunctionManager {
 
     /**
      * Updates a Function object in this FunctionManager.
+     * @param expression The function expression
      */
     public static void update(String expression) {
         try {
             Function f = new Function(expression);
             String name = f.getName();
+            if(name.startsWith(ANON_PREFIX) && FUNCTIONS.get(name) == null){
+                ANON_CURSOR.incrementAndGet();
+            }
             FUNCTIONS.put(name, f);
         } catch (Exception ex) {
             Logger.getLogger(FunctionManager.class.getName()).log(Level.SEVERE, null, ex);
@@ -173,7 +187,7 @@ public class FunctionManager {
         synchronized (FUNCTIONS) {
             for (Map.Entry<String, Function> entry : FUNCTIONS.entrySet()) {
                 Function function = entry.getValue();
-                if (function.getName().startsWith("anon")) {
+                if (function.getName().startsWith(ANON_PREFIX)) {
                     ++count;
                 }//end if
             }//end for
