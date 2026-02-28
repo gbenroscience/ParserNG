@@ -304,9 +304,9 @@ public class MethodRegistry {
         registerMethod(Declarations.LIST_SUM, (ctx, name, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
             double total = 0.0;
-               System.out.println("arg-type-in-registryp-call: "+args[0].type+", arg: "+args[0].toString());
+           //    System.out.println("arg-type-in-registryp-call: "+args[0].type+", arg: "+args[0].toString());
             for (MathExpression.EvalResult arg : args) {
-                System.out.println("arg-type-in-registryp-call: "+arg.type+", arg: "+arg.toString());
+              //  System.out.println("arg-type-in-registryp-call: "+arg.type+", arg: "+arg.toString());
                 if (arg.type == MathExpression.EvalResult.TYPE_SCALAR) {                    // scalar
                     total += arg.scalar;
                 } else if (arg.type == MathExpression.EvalResult.TYPE_VECTOR && arg.vector != null) {   // list/vector from sort/mode
@@ -315,6 +315,7 @@ public class MethodRegistry {
                     }
                 }
             }
+ 
             result.wrap(total);
             return result;
         });

@@ -35,6 +35,7 @@ import com.github.gbenroscience.math.differentialcalculus.Parser;
  */
 public class MathScanner {
 
+    public String commaAlias = String.valueOf(new Random().nextDouble());
     public Parser_Result parser_Result = Parser_Result.VALID;
     /**
      * Returns true if the expression is validated by the scanner as containing
@@ -114,7 +115,7 @@ public class MathScanner {
         }//sort(5,3,2,1,-8,-9,12,34,98,-900,34,23,12,340)
 
         DataSetFormatter dsf = new DataSetFormatter(scannerInput);
-        this.scannerInput = scannerInput;// dsf.getFormattedDataSet();
+        this.scannerInput = dsf.getFormattedDataSet();
 
     }
 
@@ -523,10 +524,8 @@ public class MathScanner {
      */
     public void splitStringOnMethods_Variables_And_Operators() {
         Scanner cs = new Scanner(scannerInput, true, VariableManager.VARIABLES.keySet().toArray(new String[0]), Method.getAllFunctions(), operators);
-        ArrayList<String> filter = new ArrayList<>();
-        filter.add("");
-        filter.add(",");
-        scanner.addAll(cs.scan());
+
+        scanner = cs.scan();
 
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
@@ -540,10 +539,8 @@ public class MathScanner {
                         scanner.add(i + 2, token.substring(j));
                         i++;
                         break;
-
                     }
                 }
-
             }
 
             /**
@@ -673,7 +670,7 @@ public class MathScanner {
 // intg,(,@,(x),log(x,2),4,2,5)
                 int close = Bracket.getComplementIndex(true, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
-
+                System.out.println("list: " + list);
                 RootFinder.extractFunctionStringFromExpression(list);
 
                 if (list.isEmpty()) {
@@ -701,10 +698,16 @@ public class MathScanner {
                         break;
                     }
                 }
+
             }
         }
 
-        scanner.removeAll(filter);
+        String curiousNumber = commaAlias;
+        while (scanner.contains(curiousNumber)) {
+            curiousNumber = String.valueOf(new Random().nextDouble());
+        }
+        this.commaAlias = curiousNumber;
+        scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
     }
 
     /**
@@ -738,12 +741,24 @@ public class MathScanner {
                 /**
                  * Enable the use of number(expr..)...and var(expr...) but avoid
                  * func_name(expr....) Users dont have to enter products of
-                 * numbers and bracketed expressions as number*(expr)
+                 * numbers and bracketed expressions as number*(expr) If
+                 * autoInitOn is true, then var(expr) is such that, if var is
+                 * not a defined method, and is a valid variable name, put a *
+                 * between the var and the bracket.
                  */
-                else if ( (isNumber(scanner.get(i)) || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))))
-                        && scanner.get(i + 1).equals("(")) {
+                else if ((isNumber(scanner.get(i))) && isOpeningBracket(scanner.get(i + 1))) {
                     scanner.add(i + 1, "*");
                     i++;
+                }//end if
+                else if ((isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))) && isOpeningBracket(scanner.get(i + 1))) {
+                    if (MathExpression.isAutoInitOn()) {
+                        scanner.add(i + 1, "*");
+                        i++;
+                    } else {
+                        parser_Result = Parser_Result.UNDEFINED_ARG;
+                        setRunnable(false);
+                        errorList.add(scanner.get(i) + " is an undefined variable. Set MathExpression.setAutoInitOn to true to use a variable without defining it");
+                    }
                 }//end if
                 /**
                  * Enable the use of number-concat-funcName(...)...e.g.
@@ -853,29 +868,36 @@ public class MathScanner {
                 scanner.remove(i + 1);
                 i--;
             }
-            
-        
-        
-         //   System.out.println("index: "+i+", scanner- "+scanner);
-       
-       // String s5 = "(--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*----3)";
+
+            //   System.out.println("index: "+i+", scanner- "+scanner);
+            // String s5 = "(--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*----3)";
         }//end for loop
-        
-        
-        for(int i=0;i<scanner.size()-1;i++){
-                String tk = scanner.get(i);
+
+        for (int i = 0; i < scanner.size() - 1; i++) {
+
+            String prev_tk = i - 1 >= 0 ? scanner.get(i - 1) : null;
+            String tk = scanner.get(i);
             String next_tk = scanner.get(i + 1);
+
+            int prev_tk_len = prev_tk != null ? prev_tk.length() : -1;
             int tk_len = tk.length();
-
             int next_tk_len = next_tk.length();
-
+            char prevToken = prev_tk_len == 1 ? prev_tk.charAt(0) : '\u0000';// if prevToken contains a null char, then it is a token of length greater than 1 or the prevToken is null
             char token = tk_len == 1 ? tk.charAt(0) : '\u0000';// if token contains a null char, then it is a token of length greater than 1
             char nextToken = next_tk_len == 1 ? next_tk.charAt(0) : '\u0000';// may be a number or a + or -, if nextToken contains a null char, then it is a string of length more than 1
+
+            if ((token == '-' || token == '+') && isNumber(next_tk)) {
+                if (prevToken == '(' || i == 0) {
+                    scanner.set(i, (-1 * Double.parseDouble(next_tk)) + "");
+                    scanner.remove(i + 1);
+                }
+                continue;
+            }
 
             if (token == '\u0000') {//skip
                 continue;
             }
-                 if ((token == '*' || token == '/' || token == '^') && (nextToken == '-' || nextToken == '+')) {
+            if ((token == '*' || token == '/' || token == '^') && (nextToken == '-' || nextToken == '+')) {
                 String veryNext = i + 2 < scanner.size() ? scanner.get(i + 2) : null;
                 if (veryNext != null && isNumber(veryNext)) {
                     if (isNegative(veryNext)) {
@@ -885,11 +907,11 @@ public class MathScanner {
                             scanner.set(i + 1, veryNext);
                         }
                     } else {
-                        if(veryNext.charAt(0) == '+'){
+                        if (veryNext.charAt(0) == '+') {
                             veryNext = veryNext.substring(1);
                         }
                         if (nextToken == '-') {
-                            scanner.set(i + 1, "-"+veryNext);
+                            scanner.set(i + 1, "-" + veryNext);
                         } else if (nextToken == '+') {
                             scanner.set(i + 1, veryNext);
                         }
@@ -965,7 +987,7 @@ public class MathScanner {
             scanner.clear();
             return scanner;
         }
-      
+
         /*
          * The for loop above does not properly handle
          * negative exponents of 10, e.g -3E-10
@@ -987,7 +1009,7 @@ public class MathScanner {
                 }//end catch
             }//end if
         }//end for
- 
+
 //enable interpretation of things like 3^-4 or 3^+4 i.e ^- or ^+ patterns
         for (int i = 0; i < scanner.size(); i++) {
             try {
@@ -996,7 +1018,7 @@ public class MathScanner {
                         scanner.set(i + 1, String.valueOf(-1 * Double.parseDouble(scanner.get(i + 2))));
                         scanner.remove(i + 2);
                     } else if (scanner.get(i + 1).equals("+") && validNumber(scanner.get(i + 2))) {
-                        scanner.set(i + 1, String.valueOf(Double.parseDouble(scanner.get(i + 2)))); 
+                        scanner.set(i + 1, String.valueOf(Double.parseDouble(scanner.get(i + 2))));
                         scanner.remove(i + 2);
                     }
                 }//end if
@@ -1008,9 +1030,9 @@ public class MathScanner {
 
             }
         }//end for
- 
+
         validateTokens();
-        
+
         /**
          * Automatically initialize and store undeclared variables to 0 in the
          * first if block. To enforce variable declaration and initialization,
@@ -1034,10 +1056,11 @@ public class MathScanner {
                 setRunnable(false);
                 parser_Result = Parser_Result.STRANGE_INPUT;
             }
-                 if (MathExpression.isAutoInitOn()) {
-                if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !variableManager.contains(scanner.get(i))
-                        && !FunctionManager.contains(scanner.get(i))) {
-                    variableManager.parseCommand(scanner.get(i) + "=0.0;");
+            if (MathExpression.isAutoInitOn()) {
+                String tk = scanner.get(i);
+                if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1)) && !variableManager.contains(tk)
+                        && !FunctionManager.contains(tk) && !Method.isDefinedMethod(tk)) {
+                    variableManager.parseCommand(tk + "=0.0;");
                 }//end if
             }//end if
             else {
@@ -1051,7 +1074,7 @@ public class MathScanner {
                 }//end if
             }//end else
         }
- 
+
         if (!runnable) {
             errorList.add("\n"
                     + "Sorry, Errors Were Found In Your Expression."
@@ -1061,9 +1084,8 @@ public class MathScanner {
             errorList.add("Scan SuccessFul.No Illegal Object Found.\n"
                     + "Putting Scanner On StandBy");
         }
-    
+
         plusAndMinusStringHandler();
-        
         return scanner;
     }
 
@@ -1169,9 +1191,10 @@ public class MathScanner {
                 setRunnable(false);
             }
             if (MathExpression.isAutoInitOn()) {
-                if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(scanner.get(i))
-                        && !FunctionManager.contains(scanner.get(i))) {
-                    varMan.parseCommand(scanner.get(i) + "=0.0;");
+                String tk = scanner.get(i);
+                if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(tk)
+                        && !FunctionManager.contains(tk) && !Method.isDefinedMethod(tk)) {
+                    varMan.parseCommand(tk + "=0.0;");
                 }//end if
             }//end if
             else {
@@ -1201,7 +1224,7 @@ public class MathScanner {
         return scanner;
     }
 
-    public static void recognizeAnonymousFunctions(List<String> scanner) {
+    public static void recognizeAnonymousFunctions1(List<String> scanner) {
         int indexOfAt = -1;
 
         while ((indexOfAt = scanner.indexOf("@")) != -1) {
@@ -1242,6 +1265,78 @@ public class MathScanner {
             }
         }
         //System.out.println("scanner-debug: "+scanner);
+    }
+
+    /**
+     * Optimized & more correct 2025 version of recognizeAnonymousFunctions
+     *
+     * Changes & improvements: • Single linear pass (O(n) instead of repeated
+     * indexOf → much faster) • Cleaner structure with helper methods • Safer
+     * in-place replacement (no risky mutations during iteration) • Exact same
+     * replacement logic & output as your original code • Better readability and
+     * maintainability • Preserves your original bracket/comma detection rules
+     *
+     * @param scanner
+     */
+    public static void recognizeAnonymousFunctions(List<String> scanner) {
+        if (scanner == null || scanner.isEmpty()) {
+            return;
+        }
+
+        int i = 0;
+        while (i < scanner.size()) {
+            if ("@".equals(scanner.get(i))) {
+                if (i + 1 >= scanner.size() || !isOpeningBracket(scanner.get(i + 1))) {
+                    String found = i + 1 < scanner.size() ? scanner.get(i + 1) : "end of expression";
+                    throw new InputMismatchException("Syntax Error occurred while scanning math expression.\n"
+                            + "Reason: The @ symbol is used exclusively to create functions. Expected: `(`, found: `" + found + "`");
+                }
+                i = processOneAnonymousFunction(scanner, i);
+            } else {
+                i++;
+            }
+        }
+    }
+
+    /**
+     * Processes one anonymous function starting at indexOfAt and replaces it
+     * with the generated function name (e.g. anon1, anon2...). Returns the
+     * index to continue scanning from after replacement.
+     */
+    private static int processOneAnonymousFunction(List<String> scanner, int indexOfAt) {
+     
+        for (int i = indexOfAt; i < scanner.size(); i++) {
+            String token = scanner.get(i);
+            if (isOpeningBracket(token)) {
+                i = Bracket.getComplementIndex(true, i, scanner);
+            } else if (isComma(token)) {
+                replaceWithFunctionName(scanner, indexOfAt, i);
+                return indexOfAt + 1;
+            } else if (isClosingBracket(token)) {
+                int open = Bracket.getComplementIndex(false, i, scanner);
+                if (open < indexOfAt) {
+                    replaceWithFunctionName(scanner, indexOfAt, i);
+                    return indexOfAt + 1;
+                }
+            }
+        }
+        // Reached end of list without comma or parent bracket
+        replaceWithFunctionName(scanner, indexOfAt, scanner.size());
+        return indexOfAt + 1;
+    }
+
+    /**
+     * Creates the Function, registers it, and replaces the range with
+     * f.getName()
+     */
+    private static void replaceWithFunctionName(List<String> scanner, int start, int end) {
+        String functionText = LISTS.createStringFrom(scanner, start, end);
+        Function f = new Function(functionText);
+        FunctionManager.add(f);
+
+        // Safe replacement
+        scanner.subList(start, end).clear();
+        scanner.add(start, f.getName());
     }
 
     /**
@@ -1490,16 +1585,23 @@ public class MathScanner {
 
     }//end method
 
+    public void refixCommas() {
+        scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
+    }
+   
     /**
      *
      * @param args Command line args (((2+3)^2))!-------((25))!-------
      */
     public static void main(String args[]) {//tester method for STRING methods
 
-        //String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3";
-        String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
+        //String s5 = "sum(3,4,1,6,7,8,4,32,1)";
+        String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3-(-4+32)";
+        //String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
+
         MathScanner sc = new MathScanner(s5);
-        System.out.println(sc.scanner());
+        System.out.println(sc.scanner(new VariableManager()));
+        System.out.println(FunctionManager.FUNCTIONS);
 
     }//end method main
 }

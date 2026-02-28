@@ -30,10 +30,9 @@ import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Operator.*;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
-import com.github.gbenroscience.parser.benchmarks.Gemini;
-import com.github.gbenroscience.parser.benchmarks.Gemini2;
-import com.github.gbenroscience.parser.benchmarks.GrokMBP;
+import com.github.gbenroscience.parser.benchmarks.GG;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
+import java.util.Random;
 import java.util.Stack;
 
 /**
@@ -69,6 +68,10 @@ import java.util.Stack;
  */
 public class MathExpression implements Savable, Solvable {
 
+    /**
+     * Backup the alias from the scanner here
+     */
+    private String commaAlias;
     public Parser_Result parser_Result = Parser_Result.VALID;
     //determines the mode in which trig operations will be carried out on numbers.if DRG==0,it is done in degrees
 //if DRG==1, it is done in radians and if it is 2, it is done in grads.
@@ -152,7 +155,7 @@ public class MathExpression implements Savable, Solvable {
     // Updated Token class (from your provided)
     static class Token {
 
-        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5;
+        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5, COMMA = 6;
         public int kind;
         public double value;
         public String name; // REQUIRED for functions/methods/variables
@@ -331,6 +334,7 @@ public class MathExpression implements Savable, Solvable {
         if (!expression.equals(this.expression)) {
             scanner.clear();
             this.cachedPostfix = null;  // Force recompile
+            this.poolPointer = 0;
             setCorrectFunction(true);
             this.expression = expression;
             initializing(expression);
@@ -370,31 +374,31 @@ public class MathExpression implements Savable, Solvable {
         //Scanner operation
 
         MathScanner opScanner = new MathScanner(expression);
-        scanner = opScanner.scanner(variableManager);
+        opScanner.scanner(variableManager);
+        this.commaAlias = opScanner.commaAlias;
+
+        scanner = opScanner.getScanner();
+        System.out.println("scanner: " + scanner);
 
         correctFunction = opScanner.isRunnable();
 
         parser_Result = opScanner.parser_Result;
         if (parser_Result == Parser_Result.VALID) {
-
             statsVerifier();
             codeModifier();
-
-            removeCommas();
-
+            refixCommas();
             mapBrackets();
-
             functionComponentsAssociation();
-
         }//end if
 
     }//end method initializing(args)
 
-    private void removeCommas() {
-        List<String> commaList = new ArrayList<>();
-        commaList.add(",");
-        commaList.add("");
-        scanner.removeAll(commaList);
+    public void removeCommas() {
+        scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
+    }
+
+    public void refixCommas() {
+        scanner.replaceAll((String t) -> this.commaAlias.equals(t) ? "," : t);
     }
 
     /**
@@ -1237,9 +1241,8 @@ public class MathExpression implements Savable, Solvable {
         if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
             return Help.getHelp();
         }
-        System.out.println("scannER: " + scanner);
+        System.out.println("scanner before compile: " + scanner);
         compileToPostfix();  // Compile once if not already done
-        System.out.println("check postfix: " + Arrays.toString(cachedPostfix));
         return expressionSolver.evaluate(cachedPostfix).scalar + "";  // Just evaluate
     }//end method solve()
 
@@ -1283,6 +1286,13 @@ public class MathExpression implements Savable, Solvable {
             return new Token(FUNCTION, s, FunctionManager.getFunction(s).getArity(), -1);
         }
 
+        // Handle commas (function argument separators)
+        if (s.equals(",")) {
+            Token t = new Token(0.0);
+            t.kind = Token.COMMA;
+            return t;
+        }
+
         // 5. Identify Methods
         if (Method.isInBuiltMethod(s)) {
             int methodId = MethodRegistry.getMethodID(s);
@@ -1315,9 +1325,11 @@ public class MathExpression implements Savable, Solvable {
 
     public final void compileToPostfix() {
         if (cachedPostfix != null) {
-            return;   // already compiled
+            return;
         }
+
         Stack<Token> opStack = new Stack<>();
+        Stack<Integer> parenTypes = new Stack<>();  // 0=function, 1=grouping
         Token[] postfix = new Token[scanner.size() * 2];
         int p = 0;
 
@@ -1325,53 +1337,107 @@ public class MathExpression implements Savable, Solvable {
         int depth = 0;
         argCount[0] = 0;
 
-        for (String s : scanner) {
+        for (int idx = 0; idx < scanner.size(); idx++) {
+            String s = scanner.get(idx);
             Token t = translate(s);
             if (t == null) {
                 continue;
             }
 
+           // System.out.println("Token[" + idx + "]: " + s + " | depth=" + depth + " argCount[" + depth + "]=" + argCount[depth]);
+
             switch (t.kind) {
                 case Token.NUMBER:
                     postfix[p++] = t;
-                    argCount[depth]++;
+                    // Increment arg count ONLY if we're in a function argument list
+                    // (not in a grouping paren)
+                    if (depth > 0 && !parenTypes.isEmpty() && parenTypes.peek() == 0) {
+                        argCount[depth]++;
+                      //  System.out.println("  -> Incremented argCount[" + depth + "] to " + argCount[depth]);
+                    }
                     break;
 
                 case Token.FUNCTION:
                 case Token.METHOD:
+                    //System.out.println("  -> Pushing FUNCTION/METHOD, will wait for LPAREN");
                     opStack.push(t);
-                    argCount[++depth] = 0;           // start counting arguments for this function
                     break;
 
                 case Token.LPAREN:
+                    // Determine if this LPAREN is for a function or just grouping
+                    boolean isForFunction = false;
+                    if (!opStack.isEmpty()) {
+                        Token lastOp = opStack.peek();
+                        if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
+                            isForFunction = true;
+                        }
+                    }
+
+                    //System.out.println("  -> LPAREN: isForFunction=" + isForFunction);
+
                     opStack.push(t);
+                    parenTypes.push(isForFunction ? 0 : 1);  // 0=function, 1=grouping
+
+                    if (isForFunction) {
+                        // This LPAREN opens a function's argument list
+                        depth++;
+                        argCount[depth] = 0;
+                       // System.out.println("  -> Opened function args at depth " + depth);
+                    }
                     break;
 
                 case Token.RPAREN:
+                    //System.out.println("  -> RPAREN: depth=" + depth + " argCount[depth]=" + argCount[depth]);
+
                     // Pop operators until matching '('
                     while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
                         postfix[p++] = opStack.pop();
                     }
+
                     if (!opStack.isEmpty()) {
                         opStack.pop(); // discard '('
                     }
 
-                    // === KEY FIX: Check what this closing ) completed ===
-                    if (!opStack.isEmpty()
-                            && (opStack.peek().kind == Token.FUNCTION || opStack.peek().kind == Token.METHOD)) {
+                    if (!parenTypes.isEmpty()) {
+                        int parenType = parenTypes.pop();
 
-                        // This ) completed a function call
-                        Token callable = opStack.pop();
-                        callable.arity = argCount[depth];
-                        postfix[p++] = callable;
+                        if (parenType == 0) {
+                            // This closes a FUNCTION's argument list
+                            if (!opStack.isEmpty()
+                                    && (opStack.peek().kind == Token.FUNCTION
+                                    || opStack.peek().kind == Token.METHOD)) {
 
-                        depth--;
-                        argCount[depth]++;        // one complete value for outer function
-                    } else {
-                        // This ) completed a grouped argument like (sin(3)) or (12)
-                        // → it counts as ONE argument for the outer function
-                        argCount[depth]++;
+                                Token callable = opStack.pop();
+                                callable.arity = argCount[depth];
+                                postfix[p++] = callable;
+
+                                //System.out.println("  -> Closed function " + callable.name + " with arity " + callable.arity);
+
+                                depth--;
+
+                                // The function's result is ONE argument to the parent function
+                                if (depth > 0 && !parenTypes.isEmpty() && parenTypes.peek() == 0) {
+                                    argCount[depth]++;
+                                    //System.out.println("  -> Function result counts as arg for depth " + depth + ", now argCount[" + depth + "]=" + argCount[depth]);
+                                }
+                            }
+                        } else {
+                            // This closes a GROUPING paren
+                            // The grouped expression result is ONE argument to the parent function
+                            if (depth > 0 && !parenTypes.isEmpty() && parenTypes.peek() == 0) {
+                                argCount[depth]++;
+                               // System.out.println("  -> Grouped expression counts as arg for depth " + depth + ", now argCount[" + depth + "]=" + argCount[depth]);
+                            }
+                        }
                     }
+                    break;
+
+                case Token.COMMA:
+                    // Pop any pending operators
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+                  //  System.out.println("  -> Comma: ends current argument, next NUMBER will increment argCount");
                     break;
 
                 case Token.OPERATOR:
@@ -1393,68 +1459,113 @@ public class MathExpression implements Savable, Solvable {
             }
         }
 
-        // Flush remaining operators
         while (!opStack.isEmpty()) {
-            postfix[p++] = opStack.pop();
+            Token top = opStack.pop();
+            if (top.kind != Token.LPAREN) {
+                postfix[p++] = top;
+            }
         }
 
-        // Trim and cache
         cachedPostfix = new Token[p];
         System.arraycopy(postfix, 0, cachedPostfix, 0, p);
-
-        //System.out.println("cachedPostfix: " + Arrays.toString(cachedPostfix));
+       // System.out.println("\n=== COMPILATION COMPLETE ===");
+       // System.out.println("Final postfix size: " + p);
     }
 
+     
     public final class ExpressionSolver {
 
         public EvalResult evaluate(Token[] postfix) {
-            final EvalResult[] stack = new EvalResult[postfix.length];
+            final EvalResult[] stack = new EvalResult[Math.max(postfix.length * 2, 64)];
             int ptr = -1;
 
             for (Token t : postfix) {
+                /*System.out.println("\n=== Evaluating token: "
+                        + (t.kind == Token.NUMBER ? "NUM(" + t.value + ")"
+                                : t.kind == Token.OPERATOR ? "OP(" + t.opChar + ")"
+                                        : t.kind == Token.FUNCTION ? "FUNC(" + t.name + ",arity=" + t.arity + ")"
+                                                : "METHOD(" + t.name + ",arity=" + t.arity + ")")
+                        + " | Stack ptr before = " + ptr);*/
+
                 switch (t.kind) {
                     case Token.NUMBER:
-                        stack[++ptr] = getNextResult().wrap(t.name != null
-                                ? VariableManager.getVariable(t.name).getValue() : t.value);
+                        if (t.name != null && !t.name.isEmpty()) {
+                            // Variable lookup
+                            Variable var = VariableManager.lookUp(t.name);
+                            if (var == null) {
+                                throw new RuntimeException("Undefined variable: " + t.name);
+                            }
+                            stack[++ptr] = getNextResult().wrap(var.getValue());
+                           // System.out.println("  Pushed variable " + t.name + " = " + var.getValue() + " at ptr=" + ptr);
+                        } else {
+                            // Direct number
+                            stack[++ptr] = getNextResult().wrap(t.value);
+                           // System.out.println("  Pushed number " + t.value + " at ptr=" + ptr);
+                        }
                         break;
 
                     case Token.OPERATOR:
                         if (t.isPostfix || t.opChar == '√' || t.opChar == 'R') {
-                            // Unary: Modify the top of stack in-place
+                            // Unary operator
+                            if (ptr < 0) {
+                                throw new RuntimeException("Insufficient operands for unary operator: " + t.opChar);
+                            }
                             applyUnary(t.opChar, stack[ptr]);
+                            // System.out.println("  Applied unary " + t.opChar + " to stack[" + ptr + "]");
                         } else {
-                            // Binary: Pop 'b', modify 'a' in-place, reclaim 'b' from pool
+                            // Binary operator
+                            if (ptr < 1) {
+                                throw new RuntimeException("Insufficient operands for binary operator: " + t.opChar
+                                        + " (stack ptr=" + ptr + ")");
+                            }
                             double bVal = stack[ptr--].scalar;
+                            double aVal = stack[ptr].scalar;
                             applyBinary(t.opChar, stack[ptr], bVal);
-                            poolPointer--;
+                            /*System.out.println("  Applied binary " + t.opChar + ": " + aVal + " " + t.opChar + " " + bVal
+                                    + " = " + stack[ptr].scalar + " at ptr=" + ptr);*/
                         }
                         break;
 
                     case Token.METHOD:
                     case Token.FUNCTION:
                         int arity = t.arity;
-                        System.out.println("arity of " + t.name + " = " + t.arity);
+
+                        // CRITICAL FIX: Validate arity matches stack depth
+                        if (ptr < arity - 1) {
+                            throw new RuntimeException("Function " + t.name + " requires " + arity
+                                    + " arguments but only " + (ptr + 1) + " values available on stack");
+                        }
+
                         EvalResult[] args = new EvalResult[arity];
                         for (int j = arity - 1; j >= 0; j--) {
                             args[j] = stack[ptr--];
+                            //System.out.println("  Popped arg[" + j + "] from stack ptr=" + (ptr + 1));
                         }
 
-                        // 2. CRITICAL: Move pointer back BEFORE execution.
-                        // This allows the method to use the argument slots for its result.
-                        poolPointer -= arity;
-                        System.out.println("--------------------------------Method Input: method-name=" + t.name + ", type: " + t.kind + ", args=" + Arrays.toString(args));
-                        EvalResult result = (t.kind == Token.METHOD)
-                                ? MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, arity, args)
-                                : FunctionManager.lookUp(t.name).calc(args);
-                        System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>Method output " + result.toString());
-                        stack[++ptr] = result;
-                        // 3. REMOVE the old release(arity) call here.
-                        break;
+                       /* System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
+                                + " " + t.name + " with " + arity + " args");*/
 
+                        EvalResult result;
+                        if (t.kind == Token.METHOD) {
+                            result = MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, arity, args);
+                        } else {
+                            result = FunctionManager.lookUp(t.name).calc(args);
+                        }
+
+                        stack[++ptr] = result;
+                        //System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr);
+                        break;
                 }
             }
-            return stack[0];
 
+            if (ptr < 0) {
+                throw new RuntimeException("Invalid expression: stack is empty after evaluation");
+            }
+            if (ptr > 0) {
+                System.out.println("WARNING: Stack has " + (ptr + 1) + " values at end, returning top");
+            }
+
+            return stack[0];
         }
 
         private void applyUnary(char op, EvalResult res) {
@@ -1498,6 +1609,9 @@ public class MathExpression implements Savable, Solvable {
                     aRes.scalar = a * b;
                     break;
                 case '/':
+                    if (b == 0) {
+                        throw new ArithmeticException("Division by zero");
+                    }
                     aRes.scalar = a / b;
                     break;
                 case '%':
@@ -1574,6 +1688,15 @@ public class MathExpression implements Savable, Solvable {
             return sb.append(']').toString();
         }
 
+// In EvalResult class:
+        public void reset() {
+            this.scalar = 0.0;
+            this.vector = null;
+            this.matrix = null;
+            this.textRes = null;
+            this.type = TYPE_SCALAR;
+        }
+
         @Override
         public String toString() {
             switch (type) {
@@ -1593,768 +1716,27 @@ public class MathExpression implements Savable, Solvable {
 
     }
 
+// In ExpressionSolver.getNextResult():
     public EvalResult getNextResult() {
-        return pool[poolPointer++];
+        if (poolPointer >= pool.length) {
+            // Expand pool if needed
+            EvalResult[] newPool = new EvalResult[pool.length * 2];
+            System.arraycopy(pool, 0, newPool, 0, pool.length);
+            for (int i = pool.length; i < newPool.length; i++) {
+                newPool[i] = new EvalResult();
+            }
+            // Note: You'd need to make pool non-final to do this
+        }
+        EvalResult result = pool[poolPointer++];
+        result.reset();
+        return result;
     }
 
     public void release(int count) {
         poolPointer -= count;
     }
 
-    public final class ExpressionSolver1 {
-
-        public double evaluate(List<String> tokens) {
-            final String[] ts = tokens.toArray(new String[0]);
-            final int n = ts.length;
-
-            final double[] valStack = new double[n];
-            final int[] opStack = new int[n];
-            int vIdx = -1;
-            int oIdx = -1;
-
-            for (int i = 0; i < n; i++) {
-                final String s = ts[i];
-                final char c0 = s.charAt(0);
-                final int sLen = s.length();
-
-                // 1. NUMERIC CHECK
-                if ((c0 >= '0' && c0 <= '9') || (c0 == '-' && sLen > 1 && s.charAt(1) >= '0' && s.charAt(1) <= '9')) {
-                    valStack[++vIdx] = fastParseDouble(s);
-                    continue;
-                }
-
-                // 2. UNARY PREFIX (ROOTS)
-                // We treat ³√ as a single internal char 'R' for the switch speed
-                if (c0 == '√' || s.equals("³√")) {
-                    opStack[++oIdx] = (c0 == '√') ? '√' : 'R';
-                    continue;
-                }
-
-                // 3. UNARY POSTFIX (FACTORIAL/POWERS)
-                if (c0 == '!' || c0 == '²' || c0 == '³' || (c0 == '-' && sLen > 1 && s.charAt(1) == '¹')) {
-                    final double a = valStack[vIdx];
-                    if (c0 == '!') {
-                        valStack[vIdx] = Maths.fact(a);
-                    } else if (c0 == '²') {
-                        valStack[vIdx] = a * a;
-                    } else if (c0 == '³') {
-                        valStack[vIdx] = a * a * a;
-                    } else {
-                        valStack[vIdx] = 1.0 / a;
-                    }
-                    continue;
-                }
-
-                // 4. BINARY OPERATORS
-                final int currentPrec = getPrec(c0);
-                while (oIdx >= 0) {
-                    final char topOp = (char) opStack[oIdx];
-                    final int topPrec = getPrec(topOp);
-
-                    // Right-associative logic for '^'
-                    if (c0 == '^' ? topPrec > currentPrec : topPrec >= currentPrec) {
-                        vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
-                    } else {
-                        break;
-                    }
-                }
-                opStack[++oIdx] = c0;
-            }
-
-            // Final Stack Reduction
-            while (oIdx >= 0) {
-                vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
-            }
-            return valStack[0];
-        }
-
-        private int getPrec(char op) {
-            switch (op) {
-                case '+':
-                case '-':
-                    return 1;
-                case '*':
-                case '/':
-                case '%':
-                case 'Р':
-                case 'Č':
-                    return 2;
-                case '^':
-                    return 3;
-                case '√':
-                case 'R':
-                    return 4; // Highest precedence for prefix roots
-                default:
-                    return 0;
-            }
-        }
-
-        private int applyOp(char op, double[] valStack, int vIdx) {
-            // Handle Unary Prefix first (takes only one operand)
-            if (op == '√') {
-                valStack[vIdx] = Math.sqrt(valStack[vIdx]);
-                return vIdx;
-            }
-            if (op == 'R') { // Internal ID for ³√
-                valStack[vIdx] = Math.cbrt(valStack[vIdx]);
-                return vIdx;
-            }
-
-            // Handle Binary (takes two operands)
-            double b = valStack[vIdx--];
-            double a = valStack[vIdx];
-            switch (op) {
-                case '+':
-                    valStack[vIdx] = a + b;
-                    break;
-                case '-':
-                    valStack[vIdx] = a - b;
-                    break;
-                case '*':
-                    valStack[vIdx] = a * b;
-                    break;
-                case '/':
-                    valStack[vIdx] = a / b;
-                    break;
-                case '%':
-                    valStack[vIdx] = a % b;
-                    break;
-                case '^':
-                    valStack[vIdx] = Math.pow(a, b);
-                    break;
-                case 'Р':
-                    valStack[vIdx] = Maths.fact(a) / Maths.fact(a - b);
-                    break;
-                case 'Č':
-                    valStack[vIdx] = Maths.fact(a) / (Maths.fact(b) * Maths.fact(a - b));
-                    break;
-            }
-            return vIdx;
-        }
-
-    }
-
-    /**
-     * used by the main parser solve to figure out SBP portions of a
-     * multi-bracketed expression (MBP)
-     *
-     * @param list a list of scanner tokens of a maths expression
-     * @return the solution to a SBP maths expression
-     */
-    protected List<String> solve1(List<String> list) {
-
-//correct the anomaly: [ (,-,number....,)  ]
-        //   turn it into: [ (,,-number........,)     ]
-        //The double commas show that there exists an empty location in between the 2 commas
-        if (list.get(0).equals("(") && list.get(1).equals(MINUS) && isNumber(list.get(2))) {
-            list.set(1, "");
-            //if the number is negative,make it positive
-            if (list.get(2).charAt(0) == MINUS.charAt(0)) {
-                list.set(2, list.get(2).substring(1));
-            } //if the number is positive,make it negative
-            else {
-                list.set(2, MINUS + list.get(2));
-            }
-        }
-//Create a collection to serve as a garbage collector for the empty memory
-//locations and other unwanted locations created in the processing collection
-        ArrayList<String> garbage = new ArrayList<>();
-//insert an empty string in it so that we can use it to remove empty spaces from the processing collection.
-        garbage.add("");
-        garbage.add("(");
-        garbage.add(")");
-
-        list.removeAll(garbage);
-
-//solves the factorial component of the input|[²]|[³]|[-¹]²³-¹
-        if (isHasPostNumberOperators()) {
-            for (int i = 0; i < list.size(); i++) {
-                try {
-
-                    if (isFactorial(list.get(i + 1))) {
-                        if (isNumber(list.get(i))) {
-                            list.set(i + 1, Maths.fact(list.get(i)));
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i, "");
-                        }//end else
-
-                    } else if (isSquare(list.get(i + 1))) {
-                        if (isNumber(list.get(i))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i)), 2)));
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i, "");
-                        }//end else
-                    } else if (isCube(list.get(i + 1))) {
-                        if (isNumber(list.get(i))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i)), 3)));
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i, "");
-                        }//end else
-                    } else if (isInverse(list.get(i + 1))) {
-                        if (isNumber(list.get(i))) {
-                            list.set(i + 1, String.valueOf(1 / Double.parseDouble(list.get(i))));
-                            list.set(i, "");
-                        } else if (list.get(i).equals("Infinity")) {
-                            list.set(i + 1, "0.0");
-                            list.set(i, "");
-                        }//end else
-                    }
-                }//end try
-                catch (NumberFormatException numerror) {
-                } catch (NullPointerException nullerror) {
-                } catch (IndexOutOfBoundsException inderror) {
-                }
-            }//end for
-            list.removeAll(garbage);
-        }//end if
-
-        if (isHasPowerOperators()) {
-
-            /*Deals with powers.
-            Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
-             instead of sin(A^B).
-             Also instructs the software to multiply any 2 numbers in consecutive positions in the list.
-             This is important in distinguishing between functions such as sinAB and sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
-             */
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (list.get(i).equals(POWER) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)), Double.parseDouble(list.get(i + 1)))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end if
-                    }//end if
-                    else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i + 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) == 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) > 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) == 0) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) < 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-                    } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i - 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) == 1) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) > 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) == 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) < 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end else if
-                    }//end else if
-                    else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        list.set(i + 1, "Infinity");
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                    }
-
-                }//end try
-                catch (NumberFormatException numerror) {
-                } catch (NullPointerException nullerror) {
-                } catch (IndexOutOfBoundsException inderror) {
-                }
-            }//end for
-
-            list.removeAll(garbage);
-
-        }//end if
-        //Handles the pre-number operators.
-
-        if (isHasPreNumberOperators()) {
-            for (int i = list.size() - 1; i >= 0; i--) {
-                try {
-                    if (!list.get(i + 1).equals("Infinity") && isNumber(list.get(i + 1))) {
-                        if (list.get(i).equals(ROOT)) {
-                            list.set(i, String.valueOf(Math.sqrt(Double.parseDouble(list.get(i + 1)))));
-                            list.set(i + 1, "");
-                        }//end if
-                        if (list.get(i).equals(CUBE_ROOT)) {
-                            list.set(i, String.valueOf(Math.cbrt(Double.parseDouble(list.get(i + 1)))));
-                            list.set(i + 1, "");
-                        }//end if
-//add more pre-number functions here...
-                    }//end if
-                    else if (list.get(i + 1).equals("Infinity")) {
-                        list.set(i, "Infinity");
-                        list.set(i + 1, "");
-                    }//end else if
-                }//end try
-                catch (NumberFormatException numerror) {
-                } catch (NullPointerException nullerror) {
-                } catch (IndexOutOfBoundsException inderror) {
-                }
-            }//end for
-        }//end if
-
-        list.removeAll(garbage);
-
-        if (isHasPowerOperators()) {
-            //do the in between operators
-
-            /*Deals with powers.Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
-             instead of sin(A^B).
-             Also instructs the software to multiply any 2 numbers in consecutive positions in the vector.
-             This is important in distinguishing between functions such as sinAB and sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
-             */
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (list.get(i).equals(POWER) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)), Double.parseDouble(list.get(i + 1)))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end if
-                    }//end if
-                    else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i + 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) == 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) > 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) == 0) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) < 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-                    } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i - 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) == 1) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) > 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) == 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) < 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end else if
-                    }//end else if
-                    else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        list.set(i + 1, "Infinity");
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                    }
-
-                }//end try
-                catch (NumberFormatException numerror) {
-                } catch (NullPointerException nullerror) {
-                } catch (IndexOutOfBoundsException inderror) {
-                }
-            }//end for
-
-            list.removeAll(garbage);
-
-        }//end if
-
-        list.removeAll(garbage);
-
-        if (isHasPermOrCombOperators()) {
-            //do the lower precedence in between operators
-
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (list.get(i).equals(Operator.PERMUTATION)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(Maths.fact(list.get(i - 1))) / (Double.parseDouble(Maths.fact(String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))))))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-
-                    }//end if
-                    else if (list.get(i).equals(Operator.COMBINATION)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(Maths.fact(list.get(i - 1))) / (Double.parseDouble(Maths.fact(String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))))) * Double.parseDouble(Maths.fact(list.get(i + 1))))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-
-                    }//end else if
-
-                }//end try
-                catch (NullPointerException nolan) {
-                }//end catch
-                catch (NumberFormatException numerr) {
-                }//end catch
-                catch (IndexOutOfBoundsException inderr) {
-                }//end catch
-
-            }//end for
-            list.removeAll(garbage);
-        }//end if
-        boolean skip = false;
-        if (isHasMulOrDivOperators() || isHasRemainderOperators() || isHasLogicOperators()) {
-            for (int i = 0; i < list.size(); i++) {
-
-                try {
-
-                    if (list.get(i).equals(MULTIPLY)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) * Double.parseDouble(list.get(i + 1))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        }
-
-                    }//end if
-                    else if (list.get(i).equals(DIVIDE)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) / Double.parseDouble(list.get(i + 1))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        }
-
-                    }//end else if
-                    else if (list.get(i).equals(REMAINDER)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) % Double.parseDouble(list.get(i + 1))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, list.get(i - 1));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        }
-
-                    }//end else if
-                }//end try
-                catch (NullPointerException nolan) {
-                }//end catch
-                catch (NumberFormatException numerr) {
-                }//end catch
-                catch (IndexOutOfBoundsException inderr) {
-                }//end catch
-
-                if (!skip) {
-                    try {
-                        if (list.get(i).equals(EQUALS)) {
-
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) == 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-                        }
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                    try {
-                        if (list.get(i).equals(GREATER_THAN)) {
-
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) > 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-                        }
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                    try {
-                        if (list.get(i).equals(GREATER_OR_EQUALS)) {
-
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) >= 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-                        }
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                    try {
-                        if (list.get(i).equals(LESS_THAN)) {
-
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) < 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-
-                        }//end if
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                    try {
-                        if (list.get(i).equals(LESS_OR_EQUALS)) {
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) <= 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-                        }//end if
-
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                }//end if (skip)
-            }//end for
-
-            list.removeAll(garbage);
-
-        }//end if
-        if (isHasPlusOrMinusOperators()) {
-            //Handles the subtraction and addition operators
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (list.get(i).equals(PLUS) || list.get(i).equals(MINUS)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            if (list.get(i).equals(PLUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) + Double.parseDouble(list.get(i + 1))));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }//end else
-                            else if (list.get(i).equals(MINUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }//end else if
-                        }//end if
-                        else {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-                    }
-
-                }//end try
-                catch (NullPointerException nolerr) {
-                }//end catch
-                catch (NumberFormatException numerr) {
-                }//end catch
-                catch (IndexOutOfBoundsException inderr) {
-                }//end catch
-            }//end for
-        }//end if
-
-        garbage.add("(");
-        garbage.add(")");
-
-        list.removeAll(garbage);
-        if (list.size() != 1) {
-            this.parser_Result = this.parser_Result == Parser_Result.VALID ? Parser_Result.SYNTAX_ERROR : this.parser_Result;
-            this.correctFunction = false;
-            list.clear();
-            list.add(parser_Result.name());
-        }//end if
-
-//Now de-list or un-package the input.If all goes well the list should have only its first memory location occupied.
-        return list;
-
-    }//end method solve
-
+ 
     /**
      * While traversing a list of tokens, sometimes its good to know if a token
      * is existing in the context of a stat function, or is a free token within
@@ -2522,601 +1904,7 @@ public class MathExpression implements Savable, Solvable {
         }
     }
 
-    public final class ExpressionSolverOld {
-
-        // Operator constants (adjust to match your project's constants if needed)
-        private static final String INFINITY = "Infinity";
-
-        // -------------------------
-        // Public entry point
-        // -------------------------
-        protected List<String> solve(List<String> list) {
-            if (list == null) {
-                return null;
-            }
-
-            // 1) Fix leading "( - number" anomaly -> mark the minus slot for removal and
-            //    convert the number to negative (or remove leading '-' if already negative).
-            fixLeadingParenthesisMinus(list);
-
-            // 2) Remove garbage tokens quickly (single pass)
-            cleanList(list);
-
-            // 3) Post-number operators (factorial, square, cube, inverse)
-            if (isHasPostNumberOperators()) {
-                applyPostNumberOperators(list);
-                cleanList(list);
-            }
-
-            // 4) Primary power pass (handles numeric ^ numeric)
-            if (isHasPowerOperators()) {
-                applyPowerOperators(list);
-                cleanList(list);
-            }
-
-            // 5) Pre-number operators (root, cube root, etc.)
-            if (isHasPreNumberOperators()) {
-                applyPreNumberOperators(list);
-                cleanList(list);
-            }
-
-            // 6) Secondary power pass (if original logic required a second pass)
-            //    The original code ran power handling in two places; keep a second pass
-            //    to preserve semantics where functions and powers interact.
-            if (isHasPowerOperators()) {
-                applyPowerOperators(list);
-                cleanList(list);
-            }
-
-            // 7) Permutation / Combination
-            if (isHasPermOrCombOperators()) {
-                applyPermCombOperators(list);
-                cleanList(list);
-            }
-
-            // 8) Multiplication / Division / Remainder and logical numeric operators
-            if (isHasMulOrDivOperators() || isHasRemainderOperators() || isHasLogicOperators()) {
-                applyMulDivRemainderAndLogic(list);
-                cleanList(list);
-            }
-
-            // 9) Plus / Minus (final pass)
-            if (isHasPlusOrMinusOperators()) {
-                applyAddSubOperators(list);
-                cleanList(list);
-            }
-
-            // Final packaging: if more than one token remains, mark syntax error
-            if (list.size() != 1) {
-                MathExpression.this.parser_Result = (MathExpression.this.parser_Result == Parser_Result.VALID)
-                        ? Parser_Result.SYNTAX_ERROR
-                        : MathExpression.this.parser_Result;
-                MathExpression.this.correctFunction = false;
-                list.clear();
-                list.add(MathExpression.this.parser_Result.name());
-            }
-
-            return list;
-        }
-
-        // -------------------------
-        // Helper: fix leading "( - number" anomaly
-        // -------------------------
-        private void fixLeadingParenthesisMinus(List<String> list) {
-            if (list.size() >= 3 && "(".equals(list.get(0)) && MINUS.equals(list.get(1))) {
-                String third = list.get(2);
-                if (isNumber(third)) {
-                    // mark the minus slot for removal and flip sign on the number
-                    list.set(1, "");
-                    if (third.startsWith(MINUS)) {
-                        list.set(2, third.substring(1)); // "-5" -> "5"
-                    } else {
-                        list.set(2, MINUS + third); // "5" -> "-5"
-                    }
-                }
-            }
-        }
-
-        // -------------------------
-        // Helper: remove garbage tokens quickly
-        // -------------------------
-        private void cleanList(List<String> list) {
-            // Remove empty strings and parentheses in one pass using removeIf (O(n))
-            Predicate<String> garbage = s -> s == null || s.isEmpty() || "(".equals(s) || ")".equals(s);
-            list.removeIf(garbage);
-        }
-
-        // -------------------------
-        // Post-number operators: factorial, square, cube, inverse
-        // -------------------------
-        private void applyPostNumberOperators(List<String> list) {
-            // iterate left-to-right; we examine token i (value) and i+1 (post-operator)
-            for (int i = 0; i + 1 < list.size(); i++) {
-                String val = list.get(i);
-                String op = list.get(i + 1);
-                if (op == null) {
-                    continue;
-                }
-
-                if (isFactorial(op)) {
-                    if (isNumber(val)) {
-                        list.set(i + 1, Maths.fact(val));
-                        list.set(i, "");
-                    } else if (INFINITY.equals(val)) {
-                        list.set(i + 1, INFINITY);
-                        list.set(i, "");
-                    }
-                } else if (isSquare(op)) {
-                    handlePowerEffect(list, i, val, 2.0);
-                } else if (isCube(op)) {
-                    handlePowerEffect(list, i, val, 3.0);
-                } else if (isInverse(op)) {
-                    if (isNumber(val)) {
-                        double d = parseDoubleSafe(val);
-                        list.set(i + 1, String.valueOf(1.0 / d));
-                        list.set(i, "");
-                    } else if (INFINITY.equals(val)) {
-                        list.set(i + 1, "0.0");
-                        list.set(i, "");
-                    }
-                }
-            }
-        }
-
-        // Small helper used by post-number operators to avoid duplication
-        private void handlePowerEffect(List<String> list, int i, String valStr, double pow) {
-            if (isNumber(valStr)) {
-                double base = parseDoubleSafe(valStr);
-                list.set(i + 1, String.valueOf(Math.pow(base, pow)));
-                list.set(i, "");
-            } else if (INFINITY.equals(valStr)) {
-                list.set(i + 1, INFINITY);
-                list.set(i, "");
-            }
-        }
-
-        // -------------------------
-        // Power operators (binary ^)
-        // -------------------------
-        private void applyPowerOperators(List<String> list) {
-            // iterate left-to-right; evaluate only when both neighbors are numbers or Infinity
-            // We iterate from left to right and collapse triples [left, ^, right] into right
-            for (int i = 1; i + 1 < list.size(); i++) {
-                String op = list.get(i);
-                if (!POWER.equals(op)) {
-                    continue;
-                }
-
-                String left = safeGet(list, i - 1);
-                String right = safeGet(list, i + 1);
-
-                // If either neighbor missing, skip
-                if (left == null || right == null) {
-                    continue;
-                }
-
-                // If both numeric
-                if (isNumber(left) && isNumber(right)) {
-                    double base = parseDoubleSafe(left);
-                    double exponent = parseDoubleSafe(right);
-                    double result = Math.pow(base, exponent);
-                    list.set(i + 1, String.valueOf(result));
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    i++; // skip past the replaced token
-                    continue;
-                }
-
-                // Handle Infinity cases with simplified but consistent rules:
-                // - Infinity ^ positive -> Infinity
-                // - Infinity ^ 0 -> 1.0
-                // - Infinity ^ negative -> 0.0
-                // - number ^ Infinity -> depends on base: >1 -> Infinity, ==1 -> 1.0, 0<base<1 -> 0.0, base<0 -> Infinity (original had many branches)
-                if (INFINITY.equals(left) && INFINITY.equals(right)) {
-                    list.set(i + 1, INFINITY);
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    continue;
-                }
-
-                if (INFINITY.equals(left) && isNumber(right)) {
-                    double r = parseDoubleSafe(right);
-                    if (r > 0) {
-                        list.set(i + 1, INFINITY);
-                    } else if (r == 0) {
-                        list.set(i + 1, "1.0");
-                    } else {
-                        list.set(i + 1, "0.0");
-                    }
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    continue;
-                }
-
-                if (isNumber(left) && INFINITY.equals(right)) {
-                    double l = parseDoubleSafe(left);
-                    if (l > 1) {
-                        list.set(i + 1, INFINITY);
-                    } else if (l == 1) {
-                        list.set(i + 1, "1.0");
-                    } else if (l > 0) {
-                        list.set(i + 1, "0.0");
-                    } else {
-                        list.set(i + 1, INFINITY);
-                    }
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                }
-            }
-        }
-
-        // -------------------------
-        // Pre-number operators (ROOT, CUBE_ROOT)
-        // -------------------------
-        private void applyPreNumberOperators(List<String> list) {
-            // iterate right-to-left to allow replacing operator with computed value
-            for (int i = list.size() - 2; i >= 0; i--) {
-                String op = list.get(i);
-                String next = safeGet(list, i + 1);
-                if (op == null || next == null) {
-                    continue;
-                }
-
-                if (INFINITY.equals(next)) {
-                    list.set(i, INFINITY);
-                    list.set(i + 1, "");
-                    continue;
-                }
-
-                if (isNumber(next)) {
-                    double val = parseDoubleSafe(next);
-                    if (ROOT.equals(op)) {
-                        list.set(i, String.valueOf(Math.sqrt(val)));
-                        list.set(i + 1, "");
-                    } else if (CUBE_ROOT.equals(op)) {
-                        list.set(i, String.valueOf(Math.cbrt(val)));
-                        list.set(i + 1, "");
-                    }
-                }
-            }
-        }
-
-        // -------------------------
-        // Permutation / Combination
-        // -------------------------
-        private void applyPermCombOperators(List<String> list) {
-            for (int i = 1; i + 1 < list.size(); i++) {
-                String op = list.get(i);
-                if (PERMUTATION.equals(op) || COMBINATION.equals(op)) {
-                    String left = safeGet(list, i - 1);
-                    String right = safeGet(list, i + 1);
-                    if (left == null || right == null) {
-                        continue;
-                    }
-
-                    if (INFINITY.equals(left) || INFINITY.equals(right)) {
-                        // If either side is Infinity, result is Infinity (original used many branches)
-                        list.set(i + 1, INFINITY);
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                        continue;
-                    }
-
-                    if (isNumber(left) && isNumber(right)) {
-                        // Use factorial-based formulas; guard against large factorials by parsing to integer where appropriate
-                        double n = parseDoubleSafe(left);
-                        double r = parseDoubleSafe(right);
-                        if (PERMUTATION.equals(op)) {
-                            // nPr = n! / (n-r)!
-                            String res = safePermutation(n, r);
-                            list.set(i + 1, res);
-                        } else {
-                            // nCr = n! / ((n-r)! * r!)
-                            String res = safeCombination(n, r);
-                            list.set(i + 1, res);
-                        }
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                    }
-                }
-            }
-        }
-
-        // Safe permutation using Maths.fact if available; fallback to 0.0 on error
-        private String safePermutation(double n, double r) {
-            try {
-                // Prefer integer factorial if values are integral and small
-                if (isIntegral(n) && isIntegral(r) && n >= r && n >= 0 && r >= 0) {
-                    return String.valueOf(Double.parseDouble(Maths.fact(String.valueOf((long) n)))
-                            / Double.parseDouble(Maths.fact(String.valueOf((long) (n - r)))));
-                }
-            } catch (Exception ignored) {
-            }
-            return "0.0";
-        }
-
-        private String safeCombination(double n, double r) {
-            try {
-                if (isIntegral(n) && isIntegral(r) && n >= r && n >= 0 && r >= 0) {
-                    double numerator = Double.parseDouble(Maths.fact(String.valueOf((long) n)));
-                    double denom = Double.parseDouble(Maths.fact(String.valueOf((long) (n - r))))
-                            * Double.parseDouble(Maths.fact(String.valueOf((long) r)));
-                    return String.valueOf(numerator / denom);
-                }
-            } catch (Exception ignored) {
-            }
-            return "0.0";
-        }
-
-        // -------------------------
-        // Multiplication / Division / Remainder and numeric logic (==, >, >=, <, <=)
-        // -------------------------
-        private void applyMulDivRemainderAndLogic(List<String> list) {
-            // We will do a single pass and handle multiply/divide/remainder first,
-            // then comparisons in the same pass to preserve precedence similar to original.
-            for (int i = 1; i + 1 < list.size(); i++) {
-                String op = list.get(i);
-                String left = safeGet(list, i - 1);
-                String right = safeGet(list, i + 1);
-                if (op == null || left == null || right == null) {
-                    continue;
-                }
-
-                // Multiplicative operators
-                if (MULTIPLY.equals(op) || DIVIDE.equals(op) || REMAINDER.equals(op)) {
-                    // Handle Infinity cases and numeric cases
-                    String result = computeMulDivRem(left, right, op);
-                    if (result != null) {
-                        list.set(i + 1, result);
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                        i++; // skip past replaced token
-                    }
-                    continue;
-                }
-
-                // Comparison / logical operators (==, >, >=, <, <=)
-                if (EQUALS.equals(op) || GREATER_THAN.equals(op) || GREATER_OR_EQUALS.equals(op)
-                        || LESS_THAN.equals(op) || LESS_OR_EQUALS.equals(op)) {
-                    String result = computeComparison(left, right, op);
-                    if (result != null) {
-                        list.set(i + 1, result);
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                        i++;
-                    }
-                }
-            }
-        }
-
-        private String computeMulDivRem(String left, String right, String op) {
-            // Handle Infinity strings explicitly
-            boolean leftInf = INFINITY.equals(left);
-            boolean rightInf = INFINITY.equals(right);
-
-            try {
-                if (leftInf && rightInf) {
-                    if (MULTIPLY.equals(op) || REMAINDER.equals(op)) {
-                        return INFINITY;
-                    }
-                    if (DIVIDE.equals(op)) {
-                        return INFINITY;
-                    }
-                }
-                if (leftInf && !rightInf) {
-                    double r = parseDoubleSafe(right);
-                    if (MULTIPLY.equals(op)) {
-                        return INFINITY;
-                    }
-                    if (DIVIDE.equals(op)) {
-                        return INFINITY;
-                    }
-                    if (REMAINDER.equals(op)) {
-                        return INFINITY;
-                    }
-                }
-                if (!leftInf && rightInf) {
-                    double l = parseDoubleSafe(left);
-                    if (MULTIPLY.equals(op)) {
-                        return INFINITY;
-                    }
-                    if (DIVIDE.equals(op)) {
-                        return "0.0";
-                    }
-                    if (REMAINDER.equals(op)) {
-                        return left; // x % Infinity -> x
-                    }
-                }
-
-                // Both numeric
-                if (isNumber(left) && isNumber(right)) {
-                    double l = parseDoubleSafe(left);
-                    double r = parseDoubleSafe(right);
-                    if (op.charAt(0) == MULTIPLY.charAt(0)) {
-                        return String.valueOf(l * r);
-                    } else if (op.charAt(0) == DIVIDE.charAt(0)) {
-                        return String.valueOf(l / r);
-                    } else if (op.charAt(0) == REMAINDER.charAt(0)) {
-                        return String.valueOf(l % r);
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-            return null;
-        }
-
-        private String computeComparison(String left, String right, String op) {
-            boolean leftInf = INFINITY.equals(left);
-            boolean rightInf = INFINITY.equals(right);
-
-            try {
-                if (leftInf && rightInf) {
-                    // Infinity compared to Infinity: == true, > true, >= true, < false, <= true
-                    if (isEqualsOperator(op)) {
-                        return "true";
-                    } else if (isGreaterThanOperator(op)) {
-                        return "true";
-                    } else if (isGreaterOrEqualsOperator(op)) {
-                        return "true";
-                    } else if (isLessThanOperator(op)) {
-                        return "false";
-                    } else if (isLessThanOrEqualsOperator(op)) {
-                        return "true";
-                    }
-                }
-                if (leftInf && !rightInf) {
-                    if (isEqualsOperator(op)) {
-                        return "false";
-                    } else if (isGreaterThanOperator(op)) {
-                        return "true";
-                    } else if (isGreaterOrEqualsOperator(op)) {
-                        return "true";
-                    } else if (isLessThanOperator(op)) {
-                        return "false";
-                    } else if (isLessThanOrEqualsOperator(op)) {
-                        return "false";
-                    }
-                }
-                if (!leftInf && rightInf) {
-                    if (isEqualsOperator(op)) {
-                        return "false";
-                    } else if (isGreaterThanOperator(op)) {
-                        return "false";
-                    } else if (isGreaterOrEqualsOperator(op)) {
-                        return "false";
-                    } else if (isLessThanOperator(op)) {
-                        return "true";
-                    } else if (isLessThanOrEqualsOperator(op)) {
-                        return "false";
-                    }
-                }
-
-                if (isNumber(left) && isNumber(right)) {
-                    double l = parseDoubleSafe(left);
-                    double r = parseDoubleSafe(right);
-
-                    if (isEqualsOperator(op)) {
-                        return String.valueOf((l - r) == 0);
-                    } else if (isGreaterThanOperator(op)) {
-                        return String.valueOf((l - r) > 0);
-                    } else if (isGreaterOrEqualsOperator(op)) {
-                        return String.valueOf((l - r) >= 0);
-                    } else if (isLessThanOperator(op)) {
-                        return String.valueOf((l - r) < 0);
-                    } else if (isLessThanOrEqualsOperator(op)) {
-                        return String.valueOf((l - r) <= 0);
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-            return null;
-        }
-
-        // -------------------------
-        // Plus / Minus (final pass)
-        // -------------------------
-        private void applyAddSubOperators(List<String> list) {
-            for (int i = 1; i + 1 < list.size(); i++) {
-                String op = list.get(i);
-                if (!PLUS.equals(op) && !MINUS.equals(op)) {
-                    continue;
-                }
-
-                String left = safeGet(list, i - 1);
-                String right = safeGet(list, i + 1);
-                if (left == null || right == null) {
-                    continue;
-                }
-
-                // Handle Infinity cases
-                if (INFINITY.equals(left) || INFINITY.equals(right)) {
-                    String res = computeAddSubInfinity(left, right, op);
-                    list.set(i + 1, res);
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    i++;
-                    continue;
-                }
-
-                if (isNumber(left) && isNumber(right)) {
-                    double l = parseDoubleSafe(left);
-                    double r = parseDoubleSafe(right);
-                    double result = PLUS.equals(op) ? (l + r) : (l - r);
-                    list.set(i + 1, String.valueOf(result));
-                    list.set(i - 1, "");
-                    list.set(i, "");
-                    i++;
-                }
-            }
-        }
-
-        private String computeAddSubInfinity(String left, String right, String op) {
-            // Simplified consistent rules:
-            if (INFINITY.equals(left) && INFINITY.equals(right)) {
-                if (PLUS.equals(op)) {
-                    return INFINITY;
-                }
-                if (MINUS.equals(op)) {
-                    return "NaN"; // Infinity - Infinity is undefined
-                }
-            }
-            if (INFINITY.equals(left) && !INFINITY.equals(right)) {
-                return INFINITY;
-            }
-            if (!INFINITY.equals(left) && INFINITY.equals(right)) {
-                return INFINITY;
-            }
-            return "0.0";
-        }
-
-        // -------------------------
-        // Utility helpers
-        // -------------------------
-        private String safeGet(List<String> list, int idx) {
-            if (idx < 0 || idx >= list.size()) {
-                return null;
-            }
-            return list.get(idx);
-        }
-
-        private boolean isIntegral(double d) {
-            return Math.floor(d) == d;
-        }
-
-        private double parseDoubleSafe(String s) {
-            try {
-                return Double.parseDouble(s);
-            } catch (Exception e) {
-                return Double.NaN;
-            }
-        }
-
-        // -------------------------
-        // Placeholder predicates and external calls
-        // -------------------------
-        // The original code referenced many helper methods (isNumber, isFactorial, etc.)
-        // which are assumed to exist in the original codebase. We keep the same names
-        // so this refactor can be dropped into the project and wired to the existing
-        // implementations.
-        protected boolean isNumber(String s) {
-            // Delegate to existing implementation in your codebase.
-            // Placeholder: treat numeric strings and "Infinity" as numbers.
-            if (s == null) {
-                return false;
-            }
-            if (INFINITY.equals(s)) {
-                return true;
-            }
-            try {
-                Double.parseDouble(s);
-                return true;
-            } catch (Exception e) {
-                return false;
-            }
-        }
-
-    }
-
+  
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**
      *
@@ -3163,8 +1951,117 @@ public class MathExpression implements Savable, Solvable {
         System.out.println(new MathExpression(in).solve());
     }//end method
 
+    static class Test {
+
+        public static void main(String... args) {
+            System.out.println("=".repeat(80));
+            System.out.println("POSTFIX EVALUATION ACCURACY TESTS");
+            System.out.println("=".repeat(80));
+
+            // Test 1: Basic arithmetic
+            testExpression("2+3", 5.0, "Basic addition");
+            testExpression("10-4", 6.0, "Basic subtraction");
+            testExpression("3*4", 12.0, "Basic multiplication");
+            testExpression("12/3", 4.0, "Basic division");
+            testExpression("2^3", 8.0, "Basic exponentiation");
+
+            // Test 2: Operator precedence
+            testExpression("2+3*4", 14.0, "Precedence: multiply before add");
+            testExpression("2*3+4", 10.0, "Precedence: multiply before add (reversed)");
+            testExpression("2^3*4", 32.0, "Precedence: power before multiply");
+            testExpression("2+3^2", 11.0, "Precedence: power before add");
+
+            // Test 3: Parentheses
+            testExpression("(2+3)*4", 20.0, "Parentheses override precedence");
+            testExpression("2*(3+4)", 14.0, "Parentheses with multiplication");
+            testExpression("((2+3)*4)+1", 21.0, "Nested parentheses");
+
+            // Test 4: Single argument functions
+            testExpression("sin(0)", 0.0, "sin(0) = 0", 1e-10);
+            testExpression("cos(0)", 1.0, "cos(0) = 1", 1e-10);
+            testExpression("sqrt(16)", 4.0, "sqrt(16) = 4", 1e-10);
+            testExpression("abs(-5)", 5.0, "abs(-5) = 5", 1e-10);
+
+            // Test 5: Nested functions
+            testExpression("sin(cos(0))", Math.sin(Math.cos(0)), "Nested: sin(cos(0))", 1e-10);
+            testExpression("sqrt(abs(-16))", 4.0, "Nested: sqrt(abs(-16))", 1e-10);
+
+            // Test 6: Variable substitution
+            MathExpression me = new MathExpression("x=5;2*x+3");
+            double result = Double.parseDouble(me.solve());
+            testValue(result, 13.0, "Variable: x=5; 2*x+3", 1e-10);
+
+            // Test 7: Multi-argument functions
+            testExpression("listsum(1,2,3,4,5)", 15.0, "listsum(1,2,3,4,5) = 15", 1e-10);
+            testExpression("listsum(10,20,30)", 60.0, "listsum(10,20,30) = 60", 1e-10);
+
+            // Test 8: Functions with grouped expressions
+            testExpression("listsum((2+3),(4+1),5)", 15.0, "listsum with grouped args", 1e-10);
+            testExpression("sort(3,-1,2,0,1)", "sorted array", "sort function");
+
+            // Test 9: Complex nested expressions
+            testExpression("sin(3.14159/2)", 1.0, "sin(π/2) ≈ 1", 0.001);
+            testExpression("sqrt(2^2 + 3^2)", 3.605551275, "sqrt(4+9) = sqrt(13)", 1e-6);
+
+            // Test 10: Mixed operators and functions
+            testExpression("2*sin(0)+3*cos(0)", 3.0, "2*sin(0) + 3*cos(0) = 3", 1e-10);
+            testExpression("sqrt(9)+2^3-1", 12.0, "sqrt(9) + 2^3 - 1 = 12", 1e-10);
+
+            // Test 11: Edge cases
+            testExpression("0+0", 0.0, "Zero addition");
+            testExpression("1*1", 1.0, "One multiplication");
+            testExpression("5-5", 0.0, "Subtraction to zero");
+
+            System.out.println("\n" + "=".repeat(80));
+            System.out.println("ACCURACY TEST SUMMARY");
+            System.out.println("=".repeat(80));
+        }
+
+        private static void testExpression(String expr, double expected, String description) {
+            testExpression(expr, expected, description, 1e-9);
+        }
+
+        private static void testExpression(String expr, double expected, String description, double tolerance) {
+            try {
+                MathExpression me = new MathExpression(expr);
+                String resultStr = me.solve();
+                double result = Double.parseDouble(resultStr);
+                testValue(result, expected, description, tolerance);
+            } catch (Exception e) {
+                System.out.printf("❌ %s: EXCEPTION - %s%n", description, e.getMessage());
+            }
+        }
+
+        private static void testExpression(String expr, String expectedType, String description) {
+            try {
+                MathExpression me = new MathExpression(expr);
+                String result = me.solve();
+                System.out.printf("✓ %s: %s%n", description, result);
+            } catch (Exception e) {
+                System.out.printf("❌ %s: EXCEPTION - %s%n", description, e.getMessage());
+            }
+        }
+
+        private static void testValue(double actual, double expected, String description, double tolerance) {
+            if (Math.abs(actual - expected) <= tolerance) {
+                System.out.printf("✓ %s: %.10f (expected %.10f)%n", description, actual, expected);
+            } else {
+                System.out.printf("❌ %s: got %.10f, expected %.10f (diff: %.2e)%n",
+                        description, actual, expected, Math.abs(actual - expected));
+            }
+        }
+    }
+
+    
+
     public static void main(String... args) {
+        
+        Test.main(args);
+        
+        System.out.println("---------------------------------------------------------------------------------------------------------");
+        
         System.out.println(new MathExpression("x=20;sin(ln(x));").solve());
+        System.out.println(new MathExpression("x=20;sin(listsum(3,9,sin(19),cos(21),4,13,2))").solve());
         MathExpression ml = new MathExpression("D=@(3,3)(3,4,1,2,4,7,9,1,-2);tri_mat(D)");
         System.out.println("ml.solve():" + ml.solve());
         MathExpression linear = new MathExpression("a=4;a11=3.14159265357;b=2.718281828;M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");
@@ -3178,18 +2075,16 @@ public class MathExpression implements Savable, Solvable {
         System.out.println("ls = " + ls);
         String s = "listsum(listsum(5),sin(5))";
         MathExpression ms = new MathExpression(s);
-        System.out.println("ms.scanner: " + ms.scanner);
         System.out.println("s--->" + ms.solve());
         String ss = "listsum(sin(5),sin(5))";
         System.out.println("ss--->" + new MathExpression(ss).solve());
         String s1 = "x=9;g(x)=((sin(x)-tan(x)));v(x)=((ln(x)/tan(x)));f(x)=g(x);sin(1.75)+cos(1.23)+tan(1.86-0.26)+log(10,3)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+listsum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));v(3);";
         String s2 = "v(x)=((ln(x)/tan(x)));2+v(3);";
         String s3 = "2+sin(3)-ln(12)+1/3.689";
-        String s4 = "sin(2)+cos(3)-sum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
+        String s4 = "sin(2)+cos(3)-listsum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
         String s5 = "listsum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,listsum(3,4,5,6,9,12,23), 12, listsum(3,4,8,9, 2000)), 12000, mode(3,2,2,1),32.897, mode(1,5,7,7,1,1,7))";
 
         MathExpression m = new MathExpression(s5);
-        System.out.println("scanner:\n" + m.scanner);
         System.out.println("m.solve(): " + m.solve());
 
         System.out.println(new MathExpression("sort(0,4+0,2+0)").solve());
