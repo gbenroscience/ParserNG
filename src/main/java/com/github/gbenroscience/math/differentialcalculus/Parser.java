@@ -7,7 +7,7 @@ package com.github.gbenroscience.math.differentialcalculus;
 
 import com.github.gbenroscience.parser.Number;
 import com.github.gbenroscience.parser.Bracket;
-import com.github.gbenroscience.parser.DataSetFormatter;
+import com.github.gbenroscience.parser.DataSetFormatter1;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.LISTS;
 import com.github.gbenroscience.parser.MathExpression;
@@ -94,7 +94,7 @@ public class Parser {
      */
     public Parser(String expression) {
 
-        DataSetFormatter dsf = new DataSetFormatter(expression);
+        DataSetFormatter1 dsf = new DataSetFormatter1(expression);
         List<String> scanner = dsf.getDataset();
 
         MathScanner.recognizeAnonymousFunctions(scanner);

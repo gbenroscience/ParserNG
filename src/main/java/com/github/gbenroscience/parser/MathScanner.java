@@ -28,7 +28,6 @@ import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Number.*;
 
 import com.github.gbenroscience.math.differentialcalculus.Parser;
-import java.awt.Toolkit;
 
 /**
  *
