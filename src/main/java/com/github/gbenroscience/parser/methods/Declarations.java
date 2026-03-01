@@ -141,10 +141,11 @@ public class Declarations {
         MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression ctx, String funcName, int arity, MathExpression.EvalResult[] args) -> {
             List<String> tokens = new ArrayList<>();
             for (MathExpression.EvalResult arg : args) {
-                if (arg.type == MathExpression.EvalResult.TYPE_STRING) {
-                    tokens.add(arg.textRes);
+                System.out.println("EvalResult arg: "+arg.toString());
+                if (arg.type == MathExpression.EvalResult.TYPE_SCALAR) {
+                    tokens.add(String.valueOf(arg.scalar));
                 }
-            }
+            }       
             MathExpression.EvalResult result = ctx.getNextResult();
             result.wrap(basicNumericalMethod.solve(tokens));
             return result;
@@ -167,6 +168,7 @@ public class Declarations {
                     tokens.add(arg.textRes);
                 }
             }
+            System.out.println("tokens: "+tokens);
             MathExpression.EvalResult result = ctx.getNextResult();
             result.wrap(basicNumericalMethod.solve(tokens));
             return result;
@@ -174,7 +176,7 @@ public class Declarations {
     }
 
     static {
-
+        System.out.println("registring BasicNumeralMethods--------------------------------------------------------------------------------");
         registerBasicNumericalMethod(new Echo());
         registerBasicNumericalMethod(new Echo.EchoN());
         registerBasicNumericalMethod(new Echo.EchoNI());
@@ -223,7 +225,7 @@ public class Declarations {
             ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
             ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT,
             LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, SQRT, CBRT, INVERSE,
-            SQUARE, CUBE, POW, FACT, COMBINATION, PERMUTATION, SUM, PROD,
+            SQUARE, CUBE, POW, FACT, COMBINATION, PERMUTATION, SUM, LIST_SUM, PROD,
             MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED,
             COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE,
             STD_ERR, RANDOM, SORT, PLOT, PRINT, DIFFERENTIATION,
@@ -402,6 +404,10 @@ public class Declarations {
             case RANDOM:
                 return TYPE.LIST.toString();
             case SORT:
+                return TYPE.LIST.toString();
+            case SUM:
+                return TYPE.NUMBER.toString();
+            case LIST_SUM:
                 return TYPE.NUMBER.toString();
             case PLOT:
                 return TYPE.VOID.toString();
@@ -447,6 +453,8 @@ public class Declarations {
                 return TYPE.ALGEBRAIC_EXPRESSION.toString();
             case MATRIX_EIGENVEC:
                 return TYPE.MATRIX.toString();
+            case MATRIX_EIGENVALUES:
+                return TYPE.LIST.toString();
             default:
                 return TYPE.NUMBER.toString();
         }

@@ -142,7 +142,7 @@ public final class Utils {
     }
 
     /**
-     * helper method to unify argument check on standart functions
+     * helper method to unify argument check on standard functions
      *
      * @param name
      * @param count

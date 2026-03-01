@@ -1146,88 +1146,8 @@ public class MathExpression implements Savable, Solvable {
      * Display the indices of all brackets in the function,brackets pair by
      * brackets pair
      */
-    /**
-     *
-     * @param scan The ArrayList object.
-     * @return the string version of the ArrayList and removes the braces i.e.
-     * []
-     */
-    protected String listToString(List<String> scan) {
-        if (scan == null || scan.isEmpty()) {
-            return "";
-        }
-
-        // Optimization 1: Pre-size the builder to avoid internal array copying
-        // We estimate: avg string length (e.g., 5) + comma/space (2) * size
-        StringBuilder sb = new StringBuilder(scan.size() * 7);
-
-        // Optimization 2: Use a standard for-loop (slightly faster than Iterator in some JVMs)
-        for (int i = 0; i < scan.size(); i++) {
-            String s = scan.get(i);
-
-            // Skip nulls or empties if necessary for your parser logic
-            if (s != null && !s.isEmpty()) {
-                if (sb.length() > 0) {
-                    sb.append(", ");
-                }
-                sb.append(s);
-            }
-        }
-
-        return sb.toString();
-    }
-
-    /**
-     * [-6, -4, 2, 3, 4, 5, 5, 13, 62, 2024]
-     *
-     * @param text
-     * @return
-     */
-    private List<String> readNumbersFromCommaSeparatedList(String text) {
-        if (text == null || text.isEmpty()) {
-            return new ArrayList<>();
-        }
-
-        // Pre-size ArrayList if possible to avoid resizing overhead
-        List<String> numbers = new ArrayList<>(16);
-        int len = text.length();
-        int start = -1;
-
-        for (int i = 0; i < len; i++) {
-            char c = text.charAt(i);
-
-            // Check if character is part of a valid number
-            if ((c >= '0' && c <= '9') || c == '-' || c == '.'
-                    || c == 'e' || c == 'E' || c == '+') {
-                if (start == -1) {
-                    start = i; // Mark the beginning of a number
-                }
-            } else {
-                // We hit a delimiter (comma, space, brackets, etc.)
-                if (start != -1) {
-                    numbers.add(text.substring(start, i));
-                    start = -1;
-                }
-
-                // Validation for '[' only at start
-                if (c == '[' && i != 0) {
-                    throw new InputMismatchException("Invalid character [ at index " + i);
-                }
-            }
-        }
-
-        // CRITICAL: Catch the last number if the string doesn't end with a delimiter
-        if (start != -1) {
-            // If the last char is ']', exclude it from the substring
-            int end = text.charAt(len - 1) == ']' ? len - 1 : len;
-            if (end > start) {
-                numbers.add(text.substring(start, end));
-            }
-        }
-
-        return numbers;
-    }
-
+ 
+  
     public void setReturnType(TYPE returnType) {
         this.returnType = returnType;
     }
@@ -1242,10 +1162,8 @@ public class MathExpression implements Savable, Solvable {
             res.wrap(Help.getHelp());
             return res;
         }
- 
         compileToPostfix();  // Compile once if not already done
-
-        return expressionSolver.evaluate(cachedPostfix); 
+        return expressionSolver.evaluate(); 
     }
 
     @Override
@@ -1253,10 +1171,10 @@ public class MathExpression implements Savable, Solvable {
         if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
             return Help.getHelp();
         }
-        System.out.println("scanner before compile: " + scanner);
         compileToPostfix();  // Compile once if not already done
+        System.out.println("scanner after restore: " + scanner);
 
-        EvalResult evr = expressionSolver.evaluate(cachedPostfix);
+        EvalResult evr = expressionSolver.evaluate();
         return evr.toString();
     }//end method solve()
 
@@ -1485,11 +1403,11 @@ public class MathExpression implements Savable, Solvable {
 
     public final class ExpressionSolver {
 
-        public EvalResult evaluate(Token[] postfix) {
-            final EvalResult[] stack = new EvalResult[Math.max(postfix.length * 2, 64)];
+        public EvalResult evaluate() {
+            final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
             int ptr = -1;
 
-            for (Token t : postfix) {
+            for (Token t : cachedPostfix) {
                 /*System.out.println("\n=== Evaluating token: "
                         + (t.kind == Token.NUMBER ? "NUM(" + t.value + ")"
                                 : t.kind == Token.OPERATOR ? "OP(" + t.opChar + ")"
@@ -1695,7 +1613,7 @@ public class MathExpression implements Savable, Solvable {
         @Override
         public String toString() {
             switch (type) {
-                case TYPE_SCALAR:
+                case TYPE_SCALAR: 
                     return String.valueOf(scalar);
                 case TYPE_VECTOR:
                     return Arrays.toString(vector);
@@ -2051,7 +1969,16 @@ public class MathExpression implements Savable, Solvable {
 
         System.out.println("---------------------------------------------------------------------------------------------------------");
 
+        String sum = "sum(3,1,4,5,9)";
+        System.out.println(sum+"--->>"+new MathExpression(sum).solve());
+         sum = "sum(3+3)";
+        System.out.println(sum+"--->>"+new MathExpression(sum).solve());
+        String prod = "prod(5)";
+        System.out.println(prod+"--->>"+new MathExpression(prod).solve());
+         prod = "prod(5+5)";
+        System.out.println(prod+"--->>"+new MathExpression(prod).solve());
         System.out.println(new MathExpression("sort(3,4,-2,-13,21,34,-99,1,-1.498,sin(28))").solve());
+        System.out.println(new MathExpression("3/2").solve());
         System.out.println(new MathExpression("x=20;sin(ln(x));").solve());
         System.out.println(new MathExpression("x=20;sin(listsum(3,9,sin(19),cos(21),4,13,2))").solve());
         MathExpression ml = new MathExpression("D=@(3,3)(3,4,1,2,4,7,9,1,-2);tri_mat(D)");
@@ -2075,6 +2002,7 @@ public class MathExpression implements Savable, Solvable {
         String s3 = "2+sin(3)-ln(12)+1/3.689";
         String s4 = "sin(2)+cos(3)-listsum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
         String s5 = "listsum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,listsum(3,4,5,6,9,12,23), 12, listsum(3,4,8,9, 2000)), 12000, mode(3,2,2,1),32.897, mode(1,5,7,7,1,1,7))";
+        
 
         MathExpression m = new MathExpression(s5);
         System.out.println("m.solve(): " + m.solve());
