@@ -28,6 +28,7 @@ import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.util.FunctionManager;
+import java.lang.reflect.Array;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.ArrayList;
@@ -560,7 +561,7 @@ public class MethodRegistry {
                 res.wrap(new double[0]);
                 return res;
             }
-
+           
             // 2. Clone the array to ensure the original dataset (args) remains 
             // unchanged for other parts of the expression evaluation.
             MathExpression.EvalResult[] sortedData = args.clone();
@@ -578,6 +579,7 @@ public class MethodRegistry {
                 out[i] = sortedData[i].scalar;
             }
 
+          
             // 4. Wrap the result as a Vector (type 1) and return from the pool
             MathExpression.EvalResult res = ctx.getNextResult();
             res.wrap(out);

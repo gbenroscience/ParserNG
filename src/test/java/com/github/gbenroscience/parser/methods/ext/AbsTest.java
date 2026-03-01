@@ -1,6 +1,5 @@
 package com.github.gbenroscience.parser.methods.ext;
-
-import static org.junit.jupiter.api.Assertions.*;
+ 
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -13,12 +12,12 @@ class AbsTest {
     void absWorks() {
         MathExpression me;
         me = new MathExpression("abs(1)");
-        Assertions.assertEquals("1", me.solve());
+        Assertions.assertEquals(com.github.gbenroscience.parser.Number.fastParseDouble("1"), com.github.gbenroscience.parser.Number.fastParseDouble(me.solve()));
         me = new MathExpression("abs(1.1259)");
-        Assertions.assertEquals("1.1259", me.solve());
+        Assertions.assertEquals(com.github.gbenroscience.parser.Number.fastParseDouble("1.1259"), com.github.gbenroscience.parser.Number.fastParseDouble(me.solve()));
         me = new MathExpression("abs(-1)");
-        Assertions.assertEquals("1.0", me.solve());
+        Assertions.assertEquals(com.github.gbenroscience.parser.Number.fastParseDouble("1.0"), com.github.gbenroscience.parser.Number.fastParseDouble(me.solve()));
         me = new MathExpression("abs(-1.1259)");
-        Assertions.assertEquals("1.1259", me.solve());
+        Assertions.assertEquals(com.github.gbenroscience.parser.Number.fastParseDouble("1.1259"), com.github.gbenroscience.parser.Number.fastParseDouble(me.solve()));
     }
 }

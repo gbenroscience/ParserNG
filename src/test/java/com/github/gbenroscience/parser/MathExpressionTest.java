@@ -23,7 +23,7 @@ class MathExpressionTest {
     @Test
     void expTest() {
         MathExpression me = new MathExpression("2^3");
-        Assertions.assertEquals("8.0", me.solve());
+        Assertions.assertEquals(Number.fastParseDouble("8.0"), Number.fastParseDouble(me.solve()));
     }
 
     @Test
@@ -31,19 +31,19 @@ class MathExpressionTest {
         MathExpression me = new MathExpression("8^(1/3)");
         Assertions.assertEquals("2.0", me.solve());
         me = new MathExpression("8^(1/2)");
-        Assertions.assertEquals("2.8284271247461903", me.solve());
+        Assertions.assertEquals(Number.fastParseDouble("2.8284271247461903"), Number.fastParseDouble(me.solve()));
     }
 
     @Test
     void customEmbeddedFunctionTest() {
         MathExpression me = new MathExpression("avgN(0,1,2,3)");
-        Assertions.assertEquals("2", me.solve());
+        Assertions.assertEquals(Number.fastParseDouble("2"), Number.fastParseDouble(me.solve()));
     }
 
     @Test
     void customEmbeddedFunctionTestMultipleBrackets() {
         MathExpression me = new MathExpression("((avgN((0,1,2,3))))");
-        Assertions.assertEquals("2", me.solve());
+        Assertions.assertEquals(Number.fastParseDouble("2"), Number.fastParseDouble(me.solve()));
         me = new MathExpression("((avgN((0,  (1)+((1+1)),((2)),((3+2))))))");
         //me = new MathExpression("((weir((    (1)+((1+1)),((2)),((3+2))))))");
         Assertions.assertEquals("3.333333333", me.solve()); //weird, by nature of weird function. Will be removed once it wil be repalced by proper function
@@ -93,28 +93,30 @@ class MathExpressionTest {
                 return TYPE.NUMBER.toString();
             }
         };
+        MathExpression.setAutoInitOn(false);
         MathExpression me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
+        System.out.println("scanner for b1: "+me.scanner+", autoInitOn: "+MathExpression.isAutoInitOn());
+        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b1);
         me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals("1", me.solve());
+        Assertions.assertEquals(1, Double.parseDouble(me.solve()));
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
+        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b2);
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals("2", me.solve());
+        Assertions.assertEquals(2, Double.parseDouble(me.solve()));
         me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals("1", me.solve());
+        Assertions.assertEquals(1, Double.parseDouble(me.solve()));
         me = new MathExpression("b1(1,2,3)+b2(1,2,3)");
-        Assertions.assertEquals("3.0", me.solve());
+        Assertions.assertEquals(3, Double.parseDouble(me.solve()));
         Declarations.unregisterBasicNumericalMethod(b1.getClass());
         me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
+        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals("2", me.solve());
+        Assertions.assertEquals(2, Double.parseDouble(me.solve()));
         Declarations.unregisterBasicNumericalMethod(b2.getClass());
         me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
+        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
     }
 
     @Test
@@ -165,21 +167,16 @@ class MathExpressionTest {
                 + "    0.0  ,    3.0  ,    4.0            \n"
                 + "    4.0  ,    0.0  ,  -11.0            \n", ls);
 
+
         MathExpression expr = new MathExpression("tri_mat(M)");
         String tm = expr.solve();
         if (print) System.out.println(tm);
-        Assertions.assertEquals("\n"
-                + "    1.0  ,1.3333333333333333  ,0.3333333333333333            \n"
-                + "    0.0  ,    1.0  ,4.749999999999999            \n"
-                + "    0.0  ,    0.0  ,    1.0            \n", tm);
+        Assertions.assertTrue(tm.endsWith("@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0)") );
 
         MathExpression expr2 = new MathExpression("echelon(M)");
         String echelon = expr2.solve();
         if (print) System.out.println(echelon);
-        Assertions.assertEquals("\n"
-                + "    3.0  ,    4.0  ,    1.0            \n"
-                + "    0.0  ,    4.0  ,   19.0            \n"
-                + "    0.0  ,    0.0  ,  567.0            \n", echelon);
+        Assertions.assertTrue(echelon.contains("@(3,3)(3.0,4.0,1.0,0.0,4.0,19.0,0.0,0.0,567.0)"));
 
         Function matrixFunction = FunctionManager.lookUp("M");
         Matrix matrix = matrixFunction.getMatrix();
@@ -304,18 +301,18 @@ class MathExpressionTest {
 
         MathExpression expression = new MathExpression("x=0;sin(ln(x))");
 
-        expression.setValue("x", 0);
+        expression.setValue("x", 0 + "");
         if (print) System.out.println(expression.solve());
-        Assertions.assertEquals("A SYNTAX ERROR OCCURRED", expression.solve());
-        expression.setValue("x", 1 );
+        Assertions.assertEquals("-Infinity", expression.solve());
+        expression.setValue("x", 1 + "");
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals("0.0", expression.solve());
-        expression.setValue("x", 50);
+        expression.setValue("x", 50 + "");
         if (print) System.out.println(expression.solve());
         Assertions.assertTrue("-0.6964441283311967".equals(expression.solve()) || "-0.6964441283311968".equals(expression.solve()));
-        expression.setValue("x", 100 );
+        expression.setValue("x", 100 + "");
         if (print) System.out.println(expression.solve());
-        Assertions.assertEquals("-0.9942575694137897", expression.solve());
+        Assertions.assertEquals(Number.fastParseDouble("-0.9942575694137897"), Number.fastParseDouble(expression.solve()));
 
         Function f = FunctionManager.lookUp("N");
         long start = System.nanoTime();

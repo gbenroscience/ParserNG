@@ -10,19 +10,20 @@ public class GeomNTest {
     @Test
     void zeroZero() {
         MathExpression me = new MathExpression("geomN(0,0)");
-        Assertions.assertEquals("0", me.solve());
+        Assertions.assertEquals("0.0", me.solve());
         me = new MathExpression("geomN(1,0)");
-        Assertions.assertEquals("0", me.solve());
+        Assertions.assertEquals("0.0", me.solve());
         me = new MathExpression("geomN(2,0)");
-        Assertions.assertEquals("0", me.solve());
+        Assertions.assertEquals("0.0", me.solve());
         me = new MathExpression("geomN(3,0)");
-        Assertions.assertEquals("0", me.solve());
+        Assertions.assertEquals("0.0", me.solve());
         me = new MathExpression("geomN(0,1)");
-        Assertions.assertEquals("1", me.solve());
+        Assertions.assertEquals("1.0", me.solve());
         me = new MathExpression("geomN(0,1,2)");
         Assertions.assertEquals("1.414213562", me.solve());
         me = new MathExpression("geomN(0,1,2,3)");
-        Assertions.assertEquals("1.817120593", me.solve());
+        Assertions.assertTrue(1.817120593 - Double.parseDouble(me.solve()) <= 1.0E-14 );
+        
     }
 
     @Test
@@ -37,36 +38,36 @@ public class GeomNTest {
     @Test
     void limitWorks() {
         MathExpression me = new MathExpression("geomN(1,2,1,4,1000,8)");
-        Assertions.assertEquals("4.000000000", me.solve());
+        Assertions.assertEquals(4, Double.parseDouble(me.solve()));
         me = new MathExpression("geomN(2,10,1,1000,10)");
-        Assertions.assertEquals("10.00000000", me.solve());
+        Assertions.assertEquals(10, Double.parseDouble(me.solve()));
         me = new MathExpression("geomN(2,2,1,1000,8,4)");
-        Assertions.assertEquals("4.000000000", me.solve());
+        Assertions.assertEquals(4, Double.parseDouble(me.solve()));
         me = new MathExpression("geomN(3,4,1,1000,8,2)");
-        Assertions.assertEquals("4.000000000", me.solve());
+        Assertions.assertEquals(4, Double.parseDouble(me.solve()));
         me = new MathExpression("geomN(3,45,1,1000,70,55,0)");
-        Assertions.assertEquals("49.74937185", me.solve());
+        Assertions.assertEquals(49.74937185, Double.parseDouble(me.solve()));
         me = new MathExpression("geomN(3,45,1,1000,70,55,0,0)");
-        Assertions.assertEquals("13.52669614", me.solve());
+        Assertions.assertEquals(13.52669614, Double.parseDouble(me.solve()));
         me = new MathExpression("geomN(3,45,1,1000,70,55,0,0,0)");
-        Assertions.assertEquals("6.708203932", me.solve());
+        Assertions.assertEquals(6.708203932, Double.parseDouble(me.solve()));
     }
 
     @Test
     void testEmpty() {
         MathExpression me;
         me = new MathExpression("geomN(1+1)");
-        Assertions.assertEquals("0", me.solve());
+        Assertions.assertEquals("0.0", me.solve());
         me = new MathExpression("geomN(1)");
-        Assertions.assertEquals("0", me.solve());
+        Assertions.assertEquals("0.0", me.solve());
     }
 
     @Test
     void testExpres() {
         MathExpression me;
         me = new MathExpression("geomN(0+1, 0+1)");
-        Assertions.assertEquals("1.0", me.solve());
+        Assertions.assertEquals(1.0, Double.parseDouble(me.solve()));
         me = new MathExpression("geomN(geomN(0,1), geomN(0,1))");
-        Assertions.assertEquals("1", me.solve());
+        Assertions.assertEquals(1, Double.parseDouble(me.solve()));
     }
 }

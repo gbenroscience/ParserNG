@@ -1236,6 +1236,18 @@ public class MathExpression implements Savable, Solvable {
         return returnType;
     }
 
+    public EvalResult solveGeneric() {
+        if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
+            EvalResult res = new EvalResult();
+            res.wrap(Help.getHelp());
+            return res;
+        }
+ 
+        compileToPostfix();  // Compile once if not already done
+
+        return expressionSolver.evaluate(cachedPostfix); 
+    }
+
     @Override
     public String solve() {
         if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
@@ -1243,7 +1255,9 @@ public class MathExpression implements Savable, Solvable {
         }
         System.out.println("scanner before compile: " + scanner);
         compileToPostfix();  // Compile once if not already done
-        return expressionSolver.evaluate(cachedPostfix).scalar + "";  // Just evaluate
+
+        EvalResult evr = expressionSolver.evaluate(cachedPostfix);
+        return evr.toString();
     }//end method solve()
 
     protected List<String> solve(List<String> list) {
@@ -1344,8 +1358,7 @@ public class MathExpression implements Savable, Solvable {
                 continue;
             }
 
-           // System.out.println("Token[" + idx + "]: " + s + " | depth=" + depth + " argCount[" + depth + "]=" + argCount[depth]);
-
+            // System.out.println("Token[" + idx + "]: " + s + " | depth=" + depth + " argCount[" + depth + "]=" + argCount[depth]);
             switch (t.kind) {
                 case Token.NUMBER:
                     postfix[p++] = t;
@@ -1353,7 +1366,7 @@ public class MathExpression implements Savable, Solvable {
                     // (not in a grouping paren)
                     if (depth > 0 && !parenTypes.isEmpty() && parenTypes.peek() == 0) {
                         argCount[depth]++;
-                      //  System.out.println("  -> Incremented argCount[" + depth + "] to " + argCount[depth]);
+                        //  System.out.println("  -> Incremented argCount[" + depth + "] to " + argCount[depth]);
                     }
                     break;
 
@@ -1374,7 +1387,6 @@ public class MathExpression implements Savable, Solvable {
                     }
 
                     //System.out.println("  -> LPAREN: isForFunction=" + isForFunction);
-
                     opStack.push(t);
                     parenTypes.push(isForFunction ? 0 : 1);  // 0=function, 1=grouping
 
@@ -1382,7 +1394,7 @@ public class MathExpression implements Savable, Solvable {
                         // This LPAREN opens a function's argument list
                         depth++;
                         argCount[depth] = 0;
-                       // System.out.println("  -> Opened function args at depth " + depth);
+                        // System.out.println("  -> Opened function args at depth " + depth);
                     }
                     break;
 
@@ -1412,7 +1424,6 @@ public class MathExpression implements Savable, Solvable {
                                 postfix[p++] = callable;
 
                                 //System.out.println("  -> Closed function " + callable.name + " with arity " + callable.arity);
-
                                 depth--;
 
                                 // The function's result is ONE argument to the parent function
@@ -1426,7 +1437,7 @@ public class MathExpression implements Savable, Solvable {
                             // The grouped expression result is ONE argument to the parent function
                             if (depth > 0 && !parenTypes.isEmpty() && parenTypes.peek() == 0) {
                                 argCount[depth]++;
-                               // System.out.println("  -> Grouped expression counts as arg for depth " + depth + ", now argCount[" + depth + "]=" + argCount[depth]);
+                                // System.out.println("  -> Grouped expression counts as arg for depth " + depth + ", now argCount[" + depth + "]=" + argCount[depth]);
                             }
                         }
                     }
@@ -1437,7 +1448,7 @@ public class MathExpression implements Savable, Solvable {
                     while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
                         postfix[p++] = opStack.pop();
                     }
-                  //  System.out.println("  -> Comma: ends current argument, next NUMBER will increment argCount");
+                    //  System.out.println("  -> Comma: ends current argument, next NUMBER will increment argCount");
                     break;
 
                 case Token.OPERATOR:
@@ -1468,11 +1479,10 @@ public class MathExpression implements Savable, Solvable {
 
         cachedPostfix = new Token[p];
         System.arraycopy(postfix, 0, cachedPostfix, 0, p);
-       // System.out.println("\n=== COMPILATION COMPLETE ===");
-       // System.out.println("Final postfix size: " + p);
+        // System.out.println("\n=== COMPILATION COMPLETE ===");
+        // System.out.println("Final postfix size: " + p);
     }
 
-     
     public final class ExpressionSolver {
 
         public EvalResult evaluate(Token[] postfix) {
@@ -1496,11 +1506,11 @@ public class MathExpression implements Savable, Solvable {
                                 throw new RuntimeException("Undefined variable: " + t.name);
                             }
                             stack[++ptr] = getNextResult().wrap(var.getValue());
-                           // System.out.println("  Pushed variable " + t.name + " = " + var.getValue() + " at ptr=" + ptr);
+                            // System.out.println("  Pushed variable " + t.name + " = " + var.getValue() + " at ptr=" + ptr);
                         } else {
                             // Direct number
                             stack[++ptr] = getNextResult().wrap(t.value);
-                           // System.out.println("  Pushed number " + t.value + " at ptr=" + ptr);
+                            // System.out.println("  Pushed number " + t.value + " at ptr=" + ptr);
                         }
                         break;
 
@@ -1542,9 +1552,8 @@ public class MathExpression implements Savable, Solvable {
                             //System.out.println("  Popped arg[" + j + "] from stack ptr=" + (ptr + 1));
                         }
 
-                       /* System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
+                        /* System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
                                 + " " + t.name + " with " + arity + " args");*/
-
                         EvalResult result;
                         if (t.kind == Token.METHOD) {
                             result = MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, arity, args);
@@ -1553,7 +1562,7 @@ public class MathExpression implements Savable, Solvable {
                         }
 
                         stack[++ptr] = result;
-                        //System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr);
+                       // System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr);
                         break;
                 }
             }
@@ -1578,7 +1587,7 @@ public class MathExpression implements Savable, Solvable {
                     res.scalar = Math.cbrt(val);
                     break;
                 case '!':
-                    res.scalar = Maths.fact(val); // Using your Maths utility
+                    res.scalar = Maths.fact(val); 
                     break;
                 case '²':
                     res.scalar = val * val;
@@ -1672,21 +1681,7 @@ public class MathExpression implements Savable, Solvable {
             return this;
         }
 
-        private static String fastToString(double[] arr) {
-            if (arr == null) {
-                return "null";
-            }
-            // Pre-size estimate: arr length * average double length + separators
-            StringBuilder sb = new StringBuilder(arr.length * 10);
-            sb.append('[');
-            for (int i = 0; i < arr.length; i++) {
-                sb.append(arr[i]);
-                if (i < arr.length - 1) {
-                    sb.append(", ");
-                }
-            }
-            return sb.append(']').toString();
-        }
+   
 
 // In EvalResult class:
         public void reset() {
@@ -1703,7 +1698,7 @@ public class MathExpression implements Savable, Solvable {
                 case TYPE_SCALAR:
                     return String.valueOf(scalar);
                 case TYPE_VECTOR:
-                    return fastToString(vector);
+                    return Arrays.toString(vector);
                 case TYPE_MATRICES:
                     return matrix.toString();
                 case TYPE_STRING:
@@ -1736,7 +1731,6 @@ public class MathExpression implements Savable, Solvable {
         poolPointer -= count;
     }
 
- 
     /**
      * While traversing a list of tokens, sometimes its good to know if a token
      * is existing in the context of a stat function, or is a free token within
@@ -1904,7 +1898,6 @@ public class MathExpression implements Savable, Solvable {
         }
     }
 
-  
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**
      *
@@ -2052,14 +2045,13 @@ public class MathExpression implements Savable, Solvable {
         }
     }
 
-    
-
     public static void main(String... args) {
-        
+
         Test.main(args);
-        
+
         System.out.println("---------------------------------------------------------------------------------------------------------");
-        
+
+        System.out.println(new MathExpression("sort(3,4,-2,-13,21,34,-99,1,-1.498,sin(28))").solve());
         System.out.println(new MathExpression("x=20;sin(ln(x));").solve());
         System.out.println(new MathExpression("x=20;sin(listsum(3,9,sin(19),cos(21),4,13,2))").solve());
         MathExpression ml = new MathExpression("D=@(3,3)(3,4,1,2,4,7,9,1,-2);tri_mat(D)");
