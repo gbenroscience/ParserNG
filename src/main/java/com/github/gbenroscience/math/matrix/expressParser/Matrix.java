@@ -151,7 +151,7 @@ public class Matrix {
     }//end method
 
     public final void setArray(double[] flatArray, int rows, int columns) {
-         if (rows * columns == flatArray.length) {
+        if (rows * columns == flatArray.length) {
             this.array = flatArray;
             this.rows = rows;
             this.cols = columns;
@@ -1139,32 +1139,6 @@ public class Matrix {
         return isValid;
     }
 
-    /**
-     *
-     * @return a string representation of the matrix in rows and columns.
-     */
-    @Override
-    public String toString() {
-        String output = "\n";
-        String appender = "";
-        for (int row = 0; row < rows; row++) {
-
-            for (int column = 0; column < cols; column++) {
-
-                if (column < cols) {
-                    appender += String.format("%7s%3s", array[row * cols + column], ",");
-                }
-                if (column == cols - 1) {
-                    appender = appender.substring(0, appender.length() - 1);
-                    appender += "          \n";
-                }
-                output += appender;
-                appender = "";
-            }
-        }
-
-        return output;
-    }//end method toString
 
     /**
      * @param mat The string matrix
@@ -2086,6 +2060,53 @@ public class Matrix {
         System.out.println(toString());
     }
 
+    public boolean equals(Matrix m) {
+        if (this == m) {
+            return true;
+        }
+        if (m.rows != rows) {
+            return false;
+        }
+        if (m.cols != cols) {
+            return false;
+        }
+
+        for (int i = 0; i < array.length; i++) {
+            if (m.array[i] != array[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    
+    /**
+     *
+     * @return a string representation of the matrix in rows and columns.
+     */
+    @Override
+    public String toString() {
+        String output = "\n";
+        String appender = "";
+        for (int row = 0; row < rows; row++) {
+
+            for (int column = 0; column < cols; column++) {
+
+                if (column < cols) {
+                    appender += String.format("%7s%3s", array[row * cols + column], ",");
+                }
+                if (column == cols - 1) {
+                    appender = appender.substring(0, appender.length() - 1);
+                    appender += "          \n";
+                }
+                output += appender;
+                appender = "";
+            }
+        }
+
+        return output;
+    }//end method toString
+    
     /**
      * (2-x)(3-x)(1-x)=(6-5x+x^2)(1-x)=6-11x+6x^2-x^3 {1, 2, 3, 4, 5} {6, 7, 8,
      * 9, 0} {1, 2, 3, 4, 5} {6, 7, 8, 9, 0} {1, 2, 3, 4, 5}

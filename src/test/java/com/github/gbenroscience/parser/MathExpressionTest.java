@@ -169,15 +169,23 @@ class MathExpressionTest {
 
 
         MathExpression expr = new MathExpression("tri_mat(M)");
-        String tm = expr.solve(); System.out.println(tm);
-        if (print) System.out.println(tm);
-        Assertions.assertTrue(tm.endsWith("@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0)") );
+        Matrix m = expr.solveGeneric().matrix; System.out.println(m.toString());
+        if (print) System.out.println(m.toString());
+        Function f = new Function("fExpr=@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0)");
+        FunctionManager.add(f);
+        Assertions.assertTrue( f.getMatrix().equals(m) );
+        FunctionManager.delete("fExpr");
          
 
         MathExpression expr2 = new MathExpression("echelon(M)");
-        String echelon = expr2.solve();
+        Matrix echelon = expr2.solveGeneric().matrix;
         if (print) System.out.println(echelon);
-        Assertions.assertTrue(echelon.contains("@(3,3)(3.0,4.0,1.0,0.0,4.0,19.0,0.0,0.0,567.0)"));
+        
+        f = new Function("fExpr=@(3,3)(3.0,4.0,1.0,0.0,4.0,19.0,0.0,0.0,567.0)");
+        FunctionManager.add(f);
+        Assertions.assertTrue( f.getMatrix().equals(echelon) );
+        FunctionManager.delete("fExpr");
+        
 
         Function matrixFunction = FunctionManager.lookUp("M");
         Matrix matrix = matrixFunction.getMatrix();
@@ -275,10 +283,10 @@ class MathExpressionTest {
         if (print) System.out.println("solution: " + exprs.solve());
         Assertions.assertEquals("20.0", exprs.solve());
 
-        //ni idea what is this trying to do, resuts sounds buggy anyway
+        //no idea what is this trying to do, results sounds buggy anyway
         expr.setExpression("44+22*(3)");
         if (print) System.out.println("solution--: " + expr.solve());
-        Assertions.assertEquals("44, +, 22, *, 3", expr.solve());
+        Assertions.assertEquals("110.0", expr.solve());
 
         if (print) System.out.println("return type: " + exprs.returnType);
         Assertions.assertEquals(TYPE.NUMBER, exprs.returnType);
@@ -315,7 +323,7 @@ class MathExpressionTest {
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals(Number.fastParseDouble("-0.9942575694137897"), Number.fastParseDouble(expression.solve()));
 
-        Function f = FunctionManager.lookUp("N");
+         f = FunctionManager.lookUp("N");
         long start = System.nanoTime();
         int iterations = 100;
         for (int i = 0; i < iterations; i++) {

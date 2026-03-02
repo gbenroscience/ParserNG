@@ -1175,7 +1175,6 @@ public class MathExpression implements Savable, Solvable {
     protected List<String> solve(List<String> list) {
         return Arrays.asList(String.valueOf(GG.evaluate(list)));
     }
-
     // Your translate method (with small updates for Java 8)
     public Token translate(String s) {
         if (s == null || s.isEmpty()) {
