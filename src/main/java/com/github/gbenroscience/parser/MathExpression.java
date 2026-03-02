@@ -1142,7 +1142,6 @@ public class MathExpression implements Savable, Solvable {
     }//end method reduceBracketIndices
 //(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)
 
-
     public void setReturnType(TYPE returnType) {
         this.returnType = returnType;
     }
@@ -1158,7 +1157,7 @@ public class MathExpression implements Savable, Solvable {
             return res;
         }
         compileToPostfix();  // Compile once if not already done
-        return expressionSolver.evaluate(); 
+        return expressionSolver.evaluate();
     }
 
     @Override
@@ -1251,165 +1250,160 @@ public class MathExpression implements Savable, Solvable {
     }
 
     public final void compileToPostfix() {
-    if (cachedPostfix != null) {
-        return;
-    }
-    
-    Stack<Token> opStack = new Stack<>();
-    Stack<Integer> parenTypes = new Stack<>();  // 0=function, 1=grouping
-    Token[] postfix = new Token[scanner.size() * 2];
-    int p = 0;
-
-    int[] argCount = new int[64];
-    int depth = 0;
-    argCount[0] = 0;
-    
-    boolean[] justSawComma = new boolean[64];  // Track if we just saw a comma at each depth
-    justSawComma[0] = true;  // Start as if we saw a comma (for first argument)
-
-    for (int idx = 0; idx < scanner.size(); idx++) {
-        String s = scanner.get(idx);
-        Token t = translate(s);
-        if (t == null) {
-            continue;
+        if (cachedPostfix != null) {
+            return;
         }
 
-        System.out.println("Token[" + idx + "]: " + s + " | depth=" + depth + " argCount[" + depth + "]=" + argCount[depth]);
+        Stack<Token> opStack = new Stack<>();
+        Stack<Integer> parenDepths = new Stack<>();  // Track function vs grouping parens
+        Token[] postfix = new Token[scanner.size() * 2];
+        int p = 0;
 
-        switch (t.kind) {
-            case Token.NUMBER:
-                postfix[p++] = t;
-                // Only increment if we just saw a comma (or are starting a function)
-                if (depth > 0 && justSawComma[depth]) {
-                    argCount[depth]++;
-                    justSawComma[depth] = false;
-                    System.out.println("  -> Incremented argCount[" + depth + "] to " + argCount[depth]);
-                }
-                break;
+        int[] argCount = new int[64];
+        int depth = 0;
+        argCount[0] = 0;
 
-            case Token.FUNCTION:
-            case Token.METHOD:
-                System.out.println("  -> Pushing FUNCTION/METHOD, will wait for LPAREN");
-                opStack.push(t);
-                break;
+        boolean[] justSawComma = new boolean[64];
+        justSawComma[0] = true;
 
-            case Token.LPAREN:
-                // Determine if this LPAREN is for a function or just grouping
-                boolean isForFunction = false;
-                if (!opStack.isEmpty()) {
-                    Token lastOp = opStack.peek();
-                    if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
-                        isForFunction = true;
-                    }
-                }
+        for (int idx = 0; idx < scanner.size(); idx++) {
+            String s = scanner.get(idx);
+            Token t = translate(s);
+            if (t == null) {
+                continue;
+            }
 
-                System.out.println("  -> LPAREN: isForFunction=" + isForFunction);
-                
-                opStack.push(t);
-                parenTypes.push(isForFunction ? 0 : 1);  // 0=function, 1=grouping
-                
-                if (isForFunction) {
-                    // This LPAREN opens a function's argument list
-                    depth++;
-                    argCount[depth] = 0;
-                    justSawComma[depth] = true;  // First argument starts after "seeing comma"
-                    System.out.println("  -> Opened function args at depth " + depth);
-                }
-                break;
-
-            case Token.RPAREN:
-                System.out.println("  -> RPAREN: depth=" + depth + " argCount[depth]=" + argCount[depth]);
-                
-                // Pop operators until matching '('
-                while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                    postfix[p++] = opStack.pop();
-                }
-                
-                if (!opStack.isEmpty()) {
-                    opStack.pop(); // discard '('
-                }
-                
-                if (!parenTypes.isEmpty()) {
-                    int parenType = parenTypes.pop();
-                    
-                    if (parenType == 0) {
-                        // This closes a FUNCTION's argument list
-                        if (!opStack.isEmpty() 
-                                && (opStack.peek().kind == Token.FUNCTION 
-                                    || opStack.peek().kind == Token.METHOD)) {
-                            
-                            Token callable = opStack.pop();
-                            
-                            // CRITICAL: If argCount[depth] is 0, we had a single expression
-                            if (argCount[depth] == 0) {
-                                argCount[depth] = 1;
-                                System.out.println("  -> Single grouped expression, set arity to 1");
-                            }
-                            
-                            callable.arity = argCount[depth];
-                            postfix[p++] = callable;
-                            
-                            System.out.println("  -> Closed function " + callable.name + " with arity " + callable.arity);
-                            
-                            depth--;
-                            
-                            // The function's result is ONE argument to the parent function
-                            if (depth > 0 && parenTypes.isEmpty() == false && parenTypes.peek() == 0) {
-                                justSawComma[depth] = false;  // We just got a value
-                            }
-                        }
-                    } else {
-                        // This closes a GROUPING paren
-                        if (depth > 0 && parenTypes.isEmpty() == false && parenTypes.peek() == 0) {
-                            justSawComma[depth] = false;  // We just got a value from the grouped expression
-                        }
-                    }
-                }
-                break;
-
-            case Token.COMMA:
-                // Pop any pending operators
-                while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                    postfix[p++] = opStack.pop();
-                }
-                if (depth > 0) {
-                    justSawComma[depth] = true;  // Next value will be a new argument
-                }
-                System.out.println("  -> Comma: next token will start new argument");
-                break;
-
-            case Token.OPERATOR:
-                if (t.isPostfix) {
+            switch (t.kind) {
+                case Token.NUMBER:
                     postfix[p++] = t;
-                } else {
-                    while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
-                        Token top = opStack.peek();
-                        if ((!t.isRightAssoc && t.precedence <= top.precedence)
-                                || (t.isRightAssoc && t.precedence < top.precedence)) {
-                            postfix[p++] = opStack.pop();
-                        } else {
-                            break;
+                    // Increment argCount when we see a number (value)
+                    if (depth > 0 && justSawComma[depth]) {
+                        argCount[depth]++;
+                        justSawComma[depth] = false;
+                    }
+                    break;
+
+                case Token.FUNCTION:
+                case Token.METHOD:
+                    opStack.push(t);
+                    break;
+
+                case Token.LPAREN:
+                    boolean isForFunction = false;
+                    if (!opStack.isEmpty()) {
+                        Token lastOp = opStack.peek();
+                        if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
+                            isForFunction = true;
                         }
                     }
+
                     opStack.push(t);
-                }
-                break;
+                    parenDepths.push(isForFunction ? depth : -1);  // -1 = grouping, >= 0 = function depth
+
+                    if (isForFunction) {
+                        depth++;
+                        argCount[depth] = 0;
+                        justSawComma[depth] = true;
+                    }
+                    break;
+
+                case Token.RPAREN:
+                    // Pop operators until matching '('
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+
+                    if (!opStack.isEmpty()) {
+                        opStack.pop(); // discard '('
+                    }
+
+                    if (!parenDepths.isEmpty()) {
+                        int prevDepth = parenDepths.pop();
+
+                        if (prevDepth >= 0) {
+                            // This closes a FUNCTION's argument list
+                            if (!opStack.isEmpty()
+                                    && (opStack.peek().kind == Token.FUNCTION
+                                    || opStack.peek().kind == Token.METHOD)) {
+
+                                Token callable = opStack.pop();
+
+                                // argCount[depth] has the correct count
+                                if (argCount[depth] == 0) {
+                                    argCount[depth] = 1;  // Single expression like f(3+5)
+                                }
+
+                                callable.arity = argCount[depth];
+                                postfix[p++] = callable;
+
+                                depth--;
+
+                                // The function result counts as ONE value for parent
+                                if (depth > 0 && !justSawComma[depth]) {
+                                    // Already counted or will be counted by next comma
+                                    justSawComma[depth] = false;
+                                }
+                            }
+                        } else {
+                            // This closes a GROUPING paren (grouped expression)
+                            // The grouped expression is ONE value
+                            if (depth > 0) {
+                                if (justSawComma[depth]) {
+                                    // Haven't incremented yet for this value
+                                    argCount[depth]++;
+                                    justSawComma[depth] = false;
+                                } else {
+                                    // Already incremented (shouldn't happen with proper grouping)
+                                    justSawComma[depth] = false;
+                                }
+                            }
+                        }
+                    }
+                    break;
+
+                case Token.COMMA:
+                    // Pop any pending operators
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+                    if (depth > 0) {
+                        justSawComma[depth] = true;
+                    }
+                    break;
+
+                case Token.OPERATOR:
+                    if (t.isPostfix) {
+                        postfix[p++] = t;
+                    } else {
+                        // Binary operator: pop based on precedence
+                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
+                            Token top = opStack.peek();
+                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
+                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
+                                postfix[p++] = opStack.pop();
+                            } else {
+                                break;
+                            }
+                        }
+                        opStack.push(t);
+                    }
+                    break;
+            }
         }
+
+        // Flush remaining operators
+        while (!opStack.isEmpty()) {
+            Token top = opStack.pop();
+            if (top.kind != Token.LPAREN) {
+                postfix[p++] = top;
+            }
+        }
+
+        cachedPostfix = new Token[p];
+        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
     }
 
-    while (!opStack.isEmpty()) {
-        Token top = opStack.pop();
-        if (top.kind != Token.LPAREN) {
-            postfix[p++] = top;
-        }
-    }
-
-    cachedPostfix = new Token[p];
-    System.arraycopy(postfix, 0, cachedPostfix, 0, p);
-    System.out.println("\n=== COMPILATION COMPLETE ===");
-}
-    
-   public final class ExpressionSolver {
+    public final class ExpressionSolver {
 
         public EvalResult evaluate() {
             final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
@@ -1488,7 +1482,7 @@ public class MathExpression implements Savable, Solvable {
                         }
 
                         stack[++ptr] = result;
-                       // System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr);
+                        // System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr);
                         break;
                 }
             }
@@ -1513,7 +1507,7 @@ public class MathExpression implements Savable, Solvable {
                     res.scalar = Math.cbrt(val);
                     break;
                 case '!':
-                    res.scalar = Maths.fact(val); 
+                    res.scalar = Maths.fact(val);
                     break;
                 case '²':
                     res.scalar = val * val;
@@ -1607,8 +1601,6 @@ public class MathExpression implements Savable, Solvable {
             return this;
         }
 
-   
-
 // In EvalResult class:
         public void reset() {
             this.scalar = 0.0;
@@ -1621,7 +1613,7 @@ public class MathExpression implements Savable, Solvable {
         @Override
         public String toString() {
             switch (type) {
-                case TYPE_SCALAR: 
+                case TYPE_SCALAR:
                     return String.valueOf(scalar);
                 case TYPE_VECTOR:
                     return Arrays.toString(vector);
@@ -1632,7 +1624,21 @@ public class MathExpression implements Savable, Solvable {
                 default:
                     return "0.0";
             }
+        }
 
+        public String getTypeName() {
+            switch (type) {
+                case TYPE_SCALAR:
+                    return "TYPE_SCALAR(double)";
+                case TYPE_STRING:
+                    return "TYPE_STRING(text)";
+                case TYPE_VECTOR:
+                    return "TYPE_VECTOR(an array of doubles)";
+                case TYPE_MATRICES:
+                    return "TYPE_MATRICES(Matrices)";
+                default:
+                    return "TYPE_UNKNOWN";
+            }
         }
 
     }
@@ -1978,28 +1984,25 @@ public class MathExpression implements Savable, Solvable {
         System.out.println("---------------------------------------------------------------------------------------------------------");
 
         String sum = "sum(3,1,4,5,9)";
-        System.out.println(sum+"--->>"+new MathExpression(sum).solve());
-         sum = "sum(3+3)";
-        System.out.println(sum+"--->>"+new MathExpression(sum).solve());
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
+        sum = "sum(3+3)";
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
         sum = "sum(sum(5),sum(6))";
-         System.out.println(sum+"--->>"+new MathExpression(sum).solve());
-         
-         
-        sum = "sum(sin(5),sin(5))";
-         System.out.println(sum+"--->>"+new MathExpression(sum).solve());
-         
-         
-        sum = "sum(sum(5))";
-         System.out.println(sum+"--->>"+new MathExpression(sum).solve());
-         System.out.println("____________________________________________________________________________________________________________________________________________");
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
 
-  
+        sum = "sum(sin(5),sin(5))";
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
+
+        sum = "listsum(listsum(5))";
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
+        System.out.println("____________________________________________________________________________________________________________________________________________");
+
         String prod = "prod(5)";
-        System.out.println(prod+"--->>"+new MathExpression(prod).solve());
-         prod = "prod(5+5)";
-        System.out.println(prod+"--->>"+new MathExpression(prod).solve());
-         prod = "prod(5+5)";
-        System.out.println(prod+"--->>"+new MathExpression(prod).solve());
+        System.out.println(prod + "--->>" + new MathExpression(prod).solve());
+        prod = "prod(5+5)";
+        System.out.println(prod + "--->>" + new MathExpression(prod).solve());
+        prod = "prod(5+5)";
+        System.out.println(prod + "--->>" + new MathExpression(prod).solve());
         System.out.println(new MathExpression("sort(3,4,-2,-13,21,34,-99,1,-1.498,sin(28))").solve());
         System.out.println(new MathExpression("3/2").solve());
         System.out.println(new MathExpression("x=20;sin(ln(x));").solve());
@@ -2025,7 +2028,6 @@ public class MathExpression implements Savable, Solvable {
         String s3 = "2+sin(3)-ln(12)+1/3.689";
         String s4 = "sin(2)+cos(3)-listsum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
         String s5 = "listsum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,listsum(3,4,5,6,9,12,23), 12, listsum(3,4,8,9, 2000)), 12000, mode(3,2,2,1),32.897, mode(1,5,7,7,1,1,7))";
-        
 
         MathExpression m = new MathExpression(s5);
         System.out.println("m.solve(): " + m.solve());

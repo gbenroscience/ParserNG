@@ -141,9 +141,12 @@ public class Declarations {
         MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression ctx, String funcName, int arity, MathExpression.EvalResult[] args) -> {
             List<String> tokens = new ArrayList<>();
             for (MathExpression.EvalResult arg : args) {
-                System.out.println("EvalResult arg: "+arg.toString());
+                System.out.println("EvalResult arg: "+arg.toString()+", arg.type = "+arg.getTypeName());
                 if (arg.type == MathExpression.EvalResult.TYPE_SCALAR) {
                     tokens.add(String.valueOf(arg.scalar));
+                }
+                else if (arg.type == MathExpression.EvalResult.TYPE_STRING) {
+                    tokens.add(arg.textRes);
                 }
             }       
             MathExpression.EvalResult result = ctx.getNextResult();
