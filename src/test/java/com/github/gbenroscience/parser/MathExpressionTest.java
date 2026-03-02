@@ -169,7 +169,7 @@ class MathExpressionTest {
 
 
         MathExpression expr = new MathExpression("tri_mat(M)");
-        String tm = expr.solve();
+        String tm = expr.solve(); System.out.println(tm);
         if (print) System.out.println(tm);
         Assertions.assertTrue(tm.endsWith("@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0)") );
 
