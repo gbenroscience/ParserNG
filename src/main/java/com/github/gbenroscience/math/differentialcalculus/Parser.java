@@ -162,6 +162,12 @@ public class Parser {
      *
      */
     private Function localParseDerivativeCommand(List<String> list) {
+        /*
+        diff(F,v|x)
+        diff(F,v|x, n)
+        
+        
+        */
 
         list.removeAll(Arrays.asList(","));
         String args1, args2 = "";
@@ -245,11 +251,11 @@ public class Parser {
      * Direct examples would be: diff(@(x)sin(x+1),4) diff(F,5.32) where F is a
      * function that has been defined before in the workspace.. and so on.
      *
-     * diff(F) Evaluate F's grad func and return the result diff(F,v) Evaluate
-     * F's grad func and store the result in a function called v diff(F,n)
-     * Evaluate F's grad func n times diff(F,v,n) Evaluate F's grad func n times
-     * and store the result in a function called v diff(F,x,n) Evaluate F's grad
-     * func n times and calculate the result at x
+     * diff(F) Evaluate F's grad func and return the result 
+     * diff(F,v) Evaluate F's grad func and store the result in a function pointer called v 
+     * diff(F,n) Evaluate F's grad func n times 
+     * diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v 
+     * diff(F,x,n) Evaluate F's grad func n times and calculate the result at x
      *
      */
     public static void parseDerivativeCommand(List<String> list) {
@@ -257,7 +263,8 @@ public class Parser {
          *
          *
          */
-        list.removeAll(Arrays.asList(","));
+        System.out.println("list-1: "+list);
+        //list.removeAll(Arrays.asList(","));
 
         String args1, args2 = "";
         if (list.get(0).equals("diff") && list.get(1).equals("(") && list.get(list.size() - 1).equals(")")) {
@@ -266,9 +273,7 @@ public class Parser {
             if (Variable.isVariableString(functionName)) {
 
                 boolean exists = FunctionManager.contains(functionName);
-
                 if (exists) {
-
                     for (int i = 3; i < list.size(); i++) {
                         String tk = list.get(i);
                         if (Operator.isOpeningBracket(tk)) {
@@ -276,7 +281,7 @@ public class Parser {
                             args1 = new MathExpression(LISTS.createStringFrom(list, i, closeBracket + 1)).solve();
                             List l = list.subList(i, closeBracket + 1);
                             l.clear();
-                            l.add(args1);
+                            l.add(args1); 
                         } else if (Variable.isVariableString(tk) & !Method.isDefinedMethod(tk)) {
                             Variable v = VariableManager.getVariable(list.get(i));
                             if (v != null) {
@@ -284,12 +289,10 @@ public class Parser {
                                 list.set(i, String.valueOf(val));
                             }
                         }
-
                     }
-
                 }
-
             }
+            System.out.println("list: "+list);
 
             int sz = list.size();
 
@@ -297,9 +300,7 @@ public class Parser {
              * diff,(,f,)--sz = 4 diff,(,f,1,)--sz = 5 diff,(,f,2,3,)--sz = 6
              */
             switch (sz) {
-
                 case 4:
-
                     break;
                 case 5:
                     args1 = list.get(3);

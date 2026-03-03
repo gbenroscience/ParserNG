@@ -229,7 +229,7 @@ public class Derivative {
                         expr = "diff(" + derivative.differentiate() + ")";
                     }//end for loop
                     expr = expr.substring(5, expr.length() - 1);
-                    String funcExpr = "@("+baseVariable+")"+expr;System.out.println("funcExpr: "+funcExpr);
+                    String funcExpr = "@("+baseVariable+")"+expr;
                     Function f = FunctionManager.add(funcExpr);
                     return f.getName();
                     //return funcExpr;

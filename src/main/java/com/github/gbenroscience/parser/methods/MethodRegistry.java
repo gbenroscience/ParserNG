@@ -247,6 +247,10 @@ public class MethodRegistry {
         registerMethod(Declarations.COMBINATION, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.combination(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.PERMUTATION, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.permutation(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.DIFFERENTIATION, (ctx, funcName, arity, args) -> {
+            System.out.println("Derivatives Action");
+            System.out.println("funcName: "+funcName);
+            System.out.println("arity: "+arity);
+            System.out.println("args: "+Arrays.toString(args));
             int sz = args.length;
             switch (sz) {
                 case 1: {

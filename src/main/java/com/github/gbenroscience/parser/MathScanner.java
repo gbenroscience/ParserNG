@@ -624,16 +624,13 @@ public class MathScanner {
         removeExcessBrackets(scanner);
         recognizeAnonymousFunctions(scanner);
         for (int i = 0; i < scanner.size(); i++) {
-
             String token = scanner.get(i);
             if (i + 1 >= scanner.size()) {
                 break;
             }
             String nextToken = scanner.get(i + 1);
-
             if (token.equals("diff") && nextToken.equals("(")) {
                 ///diff,(,@,(x),log,(,x, , ,2,), , ,4,)
-
                 int close = Bracket.getComplementIndex(true, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
                 Parser.parseDerivativeCommand(list);
@@ -1339,55 +1336,7 @@ public class MathScanner {
         scanner.add(start, f.getName());
     }
 
-    /**
-     * This technique conserves the last single bracket as it is unsure of the
-     * rules that allow it to unwrap the last bracket.
-     *
-     * @param scanner The tokens list
-     */
-    public static void $removeExcessBrackets(List<String> scanner) {
-
-        for (int i = 0; i < scanner.size(); i++) {
-
-            if (i + 1 < scanner.size() && isClosingBracket(scanner.get(i))) {
-
-                if (isClosingBracket(scanner.get(i + 1))) {//you have a match for an unnecessary wasted bracket
-                    int inner_open = Bracket.getComplementIndex(false, i, scanner);
-                    int outer_open = Bracket.getComplementIndex(false, i + 1, scanner);
-
-                    if (inner_open != -1 && outer_open != -1 && inner_open - 1 == outer_open) {
-                        scanner.remove(i);
-                        scanner.remove(inner_open);
-                        i -= 2;
-                    }
-                } else {//the bracket is not enclosed by another bracket..check if it is unnecessarily enclosing a positive or negative number
-                    int open = Bracket.getComplementIndex(false, i, scanner);
-                    if (i - open == 2) {//confirm that the bracket has only 1 token inside it
-                        if (open > 0) {//open bracket is beyond 0
-                            String token = scanner.get(open - 1);
-                            if (!isVariableString(token) && !isAtOperator(token) && !Method.isMethodName(token) && !isUnaryPreOperator(token)) {
-                                scanner.remove(i);
-                                scanner.remove(open);
-                                i -= 2;
-                                continue;
-                            }
-                        } else if (open == 0) {//open bracket is at 0
-                            scanner.remove(i);
-                            scanner.remove(open);
-                            i -= 2;
-                            continue;
-                        }
-
-                    }//end if
-
-                }
-
-            }
-
-        }
-
-    }
-
+ 
     /**
      * This technique will rid tokens of offending brackets up to the last
      * bracket. It assumes that it knows the rules that allow one to remove all

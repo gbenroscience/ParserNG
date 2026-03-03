@@ -934,7 +934,6 @@ public class Function implements Savable {
                 return f.matrix.getName().startsWith("anon");
             default:
                 return false;
-
         }
 
     }

@@ -30,6 +30,7 @@ import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Operator.*;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import static com.github.gbenroscience.parser.TYPE.MATRIX;
 import com.github.gbenroscience.parser.benchmarks.GG;
 import com.github.gbenroscience.parser.logical.ExpressionLogger;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
@@ -131,7 +132,6 @@ public class MathExpression implements Savable, Solvable {
      * The kind of output returned by the parser.
      */
     TYPE returnType = TYPE.NUMBER;
- 
 
     // Precedence levels
     private static final int PREC_POSTFIX = 5;  // !, ², ³, √, ³√, -¹
@@ -154,7 +154,8 @@ public class MathExpression implements Savable, Solvable {
 
     // Updated Token class (from your provided)
     static class Token {
-        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, FUNCTION_PTR = 4, LPAREN = 5, RPAREN = 6, COMMA = 7; 
+
+        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 5, RPAREN = 6, COMMA = 7;
         public int kind;
         public double value;
         public String name; // REQUIRED for functions/methods/variables
@@ -164,6 +165,10 @@ public class MathExpression implements Savable, Solvable {
         public boolean isRightAssoc;
         public boolean isPostfix;
         public int arity;
+
+        // NEW FIELDS FOR FUNCTION ASSIGNMENT
+        public String assignToName;  // The variable to assign result to (e.g., "vw")
+        public boolean isAssignmentTarget = false;
 
         // Constructor for Numbers
         public Token(double value) {
@@ -198,6 +203,13 @@ public class MathExpression implements Savable, Solvable {
             this.kind = kind;
             this.precedence = -1;
             this.isRightAssoc = false;
+        }
+
+        // Add constructor for assignment
+        public Token(int kind, String name, int arity, int id, String assignToName) {
+            this(kind, name, arity, id);
+            this.assignToName = assignToName;
+            this.isAssignmentTarget = (assignToName != null);
         }
 
         // Helper to get precedence for opChar
@@ -239,7 +251,9 @@ public class MathExpression implements Savable, Solvable {
                     + "\"precedence\": " + precedence + ",\n"
                     + "\"isRightAssoc\": " + isRightAssoc + ",\n"
                     + "\"isPostfix\": " + isPostfix + ",\n"
-                    + "\"arity\": " + arity + "\n"
+                    + "\"arity\": " + arity + ",\n"
+                    + "\"assignToName\": " + assignToName + ",\n"
+                    + "\"isAssignmentTarget\": " + isAssignmentTarget + "\n"
                     + "}\n";
         }
 
@@ -254,7 +268,9 @@ public class MathExpression implements Savable, Solvable {
                     + "\"precedence\": " + precedence + ","
                     + "\"isRightAssoc\": " + isRightAssoc + ","
                     + "\"isPostfix\": " + isPostfix + ","
-                    + "\"arity\": " + arity
+                    + "\"arity\": " + arity + ","
+                    + "\"assignToName\": " + assignToName + ","
+                    + "\"isAssignmentTarget\": " + isAssignmentTarget
                     + "}";
         }
 
@@ -1171,7 +1187,7 @@ public class MathExpression implements Savable, Solvable {
     }
 
     // Your translate method (with small updates for Java 8)
-    public Token translate(String s, String prev) {
+    public Token translate(String s, String next) {
         if (s == null || s.isEmpty()) {
             return null;
         }
@@ -1201,9 +1217,18 @@ public class MathExpression implements Savable, Solvable {
             return new Token(internalOp, Token.getPrec(internalOp), Token.isRightAssociative(internalOp), isPostfix);
         }
 
-        // 4. Identify Functions (Built-in or User-Defined)
+        // 4. Identify Functions (Built-in or User-Defined)[f,(,a,b,...)]
         if (FunctionManager.FUNCTIONS.containsKey(s)) {
-            return new Token(Token.FUNCTION, s, FunctionManager.getFunction(s).getArity(), -1);
+            Function f = FunctionManager.getFunction(s);
+            if (f != null) {
+                if (next != null && next.equals("(")) {
+                    return new Token(Token.FUNCTION, s, -1, -1); // Arity set during compile
+                }
+                if (next == null || !next.equals("(")) {
+                    return new Token(Token.FUNCTION, s, 0, -1);
+                }
+            }
+
         }
 
         // Handle commas (function argument separators)
@@ -1218,14 +1243,6 @@ public class MathExpression implements Savable, Solvable {
             int methodId = MethodRegistry.getMethodID(s);
             return new Token(Token.METHOD, s, -1, methodId); // Arity set during compile
         }
-        
-        if(isVariableString(s) && VariableManager.lookUp(s) == null && prev != null && FunctionManager.lookUp(prev) != null){
-            /*scenario: [(, diff, (, anon1, vw, ), )]... where vw is an undefined function which the derivative will be assigned to when it has been calculated*/
-            Token t = new Token(len);
-            t.name = s;
-            t.kind = Token.FUNCTION_PTR;
-            return new Token(Token.FUNCTION_PTR, s, FunctionManager.getFunction(prev).getArity(), -1);
-          }
 
         // 6. Fallback: Treat as Variable/Constant
         Token t = new Token(0.0);
@@ -1268,10 +1285,12 @@ public class MathExpression implements Savable, Solvable {
         boolean[] justSawComma = new boolean[64];
         justSawComma[0] = true;
 
-        for (int idx = 0; idx < scanner.size(); idx++) {
+        int len = scanner.size();
+        for (int idx = 0; idx < len; idx++) {
             String s = scanner.get(idx);
-            String prev = idx-1>=0 ? scanner.get(idx-1) : null; 
-            Token t = translate(s, prev);
+            String next = idx + 1 < len ? scanner.get(idx + 1) : null;
+
+            Token t = translate(s, next);
             if (t == null) {
                 continue;
             }
@@ -1301,7 +1320,7 @@ public class MathExpression implements Savable, Solvable {
                     }
 
                     opStack.push(t);
-                    parenDepths.push(isForFunction ? depth : -1);  // -1 = grouping, >= 0 = function depth
+                    parenDepths.push(isForFunction ? depth : -1);
 
                     if (isForFunction) {
                         depth++;
@@ -1343,7 +1362,6 @@ public class MathExpression implements Savable, Solvable {
 
                                 // The function result counts as ONE value for parent
                                 if (depth > 0 && !justSawComma[depth]) {
-                                    // Already counted or will be counted by next comma
                                     justSawComma[depth] = false;
                                 }
                             }
@@ -1356,7 +1374,7 @@ public class MathExpression implements Savable, Solvable {
                                     argCount[depth]++;
                                     justSawComma[depth] = false;
                                 } else {
-                                    // Already incremented (shouldn't happen with proper grouping)
+                                    // Already incremented
                                     justSawComma[depth] = false;
                                 }
                             }
@@ -1413,7 +1431,7 @@ public class MathExpression implements Savable, Solvable {
             final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
             int ptr = -1;
 
-            for (int i=0;i<cachedPostfix.length;i++) {
+            for (int i = 0; i < cachedPostfix.length; i++) {
                 Token t = cachedPostfix[i];
                 System.out.println("\n=== Evaluating token: "
                         + (t.kind == Token.NUMBER ? "NUM(" + t.value + ")"
@@ -1431,11 +1449,9 @@ public class MathExpression implements Savable, Solvable {
                                 throw new RuntimeException("Undefined variable: " + t.name);
                             }
                             stack[++ptr] = getNextResult().wrap(var.getValue());
-                            // System.out.println("  Pushed variable " + t.name + " = " + var.getValue() + " at ptr=" + ptr);
                         } else {
                             // Direct number
                             stack[++ptr] = getNextResult().wrap(t.value);
-                            // System.out.println("  Pushed number " + t.value + " at ptr=" + ptr);
                         }
                         break;
 
@@ -1446,7 +1462,6 @@ public class MathExpression implements Savable, Solvable {
                                 throw new RuntimeException("Insufficient operands for unary operator: " + t.opChar);
                             }
                             applyUnary(t.opChar, stack[ptr]);
-                            // System.out.println("  Applied unary " + t.opChar + " to stack[" + ptr + "]");
                         } else {
                             // Binary operator
                             if (ptr < 1) {
@@ -1454,86 +1469,76 @@ public class MathExpression implements Savable, Solvable {
                                         + " (stack ptr=" + ptr + ")");
                             }
                             double bVal = stack[ptr--].scalar;
-                            double aVal = stack[ptr].scalar;
                             applyBinary(t.opChar, stack[ptr], bVal);
-                            /*System.out.println("  Applied binary " + t.opChar + ": " + aVal + " " + t.opChar + " " + bVal
-                                    + " = " + stack[ptr].scalar + " at ptr=" + ptr);*/
                         }
                         break;
 
                     case Token.METHOD:
                     case Token.FUNCTION:
+                        System.out.println("token:(is method or function)--->>> " + t);
                         int arity = t.arity;
-
-                        // CRITICAL FIX: Validate arity matches stack depth
-                        if (ptr < arity - 1) {
-                            /**
-                             * A situation arises where a user defined function,
-                             * especially an anonymous one(usually generated
-                             * dynamically during the compile phase makes it
-                             * here. Its representation is usually anonX---e.g.
-                             * anon1, anon2 etc. Its token has an arity which is
-                             * usually non zero. But the arity is not available
-                             * to this evaluation phase. It is stored away in
-                             * the FunctionManager's store. So treat the token
-                             * like a function handle or reference. Scan the
-                             * FunctionManager and see if it has this token and
-                             * then evaluate it or return it depending on what
-                             * is needed.
-                             */
+                        // CRITICAL FIX: Calculate how many values are actually on stack
+                        int valuesOnStack = ptr + 1;
+                        System.out.println("  Function " + t.name + " expects arity=" + arity
+                                + ", values on stack=" + valuesOnStack);
+                        // CASE 1: Zero-argument function
+                        if (arity == 0) {
                             Function f = FunctionManager.lookUp(t.name);
                             if (f != null) {
-                                EvalResult r = new EvalResult();
-                                switch (f.getType()) {
-                                    case ALGEBRAIC_EXPRESSION:
-                                        r.wrap(f.getMathExpression().expression);
-                                        break;
-                                    case MATRIX:
-                                        r.wrap(f.getMatrix());
-                                        break; 
-                                    case ERROR:
-                                        r.wrap(ParserResult.SYNTAX_ERROR);
-                                        break;
-                                    case LIST:
-                                        r.wrap(f.getMatrix().getFlatArray());
-                                        break;
-                                    default:
-                                        throw new AssertionError("Unknown function type");
-                                }
-                                return r;
+                                EvalResult e = new EvalResult();
+                                e.absorb(f);
+                                EvalResult result = f.calc(new EvalResult[]{e});
+                                stack[++ptr] = result;
+                                System.out.println("  Evaluated zero-arg function: " + result.toString());
                             } else {
-                                throw new RuntimeException("Function " + t.name + " requires " + arity
-                                        + " arguments but only " + (ptr + 1) + " values available on stack");
+                                throw new RuntimeException("Function " + t.name + " not found");
                             }
+                            break;
                         }
 
+                        // CASE 2: Function with arguments expected
+                        if (valuesOnStack < arity) {
+                            throw new RuntimeException("Function " + t.name + " requires " + arity
+                                    + " arguments but only " + valuesOnStack + " values available on stack");
+                        }
+
+                        // Pop exactly 'arity' arguments from the stack
                         EvalResult[] args = new EvalResult[arity];
                         for (int j = arity - 1; j >= 0; j--) {
                             args[j] = stack[ptr--];
-                            System.out.println("  Popped arg[" + j + "] from stack ptr=" + (ptr + 1));
+                            System.out.println("  Popped arg[" + j + "] from stack ptr=" + (ptr + 1)
+                                    + " value=" + args[j].toString());
                         }
 
                         System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
                                 + " " + t.name + " with " + arity + " args");
+
                         EvalResult result;
-                        if (t.kind == Token.METHOD) {
-                            result = MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, arity, args);
-                        } else {
-                            result = FunctionManager.lookUp(t.name).calc(args);
+                        try {
+                            if (t.kind == Token.METHOD) {
+                                result = MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, arity, args);
+                            } else {
+                                result = FunctionManager.lookUp(t.name).calc(args);
+                            }
+                        } catch (Exception e) {
+                            throw new RuntimeException("Error executing " + t.name + ": " + e.getMessage(), e);
                         }
 
+                        // Push result back on stack (exactly ONE value replaces the popped arguments)
                         stack[++ptr] = result;
-                        System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr + ", type: " + result.getTypeName());
+                        System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr
+                                + ", type: " + result.getTypeName());
                         break;
                 }
             }
 
+            // Final validation
             if (ptr < 0) {
-                //throw new RuntimeException("Invalid expression: stack is empty after evaluation");
                 EvalResult r = new EvalResult();
                 r.wrap(ParserResult.SYNTAX_ERROR);
                 return r;
             }
+
             if (ptr > 0) {
                 System.out.println("WARNING: Stack has " + (ptr + 1) + " values at end, returning top");
             }
@@ -1731,6 +1736,26 @@ public class MathExpression implements Savable, Solvable {
             }
         }
 
+        public EvalResult absorb(Function f) {
+            if (f != null) {
+                TYPE tt = f.getType();
+                switch (tt) {
+                    case MATRIX:
+                        wrap(f.getMatrix());
+                        break;
+                    case ALGEBRAIC_EXPRESSION:
+                        wrap(f.getMathExpression().getExpression());
+                        break;
+                    case LIST:
+                        wrap(f.getMatrix().getFlatArray());
+                        break;
+                    default:
+                        break;
+                }
+                return this;
+            }
+            return null;
+        }
     }
 
 // In ExpressionSolver.getNextResult():
@@ -2077,18 +2102,21 @@ public class MathExpression implements Savable, Solvable {
         Test.main(args);
 
         System.out.println("________________________________________________________________TESTS-DONE________________________________________________________________");
+        System.out.println(new MathExpression("f(x,y)=2*x*y;f(3,4);").solve());
+        System.out.println("sum(sum(5),sum(6)): " + new MathExpression("sum(sum(5),sum(6))").solve());
+// Expected: 11
 
-          
+        System.out.println("sort(0,4+0,2+0): " + new MathExpression("sort(0,4+0,2+0)").solve());
         System.out.println(new MathExpression("x=0.9;sqrt(0.64-x^2)").solve());
+        System.out.println("differential calculus:>>3 " + new MathExpression("diff(@(x)sin(ln(x)), 1);").solve());
+        System.out.println("differential calculus:>>4 " + new MathExpression("diff(@(x)x^10, m,1);").solve());
         MathExpression meDiff = new MathExpression("x=3;diff(@(x)sin(ln(x)),vw);");
-           System.out.println("--------------------------"+FunctionManager.FUNCTIONS);
-        System.out.println("differential calculus:>>1 "+meDiff.solve());
-        System.out.println("differential calculus:>>2 "+new MathExpression("diff(@(x)sin(ln(x)), b);").solve());
-        System.out.println("differential calculus:>>3 "+new MathExpression("diff(@(x)sin(ln(x)), 1);").solve());
-        System.out.println("differential calculus:>>4 "+new MathExpression("diff(@(x)x^10, m,1);").solve());
+        System.out.println("--------------------------" + FunctionManager.FUNCTIONS);
+        System.out.println("differential calculus:>>1 " + meDiff.solve());
+        System.out.println("differential calculus:>>2 " + new MathExpression("diff(@(x)sin(ln(x)), b);").solve());
         System.out.println(new MathExpression("sin(ln(x));").solve());
-        System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS);
-        
+        System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
+
         MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);B=eigvalues(A);C=eigvec(A);D=eigpoly(A);eigpoly(A);");
         System.out.println(FunctionManager.FUNCTIONS);
         System.out.println("----------" + mex.solve());
