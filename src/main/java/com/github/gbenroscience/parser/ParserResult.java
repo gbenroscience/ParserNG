@@ -1,5 +1,5 @@
 package com.github.gbenroscience.parser;
 
-public enum Parser_Result{
+public enum ParserResult{
     SYNTAX_ERROR,INVALID_FUNCTION,INCOMPLETE_PARAMS,PARENTHESES_ERROR,NULL_ERROR,STRANGE_INPUT,UNDEFINED_ARG,VALID;
 }

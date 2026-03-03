@@ -26,14 +26,14 @@ public class ProdTest {
     void prodAcceptsTwoPlainArguments() {
         MathExpression me;
         me = new MathExpression("prod(5,6)");
-        Assertions.assertEquals("30.0", me.solveGeneric().textRes);
+        Assertions.assertEquals(30.0, me.solveGeneric().scalar);
     }
 
     @Test
     void prodAcceptsTwoPlainExpressions() {
         MathExpression me;
         me = new MathExpression("prod(5+5, 4+4)");
-        Assertions.assertEquals(80.0, me.solveGeneric().textRes);
+        Assertions.assertEquals(80.0, me.solveGeneric().scalar);
     }
 
     @Test
@@ -61,15 +61,15 @@ public class ProdTest {
     void prodAcceptsTwoNumFunction() {
         MathExpression me;
         me = new MathExpression("prod(sin(5),sin(5))"); 
-        Assertions.assertTrue(Math.abs(Double.parseDouble(me.solveGeneric().textRes) - 0.9195357645382262) <= 1.0E-15 );
+        Assertions.assertTrue(Math.abs(me.solveGeneric().scalar - 0.9195357645382262) <= 1.0E-15 );
     }
 
     @Test
     void prodAcceptsStatAndNumFunction() {
         MathExpression me;
         me = new MathExpression("prod(prod(5),sin(5))");
-        Assertions.assertEquals(-4.794621373315692, me.solveGeneric().textRes);
+        Assertions.assertEquals(-4.794621373315692, me.solveGeneric().scalar);
         me = new MathExpression("prod(sin(5),prod(5))");
-        Assertions.assertEquals(-4.794621373315692, me.solveGeneric().textRes);
+        Assertions.assertEquals(-4.794621373315692, me.solveGeneric().scalar);
     }
 }

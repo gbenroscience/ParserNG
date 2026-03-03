@@ -13,7 +13,7 @@ import com.github.gbenroscience.parser.LISTS;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathScanner;
 import com.github.gbenroscience.parser.Operator;
-import com.github.gbenroscience.parser.Parser_Result;
+import com.github.gbenroscience.parser.ParserResult;
 import com.github.gbenroscience.parser.Variable;
 import com.github.gbenroscience.parser.methods.Method;
 import java.util.Arrays;
@@ -58,7 +58,7 @@ public class Parser {
      * The number of times to differentiate the function.
      */
     private int orderOfDifferentiation = Integer.MAX_VALUE;
-    public Parser_Result result = Parser_Result.VALID;
+    public ParserResult result = ParserResult.VALID;
 
     /**
      * This is a very important field as it tells if the function is to be

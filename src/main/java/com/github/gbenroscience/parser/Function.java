@@ -205,17 +205,23 @@ public class Function implements Savable {
      * value list is applied to the function's parameter list in the order they
      * were supplied in the original question.
      * @return the value of the function with these variables set.
-     */
+  */
     public double calc(double... x) {
-        int i = 0;
-        if (x.length == independentVariables.size()) {
-            for (Variable var : independentVariables) {
-                mathExpression.setValue(var.getName(), x[i++]);
-            }
-
-            return Double.parseDouble(mathExpression.solve());
+        // Check for null and size equality
+        if (x == null || x.length != independentVariables.size()) {
+            return Double.NaN;
         }
-        return Double.NaN;
+
+        for (int i = 0; i < x.length; i++) {
+            Variable var = independentVariables.get(i);
+            mathExpression.setValue(var.getName(), x[i]);
+        }
+
+        try {
+            return mathExpression.solveGeneric().scalar;
+        } catch (NumberFormatException | NullPointerException e) {
+            return Double.NaN;
+        }
     }
 
     /**

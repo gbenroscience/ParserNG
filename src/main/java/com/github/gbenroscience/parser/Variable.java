@@ -5,12 +5,12 @@
 package com.github.gbenroscience.parser;
 
 import com.github.gbenroscience.interfaces.Savable;
-import java.io.StringReader;
 import java.util.InputMismatchException;
 
 import com.github.gbenroscience.math.Maths;
 import java.util.NoSuchElementException;
 import com.github.gbenroscience.util.Serializer;
+import com.github.gbenroscience.util.VariableManager;
 
 /**
  *
@@ -54,14 +54,36 @@ public class Variable implements Savable {
         PI.type = TYPE.NUMBER;
     }
 
+    /**
+     *
+     * @param name The name of the variable (will create and initialize the
+     * variable with the given name to 0.0) or a variable assignment statement
+     * like a=4; or b=a; (where a is an existing stored variable)
+     */
     public Variable(String name) {
 
         if (isVariableString(name)) {
             this.name = name;
             this.value = 0.0;
             this.type = TYPE.NUMBER;
-        } else {
-
+        } else {//may be variable assignment statement a=4.43 etc
+            int commaIndex = name.indexOf("=");
+            if (commaIndex != -1) {
+                String n = name.substring(0, commaIndex);
+                String v = name.substring(commaIndex + 1);
+                Variable someVar = null;
+                if (isVariableString(n)) {
+                    if (Number.isNumber(v)) {
+                        this.name = n;
+                        this.value = Double.parseDouble(v);
+                        this.type = TYPE.NUMBER;
+                    } else if (isVariableString(v) && (someVar = VariableManager.lookUp(v)) != null) {
+                        this.name = n;
+                        this.value = someVar.value;
+                        this.type = TYPE.NUMBER;
+                    }
+                }
+            }
         }
     }
 
@@ -94,6 +116,7 @@ public class Variable implements Savable {
         if (isVariableString(name)) {
             this.name = name;
             setValue(value);
+            this.type = TYPE.NUMBER;
             this.fullName = fullName;
             this.constant = constant;
         }
@@ -455,7 +478,13 @@ public class Variable implements Savable {
      * @param args
      */
     public static void main(String args[]) {
-        System.out.println(isVariableString("sin"));
+        Variable a = new Variable("a=4");
+        VariableManager.add(a);
+        System.out.println("REGISTRY: " + VariableManager.VARIABLES);
+        Variable b = new Variable("b=a");
+        System.out.println(b);
+        VariableManager.add(b);
+        System.out.println("REGISTRY: " + VariableManager.VARIABLES);
     }//end method
 
 }//end class Variable

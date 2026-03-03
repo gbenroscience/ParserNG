@@ -306,13 +306,13 @@ class MathExpressionTest {
 //                        + ".0), anon6=anon6=@(x,y)(x-x/y), f=f=@(x,y)(x-x/y), r=r=@(x)(ln(sin(x)))]",
 //                l.toString());
         if (print) System.out.println("VariableManager: " + VariableManager.VARIABLES);
-        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, x=x:0.0, pi=pi:3.1415926535897932, y=y:0.0, r1=r1:4}", VariableManager.VARIABLES.toString());
+        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, x=x:0.0, pi=pi:3.141592653589793, y=y:0.0, r1=r1:4.0}", VariableManager.VARIABLES.toString());
 
         MathExpression expression = new MathExpression("x=0;sin(ln(x))");
 
         expression.setValue("x", 0 );
         if (print) System.out.println(expression.solve());
-        Assertions.assertEquals("-Infinity", expression.solve());
+        Assertions.assertEquals("NaN", expression.solve());
         expression.setValue("x", 1 );
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals("0.0", expression.solve());

@@ -36,7 +36,7 @@ import com.github.gbenroscience.math.differentialcalculus.Parser;
 public class MathScanner {
 
     public String commaAlias = String.valueOf(new Random().nextDouble());
-    public Parser_Result parser_Result = Parser_Result.VALID;
+    public ParserResult parser_Result = ParserResult.VALID;
     /**
      * Returns true if the expression is validated by the scanner as containing
      * all the necessary objects and no foreign object. This does not validate
@@ -638,7 +638,7 @@ public class MathScanner {
                 List<String> list = scanner.subList(i, close + 1);
                 Parser.parseDerivativeCommand(list);
                 if (list.isEmpty()) {
-                    parser_Result = Parser_Result.INCOMPLETE_PARAMS;
+                    parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
                 }
 
@@ -650,7 +650,7 @@ public class MathScanner {
                 List<String> list = scanner.subList(i, close + 1);
                 NumericalIntegral.extractFunctionStringFromExpression(list);
                 if (list.isEmpty()) {
-                    parser_Result = Parser_Result.INCOMPLETE_PARAMS;
+                    parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
                 }
 
@@ -661,7 +661,7 @@ public class MathScanner {
                 List<String> list = scanner.subList(i, close + 1);
                 extractFunctionStringFromExpressionForMatrixMethods(list);
                 if (list.isEmpty()) {
-                    parser_Result = Parser_Result.INCOMPLETE_PARAMS;
+                    parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
                 }
 
@@ -674,7 +674,7 @@ public class MathScanner {
                 RootFinder.extractFunctionStringFromExpression(list);
 
                 if (list.isEmpty()) {
-                    parser_Result = Parser_Result.INCOMPLETE_PARAMS;
+                    parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
                 }
             }//end else if
@@ -693,7 +693,7 @@ public class MathScanner {
                         //skip to bracket close and continue searching for commas
                         cursor = Bracket.getComplementIndex(true, cursor, scanner);
                     } else if (isComma(tkn)) {
-                        parser_Result = Parser_Result.SYNTAX_ERROR;
+                        parser_Result = ParserResult.SYNTAX_ERROR;
                         setRunnable(false);
                         break;
                     }
@@ -755,7 +755,7 @@ public class MathScanner {
                         scanner.add(i + 1, "*");
                         i++;
                     } else {
-                        parser_Result = Parser_Result.UNDEFINED_ARG;
+                        parser_Result = ParserResult.UNDEFINED_ARG;
                         setRunnable(false);
                         errorList.add(scanner.get(i) + " is an undefined variable. Set MathExpression.setAutoInitOn to true to use a variable without defining it");
                     }
@@ -806,7 +806,7 @@ public class MathScanner {
 
                 if (!isOperatorString(scanner.get(i)) && !isVariableString(scanner.get(i))
                         && !validNumber(scanner.get(i)) && !Method.isMethodName(scanner.get(i))) {
-                    parser_Result = Parser_Result.STRANGE_INPUT;
+                    parser_Result = ParserResult.STRANGE_INPUT;
                     setRunnable(false);
                     errorList.add(scanner.get(i) + " is a strange math object!");
                     return;
@@ -978,12 +978,12 @@ public class MathScanner {
     public List<String> scanner() {
         VariableManager variableManager = new VariableManager();
         splitStringOnMethods_Variables_And_Operators();
-        if (parser_Result != Parser_Result.VALID) {
+        if (parser_Result != ParserResult.VALID) {
             scanner.clear();
             return scanner;
         }
         validateInputAfterSplitOnMethodsAndOps();
-        if (parser_Result != Parser_Result.VALID) {
+        if (parser_Result != ParserResult.VALID) {
             scanner.clear();
             return scanner;
         }
@@ -1054,7 +1054,7 @@ public class MathScanner {
                     && !Method.isMethodName(scanner.get(i))) {
                 errorList.add("Syntax Error! Strange Object Found: " + scanner.get(i));
                 setRunnable(false);
-                parser_Result = Parser_Result.STRANGE_INPUT;
+                parser_Result = ParserResult.STRANGE_INPUT;
             }
             if (MathExpression.isAutoInitOn()) {
                 String tk = scanner.get(i);
@@ -1068,7 +1068,7 @@ public class MathScanner {
                         && !FunctionManager.contains(scanner.get(i))) {
                     errorList.add(" Unknown Variable: " + scanner.get(i) + "\n Please Declare And Initialize This Variable Before Using It.\n"
                             + "Use The Command, \'variableName=value\' To Accomplish This.");
-                    parser_Result = Parser_Result.STRANGE_INPUT;
+                    parser_Result = ParserResult.STRANGE_INPUT;
                     setRunnable(false);
 
                 }//end if
@@ -1187,7 +1187,7 @@ public class MathScanner {
             if (!Variable.isVariableString(scanner.get(i)) && !Operator.isOperatorString(scanner.get(i)) && !validNumber(scanner.get(i))
                     && !Method.isMethodName(scanner.get(i))) {
                 errorList.add("Syntax Error! Strange Object Found: " + scanner.get(i));
-                parser_Result = Parser_Result.STRANGE_INPUT;
+                parser_Result = ParserResult.STRANGE_INPUT;
                 setRunnable(false);
             }
             if (MathExpression.isAutoInitOn()) {
@@ -1202,7 +1202,7 @@ public class MathScanner {
                         && !FunctionManager.contains(scanner.get(i))) {
                     errorList.add(" Unknown Variable: " + scanner.get(i) + "\n Please Declare And Initialize This Variable Before Using It.\n"
                             + "Use The Command, \'variableName=value\' To Accomplish This.");
-                    parser_Result = Parser_Result.STRANGE_INPUT;
+                    parser_Result = ParserResult.STRANGE_INPUT;
                     setRunnable(false);
 
                 }//end if

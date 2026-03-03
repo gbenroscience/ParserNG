@@ -6,7 +6,7 @@ package com.github.gbenroscience.math.differentialcalculus;
 
 import com.github.gbenroscience.parser.MathExpression;
 import static com.github.gbenroscience.parser.Number.*;
-import com.github.gbenroscience.parser.Parser_Result;
+import com.github.gbenroscience.parser.ParserResult;
 import static com.github.gbenroscience.parser.Variable.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -202,7 +202,7 @@ public class Derivative {
         try {
             Parser p = new Parser(expr);
              
-            if (p.result == Parser_Result.VALID) {
+            if (p.result == ParserResult.VALID) {
                 expr = "diff(" + p.getFunction().getMathExpression().getExpression() + ")";
                 String baseVariable = p.getFunction().getIndependentVariables().get(0).getName();
 

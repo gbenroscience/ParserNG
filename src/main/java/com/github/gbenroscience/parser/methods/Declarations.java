@@ -150,7 +150,9 @@ public class Declarations {
                 }
             }       
             MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(basicNumericalMethod.solve(tokens));
+            String res = basicNumericalMethod.solve(tokens);
+            result.wrap(Double.parseDouble(res));
+            System.out.println("res: "+res);
             return result;
         });
     }

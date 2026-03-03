@@ -24,7 +24,7 @@ public class VariableManager {
 //const a=1,const b=2;const q,w,e,r,t=9.2; constant cannot be pi or ans.
     //check if the variable already exists.
 //if so,the user cannot define it by var x = 2; instead use x =9; to change the value in x.
-    public static final Map<String, Variable> VARIABLES = Collections.synchronizedMap(new HashMap<String, Variable>());
+    public static final Map<String, Variable> VARIABLES = Collections.synchronizedMap(new HashMap<>());
 
     /**
      * Parses commands used to insert and update Variables loaded into the
@@ -159,9 +159,9 @@ public class VariableManager {
      *
      * @param cmd The command string to parse.
      */
-    public void parseCommand(String cmd) {
+    public final void parseCommand(String cmd) {
         if (commandParser == null) {
-            commandParser = new CommandInterpreter(cmd);
+            commandParser =  new CommandInterpreter(cmd); 
         } else {
             commandParser.setCommand(cmd);
         }
@@ -344,7 +344,7 @@ public class VariableManager {
      *
      *
      */
-    public class CommandInterpreter {
+    public final class CommandInterpreter {
 
         private String command;
 

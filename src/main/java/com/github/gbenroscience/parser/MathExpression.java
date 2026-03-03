@@ -31,6 +31,7 @@ import static com.github.gbenroscience.parser.Operator.*;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.benchmarks.GG;
+import com.github.gbenroscience.parser.logical.ExpressionLogger;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
 import java.util.Random;
 import java.util.Stack;
@@ -72,7 +73,7 @@ public class MathExpression implements Savable, Solvable {
      * Backup the alias from the scanner here
      */
     private String commaAlias;
-    public Parser_Result parser_Result = Parser_Result.VALID;
+    public ParserResult parser_Result = ParserResult.VALID;
     //determines the mode in which trig operations will be carried out on numbers.if DRG==0,it is done in degrees
 //if DRG==1, it is done in radians and if it is 2, it is done in grads.
     private DRG_MODE DRG = Declarations.degGradRadFromVariable();
@@ -122,7 +123,7 @@ public class MathExpression implements Savable, Solvable {
     private VariableManager variableManager;
 
     // A simple pre-allocated array of results to act as a stack
-    private final EvalResult[] pool = new EvalResult[64];
+    private EvalResult[] pool = new EvalResult[64];
     private int poolPointer = 0;
 
     /**
@@ -289,7 +290,7 @@ public class MathExpression implements Savable, Solvable {
         for (int i = 0; i < 64; i++) {
             pool[i] = new EvalResult();
         }
-        setAutoInitOn(false);
+
         this.variableManager = variableManager;
 
         Scanner cs = new Scanner(STRING.purifier(input), false, VariableManager.endOfLine);
@@ -304,7 +305,7 @@ public class MathExpression implements Savable, Solvable {
                 boolean success = Function.assignObject(code + ";");
                 if (!success) {
                     correctFunction = success;
-                    parser_Result = Parser_Result.SYNTAX_ERROR;
+                    parser_Result = ParserResult.SYNTAX_ERROR;
                     input = null;
                     return;
                 }
@@ -378,12 +379,11 @@ public class MathExpression implements Savable, Solvable {
         this.commaAlias = opScanner.commaAlias;
 
         scanner = opScanner.getScanner();
-        System.out.println("scanner: " + scanner);
-
+       
         correctFunction = opScanner.isRunnable();
 
         parser_Result = opScanner.parser_Result;
-        if (parser_Result == Parser_Result.VALID) {
+        if (parser_Result == ParserResult.VALID) {
             statsVerifier();
             codeModifier();
             refixCommas();
@@ -776,7 +776,7 @@ public class MathExpression implements Savable, Solvable {
         }//end for
 
         correctFunction = ListReturningStatsMethod.validateFunction(this.scanner);
-        parser_Result = correctFunction ? Parser_Result.VALID : Parser_Result.SYNTAX_ERROR;
+        parser_Result = correctFunction ? ParserResult.VALID : ParserResult.SYNTAX_ERROR;
         //processLogger.writeLog(ListReturningStatsMethod.getErrorMessage());
 
         if (noOfListReturningOperators > 0 && correctFunction) {
@@ -815,7 +815,7 @@ public class MathExpression implements Savable, Solvable {
                 scanner.add(")");
 
                 if (!correctFunction) {
-                    parser_Result = Parser_Result.SYNTAX_ERROR;
+                    parser_Result = ParserResult.SYNTAX_ERROR;
                     //processLogger.writeLog("Verifier discovers invalid association between data set returning operators:");
                 }
             }//end if isHasListReturningOperator
@@ -926,7 +926,7 @@ public class MathExpression implements Savable, Solvable {
             mapBrackets(scanner);
         }//end method//end method
         catch (InputMismatchException ime) {
-            parser_Result = Parser_Result.PARENTHESES_ERROR;
+            parser_Result = ParserResult.PARENTHESES_ERROR;
             setCorrectFunction(false);
             scanner.clear();
         }//end catch
@@ -990,13 +990,13 @@ public class MathExpression implements Savable, Solvable {
             }//end if
             else {
                 scanner.clear();
-                parser_Result = Parser_Result.SYNTAX_ERROR;
+                parser_Result = ParserResult.SYNTAX_ERROR;
             }//end else
 
         }//end if
         else {
             scanner.clear();
-            parser_Result = Parser_Result.SYNTAX_ERROR;
+            parser_Result = ParserResult.SYNTAX_ERROR;
         }
 
     }//end method functionComponentAssociation
@@ -1156,25 +1156,20 @@ public class MathExpression implements Savable, Solvable {
             res.wrap(Help.getHelp());
             return res;
         }
+        resetPool();
         compileToPostfix();  // Compile once if not already done
         return expressionSolver.evaluate();
     }
 
     @Override
     public String solve() {
-        if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
-            return Help.getHelp();
-        }
-        compileToPostfix();  // Compile once if not already done
-        System.out.println("scanner after restore: " + scanner);
-
-        EvalResult evr = expressionSolver.evaluate();
-        return evr.toString();
+        return this.solveGeneric().toString();
     }//end method solve()
 
     protected List<String> solve(List<String> list) {
         return Arrays.asList(String.valueOf(GG.evaluate(list)));
     }
+
     // Your translate method (with small updates for Java 8)
     public Token translate(String s) {
         if (s == null || s.isEmpty()) {
@@ -1487,7 +1482,10 @@ public class MathExpression implements Savable, Solvable {
             }
 
             if (ptr < 0) {
-                throw new RuntimeException("Invalid expression: stack is empty after evaluation");
+                //throw new RuntimeException("Invalid expression: stack is empty after evaluation");
+                EvalResult r = new EvalResult();
+                r.wrap(ParserResult.SYNTAX_ERROR);
+                return r;
             }
             if (ptr > 0) {
                 System.out.println("WARNING: Stack has " + (ptr + 1) + " values at end, returning top");
@@ -1564,11 +1562,14 @@ public class MathExpression implements Savable, Solvable {
         public static final int TYPE_VECTOR = 1;
         public static final int TYPE_MATRICES = 2;
         public static final int TYPE_STRING = 3;
+        public static final int TYPE_ERROR = 4;
+
+        public int type;           // 0=Scalar, 1=Vector, 2=Matrix, 3=String
 
         public double scalar;      // For single numbers
         public double[] vector;    // For stats/lists
         public Matrix matrix;  // For matrices
-        public int type;           // 0=Scalar, 1=Vector, 2=Matrix, 3=String
+        public ParserResult error;
         /**
          * Use this to return string results, e.g. formulas, function results,
          * etc.
@@ -1600,12 +1601,19 @@ public class MathExpression implements Savable, Solvable {
             return this;
         }
 
+        public EvalResult wrap(ParserResult s) {
+            this.error = s;
+            this.type = TYPE_ERROR;
+            return this;
+        }
+
 // In EvalResult class:
         public void reset() {
             this.scalar = 0.0;
             this.vector = null;
             this.matrix = null;
             this.textRes = null;
+            this.error = null;
             this.type = TYPE_SCALAR;
         }
 
@@ -1620,6 +1628,8 @@ public class MathExpression implements Savable, Solvable {
                     return matrix.toString();
                 case TYPE_STRING:
                     return textRes;
+                case TYPE_ERROR:
+                    return error == ParserResult.SYNTAX_ERROR ? SYNTAX_ERROR : error.toString();
                 default:
                     return "0.0";
             }
@@ -1635,6 +1645,8 @@ public class MathExpression implements Savable, Solvable {
                     return "TYPE_VECTOR(an array of doubles)";
                 case TYPE_MATRICES:
                     return "TYPE_MATRICES(Matrices)";
+                case TYPE_ERROR:
+                    return "TYPE_ERROR(" + error.name() + ")";
                 default:
                     return "TYPE_UNKNOWN";
             }
@@ -1660,6 +1672,11 @@ public class MathExpression implements Savable, Solvable {
 
     public void release(int count) {
         poolPointer -= count;
+    }
+
+// Add a reset method to clear the pool between evaluations
+    private void resetPool() {
+        poolPointer = 0;
     }
 
     /**
@@ -1980,8 +1997,25 @@ public class MathExpression implements Savable, Solvable {
 
         Test.main(args);
 
-        System.out.println("---------------------------------------------------------------------------------------------------------");
+        System.out.println("________________________________________________________________TESTS-DONE________________________________________________________________");
+  LogicalExpression expr = new LogicalExpression("[s=3;s<s+1 || [s<5]]", (String s) -> {
+                System.out.println("LOG>>>"+s);
+        });
+            String slogic = expr.solve();
+            System.out.println("s: "+slogic);
+        Function f = FunctionManager.add("f(x,y) = x - x/y");
+        double r = f.calc(2, 3);
+        System.out.println("r = " + r);
+        int iterations = 1;
+        long start = System.nanoTime();
+        for (int i = 1; i < iterations; i++) {
+            f.calc(2, 3);
+        }
+        double duration = (System.nanoTime() - start)/iterations;
+        System.out.println("dur = " + (duration / 1000) + "microns");//μμμ
 
+        String geom = "geom((2,8,4))+geom(((2,8,4)))";
+        System.out.println(geom + ": " + new MathExpression(geom).solve());
         String sum = "sum(3,1,4,5,9)";
         System.out.println(sum + "--->>" + new MathExpression(sum).solve());
         sum = "sum(3+3)";

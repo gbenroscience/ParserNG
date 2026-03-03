@@ -122,12 +122,12 @@ class LogicalExpressionTest {
     }
 
     @Test
-    void variablesDoNotWorks(){
+    void variablesNowWork(){
         try {
             LogicalExpression expr;
             expr = new LogicalExpression("[s=3;s<s+1 || [s<5]]", log);
             String s = expr.solve();
-            Assertions.assertEquals("Character s is neither a decimal digit number, decimal point, nor \"e\" notation exponential mark.", s);
+            Assertions.assertEquals("true", s);
         }catch(NumberFormatException ex){
             ex.printStackTrace();
             return;

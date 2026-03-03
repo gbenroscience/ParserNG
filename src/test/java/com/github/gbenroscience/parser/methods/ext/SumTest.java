@@ -60,7 +60,7 @@ public class SumTest {
     void sumAcceptsTwoNumFunction() {
         MathExpression me;
         me = new MathExpression("sum(sin(5),sin(5))");
-        Assertions.assertEquals("-1.9178485493262771", me.solve());
+        Assertions.assertEquals("-1.917848549326277", me.solve());
     }
 
     @Test
