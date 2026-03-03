@@ -131,9 +131,7 @@ public class MathExpression implements Savable, Solvable {
      * The kind of output returned by the parser.
      */
     TYPE returnType = TYPE.NUMBER;
-
-    // Token kinds
-    public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5;
+ 
 
     // Precedence levels
     private static final int PREC_POSTFIX = 5;  // !, ², ³, √, ³√, -¹
@@ -156,8 +154,7 @@ public class MathExpression implements Savable, Solvable {
 
     // Updated Token class (from your provided)
     static class Token {
-
-        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5, COMMA = 6;
+        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, FUNCTION_PTR = 4, LPAREN = 5, RPAREN = 6, COMMA = 7; 
         public int kind;
         public double value;
         public String name; // REQUIRED for functions/methods/variables
@@ -1174,7 +1171,7 @@ public class MathExpression implements Savable, Solvable {
     }
 
     // Your translate method (with small updates for Java 8)
-    public Token translate(String s) {
+    public Token translate(String s, String prev) {
         if (s == null || s.isEmpty()) {
             return null;
         }
@@ -1190,9 +1187,9 @@ public class MathExpression implements Savable, Solvable {
         if (len == 1) {
             switch (c0) {
                 case '(':
-                    return new Token(LPAREN);
+                    return new Token(Token.LPAREN);
                 case ')':
-                    return new Token(RPAREN);
+                    return new Token(Token.RPAREN);
             }
         }
 
@@ -1206,7 +1203,7 @@ public class MathExpression implements Savable, Solvable {
 
         // 4. Identify Functions (Built-in or User-Defined)
         if (FunctionManager.FUNCTIONS.containsKey(s)) {
-            return new Token(FUNCTION, s, FunctionManager.getFunction(s).getArity(), -1);
+            return new Token(Token.FUNCTION, s, FunctionManager.getFunction(s).getArity(), -1);
         }
 
         // Handle commas (function argument separators)
@@ -1219,13 +1216,21 @@ public class MathExpression implements Savable, Solvable {
         // 5. Identify Methods
         if (Method.isInBuiltMethod(s)) {
             int methodId = MethodRegistry.getMethodID(s);
-            return new Token(METHOD, s, -1, methodId); // Arity set during compile
+            return new Token(Token.METHOD, s, -1, methodId); // Arity set during compile
         }
+        
+        if(isVariableString(s) && VariableManager.lookUp(s) == null && prev != null && FunctionManager.lookUp(prev) != null){
+            /*scenario: [(, diff, (, anon1, vw, ), )]... where vw is an undefined function which the derivative will be assigned to when it has been calculated*/
+            Token t = new Token(len);
+            t.name = s;
+            t.kind = Token.FUNCTION_PTR;
+            return new Token(Token.FUNCTION_PTR, s, FunctionManager.getFunction(prev).getArity(), -1);
+          }
 
         // 6. Fallback: Treat as Variable/Constant
         Token t = new Token(0.0);
         t.name = s;
-        t.kind = NUMBER;
+        t.kind = Token.NUMBER;
 
         return t;
 
@@ -1265,7 +1270,8 @@ public class MathExpression implements Savable, Solvable {
 
         for (int idx = 0; idx < scanner.size(); idx++) {
             String s = scanner.get(idx);
-            Token t = translate(s);
+            String prev = idx-1>=0 ? scanner.get(idx-1) : null; 
+            Token t = translate(s, prev);
             if (t == null) {
                 continue;
             }
@@ -1407,7 +1413,8 @@ public class MathExpression implements Savable, Solvable {
             final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
             int ptr = -1;
 
-            for (Token t : cachedPostfix) {
+            for (int i=0;i<cachedPostfix.length;i++) {
+                Token t = cachedPostfix[i];
                 System.out.println("\n=== Evaluating token: "
                         + (t.kind == Token.NUMBER ? "NUM(" + t.value + ")"
                                 : t.kind == Token.OPERATOR ? "OP(" + t.opChar + ")"
@@ -2071,6 +2078,17 @@ public class MathExpression implements Savable, Solvable {
 
         System.out.println("________________________________________________________________TESTS-DONE________________________________________________________________");
 
+          
+        System.out.println(new MathExpression("x=0.9;sqrt(0.64-x^2)").solve());
+        MathExpression meDiff = new MathExpression("x=3;diff(@(x)sin(ln(x)),vw);");
+           System.out.println("--------------------------"+FunctionManager.FUNCTIONS);
+        System.out.println("differential calculus:>>1 "+meDiff.solve());
+        System.out.println("differential calculus:>>2 "+new MathExpression("diff(@(x)sin(ln(x)), b);").solve());
+        System.out.println("differential calculus:>>3 "+new MathExpression("diff(@(x)sin(ln(x)), 1);").solve());
+        System.out.println("differential calculus:>>4 "+new MathExpression("diff(@(x)x^10, m,1);").solve());
+        System.out.println(new MathExpression("sin(ln(x));").solve());
+        System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS);
+        
         MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);B=eigvalues(A);C=eigvec(A);D=eigpoly(A);eigpoly(A);");
         System.out.println(FunctionManager.FUNCTIONS);
         System.out.println("----------" + mex.solve());
