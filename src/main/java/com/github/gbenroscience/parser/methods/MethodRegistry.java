@@ -94,10 +94,11 @@ public class MethodRegistry {
     }
 
     // --- Pre-register Built-ins ---
-   static{
-     loadInBuiltMethods();
-   }
-    private static void loadInBuiltMethods(){
+    static {
+        loadInBuiltMethods();
+    }
+
+    private static void loadInBuiltMethods() {
         registerMethod(Declarations.SIN, (ctx, funcName, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
             result.wrap(ctx.getDRG() == DRG_MODE.DEG ? Maths.sinDegToRad(args[0].scalar) : (ctx.getDRG() == DRG_MODE.RAD ? Math.sin(args[0].scalar) : Maths.sinGradToRad(args[0].scalar)));
@@ -305,9 +306,9 @@ public class MethodRegistry {
         registerMethod(Declarations.LIST_SUM, (ctx, name, arity, args) -> {
             MathExpression.EvalResult result = ctx.getNextResult();
             double total = 0.0;
-           //    System.out.println("arg-type-in-registryp-call: "+args[0].type+", arg: "+args[0].toString());
+            //    System.out.println("arg-type-in-registryp-call: "+args[0].type+", arg: "+args[0].toString());
             for (MathExpression.EvalResult arg : args) {
-              //  System.out.println("arg-type-in-registryp-call: "+arg.type+", arg: "+arg.toString());
+                //  System.out.println("arg-type-in-registryp-call: "+arg.type+", arg: "+arg.toString());
                 if (arg.type == MathExpression.EvalResult.TYPE_SCALAR) {                    // scalar
                     total += arg.scalar;
                 } else if (arg.type == MathExpression.EvalResult.TYPE_VECTOR && arg.vector != null) {   // list/vector from sort/mode
@@ -316,7 +317,7 @@ public class MethodRegistry {
                     }
                 }
             }
- 
+
             result.wrap(total);
             return result;
         });
@@ -331,8 +332,8 @@ public class MethodRegistry {
             double n = args.length;
             return ctx.getNextResult().wrap(getAction(getMethodID(Declarations.SUM)).execute(ctx, funcName, arity, args).scalar / n);
         });
-      //Registered under BasicNumeral
-      //registerMethod(Declarations.AVG, (ctx, funcName, arity, args) -> getAction(getMethodID(Declarations.MEAN)).execute(ctx, funcName, arity, args));
+        //Registered under BasicNumeral
+        //registerMethod(Declarations.AVG, (ctx, funcName, arity, args) -> getAction(getMethodID(Declarations.MEAN)).execute(ctx, funcName, arity, args));
 
         registerMethod(Declarations.MEDIAN, (ctx, funcName, arity, args) -> {
             if (args == null || args.length == 0) {
@@ -561,7 +562,7 @@ public class MethodRegistry {
                 res.wrap(new double[0]);
                 return res;
             }
-           
+
             // 2. Clone the array to ensure the original dataset (args) remains 
             // unchanged for other parts of the expression evaluation.
             MathExpression.EvalResult[] sortedData = args.clone();
@@ -579,7 +580,6 @@ public class MethodRegistry {
                 out[i] = sortedData[i].scalar;
             }
 
-          
             // 4. Wrap the result as a Vector (type 1) and return from the pool
             MathExpression.EvalResult res = ctx.getNextResult();
             res.wrap(out);
@@ -831,10 +831,23 @@ public class MethodRegistry {
             String v = f.getMatrix().getCharacteristicPolynomialForEigenVector();
             return ctx.getNextResult().wrap(v);
         });
+        registerMethod(Declarations.MATRIX_EIGENVALUES, (ctx, funcName, arity, args) -> {
+ 
+              Matrix m = args[0].matrix;
+                double[] evals = m.computeEigenValues();
 
+                // Create a 1xN matrix
+                Matrix result = new Matrix(1, evals.length);
+                // Directly copy the array into the matrix's internal storage
+                double array[] = new double[evals.length];
+                System.arraycopy(evals, 0, array, 0, evals.length);
+                result.setArray(array, 1, evals.length);
+            return ctx.getNextResult().wrap(result);
+        });
         registerMethod(Declarations.MATRIX_EIGENVEC, (ctx, funcName, arity, args) -> {
             Function f = FunctionManager.lookUp(funcName);
             Matrix m = f.getMatrix();
+            System.out.println("matrix for eigen: " + m.toString());
             double eigenValues[] = m.computeEigenValues();
             int n = eigenValues.length;
 
@@ -901,8 +914,8 @@ public class MethodRegistry {
         });
 
         // Users can call MethodRegistry.registerMethod("custom", (ctx, funcName, arity, args) -> ...) at runtime!
-    
     }
+
     public static boolean isInBuiltMethod(String name) {
         return methodIds.containsKey(name);
     }

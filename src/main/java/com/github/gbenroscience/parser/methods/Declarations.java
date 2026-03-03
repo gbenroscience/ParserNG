@@ -238,7 +238,7 @@ public class Declarations {
             LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX,
             ECHELON_MATRIX, MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD,
             MATRIX_SUBTRACT, MATRIX_POWER, MATRIX_TRANSPOSE, MATRIX_EDIT,
-            MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC,
+            MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC,MATRIX_EIGENVALUES,
             MATRIX_EIGENPOLY, HELP
         };
 
@@ -459,7 +459,7 @@ public class Declarations {
             case MATRIX_EIGENVEC:
                 return TYPE.MATRIX.toString();
             case MATRIX_EIGENVALUES:
-                return TYPE.LIST.toString();
+                return TYPE.MATRIX.toString();
             default:
                 return TYPE.NUMBER.toString();
         }

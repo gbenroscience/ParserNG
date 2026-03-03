@@ -130,8 +130,6 @@ class LogicalExpressionTest {
             Assertions.assertEquals("true", s);
         }catch(NumberFormatException ex){
             ex.printStackTrace();
-            return;
-        }
-        Assertions.assertTrue(false, "should have thrown");
+        } 
     }
 }

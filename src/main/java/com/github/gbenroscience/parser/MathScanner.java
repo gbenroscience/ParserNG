@@ -1290,8 +1290,8 @@ public class MathScanner {
                     String found = i + 1 < scanner.size() ? scanner.get(i + 1) : "end of expression";
                     throw new InputMismatchException("Syntax Error occurred while scanning math expression.\n"
                             + "Reason: The @ symbol is used exclusively to create functions. Expected: `(`, found: `" + found + "`");
-                }
-                i = processOneAnonymousFunction(scanner, i);
+                } 
+                i = processOneAnonymousFunction(scanner, i); 
             } else {
                 i++;
             }

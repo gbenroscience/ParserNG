@@ -122,8 +122,9 @@ public class MathExpression implements Savable, Solvable {
      */
     private VariableManager variableManager;
 
+    private static final int INIT_POOL_SIZE = 64;
     // A simple pre-allocated array of results to act as a stack
-    private EvalResult[] pool = new EvalResult[64];
+    private EvalResult[] pool = new EvalResult[INIT_POOL_SIZE];
     private int poolPointer = 0;
 
     /**
@@ -287,7 +288,7 @@ public class MathExpression implements Savable, Solvable {
     }//end constructor MathExpression
 
     public MathExpression(String input, VariableManager variableManager) {
-        for (int i = 0; i < 64; i++) {
+        for (int i = 0; i < INIT_POOL_SIZE; i++) {
             pool[i] = new EvalResult();
         }
 
@@ -379,7 +380,7 @@ public class MathExpression implements Savable, Solvable {
         this.commaAlias = opScanner.commaAlias;
 
         scanner = opScanner.getScanner();
-       
+
         correctFunction = opScanner.isRunnable();
 
         parser_Result = opScanner.parser_Result;
@@ -639,7 +640,7 @@ public class MathExpression implements Savable, Solvable {
      * variable, is reduced to a function name(or other object as time goes on)
      * instead of a number of other list. The parser unfortunately will not
      * return this variable, but instead returns the data which it refers
-     * to..e.g a {@link Matrix} function or other. But we atimes need that
+     * to..e.g a {@link Matrix} function or other. But we at times need that
      * function name...So we cache this value here.
      */
     public String getReturnObjectName() {
@@ -1158,12 +1159,14 @@ public class MathExpression implements Savable, Solvable {
         }
         resetPool();
         compileToPostfix();  // Compile once if not already done
-        return expressionSolver.evaluate();
+        EvalResult r = expressionSolver.evaluate();
+        returnType = r.getType();
+        return r;
     }
 
     @Override
     public String solve() {
-        return this.solveGeneric().toString();
+        return solveGeneric().toString();
     }//end method solve()
 
     protected List<String> solve(List<String> list) {
@@ -1400,16 +1403,17 @@ public class MathExpression implements Savable, Solvable {
     public final class ExpressionSolver {
 
         public EvalResult evaluate() {
+            System.out.println("scanner: " + scanner);
             final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
             int ptr = -1;
 
             for (Token t : cachedPostfix) {
-                /*System.out.println("\n=== Evaluating token: "
+                System.out.println("\n=== Evaluating token: "
                         + (t.kind == Token.NUMBER ? "NUM(" + t.value + ")"
                                 : t.kind == Token.OPERATOR ? "OP(" + t.opChar + ")"
                                         : t.kind == Token.FUNCTION ? "FUNC(" + t.name + ",arity=" + t.arity + ")"
                                                 : "METHOD(" + t.name + ",arity=" + t.arity + ")")
-                        + " | Stack ptr before = " + ptr);*/
+                        + " | Stack ptr before = " + ptr);
 
                 switch (t.kind) {
                     case Token.NUMBER:
@@ -1456,18 +1460,54 @@ public class MathExpression implements Savable, Solvable {
 
                         // CRITICAL FIX: Validate arity matches stack depth
                         if (ptr < arity - 1) {
-                            throw new RuntimeException("Function " + t.name + " requires " + arity
-                                    + " arguments but only " + (ptr + 1) + " values available on stack");
+                            /**
+                             * A situation arises where a user defined function,
+                             * especially an anonymous one(usually generated
+                             * dynamically during the compile phase makes it
+                             * here. Its representation is usually anonX---e.g.
+                             * anon1, anon2 etc. Its token has an arity which is
+                             * usually non zero. But the arity is not available
+                             * to this evaluation phase. It is stored away in
+                             * the FunctionManager's store. So treat the token
+                             * like a function handle or reference. Scan the
+                             * FunctionManager and see if it has this token and
+                             * then evaluate it or return it depending on what
+                             * is needed.
+                             */
+                            Function f = FunctionManager.lookUp(t.name);
+                            if (f != null) {
+                                EvalResult r = new EvalResult();
+                                switch (f.getType()) {
+                                    case ALGEBRAIC_EXPRESSION:
+                                        r.wrap(f.getMathExpression().expression);
+                                        break;
+                                    case MATRIX:
+                                        r.wrap(f.getMatrix());
+                                        break; 
+                                    case ERROR:
+                                        r.wrap(ParserResult.SYNTAX_ERROR);
+                                        break;
+                                    case LIST:
+                                        r.wrap(f.getMatrix().getFlatArray());
+                                        break;
+                                    default:
+                                        throw new AssertionError("Unknown function type");
+                                }
+                                return r;
+                            } else {
+                                throw new RuntimeException("Function " + t.name + " requires " + arity
+                                        + " arguments but only " + (ptr + 1) + " values available on stack");
+                            }
                         }
 
                         EvalResult[] args = new EvalResult[arity];
                         for (int j = arity - 1; j >= 0; j--) {
                             args[j] = stack[ptr--];
-                            //System.out.println("  Popped arg[" + j + "] from stack ptr=" + (ptr + 1));
+                            System.out.println("  Popped arg[" + j + "] from stack ptr=" + (ptr + 1));
                         }
 
-                        /* System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
-                                + " " + t.name + " with " + arity + " args");*/
+                        System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
+                                + " " + t.name + " with " + arity + " args");
                         EvalResult result;
                         if (t.kind == Token.METHOD) {
                             result = MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, arity, args);
@@ -1476,7 +1516,7 @@ public class MathExpression implements Savable, Solvable {
                         }
 
                         stack[++ptr] = result;
-                        // System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr);
+                        System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr + ", type: " + result.getTypeName());
                         break;
                 }
             }
@@ -1560,9 +1600,10 @@ public class MathExpression implements Savable, Solvable {
 
         public static final int TYPE_SCALAR = 0;
         public static final int TYPE_VECTOR = 1;
-        public static final int TYPE_MATRICES = 2;
+        public static final int TYPE_MATRIX = 2;
         public static final int TYPE_STRING = 3;
-        public static final int TYPE_ERROR = 4;
+        public static final int TYPE_BOOLEAN = 4;
+        public static final int TYPE_ERROR = 5;
 
         public int type;           // 0=Scalar, 1=Vector, 2=Matrix, 3=String
 
@@ -1570,6 +1611,7 @@ public class MathExpression implements Savable, Solvable {
         public double[] vector;    // For stats/lists
         public Matrix matrix;  // For matrices
         public ParserResult error;
+        public boolean boolVal;
         /**
          * Use this to return string results, e.g. formulas, function results,
          * etc.
@@ -1591,13 +1633,19 @@ public class MathExpression implements Savable, Solvable {
 
         public EvalResult wrap(Matrix m) {
             this.matrix = m;
-            this.type = TYPE_MATRICES;
+            this.type = TYPE_MATRIX;
             return this;
         }
 
         public EvalResult wrap(String s) {
             this.textRes = s;
             this.type = TYPE_STRING;
+            return this;
+        }
+
+        public EvalResult wrap(boolean s) {
+            this.boolVal = s;
+            this.type = TYPE_BOOLEAN;
             return this;
         }
 
@@ -1613,6 +1661,7 @@ public class MathExpression implements Savable, Solvable {
             this.vector = null;
             this.matrix = null;
             this.textRes = null;
+            this.boolVal = false;
             this.error = null;
             this.type = TYPE_SCALAR;
         }
@@ -1624,10 +1673,12 @@ public class MathExpression implements Savable, Solvable {
                     return String.valueOf(scalar);
                 case TYPE_VECTOR:
                     return Arrays.toString(vector);
-                case TYPE_MATRICES:
+                case TYPE_MATRIX:
                     return matrix.toString();
                 case TYPE_STRING:
                     return textRes;
+                case TYPE_BOOLEAN:
+                    return String.valueOf(boolVal);
                 case TYPE_ERROR:
                     return error == ParserResult.SYNTAX_ERROR ? SYNTAX_ERROR : error.toString();
                 default:
@@ -1643,12 +1694,33 @@ public class MathExpression implements Savable, Solvable {
                     return "TYPE_STRING(text)";
                 case TYPE_VECTOR:
                     return "TYPE_VECTOR(an array of doubles)";
-                case TYPE_MATRICES:
-                    return "TYPE_MATRICES(Matrices)";
+                case TYPE_MATRIX:
+                    return "TYPE_MATRIX(Matrix)";
+                case TYPE_BOOLEAN:
+                    return "TYPE_BOOLEAN(Boolean)";
                 case TYPE_ERROR:
                     return "TYPE_ERROR(" + error.name() + ")";
                 default:
                     return "TYPE_UNKNOWN";
+            }
+        }
+
+        public TYPE getType() {
+            switch (type) {
+                case TYPE_SCALAR:
+                    return TYPE.NUMBER;
+                case TYPE_STRING:
+                    return TYPE.STRING;
+                case TYPE_VECTOR:
+                    return TYPE.LIST;
+                case TYPE_MATRIX:
+                    return TYPE.MATRIX;
+                case TYPE_BOOLEAN:
+                    return TYPE.BOOLEAN;
+                case TYPE_ERROR:
+                    return TYPE.ERROR;
+                default:
+                    return TYPE.ALGEBRAIC_EXPRESSION;
             }
         }
 
@@ -1998,11 +2070,11 @@ public class MathExpression implements Savable, Solvable {
         Test.main(args);
 
         System.out.println("________________________________________________________________TESTS-DONE________________________________________________________________");
-  LogicalExpression expr = new LogicalExpression("[s=3;s<s+1 || [s<5]]", (String s) -> {
-                System.out.println("LOG>>>"+s);
-        });
-            String slogic = expr.solve();
-            System.out.println("s: "+slogic);
+
+        MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);B=eigvalues(A);C=eigvec(A);D=eigpoly(A);eigpoly(A);");
+        System.out.println(FunctionManager.FUNCTIONS);
+        System.out.println("----------" + mex.solve());
+
         Function f = FunctionManager.add("f(x,y) = x - x/y");
         double r = f.calc(2, 3);
         System.out.println("r = " + r);
@@ -2011,7 +2083,7 @@ public class MathExpression implements Savable, Solvable {
         for (int i = 1; i < iterations; i++) {
             f.calc(2, 3);
         }
-        double duration = (System.nanoTime() - start)/iterations;
+        double duration = (System.nanoTime() - start) / iterations;
         System.out.println("dur = " + (duration / 1000) + "microns");//μμμ
 
         String geom = "geom((2,8,4))+geom(((2,8,4)))";

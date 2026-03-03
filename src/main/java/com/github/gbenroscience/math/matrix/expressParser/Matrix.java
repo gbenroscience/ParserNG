@@ -507,6 +507,21 @@ public class Matrix {
     }
 
     /**
+     * Convert a vector to a Matrix
+     * @param vector
+     * @return 
+     */
+    public static final Matrix vectorToMatrix(double[]vector){
+                // Create a 1xN matrix
+                Matrix result = new Matrix(1, vector.length);
+                // Directly copy the array into the matrix's internal storage
+                double array[] = new double[vector.length];
+                System.arraycopy(vector, 0, array, 0, vector.length);
+                result.setArray(array, 1, vector.length);
+                return result;
+    }
+    
+    /**
      *
      * @param value The value to insert
      * @param row The row where the value is to be inserted.

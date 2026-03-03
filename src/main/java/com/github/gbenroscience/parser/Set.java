@@ -912,7 +912,7 @@ public class Set {
                     } else {
                         Variable v = VariableManager.lookUp(nextToken);
                         if (v != null) {
-                            double val =  v.getValue();
+                            double val = v.getValue();
                             return f.getMatrix().scalarDivide(val);
                         }
 
@@ -1006,7 +1006,7 @@ public class Set {
             if (Variable.isVariableString(token)) {
                 if (Variable.isVariableString(nextToken) || Number.validNumber(nextToken)) {
                     Function f = FunctionManager.lookUp(token);
-                    double pow = Variable.isVariableString(nextToken) ?  VariableManager.lookUp(nextToken).getValue() : Double.parseDouble(nextToken);
+                    double pow = Variable.isVariableString(nextToken) ? VariableManager.lookUp(nextToken).getValue() : Double.parseDouble(nextToken);
 
                     if (f != null) {
                         return Matrix.pow(f.getMatrix(), (int) pow);
@@ -1103,29 +1103,6 @@ public class Set {
 
     }
 
-    /**
-     * The list must have been originally supplied: eigvec(A) {where A is a
-     * Matrix} It finds the eigenvalues of A and returns the result as a list.
-     *
-     * @return a {@link Matrix} containing the matrix transpose.
-     */
-    public Matrix eigenVectors() {
-
-        if (data.size() == 1) {
-
-            String token = data.get(0);
-
-            if (Variable.isVariableString(token)) {
-                Function f = FunctionManager.lookUp(token);
-
-                if (f != null) {
-                    return f.getMatrix().transpose();
-                }
-            }
-        }
-        throw new InputMismatchException("Bad args for matrix eigenValues");
-    }
-
     private static final void printImpl(String data) {
         System.out.println("ParserNG> " + data);
     }
@@ -1177,6 +1154,77 @@ public class Set {
         }
 
         throw new InputMismatchException("Bad args for printing");
+
+    }
+
+    public Matrix eigenValues() {
+
+        if (data.size() == 1) {
+
+            String token = data.get(0);
+
+            if (Variable.isVariableString(token)) {
+                Function f = FunctionManager.lookUp(token);
+                Matrix m = f.getMatrix();
+                double[] evals = m.computeEigenValues();
+
+                // Create a 1xN matrix
+                Matrix result = new Matrix(1, evals.length);
+                // Directly copy the array into the matrix's internal storage
+                double array[] = new double[evals.length];
+                System.arraycopy(evals, 0, array, 0, evals.length);
+                result.setArray(array, 1, evals.length);
+                return result;
+            }
+        }
+        throw new InputMismatchException("Bad args for matrix eigenValues");
+    }
+
+    /**
+     *
+     *
+     *  * <code>A = VɅV-¹</code> Check: Is ||A*v - lambda*v|| close to zero?
+     * double[] Av = matrixMultiply(A, v); double[] lv = scalarMultiply(lambda,
+     * v); double residual = computeNorm(subtract(Av, lv));
+     *
+     * if (residual > 1e-9) { // This eigenvalue/vector pair might be inaccurate
+     * }
+     *
+     *
+     * The list must have been originally supplied: eigvec(A) {where A is a
+     * Matrix} It finds the eigenvalues of A and returns the result as a list.
+     *
+     * @return a {@link Matrix} containing the matrix transpose.
+     */
+    public Matrix eigenVectors() {
+
+        if (data.size() == 1) {
+
+            String token = data.get(0);
+
+            if (Variable.isVariableString(token)) {
+                Function f = FunctionManager.lookUp(token);
+                Matrix m = f.getMatrix();
+                double eigenValues[] = m.computeEigenValues();
+                int n = eigenValues.length;
+
+// 2. Prepare a Matrix to hold all eigenvectors as columns
+// Column 0 corresponds to lambda[0], Column 1 to lambda[1], etc.
+                double[][] eigenvectorMatrix = new double[n][n];
+
+                for (int i = 0; i < n; i++) {
+                    double lambda = eigenValues[i];
+                    double[] v = m.computeEigenVector(lambda);
+                    // Store v as a COLUMN in the result matrix
+                    for (int row = 0; row < n; row++) {
+                        eigenvectorMatrix[row][i] = v[row];
+                    }
+                }
+                return new Matrix(eigenvectorMatrix);
+            }
+        }
+
+        throw new InputMismatchException("Bad args for matrix eigenVectors");
 
     }
 

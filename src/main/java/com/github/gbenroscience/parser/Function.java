@@ -302,9 +302,7 @@ public class Function implements Savable {
                 List<String> scanner = expr.getScanner();
                 if (scanner.size() == 3 && scanner.get(1).startsWith("anon")) {//function assigments will always be like this: [(,anon1,)] when they get here
                     Function f = FunctionManager.lookUp(scanner.get(1));
-
                     if (f != null) {
-
                         FunctionManager.delete(scanner.get(1));
                         if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
                             f.setDependentVariable(new Variable(newFuncName));
@@ -320,7 +318,7 @@ public class Function implements Savable {
 
                     return true;
                 }
-                String val = expr.solve();
+                MathExpression.EvalResult val = expr.solveGeneric();System.out.println("val.type = "+val.getTypeName());
                 String referenceName = expr.getReturnObjectName();
 
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
@@ -330,8 +328,9 @@ public class Function implements Savable {
                             if (isVarNamesList && hasCommas) {
                                 throw new InputMismatchException("Initialize a function at a time!");
                             }
-                            f = FunctionManager.lookUp(referenceName);
-                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
+                              
+                            val.matrix.setName(newFuncName);
+                            Function fm = new Function(val.matrix); 
                             success = true;
                             break;
                         case ALGEBRAIC_EXPRESSION:
@@ -357,11 +356,12 @@ public class Function implements Savable {
                             if (isVarNamesList && hasCommas) {
                                 List<String> vars = new Scanner(newFuncName, false, ",").scan();
                                 for (String var : vars) {
-                                    VariableManager.VARIABLES.put(var, new Variable(var, Double.parseDouble(val), false));
+                                    VariableManager.VARIABLES.put(var, new Variable(var, val.scalar, false));
                                 }
                                 success = true;
                             } else {
-                                VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(val), false));
+                                System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS); 
+                                VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, val.scalar, false));
                                 success = true;
                             }
 
