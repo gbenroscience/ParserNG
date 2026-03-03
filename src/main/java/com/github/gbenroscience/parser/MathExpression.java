@@ -30,6 +30,8 @@ import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Operator.*;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
+import static com.github.gbenroscience.parser.TYPE.LIST;
 import static com.github.gbenroscience.parser.TYPE.MATRIX;
 import com.github.gbenroscience.parser.benchmarks.GG;
 import com.github.gbenroscience.parser.logical.ExpressionLogger;
@@ -2104,6 +2106,7 @@ public class MathExpression implements Savable, Solvable {
         System.out.println("________________________________________________________________TESTS-DONE________________________________________________________________");
         System.out.println(new MathExpression("f(x,y)=2*x*y;f(3,4);").solve());
         System.out.println("sum(sum(5),sum(6)): " + new MathExpression("sum(sum(5),sum(6))").solve());
+        System.out.println("sum(sum(5,3,4,5),sum(6,12,14,1,2,1)): " + new MathExpression("sum(sum(5,3,4,5),sum(6,12,14,1,2,1))").solve());
 // Expected: 11
 
         System.out.println("sort(0,4+0,2+0): " + new MathExpression("sort(0,4+0,2+0)").solve());
