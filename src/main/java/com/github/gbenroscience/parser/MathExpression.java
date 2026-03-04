@@ -1335,7 +1335,7 @@ public class MathExpression implements Savable, Solvable {
                 || opChar == 'Č' || opChar == 'Р';
     }
 
-    public final void compileToPostfix1() {
+    public final void compileToPostfix2() {
         if (cachedPostfix != null) {
             return;
         }
@@ -1490,8 +1490,9 @@ public class MathExpression implements Savable, Solvable {
         cachedPostfix = new Token[p];
         System.arraycopy(postfix, 0, cachedPostfix, 0, p);
     }
+//diffs args passing works
 
-    public final void compileToPostfix() {
+    public final void compileToPostfix1() {
         if (cachedPostfix != null) {
             return;
         }
@@ -1603,6 +1604,145 @@ public class MathExpression implements Savable, Solvable {
                         postfix[p++] = t;
                     } else {
                         // Binary operator: pop based on precedence
+                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
+                            Token top = opStack.peek();
+                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
+                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
+                                postfix[p++] = opStack.pop();
+                            } else {
+                                break;
+                            }
+                        }
+                        opStack.push(t);
+                    }
+                    break;
+            }
+        }
+
+        // Flush remaining operators
+        while (!opStack.isEmpty()) {
+            Token top = opStack.pop();
+            if (top.kind != Token.LPAREN) {
+                postfix[p++] = top;
+            }
+        }
+
+        cachedPostfix = new Token[p];
+        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
+    }
+
+    public final void compileToPostfix() {
+        if (cachedPostfix != null) {
+            return;
+        }
+
+        Stack<Token> opStack = new Stack<>();
+        Stack<Integer> parenDepths = new Stack<>();
+        Stack<Integer> argCounts = new Stack<>();
+        Stack<Boolean> lastWasComma = new Stack<>();  // Track if last token at this depth was comma
+
+        Token[] postfix = new Token[scanner.size() * 2];
+        int p = 0;
+
+        int depth = 0;
+        argCounts.push(0);
+        lastWasComma.push(true);  // Start as true so first value increments count
+
+        int len = scanner.size();
+        for (int idx = 0; idx < len; idx++) {
+            String s = scanner.get(idx);
+            String next = idx + 1 < len ? scanner.get(idx + 1) : null;
+
+            Token t = translate(s, next);
+            if (t == null) {
+                continue;
+            }
+
+            switch (t.kind) {
+                case Token.NUMBER:
+                    postfix[p++] = t;
+                    // Increment arg count if this is the START of a new argument
+                    if (depth > 0 && lastWasComma.peek()) {
+                        int currentCount = argCounts.pop();
+                        argCounts.push(currentCount + 1);
+                        lastWasComma.pop();
+                        lastWasComma.push(false);  // We've now seen a value
+                    }
+                    break;
+
+                case Token.FUNCTION:
+                case Token.METHOD:
+                    opStack.push(t);
+                    break;
+
+                case Token.LPAREN:
+                    boolean isForFunction = false;
+                    if (!opStack.isEmpty()) {
+                        Token lastOp = opStack.peek();
+                        if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
+                            isForFunction = true;
+                        }
+                    }
+
+                    opStack.push(t);
+                    parenDepths.push(isForFunction ? 1 : 0);
+
+                    if (isForFunction) {
+                        depth++;
+                        argCounts.push(0);
+                        lastWasComma.push(true);  // Next value starts a new arg
+                    }
+                    break;
+
+                case Token.RPAREN:
+                    // Pop operators until matching '('
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+
+                    if (!opStack.isEmpty()) {
+                        opStack.pop(); // discard the '('
+                    }
+
+                    if (!parenDepths.isEmpty()) {
+                        int isForFunc = parenDepths.pop();
+
+                        if (isForFunc > 0 && !opStack.isEmpty()) {
+                            Token callable = opStack.pop();
+
+                            int actualArgCount = argCounts.pop();
+                            lastWasComma.pop();
+
+                            callable.arity = Math.max(1, actualArgCount);  // At least 1 if there was content
+                            postfix[p++] = callable;
+
+                            depth--;
+
+                            if (depth > 0 && !argCounts.isEmpty() && !lastWasComma.isEmpty()) {
+                                // Mark that we just completed a value in parent depth
+                                lastWasComma.pop();
+                                lastWasComma.push(false);
+                            }
+                        }
+                    }
+                    break;
+
+                case Token.COMMA:
+                    // Pop any pending operators
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+                    // Next value will be a new argument
+                    if (depth > 0 && !lastWasComma.isEmpty()) {
+                        lastWasComma.pop();
+                        lastWasComma.push(true);
+                    }
+                    break;
+
+                case Token.OPERATOR:
+                    if (t.isPostfix) {
+                        postfix[p++] = t;
+                    } else {
                         while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
                             Token top = opStack.peek();
                             if ((!t.isRightAssoc && t.precedence <= top.precedence)

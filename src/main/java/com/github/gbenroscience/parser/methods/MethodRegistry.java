@@ -839,8 +839,8 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(v);
         });
         registerMethod(Declarations.MATRIX_EIGENVALUES, (ctx, funcName, arity, args) -> {
-
-            Matrix m = args[0].matrix;
+            System.out.println("eigValues branch: args-->>"+Arrays.deepToString(args)+", args[0].type = "+args[0].getTypeName());
+            Matrix m = FunctionManager.lookUp(args[0].textRes).getMatrix();
             double[] evals = m.computeEigenValues();
 
             // Create a 1xN matrix
