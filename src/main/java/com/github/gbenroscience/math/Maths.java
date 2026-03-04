@@ -129,7 +129,7 @@ public class Maths {                       //3.14159265358979323846;
     }//end method fact
 
     public static double permutation(double n, double r){
-      return Maths.fact(r) / Maths.fact(n - r);
+      return Maths.fact(n) / Maths.fact(n - r);
     }
     
     public static double combination(double n, double r){

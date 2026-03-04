@@ -275,7 +275,7 @@ public class MethodRegistry {
                         return ctx.getNextResult().wrap(Double.parseDouble(solution));
                     } else {
                         return ctx.getNextResult().wrap(solution);
-                    } 
+                    }
                 }
                 default:
                     return ctx.getNextResult().wrap(Double.NaN);
@@ -789,23 +789,40 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(m.determinant());
         });
         registerMethod(Declarations.LINEAR_SYSTEM, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
-            Matrix m = f.getMatrix().solveEquation();
-            return ctx.getNextResult().wrap(m);
+            System.out.println("eigValues branch: args-->>" + Arrays.deepToString(args) + ", args[0].type = " + args[0].getTypeName() + ",funcName: " + funcName);
+            if (args.length == 1 && args[0].textRes != null) {//linear_sys(1,2,-1,3,4,9,-3,7)
+                Function f = FunctionManager.lookUp(args[0].textRes);
+                Matrix m = f.getMatrix().solveEquation();
+                return ctx.getNextResult().wrap(m);
+            }
+            //else --- //linear_sys(A) where A is a defined mXm+1 matrix
+            double[] arr = new double[args.length];
+            for (int i = 0; i < args.length; i++) {
+                arr[i] = args[i].scalar;
+            }
+            int rows = (int) ((int) (-1 + Math.sqrt(1 + 4 * arr.length)) / 2.0);
+            int cols = rows + 1;
+
+            Matrix m = new Matrix(arr, rows, cols);
+            /* Orig   Soln-Matrix
+               2x2       2X3
+               3x3       3X4
+               nxn       nx(n+1)-M ------n^2+n-M=0----  (-1+sqrt(1+4M))/2  AND (-1-sqrt(1+4M))/2 where M = args.length, the correct soln is the first,as rows and cols cant be < 0
+             */
+
+            Matrix n = m.solveEquation();
+            return ctx.getNextResult().wrap(n);
         });
 
         registerMethod(Declarations.MATRIX_ADD, (ctx, funcName, arity, args) -> {
-            int commaIndex = funcName.indexOf(",");
-            String matrixA = funcName.substring(0, commaIndex);
-            String matrixB = funcName.substring(commaIndex + 1);
-            Function fA = FunctionManager.lookUp(matrixA);
-            Function fB = FunctionManager.lookUp(matrixB);
+            Function fA = FunctionManager.lookUp(args[0].textRes);
+            Function fB = FunctionManager.lookUp(args[1].textRes);
             Matrix mA = fA.getMatrix();
             Matrix mB = fB.getMatrix();
             return ctx.getNextResult().wrap(mA.add(mB));
         });
         registerMethod(Declarations.MATRIX_ADJOINT, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
+            Function f = FunctionManager.lookUp(args[0].textRes);
             Matrix m = f.getMatrix().adjoint();
             return ctx.getNextResult().wrap(m);
         });
@@ -839,7 +856,7 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(v);
         });
         registerMethod(Declarations.MATRIX_EIGENVALUES, (ctx, funcName, arity, args) -> {
-            //System.out.println("eigValues branch: args-->>"+Arrays.deepToString(args)+", args[0].type = "+args[0].getTypeName());
+            System.out.println("eigValues branch: args-->>" + Arrays.deepToString(args) + ", args[0].type = " + args[0].getTypeName() + ",funcName: " + funcName);
             Matrix m = FunctionManager.lookUp(args[0].textRes).getMatrix();
             double[] evals = m.computeEigenValues();
 
@@ -853,10 +870,9 @@ public class MethodRegistry {
         });
         registerMethod(Declarations.MATRIX_EIGENVEC, (ctx, funcName, arity, args) -> {
             Function f = FunctionManager.lookUp(funcName);
-            Matrix m = f.getMatrix(); 
+            Matrix m = f.getMatrix();
             double eigenValues[] = m.computeEigenValues();
             int n = eigenValues.length;
-
 // 2. Prepare a Matrix to hold all eigenvectors as columns
 // Column 0 corresponds to lambda[0], Column 1 to lambda[1], etc.
             double[][] eigenvectorMatrix = new double[n][n];
@@ -873,33 +889,27 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(eigVectorMatrix);
         });
         registerMethod(Declarations.MATRIX_MULTIPLY, (ctx, funcName, arity, args) -> {
-            int commaIndex = funcName.indexOf(",");
-            String matrixA = funcName.substring(0, commaIndex);
-            String matrixB = funcName.substring(commaIndex + 1);
-            Function fA = FunctionManager.lookUp(matrixA);
-            Function fB = FunctionManager.lookUp(matrixB);
+            Function fA = FunctionManager.lookUp(args[0].textRes);
+            Function fB = FunctionManager.lookUp(args[1].textRes);
             Matrix mA = fA.getMatrix();
             Matrix mB = fB.getMatrix();
             return ctx.getNextResult().wrap(Matrix.multiply(mA, mB));
         });
         registerMethod(Declarations.MATRIX_POWER, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
-            Matrix mA = f.getMatrix();
+            Function fA = FunctionManager.lookUp(args[0].textRes);
+            Matrix mA = fA.getMatrix();
             return ctx.getNextResult().wrap(Matrix.pow(mA, (int) args[0].scalar));
 
         });
         registerMethod(Declarations.MATRIX_SUBTRACT, (ctx, funcName, arity, args) -> {
-            int commaIndex = funcName.indexOf(",");
-            String matrixA = funcName.substring(0, commaIndex);
-            String matrixB = funcName.substring(commaIndex + 1);
-            Function fA = FunctionManager.lookUp(matrixA);
-            Function fB = FunctionManager.lookUp(matrixB);
+            Function fA = FunctionManager.lookUp(args[0].textRes);
+            Function fB = FunctionManager.lookUp(args[1].textRes);
             Matrix mA = fA.getMatrix();
             Matrix mB = fB.getMatrix();
             return ctx.getNextResult().wrap(mA.subtract(mB));
         });
         registerMethod(Declarations.MATRIX_TRANSPOSE, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
+            Function f = FunctionManager.lookUp(args[0].textRes);
             Matrix m = f.getMatrix().transpose();
             return ctx.getNextResult().wrap(m);
         });

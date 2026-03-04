@@ -217,11 +217,7 @@ public class Function implements Savable {
             mathExpression.setValue(var.getName(), x[i]);
         }
 
-        try {
-            return mathExpression.solveGeneric().scalar;
-        } catch (NumberFormatException | NullPointerException e) {
-            return Double.NaN;
-        }
+         return mathExpression.solveGeneric().scalar;
     }
 
     /**

@@ -130,6 +130,8 @@ public class MathExpression implements Savable, Solvable {
     private EvalResult[] pool = new EvalResult[INIT_POOL_SIZE];
     private int poolPointer = 0;
 
+    private boolean help;
+
     /**
      * The kind of output returned by the parser.
      */
@@ -303,6 +305,7 @@ public class MathExpression implements Savable, Solvable {
     }//end constructor MathExpression
 
     public MathExpression(String input, VariableManager variableManager) {
+        this.help = input.equals(Declarations.HELP);
         for (int i = 0; i < INIT_POOL_SIZE; i++) {
             pool[i] = new EvalResult();
         }
@@ -397,16 +400,16 @@ public class MathExpression implements Savable, Solvable {
         scanner = opScanner.getScanner();
 
         correctFunction = opScanner.isRunnable();
-        
+        System.out.println("scanner>>>>>: "+scanner);
         parser_Result = opScanner.parser_Result;
-        if (parser_Result == ParserResult.VALID) { 
-            statsVerifier(); 
-            codeModifier(); 
-            refixCommas(); 
-            mapBrackets(); 
-            functionComponentsAssociation(); 
+        if (parser_Result == ParserResult.VALID) {
+            statsVerifier();
+            codeModifier();
+            refixCommas();
+            mapBrackets();
+            functionComponentsAssociation();
+            compileToPostfix();  // Compile once if not already done
         }//end if
- 
     }//end method initializing(args)
 
     public void removeCommas() {
@@ -1070,7 +1073,7 @@ public class MathExpression implements Savable, Solvable {
      * not found.
      */
     public double getValue(String name) throws NullPointerException {
-        Variable var = variableManager.lookUp(name);
+        Variable var = VariableManager.lookUp(name);
         return var == null ? Double.NaN : var.getValue();
     }
 
@@ -1089,75 +1092,6 @@ public class MathExpression implements Savable, Solvable {
 
     }
 
-    /**
-     * Utility method used to dynamically change the indices of brackets in the
-     * governing bracket map of the scanner function.
-     *
-     * When method solve is performing its task,it uses the bracket ArrayList to
-     * know the next portion to evaluate in the scanner function. However when
-     * it evaluates this portion,the size of the scanner function
-     * changes(reduces) and this means that the bracket ArrayList is no longer
-     * relevant in determining the next point to evaluate in the scanner
-     * function. So this method is called to automatically re-configure the
-     * bracket ArrayList so that it can continue to be relevant to the solution
-     * process.
-     *
-     * The process occurs during method solve and is a sort of automatic
-     * compression in response to the solution process which brings about
-     * changes in the number of elements in the scanner function.
-     *
-     * LOGIC: Bearing in mind the fact that each bracket stores its current
-     * index in the MathExpression object's ArrayList,scanner; we traverse the
-     * bracket list starting from the bracket from which evaluation is to begin
-     * in the client method solve and looping on to the end of the bracket list.
-     * We check for the current index (say A) ( as in its position in the
-     * ArrayList object) stored by each bracket we meet during this scan and
-     * compare it with the index (say B)stored by the bracket from which we
-     * began the loop the last time this method was called. This is the bracket
-     * at index startPosition-2. If A&lt;B then we apply the decrement or
-     * shrinking factor to it.Else we continue the scan.
-     *
-     *
-     * @param brac the Bracket store to modify
-     * @param startPosition the index in the ArrayList where the modification is
-     * to start
-     * @param increment the amount by which each brackets index is to be
-     * decreased
-     * @param run will run this method if given the sign to do so.
-     */
-    protected void modifyBracketIndices(Bracket[] brac, int startPosition, int increment, boolean run) {
-        if (run) {
-            int valAtBracIndex = 0;
-            int valAtLastEvaluatedBracIndex = 0;
-            if (startPosition > 0) {
-                valAtLastEvaluatedBracIndex = brac[startPosition - 2].getIndex();
-
-                for (int i = startPosition; i < brac.length; i++) {
-                    valAtBracIndex = brac[i].getIndex();
-//values greater than the value stored by the brackets from which looping was started the
-// last time represent the indices of brackets in the function list that the compression function
-// will affect.So apply the decrement to them.
-                    try {
-                        if (valAtBracIndex > valAtLastEvaluatedBracIndex) {
-                            brac[i].setIndex(brac[i].getIndex() + increment);
-                        }//end if
-                    }//end try
-                    catch (IndexOutOfBoundsException indexErr) {
-                    }//end catch
-                }//end for
-
-                ArrayList<Integer> arr = new ArrayList<Integer>();
-                for (int i = 0; i < brac.length; i++) {
-                    arr.add(brac[i].getIndex());
-                }
-                //displayIndicesStoredInBrackets();
-
-            }
-        }
-
-    }//end method reduceBracketIndices
-//(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)
-
     public void setReturnType(TYPE returnType) {
         this.returnType = returnType;
     }
@@ -1167,16 +1101,22 @@ public class MathExpression implements Savable, Solvable {
     }
 
     public EvalResult solveGeneric() {
-        if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
+        if (help) {
             EvalResult res = new EvalResult();
             res.wrap(Help.getHelp());
             return res;
         }
-        resetPool();
-        compileToPostfix();  // Compile once if not already done
-        EvalResult r = expressionSolver.evaluate();
-        returnType = r.getType();
-        return r;
+        if (cachedPostfix != null) {
+            resetPool();
+            EvalResult r = expressionSolver.evaluate();
+            returnType = r.getType();
+            return r;
+        }
+        if (scanner == null || scanner.isEmpty() || !correctFunction || parser_Result != ParserResult.VALID) {
+            return EvalResult.ERROR;
+        }
+
+        return EvalResult.ERROR;
     }
 
     @Override
@@ -1186,73 +1126,6 @@ public class MathExpression implements Savable, Solvable {
 
     protected List<String> solve(List<String> list) {
         return Arrays.asList(String.valueOf(GG.evaluate(list)));
-    }
-
-    // Your translate method (with small updates for Java 8)
-    public Token translate1(String s, String next) {
-        if (s == null || s.isEmpty()) {
-            return null;
-        }
-        char c0 = s.charAt(0);
-        int len = s.length();
-        // 1. Identify Numbers
-        // (Assuming isNumber() handles negative signs and decimals correctly)
-        if (isNumber(s)) {
-            return new Token(fastParseDouble(s));
-        }
-
-        // 2. Identify Brackets (Commas completely removed)
-        if (len == 1) {
-            switch (c0) {
-                case '(':
-                    return new Token(Token.LPAREN);
-                case ')':
-                    return new Token(Token.RPAREN);
-            }
-        }
-
-        // 3. Identify Operators
-        if (isOperator(s)) {
-            boolean isPostfix = (c0 == '!' || c0 == '²' || c0 == '³');
-            // Map "³√" to 'R' for fast switch
-            char internalOp = (len > 1 && s.equals("³√")) ? 'R' : c0;
-            return new Token(internalOp, Token.getPrec(internalOp), Token.isRightAssociative(internalOp), isPostfix);
-        }
-
-        // 4. Identify Functions (Built-in or User-Defined)[f,(,a,b,...)]
-        if (FunctionManager.FUNCTIONS.containsKey(s)) {
-            Function f = FunctionManager.getFunction(s);
-            if (f != null) {
-                if (next != null && next.equals("(")) {
-                    return new Token(Token.FUNCTION, s, -1, -1); // Arity set during compile
-                }
-                if (next == null || !next.equals("(")) {
-                    return new Token(Token.FUNCTION, s, 0, -1);
-                }
-            }
-
-        }
-
-        // Handle commas (function argument separators)
-        if (s.equals(",")) {
-            Token t = new Token(0.0);
-            t.kind = Token.COMMA;
-            return t;
-        }
-
-        // 5. Identify Methods
-        if (Method.isInBuiltMethod(s)) {
-            int methodId = MethodRegistry.getMethodID(s);
-            return new Token(Token.METHOD, s, -1, methodId); // Arity set during compile
-        }
-
-        // 6. Fallback: Treat as Variable/Constant
-        Token t = new Token(0.0);
-        t.name = s;
-        t.kind = Token.NUMBER;
-
-        return t;
-
     }
 
     public Token translate(String s, String next) {
@@ -1279,7 +1152,7 @@ public class MathExpression implements Savable, Solvable {
 
         // 3. Identify Operators
         if (isOperator(s)) {
-            boolean isPostfix = (c0 == '!' || c0 == '²' || c0 == '³');
+            boolean isPostfix = (c0 == '!' || c0 == '²' || c0 == '³') && !s.equals("³√");
             char internalOp = (len > 1 && s.equals("³√")) ? 'R' : c0;
             return new Token(internalOp, Token.getPrec(internalOp), Token.isRightAssociative(internalOp), isPostfix);
         }
@@ -1335,449 +1208,12 @@ public class MathExpression implements Savable, Solvable {
                 || opChar == 'Č' || opChar == 'Р';
     }
 
-    public final void compileToPostfix3() {
+    private void compileToPostfix() {
         if (cachedPostfix != null) {
             return;
         }
 
         Stack<Token> opStack = new Stack<>();
-        Stack<Integer> parenDepths = new Stack<>();  // Track function vs grouping parens
-        Token[] postfix = new Token[scanner.size() * 2];
-        int p = 0;
-
-        int[] argCount = new int[64];
-        int depth = 0;
-        argCount[0] = 0;
-
-        boolean[] justSawComma = new boolean[64];
-        justSawComma[0] = true;
-
-        int len = scanner.size();
-        for (int idx = 0; idx < len; idx++) {
-            String s = scanner.get(idx);
-            String next = idx + 1 < len ? scanner.get(idx + 1) : null;
-
-            Token t = translate(s, next);
-            if (t == null) {
-                continue;
-            }
-
-            switch (t.kind) {
-                case Token.NUMBER:
-                    postfix[p++] = t;
-                    // Increment argCount when we see a number (value)
-                    if (depth > 0 && justSawComma[depth]) {
-                        argCount[depth]++;
-                        justSawComma[depth] = false;
-                    }
-                    break;
-
-                case Token.FUNCTION:
-                case Token.METHOD:
-                    opStack.push(t);
-                    break;
-
-                case Token.LPAREN:
-                    boolean isForFunction = false;
-                    if (!opStack.isEmpty()) {
-                        Token lastOp = opStack.peek();
-                        if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
-                            isForFunction = true;
-                        }
-                    }
-
-                    opStack.push(t);
-                    parenDepths.push(isForFunction ? depth : -1);
-
-                    if (isForFunction) {
-                        depth++;
-                        argCount[depth] = 0;
-                        justSawComma[depth] = true;
-                    }
-                    break;
-
-                case Token.RPAREN:
-                    // Pop operators until matching '('
-                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                        postfix[p++] = opStack.pop();
-                    }
-
-                    if (!opStack.isEmpty()) {
-                        opStack.pop(); // discard '('
-                    }
-
-                    if (!parenDepths.isEmpty()) {
-                        int prevDepth = parenDepths.pop();
-
-                        if (prevDepth >= 0) {
-                            // This closes a FUNCTION's argument list
-                            if (!opStack.isEmpty()
-                                    && (opStack.peek().kind == Token.FUNCTION
-                                    || opStack.peek().kind == Token.METHOD)) {
-
-                                Token callable = opStack.pop();
-
-                                // argCount[depth] has the correct count
-                                if (argCount[depth] == 0) {
-                                    argCount[depth] = 1;  // Single expression like f(3+5)
-                                }
-
-                                callable.arity = argCount[depth];
-                                postfix[p++] = callable;
-
-                                depth--;
-
-                                // The function result counts as ONE value for parent
-                                if (depth > 0 && !justSawComma[depth]) {
-                                    justSawComma[depth] = false;
-                                }
-                            }
-                        } else {
-                            // This closes a GROUPING paren (grouped expression)
-                            // The grouped expression is ONE value
-                            if (depth > 0) {
-                                if (justSawComma[depth]) {
-                                    // Haven't incremented yet for this value
-                                    argCount[depth]++;
-                                    justSawComma[depth] = false;
-                                } else {
-                                    // Already incremented
-                                    justSawComma[depth] = false;
-                                }
-                            }
-                        }
-                    }
-                    break;
-
-                case Token.COMMA:
-                    // Pop any pending operators
-                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                        postfix[p++] = opStack.pop();
-                    }
-                    if (depth > 0) {
-                        justSawComma[depth] = true;
-                    }
-                    break;
-
-                case Token.OPERATOR:
-                    if (t.isPostfix) {
-                        postfix[p++] = t;
-                    } else {
-                        // Binary operator: pop based on precedence
-                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
-                            Token top = opStack.peek();
-                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
-                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
-                                postfix[p++] = opStack.pop();
-                            } else {
-                                break;
-                            }
-                        }
-                        opStack.push(t);
-                    }
-                    break;
-            }
-        }
-
-        // Flush remaining operators
-        while (!opStack.isEmpty()) {
-            Token top = opStack.pop();
-            if (top.kind != Token.LPAREN) {
-                postfix[p++] = top;
-            }
-        }
-
-        cachedPostfix = new Token[p];
-        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
-    }
-//diffs args passing works
-
-    public final void compileToPostfix2() {
-        if (cachedPostfix != null) {
-            return;
-        }
-
-        Stack<Token> opStack = new Stack<>();
-        Stack<Integer> parenDepths = new Stack<>();
-        Stack<Integer> argCounts = new Stack<>();  // Track arg count per paren depth
-
-        Token[] postfix = new Token[scanner.size() * 2];
-        int p = 0;
-
-        int depth = 0;
-        argCounts.push(0);
-
-        int len = scanner.size();
-        for (int idx = 0; idx < len; idx++) {
-            String s = scanner.get(idx);
-            String next = idx + 1 < len ? scanner.get(idx + 1) : null;
-
-            Token t = translate(s, next);
-            if (t == null) {
-                continue;
-            }
-
-            switch (t.kind) {
-                case Token.NUMBER:
-                    postfix[p++] = t;
-                    // Increment arg count when we see a value
-                    if (depth > 0) {
-                        int currentCount = argCounts.pop();
-                        argCounts.push(currentCount + 1);
-                    }
-                    break;
-
-                case Token.FUNCTION:
-                case Token.METHOD:
-                    opStack.push(t);
-                    break;
-
-                case Token.LPAREN:
-                    boolean isForFunction = false;
-                    if (!opStack.isEmpty()) {
-                        Token lastOp = opStack.peek();
-                        if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
-                            isForFunction = true;
-                        }
-                    }
-
-                    opStack.push(t);
-                    parenDepths.push(isForFunction ? 1 : 0);
-
-                    if (isForFunction) {
-                        depth++;
-                        argCounts.push(0);  // Start with 0 args at this depth
-                    }
-                    break;
-
-                case Token.RPAREN:
-                    // Pop operators until matching '('
-                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                        postfix[p++] = opStack.pop();
-                    }
-
-                    if (!opStack.isEmpty()) {
-                        opStack.pop(); // discard the '('
-                    }
-
-                    if (!parenDepths.isEmpty()) {
-                        int isForFunc = parenDepths.pop();
-
-                        if (isForFunc > 0 && !opStack.isEmpty()) {
-                            Token callable = opStack.pop();
-
-                            // GET THE ACTUAL ARGUMENT COUNT FOR THIS FUNCTION CALL
-                            int actualArgCount = argCounts.pop();
-
-                            // If no arguments were seen (empty parens), treat as 0
-                            // If at least one value was seen, that's the arg count
-                            if (actualArgCount == 0 && p > 0) {
-                                // Check if there's anything on the postfix stack for this function
-                                // Empty parens = 0 args, otherwise actualArgCount is correct
-                            }
-
-                            callable.arity = actualArgCount;
-                            postfix[p++] = callable;
-
-                            depth--;
-
-                            // Parent depth arg count increments by 1 (function result counts as 1 arg)
-                            if (depth > 0 && !argCounts.isEmpty()) {
-                                int parentCount = argCounts.pop();
-                                argCounts.push(parentCount + 1);
-                            }
-                        }
-                    }
-                    break;
-
-                case Token.COMMA:
-                    // Pop any pending operators (but NOT the LPAREN)
-                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                        postfix[p++] = opStack.pop();
-                    }
-                    // CRITICAL: Don't increment arg count here - it already incremented when we saw the value
-                    // The comma just separates values, it doesn't represent a new arg
-                    break;
-
-                case Token.OPERATOR:
-                    if (t.isPostfix) {
-                        postfix[p++] = t;
-                    } else {
-                        // Binary operator: pop based on precedence
-                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
-                            Token top = opStack.peek();
-                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
-                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
-                                postfix[p++] = opStack.pop();
-                            } else {
-                                break;
-                            }
-                        }
-                        opStack.push(t);
-                    }
-                    break;
-            }
-        }
-
-        // Flush remaining operators
-        while (!opStack.isEmpty()) {
-            Token top = opStack.pop();
-            if (top.kind != Token.LPAREN) {
-                postfix[p++] = top;
-            }
-        }
-
-        cachedPostfix = new Token[p];
-        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
-    }
-
-    //diff args passing works, sort on compound tokens works, but prod(sin(5),sin(5)) does not work
-    public final void compileToPostfix1() {
-        if (cachedPostfix != null) {
-            return;
-        }
-
-        Stack<Token> opStack = new Stack<>();
-        Stack<Integer> parenDepths = new Stack<>();
-        Stack<Integer> argCounts = new Stack<>();
-        Stack<Boolean> lastWasComma = new Stack<>();  // Track if last token at this depth was comma
-
-        Token[] postfix = new Token[scanner.size() * 2];
-        int p = 0;
-
-        int depth = 0;
-        argCounts.push(0);
-        lastWasComma.push(true);  // Start as true so first value increments count
-
-        int len = scanner.size();
-        for (int idx = 0; idx < len; idx++) {
-            String s = scanner.get(idx);
-            String next = idx + 1 < len ? scanner.get(idx + 1) : null;
-
-            Token t = translate(s, next);
-            if (t == null) {
-                continue;
-            }
-
-            switch (t.kind) {
-                case Token.NUMBER:
-                    postfix[p++] = t;
-                    // Increment arg count if this is the START of a new argument
-                    if (depth > 0 && lastWasComma.peek()) {
-                        int currentCount = argCounts.pop();
-                        argCounts.push(currentCount + 1);
-                        lastWasComma.pop();
-                        lastWasComma.push(false);  // We've now seen a value
-                    }
-                    break;
-
-                case Token.FUNCTION:
-                case Token.METHOD:
-                    opStack.push(t);
-                    break;
-
-                case Token.LPAREN:
-                    boolean isForFunction = false;
-                    if (!opStack.isEmpty()) {
-                        Token lastOp = opStack.peek();
-                        if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
-                            isForFunction = true;
-                        }
-                    }
-
-                    opStack.push(t);
-                    parenDepths.push(isForFunction ? 1 : 0);
-
-                    if (isForFunction) {
-                        depth++;
-                        argCounts.push(0);
-                        lastWasComma.push(true);  // Next value starts a new arg
-                    }
-                    break;
-
-                case Token.RPAREN:
-                    // Pop operators until matching '('
-                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                        postfix[p++] = opStack.pop();
-                    }
-
-                    if (!opStack.isEmpty()) {
-                        opStack.pop(); // discard the '('
-                    }
-
-                    if (!parenDepths.isEmpty()) {
-                        int isForFunc = parenDepths.pop();
-
-                        if (isForFunc > 0 && !opStack.isEmpty()) {
-                            Token callable = opStack.pop();
-
-                            int actualArgCount = argCounts.pop();
-                            lastWasComma.pop();
-
-                            callable.arity = Math.max(1, actualArgCount);  // At least 1 if there was content
-                            postfix[p++] = callable;
-
-                            depth--;
-
-                            if (depth > 0 && !argCounts.isEmpty() && !lastWasComma.isEmpty()) {
-                                // Mark that we just completed a value in parent depth
-                                lastWasComma.pop();
-                                lastWasComma.push(false);
-                            }
-                        }
-                    }
-                    break;
-
-                case Token.COMMA:
-                    // Pop any pending operators
-                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                        postfix[p++] = opStack.pop();
-                    }
-                    // Next value will be a new argument
-                    if (depth > 0 && !lastWasComma.isEmpty()) {
-                        lastWasComma.pop();
-                        lastWasComma.push(true);
-                    }
-                    break;
-
-                case Token.OPERATOR:
-                    if (t.isPostfix) {
-                        postfix[p++] = t;
-                    } else {
-                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
-                            Token top = opStack.peek();
-                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
-                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
-                                postfix[p++] = opStack.pop();
-                            } else {
-                                break;
-                            }
-                        }
-                        opStack.push(t);
-                    }
-                    break;
-            }
-        }
-
-        // Flush remaining operators
-        while (!opStack.isEmpty()) {
-            Token top = opStack.pop();
-            if (top.kind != Token.LPAREN) {
-                postfix[p++] = top;
-            }
-        }
-
-        cachedPostfix = new Token[p];
-        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
-    }
-
-    public final void compileToPostfix() {
-        if (cachedPostfix != null) {
-            return;
-        }
-
-        Stack<Token> opStack = new Stack<>();
-        Stack<Integer> parenDepths = new Stack<>();
         Stack<Integer> argCounts = new Stack<>();
         Stack<Boolean> lastWasComma = new Stack<>();
         Stack<Boolean> isGrouping = new Stack<>();  // Track if this paren is grouping
@@ -1925,19 +1361,19 @@ public class MathExpression implements Savable, Solvable {
     public final class ExpressionSolver {
 
         public EvalResult evaluate() {
-            //System.out.println("scanner: " + scanner);
+            System.out.println("scanner: " + scanner);
             final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
             int ptr = -1;
 
             for (int i = 0; i < cachedPostfix.length; i++) {
                 Token t = cachedPostfix[i];
-  /*              System.out.println("\n=== Evaluating token: "
+                /*              System.out.println("\n=== Evaluating token: "
                         + (t.kind == Token.NUMBER ? "NUM(" + t.value + ")"
                                 : t.kind == Token.OPERATOR ? "OP(" + t.opChar + ")"
                                         : t.kind == Token.FUNCTION ? "FUNC(" + t.name + ",arity=" + t.arity + ")"
                                                 : "METHOD(" + t.name + ",arity=" + t.arity + ")")
                         + " | Stack ptr before = " + ptr);
-*/
+                 */
                 switch (t.kind) {
                     case Token.NUMBER:
                         if (t.name != null && !t.name.isEmpty()) {
@@ -1985,7 +1421,7 @@ public class MathExpression implements Savable, Solvable {
 
                     case Token.METHOD:
                     case Token.FUNCTION:
-                    /*    System.out.println("Function: " + t.name + ", arity=" + t.arity);
+                        /*    System.out.println("Function: " + t.name + ", arity=" + t.arity);
                         for (int j = 0; j < t.arity; j++) {
                             System.out.println("  arg[" + j + "] = " + (ptr - t.arity + j + 1) + " -> " + stack[ptr - t.arity + j + 1]);
                         }*/
@@ -2026,7 +1462,6 @@ public class MathExpression implements Savable, Solvable {
 
 //                        System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
 //                                + " " + t.name + " with " + arity + " args");
-
                         EvalResult result;
                         try {
                             if (t.kind == Token.METHOD) {
@@ -2078,7 +1513,7 @@ public class MathExpression implements Savable, Solvable {
                 case '³':
                     res.scalar = val * val * val;
                     break;
-                case '-': // Unary negation (if supported by your scanner)
+                case '-': // Unary negation (if supported by my scanner, actually my scanner has fixed it before this stage)
                     res.scalar = -val;
                     break;
                 case 'i': // Reciprocal/Inverse x⁻¹
@@ -2130,6 +1565,12 @@ public class MathExpression implements Savable, Solvable {
         public static final int TYPE_STRING = 3;
         public static final int TYPE_BOOLEAN = 4;
         public static final int TYPE_ERROR = 5;
+
+        public static final EvalResult ERROR = new EvalResult();
+
+        static {
+            ERROR.wrap(ParserResult.SYNTAX_ERROR);
+        }
 
         public int type;           // 0=Scalar, 1=Vector, 2=Matrix, 3=String
 
@@ -2616,6 +2057,15 @@ public class MathExpression implements Savable, Solvable {
         Test.main(args);
 
         System.out.println("________________________________________________________________TESTS-DONE________________________________________________________________");
+        System.out.println("sum(32,12,10,18,1,3,2,5,6): -->> "+new MathExpression("sum(32,12,10,18,1,3,2,5,6)").solve());
+ MathExpression lin = new MathExpression("linear_sys(2,3,-5,3,-4,20)");
+        System.out.println("linear_sys(2,3,-5,3,-4,20): -->> "+lin.solve());
+ MathExpression lin1 = new MathExpression("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18)");
+        System.out.println("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18): -->> "+lin1.solve());
+             System.out.println("linear_sys(12,16, 24,15,21, 24): -->> "+new MathExpression("linear_sys(@(3,4)(12,16, 24,15,21, 32))").solve());
+        System.out.println("sin(5,6)-->>" + new MathExpression("sin(5,6)").solve());
+        System.out.println("√81 + ³√(27) + 2^10-->>" + new MathExpression("√81 + ³√(27) + 2^10").solve());
+        System.out.println(new MathExpression("5! + 9Р3 + 6Č5").solve());
         System.out.println(new MathExpression("f(x,y)=2*x*y;f(3,4);").solve());
         System.out.println("sum(sum(5),sum(6)): " + new MathExpression("sum(sum(5),sum(6))").solve());
         System.out.println("sum(sum(5,3,4,5),sum(6,12,14,1,2,1)): " + new MathExpression("sum(sum(5,3,4,5),sum(6,12,14,1,2,1))").solve());
@@ -2647,11 +2097,12 @@ public class MathExpression implements Savable, Solvable {
         System.out.println("r = " + r);
         int iterations = 1;
         long start = System.nanoTime();
-        for (int i = 1; i < iterations; i++) {
-            f.calc(2, 3);
+        double vvv[] = new double[1];
+        for (int i = 1; i <= iterations; i++) {
+            vvv[0] = f.calc(2, 3);
         }
         double duration = (System.nanoTime() - start) / iterations;
-        System.out.println("dur = " + (duration / 1000) + "microns");//μμμ
+        System.out.println("dur = " + (duration / 1000) + " microns, ans = " + vvv[0]);//μμμ
 
         String geom = "geom((2,8,4))+geom(((2,8,4)))";
         System.out.println(geom + ": " + new MathExpression(geom).solve());

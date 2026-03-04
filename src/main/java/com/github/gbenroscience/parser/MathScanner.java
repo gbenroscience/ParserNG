@@ -1412,7 +1412,7 @@ public class MathScanner {
      *
      */
     public static void extractFunctionStringFromExpressionForMatrixMethods(List<String> list) {
-        list.removeAll(Arrays.asList(","));
+        
 
         int sz = list.size();
         /**
@@ -1420,17 +1420,18 @@ public class MathScanner {
          * tokens list.
          */
         if (list.indexOf("(") == list.lastIndexOf("(") && list.indexOf(")") == list.lastIndexOf(")")) {
-            //det,(,A,) or matrix_mul,(,A,B,)
+            //det,(,A,) or matrix_mul,(,A, , ,B,)
+            
+                System.out.println("list-in: "+list);
             if (sz == 4 || sz == 5) {
                 if (Method.isMatrixMethod(list.get(0)) && isOpeningBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
-                    if (sz == 4 && isClosingBracket(list.get(3))) {
+                  if (sz == 4 && isClosingBracket(list.get(3))) {
                         Method.run(list, Declarations.degGradRadFromVariable());
-                    } else if (sz == 5 && (Method.isUserDefinedFunction(list.get(3)) || isNumber(list.get(3)) || isVariableString(list.get(3))) && isClosingBracket(list.get(4))) {
+                   }else if (sz == 5 && ( isComma(list.get(3)) && Method.isUserDefinedFunction(list.get(4)) || isNumber(list.get(4)) || isVariableString(list.get(4))) && isClosingBracket(list.get(5))) {
                         Method.run(list, Declarations.degGradRadFromVariable());
                     }
-
                 }
-
+                System.out.println("list-out: "+list);
             } /**
              * There remains only one open and close bracket, but the parameters
              * have not yet been properly ordered! Most of the matrix methods
@@ -1452,6 +1453,136 @@ public class MathScanner {
                             List l = list.subList(open - 1, i + 1);
                             int siz = l.size();
                             extractFunctionStringFromExpressionForMatrixMethods(l);
+                            i = i - (siz - l.size());
+                        } //Most likely you have gotten to the first parameter...ignore it and process the bracket
+                        else if (FunctionManager.contains(token)) {
+                            List l = list.subList(open, i + 1);
+                            int siz = l.size();
+
+                            MathExpression me = new MathExpression(LISTS.createStringFrom(list, open, i + 1));
+                            String val = me.solve();
+                            l.clear();
+                            switch (me.getReturnType()) {
+                                case MATRIX:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case ALGEBRAIC_EXPRESSION:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case LIST:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case NUMBER:
+                                    l.add(val);
+                                    break;
+                                default:
+                                    break;
+                            }//end switch
+                            i = i - (siz - l.size());
+                        } else if (Method.isMethodName(token) || isUnaryPreOperator(token) || isNumber(token)) {
+                            List<String> l = list.subList(open - 1, i + 1);
+                            int siz = l.size();
+                            String input;
+                            if (Method.isStatsMethod(token)) {
+                                /**
+                                 * Pattern is [sum,(, 2, 3, 4, 6, )] We need to
+                                 * convert this into: sum(2,3,4,6) Our job is to
+                                 * remove the starting, second and final commas,
+                                 * the white spaces, and the opening and closing
+                                 * braces[]
+                                 */
+                                StringBuilder builder = new StringBuilder(token);
+                                builder.append("(");
+                                for (int j = 2; j < l.size() - 1; j++) {
+                                    builder.append(l.get(j)).append(",");
+                                }
+                                input = builder.substring(0, builder.length() - 1);
+                                input = input.concat(")");
+                            } else {
+                                input = LISTS.createStringFrom(list, open - 1, i + 1);
+                            }
+
+                            MathExpression me = new MathExpression(input);
+                            String val = me.solve();
+                            l.clear();
+                            switch (me.getReturnType()) {
+                                case MATRIX:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case ALGEBRAIC_EXPRESSION:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case LIST:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case NUMBER:
+                                    l.add(val);
+                                    break;
+                                default:
+                                    break;
+                            }//end switch
+                            i = i - (siz - l.size());
+                        }
+
+                    }
+
+                }
+
+            }//end for loop
+
+        }
+
+    }//end method
+
+    /**
+     * Analyzes the list and extracts the Function string from it.
+     *
+     * @param list The list to be analyzed. Direct examples would be:
+     * intg(@sin(x+1),4,7) intg(F,4,7) where F is a function that has been
+     * defined before in the workspace.. and so on.
+     *
+     * Simplifies the list to the form matrix_method(funcName,params)
+     *
+     */
+    public static void extractFunctionStringFromExpressionForMatrixMethods1(List<String> list) {
+        list.removeAll(Arrays.asList(","));
+
+        int sz = list.size();
+        /**
+         * Confirm that there remains only one open and one close bracket in the
+         * tokens list.
+         */
+        if (list.indexOf("(") == list.lastIndexOf("(") && list.indexOf(")") == list.lastIndexOf(")")) {
+            //det,(,A,) or matrix_mul,(,A,B,)
+            if (sz == 4 || sz == 5) {
+                if (Method.isMatrixMethod(list.get(0)) && isOpeningBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
+                  if (sz == 4 && isClosingBracket(list.get(3))) {
+                        Method.run(list, Declarations.degGradRadFromVariable());
+                   }else if (sz == 5 && (Method.isUserDefinedFunction(list.get(3)) || isNumber(list.get(3)) || isVariableString(list.get(3))) && isClosingBracket(list.get(4))) {
+                        Method.run(list, Declarations.degGradRadFromVariable());
+                    }
+                }
+            } /**
+             * There remains only one open and close bracket, but the parameters
+             * have not yet been properly ordered! Most of the matrix methods
+             * take one or at most 2 parameters, so if you have more than 2
+             * parameters, then check that the first parameter is in the proper
+             * format, then run the parser on everything in the second part of
+             * the parameters list to get the second parameter.
+             */
+            else {
+
+            }
+        } else {
+            for (int i = 0; i < list.size(); i++) {
+                if (isClosingBracket(list.get(i))) {
+                    int open = Bracket.getComplementIndex(false, i, list);
+                    if (open > 0) {
+                        String token = list.get(open - 1);
+                        if (Method.isMatrixMethod(token)) {
+                            List l = list.subList(open - 1, i + 1);
+                            int siz = l.size();
+                            extractFunctionStringFromExpressionForMatrixMethods1(l);
 
                             i = i - (siz - l.size());
                         } //Most likely you have gotten to the first parameter...ignore it and process the bracket
