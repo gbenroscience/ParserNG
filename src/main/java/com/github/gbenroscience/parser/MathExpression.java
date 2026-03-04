@@ -1335,7 +1335,7 @@ public class MathExpression implements Savable, Solvable {
                 || opChar == 'Č' || opChar == 'Р';
     }
 
-    public final void compileToPostfix2() {
+    public final void compileToPostfix3() {
         if (cachedPostfix != null) {
             return;
         }
@@ -1492,7 +1492,7 @@ public class MathExpression implements Savable, Solvable {
     }
 //diffs args passing works
 
-    public final void compileToPostfix1() {
+    public final void compileToPostfix2() {
         if (cachedPostfix != null) {
             return;
         }
@@ -1631,7 +1631,8 @@ public class MathExpression implements Savable, Solvable {
         System.arraycopy(postfix, 0, cachedPostfix, 0, p);
     }
 
-    public final void compileToPostfix() {
+    //diff args passing works, sort on compound tokens works, but prod(sin(5),sin(5)) does not work
+    public final void compileToPostfix1() {
         if (cachedPostfix != null) {
             return;
         }
@@ -1759,6 +1760,157 @@ public class MathExpression implements Savable, Solvable {
         }
 
         // Flush remaining operators
+        while (!opStack.isEmpty()) {
+            Token top = opStack.pop();
+            if (top.kind != Token.LPAREN) {
+                postfix[p++] = top;
+            }
+        }
+
+        cachedPostfix = new Token[p];
+        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
+    }
+
+    public final void compileToPostfix() {
+        if (cachedPostfix != null) {
+            return;
+        }
+
+        Stack<Token> opStack = new Stack<>();
+        Stack<Integer> parenDepths = new Stack<>();
+        Stack<Integer> argCounts = new Stack<>();
+        Stack<Boolean> lastWasComma = new Stack<>();
+        Stack<Boolean> isGrouping = new Stack<>();  // Track if this paren is grouping
+
+        Token[] postfix = new Token[scanner.size() * 2];
+        int p = 0;
+
+        int depth = 0;
+        argCounts.push(0);
+        lastWasComma.push(true);
+
+        int len = scanner.size();
+        for (int idx = 0; idx < len; idx++) {
+            String s = scanner.get(idx);
+            String next = idx + 1 < len ? scanner.get(idx + 1) : null;
+
+            Token t = translate(s, next);
+            if (t == null) {
+                continue;
+            }
+
+            switch (t.kind) {
+                case Token.NUMBER:
+                    postfix[p++] = t;
+                    if (depth > 0 && lastWasComma.peek()) {
+                        int currentCount = argCounts.pop();
+                        argCounts.push(currentCount + 1);
+                        lastWasComma.pop();
+                        lastWasComma.push(false);
+                    }
+                    break;
+
+                case Token.FUNCTION:
+                case Token.METHOD:
+                    opStack.push(t);
+                    break;
+
+                case Token.LPAREN:
+                    boolean isFuncParen = false;
+                    if (!opStack.isEmpty()) {
+                        Token lastOp = opStack.peek();
+                        if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
+                            isFuncParen = true;
+                        }
+                    }
+
+                    opStack.push(t);
+
+                    if (isFuncParen) {
+                        depth++;
+                        argCounts.push(0);
+                        lastWasComma.push(true);
+                        isGrouping.push(false);
+                    } else {
+                        // Grouping paren - still track if we're in a function
+                        isGrouping.push(true);
+                    }
+                    break;
+
+                case Token.RPAREN:
+                    // Pop operators until matching '('
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+
+                    if (!opStack.isEmpty()) {
+                        opStack.pop(); // discard the '('
+                    }
+
+                    boolean wasGrouping = !isGrouping.isEmpty() && isGrouping.pop();
+
+                    if (wasGrouping) {
+                        // Closing a GROUPING paren
+                        // This completes a value in the function's arg list
+                        if (depth > 0 && lastWasComma.peek()) {
+                            int currentCount = argCounts.pop();
+                            argCounts.push(currentCount + 1);
+                            lastWasComma.pop();
+                            lastWasComma.push(false);
+                        }
+                    } else {
+                        // Closing a FUNCTION CALL paren
+                        if (!opStack.isEmpty()) {
+                            Token callable = opStack.pop();
+
+                            int actualArgCount = argCounts.pop();
+                            lastWasComma.pop();
+
+                            callable.arity = Math.max(1, actualArgCount);
+                            postfix[p++] = callable;
+
+                            depth--;
+
+                            // Function result is a value in parent
+                            if (depth > 0 && lastWasComma.peek()) {
+                                int parentCount = argCounts.pop();
+                                argCounts.push(parentCount + 1);
+                                lastWasComma.pop();
+                                lastWasComma.push(false);
+                            }
+                        }
+                    }
+                    break;
+
+                case Token.COMMA:
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+                    if (depth > 0 && !lastWasComma.isEmpty()) {
+                        lastWasComma.pop();
+                        lastWasComma.push(true);
+                    }
+                    break;
+
+                case Token.OPERATOR:
+                    if (t.isPostfix) {
+                        postfix[p++] = t;
+                    } else {
+                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
+                            Token top = opStack.peek();
+                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
+                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
+                                postfix[p++] = opStack.pop();
+                            } else {
+                                break;
+                            }
+                        }
+                        opStack.push(t);
+                    }
+                    break;
+            }
+        }
+
         while (!opStack.isEmpty()) {
             Token top = opStack.pop();
             if (top.kind != Token.LPAREN) {
@@ -2467,6 +2619,7 @@ public class MathExpression implements Savable, Solvable {
         System.out.println(new MathExpression("f(x,y)=2*x*y;f(3,4);").solve());
         System.out.println("sum(sum(5),sum(6)): " + new MathExpression("sum(sum(5),sum(6))").solve());
         System.out.println("sum(sum(5,3,4,5),sum(6,12,14,1,2,1)): " + new MathExpression("sum(sum(5,3,4,5),sum(6,12,14,1,2,1))").solve());
+        System.out.println("prod(sin(5),sin(5)): " + new MathExpression("prod(sin(5),sin(5))").solve());
 
         System.out.println("differential calculus:>>1 " + new MathExpression("diff(@(x)sin(ln(x)), 1);").solve());
         System.out.println("differential calculus:>>2 " + new MathExpression("diff(@(x)x^10, m);").solve());
