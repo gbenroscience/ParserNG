@@ -247,10 +247,10 @@ public class MethodRegistry {
         registerMethod(Declarations.COMBINATION, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.combination(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.PERMUTATION, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.permutation(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.DIFFERENTIATION, (ctx, funcName, arity, args) -> {
-            System.out.println("Derivatives Action");
-            System.out.println("funcName: " + funcName);
-            System.out.println("arity: " + arity);
-            System.out.println("args: " + Arrays.toString(args));
+//            System.out.println("Derivatives Action");
+//            System.out.println("funcName: " + funcName);
+//            System.out.println("arity: " + arity);
+//            System.out.println("args: " + Arrays.toString(args));
             int sz = args.length;
             switch (sz) {
                 case 1: {
@@ -839,7 +839,7 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(v);
         });
         registerMethod(Declarations.MATRIX_EIGENVALUES, (ctx, funcName, arity, args) -> {
-            System.out.println("eigValues branch: args-->>"+Arrays.deepToString(args)+", args[0].type = "+args[0].getTypeName());
+            //System.out.println("eigValues branch: args-->>"+Arrays.deepToString(args)+", args[0].type = "+args[0].getTypeName());
             Matrix m = FunctionManager.lookUp(args[0].textRes).getMatrix();
             double[] evals = m.computeEigenValues();
 
@@ -853,8 +853,7 @@ public class MethodRegistry {
         });
         registerMethod(Declarations.MATRIX_EIGENVEC, (ctx, funcName, arity, args) -> {
             Function f = FunctionManager.lookUp(funcName);
-            Matrix m = f.getMatrix();
-            System.out.println("matrix for eigen: " + m.toString());
+            Matrix m = f.getMatrix(); 
             double eigenValues[] = m.computeEigenValues();
             int n = eigenValues.length;
 

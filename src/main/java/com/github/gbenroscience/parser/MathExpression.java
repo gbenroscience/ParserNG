@@ -397,16 +397,16 @@ public class MathExpression implements Savable, Solvable {
         scanner = opScanner.getScanner();
 
         correctFunction = opScanner.isRunnable();
-
+        
         parser_Result = opScanner.parser_Result;
-        if (parser_Result == ParserResult.VALID) {
-            statsVerifier();
-            codeModifier();
-            refixCommas();
-            mapBrackets();
-            functionComponentsAssociation();
+        if (parser_Result == ParserResult.VALID) { 
+            statsVerifier(); 
+            codeModifier(); 
+            refixCommas(); 
+            mapBrackets(); 
+            functionComponentsAssociation(); 
         }//end if
-
+ 
     }//end method initializing(args)
 
     public void removeCommas() {
@@ -1925,19 +1925,19 @@ public class MathExpression implements Savable, Solvable {
     public final class ExpressionSolver {
 
         public EvalResult evaluate() {
-            System.out.println("scanner: " + scanner);
+            //System.out.println("scanner: " + scanner);
             final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
             int ptr = -1;
 
             for (int i = 0; i < cachedPostfix.length; i++) {
                 Token t = cachedPostfix[i];
-                System.out.println("\n=== Evaluating token: "
+  /*              System.out.println("\n=== Evaluating token: "
                         + (t.kind == Token.NUMBER ? "NUM(" + t.value + ")"
                                 : t.kind == Token.OPERATOR ? "OP(" + t.opChar + ")"
                                         : t.kind == Token.FUNCTION ? "FUNC(" + t.name + ",arity=" + t.arity + ")"
                                                 : "METHOD(" + t.name + ",arity=" + t.arity + ")")
                         + " | Stack ptr before = " + ptr);
-
+*/
                 switch (t.kind) {
                     case Token.NUMBER:
                         if (t.name != null && !t.name.isEmpty()) {
@@ -1985,16 +1985,16 @@ public class MathExpression implements Savable, Solvable {
 
                     case Token.METHOD:
                     case Token.FUNCTION:
-                        System.out.println("Function: " + t.name + ", arity=" + t.arity);
+                    /*    System.out.println("Function: " + t.name + ", arity=" + t.arity);
                         for (int j = 0; j < t.arity; j++) {
                             System.out.println("  arg[" + j + "] = " + (ptr - t.arity + j + 1) + " -> " + stack[ptr - t.arity + j + 1]);
-                        }
+                        }*/
 
                         int arity = t.arity;
                         // CRITICAL FIX: Calculate how many values are actually on stack
                         int valuesOnStack = ptr + 1;
-                        System.out.println("  Function " + t.name + " expects arity=" + arity
-                                + ", values on stack=" + valuesOnStack);
+//                        System.out.println("  Function " + t.name + " expects arity=" + arity
+//                                + ", values on stack=" + valuesOnStack);
                         // CASE 1: Zero-argument function
                         if (arity == 0) {
                             Function f = FunctionManager.lookUp(t.name);
@@ -2003,7 +2003,7 @@ public class MathExpression implements Savable, Solvable {
                                 e.absorb(f);
                                 EvalResult result = f.calc(new EvalResult[]{e});
                                 stack[++ptr] = result;
-                                System.out.println("  Evaluated zero-arg function: " + result.toString());
+//                                System.out.println("  Evaluated zero-arg function: " + result.toString());
                             } else {
                                 throw new RuntimeException("Function " + t.name + " not found");
                             }
@@ -2020,12 +2020,12 @@ public class MathExpression implements Savable, Solvable {
                         EvalResult[] args = new EvalResult[arity];
                         for (int j = arity - 1; j >= 0; j--) {
                             args[j] = stack[ptr--];
-                            System.out.println("  Popped arg[" + j + "] from stack ptr=" + (ptr + 1)
-                                    + " value=" + args[j].toString());
+//                            System.out.println("  Popped arg[" + j + "] from stack ptr=" + (ptr + 1)
+//                                    + " value=" + args[j].toString());
                         }
 
-                        System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
-                                + " " + t.name + " with " + arity + " args");
+//                        System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
+//                                + " " + t.name + " with " + arity + " args");
 
                         EvalResult result;
                         try {
@@ -2040,8 +2040,8 @@ public class MathExpression implements Savable, Solvable {
 
                         // Push result back on stack (exactly ONE value replaces the popped arguments)
                         stack[++ptr] = result;
-                        System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr
-                                + ", type: " + result.getTypeName());
+//                        System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr
+//                                + ", type: " + result.getTypeName());
                         break;
                 }
             }
@@ -2054,7 +2054,7 @@ public class MathExpression implements Savable, Solvable {
             }
 
             if (ptr > 0) {
-                System.out.println("WARNING: Stack has " + (ptr + 1) + " values at end, returning top");
+                System.out.println("WARNING: Evalaution stack has " + (ptr + 1) + " values at end, returning top");
             }
 
             return stack[0];

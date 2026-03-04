@@ -484,11 +484,9 @@ public class Maths {                       //3.14159265358979323846;
                 }//end for
 
                 return STRING.reverse(h);
-            } catch (NumberFormatException num) {
-                System.out.println(dec_no);
-                System.out.println(base_no);
+            } catch (NumberFormatException num) { 
                 num.printStackTrace();
-                throw new NumberFormatException("Only integers are expected here!");
+                throw new NumberFormatException("Only integers are expected here!--dec_no: "+dec_no+", base_no: "+base_no);
             }
 
         }//end if
@@ -1558,38 +1556,7 @@ public class Maths {                       //3.14159265358979323846;
             }
         }
     }//end method.
-
-    public static void main(String args[]) {
-
-        
-         for (int i = 0; i < 170; i++) {
-             double x = Math.random()+i;
-             System.out.println("factOld("+x+") = "+factOld(x));
-             System.out.println("fact("+x+") = "+fact(x));
-           }
-             
-        for (int i = 0; i < 1000; i++) {
-            Math.asin(0.3);
-            Maths.asin(0.3);
-        }
-
-        double x = 0.99;
-
-        double t1 = System.nanoTime();
-        double val = Math.asin(x);
-        double t2 = System.nanoTime();
-
-        System.out.println("ans = " + val);
-        System.out.println(" RUNTIME = " + ((t2 - t1) / 1.0E6) + " ms");
-
-        double t3 = System.nanoTime();
-        val = Maths.asin(x);
-        double t4 = System.nanoTime();
-
-        System.out.println("ans = " + val);
-        System.out.println(" RUNTIME = " + ((t4 - t3) / 1.0E6) + " ms");
-
-    }
+ 
     /*We use the principle:
      * pi=(magic_whole_no)*(SUM(i^-n))^(1/n) < where i goes from 1 to infinity during summation >
      * to calculate pi.

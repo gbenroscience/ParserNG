@@ -165,11 +165,11 @@ class MathExpressionTest {
         Assertions.assertEquals("\n"
                 + "   -1.0  ,    3.0  ,   -7.0            \n"
                 + "    0.0  ,    3.0  ,    4.0            \n"
-                + "    4.0  ,    0.0  ,  -11.0            \n", ls);
+                + "    4.0  ,    0.0  ,  -11.0            \n", FunctionManager.lookUp(ls).getMatrix().toString());
 
 
-        MathExpression expr = new MathExpression("tri_mat(M)");
-        Matrix m = expr.solveGeneric().matrix; System.out.println(m.toString());
+        MathExpression expr = new MathExpression("tri_mat(M)"); 
+        Matrix m = FunctionManager.lookUp(expr.solve()).getMatrix(); System.out.println(m.toString());
         if (print) System.out.println(m.toString());
         Function f = new Function("fExpr=@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0)");
         FunctionManager.add(f);
@@ -178,7 +178,7 @@ class MathExpressionTest {
          
 
         MathExpression expr2 = new MathExpression("echelon(M)");
-        Matrix echelon = expr2.solveGeneric().matrix;
+        Matrix echelon = FunctionManager.lookUp(expr2.solve()).getMatrix();//expr2.solveGeneric().matrix;
         if (print) System.out.println(echelon);
         
         f = new Function("fExpr=@(3,3)(3.0,4.0,1.0,0.0,4.0,19.0,0.0,0.0,567.0)");

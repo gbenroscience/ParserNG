@@ -259,12 +259,7 @@ public class Parser {
      *
      */
     public static void parseDerivativeCommand(List<String> list) {
-        /**
-         *
-         *
-         */
-        System.out.println("list-1: "+list);
-        //list.removeAll(Arrays.asList(","));
+      //  System.out.println("list-1: "+list); 
 
         String args1, args2 = "";
         if (list.get(0).equals("diff") && list.get(1).equals("(") && list.get(list.size() - 1).equals(")")) {
@@ -292,30 +287,9 @@ public class Parser {
                     }
                 }
             }
-            System.out.println("list: "+list);
-
-            int sz = list.size();
-
-            /**
-             * diff,(,f,)--sz = 4 diff,(,f,1,)--sz = 5 diff,(,f,2,3,)--sz = 6
-             */
-            switch (sz) {
-                case 4:
-                    break;
-                case 5:
-                    args1 = list.get(3);
-                    break;
-                case 6:
-                    args1 = list.get(3);
-                    args2 = list.get(4);
-                    break;
-                default:
-                    list.clear();
-                    break;
-            }
-
+          
         }
-
+ 
     }//end method
 
     public static void main(String[] args) {

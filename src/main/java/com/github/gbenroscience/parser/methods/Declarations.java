@@ -140,8 +140,7 @@ public class Declarations {
          */
         MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression ctx, String funcName, int arity, MathExpression.EvalResult[] args) -> {
             List<String> tokens = new ArrayList<>();
-            for (MathExpression.EvalResult arg : args) {
-                System.out.println("EvalResult arg: "+arg.toString()+", arg.type = "+arg.getTypeName());
+            for (MathExpression.EvalResult arg : args) { 
                 if (arg.type == MathExpression.EvalResult.TYPE_SCALAR) {
                     tokens.add(String.valueOf(arg.scalar));
                 }
@@ -151,8 +150,7 @@ public class Declarations {
             }       
             MathExpression.EvalResult result = ctx.getNextResult();
             String res = basicNumericalMethod.solve(tokens);
-            result.wrap(Double.parseDouble(res));
-            System.out.println("res: "+res);
+            result.wrap(Double.parseDouble(res)); 
             return result;
         });
     }
@@ -173,7 +171,7 @@ public class Declarations {
                     tokens.add(arg.textRes);
                 }
             }
-            System.out.println("tokens: "+tokens);
+            //System.out.println("tokens: "+tokens);
             MathExpression.EvalResult result = ctx.getNextResult();
             result.wrap(basicNumericalMethod.solve(tokens));
             return result;
@@ -181,7 +179,7 @@ public class Declarations {
     }
 
     static {
-        System.out.println("registring BasicNumeralMethods--------------------------------------------------------------------------------");
+        //System.out.println("registring BasicNumeralMethods--------------------------------------------------------------------------------");
         registerBasicNumericalMethod(new Echo());
         registerBasicNumericalMethod(new Echo.EchoN());
         registerBasicNumericalMethod(new Echo.EchoNI());

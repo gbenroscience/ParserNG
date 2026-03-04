@@ -667,7 +667,7 @@ public class MathScanner {
 // intg,(,@,(x),log(x,2),4,2,5)
                 int close = Bracket.getComplementIndex(true, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
-                System.out.println("list: " + list);
+               // System.out.println("list: " + list);
                 RootFinder.extractFunctionStringFromExpression(list);
 
                 if (list.isEmpty()) {
