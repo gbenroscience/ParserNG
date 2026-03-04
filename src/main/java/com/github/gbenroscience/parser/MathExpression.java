@@ -1189,7 +1189,7 @@ public class MathExpression implements Savable, Solvable {
     }
 
     // Your translate method (with small updates for Java 8)
-    public Token translate(String s, String next) {
+    public Token translate1(String s, String next) {
         if (s == null || s.isEmpty()) {
             return null;
         }
@@ -1255,6 +1255,71 @@ public class MathExpression implements Savable, Solvable {
 
     }
 
+    public Token translate(String s, String next) {
+        if (s == null || s.isEmpty()) {
+            return null;
+        }
+        char c0 = s.charAt(0);
+        int len = s.length();
+
+        // 1. Identify Numbers
+        if (isNumber(s)) {
+            return new Token(fastParseDouble(s));
+        }
+
+        // 2. Identify Brackets
+        if (len == 1) {
+            switch (c0) {
+                case '(':
+                    return new Token(Token.LPAREN);
+                case ')':
+                    return new Token(Token.RPAREN);
+            }
+        }
+
+        // 3. Identify Operators
+        if (isOperator(s)) {
+            boolean isPostfix = (c0 == '!' || c0 == '²' || c0 == '³');
+            char internalOp = (len > 1 && s.equals("³√")) ? 'R' : c0;
+            return new Token(internalOp, Token.getPrec(internalOp), Token.isRightAssociative(internalOp), isPostfix);
+        }
+
+        // Handle commas (function argument separators)
+        if (s.equals(",")) {
+            Token t = new Token(0.0);
+            t.kind = Token.COMMA;
+            return t;
+        }
+
+        // 4. Identify Functions/Anonymous Functions (ONLY if followed by "(")
+        if (FunctionManager.FUNCTIONS.containsKey(s)) {
+            // CRITICAL: Only treat as FUNCTION if it's being CALLED (has "(" after it)
+            if (next != null && next.equals("(")) {
+                return new Token(Token.FUNCTION, s, -1, -1); // Arity set during compile
+            }
+
+            // If NOT followed by "(", treat as a FUNCTION REFERENCE/POINTER
+            // This allows passing function names as arguments (like to diff)
+            Token t = new Token(0.0);
+            t.kind = Token.NUMBER;  // Treat as a "value" that can be passed as argument
+            t.name = s;  // Store the function name
+            return t;
+        }
+
+        // 5. Identify Methods
+        if (Method.isInBuiltMethod(s)) {
+            int methodId = MethodRegistry.getMethodID(s);
+            return new Token(Token.METHOD, s, -1, methodId); // Arity set during compile
+        }
+
+        // 6. Fallback: Treat as Variable/Constant
+        Token t = new Token(0.0);
+        t.name = s;
+        t.kind = Token.NUMBER;
+
+        return t;
+    }
+
     // Helper for isOperator (your custom ops)
     private boolean isOperator(String s) {
         if (s.length() == 1) {
@@ -1270,7 +1335,7 @@ public class MathExpression implements Savable, Solvable {
                 || opChar == 'Č' || opChar == 'Р';
     }
 
-    public final void compileToPostfix() {
+    public final void compileToPostfix1() {
         if (cachedPostfix != null) {
             return;
         }
@@ -1426,6 +1491,145 @@ public class MathExpression implements Savable, Solvable {
         System.arraycopy(postfix, 0, cachedPostfix, 0, p);
     }
 
+    public final void compileToPostfix() {
+        if (cachedPostfix != null) {
+            return;
+        }
+
+        Stack<Token> opStack = new Stack<>();
+        Stack<Integer> parenDepths = new Stack<>();
+        Stack<Integer> argCounts = new Stack<>();  // Track arg count per paren depth
+
+        Token[] postfix = new Token[scanner.size() * 2];
+        int p = 0;
+
+        int depth = 0;
+        argCounts.push(0);
+
+        int len = scanner.size();
+        for (int idx = 0; idx < len; idx++) {
+            String s = scanner.get(idx);
+            String next = idx + 1 < len ? scanner.get(idx + 1) : null;
+
+            Token t = translate(s, next);
+            if (t == null) {
+                continue;
+            }
+
+            switch (t.kind) {
+                case Token.NUMBER:
+                    postfix[p++] = t;
+                    // Increment arg count when we see a value
+                    if (depth > 0) {
+                        int currentCount = argCounts.pop();
+                        argCounts.push(currentCount + 1);
+                    }
+                    break;
+
+                case Token.FUNCTION:
+                case Token.METHOD:
+                    opStack.push(t);
+                    break;
+
+                case Token.LPAREN:
+                    boolean isForFunction = false;
+                    if (!opStack.isEmpty()) {
+                        Token lastOp = opStack.peek();
+                        if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
+                            isForFunction = true;
+                        }
+                    }
+
+                    opStack.push(t);
+                    parenDepths.push(isForFunction ? 1 : 0);
+
+                    if (isForFunction) {
+                        depth++;
+                        argCounts.push(0);  // Start with 0 args at this depth
+                    }
+                    break;
+
+                case Token.RPAREN:
+                    // Pop operators until matching '('
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+
+                    if (!opStack.isEmpty()) {
+                        opStack.pop(); // discard the '('
+                    }
+
+                    if (!parenDepths.isEmpty()) {
+                        int isForFunc = parenDepths.pop();
+
+                        if (isForFunc > 0 && !opStack.isEmpty()) {
+                            Token callable = opStack.pop();
+
+                            // GET THE ACTUAL ARGUMENT COUNT FOR THIS FUNCTION CALL
+                            int actualArgCount = argCounts.pop();
+
+                            // If no arguments were seen (empty parens), treat as 0
+                            // If at least one value was seen, that's the arg count
+                            if (actualArgCount == 0 && p > 0) {
+                                // Check if there's anything on the postfix stack for this function
+                                // Empty parens = 0 args, otherwise actualArgCount is correct
+                            }
+
+                            callable.arity = actualArgCount;
+                            postfix[p++] = callable;
+
+                            depth--;
+
+                            // Parent depth arg count increments by 1 (function result counts as 1 arg)
+                            if (depth > 0 && !argCounts.isEmpty()) {
+                                int parentCount = argCounts.pop();
+                                argCounts.push(parentCount + 1);
+                            }
+                        }
+                    }
+                    break;
+
+                case Token.COMMA:
+                    // Pop any pending operators (but NOT the LPAREN)
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+                    // CRITICAL: Don't increment arg count here - it already incremented when we saw the value
+                    // The comma just separates values, it doesn't represent a new arg
+                    break;
+
+                case Token.OPERATOR:
+                    if (t.isPostfix) {
+                        postfix[p++] = t;
+                    } else {
+                        // Binary operator: pop based on precedence
+                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
+                            Token top = opStack.peek();
+                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
+                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
+                                postfix[p++] = opStack.pop();
+                            } else {
+                                break;
+                            }
+                        }
+                        opStack.push(t);
+                    }
+                    break;
+            }
+        }
+
+        // Flush remaining operators
+        while (!opStack.isEmpty()) {
+            Token top = opStack.pop();
+            if (top.kind != Token.LPAREN) {
+                postfix[p++] = top;
+            }
+        }
+
+        cachedPostfix = new Token[p];
+        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
+    }
+
     public final class ExpressionSolver {
 
         public EvalResult evaluate() {
@@ -1445,18 +1649,30 @@ public class MathExpression implements Savable, Solvable {
                 switch (t.kind) {
                     case Token.NUMBER:
                         if (t.name != null && !t.name.isEmpty()) {
-                            // Variable lookup
+                            // Could be a variable OR a function reference (like anon1)
                             Variable var = VariableManager.lookUp(t.name);
-                            if (var == null) {
-                                throw new RuntimeException("Undefined variable: " + t.name);
+                            if (var != null) {
+                                // It's a variable
+                                stack[++ptr] = getNextResult().wrap(var.getValue());
+                            } else if (FunctionManager.FUNCTIONS.containsKey(t.name)) {
+                                // It's a function reference - wrap it as a special object
+                                // The diff method will know how to handle it
+                                stack[++ptr] = getNextResult().wrap(t.name);  // Store the function name as string
+                            } else {
+                                String prevToken = stack[ptr].toString();
+                                if (FunctionManager.lookUp(prevToken) != null) {
+                                    //e.g diff(F,v) or diff(F,v,n) where F is the prevToken and v is the undefined variable to be used to create
+                                    //a function that will hold the return value of diff(F)
+                                    stack[++ptr] = getNextResult().wrap(t.name); // Store pointer to the to-be-created function as string
+                                } else {
+                                    throw new RuntimeException("Undefined variable or function: " + t.name);
+                                }
                             }
-                            stack[++ptr] = getNextResult().wrap(var.getValue());
                         } else {
                             // Direct number
                             stack[++ptr] = getNextResult().wrap(t.value);
                         }
                         break;
-
                     case Token.OPERATOR:
                         if (t.isPostfix || t.opChar == '√' || t.opChar == 'R') {
                             // Unary operator
@@ -1477,7 +1693,11 @@ public class MathExpression implements Savable, Solvable {
 
                     case Token.METHOD:
                     case Token.FUNCTION:
-                        System.out.println("token:(is method or function)--->>> " + t);
+                        System.out.println("Function: " + t.name + ", arity=" + t.arity);
+                        for (int j = 0; j < t.arity; j++) {
+                            System.out.println("  arg[" + j + "] = " + (ptr - t.arity + j + 1) + " -> " + stack[ptr - t.arity + j + 1]);
+                        }
+
                         int arity = t.arity;
                         // CRITICAL FIX: Calculate how many values are actually on stack
                         int valuesOnStack = ptr + 1;
@@ -2107,18 +2327,23 @@ public class MathExpression implements Savable, Solvable {
         System.out.println(new MathExpression("f(x,y)=2*x*y;f(3,4);").solve());
         System.out.println("sum(sum(5),sum(6)): " + new MathExpression("sum(sum(5),sum(6))").solve());
         System.out.println("sum(sum(5,3,4,5),sum(6,12,14,1,2,1)): " + new MathExpression("sum(sum(5,3,4,5),sum(6,12,14,1,2,1))").solve());
-// Expected: 11
 
-        System.out.println("sort(0,4+0,2+0): " + new MathExpression("sort(0,4+0,2+0)").solve());
-        System.out.println(new MathExpression("x=0.9;sqrt(0.64-x^2)").solve());
-        System.out.println("differential calculus:>>3 " + new MathExpression("diff(@(x)sin(ln(x)), 1);").solve());
-        System.out.println("differential calculus:>>4 " + new MathExpression("diff(@(x)x^10, m,1);").solve());
+        System.out.println("differential calculus:>>1 " + new MathExpression("diff(@(x)sin(ln(x)), 1);").solve());
+        System.out.println("differential calculus:>>2 " + new MathExpression("diff(@(x)x^10, m);").solve());
+        System.out.println("differential calculus:>>2a " + new MathExpression("diff(@(x)x^10, n,1);").solve());
         MathExpression meDiff = new MathExpression("x=3;diff(@(x)sin(ln(x)),vw);");
         System.out.println("--------------------------" + FunctionManager.FUNCTIONS);
-        System.out.println("differential calculus:>>1 " + meDiff.solve());
-        System.out.println("differential calculus:>>2 " + new MathExpression("diff(@(x)sin(ln(x)), b);").solve());
+        System.out.println("differential calculus:>>3 " + meDiff.solve());
+        System.out.println("differential calculus:>>4 " + new MathExpression("diff(@(x)sin(ln(x)), b);").solve());
         System.out.println(new MathExpression("sin(ln(x));").solve());
         System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
+// Expected: 11
+
+        System.out.println("sort(-3,8,3,2,6,-7,9,1,0,-1): " + new MathExpression("sort(-3,8,3,2,6,-7,9,1,0,-1)").solve());
+        System.out.println("sort(0,4+0,2+0): " + new MathExpression("sort(0,4+0,2+0)").solve());
+        System.out.println("sort(3+1,-3): " + new MathExpression("sort(3+1, -3)").solve());
+        System.out.println("sort(4+2): " + new MathExpression("sort(4+2)").solve());
+        System.out.println(new MathExpression("x=0.9;sqrt(0.64-x^2)").solve());
 
         MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);B=eigvalues(A);C=eigvec(A);D=eigpoly(A);eigpoly(A);");
         System.out.println(FunctionManager.FUNCTIONS);

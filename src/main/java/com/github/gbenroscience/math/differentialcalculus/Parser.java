@@ -155,7 +155,7 @@ public class Parser {
      * has been pre-defined. The parser will load the function and differentiate
      * it wrt x, twice, and then evaluate it at x = 5.
      *
-     * Direct examples would be: diff(@(x)sin(x+1),4) diff(F,5.32) where F is a
+     * Direct examples would be: diff(@(x)sin(x+1),4), diff(F,5.32) where F is a
      * function that has been defined before in the workspace.. and so on.
      * @return the Function object in the expression and in the process also
      * discovers the point at which the derivative is to be evaluated.

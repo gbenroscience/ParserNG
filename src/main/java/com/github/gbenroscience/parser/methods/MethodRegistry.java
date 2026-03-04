@@ -248,31 +248,34 @@ public class MethodRegistry {
         registerMethod(Declarations.PERMUTATION, (ctx, funcName, arity, args) -> ctx.getNextResult().wrap(Maths.permutation(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.DIFFERENTIATION, (ctx, funcName, arity, args) -> {
             System.out.println("Derivatives Action");
-            System.out.println("funcName: "+funcName);
-            System.out.println("arity: "+arity);
-            System.out.println("args: "+Arrays.toString(args));
+            System.out.println("funcName: " + funcName);
+            System.out.println("arity: " + arity);
+            System.out.println("args: " + Arrays.toString(args));
             int sz = args.length;
             switch (sz) {
                 case 1: {
-                    String solution = Derivative.eval("diff(" + funcName + ",1)");
-                    return ctx.getNextResult().wrap(com.github.gbenroscience.parser.Number.isNumber(solution) ? Double.parseDouble(solution) : Double.NaN);
+                    String solution = Derivative.eval("diff(" + args[0] + ",1)");//only the function handle was sent...e.g diff(F)
+                    return ctx.getNextResult().wrap(solution);
                 }
-                case 2: {
-                    String anonFunc = funcName;
-                    double value = args[0].scalar;
-
-                    String solution = Derivative.eval("diff(" + anonFunc + "," + value + ")");
-                    return ctx.getNextResult().wrap(com.github.gbenroscience.parser.Number.isNumber(solution) ? Double.parseDouble(solution) : Double.NaN);
+                case 2: {//diff(F,v|n) F = func to be differentiated, v = new func to hold return value of differentiation, n = order of differentiation
+                    String anonFunc = args[0].textRes;
+                    String solution = Derivative.eval("diff(" + anonFunc + "," + (args[1].textRes != null ? args[1].textRes : args[1].scalar) + ")");
+                    return ctx.getNextResult().wrap(solution);
                 }
                 case 3: {
-                    String anonFunc = funcName;
-                    double value = args[1].scalar;
+//diff(F,v|x, n) F = func to be differentiated, v = new func to hold return value of differentiation, 
+//x = x point to evaluate final detivative at n = order of differentiation
+                    String anonFunc = args[0].textRes;
                     int order = (int) args[2].scalar;
                     /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.parseDouble(data.get(1)));
                 return der.findDerivativeByPolynomialExpander();
                      */
-                    String solution = Derivative.eval("diff(" + anonFunc + "," + value + "," + order + ")");
-                    return ctx.getNextResult().wrap(com.github.gbenroscience.parser.Number.isNumber(solution) ? Double.parseDouble(solution) : Double.NaN);
+                    String solution = Derivative.eval("diff(" + anonFunc + "," + (args[1].textRes != null ? args[1].textRes : args[1].scalar) + "," + args[2] + ")");
+                    if (com.github.gbenroscience.parser.Number.isNumber(solution)) {
+                        return ctx.getNextResult().wrap(Double.parseDouble(solution));
+                    } else {
+                        return ctx.getNextResult().wrap(solution);
+                    } 
                 }
                 default:
                     return ctx.getNextResult().wrap(Double.NaN);
@@ -836,16 +839,16 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(v);
         });
         registerMethod(Declarations.MATRIX_EIGENVALUES, (ctx, funcName, arity, args) -> {
- 
-              Matrix m = args[0].matrix;
-                double[] evals = m.computeEigenValues();
 
-                // Create a 1xN matrix
-                Matrix result = new Matrix(1, evals.length);
-                // Directly copy the array into the matrix's internal storage
-                double array[] = new double[evals.length];
-                System.arraycopy(evals, 0, array, 0, evals.length);
-                result.setArray(array, 1, evals.length);
+            Matrix m = args[0].matrix;
+            double[] evals = m.computeEigenValues();
+
+            // Create a 1xN matrix
+            Matrix result = new Matrix(1, evals.length);
+            // Directly copy the array into the matrix's internal storage
+            double array[] = new double[evals.length];
+            System.arraycopy(evals, 0, array, 0, evals.length);
+            result.setArray(array, 1, evals.length);
             return ctx.getNextResult().wrap(result);
         });
         registerMethod(Declarations.MATRIX_EIGENVEC, (ctx, funcName, arity, args) -> {
