@@ -28,7 +28,7 @@ import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.util.FunctionManager;
-import java.lang.reflect.Array;
+import com.github.gbenroscience.util.Utils; 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.ArrayList;
@@ -784,12 +784,29 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(Double.POSITIVE_INFINITY);
         });
         registerMethod(Declarations.DETERMINANT, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
-            Matrix m = f.getMatrix();
-            return ctx.getNextResult().wrap(m.determinant());
+
+            if (args.length == 1 && args[0].textRes != null) {//det(1,2,-1,3,)
+                Function f = FunctionManager.lookUp(args[0].textRes);
+                Matrix m = f.getMatrix();
+                return ctx.getNextResult().wrap(m.determinant());
+            }
+            //else --- //det(A) where A is a defined mXm+1 matrix
+            double[] arr = new double[args.length];
+            for (int i = 0; i < args.length; i++) {
+                arr[i] = args[i].scalar;
+            }
+            boolean isPerfectSquare = Utils.isPerfectSquare(args.length);
+            int sqrtLen = (int) Math.sqrt(args.length);
+            if (isPerfectSquare) {
+                int rows = sqrtLen;
+                int cols = sqrtLen;
+                Matrix m = new Matrix(arr, rows, cols);
+                return ctx.getNextResult().wrap(m.determinant());
+            }
+            return MathExpression.EvalResult.ERROR;
         });
         registerMethod(Declarations.LINEAR_SYSTEM, (ctx, funcName, arity, args) -> {
-            System.out.println("eigValues branch: args-->>" + Arrays.deepToString(args) + ", args[0].type = " + args[0].getTypeName() + ",funcName: " + funcName);
+            //System.out.println("LINEAR_SYSTEM: args-->>" + Arrays.deepToString(args) + ", args[0].type = " + args[0].getTypeName() + ",funcName: " + funcName);
             if (args.length == 1 && args[0].textRes != null) {//linear_sys(1,2,-1,3,4,9,-3,7)
                 Function f = FunctionManager.lookUp(args[0].textRes);
                 Matrix m = f.getMatrix().solveEquation();
@@ -807,7 +824,7 @@ public class MethodRegistry {
             /* Orig   Soln-Matrix
                2x2       2X3
                3x3       3X4
-               nxn       nx(n+1)-M ------n^2+n-M=0----  (-1+sqrt(1+4M))/2  AND (-1-sqrt(1+4M))/2 where M = args.length, the correct soln is the first,as rows and cols cant be < 0
+              nxn       nx(n+1)-M ------n^2+n-M=0----  (-1+sqrt(1+4M))/2  AND (-1-sqrt(1+4M))/2 where M = args.length, the correct soln is the first,as rows and cols cant be < 0
              */
 
             Matrix n = m.solveEquation();
@@ -827,36 +844,33 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(m);
         });
         registerMethod(Declarations.MATRIX_COFACTORS, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
+            Function f = FunctionManager.lookUp(args[0].textRes);
             Matrix m = f.getMatrix().getCofactorMatrix();
             return ctx.getNextResult().wrap(m);
         });
         registerMethod(Declarations.MATRIX_DIVIDE, (ctx, funcName, arity, args) -> {
-            int commaIndex = funcName.indexOf(",");
-            String matrixA = funcName.substring(0, commaIndex);
-            String matrixB = funcName.substring(commaIndex + 1);
-            Function fA = FunctionManager.lookUp(matrixA);
-            Function fB = FunctionManager.lookUp(matrixB);
+            Function fA = FunctionManager.lookUp(args[0].textRes);
+            Function fB = FunctionManager.lookUp(args[1].textRes);
             Matrix mA = fA.getMatrix();
             Matrix mB = fB.getMatrix();
             return ctx.getNextResult().wrap(Matrix.multiply(mA, mB.inverse()));
         });
         registerMethod(Declarations.MATRIX_EDIT, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
+            Function f = FunctionManager.lookUp(args[0].textRes);
             Matrix m = f.getMatrix();
-            int row = (int) args[0].scalar;
-            int col = (int) args[1].scalar;
-            double val = args[2].scalar;
+            int row = (int) args[1].scalar;
+            int col = (int) args[2].scalar;
+            double val = args[3].scalar;
             boolean updated = m.update(val, row, col);
             return ctx.getNextResult().wrap(m);
         });
         registerMethod(Declarations.MATRIX_EIGENPOLY, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
+            Function f = FunctionManager.lookUp(args[0].textRes);
             String v = f.getMatrix().getCharacteristicPolynomialForEigenVector();
             return ctx.getNextResult().wrap(v);
         });
         registerMethod(Declarations.MATRIX_EIGENVALUES, (ctx, funcName, arity, args) -> {
-            System.out.println("eigValues branch: args-->>" + Arrays.deepToString(args) + ", args[0].type = " + args[0].getTypeName() + ",funcName: " + funcName);
+            //System.out.println("eigValues branch: args-->>" + Arrays.deepToString(args) + ", args[0].type = " + args[0].getTypeName() + ",funcName: " + funcName);
             Matrix m = FunctionManager.lookUp(args[0].textRes).getMatrix();
             double[] evals = m.computeEigenValues();
 
@@ -869,7 +883,7 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(result);
         });
         registerMethod(Declarations.MATRIX_EIGENVEC, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
+            Function f = FunctionManager.lookUp(args[0].textRes);
             Matrix m = f.getMatrix();
             double eigenValues[] = m.computeEigenValues();
             int n = eigenValues.length;
@@ -914,17 +928,17 @@ public class MethodRegistry {
             return ctx.getNextResult().wrap(m);
         });
         registerMethod(Declarations.INVERSE_MATRIX, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
+            Function f = FunctionManager.lookUp(args[0].textRes);
             Matrix m = f.getMatrix().inverse();
             return ctx.getNextResult().wrap(m);
         });
         registerMethod(Declarations.TRIANGULAR_MATRIX, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
+            Function f = FunctionManager.lookUp(args[0].textRes);
             Matrix m = f.getMatrix().reduceToTriangularMatrix();
             return ctx.getNextResult().wrap(m);
         });
         registerMethod(Declarations.ECHELON_MATRIX, (ctx, funcName, arity, args) -> {
-            Function f = FunctionManager.lookUp(funcName);
+            Function f = FunctionManager.lookUp(args[0].textRes);
             Matrix m = f.getMatrix().reduceToRowEchelonMatrix();
             return ctx.getNextResult().wrap(m);
         });
@@ -983,4 +997,7 @@ public class MethodRegistry {
             arr[j + 1].scalar = val;
         }
     }
+    
+    
+ 
 }

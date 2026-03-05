@@ -23,7 +23,6 @@ import java.util.Deque;
 import java.util.InputMismatchException;
 import java.util.Iterator;
 import java.util.List;
-import java.util.function.Predicate;
 
 import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Number.*;
@@ -34,9 +33,7 @@ import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
 import static com.github.gbenroscience.parser.TYPE.LIST;
 import static com.github.gbenroscience.parser.TYPE.MATRIX;
 import com.github.gbenroscience.parser.benchmarks.GG;
-import com.github.gbenroscience.parser.logical.ExpressionLogger;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
-import java.util.Random;
 import java.util.Stack;
 
 /**
@@ -369,12 +366,7 @@ public class MathExpression implements Savable, Solvable {
      * state, objects of this class are optimized to run at very high speeds.
      */
     public boolean isScannedAndOptimized() {
-        try {
-            return !scanner.isEmpty() && correctFunction && this != null;
-        }//end try
-        catch (NullPointerException nol) {
-            return false;
-        }//end catch
+            return scanner != null && !scanner.isEmpty() && correctFunction && this != null;
     }//end method
 
     public static void setAutoInitOn(boolean autoInitOn) {
@@ -400,7 +392,7 @@ public class MathExpression implements Savable, Solvable {
         scanner = opScanner.getScanner();
 
         correctFunction = opScanner.isRunnable();
-        System.out.println("scanner>>>>>: "+scanner);
+       
         parser_Result = opScanner.parser_Result;
         if (parser_Result == ParserResult.VALID) {
             statsVerifier();
@@ -412,11 +404,11 @@ public class MathExpression implements Savable, Solvable {
         }//end if
     }//end method initializing(args)
 
-    public void removeCommas() {
+    private void removeCommas() {
         scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
     }
 
-    public void refixCommas() {
+    private void refixCommas() {
         scanner.replaceAll((String t) -> this.commaAlias.equals(t) ? "," : t);
     }
 
@@ -660,6 +652,7 @@ public class MathExpression implements Savable, Solvable {
      * return this variable, but instead returns the data which it refers
      * to..e.g a {@link Matrix} function or other. But we at times need that
      * function name...So we cache this value here.
+     * @return the object returned via its string reference name
      */
     public String getReturnObjectName() {
         return returnObjectName;
@@ -783,7 +776,7 @@ public class MathExpression implements Savable, Solvable {
 
     }
 
-    public void statsVerifier() {
+    private void statsVerifier() {
         scanner.removeAll(whitespaceremover);
 
         //determine the presence of list returning statistical operators
@@ -849,7 +842,7 @@ public class MathExpression implements Savable, Solvable {
      * :e.g(3+4)(1+2) will become (3+4)*(1+2).It is essentially a stage that
      * generates code.
      */
-    public void codeModifier() {
+    private void codeModifier() {
 
         if (correctFunction) {
             StringBuilder utility = new StringBuilder();
@@ -896,7 +889,7 @@ public class MathExpression implements Savable, Solvable {
      * scanned function.
      * @return a Bracket array that holds related brackets pairs.
      */
-    public static Bracket[] mapBrackets(List<String> scanner) {
+    private static Bracket[] mapBrackets(List<String> scanner) {
         for (Iterator<String> it = scanner.iterator(); it.hasNext();) {
             if (" ".equals(it.next())) {
                 it.remove();
@@ -940,7 +933,7 @@ public class MathExpression implements Savable, Solvable {
      * Method mapBrackets goes over an input equation and maps all positions
      * that have corresponding brackets
      */
-    public void mapBrackets() {
+    private void mapBrackets() {
         try {
             mapBrackets(scanner);
         }//end method//end method
@@ -958,7 +951,7 @@ public class MathExpression implements Savable, Solvable {
      * scanner function e.g it will check for errors in operator combination in
      * the scanner function and so on
      */
-    public void functionComponentsAssociation() {
+    private void functionComponentsAssociation() {
 
         if (correctFunction) {
             scanner.removeAll(whitespaceremover);//remove white spaces that may result from past parser actions
@@ -1128,7 +1121,7 @@ public class MathExpression implements Savable, Solvable {
         return Arrays.asList(String.valueOf(GG.evaluate(list)));
     }
 
-    public Token translate(String s, String next) {
+    private Token translate(String s, String next) {
         if (s == null || s.isEmpty()) {
             return null;
         }
@@ -1201,13 +1194,7 @@ public class MathExpression implements Savable, Solvable {
         }
         return s.equals("³√");
     }
-
-    private boolean isABinaryOperator(char opChar) {
-        return opChar == '+' || opChar == '-' || opChar == '*'
-                || opChar == '/' || opChar == '%' || opChar == '^'
-                || opChar == 'Č' || opChar == 'Р';
-    }
-
+ 
     private void compileToPostfix() {
         if (cachedPostfix != null) {
             return;
@@ -1358,10 +1345,9 @@ public class MathExpression implements Savable, Solvable {
         System.arraycopy(postfix, 0, cachedPostfix, 0, p);
     }
 
-    public final class ExpressionSolver {
+    private final class ExpressionSolver {
 
-        public EvalResult evaluate() {
-            System.out.println("scanner: " + scanner);
+        public EvalResult evaluate() { 
             final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
             int ptr = -1;
 
@@ -1729,182 +1715,14 @@ public class MathExpression implements Savable, Solvable {
         return result;
     }
 
-    public void release(int count) {
-        poolPointer -= count;
-    }
+
 
 // Add a reset method to clear the pool between evaluations
     private void resetPool() {
         poolPointer = 0;
     }
 
-    /**
-     * While traversing a list of tokens, sometimes its good to know if a token
-     * is existing in the context of a stat function, or is a free token within
-     * an algebraic expression etc Represents a scope within a mathematical
-     * expression. Used to track if we are inside a statistical function,
-     * algebraic group, or standard function.
-     */
-    static class ParseContext {
-
-        public static final int CONTEXT_IS_STAT_METHOD = 1;
-        public static final int CONTEXT_IS_ALGEBRAIC = 2;
-        public static final int CONTEXT_IS_NON_STAT_METHOD = 3;
-
-        /**
-         * The index of the start of the context identifier(the token that
-         * identifies the context -> e.g. sum for sum(...)
-         */
-        int start;
-        /**
-         * The token that identifies the context. e.g. sum for sum(...) or ( for
-         * a normal algebraic expression
-         */
-        private String token;
-        /**
-         * The kind of the context
-         */
-        private int type;
-        /**
-         * A context encountered while in another context was executing e.g.
-         * sum,(,3,4,sort,(,-3,2,1,-4,),)... The scan got to sum and changed its
-         * context to {@link ParseContext#CONTEXT_IS_STAT_METHOD}, while
-         * traversing sum's elements, it came across sort, which is a nested
-         * context within sum, so it changes its context to
-         * {@link ParseContext#CONTEXT_IS_STAT_METHOD} within and sets the
-         * {@link ParseContext#next} field of the original context. When it
-         * emerges from the close brackets of the sort(, it must null the next
-         * field and then make the current context the original or the parent of
-         * {@link ParseContext#next}
-         */
-        private ParseContext child;
-
-        private ParseContext parent;
-
-        public ParseContext(int start, String token, int type) {
-            this.start = start;
-            this.token = token;
-            this.type = type;
-        }
-
-        /**
-         * Finds the root context (the very first opening scope).
-         */
-        public ParseContext getFirst() {
-            ParseContext curr = this;
-            while (curr.parent != null) {
-                curr = curr.parent;
-            }
-            return curr;
-        }
-
-        /**
-         * Finds the current deepest nested context.
-         */
-        public ParseContext getLast() {
-            ParseContext curr = this;
-            while (curr.child != null) {
-                curr = curr.child;
-            }
-            return curr;
-        }
-
-        /**
-         * Correctly removes the deepest context and returns the new "last"
-         * context. This is vital for "emerging" from a close bracket.
-         */
-        public ParseContext removeLast() {
-            ParseContext last = getLast();
-            ParseContext newLast = last.parent;
-            if (newLast != null) {
-                newLast.child = null; // Sever the link to the child
-                last.parent = null;   // Clean up references for GC
-            }
-            return newLast;
-        }
-
-        /**
-         * Adds a new nested context to the current chain.
-         */
-        public void addChild(ParseContext newChild) {
-            ParseContext last = getLast();
-            last.child = newChild;
-            newChild.parent = last;
-        }
-
-        // --- Getters and Setters ---
-        public int getType() {
-            return type;
-        }
-
-        public void setType(int type) {
-            this.type = type;
-        }
-
-        public int getStart() {
-            return start;
-        }
-
-        public void setStart(int start) {
-            this.start = start;
-        }
-
-        public String getToken() {
-            return token;
-        }
-
-        public void setToken(String token) {
-            this.token = token;
-        }
-
-        public ParseContext getChild() {
-            return child;
-        }
-
-        public ParseContext getParent() {
-            return parent;
-        }
-
-        @Override
-        public String toString() {
-            StringBuilder sb = new StringBuilder();
-            buildString(sb, 0);
-            return sb.toString();
-        }
-
-        private void buildString(StringBuilder sb, int depth) {
-            // Create indentation based on nesting depth
-            for (int i = 0; i < depth; i++) {
-                sb.append("  ");
-            }
-
-            // Append context details
-            sb.append("Context{")
-                    .append("type=").append(getTypeName(type))
-                    .append(", token='").append(token).append('\'')
-                    .append(", start=").append(start)
-                    .append("}\n");
-
-            // Recurse into the child if it exists
-            if (child != null) {
-                child.buildString(sb, depth + 1);
-            }
-        }
-
-        private String getTypeName(int type) {
-            switch (type) {
-                case CONTEXT_IS_STAT_METHOD:
-                    return "STAT";
-                case CONTEXT_IS_ALGEBRAIC:
-                    return "ALGEBRAIC";
-                case CONTEXT_IS_NON_STAT_METHOD:
-                    return "FUNCTION";
-                default:
-                    return "UNKNOWN";
-            }
-        }
-    }
-
+  
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**
      *
@@ -2062,7 +1880,9 @@ public class MathExpression implements Savable, Solvable {
         System.out.println("linear_sys(2,3,-5,3,-4,20): -->> "+lin.solve());
  MathExpression lin1 = new MathExpression("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18)");
         System.out.println("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18): -->> "+lin1.solve());
-             System.out.println("linear_sys(12,16, 24,15,21, 24): -->> "+new MathExpression("linear_sys(@(3,4)(12,16, 24,15,21, 32))").solve());
+             System.out.println("linear_sys(12,16, 24,15,21, 24): -->> "+new MathExpression("linear_sys(@(2,3)(12,16, 24,15,21, 32))").solve());
+        System.out.println("det(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5): -->> "+new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
+        System.out.println("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5)): -->> "+new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
         System.out.println("sin(5,6)-->>" + new MathExpression("sin(5,6)").solve());
         System.out.println("√81 + ³√(27) + 2^10-->>" + new MathExpression("√81 + ³√(27) + 2^10").solve());
         System.out.println(new MathExpression("5! + 9Р3 + 6Č5").solve());

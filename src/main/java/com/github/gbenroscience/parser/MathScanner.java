@@ -1422,7 +1422,6 @@ public class MathScanner {
         if (list.indexOf("(") == list.lastIndexOf("(") && list.indexOf(")") == list.lastIndexOf(")")) {
             //det,(,A,) or matrix_mul,(,A, , ,B,)
             
-                System.out.println("list-in: "+list);
             if (sz == 4 || sz == 5) {
                 if (Method.isMatrixMethod(list.get(0)) && isOpeningBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
                   if (sz == 4 && isClosingBracket(list.get(3))) {
@@ -1430,8 +1429,7 @@ public class MathScanner {
                    }else if (sz == 5 && ( isComma(list.get(3)) && Method.isUserDefinedFunction(list.get(4)) || isNumber(list.get(4)) || isVariableString(list.get(4))) && isClosingBracket(list.get(5))) {
                         Method.run(list, Declarations.degGradRadFromVariable());
                     }
-                }
-                System.out.println("list-out: "+list);
+                } 
             } /**
              * There remains only one open and close bracket, but the parameters
              * have not yet been properly ordered! Most of the matrix methods

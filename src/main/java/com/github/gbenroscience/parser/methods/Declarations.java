@@ -104,6 +104,11 @@ public class Declarations {
     public static final String QUADRATIC = "quad";
     public static final String TARTAGLIA_ROOTS = "t_root";
     public static final String GENERAL_ROOT = "root";
+    /**
+     * May take its input  matrix as a list or as an anonymous function or as a Matrix variable.
+     * e.g linear_sys(3,2,-1,4,5,-8) [returns the raw matrix data] or linear_sys(@(2,3)(3,2,-1,4,5,-8)) [returns a function that points to the solution matrix] 
+     * or linear_sys(A) [returns a function that points to the solution matrix]
+     */
     public static final String LINEAR_SYSTEM = "linear_sys";
     public static final String DETERMINANT = "det";
     public static final String INVERSE_MATRIX = "invert";
