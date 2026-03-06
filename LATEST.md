@@ -9,6 +9,9 @@ Check [ParserNG-Wars](https://github.com/gbenroscience/tinymath) for some shooto
 ParserNG evaluates expressions at almost the speed at which the expressions would run if they were compiled statements in Java code. Typical values for moderate expression evaluation speeds are between `85ns`(algebraic expressions e.g.`((12+5)*3 - (45/9))^2` to `176ns`(methods with trig. functions, e.g. `(sin(3) + cos(4 - sin(2))) ^ (-2))`.
 
 
+Applications that need 5 million to 10 million points generated per second would benefit from `ParserNG v0.2.4`
+
+
 ## What's new?
 
 1. Breaking change!!! Package name change. **ParserNG** now has a proper root package name, com.github.gbenroscience
