@@ -260,8 +260,7 @@ public class RoundingTests {
         me = new MathExpression("roundN(2,sin(5))");
         Assertions.assertEquals("-0.96", me.solve());
         me = new MathExpression("round(abs(-1.5))");
-        Assertions.assertEquals("2.0", me.solve());
-
+        Assertions.assertEquals(2.0, Double.parseDouble(me.solve()));
     }
 
 

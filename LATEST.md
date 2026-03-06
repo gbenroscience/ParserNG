@@ -1,5 +1,17 @@
 # ParserNG
+ 
+ 
+ParserNG 0.2.4 has been released on maven-central!
 
+ParserNG 0.2.4 drives the limits of expression interpretation velocity even further than all previous versions, beating much lighterweight and fast Java math parsers in many benchmarks.
+Check [ParserNG-Wars](https://github.com/gbenroscience/tinymath) for some shootouts between ParserNG and other parsers, both handrafted benchmarks and JMH based ones
+
+ParserNG evaluates expressions at almost the speed at which the expressions would run if they were compiled statements in Java code. Typical values for moderate expression evaluation speeds are between `85ns`(algebraic expressions e.g.`((12+5)*3 - (45/9))^2` to `176ns`(methods with trig. functions, e.g. `(sin(3) + cos(4 - sin(2))) ^ (-2))`.
+
+
+Applications that need 5 million to 10 million points generated per second would benefit from `ParserNG v0.2.4`
+ 
+0.2.3
 **ParserNG 0.2.3** has been released on maven central!<br>
 comes with couple microsecond (on decent hardware and) expression solving ability while maintaining its full feature stack. Graphing feels butter-smooth and iterations shouldn't feel so iterative. 
 
@@ -13,7 +25,6 @@ String s6 = "5*sin(3+2)/(4*3-2)";
 
  Also, we support eigenvalues and eigenvectors as inbuilt methods, so enjoy! 
 
-**Back with a bang!
 ParserNG 0.2.2 has been released on maven-central!**
 
 

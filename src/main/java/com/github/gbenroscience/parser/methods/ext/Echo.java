@@ -1,7 +1,5 @@
 package com.github.gbenroscience.parser.methods.ext;
 
-import java.io.File;
-import java.nio.file.Files;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -19,7 +17,7 @@ public class Echo implements BasicNumericalMethod {
 
     @Override
     public String getHelp() {
-        return Help.toLine(getName(), " simply reprints its space dleimited arguments. Result is final, and no other operations possible");
+        return Help.toLine(getName(), " simply reprints its space delimited arguments. Result is final, and no other operations possible");
     }
 
     @Override

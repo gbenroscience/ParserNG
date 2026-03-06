@@ -1,6 +1,5 @@
 package com.github.gbenroscience.math;
 
-
 import com.github.gbenroscience.parser.STRING;
 
 import static java.lang.Math.*;
@@ -10,17 +9,64 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Maths {                       //3.14159265358979323846;
-    public static BigDecimal PI =
-            new BigDecimal("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651");
+
+    public static BigDecimal PI
+            = new BigDecimal("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651");
 
     public static String PI() {
         return "3.1415926535897932";
     }
 
-    
-    public static double fact(double p){
-        
-        String fact5 = "";
+    private static final double[] FACT_TABLE = new double[171];
+    private static final double SQRT_2PI = Math.sqrt(2 * Math.PI);
+
+    static {
+        FACT_TABLE[0] = 1.0;
+        for (int i = 1; i <= 170; i++) {
+            FACT_TABLE[i] = FACT_TABLE[i - 1] * i;
+        }
+    }
+
+    public static double fact(double p) {
+        // 1. Instant Path: Integers up to 170 (99% of use cases)
+        if (p >= 0 && p <= 170 && p == (int) p) {
+            return FACT_TABLE[(int) p];
+        }
+
+        // 2. Edge Cases
+        if (p < 0) {
+            return (p == Math.floor(p)) ? Double.NEGATIVE_INFINITY : Double.NaN;
+        }
+        if (p > 170.6) {
+            return Double.POSITIVE_INFINITY; // Beyond 170.6, double overflows
+        }
+        // 3. Floating Point Path (Optimized Stirling/Gamma)
+        double n = Math.floor(p);
+        double k = p - n;
+        double d = 160 + k;
+
+        // Stirling's series with Horner's Method-style evaluation to save cycles
+        double invD = 1.0 / d;
+        double invD2 = invD * invD;
+
+        // We pre-calculate the large constant series to avoid division in the loop
+        double series = 1.0 + invD * (1.0 / 12.0 + invD * (1.0 / 288.0 + invD * (-139.0 / 51840.0
+                + invD * (-59909.0 / 259200000.0 + invD * (1208137.0 / 1492992000.0)))));
+
+        // Use a faster power approximation or Math.pow if p is very large
+        double fact1 = Math.pow(d / Math.E, d) * SQRT_2PI * Math.sqrt(d) * series;
+
+        double prod = 1.0;
+        int limit = (int) (160 - n);
+        for (int j = 1; j <= limit; j++) {
+            prod *= (p + j);
+        }
+
+        return fact1 / prod;
+    }
+
+    public static double factOld(double p) {
+
         double i = 1;
         double prod = 1;
         double fact = 0;
@@ -28,7 +74,6 @@ public class Maths {                       //3.14159265358979323846;
         double n = Math.floor(dbVal);
         double k = dbVal - n;
         double d = 160 + k;
-
 
         if ((dbVal == 0) || (dbVal == 1.0)) {
             fact = 1.0;
@@ -49,9 +94,9 @@ public class Maths {                       //3.14159265358979323846;
             double dSeven = dSix * d;
             double dEight = dSeven * d;
             double dNine = dEight * d;
-            double fact1 = Math.pow((d / Math.E), d) * Math.sqrt(2 * d * Math.PI) * (1 + (1 / (12 * d)) + (1 / (288 * dSquare)) - (139 / (51840 * dCube)) -
-                    (59909 / (2.592E8 * dFour)) + (1208137 / (1.492992E9 * dFive)) - (1151957 / (1.875E11 * dSix)) - (101971 / (2.88E8 * dSeven)) +
-                    (189401873 / (2.4E12 * dEight)) + (1293019 / (1.8E10 * dNine)));
+            double fact1 = Math.pow((d / Math.E), d) * Math.sqrt(2 * d * Math.PI) * (1 + (1 / (12 * d)) + (1 / (288 * dSquare)) - (139 / (51840 * dCube))
+                    - (59909 / (2.592E8 * dFour)) + (1208137 / (1.492992E9 * dFive)) - (1151957 / (1.875E11 * dSix)) - (101971 / (2.88E8 * dSeven))
+                    + (189401873 / (2.4E12 * dEight)) + (1293019 / (1.8E10 * dNine)));
             while ((n + i) <= 160) {
                 prod *= (dbVal + i);
                 i++;
@@ -72,22 +117,32 @@ public class Maths {                       //3.14159265358979323846;
         }
         return fact;
     }
-    
-    
-    public static String factorialStr(double p){
+
+    public static String factorialStr(double p) {
         double v = fact(p);
         return String.valueOf(v);
     }
-    
+
     @SuppressWarnings("empty-statement")
     public static String fact(String p) {
-      return factorialStr(Double.parseDouble(p));
+        return factorialStr(Double.parseDouble(p));
     }//end method fact
 
+    public static double permutation(double n, double r){
+      return Maths.fact(n) / Maths.fact(n - r);
+    }
+    
+    public static double combination(double n, double r){
+      return Maths.fact(n) / (Maths.fact(r) * Maths.fact(n - r));
+    }
+    
 
+    
+    
     /**
-     * method getExponent returns the power to which 10 is raised when the number is written in standard form
-     * e.g an argument of 34.543 for the method gives a result of 1,since 34.543=3.4543*10^1
+     * method getExponent returns the power to which 10 is raised when the
+     * number is written in standard form e.g an argument of 34.543 for the
+     * method gives a result of 1,since 34.543=3.4543*10^1
      *
      * @param num the double number argument whose exponent is desire
      * @return the base 10 exponent of the number when written in standard form
@@ -118,7 +173,6 @@ public class Maths {                       //3.14159265358979323846;
         return Math.pow(base, num);
     }
 
-
     //returns the sign of a number string
     private static String sign(String num) {
         String sign = "";
@@ -129,7 +183,6 @@ public class Maths {                       //3.14159265358979323846;
                 sign = "+";
             }
         }
-
 
         return sign;
     }
@@ -293,14 +346,14 @@ public class Maths {                       //3.14159265358979323846;
 //e.g 0034 becomes 34
             String numafterexp = String.valueOf(Long.valueOf(getNumbersAfterExp(abs_val)));
 //rewrite number before point and after point but before the E ( if one exists ) in std_form e.g 4567=4.567E3
-            String transform_num_before_exp_to_std_form =
-                    numbeforepoint.substring(0, 1) + "." + numbeforepoint.substring(1) + getNumbersAfterPoint(abs_val) + "E" + (numbeforepoint.length() - 1);
+            String transform_num_before_exp_to_std_form
+                    = numbeforepoint.substring(0, 1) + "." + numbeforepoint.substring(1) + getNumbersAfterPoint(abs_val) + "E" + (numbeforepoint.length() - 1);
             if (hasNegExponent(num)) {
-                the_std_form_of_num = transform_num_before_exp_to_std_form.substring(0, transform_num_before_exp_to_std_form.indexOf("E")) + "E" +
-                        +(-Long.valueOf(numafterexp) + Long.valueOf(transform_num_before_exp_to_std_form.substring(transform_num_before_exp_to_std_form.indexOf("E") + 1)));
+                the_std_form_of_num = transform_num_before_exp_to_std_form.substring(0, transform_num_before_exp_to_std_form.indexOf("E")) + "E"
+                        + +(-Long.valueOf(numafterexp) + Long.valueOf(transform_num_before_exp_to_std_form.substring(transform_num_before_exp_to_std_form.indexOf("E") + 1)));
             } else {
-                the_std_form_of_num = transform_num_before_exp_to_std_form.substring(0, transform_num_before_exp_to_std_form.indexOf("E")) + "E" +
-                        +(Long.valueOf(numafterexp) + Long.valueOf(transform_num_before_exp_to_std_form.substring(transform_num_before_exp_to_std_form.indexOf("E") + 1)));
+                the_std_form_of_num = transform_num_before_exp_to_std_form.substring(0, transform_num_before_exp_to_std_form.indexOf("E")) + "E"
+                        + +(Long.valueOf(numafterexp) + Long.valueOf(transform_num_before_exp_to_std_form.substring(transform_num_before_exp_to_std_form.indexOf("E") + 1)));
             }
 
         } else if (checkmethodgetNumbersBeforePoint == 0) {
@@ -315,23 +368,19 @@ public class Maths {                       //3.14159265358979323846;
             String numafterexp = String.valueOf(Long.valueOf(getNumbersAfterExp(abs_val)));
 //rewrite number before point and after point but before the E ( if one exists ) in std_form e.g 4567=4.567E3
 
-
-            String transform_num_before_exp_to_std_form =
-                    numafterpointwithoutleadingzeroes.substring(0, 1) + "." + numafterpointwithoutleadingzeroes.substring(1) +
-                            "0E" + "-" + (1 + getNumberOfLeadingZeroes(numafterpoint));
-
+            String transform_num_before_exp_to_std_form
+                    = numafterpointwithoutleadingzeroes.substring(0, 1) + "." + numafterpointwithoutleadingzeroes.substring(1)
+                    + "0E" + "-" + (1 + getNumberOfLeadingZeroes(numafterpoint));
 
             if (hasNegExponent(num)) {
-                the_std_form_of_num = transform_num_before_exp_to_std_form.substring(0, transform_num_before_exp_to_std_form.indexOf("E")) + "E" +
-                        +(-Long.valueOf(numafterexp) + Long.valueOf(transform_num_before_exp_to_std_form.substring(transform_num_before_exp_to_std_form.indexOf("E") + 1)));
+                the_std_form_of_num = transform_num_before_exp_to_std_form.substring(0, transform_num_before_exp_to_std_form.indexOf("E")) + "E"
+                        + +(-Long.valueOf(numafterexp) + Long.valueOf(transform_num_before_exp_to_std_form.substring(transform_num_before_exp_to_std_form.indexOf("E") + 1)));
             } else {
-                the_std_form_of_num = transform_num_before_exp_to_std_form.substring(0, transform_num_before_exp_to_std_form.indexOf("E")) + "E" +
-                        +(Long.valueOf(numafterexp) + Long.valueOf(transform_num_before_exp_to_std_form.substring(transform_num_before_exp_to_std_form.indexOf("E") + 1)));
+                the_std_form_of_num = transform_num_before_exp_to_std_form.substring(0, transform_num_before_exp_to_std_form.indexOf("E")) + "E"
+                        + +(Long.valueOf(numafterexp) + Long.valueOf(transform_num_before_exp_to_std_form.substring(transform_num_before_exp_to_std_form.indexOf("E") + 1)));
             }
 
-
         }
-
 
         String standardized = "";
         if (sign.equals("+")) {
@@ -344,7 +393,6 @@ public class Maths {                       //3.14159265358979323846;
         String modify1 = standardized.substring(0, j + 1);
         String modify2 = standardized.substring(j + 1);
 
-
         for (int i = j - 1; i >= 0; i--) {
             if (modify1.substring(i, i + 1).equals("0")) {
                 modify1 = STRING.replace(modify1, "", i, i + 1);
@@ -352,7 +400,6 @@ public class Maths {                       //3.14159265358979323846;
                 break;
             }
         }
-
 
         return modify1 + modify2;
     }
@@ -373,17 +420,15 @@ public class Maths {                       //3.14159265358979323846;
             std_form1 = STRING.delete(std_form1, ".");//remove the floating point
             int L = std_form1.substring(0, std_form1.indexOf("E")).length();
 
-
             int expsize = Integer.valueOf(getNumbersAfterExp(std_form1));
             if (hasNegExponent(num)) {
                 expsize *= -1;
             }
 
-
             if (expsize >= 0) {
                 if (L > expsize) {
-                    result = std_form1.substring(0, expsize + 1) +
-                            "." + std_form1.substring(expsize + 1, std_form1.indexOf("E"));
+                    result = std_form1.substring(0, expsize + 1)
+                            + "." + std_form1.substring(expsize + 1, std_form1.indexOf("E"));
                 } else if (L <= expsize) {
                     result = std_form1.substring(0, std_form1.indexOf("E")) + generateZeroes(expsize - L + 1);
                 }
@@ -396,7 +441,6 @@ public class Maths {                       //3.14159265358979323846;
                 result += "";
             }
 
-
         }//end if
         else if (!hasExponent(num)) {
             result = num;
@@ -406,13 +450,15 @@ public class Maths {                       //3.14159265358979323846;
     }
 
     /**
-     * method dec_to_other_base takes 2 arguments,the decimal number to be converted,
-     * and the base to which the number is to be converted.
-     * This method has the ability to convert the whole part of a decimal number to a specified base.
+     * method dec_to_other_base takes 2 arguments,the decimal number to be
+     * converted, and the base to which the number is to be converted. This
+     * method has the ability to convert the whole part of a decimal number to a
+     * specified base.
      *
-     * @param dec_no  =the decimal number to be converted,
+     * @param dec_no =the decimal number to be converted,
      * @param base_no =the base to which the number is to be converted.
-     * @return the representation of the input decimal number in the specified base system.
+     * @return the representation of the input decimal number in the specified
+     * base system.
      * @throws
      */
     private static String whole_dec_to_other_base(String dec_no, String base_no) {
@@ -438,11 +484,9 @@ public class Maths {                       //3.14159265358979323846;
                 }//end for
 
                 return STRING.reverse(h);
-            } catch (NumberFormatException num) {
-                System.out.println(dec_no);
-                System.out.println(base_no);
+            } catch (NumberFormatException num) { 
                 num.printStackTrace();
-                throw new NumberFormatException("Only integers are expected here!");
+                throw new NumberFormatException("Only integers are expected here!--dec_no: "+dec_no+", base_no: "+base_no);
             }
 
         }//end if
@@ -450,17 +494,18 @@ public class Maths {                       //3.14159265358979323846;
             throw new NumberFormatException("Only integers are expected here!");
         }
 
-
     }
 
     /**
-     * method frac_dec_to_other_base takes 2 arguments,the decimal number to be converted,
-     * and the base to which the number is to be converted. It however deals with positive decimals less than 1 and greater than 0.
-     * This method has the ability to convert a decimal number to a specified base
+     * method frac_dec_to_other_base takes 2 arguments,the decimal number to be
+     * converted, and the base to which the number is to be converted. It
+     * however deals with positive decimals less than 1 and greater than 0. This
+     * method has the ability to convert a decimal number to a specified base
      *
-     * @param dec_no  =the decimal number to be converted,
+     * @param dec_no =the decimal number to be converted,
      * @param base_no =the base to which the number is to be converted.
-     * @return the representation of the input decimal number in the specified base system.
+     * @return the representation of the input decimal number in the specified
+     * base system.
      * @throws
      */
     private static String frac_dec_to_other_base(String dec_no, String base_no) {
@@ -487,7 +532,6 @@ public class Maths {                       //3.14159265358979323846;
         } catch (IndexOutOfBoundsException ind) {
         }
 
-
         h = "." + h;
 
         int indexOfPoint = h.indexOf(".");
@@ -504,18 +548,18 @@ public class Maths {                       //3.14159265358979323846;
 
         }
 
-
         return h;
     }
 
     /**
-     * method dec_to_other_base takes 2 arguments,the decimal number to be converted,
-     * and the base to which the number is to be converted.
-     * This method has the ability to convert a decimal number to a specified base
+     * method dec_to_other_base takes 2 arguments,the decimal number to be
+     * converted, and the base to which the number is to be converted. This
+     * method has the ability to convert a decimal number to a specified base
      *
-     * @param dec_no  =the decimal number to be converted,
+     * @param dec_no =the decimal number to be converted,
      * @param base_no =the base to which the number is to be converted.
-     * @return the representation of the input decimal number in the specified base system.
+     * @return the representation of the input decimal number in the specified
+     * base system.
      */
     public static String dec_to_other_base(String dec_no, String base_no) {
         if (dec_no.contains("E") || dec_no.contains("Є")) {
@@ -567,18 +611,18 @@ public class Maths {                       //3.14159265358979323846;
             v2 += "";
         }
 
-
 // return nio+whole_dec_to_other_base(r, base_no)+frac_dec_to_other_base(y, base_no);
         return nio + v1 + v2;
     }
 
     /**
-     * method num_to_base_10 takes 2 arguments,the number to be converted to base 10,
-     * and the base system to which the number currently belongs.
-     * This method has the ability to convert a number in a specified base back to
-     * base 10 and so has the effect of reversing the action of method dec_to_other_base.
+     * method num_to_base_10 takes 2 arguments,the number to be converted to
+     * base 10, and the base system to which the number currently belongs. This
+     * method has the ability to convert a number in a specified base back to
+     * base 10 and so has the effect of reversing the action of method
+     * dec_to_other_base.
      *
-     * @param num      is the number to be converted to base 10
+     * @param num is the number to be converted to base 10
      * @param num_base is the base to which the number currently belongs
      * @return the decimal representation of the input.
      */
@@ -599,17 +643,13 @@ public class Maths {                       //3.14159265358979323846;
             //of operation.If any digit in the input is equal to or greater than the base system,then the entry
             //is not a valid number under that base system so it instructs the software
             //to generate a NumberFormatException
-
             //The second if specifies the valid components of any number and checks all components of the input
             //to see if they are valid components.If any component of the input is not a valid number component,
             //The logic instructs the software to generate a NumberFormatException
-
-
             //The last if is only a floating point watchdog and checks to see if the input
             // contains a floating point or not.If a component of the number is a floating
             //point,the system documents or remembers this by incrementing variable point_watch
             for (int i = 0; i < num.length(); i++) {
-
 
                 if (STRING.isDigit(num.substring(i, i + 1)) && Integer.valueOf(num.substring(i, i + 1)) >= Integer.valueOf(num_base)) {
                     num = "";
@@ -689,21 +729,22 @@ public class Maths {                       //3.14159265358979323846;
                 numa.printStackTrace();
             }
 
-
         }
         return h;
     }
 
     /**
-     * Method changeBase is designed to give flexibility in converting from one base to another
-     * method changeBase takes 3 arguments,the number to be converted to base another base,
-     * the base system to which the number currently belongs,and the base to which the number is to be converted
-     * This method has the ability to convert a number in a specified base back to
-     * base 10 and so has the effect of reversing the action of method dec_to_other_base.
+     * Method changeBase is designed to give flexibility in converting from one
+     * base to another method changeBase takes 3 arguments,the number to be
+     * converted to base another base, the base system to which the number
+     * currently belongs,and the base to which the number is to be converted
+     * This method has the ability to convert a number in a specified base back
+     * to base 10 and so has the effect of reversing the action of method
+     * dec_to_other_base.
      *
-     * @param num      is the number to be converted to a new base
+     * @param num is the number to be converted to a new base
      * @param num_base is the base to which the number currently belongs
-     * @param base     is the base to which the number is to be converted.
+     * @param base is the base to which the number is to be converted.
      * @return the decimal representation of the input.
      */
     public static String changeBase(String num, String num_base, String base) {
@@ -713,13 +754,12 @@ public class Maths {                       //3.14159265358979323846;
     }
 
     /**
-     * @param num1       The first number.
-     * @param base1      The base system of the first number.
-     * @param num2       The second number.
-     * @param base2      The base system of the second number.
+     * @param num1 The first number.
+     * @param base1 The base system of the first number.
+     * @param num2 The second number.
+     * @param base2 The base system of the second number.
      * @param resultbase The base system of the result.
-     * @return the sum of the 2 numbers in the
-     * target base system.
+     * @return the sum of the 2 numbers in the target base system.
      */
     public static String add(String num1, int base1, String num2, int base2, int resultbase) {
         String no1_to_base10 = changeBase(num1, String.valueOf(base1), "10");
@@ -728,15 +768,13 @@ public class Maths {                       //3.14159265358979323846;
                 "10", String.valueOf(resultbase));
     }
 
-
     /**
-     * @param num1       The first number.
-     * @param base1      The base system of the first number.
-     * @param num2       The second number.
-     * @param base2      The base system of the second number.
+     * @param num1 The first number.
+     * @param base1 The base system of the first number.
+     * @param num2 The second number.
+     * @param base2 The base system of the second number.
      * @param resultbase The base system of the result.
-     * @return the difference of the 2 numbers in the
-     * target base system.
+     * @return the difference of the 2 numbers in the target base system.
      */
     public static String subtract(String num1, int base1, String num2, int base2, int resultbase) {
 
@@ -747,13 +785,12 @@ public class Maths {                       //3.14159265358979323846;
     }
 
     /**
-     * @param num1       The first number.
-     * @param base1      The base system of the first number.
-     * @param num2       The second number.
-     * @param base2      The base system of the second number.
+     * @param num1 The first number.
+     * @param base1 The base system of the first number.
+     * @param num2 The second number.
+     * @param base2 The base system of the second number.
      * @param resultbase The base system of the result.
-     * @return the division product of the 2 numbers in the
-     * target base system.
+     * @return the division product of the 2 numbers in the target base system.
      */
     public static String divide(String num1, int base1, String num2, int base2, int resultbase) {
         String no1_to_base10 = changeBase(num1, String.valueOf(base1), "10");
@@ -763,13 +800,12 @@ public class Maths {                       //3.14159265358979323846;
     }
 
     /**
-     * @param num1       The first number.
-     * @param base1      The base system of the first number.
-     * @param num2       The second number.
-     * @param base2      The base system of the second number.
+     * @param num1 The first number.
+     * @param base1 The base system of the first number.
+     * @param num2 The second number.
+     * @param base2 The base system of the second number.
      * @param resultbase The base system of the result.
-     * @return the product of the 2 numbers in the
-     * target base system.
+     * @return the product of the 2 numbers in the target base system.
      */
     public static String multiply(String num1, int base1, String num2, int base2, int resultbase) {
         String no1_to_base10 = changeBase(num1, String.valueOf(base1), "10");
@@ -778,10 +814,10 @@ public class Maths {                       //3.14159265358979323846;
                 "10", String.valueOf(resultbase));
     }
 
-
     /**
-     * Method scanintoList is designed to scan a string of numbers separated by commas into a List
-     * serves to separate the individual number objects in a number string
+     * Method scanintoList is designed to scan a string of numbers separated by
+     * commas into a List serves to separate the individual number objects in a
+     * number string
      *
      * @param s is the string of numbers separated by commas
      * @return the List of scanned numbers
@@ -808,7 +844,6 @@ public class Maths {                       //3.14159265358979323846;
         return input;
     }
 
-
     public static double degToRad(double deg) {//from degrees to radians
         return deg * (Math.PI / 180.0);
     }
@@ -832,7 +867,6 @@ public class Maths {                       //3.14159265358979323846;
     public static double gradToRad(double grad) {//from rad to degrees
         return grad * (Math.PI / 200.0);
     }
-
 
     /**
      * @param angRad the angle in rads
@@ -882,7 +916,6 @@ public class Maths {                       //3.14159265358979323846;
         return sin(gradToDeg(angDeg));
     }
 
-
     /**
      * @param angRad the angle in rads
      * @return the cosine of an angle in degrees
@@ -930,7 +963,6 @@ public class Maths {                       //3.14159265358979323846;
     public static double cosGradToDeg(double angDeg) {
         return cos(gradToDeg(angDeg));
     }
-
 
     /**
      * @param angRad the angle in rads
@@ -980,7 +1012,6 @@ public class Maths {                       //3.14159265358979323846;
         return tan(gradToDeg(angDeg));
     }
 
-
     /**
      * @param angRad the angle in rads
      * @return the arctan of an angle in degrees
@@ -996,7 +1027,6 @@ public class Maths {                       //3.14159265358979323846;
     public static double acosRadToDeg(double angRad) {
         return radToDeg(acos(angRad));
     }
-
 
     /**
      * @param angRad the angle in rads
@@ -1046,7 +1076,6 @@ public class Maths {                       //3.14159265358979323846;
         return gradToDeg(asin(angGrad));
     }
 
-
     /**
      * @param angDeg the angle in rads
      * @return the arccos of an angle in rads
@@ -1086,7 +1115,6 @@ public class Maths {                       //3.14159265358979323846;
     public static double acosGradToDeg(double angGrad) {
         return gradToDeg(acos(angGrad));
     }
-
 
     /**
      * @param angDeg the angle in rads
@@ -1128,7 +1156,6 @@ public class Maths {                       //3.14159265358979323846;
         return gradToDeg(atan(angGrad));
     }
 
-
     /**
      * @param x The number.
      * @return the arc sinh of the number.
@@ -1152,7 +1179,6 @@ public class Maths {                       //3.14159265358979323846;
     public static double atanh(double x) {
         return 0.5 * Math.log((1 + x) / (1 - x));
     }
-
 
     /**
      * @param x The number.
@@ -1179,9 +1205,10 @@ public class Maths {                       //3.14159265358979323846;
     }
 
     /**
-     * @param number   The number
+     * @param number The number
      * @param exponent The power. May be integer or floating point.
-     * @return The number parameter raised to the power of the exponent parameter.
+     * @return The number parameter raised to the power of the exponent
+     * parameter.
      */
     public static double power(double number, double exponent) {
 
@@ -1251,24 +1278,21 @@ public class Maths {                       //3.14159265358979323846;
         }
     }//end method
 
-
     /**
-     * Developed by JIBOYE Oluwagbemiro for
-     * the J2ME platform where no proper method for calculating power exists.
-     * It also works on the J2SE platform.
+     * Developed by JIBOYE Oluwagbemiro for the J2ME platform where no proper
+     * method for calculating power exists. It also works on the J2SE platform.
      * <p>
-     * A very high speed method that finds the result when the first argument is raised to
-     * the power of the second. But the power must always be
-     * a whole number. The method could be as much as 4-5 times
-     * faster than the Math.pow method of Java's Math class and should be used
-     * whenever the power is non-fractional.
+     * A very high speed method that finds the result when the first argument is
+     * raised to the power of the second. But the power must always be a whole
+     * number. The method could be as much as 4-5 times faster than the Math.pow
+     * method of Java's Math class and should be used whenever the power is
+     * non-fractional.
      *
-     * @param number   The number to raise to a power.
+     * @param number The number to raise to a power.
      * @param exponent The power it is to be raised to.
      * @return the result of number raised to the power of exponent.
      */
     public static double pow(double number, double exponent) {
-
 
         int pow = (int) exponent;
 
@@ -1281,35 +1305,31 @@ public class Maths {                       //3.14159265358979323846;
         }
         return result;
 
-
     }//end method
 
     /**
-     * Developed by JIBOYE Oluwagbemiro Olaoluwa for
-     * the J2ME platform where no proper method for calculating the
-     * natural logarithm of a number exists.
+     * Developed by JIBOYE Oluwagbemiro Olaoluwa for the J2ME platform where no
+     * proper method for calculating the natural logarithm of a number exists.
      * It also works on the J2SE platform, but is about 5 times slower than the
      * its counterpart in class Math.
      *
-     * @param x The number whose natural
-     *          logarithm is needed.
-     * @return the natural logarithm of the number using the
-     * relation: log(x) = 2*(p+p^3/3+p^5/5+p^7/7+...) where p = (x-1)/(x+1)
+     * @param x The number whose natural logarithm is needed.
+     * @return the natural logarithm of the number using the relation: log(x) =
+     * 2*(p+p^3/3+p^5/5+p^7/7+...) where p = (x-1)/(x+1)
      * <p>
      * <p>
      * <p>
-     * This formula runs fastest at values of x very close to 1.
-     * e.g: 0.9&lte;x&lte;1.1 ,the accuracy is also highest for this range.
+     * This formula runs fastest at values of x very close to 1. e.g:
+     * 0.9&lte;x&lte;1.1 ,the accuracy is also highest for this range.
      * <p>
      * For this reason the algorithm uses a repeated-square-root deduction
      * process to force all numbers to fall into the specified range before
-     * applying the log-series formula above. The output of this step
-     * is , say <code> m = log(reduced_sqrt)</code>It then retrieves the number of
-     * times it used the square root to force the number into the range..
-     * say this number is <code>n</code>, and finds <code>N=2^n</code>.
-     * The log is then <code> m*N</code>
+     * applying the log-series formula above. The output of this step is , say
+     * <code> m = log(reduced_sqrt)</code>It then retrieves the number of times
+     * it used the square root to force the number into the range.. say this
+     * number is <code>n</code>, and finds <code>N=2^n</code>. The log is then
+     * <code> m*N</code>
      */
-
     public static double log(double x) {
         if (x <= 0) {
             return Double.NaN;
@@ -1332,13 +1352,12 @@ public class Maths {                       //3.14159265358979323846;
         }//end else
     }//end method
 
-
     /**
-     * Developed by JIBOYE Oluwagbemiro for
-     * the J2ME platform where no proper method for calculating the
-     * exponent of a number exists.
-     * It runs on the J2SE platform, too and is only slightly slower than its
-     * counterpart in class Math.
+     * Developed by JIBOYE Oluwagbemiro for the J2ME platform where no proper
+     * method for calculating the exponent of a number exists. It runs on the
+     * J2SE platform, too and is only slightly slower than its counterpart in
+     * class Math.
+     *
      * @param x The number whose exponent is needed.
      * @return the exponent of the number.
      */
@@ -1376,35 +1395,26 @@ public class Maths {                       //3.14159265358979323846;
             }
         }//end else if
 
-
     }//end method
 
-
     /**
-     * We have code that computes the arctangent very accurately.
-     * The same principles applied for the arctan do not work well
-     * for arcsin and arccos throughout the whole range -1&leq;x&leq;1.
-     * So we use the relationship between arctan,arccos and arcsin
-     * to compute them.
-     * This is it:
-     * arctan(x)=arccos(1/sqrt(1+x^2))=arcsin(x/sqrt(1+x^2))
-     * So arctan(x)=arccos(p)=arcsin(q)
-     * where p = 1/sqrt(1+x^2) and so x = sqrt(1-p^2)/p
-     * and q = x/sqrt(1+x^2) and so x = q/sqrt(1-q^2)
+     * We have code that computes the arctangent very accurately. The same
+     * principles applied for the arctan do not work well for arcsin and arccos
+     * throughout the whole range -1&leq;x&leq;1. So we use the relationship
+     * between arctan,arccos and arcsin to compute them. This is it:
+     * arctan(x)=arccos(1/sqrt(1+x^2))=arcsin(x/sqrt(1+x^2)) So
+     * arctan(x)=arccos(p)=arcsin(q) where p = 1/sqrt(1+x^2) and so x =
+     * sqrt(1-p^2)/p and q = x/sqrt(1+x^2) and so x = q/sqrt(1-q^2)
      * <p>
-     * So for example to compute arccos(0.5):
-     * Then p = 0.5 and to use arctan(x) to compute it,
-     * we convert p to x coordinates using x = sqrt(1-p^2)/p.
-     * So x = sqrt(1-0.5^2)/0.5 = sqrt(3)
-     * Then arccos(0.5) = arctan(sqrt(3))
+     * So for example to compute arccos(0.5): Then p = 0.5 and to use arctan(x)
+     * to compute it, we convert p to x coordinates using x = sqrt(1-p^2)/p. So
+     * x = sqrt(1-0.5^2)/0.5 = sqrt(3) Then arccos(0.5) = arctan(sqrt(3))
      * <p>
      * For arcsin, the same thing applies.
      * <p>
-     * So for example to compute arcsin(0.5):
-     * Then q = 0.5 and to use arctan(x) to compute it,
-     * we convert q to x coordinates using x = q/sqrt(1-q^2)
-     * So x = 0.5/sqrt(1-0.5^2) = sqrt(3)
-     * Then arcsin(0.5) = arctan(1/sqrt(3))
+     * So for example to compute arcsin(0.5): Then q = 0.5 and to use arctan(x)
+     * to compute it, we convert q to x coordinates using x = q/sqrt(1-q^2) So x
+     * = 0.5/sqrt(1-0.5^2) = sqrt(3) Then arcsin(0.5) = arctan(1/sqrt(3))
      *
      * @param q The number.
      * @return the arc sine of the number.
@@ -1420,30 +1430,23 @@ public class Maths {                       //3.14159265358979323846;
     }//end method
 
     /**
-     * We have code that computes the arctangent very accurately.
-     * The same principles applied for the arctan do not work well
-     * for arcsin and arccos throughout the whole range -1&leq;x&leq;1.
-     * So we use the relationship between arctan,arccos and arcsin
-     * to compute them.
-     * This is it:
-     * arctan(x)=arccos(1/sqrt(1+x^2))=arcsin(x/sqrt(1+x^2))
-     * So arctan(x)=arccos(p)=arcsin(q)
-     * where p = 1/sqrt(1+x^2) and so x = sqrt(1-p^2)/p
-     * and q = x/sqrt(1+x^2) and so x = q/sqrt(1-q^2)
+     * We have code that computes the arctangent very accurately. The same
+     * principles applied for the arctan do not work well for arcsin and arccos
+     * throughout the whole range -1&leq;x&leq;1. So we use the relationship
+     * between arctan,arccos and arcsin to compute them. This is it:
+     * arctan(x)=arccos(1/sqrt(1+x^2))=arcsin(x/sqrt(1+x^2)) So
+     * arctan(x)=arccos(p)=arcsin(q) where p = 1/sqrt(1+x^2) and so x =
+     * sqrt(1-p^2)/p and q = x/sqrt(1+x^2) and so x = q/sqrt(1-q^2)
      * <p>
-     * So for example to compute arccos(0.5):
-     * Then p = 0.5 and to use arctan(x) to compute it,
-     * we convert p to x coordinates using x = sqrt(1-p^2)/p.
-     * So x = sqrt(1-0.5^2)/0.5 = sqrt(3)
-     * Then arccos(0.5) = arctan(sqrt(3))
+     * So for example to compute arccos(0.5): Then p = 0.5 and to use arctan(x)
+     * to compute it, we convert p to x coordinates using x = sqrt(1-p^2)/p. So
+     * x = sqrt(1-0.5^2)/0.5 = sqrt(3) Then arccos(0.5) = arctan(sqrt(3))
      * <p>
      * For arcsin, the same thing applies.
      * <p>
-     * So for example to compute arcsin(0.5):
-     * Then q = 0.5 and to use arctan(x) to compute it,
-     * we convert q to x coordinates using x = q/sqrt(1-q^2)
-     * So x = 0.5/sqrt(1-0.5^2) = sqrt(3)
-     * Then arcsin(0.5) = arctan(1/sqrt(3))
+     * So for example to compute arcsin(0.5): Then q = 0.5 and to use arctan(x)
+     * to compute it, we convert q to x coordinates using x = q/sqrt(1-q^2) So x
+     * = 0.5/sqrt(1-0.5^2) = sqrt(3) Then arcsin(0.5) = arctan(1/sqrt(3))
      *
      * @param p The number.
      * @return the arc cosine of the number.
@@ -1457,13 +1460,11 @@ public class Maths {                       //3.14159265358979323846;
         throw new ArithmeticException("x = " + p + " does not lie between -1 and 1.");
     }
 
-
     /**
-     * We use a = atan(x)....x = tan(a)
-     * Then approx... a = x-x^3/3+x^5/5-x^7/7+x^9/9.....
-     * Then use the approx value for a in the Newton-Raphson formula
-     * to get a very accurate value for a.
-     * i.e x_n1 = x_n - f(x_n)/f'(x_n)
+     * We use a = atan(x)....x = tan(a) Then approx... a =
+     * x-x^3/3+x^5/5-x^7/7+x^9/9..... Then use the approx value for a in the
+     * Newton-Raphson formula to get a very accurate value for a. i.e x_n1 = x_n
+     * - f(x_n)/f'(x_n)
      *
      * @param x
      * @return
@@ -1476,7 +1477,6 @@ public class Maths {                       //3.14159265358979323846;
             isPositive = false;
             x = -x;
         }
-
 
         if (x > 1) {
             double a = 0.0;//approx atan.
@@ -1516,8 +1516,6 @@ public class Maths {                       //3.14159265358979323846;
                 return -1 * (Math.PI / 2.0 - x_n1);
             }
         }//end if
-
-
         else {
             double a = 0.0;//approx atan.
             double x_squared = x * x;
@@ -1535,7 +1533,6 @@ public class Maths {                       //3.14159265358979323846;
                     a -= prod;
                 }
             }//end for loop
-
 
             double x_n = a;
             double x_n1 = 0;
@@ -1559,33 +1556,7 @@ public class Maths {                       //3.14159265358979323846;
             }
         }
     }//end method.
-
-    public static void main(String args[]) {
-
-        for (int i = 0; i < 1000; i++) {
-            Math.asin(0.3);
-            Maths.asin(0.3);
-        }
-
-        double x = 0.99;
-
-        double t1 = System.nanoTime();
-        double val = Math.asin(x);
-        double t2 = System.nanoTime();
-
-        System.out.println("ans = " + val);
-        System.out.println(" RUNTIME = " + ((t2 - t1) / 1.0E6) + " ms");
-
-
-        double t3 = System.nanoTime();
-        val = Maths.asin(x);
-        double t4 = System.nanoTime();
-
-        System.out.println("ans = " + val);
-        System.out.println(" RUNTIME = " + ((t4 - t3) / 1.0E6) + " ms");
-
-
-    }
+ 
     /*We use the principle:
      * pi=(magic_whole_no)*(SUM(i^-n))^(1/n) < where i goes from 1 to infinity during summation >
      * to calculate pi.

@@ -175,7 +175,8 @@ public class Number {
         }//end catch
 
     }
- public static double fastParseDouble(String s) {
+ 
+      public static double fastParseDouble(String s) {
         int len = s.length();
         if (len == 0) {
             return 0.0; // or throw if empty not allowed
@@ -183,7 +184,7 @@ public class Number {
         int idx = 0;
         boolean negative = false;
         char first = s.charAt(0);
-
+ 
         // Handle sign
         if (first == '-') {
             negative = true;
@@ -267,7 +268,7 @@ public class Number {
         return negative ? -value : value;
     }
 
-   
+ 
     public static void main(String args[]) {
         System.out.println(isNumber("-"));
         System.out.println(validNumber("-90g"));

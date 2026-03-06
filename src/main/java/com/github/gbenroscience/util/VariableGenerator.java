@@ -51,7 +51,7 @@ private Random ran=new Random();
      int num3=ran.nextInt(67);//randomly generate a number to use as code for randomly decoding a valid Variable
       variable+=decodePiece(num3);
   }
-var=new Variable(variable,"0.0",true);
+var=new Variable(variable,0.0,true);
      }//end constructor
 /**
  *  creates a new object of this class that can be used to generate Variables randomly

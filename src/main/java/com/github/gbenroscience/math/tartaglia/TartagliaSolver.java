@@ -2,35 +2,31 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-
 package com.github.gbenroscience.math.tartaglia;
- 
+
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
 import com.github.gbenroscience.parser.MathExpression;
 import static java.lang.Math.*;
 
 /**
  *
- * Objects of this class are
- * real value solvers of the system:
- * cx^3+ax+b=0.
+ * Objects of this class are real value solvers of the system: cx^3+ax+b=0.
+ *
  * @author JIBOYE OLuwagbemiro Olaoluwa
  */
 public class TartagliaSolver {
+
     private double a;//coefficient of x.
     private double b;//coefficient of the constant.
     private double c;//coefficient of x^3.
 
     public TartagliaSolver(double c, double a, double b) {
-            this.a=a;
-            this.b=b;
-            this.c=c;
-normalizeCofficients();
+        this.a = a;
+        this.b = b;
+        this.c = c;
+        normalizeCofficients();
 
     }
-
-
-
 
     public double getA() {
         return a;
@@ -56,63 +52,51 @@ normalizeCofficients();
         this.c = c;
     }
 
+    /**
+     * Make the value of c to be equal to one by dividing through a,b,c by its
+     * value
+     *
+     */
+    final void normalizeCofficients() {
+        try {
+            setA(a / c);
+            setB(b / c);
+            setC(1.0);
 
-
-
-/**
- * Make the value of c to be equal to one by
- * dividing through a,b,c by its value
- *
- */
-public void normalizeCofficients(){
-    try{
-    setA(a/c);
-    setB(b/c);
-    setC(1.0);
-
+        } catch (ArithmeticException arit) {
+            com.github.gbenroscience.util.Utils.logError("THE COEFFICIENT OF x^3 MUST NOT BE ZERO".toUpperCase());
+        }
     }
-    catch(ArithmeticException arit){
-        com.github.gbenroscience.util.Utils.logError( "THE COEFFICIENT OF x^3 MUST NOT BE ZERO".toUpperCase());
-    }
-}
-/**
- * Finds the real roots
- * of the equation.
- */
-public String solve(){
 
-String x1="0.0";
+    /**
+     * Finds the real roots of the equation.
+     */
+    public String solve() {
 
-if(a>0){
+        String x1 = "0.0";
 
-try{
-   double lhs=(b/2.0);
-   double rhs= sqrt( ( pow(a,3)/27.0 ) +   ( pow(b,2)/4.0 ) );
- x1=String.valueOf( cbrt( -lhs+rhs)+cbrt( -lhs-rhs) );
+        if (a > 0) {
 
- QuadraticSolver solver = new QuadraticSolver(1.0,Double.valueOf(x1), a+ pow( Double.valueOf(x1),2) );
+            try {
+                double lhs = (b / 2.0);
+                double rhs = sqrt((pow(a, 3) / 27.0) + (pow(b, 2) / 4.0));
+                x1 = String.valueOf(cbrt(-lhs + rhs) + cbrt(-lhs - rhs));
 
-String allSolutions=x1+",\n"+solver.solve();
+                QuadraticSolver solver = new QuadraticSolver(1.0, Double.parseDouble(x1), a + pow(Double.parseDouble(x1), 2));
 
-return allSolutions;
-}//end try
-catch(NumberFormatException numErr){
-    return MathExpression.SYNTAX_ERROR;
-}//end catch
+                String allSolutions = x1 + ",\n" + solver.solve();
 
-}//end if
-else{
-    return "THE COEFFICIENT OF X CANNOT BE LESS THAN OR EQUAL TO ZERO.";
-}//end else
+                return allSolutions;
+            }//end try
+            catch (NumberFormatException numErr) {
+                return MathExpression.SYNTAX_ERROR;
+            }//end catch
 
+        }//end if
+        else {
+            return "THE COEFFICIENT OF X CANNOT BE LESS THAN OR EQUAL TO ZERO.";
+        }//end else
 
-
-}//end method
-
-
-
-
-
-
+    }//end method
 
 }//end class

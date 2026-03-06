@@ -16,19 +16,31 @@ import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.parser.methods.Help;
 import com.github.gbenroscience.parser.methods.Method;
 
-import com.github.gbenroscience.math.Maths; 
+ 
+import com.github.gbenroscience.math.Maths;
+ 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.InputMismatchException;
 import java.util.Iterator;
-import java.util.List; 
+ 
+import java.util.List;
+ 
 
 import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Operator.*;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+ 
+import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
+import static com.github.gbenroscience.parser.TYPE.LIST;
+import static com.github.gbenroscience.parser.TYPE.MATRIX;
+import com.github.gbenroscience.parser.benchmarks.GG;
+import com.github.gbenroscience.parser.methods.MethodRegistry;
+import java.util.Stack;
+ 
 
 /**
  *
@@ -41,8 +53,8 @@ import com.github.gbenroscience.math.matrix.expressParser.Matrix;
  * expression. To work with expressions containing user defined functions, the
  * parser looks up the underlying expression of the function in the
  * FunctionManager and employs that value in evaluating the function.
- * <b>
- * <font color = 'red'>
+ *
+ * <p style="font-weight:'bold';color:'red'">
  * NOTE: The parser operation is divided into: Step 1. Expression
  * Processing...This step takes time. Step 2. Expression Evaluation....Is an
  * high speed one.
@@ -57,16 +69,17 @@ import com.github.gbenroscience.math.matrix.expressParser.Matrix;
  * and so this scanner output cannot be reliably referred to later on by
  * iterative processes or any process that seeks to reuse the scanner's output.
  *
- *
- *
- * </font>
- * </b>
+ * </p>
  *
  * @author GBENRO
  */
 public class MathExpression implements Savable, Solvable {
 
-    public Parser_Result parser_Result = Parser_Result.VALID;
+    /**
+     * Backup the alias from the scanner here
+     */
+    private String commaAlias;
+    public ParserResult parser_Result = ParserResult.VALID;
     //determines the mode in which trig operations will be carried out on numbers.if DRG==0,it is done in degrees
 //if DRG==1, it is done in radians and if it is 2, it is done in grads.
     private DRG_MODE DRG = Declarations.degGradRadFromVariable();
@@ -80,7 +93,7 @@ public class MathExpression implements Savable, Solvable {
     protected int noOfListReturningOperators;
     protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scanner input function
     private boolean optimizable;
-    private Bracket[] bracket;
+
     protected boolean hasListReturningOperators;
     private boolean hasNumberReturningStatsOperators;
     private boolean hasPlusOrMinusOperators;
@@ -91,6 +104,10 @@ public class MathExpression implements Savable, Solvable {
     private boolean hasRemainderOperators;
     private boolean hasPermOrCombOperators;
     private boolean hasLogicOperators;
+ 
+
+    private ExpressionSolver expressionSolver = new ExpressionSolver();
+ 
     /**
      * If set to true, MathExpression objects will automatically initialize
      * undeclared variables to zero and store them.
@@ -114,10 +131,25 @@ public class MathExpression implements Savable, Solvable {
      */
     private VariableManager variableManager;
 
+    private static final int INIT_POOL_SIZE = 64;
+    // A simple pre-allocated array of results to act as a stack
+    private EvalResult[] pool = new EvalResult[INIT_POOL_SIZE];
+    private int poolPointer = 0;
+
+    private boolean help;
+
     /**
-     * The type of output returned by the parser.
+     * The kind of output returned by the parser.
      */
     TYPE returnType = TYPE.NUMBER;
+
+    // Precedence levels
+    private static final int PREC_POSTFIX = 5;  // !, ², ³, √, ³√, -¹
+    private static final int PREC_POWER = 4;    // ^
+    private static final int PREC_MULDIV = 3;   // *, /, %, Р, Č
+    private static final int PREC_ADDSUB = 2;   // +, -
+    private static final int PREC_UNARY = 100;  // Unary minus
+    private Token[] cachedPostfix = null;  // Cache the compiled postfix
 
     /**
      * Sometimes, after evaluation the evaluation list which is a local
@@ -130,6 +162,140 @@ public class MathExpression implements Savable, Solvable {
     private String returnObjectName;
     public static final String SYNTAX_ERROR = "SYNTAX ERROR";
      
+
+    // Updated Token class (from your provided)
+    static class Token {
+
+        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 5, RPAREN = 6, COMMA = 7;
+        public int kind;
+        public double value;
+        public String name; // REQUIRED for functions/methods/variables
+        public int id;
+        public char opChar;
+        public int precedence;
+        public boolean isRightAssoc;
+        public boolean isPostfix;
+        public int arity;
+        private MethodRegistry.MethodAction action;
+
+        // NEW FIELDS FOR FUNCTION ASSIGNMENT
+        public String assignToName;  // The variable to assign result to (e.g., "vw")
+        public boolean isAssignmentTarget = false;
+
+        // Constructor for Numbers
+        public Token(double value) {
+            this.kind = NUMBER;
+            this.value = value;
+            this.precedence = -1;
+            this.isRightAssoc = false;
+        }
+
+        // Constructor for Operators
+        public Token(char opChar, int precedence, boolean isRightAssoc, boolean isPostfix) {
+            this.kind = OPERATOR;
+            this.opChar = opChar;
+            this.precedence = precedence;
+            this.isRightAssoc = isRightAssoc;
+            this.isPostfix = isPostfix;
+            this.arity = isPostfix ? 1 : 2;
+        }
+
+        // Constructor for Functions/Methods
+        public Token(int kind, String name, int arity, int id) {
+            this.kind = kind;
+            this.name = name;
+            this.arity = arity;
+            this.id = id;
+            this.precedence = PREC_POSTFIX + 1;  // Bind tighter than postfix
+            this.isRightAssoc = false;
+            //This is an inbuilt method call
+            if (id != -1) {
+                this.action = MethodRegistry.getAction(id);
+            } else {
+                this.action = FunctionManager.lookUp(this.name);
+                if (this.action == null) {
+                    throw new RuntimeException("Function " + this.name + " not found");
+                }
+            }
+        }
+
+        // Constructor for Parens
+        public Token(int kind) {
+            this.kind = kind;
+            this.precedence = -1;
+            this.isRightAssoc = false;
+        }
+
+        // Add constructor for assignment
+        public Token(int kind, String name, int arity, int id, String assignToName) {
+            this(kind, name, arity, id);
+            this.assignToName = assignToName;
+            this.isAssignmentTarget = (assignToName != null);
+        }
+
+        // Helper to get precedence for opChar
+        public static int getPrec(char op) {
+            switch (op) {
+                case '!':
+                case '²':
+                case '³':
+                case '√':
+                case 'R':  // Internal for ³√
+                    return PREC_POSTFIX;
+                case '^':
+                    return PREC_POWER;
+                case '*':
+                case '/':
+                case '%':
+                case 'Р':
+                case 'Č':
+                    return PREC_MULDIV;
+                case '+':
+                case '-':
+                    return PREC_ADDSUB;
+                default:
+                    return 0;
+            }
+        }
+
+        public static boolean isRightAssociative(char op) {
+            return op == '^';
+        }
+
+        public String toJsonString() {
+            return "{\n"
+                    + "\"kind\": " + kind + ",\n"
+                    + "\"value\": " + value + ",\n"
+                    + "\"name\": " + name + ",\n"
+                    + "\"id\": " + id + ",\n"
+                    + "\"opChar\": " + opChar + ",\n"
+                    + "\"precedence\": " + precedence + ",\n"
+                    + "\"isRightAssoc\": " + isRightAssoc + ",\n"
+                    + "\"isPostfix\": " + isPostfix + ",\n"
+                    + "\"arity\": " + arity + ",\n"
+                    + "\"assignToName\": " + assignToName + ",\n"
+                    + "\"isAssignmentTarget\": " + isAssignmentTarget + "\n"
+                    + "}\n";
+        }
+
+        @Override
+        public String toString() {
+            return "{"
+                    + "\"kind\": " + kind + ","
+                    + "\"value\": " + value + ","
+                    + "\"name\": " + name + ","
+                    + "\"id\": " + id + ","
+                    + "\"opChar\": " + opChar + ","
+                    + "\"precedence\": " + precedence + ","
+                    + "\"isRightAssoc\": " + isRightAssoc + ","
+                    + "\"isPostfix\": " + isPostfix + ","
+                    + "\"arity\": " + arity + ","
+                    + "\"assignToName\": " + assignToName + ","
+                    + "\"isAssignmentTarget\": " + isAssignmentTarget
+                    + "}";
+        }
+
+    }
 
     /**
      * default no argument constructor for class MathExpression. It creates a
@@ -157,6 +323,11 @@ public class MathExpression implements Savable, Solvable {
 
     public MathExpression(String input, VariableManager variableManager) {
  
+        this.help = input.equals(Declarations.HELP);
+        for (int i = 0; i < INIT_POOL_SIZE; i++) {
+            pool[i] = new EvalResult();
+        }
+ 
         this.variableManager = variableManager;
 
         Scanner cs = new Scanner(STRING.purifier(input), false, VariableManager.endOfLine);
@@ -171,7 +342,7 @@ public class MathExpression implements Savable, Solvable {
                 boolean success = Function.assignObject(code + ";");
                 if (!success) {
                     correctFunction = success;
-                    parser_Result = Parser_Result.SYNTAX_ERROR;
+                    parser_Result = ParserResult.SYNTAX_ERROR;
                     input = null;
                     return;
                 }
@@ -200,6 +371,8 @@ public class MathExpression implements Savable, Solvable {
     public final void setExpression(String expression) {
         if (!expression.equals(this.expression)) {
             scanner.clear();
+            this.cachedPostfix = null;  // Force recompile
+            this.poolPointer = 0;
             setCorrectFunction(true);
             this.expression = expression;
             initializing(expression);
@@ -214,12 +387,7 @@ public class MathExpression implements Savable, Solvable {
      * state, objects of this class are optimized to run at very high speeds.
      */
     public boolean isScannedAndOptimized() {
-        try {
-            return !scanner.isEmpty() && correctFunction && this != null;
-        }//end try
-        catch (NullPointerException nol) {
-            return false;
-        }//end catch
+        return scanner != null && !scanner.isEmpty() && correctFunction && this != null;
     }//end method
 
     public static void setAutoInitOn(boolean autoInitOn) {
@@ -239,32 +407,30 @@ public class MathExpression implements Savable, Solvable {
         //Scanner operation
 
         MathScanner opScanner = new MathScanner(expression);
-        scanner = opScanner.scanner(variableManager);
+        opScanner.scanner(variableManager);
+        this.commaAlias = opScanner.commaAlias;
+
+        scanner = opScanner.getScanner();
 
         correctFunction = opScanner.isRunnable();
 
         parser_Result = opScanner.parser_Result;
-        if (parser_Result == Parser_Result.VALID) {
-            bracket = null;
-            //System.out.println("scanner before cdm: " + scanner);
+        if (parser_Result == ParserResult.VALID) {
+            statsVerifier();
             codeModifier();
-            //System.out.println("scanner after cdm: " + scanner);
-
-            removeCommas();
-
+            refixCommas();
             mapBrackets();
-
             functionComponentsAssociation();
-
+            compileToPostfix();  // Compile once if not already done
         }//end if
-
     }//end method initializing(args)
 
     private void removeCommas() {
-        List<String> commaList = new ArrayList<>();
-        commaList.add(",");
-        commaList.add("");
-        scanner.removeAll(commaList);
+        scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
+    }
+
+    private void refixCommas() {
+        scanner.replaceAll((String t) -> this.commaAlias.equals(t) ? "," : t);
     }
 
     /**
@@ -281,41 +447,36 @@ public class MathExpression implements Savable, Solvable {
      * @param DRG
      */
     public void setDRG(DRG_MODE DRG) {
+        if (DRG != this.DRG) {
+            for (int i = 0; i < cachedPostfix.length; i++) {
+                Token t = cachedPostfix[i];
+                if (t.kind == Token.METHOD) {
+                    if (t.name.endsWith("_deg") || t.name.endsWith("_rad") || t.name.endsWith("_grad")) {
+                        String name = t.name.substring(0, t.name.lastIndexOf("_"));
+                        t.name = Declarations.getTrigFuncDRGVariant(name, DRG);
+                        t.id = MethodRegistry.getMethodID(t.name);
+                        t.action = MethodRegistry.getAction(t.id);
+                    }
+                }
+            }
+        }
         this.DRG = DRG;
     }
 
     public void setDRG(int mode) {
         switch (mode) {
             case 0:
-                this.DRG = DRG_MODE.DEG;
+                setDRG(DRG_MODE.DEG);
                 break;
             case 1:
-                this.DRG = DRG_MODE.RAD;
+                setDRG(DRG_MODE.RAD);
                 break;
             case 2:
-                this.DRG = DRG_MODE.GRAD;
+                setDRG(DRG_MODE.GRAD);
                 break;
             default:
                 break;
         }
-    }
-
-    /**
-     *
-     * @return the Brackets ArrayList containing all Bracket objects found in
-     * the input.
-     */
-    public Bracket[] getBracket() {
-        return bracket;
-    }
-
-    /**
-     *
-     * @param bracket the Brackets ArrayList containing all Bracket objects
-     * found in the input.
-     */
-    public void setBracket(Bracket[] bracket) {
-        this.bracket = bracket;
     }
 
     /**
@@ -523,8 +684,10 @@ public class MathExpression implements Savable, Solvable {
      * variable, is reduced to a function name(or other object as time goes on)
      * instead of a number of other list. The parser unfortunately will not
      * return this variable, but instead returns the data which it refers
-     * to..e.g a {@link Matrix} function or other. But we atimes need that
+     * to..e.g a {@link Matrix} function or other. But we at times need that
      * function name...So we cache this value here.
+     *
+     * @return the object returned via its string reference name
      */
     public String getReturnObjectName() {
         return returnObjectName;
@@ -648,57 +811,7 @@ public class MathExpression implements Savable, Solvable {
 
     }
 
-    /**
-     * Removes encapsulating brackets from data set returning statistical
-     * operators. For example, (((sort(3,sin(4),5,-1))) does not need the two
-     * enclosing bracket pairs so turn it into... sort(3,sin(4),5,-1).
-     *
-     *
-     */
-    public void unBracketDataSetReturningStatsOperators() {
-
-        for (int i = 0; i < scanner.size(); i++) {
-
-            boolean exitForLoop = false;
-            if (Method.isListReturningStatsMethod(scanner.get(i))) {
-                int I = i - 1;
-                /**
-                 * Loop backwards from the operator itself and if the object at
-                 * the index is not the open bracket of a
-                 * ListReturningStatsOperator,remove it.Keep doing this till the
-                 * test fails. If the test keeps succeeding, then watch out for
-                 * the starting index,0. If the element at the starting index is
-                 * also an open bracket, remove it and exit the loop.
-                 *
-                 */
-                while (isOpeningBracket(scanner.get(I))) {
-                    int closeBracIndex = Bracket.getComplementIndex(true, I, scanner);
-                    if (I > 0 && !Method.isListReturningStatsMethod(scanner.get(I - 1))) {
-                        scanner.set(closeBracIndex, "");
-                        scanner.set(I, "");
-                        --I;
-                        exitForLoop = closeBracIndex <= scanner.size();
-                    } else if (I == 0 && isOpeningBracket(scanner.get(0))) {
-                        scanner.set(closeBracIndex, "");
-                        scanner.set(0, "");
-                        exitForLoop = closeBracIndex <= scanner.size();
-                        break;
-                    }
-                }//end while
-
-            }//end if
-
-            if (exitForLoop) {
-                break;
-            }
-
-        }//end for
-
-        scanner.removeAll(whitespaceremover);
-
-    }//end method
-
-    public void statsVerifier() {
+    private void statsVerifier() {
         scanner.removeAll(whitespaceremover);
 
         //determine the presence of list returning statistical operators
@@ -710,7 +823,7 @@ public class MathExpression implements Savable, Solvable {
         }//end for
 
         correctFunction = ListReturningStatsMethod.validateFunction(this.scanner);
-        parser_Result = correctFunction ? Parser_Result.VALID : Parser_Result.SYNTAX_ERROR;
+        parser_Result = correctFunction ? ParserResult.VALID : ParserResult.SYNTAX_ERROR;
         //processLogger.writeLog(ListReturningStatsMethod.getErrorMessage());
 
         if (noOfListReturningOperators > 0 && correctFunction) {
@@ -720,8 +833,8 @@ public class MathExpression implements Savable, Solvable {
 
             if (isHasListReturningOperators()) {
 
-                scanner.remove(0);//temporarily remove the starting bracket
-                scanner.remove(scanner.size() - 1);//temporarily remove the ending bracket
+                scanner.remove(0);//temporarily remove the starting brackets
+                scanner.remove(scanner.size() - 1);//temporarily remove the ending brackets
 
                 for (int i = 0; i < scanner.size(); i++) {
                     try {
@@ -749,7 +862,7 @@ public class MathExpression implements Savable, Solvable {
                 scanner.add(")");
 
                 if (!correctFunction) {
-                    parser_Result = Parser_Result.SYNTAX_ERROR;
+                    parser_Result = ParserResult.SYNTAX_ERROR;
                     //processLogger.writeLog("Verifier discovers invalid association between data set returning operators:");
                 }
             }//end if isHasListReturningOperator
@@ -759,159 +872,12 @@ public class MathExpression implements Savable, Solvable {
     }//end method statsVerifier
 
     /**
-     * e.g in structures like sort(3,sin2,2sin3,5,3,2,sin(4+5),4!...) This
-     * method will help to reduce the input to the simple form i.e
-     * sort(num1,num2,num3....)
-     */
-    private void evaluateCompoundStructuresInStatisticalInput() {
-        if (hasListReturningOperators || hasNumberReturningStatsOperators) {
-            for (int i = 0; i < scanner.size(); i++) {
-                try {
-                    if (Operator.isClosingBracket(scanner.get(i))) {
-                        int open = Bracket.getComplementIndex(false, i, scanner);
-
-                        int preIndex = open - 1;
-
-                        if (preIndex >= 0) {
-                            String entry = scanner.get(preIndex);
-                            if (!Method.isMethodName(entry)) {
-                                Bracket opener = new Bracket("(");
-                                opener.setIndex(open);
-                                Bracket closer = new Bracket(")");
-                                closer.setIndex(i);
-                                opener.setComplement(closer);
-                                closer.setComplement(opener);
-
-                                if (opener.simpleBracketPairHasVariables(scanner)) {
-                                    continue;
-                                }
-
-                                String fun = opener.getDomainContents(scanner);
-                                while (fun.startsWith("(") && fun.endsWith(")")) {
-                                    fun = fun.substring(1);
-                                    fun = fun.substring(0, fun.length() - 1);
-                                    fun = fun.trim();
-                                }//end while
-                                MathExpression f = new MathExpression(fun);
-                                String val = f.solve();
-                                scanner.add(open, val);
-                                scanner.subList(open + 1, i + 2).clear();
-                            }//end if
-                            else if (Method.isDefinedMethod(entry)) {
-                                int ind = open - 2;
-
-                                if (Method.isStatsMethod(entry)) {
-                                    Bracket opener = new Bracket("(");
-                                    opener.setIndex(open);
-                                    Bracket closer = new Bracket(")");
-                                    closer.setIndex(i);
-                                    opener.setComplement(closer);
-                                    closer.setComplement(opener);
-
-                                    if (opener.simpleBracketPairHasVariables(scanner)) {
-                                        continue;
-                                    }
-
-                                    //This for loop checks if it is the fix's scenario. e.g. statmethodName(num_or_var operator num_or_var)...e.g. sum(2+3*2...)
-                                    // If sum(2, 3+4) WRONG scenario, prod(3*2)  CORRECT etc.
-                                    for (int c = open; c < i; c++) {
-                                        String tkn = scanner.get(c);
-                                        String nextTkn = scanner.get(c + 1);
-                                        if ((isNumber(tkn) || isVariableString(tkn)) && (isNumber(nextTkn) || isVariableString(nextTkn))) {
-                                            return;
-                                        }
-                                    }
-
-                                    List<String> domain = new ArrayList<>(opener.getBracketDomainContents(scanner));
-
-                                    String fun = opener.getDomainContents(scanner);
-
-                                    while (fun.startsWith("(") && fun.endsWith(")")) {
-                                        fun = fun.substring(1);
-                                        fun = fun.substring(0, fun.length() - 1);
-                                        fun = fun.trim();
-                                    }//end while
-
-                                    if (fun.contains(OPEN_CIRC_BRAC)) {
-
-                                        int op = 0, cl = 0;
-
-                                        while ((cl = LISTS.nextIndexOf(domain, cl, CLOSE_CIRC_BRAC)) != -1) {
-                                            op = Bracket.getComplementIndex(false, cl, domain);
-                                            List<String> l = domain.subList(op, cl + 1);
-                                            List<String> val = solve(l);
-                                            l.clear();
-                                            l.addAll(val);
-                                            cl = op;
-                                        }
-
-                                    } else {
-                                        MathExpression f = new MathExpression(fun);
-                                        String val = f.solve();
-                                        scanner.add(open, val);
-                                        scanner.subList(open + 1, i + 2).clear();
-                                        scanner.add(open + 1, ")");
-                                        scanner.add(open, "(");
-                                    }
-
-                                } else {
-
-                                    while (ind >= 0 && Operator.isOpeningBracket(scanner.get(ind))) {
-                                        --ind;
-                                    }//end while
-
-                                    if (ind >= 0) {
-                                        String v = scanner.get(ind);
-                                        if (v.equals("intg") || v.equals("quad") || v.equals("diff") || v.equals("root")) {
-                                            Bracket opener = new Bracket("(");
-                                            opener.setIndex(open);
-                                            Bracket closer = new Bracket(")");
-                                            closer.setIndex(i);
-                                            opener.setComplement(closer);
-                                            closer.setComplement(opener);
-                                            if (opener.simpleBracketPairHasVariables(scanner)) {
-                                                continue;
-                                            }
-                                            String fun = opener.getDomainContents(scanner);
-                                            while (fun.startsWith("(") && fun.endsWith(")")) {
-                                                fun = fun.substring(1);
-                                                fun = fun.substring(0, fun.length() - 1);
-                                                fun = fun.trim();
-                                            }
-                                            MathExpression f = new MathExpression(fun);
-                                            String val = f.solve();
-                                            scanner.add(open, val);
-                                            scanner.subList(open + 1, i + 2).clear();
-                                        }//end if
-                                    }
-                                }
-
-                            }//end else if
-                        }
-
-                    }//end if
-                }//end try
-                catch (IndexOutOfBoundsException boundsException) {
-                    boundsException.printStackTrace();
-                }
-            }//end for
-        }//end if
-    }//end method
-
-    /**
      * The method establishes meaning to some shorthand techniques in math that
      * the average mathematician might expect to see in a math device.
      * :e.g(3+4)(1+2) will become (3+4)*(1+2).It is essentially a stage that
      * generates code.
      */
-    public void codeModifier() {
-
-        detectKeyOperators();
-        statsVerifier();
-        evaluateCompoundStructuresInStatisticalInput();
-        unBracketDataSetReturningStatsOperators();
-        UnaryPostOperator.assignCompoundTokens(this.scanner);
-        //PowerOperator.assignCompoundTokens(this.scanner);
+    private void codeModifier() {
 
         if (correctFunction) {
             StringBuilder utility = new StringBuilder();
@@ -944,155 +910,13 @@ public class MathExpression implements Savable, Solvable {
 
             }//end for
 
-            /**
-             * The theory behind this is that any sub-expression that lies
-             * between any 2 inBetweenOperators or between an in between
-             * operator and the enclosing bracket: is a compound token and as
-             * such must be evaluated first before execution of other parts of
-             * the expression can proceed. For example: 3/2sin4+5 is scanned as:
-             * [3,/,(,2,sin,4,),+,5] COME HEREEEEEEEEEEEEEE!!!!FOR COMPOUND
-             * TOKENS IF NEEDED!!!!!!!!!!!!!!!!
-             */
-            scanner.removeAll(whitespaceremover);
-            ParseContext context = null;
-            for (int i = 0; i < scanner.size(); i++) {
-
-                String prev = i - 1 >= 0 ? scanner.get(i - 1) : null;
-                String curr = scanner.get(i);
-                String next = i + 1 < scanner.size() ? scanner.get(i + 1) : null;
-                if (isOpeningBracket(curr)) {
-                    if (Method.isDefinedMethod(prev)) {
-                        if (Method.isStatsMethod(prev)) {
-                            if (context == null) {
-                                context = new ParseContext(i, curr, ParseContext.CONTEXT_IS_STAT_METHOD);
-                            } else {
-                                context.addChild(new ParseContext(i, curr, ParseContext.CONTEXT_IS_STAT_METHOD));
-                            }
-                        } else {
-                            if (context == null) {
-                                context = new ParseContext(i, curr, ParseContext.CONTEXT_IS_NON_STAT_METHOD);
-                            } else {
-                                context.addChild(new ParseContext(i, curr, ParseContext.CONTEXT_IS_NON_STAT_METHOD));
-                            }
-                        }
-                    } else {
-                        if (context == null) {
-                            context = new ParseContext(i, curr, ParseContext.CONTEXT_IS_ALGEBRAIC);
-                        } else {
-                            context.addChild(new ParseContext(i, curr, ParseContext.CONTEXT_IS_ALGEBRAIC));
-                        }
-                    }
-                }
-
-                try {
-                    ParseContext currCon = context != null ? context.getLast() : null;
-                    if (currCon != null && currCon.type != ParseContext.CONTEXT_IS_STAT_METHOD && (isNumber(scanner.get(i)) || (isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))))
-                            && (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))
-                            || Method.isNumberReturningStatsMethod(scanner.get(i + 1)) || Method.isLogOrAntiLogToAnyBase(scanner.get(i + 1)))) {
-                        //Determine the placement of the close bracket
-                        int j = i + 1;
-                        while (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(j)) || Method.isNumberReturningStatsMethod(scanner.get(j)) || Method.isLogOrAntiLogToAnyBase(scanner.get(j))) {
-                            System.out.println("j=" + j);
-                            ++j;
-                        }
-
-                        if (isNumber(scanner.get(j)) || isVariableString(scanner.get(j))) {
-                            scanner.add(j + 1, ")");
-                            scanner.add(i, "(");
-                            scanner.add(i + 2, MULTIPLY);
-                        } else if (isOpeningBracket(scanner.get(j))) {
-                            int ind = Bracket.getComplementIndex(true, j, scanner);
-                            scanner.add(ind + 1, ")");
-                            scanner.add(i, "(");
-                            scanner.add(i + 2, MULTIPLY);
-                        }
-
-                    }//end if
-                }//end try.
-                catch (IndexOutOfBoundsException indErr) {
-                }//end catch
-
-                try {
-                    /**
-                     * tackles situations like sin-(2+3) by converting them into
-                     * sin(-1*(2+3)). The generic situation is
-                     * "preNumberOperator-(expr)"
-                     */
-                    if (Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
-                        if (scanner.get(i).equals(MINUS)) {
-                            List<String> subList = scanner.subList(i - 1, Bracket.getComplementIndex(true, i + 1, scanner) + 1);
-
-                            subList.set(1, "(");
-                            subList.add(2, "-1");
-                            subList.add(3, MULTIPLY);
-                            subList.add(")");
-                        }//end if
-                        else if (scanner.get(i).equals(PLUS)) {
-                            scanner.set(i, "");
-                        }
-
-                    }//end if
-                }//end try
-                catch (IndexOutOfBoundsException ind) {
-                }//end catch
-
-                try {
-                    /**
-                     * tackles situations like (-sin2+3) which it converts into
-                     * -1*sin2+3 if this is not done, it would be evaluated as
-                     * -(sin2+3)
-                     */
-                    if (isOpeningBracket(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && Method.isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))) {
-                        if (scanner.get(i).equals(MINUS)) {
-                            scanner.set(i, "-1");
-                            scanner.add(i + 1, MULTIPLY);
-                        } else if (scanner.get(i).equals(PLUS)) {
-                            scanner.set(i, "");
-                        }
-                    }
-                }//end try
-                catch (IndexOutOfBoundsException ind) {
-                }//end catch
-
-            }//end for
-
             scanner.removeAll(whitespaceremover);
 
         } else if (!correctFunction) {
             //processLogger.writeLog("Beginning Parser Shutdown Tasks Due To Errors In User Input.");
         }
 
-        detectKeyOperators();
     }//end method codeModifier
-
-    /**
-     * Serves as a powerful optimizer of the evaluation section as it can govern
-     * what sections of code will be executed and which ones will be ignored.
-     */
-    public void detectKeyOperators() {
-        for (int i = 0; i < scanner.size(); i++) {
-            if (isPlusOrMinus(scanner.get(i))) {
-                setHasPlusOrMinusOperators(true);
-            } else if (isUnaryPreOperator(scanner.get(i))) {
-                setHasPreNumberOperators(true);
-            } else if (isUnaryPostOperator(scanner.get(i))) {
-                setHasPostNumberOperators(true);
-            } else if (isMulOrDiv(scanner.get(i))) {
-                setHasMulOrDivOperators(true);
-            } else if (isPermOrComb(scanner.get(i))) {
-                setHasPermOrCombOperators(true);
-            } else if (isRemainder(scanner.get(i))) {
-                setHasRemainderOperators(true);
-            } else if (Method.isNumberReturningStatsMethod(scanner.get(i))) {
-                setHasNumberReturningStatsOperators(true);
-            } else if (isPower(scanner.get(i))) {
-                setHasPowerOperators(true);
-            } else if (isLogicOperator(scanner.get(i))) {
-                setHasLogicOperators(true);
-            }
-        }//end for
-
-    }
 
     /**
      *
@@ -1100,7 +924,7 @@ public class MathExpression implements Savable, Solvable {
      * scanned function.
      * @return a Bracket array that holds related brackets pairs.
      */
-    public static Bracket[] mapBrackets(List<String> scanner) {
+    private static Bracket[] mapBrackets(List<String> scanner) {
         for (Iterator<String> it = scanner.iterator(); it.hasNext();) {
             if (" ".equals(it.next())) {
                 it.remove();
@@ -1144,12 +968,12 @@ public class MathExpression implements Savable, Solvable {
      * Method mapBrackets goes over an input equation and maps all positions
      * that have corresponding brackets
      */
-    public void mapBrackets() {
+    private void mapBrackets() {
         try {
-            setBracket(mapBrackets(scanner));
-        }//end method
+            mapBrackets(scanner);
+        }//end method//end method
         catch (InputMismatchException ime) {
-            parser_Result = Parser_Result.PARENTHESES_ERROR;
+            parser_Result = ParserResult.PARENTHESES_ERROR;
             setCorrectFunction(false);
             scanner.clear();
         }//end catch
@@ -1162,7 +986,7 @@ public class MathExpression implements Savable, Solvable {
      * scanner function e.g it will check for errors in operator combination in
      * the scanner function and so on
      */
-    public void functionComponentsAssociation() {
+    private void functionComponentsAssociation() {
 
         if (correctFunction) {
             scanner.removeAll(whitespaceremover);//remove white spaces that may result from past parser actions
@@ -1179,7 +1003,7 @@ public class MathExpression implements Savable, Solvable {
                         if (i - 1 >= 0 && !isOpeningBracket(scanner.get(i - 1))
                                 && !isLogicOperator(scanner.get(i - 1)) && !isUnaryPreOperator(scanner.get(i - 1))
                                 && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1)) && !isNumber(scanner.get(i - 1))
-                                && !isVariableString(scanner.get(i - 1))) {
+                                && !isVariableString(scanner.get(i - 1)) && !isComma(scanner.get(i - 1))) {
                             //processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n");
                             correctFunction = false;
                             scanner.clear();
@@ -1191,7 +1015,7 @@ public class MathExpression implements Savable, Solvable {
                                 && !isLogicOperator(scanner.get(i + 1)) && !isAssignmentOperator(scanner.get(i + 1))
                                 && !isUnaryPreOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
                                 && !Method.isLogToAnyBase(scanner.get(i + 1)) && !Method.isAntiLogToAnyBase(scanner.get(i + 1)) && !isNumber(scanner.get(i + 1))
-                                && !isVariableString(scanner.get(i + 1))) {
+                                && !isVariableString(scanner.get(i + 1)) && !isComma(scanner.get(i + 1))) {
                             //processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i)+"\" And \""+scanner.get(i+1)+"\"PLUS As You Have Done.\n");
                             correctFunction = false;
                             scanner.clear();
@@ -1213,15 +1037,13 @@ public class MathExpression implements Savable, Solvable {
             }//end if
             else {
                 scanner.clear();
-                bracket = null;
-                parser_Result = Parser_Result.SYNTAX_ERROR;
+                parser_Result = ParserResult.SYNTAX_ERROR;
             }//end else
 
         }//end if
         else {
             scanner.clear();
-            bracket = null;
-            parser_Result = Parser_Result.SYNTAX_ERROR;
+            parser_Result = ParserResult.SYNTAX_ERROR;
         }
 
     }//end method functionComponentAssociation
@@ -1249,7 +1071,7 @@ public class MathExpression implements Savable, Solvable {
                     if (isVariableString(scan.get(i)) && !isOpeningBracket(scan.get(i + 1))) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
-                            scan.set(i, v.getValue());
+                            scan.set(i, String.valueOf(v.getValue()));
                         }
 
                     }//end if
@@ -1257,7 +1079,7 @@ public class MathExpression implements Savable, Solvable {
                     if (isVariableString(scan.get(i))) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
-                            scan.set(i, v.getValue());
+                            scan.set(i, String.valueOf(v.getValue()));
                         }
 
                     }//end if
@@ -1278,9 +1100,9 @@ public class MathExpression implements Savable, Solvable {
      * @throws NullPointerException if a Variable object that has that name id
      * not found.
      */
-    public String getValue(String name) throws NullPointerException {
-        Variable var = variableManager.lookUp(name);
-        return var == null ? null : var.getValue();
+    public double getValue(String name) throws NullPointerException {
+        Variable var = VariableManager.lookUp(name);
+        return var == null ? Double.NaN : var.getValue();
     }
 
     /**
@@ -1290,198 +1112,12 @@ public class MathExpression implements Savable, Solvable {
      * @throws NullPointerException if a Variable object that has that name id
      * not found.
      */
-    public void setValue(String name, String value) throws NullPointerException, NumberFormatException {
+    public void setValue(String name, double value) throws NullPointerException, NumberFormatException {
         Variable v = VariableManager.lookUp(name);
         if (v != null) {
             v.setValue(value);
         }
 
-    }
-
-    /**
-     * Utility method used to dynamically change the indices of brackets in the
-     * governing bracket map of the scanner function.
-     *
-     * When method solve is performing its task,it uses the bracket ArrayList to
-     * know the next portion to evaluate in the scanner function. However when
-     * it evaluates this portion,the size of the scanner function
-     * changes(reduces) and this means that the bracket ArrayList is no longer
-     * relevant in determining the next point to evaluate in the scanner
-     * function. So this method is called to automatically re-configure the
-     * bracket ArrayList so that it can continue to be relevant to the solution
-     * process.
-     *
-     * The process occurs during method solve and is a sort of automatic
-     * compression in response to the solution process which brings about
-     * changes in the number of elements in the scanner function.
-     *
-     * LOGIC: Bearing in mind the fact that each bracket stores its current
-     * index in the MathExpression object's ArrayList,scanner; we traverse the
-     * bracket list starting from the bracket from which evaluation is to begin
-     * in the client method solve and looping on to the end of the bracket list.
-     * We check for the current index (say A) ( as in its position in the
-     * ArrayList object) stored by each bracket we meet during this scan and
-     * compare it with the index (say B)stored by the bracket from which we
-     * began the loop the last time this method was called. This is the bracket
-     * at index startPosition-2. If A&lt;B then we apply the decrement or
-     * shrinking factor to it.Else we continue the scan.
-     *
-     *
-     * @param brac the Bracket store to modify
-     * @param startPosition the index in the ArrayList where the modification is
-     * to start
-     * @param increment the amount by which each bracket index is to be
-     * decreased
-     * @param run will run this method if given the sign to do so.
-     */
-    protected void modifyBracketIndices(Bracket[] brac, int startPosition, int increment, boolean run) {
-        if (run) {
-            int valAtBracIndex = 0;
-            int valAtLastEvaluatedBracIndex = 0;
-            if (startPosition > 0) {
-                valAtLastEvaluatedBracIndex = brac[startPosition - 2].getIndex();
-
-                for (int i = startPosition; i < brac.length; i++) {
-                    valAtBracIndex = brac[i].getIndex();
-//values greater than the value stored by the bracket from which looping was started the
-// last time represent the indices of bracket in the function list that the compression function
-// will affect.So apply the decrement to them.
-                    try {
-                        if (valAtBracIndex > valAtLastEvaluatedBracIndex) {
-                            brac[i].setIndex(brac[i].getIndex() + increment);
-                        }//end if
-                    }//end try
-                    catch (IndexOutOfBoundsException indexErr) {
-                    }//end catch
-                }//end for
-
-                ArrayList<Integer> arr = new ArrayList<Integer>();
-                for (int i = 0; i < brac.length; i++) {
-                    arr.add(brac[i].getIndex());
-                }
-                //displayIndicesStoredInBrackets();
-
-            }
-        }
-
-    }//end method reduceBracketIndices
-//(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)(1+1+1+1+1+1+1+1+1+1)
-
-    /**
-     * Display the indices of all brackets in the function,bracket pair by
-     * bracket pair
-     */
-    private void displayIndicesStoredInBrackets() {
-        ArrayList<Integer> arr = new ArrayList<Integer>();
-        int size = bracket.length;
-        for (int i = 0; i < size; i++) {
-            arr.add(bracket[i].getIndex());
-        }
-        /**
-         * This method is not a useful one in the overall running. It is only
-         * used by the coder to make sure that the system is parsing the
-         * brackets properly.
-         */
-    }
-
-    /**
-     *
-     * @param scan The ArrayList object.
-     * @return the string version of the ArrayList and removes the braces i.e.
-     * []
-     */
-    protected String listToString(List<String> scan) {
-        if (scan == null || scan.isEmpty()) {
-            return "";
-        }
-
-        // Optimization 1: Pre-size the builder to avoid internal array copying
-        // We estimate: avg string length (e.g., 5) + comma/space (2) * size
-        StringBuilder sb = new StringBuilder(scan.size() * 7);
-
-        // Optimization 2: Use a standard for-loop (slightly faster than Iterator in some JVMs)
-        for (int i = 0; i < scan.size(); i++) {
-            String s = scan.get(i);
-
-            // Skip nulls or empties if necessary for your parser logic
-            if (s != null && !s.isEmpty()) {
-                if (sb.length() > 0) {
-                    sb.append(", ");
-                }
-                sb.append(s);
-            }
-        }
-
-        return sb.toString();
-    }
-
-    /**
-     * [-6, -4, 2, 3, 4, 5, 5, 13, 62, 2024]
-     *
-     * @param text
-     * @return
-     */
-    private List<String> readNumbersFromCommaSeparatedList(String text) {
-        if (text == null || text.isEmpty()) {
-            return new ArrayList<>();
-        }
-
-        // Pre-size ArrayList if possible to avoid resizing overhead
-        List<String> numbers = new ArrayList<>(16);
-        int len = text.length();
-        int start = -1;
-
-        for (int i = 0; i < len; i++) {
-            char c = text.charAt(i);
-
-            // Check if character is part of a valid number
-            if ((c >= '0' && c <= '9') || c == '-' || c == '.'
-                    || c == 'e' || c == 'E' || c == '+') {
-                if (start == -1) {
-                    start = i; // Mark the beginning of a number
-                }
-            } else {
-                // We hit a delimiter (comma, space, bracket, etc.)
-                if (start != -1) {
-                    numbers.add(text.substring(start, i));
-                    start = -1;
-                }
-
-                // Validation for '[' only at start
-                if (c == '[' && i != 0) {
-                    throw new InputMismatchException("Invalid character [ at index " + i);
-                }
-            }
-        }
-
-        // CRITICAL: Catch the last number if the string doesn't end with a delimiter
-        if (start != -1) {
-            // If the last char is ']', exclude it from the substring
-            int end = text.charAt(len - 1) == ']' ? len - 1 : len;
-            if (end > start) {
-                numbers.add(text.substring(start, end));
-            }
-        }
-
-        return numbers;
-    }
-
-    /**
-     *
-     * @return an Array object containing duplicate contents of the List object
-     * alone
-     */
-    protected Bracket[] copyArrayToArray() {
-        int size = bracket.length;
-        Bracket[] obj = new Bracket[size];
-        if (bracket != null) {
-            for (int i = 0; i < size; i++) {
-                obj[i] = bracket[i].createTwinBracket();
-            }
-        } else {
-            throw new NullPointerException("Null List Cannot Be Copied");
-        }
-        return obj;
     }
 
     public void setReturnType(TYPE returnType) {
@@ -1491,1276 +1127,665 @@ public class MathExpression implements Savable, Solvable {
     public TYPE getReturnType() {
         return returnType;
     }
-
-  
-    private String resolveSegment(List<String> scan, int openIdx, int closeIdx, boolean isMethod) {
-         if (isMethod) {
-            try {
-                /**
-                 * Get the view of the scanner between the method and the
-                 * closing bracket.. e.g. [....sin,(,3,),....] stores
-                 * [sin,(,3,)] in executable.
-                 */
-                List<String> executable = isMethod ? scan.subList(openIdx - 1, closeIdx + 1) : scan.subList(openIdx, closeIdx + 1);
-                int execSize = executable.size();
-                //System.out.println("resolveSegment->isMethod: executable " + executable);
-                String methodName = isMethod ? executable.get(0) : null;
-                //System.out.println("methodName: " + methodName + ", executable = " + executable);
-                // System.out.println("resolveSegment->isMethod: methodName " + methodName);
-                //[,sin,(,2,),] should be allowed to pass here to Method.run, else, evaluate the contents of the bracket and reduce to a number before passing
-                if (execSize == 4) {
-                    List<String> out = Method.run(new ArrayList<>(executable), DRG);
-                    //  System.out.println("resolveSegment->isMethod: executable is size=4 e.g: [sin,(,3,)] --> will call Method.run");
-                    return out.get(0);
-                } else {//e.g [,cos,(,3,+,5,-2,^,3,),]-> First evaluate the expression before evaluating the method
-                  if (Method.isStatsMethod(methodName)) {
-                        boolean isNotListReturner = Method.isNumberReturningStatsMethod(methodName);
-                        //  System.out.println("resolveSegment->isMethod: executable is stats-method e.g: \n"+executable+"\n --> will " +  (isNotListReturner ? "not call" : "call") + " listToString on result of Method.run");
-                        List<String> out = Method.run(new ArrayList<>(executable), DRG);
-                        if (!isNotListReturner) {//return a list... write the list in the original executable and then return null, the solve method will take it from there.
-                            executable.clear();
-                            executable.addAll(out);
-                        } 
-                        return isNotListReturner ? out.get(0) : null;
-                    } else {
-                        double val = hiSpeedSolver(executable.subList(2, executable.size() - 1));
-                        ArrayList<String> newList = new ArrayList<>(Arrays.asList(methodName, "(", val + "", ")"));
-                        List<String> out = Method.run(newList, DRG);
-                        //      System.out.println("resolveSegment->isMethod: executable is not stats-method. Will evaluate with hiSpeedResolver");
-                        return out.get(0);
-                    }
-                }
-            } catch (IndexOutOfBoundsException | NullPointerException | IllegalArgumentException indexErr) { 
-                indexErr.printStackTrace();
-                //System.out.println("resolveSegment->isMethod: error happened while evaluating. Check stacktrace");
-                correctFunction = false;
-                returnType = TYPE.ERROR;
-                return SYNTAX_ERROR;
-            }
-        } else {
-            // Range: [(, tokens..., )]
-            // Extract only the inner tokens for the fast evaluator
-            // Using subList here is okay as it's just a view for the evaluator
-            List<String> inner = scan.subList(openIdx + 1, closeIdx);
-
-            int sz = (closeIdx - 1) - openIdx;
-            // System.out.println("resolveSegment->isNotMethod: will call hiSpeedResolver on " + inner);
-            if (sz == 1) {
-                String elem = inner.get(0);
-                if (elem.startsWith(FunctionManager.ANON_PREFIX) || !isNumber(elem)) {//[(,anon1,)]// 
-                    Function f = FunctionManager.lookUp(inner.get(0));
-                    return f != null ? f.toString() : SYNTAX_ERROR;
-                }else if(elem.equals("NaN") || elem.contains("Infinity")){
-                    return elem;
-                }
-            }
-            double val = hiSpeedSolver(inner);
-            return String.valueOf(val);
+ 
+    public EvalResult solveGeneric() {
+        if (help) {
+            EvalResult res = new EvalResult();
+            res.wrap(Help.getHelp());
+            return res;
         }
+        if (cachedPostfix != null) {
+            resetPool();
+            EvalResult r = expressionSolver.evaluate();
+            returnType = r.getType();
+            return r;
+        }
+        if (scanner == null || scanner.isEmpty() || !correctFunction || parser_Result != ParserResult.VALID) {
+            return EvalResult.ERROR;
+        }
+
+        return EvalResult.ERROR;
     }
 
-
-    private String solveNoBrackets(List<String> tokens) {
-        if (tokens.isEmpty()) {
-            return "0";
-        }
-
-        // Check if it's already a single value to avoid overhead
-        if (tokens.size() == 1) {
-            return tokens.get(0);
-        }
-
-        try {
-            double result = hiSpeedSolver(tokens);
-
-            // Clean up the output: if it's 5.0, return "5"
-            if (result == (long) result) {
-                return String.valueOf((long) result);
-            }
-            return String.valueOf(result);
-
-        } catch (Exception e) {
-            return SYNTAX_ERROR;
-        }
-    }
-    
-     public String solve() {
-        if (expression.equalsIgnoreCase("(" + Declarations.HELP + ")")) {
-            return Help.getHelp();
-        }
-        if (correctFunction && !hasFunctionOrVariableInitStatement) {
-            final ArrayList<String> myScan = new ArrayList<>();
-
-            myScan.addAll(scanner);
-
-            setVariableValuesInFunction(myScan);
-            // Indices stack to track nested brackets
-            // Using a primitive array as a stack for speed
-            int[] openIdxStack = new int[myScan.size()];
-            int stackPtr = -1;
-
-            for (int i = 0; i < myScan.size(); i++) {
-                String token = myScan.get(i);
-
-                // 1. When we find an open bracket, just remember its position
-                if (token.equals("(")) {
-                    openIdxStack[++stackPtr] = i;
-                } // 2. When we find a closing bracket, we resolve the innermost pair
-                else if (token.equals(")")) {
-                    if (stackPtr < 0) {
-                        return "SYNTAX ERROR: Mismatched brackets";
-                    }
-
-                    int openIdx = openIdxStack[stackPtr--];
-                    int closeIdx = i;
-
-                    // Check if there is a method name before the opening bracket
-                    boolean isMethod = openIdx > 0 && Method.isMethodName(myScan.get(openIdx - 1));
-                    int replaceStart = isMethod ? openIdx - 1 : openIdx;
-                    try {
-                        // Extract the result for this specific pair
-                        String result = resolveSegment(myScan, openIdx, closeIdx, isMethod);
-                        if (result != null) {
-                             if (result.equals(SYNTAX_ERROR)) {
-                                correctFunction = false;
-                                returnType = TYPE.ERROR;
-                                return SYNTAX_ERROR;
-                            }else if(result.equals("NaN") || result.equals("Infinity") || result.equals("-Infinity")){
-                                return result;
-                            }
-                            // 3. REPLACEMENT BLOCK (The most critical part for speed)
-                            // Remove the processed tokens from the list
-                            int countToRemove = closeIdx - replaceStart + 1;
-                            for (int k = 0; k < countToRemove; k++) {
-                                myScan.remove(replaceStart);
-                            }
-                            // Insert the computed value
-                            myScan.add(replaceStart, result);
-                            // 4. RESET INDEX: Move the pointer back to where the result was inserted
-                            // so the 'for' loop continues scanning the rest of the expression correctly.
-                            i = replaceStart; 
-                        } else {//list returning operator has already mutated the scanner with the result of its computations on the portion of the list
-                            i = replaceStart;
-                        } 
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        returnType = TYPE.ERROR;
-                        return SYNTAX_ERROR;
-                    }
-                }
-            }
-
-// Final reduction for any remaining tokens without brackets
-            if (myScan.size() > 1) {
-                solveNoBrackets(myScan);
-            }
-
-            String listAppender = listToString(myScan);
-            if (listAppender.startsWith("(")) {
-                listAppender = listAppender.substring(1);
-                listAppender = listAppender.substring(0, listAppender.length() - 1);
-
-                if (isComma(listAppender.substring(0, 1))) {
-                    listAppender = listAppender.replace(",", "");
-                }
-            }
-
-            if (validNumber(listAppender)) {
-                returnType = TYPE.NUMBER;
-            } else if (listAppender.contains(",")) {
-                returnType = TYPE.STRING;
-            }
-            Function f;
-            if ((f = FunctionManager.lookUp(listAppender)) != null) {
-                if (f.getType() == TYPE.MATRIX) {
-                    listAppender = f.getMatrix().toString();
-                    returnType = f.getType();
-                } else if (f.getType() == TYPE.LIST) {
-                    listAppender = f.toString();
-                    returnType = f.getType();
-                } else if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
-                    returnType = f.getType();
-                    listAppender = f.toString();
-                }
-
-            }
-
-            //designed to deduce if or not the evaluating loop executed normally.
-            //If it didn't the statements in the else will execute
-            if (correctFunction) {
-                lastResult = listAppender;
-            }//end if
-            //give an error statement and then reset correctFunction to true;
-            else {
-                listAppender = SYNTAX_ERROR;
-                correctFunction = true;
-            }
-            if (myScan.size() == 1) {
-                returnObjectName = myScan.get(0);
-            }
-            return listAppender;
-        }//end if
-        else if (hasFunctionOrVariableInitStatement) {
-            return "Variable Storage Process Finished!";
-        } else {
-            returnType = TYPE.ERROR;
-            return SYNTAX_ERROR;
-        }
+    @Override
+    public String solve() {
+        return solveGeneric().toString();
+ 
     }//end method solve()
      
      
      
       
     protected List<String> solve(List<String> list) {
-        ExpressionSolver.evaluate(list);
-        return list;
+        return Arrays.asList(String.valueOf(GG.evaluate(list)));
     }
 
-    protected double hiSpeedSolver(List<String> list) {
-        return ExpressionSolver.evaluate(list);
+    private Token translate(String s, String next) {
+        if (s == null || s.isEmpty()) {
+            return null;
+        }
+        char c0 = s.charAt(0);
+        int len = s.length();
+
+        // 1. Identify Numbers
+        if (isNumber(s)) {
+            return new Token(fastParseDouble(s));
+        }
+
+        // 2. Identify Brackets
+        if (len == 1) {
+            switch (c0) {
+                case '(':
+                    return new Token(Token.LPAREN);
+                case ')':
+                    return new Token(Token.RPAREN);
+            }
+        }
+
+        // 3. Identify Operators
+        if (isOperator(s)) {
+            boolean isPostfix = (c0 == '!' || c0 == '²' || c0 == '³') && !s.equals("³√");
+            char internalOp = (len > 1 && s.equals("³√")) ? 'R' : c0;
+            return new Token(internalOp, Token.getPrec(internalOp), Token.isRightAssociative(internalOp), isPostfix);
+        }
+
+        // Handle commas (function argument separators)
+        if (s.equals(",")) {
+            Token t = new Token(0.0);
+            t.kind = Token.COMMA;
+            return t;
+        }
+
+        // 4. Identify Functions/Anonymous Functions (ONLY if followed by "(")
+        if (FunctionManager.FUNCTIONS.containsKey(s)) {
+            // CRITICAL: Only treat as FUNCTION if it's being CALLED (has "(" after it)
+            if (next != null && next.equals("(")) {
+                return new Token(Token.FUNCTION, s, -1, -1); // Arity set during compile
+            }
+
+            // If NOT followed by "(", treat as a FUNCTION REFERENCE/POINTER
+            // This allows passing function names as arguments (like to diff)
+            Token t = new Token(0.0);
+            t.kind = Token.NUMBER;  // Treat as a "value" that can be passed as argument
+            t.name = s;  // Store the function name
+            return t;
+        }
+
+        // 5. Identify Methods
+        if (Method.isInBuiltMethod(s)) {
+            String transformedMethodName = Declarations.getTrigFuncDRGVariant(s, DRG);
+            int methodId = MethodRegistry.getMethodID(transformedMethodName);
+            return new Token(Token.METHOD, transformedMethodName, -1, methodId); // Arity set during compile
+        }
+
+        // 6. Fallback: Treat as Variable/Constant
+        Token t = new Token(0.0);
+        t.name = s;
+        t.kind = Token.NUMBER;
+
+        return t; 
     }
 
-    /**
-     * used by the main parser solve to figure out SBP portions of a
-     * multi-bracketed expression (MBP)
-     *
-     * @param list a list of scanner tokens of a maths expression
-     * @return the solution to a SBP maths expression
-     */
-    protected List<String> solve1(List<String> list) {
-
-//correct the anomaly: [ (,-,number....,)  ]
-        //   turn it into: [ (,,-number........,)     ]
-        //The double commas show that there exists an empty location in between the 2 commas
-        if (list.get(0).equals("(") && list.get(1).equals(MINUS) && isNumber(list.get(2))) {
-            list.set(1, "");
-            //if the number is negative,make it positive
-            if (list.get(2).charAt(0) == MINUS.charAt(0)) {
-                list.set(2, list.get(2).substring(1));
-            } //if the number is positive,make it negative
-            else {
-                list.set(2, MINUS + list.get(2));
-            }
+    // Helper for isOperator (your custom ops)
+    private boolean isOperator(String s) {
+        if (s.length() == 1) {
+            char c = s.charAt(0);
+            return "+-*/%^√!²³ČР".indexOf(c) != -1;
         }
-//Create a collection to serve as a garbage collector for the empty memory
-//locations and other unwanted locations created in the processing collection
-        ArrayList<String> garbage = new ArrayList<>();
-//insert an empty string in it so that we can use it to remove empty spaces from the processing collection.
-        garbage.add("");
-        garbage.add("(");
-        garbage.add(")");
-
-        list.removeAll(garbage);
-
-//solves the factorial component of the input|[²]|[³]|[-¹]²³-¹
-        if (isHasPostNumberOperators()) {
-            for (int i = 0; i < list.size(); i++) {
-                try {
-
-                    if (isFactorial(list.get(i + 1))) {
-                        if (isNumber(list.get(i))) {
-                            list.set(i + 1, Maths.fact(list.get(i)));
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i, "");
-                        }//end else
-
-                    } else if (isSquare(list.get(i + 1))) {
-                        if (isNumber(list.get(i))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i)), 2)));
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i, "");
-                        }//end else
-                    } else if (isCube(list.get(i + 1))) {
-                        if (isNumber(list.get(i))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i)), 3)));
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i, "");
-                        }//end else
-                    } else if (isInverse(list.get(i + 1))) {
-                        if (isNumber(list.get(i))) {
-                            list.set(i + 1, String.valueOf(1 / Double.parseDouble(list.get(i))));
-                            list.set(i, "");
-                        } else if (list.get(i).equals("Infinity")) {
-                            list.set(i + 1, "0.0");
-                            list.set(i, "");
-                        }//end else
-                    }
-                }//end try
-                catch (NumberFormatException numerror) {
-                } catch (NullPointerException nullerror) {
-                } catch (IndexOutOfBoundsException inderror) {
-                }
-            }//end for
-            list.removeAll(garbage);
-        }//end if
-
-        if (isHasPowerOperators()) {
-
-            /*Deals with powers.
-            Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
-             instead of sin(A^B).
-             Also instructs the software to multiply any 2 numbers in consecutive positions in the list.
-             This is important in distinguishing between functions such as sinAB and sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
-             */
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (list.get(i).equals(POWER) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)), Double.parseDouble(list.get(i + 1)))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end if
-                    }//end if
-                    else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i + 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) == 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) > 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) == 0) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) < 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-                    } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i - 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) == 1) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) > 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) == 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) < 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end else if
-                    }//end else if
-                    else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        list.set(i + 1, "Infinity");
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                    }
-
-                }//end try
-                catch (NumberFormatException numerror) {
-                } catch (NullPointerException nullerror) {
-                } catch (IndexOutOfBoundsException inderror) {
-                }
-            }//end for
-
-            list.removeAll(garbage);
-
-        }//end if
-        //Handles the pre-number operators.
-
-        if (isHasPreNumberOperators()) {
-            for (int i = list.size() - 1; i >= 0; i--) {
-                try {
-                    if (!list.get(i + 1).equals("Infinity") && isNumber(list.get(i + 1))) {
-                        if (list.get(i).equals(ROOT)) {
-                            list.set(i, String.valueOf(Math.sqrt(Double.parseDouble(list.get(i + 1)))));
-                            list.set(i + 1, "");
-                        }//end if
-                        if (list.get(i).equals(CUBE_ROOT)) {
-                            list.set(i, String.valueOf(Math.cbrt(Double.parseDouble(list.get(i + 1)))));
-                            list.set(i + 1, "");
-                        }//end if
-//add more pre-number functions here...
-                    }//end if
-                    else if (list.get(i + 1).equals("Infinity")) {
-                        list.set(i, "Infinity");
-                        list.set(i + 1, "");
-                    }//end else if
-                }//end try
-                catch (NumberFormatException numerror) {
-                } catch (NullPointerException nullerror) {
-                } catch (IndexOutOfBoundsException inderror) {
-                }
-            }//end for
-        }//end if
-
-        list.removeAll(garbage);
-
-        if (isHasPowerOperators()) {
-            //do the in between operators
-
-            /*Deals with powers.Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
-             instead of sin(A^B).
-             Also instructs the software to multiply any 2 numbers in consecutive positions in the vector.
-             This is important in distinguishing between functions such as sinAB and sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
-             */
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (list.get(i).equals(POWER) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)), Double.parseDouble(list.get(i + 1)))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end if
-                    }//end if
-                    else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i + 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) == 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) > 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) == 0) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) < 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-                    } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i - 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) == 1) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) > 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) == 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) < 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end else if
-                    }//end else if
-                    else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        list.set(i + 1, "Infinity");
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                    }
-
-                }//end try
-                catch (NumberFormatException numerror) {
-                } catch (NullPointerException nullerror) {
-                } catch (IndexOutOfBoundsException inderror) {
-                }
-            }//end for
-
-            list.removeAll(garbage);
-
-        }//end if
-
-        list.removeAll(garbage);
-
-        if (isHasPermOrCombOperators()) {
-            //do the lower precedence in between operators
-
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (list.get(i).equals(Operator.PERMUTATION)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(Maths.fact(list.get(i - 1))) / (Double.parseDouble(Maths.fact(String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))))))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-
-                    }//end if
-                    else if (list.get(i).equals(Operator.COMBINATION)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(Maths.fact(list.get(i - 1))) / (Double.parseDouble(Maths.fact(String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))))) * Double.parseDouble(Maths.fact(list.get(i + 1))))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end if
-                        else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-
-                    }//end else if
-
-                }//end try
-                catch (NullPointerException nolan) {
-                }//end catch
-                catch (NumberFormatException numerr) {
-                }//end catch
-                catch (IndexOutOfBoundsException inderr) {
-                }//end catch
-
-            }//end for
-            list.removeAll(garbage);
-        }//end if
-        boolean skip = false;
-        if (isHasMulOrDivOperators() || isHasRemainderOperators() || isHasLogicOperators()) {
-            for (int i = 0; i < list.size(); i++) {
-
-                try {
-
-                    if (list.get(i).equals(MULTIPLY)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) * Double.parseDouble(list.get(i + 1))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        }
-
-                    }//end if
-                    else if (list.get(i).equals(DIVIDE)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) / Double.parseDouble(list.get(i + 1))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        }
-
-                    }//end else if
-                    else if (list.get(i).equals(REMAINDER)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) % Double.parseDouble(list.get(i + 1))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, list.get(i - 1));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        }
-
-                    }//end else if
-                }//end try
-                catch (NullPointerException nolan) {
-                }//end catch
-                catch (NumberFormatException numerr) {
-                }//end catch
-                catch (IndexOutOfBoundsException inderr) {
-                }//end catch
-
-                if (!skip) {
-                    try {
-                        if (list.get(i).equals(EQUALS)) {
-
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) == 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-                        }
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                    try {
-                        if (list.get(i).equals(GREATER_THAN)) {
-
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) > 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-                        }
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                    try {
-                        if (list.get(i).equals(GREATER_OR_EQUALS)) {
-
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) >= 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-                        }
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                    try {
-                        if (list.get(i).equals(LESS_THAN)) {
-
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) < 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-
-                        }//end if
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                    try {
-                        if (list.get(i).equals(LESS_OR_EQUALS)) {
-                            if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-
-                                list.set(i + 1, String.valueOf((Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))) <= 0));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "false");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                                list.set(i + 1, "true");
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }
-                        }//end if
-
-                    }//end try
-                    catch (NullPointerException nolerr) {
-                    }//end catch
-                    catch (NumberFormatException numerr) {
-                    }//end catch
-                    catch (IndexOutOfBoundsException inderr) {
-                    }//end catch
-
-                }//end if (skip)
-            }//end for
-
-            list.removeAll(garbage);
-
-        }//end if
-        if (isHasPlusOrMinusOperators()) {
-            //Handles the subtraction and addition operators
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (list.get(i).equals(PLUS) || list.get(i).equals(MINUS)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            if (list.get(i).equals(PLUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) + Double.parseDouble(list.get(i + 1))));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }//end else
-                            else if (list.get(i).equals(MINUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }//end else if
-                        }//end if
-                        else {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-                    }
-
-                }//end try
-                catch (NullPointerException nolerr) {
-                }//end catch
-                catch (NumberFormatException numerr) {
-                }//end catch
-                catch (IndexOutOfBoundsException inderr) {
-                }//end catch
-            }//end for
-        }//end if
-
-        garbage.add("(");
-        garbage.add(")");
-
-        list.removeAll(garbage);
-        if (list.size() != 1) {
-            this.parser_Result = this.parser_Result == Parser_Result.VALID ? Parser_Result.SYNTAX_ERROR : this.parser_Result;
-            this.correctFunction = false;
-            list.clear();
-            list.add(parser_Result.name());
-        }//end if
-
-//Now de-list or un-package the input.If all goes well the list should have only its first memory location occupied.
-        return list;
-
-    }//end method solve
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-     
-
+        return s.equals("³√");
+    }
  
+    private void compileToPostfix() {
+        if (cachedPostfix != null) {
+            return;
+        }
+
+        Stack<Token> opStack = new Stack<>();
+        Stack<Integer> argCounts = new Stack<>();
+        Stack<Boolean> lastWasComma = new Stack<>();
+        Stack<Boolean> isGrouping = new Stack<>();  // Track if this paren is grouping
+
+        Token[] postfix = new Token[scanner.size() * 2];
+        int p = 0;
+
+        int depth = 0;
+        argCounts.push(0);
+        lastWasComma.push(true);
+
+        int len = scanner.size();
+        for (int idx = 0; idx < len; idx++) {
+            String s = scanner.get(idx);
+            String next = idx + 1 < len ? scanner.get(idx + 1) : null;
+
+            Token t = translate(s, next);
+            if (t == null) {
+                continue;
+            }
+
+            switch (t.kind) {
+                case Token.NUMBER:
+                    postfix[p++] = t;
+                    if (depth > 0 && lastWasComma.peek()) {
+                        int currentCount = argCounts.pop();
+                        argCounts.push(currentCount + 1);
+                        lastWasComma.pop();
+                        lastWasComma.push(false);
+                    }
+                    break;
+
+                case Token.FUNCTION:
+                case Token.METHOD:
+                    opStack.push(t);
+                    break;
+
+                case Token.LPAREN:
+                    boolean isFuncParen = false;
+                    if (!opStack.isEmpty()) {
+                        Token lastOp = opStack.peek();
+                        if (lastOp.kind == Token.FUNCTION || lastOp.kind == Token.METHOD) {
+                            isFuncParen = true;
+                        }
+                    }
+
+                    opStack.push(t);
+
+                    if (isFuncParen) {
+                        depth++;
+                        argCounts.push(0);
+                        lastWasComma.push(true);
+                        isGrouping.push(false);
+                    } else {
+                        // Grouping paren - still track if we're in a function
+                        isGrouping.push(true);
+                    }
+                    break;
+
+                case Token.RPAREN:
+                    // Pop operators until matching '('
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+
+                    if (!opStack.isEmpty()) {
+                        opStack.pop(); // discard the '('
+                    }
+
+                    boolean wasGrouping = !isGrouping.isEmpty() && isGrouping.pop();
+
+                    if (wasGrouping) {
+                        // Closing a GROUPING paren
+                        // This completes a value in the function's arg list
+                        if (depth > 0 && lastWasComma.peek()) {
+                            int currentCount = argCounts.pop();
+                            argCounts.push(currentCount + 1);
+                            lastWasComma.pop();
+                            lastWasComma.push(false);
+                        }
+                    } else {
+                        // Closing a FUNCTION CALL paren
+                        if (!opStack.isEmpty()) {
+                            Token callable = opStack.pop();
+
+                            int actualArgCount = argCounts.pop();
+                            lastWasComma.pop();
+
+                            callable.arity = Math.max(1, actualArgCount);
+                            postfix[p++] = callable;
+
+                            depth--;
+
+                            // Function result is a value in parent
+                            if (depth > 0 && lastWasComma.peek()) {
+                                int parentCount = argCounts.pop();
+                                argCounts.push(parentCount + 1);
+                                lastWasComma.pop();
+                                lastWasComma.push(false);
+                            }
+                        }
+                    }
+                    break;
+
+                case Token.COMMA:
+                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
+                        postfix[p++] = opStack.pop();
+                    }
+                    if (depth > 0 && !lastWasComma.isEmpty()) {
+                        lastWasComma.pop();
+                        lastWasComma.push(true);
+                    }
+                    break;
+
+                case Token.OPERATOR:
+                    if (t.isPostfix) {
+                        postfix[p++] = t;
+                    } else {
+                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
+                            Token top = opStack.peek();
+                            if ((!t.isRightAssoc && t.precedence <= top.precedence)
+                                    || (t.isRightAssoc && t.precedence < top.precedence)) {
+                                postfix[p++] = opStack.pop();
+                            } else {
+                                break;
+                            }
+                        }
+                        opStack.push(t);
+                    }
+                    break;
+            }
+        }
+
+        while (!opStack.isEmpty()) {
+            Token top = opStack.pop();
+            if (top.kind != Token.LPAREN) {
+                postfix[p++] = top;
+            }
+        }
+
+        cachedPostfix = new Token[p];
+        System.arraycopy(postfix, 0, cachedPostfix, 0, p);
+    }
+
+    private final class ExpressionSolver {
+
+        private static final int MAX_ARITY = 32;
+        private static final int ABSOLUTE_MAX_ARITY = 100_000;
+        private EvalResult[][] argCache = new EvalResult[MAX_ARITY + 1][];
+
+        public ExpressionSolver() {
+            // Pre-allocate ONE array per arity that we reuse
+            for (int i = 0; i <= MAX_ARITY; i++) {
+                argCache[i] = new EvalResult[i];
+            }
+        }
+
+        public EvalResult evaluate() {
+            final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
+            int ptr = -1;
+
+            for (int i = 0; i < cachedPostfix.length; i++) {
+                Token t = cachedPostfix[i];
+                /*              System.out.println("\n=== Evaluating token: "
+                        + (t.kind == Token.NUMBER ? "NUM(" + t.value + ")"
+                                : t.kind == Token.OPERATOR ? "OP(" + t.opChar + ")"
+                                        : t.kind == Token.FUNCTION ? "FUNC(" + t.name + ",arity=" + t.arity + ")"
+                                                : "METHOD(" + t.name + ",arity=" + t.arity + ")")
+                        + " | Stack ptr before = " + ptr);
+                 */
+                switch (t.kind) {
+                    case Token.NUMBER:
+                        if (t.name != null && !t.name.isEmpty()) {
+                            // Could be a variable OR a function reference (like anon1)
+                            Variable var = VariableManager.lookUp(t.name);
+                            if (var != null) {
+                                // It's a variable
+                                stack[++ptr] = getNextResult().wrap(var.getValue());
+                            } else if (FunctionManager.FUNCTIONS.containsKey(t.name)) {
+                                // It's a function reference - wrap it as a special object
+                                // The diff method will know how to handle it
+                                stack[++ptr] = getNextResult().wrap(t.name);  // Store the function name as string
+                            } else {
+                                String prevToken = stack[ptr].toString();
+                                if (FunctionManager.lookUp(prevToken) != null) {
+                                    //e.g diff(F,v) or diff(F,v,n) where F is the prevToken and v is the undefined variable to be used to create
+                                    //a function that will hold the return value of diff(F)
+                                    stack[++ptr] = getNextResult().wrap(t.name); // Store pointer to the to-be-created function as string
+                                } else {
+                                    throw new RuntimeException("Undefined variable or function: " + t.name);
+                                }
+                            }
+                        } else {
+                            // Direct number
+                            stack[++ptr] = getNextResult().wrap(t.value);
+                        }
+                        break;
+                    case Token.OPERATOR:
+                        if (t.isPostfix || t.opChar == '√' || t.opChar == 'R') {
+                            // Unary operator
+                            if (ptr < 0) {
+                                throw new RuntimeException("Insufficient operands for unary operator: " + t.opChar);
+                            }
+                            applyUnary(t.opChar, stack[ptr]);
+                        } else {
+                            // Binary operator
+                            if (ptr < 1) {
+                                throw new RuntimeException("Insufficient operands for binary operator: " + t.opChar
+                                        + " (stack ptr=" + ptr + ")");
+                            }
+                            double bVal = stack[ptr--].scalar;
+                            applyBinary(t.opChar, stack[ptr], bVal);
+                        }
+                        break;
+
+                    case Token.METHOD:
+                    case Token.FUNCTION:
+                        int arity = t.arity;
+
+                        if (arity > ABSOLUTE_MAX_ARITY) {
+                            throw new RuntimeException(
+                                    "Function " + t.name + " has too many arguments (" + arity
+                                    + "). Maximum supported: " + ABSOLUTE_MAX_ARITY);
+                        }
+
+                        int valuesOnStack = ptr + 1;
+
+                        if (arity == 0) {
+                            EvalResult result = t.action.calc(getNextResult(), arity);
+                            stack[++ptr] = result;
+                            break;
+                        }
+
+                        if (valuesOnStack < arity) {
+                            throw new RuntimeException("Function " + t.name + " requires " + arity
+                                    + " arguments but only " + valuesOnStack + " values available on stack");
+                        }
+
+                        // ULTRA FAST: Reuse cached array for this arity
+                        EvalResult[] args = (arity <= MAX_ARITY) ? argCache[arity] : new EvalResult[arity];
+
+                        // This eliminates loop overhead for the most common cases
+                        if (arity == 1) {
+                            args[0] = stack[ptr--];
+                        } else if (arity == 2) {
+                            args[1] = stack[ptr--];
+                            args[0] = stack[ptr--];
+                        } else if (arity == 3) {
+                            args[2] = stack[ptr--];
+                            args[1] = stack[ptr--];
+                            args[0] = stack[ptr--];
+                        } else {
+                            // General case for arity > 3
+                            for (int j = arity - 1; j >= 0; j--) {
+                                args[j] = stack[ptr--];
+                            }
+                        }
+
+                        EvalResult result = t.action.calc(getNextResult(), arity, args);
  
-    /**
-     * While traversing a list of tokens, sometimes its good to know if a token
-     * is existing in the context of a stat function, or is a free token within
-     * an algebraic expression etc Represents a scope within a mathematical
-     * expression. Used to track if we are inside a statistical function,
-     * algebraic group, or standard function.
-     */
-    static class ParseContext {
-
-        public static final int CONTEXT_IS_STAT_METHOD = 1;
-        public static final int CONTEXT_IS_ALGEBRAIC = 2;
-        public static final int CONTEXT_IS_NON_STAT_METHOD = 3;
-
-        /**
-         * The index of the start of the context identifier(the token that
-         * identifies the context -> e.g. sum for sum(...)
-         */
-        int start;
-        /**
-         * The token that identifies the context. e.g. sum for sum(...) or ( for
-         * a normal algebraic expression
-         */
-        private String token;
-        /**
-         * The type of the context
-         */
-        private int type;
-        /**
-         * A context encountered while in another context was executing e.g.
-         * sum,(,3,4,sort,(,-3,2,1,-4,),)... The scan got to sum and changed its
-         * context to {@link ParseContext#CONTEXT_IS_STAT_METHOD}, while
-         * traversing sum's elements, it came across sort, which is a nested
-         * context within sum, so it changes its context to
-         * {@link ParseContext#CONTEXT_IS_STAT_METHOD} within and sets the
-         * {@link ParseContext#next} field of the original context. When it
-         * emerges from the close bracket of the sort(, it must null the next
-         * field and then make the current context the original or the parent of
-         * {@link ParseContext#next}
-         */
-        private ParseContext child;
-
-        private ParseContext parent;
-
-        public ParseContext(int start, String token, int type) {
-            this.start = start;
-            this.token = token;
-            this.type = type;
-        }
-
-        /**
-         * Finds the root context (the very first opening scope).
-         */
-        public ParseContext getFirst() {
-            ParseContext curr = this;
-            while (curr.parent != null) {
-                curr = curr.parent;
+                        stack[++ptr] = result;
+                        break;
+                }
             }
-            return curr;
-        }
 
-        /**
-         * Finds the current deepest nested context.
-         */
-        public ParseContext getLast() {
-            ParseContext curr = this;
-            while (curr.child != null) {
-                curr = curr.child;
+            // Final validation
+            if (ptr < 0) {
+                EvalResult r = new EvalResult();
+                r.wrap(ParserResult.SYNTAX_ERROR);
+                return r;
             }
-            return curr;
-        }
 
-        /**
-         * Correctly removes the deepest context and returns the new "last"
-         * context. This is vital for "emerging" from a close bracket.
-         */
-        public ParseContext removeLast() {
-            ParseContext last = getLast();
-            ParseContext newLast = last.parent;
-            if (newLast != null) {
-                newLast.child = null; // Sever the link to the child
-                last.parent = null;   // Clean up references for GC
+            if (ptr > 0) {
+                System.out.println("WARNING: Evalaution stack has " + (ptr + 1) + " values at end, returning top");
             }
-            return newLast;
+
+            return stack[0];
         }
 
+        private void applyUnary(char op, EvalResult res) {
+            double val = res.scalar;
+            switch (op) {
+                case '√':
+                    res.scalar = Math.sqrt(val);
+                    break;
+                case 'R': // Internal mapping for ³√
+                    res.scalar = Math.cbrt(val);
+                    break;
+                case '!':
+                    res.scalar = Maths.fact(val);
+                    break;
+                case '²':
+                    res.scalar = val * val;
+                    break;
+                case '³':
+                    res.scalar = val * val * val;
+                    break;
+                case '-': // Unary negation (if supported by my scanner, actually my scanner has fixed it before this stage)
+                    res.scalar = -val;
+                    break;
+                case 'i': // Reciprocal/Inverse x⁻¹
+                    res.scalar = 1.0 / val;
+                    break;
+            }
+            // Note: type remains TYPE_SCALAR, so no need to call wrap()
+        }
+
+        private void applyBinary(char op, EvalResult aRes, double b) {
+            double a = aRes.scalar;
+            switch (op) {
+                case '+':
+                    aRes.scalar = a + b;
+                    break;
+                case '-':
+                    aRes.scalar = a - b;
+                    break;
+                case '*':
+                    aRes.scalar = a * b;
+                    break;
+                case '/':
+                    if (b == 0) {
+                        throw new ArithmeticException("Division by zero");
+                    }
+                    aRes.scalar = a / b;
+                    break;
+                case '%':
+                    aRes.scalar = a % b;
+                    break;
+                case '^':
+                    aRes.scalar = Math.pow(a, b);
+                    break;
+                case 'Č':
+                    aRes.scalar = Maths.combination(a, b);
+                    break;
+                case 'Р':
+                    aRes.scalar = Maths.permutation(a, b);
+                    break;
+            }
+        }
+    }
+ 
+
+    public static final class EvalResult {
+
+        public static final int TYPE_SCALAR = 0;
+        public static final int TYPE_VECTOR = 1;
+        public static final int TYPE_MATRIX = 2;
+        public static final int TYPE_STRING = 3;
+        public static final int TYPE_BOOLEAN = 4;
+        public static final int TYPE_ERROR = 5;
+
+        public static final EvalResult ERROR = new EvalResult();
+
+        static {
+            ERROR.wrap(ParserResult.SYNTAX_ERROR);
+        }
+
+        public int type;           // 0=Scalar, 1=Vector, 2=Matrix, 3=String
+
+        public double scalar;      // For single numbers
+        public double[] vector;    // For stats/lists
+        public Matrix matrix;  // For matrices
+        public ParserResult error;
+        public boolean boolVal;
         /**
-         * Adds a new nested context to the current chain.
+         * Use this to return string results, e.g. formulas, function results,
+         * etc.
          */
-        public void addChild(ParseContext newChild) {
-            ParseContext last = getLast();
-            last.child = newChild;
-            newChild.parent = last;
+        public String textRes;
+
+        // Helper to reset the object for reuse
+        public EvalResult wrap(double s) {
+            this.scalar = s;
+            this.type = TYPE_SCALAR;
+            return this;
         }
 
-        // --- Getters and Setters ---
-        public int getType() {
-            return type;
+        public EvalResult wrap(double[] v) {
+            this.vector = v;
+            this.type = TYPE_VECTOR;
+            return this;
         }
 
-        public void setType(int type) {
-            this.type = type;
+        public EvalResult wrap(Matrix m) {
+            this.matrix = m;
+            this.type = TYPE_MATRIX;
+            return this;
         }
 
-        public int getStart() {
-            return start;
+        public EvalResult wrap(String s) {
+            this.textRes = s;
+            this.type = TYPE_STRING;
+            return this;
         }
 
-        public void setStart(int start) {
-            this.start = start;
+        public EvalResult wrap(boolean s) {
+            this.boolVal = s;
+            this.type = TYPE_BOOLEAN;
+            return this;
         }
 
-        public String getToken() {
-            return token;
+        public EvalResult wrap(ParserResult s) {
+            this.error = s;
+            this.type = TYPE_ERROR;
+            return this;
         }
 
-        public void setToken(String token) {
-            this.token = token;
+        public EvalResult wrap(EvalResult evr) {
+            switch (evr.type) {
+                case TYPE_ERROR:
+                    wrap(evr.error);
+                    break;
+                case TYPE_BOOLEAN:
+                    wrap(evr.boolVal);
+                    break;
+                case TYPE_SCALAR:
+                    wrap(evr.scalar);
+                    break;
+                case TYPE_MATRIX:
+                    wrap(evr.matrix);
+                    break;
+                case TYPE_STRING:
+                    wrap(evr.textRes);
+                    break;
+                case TYPE_VECTOR:
+                    wrap(evr.vector);
+                    break;
+                default:
+                    throw new AssertionError();
+            }
+            this.type = evr.type;
+            return this;
         }
 
-        public ParseContext getChild() {
-            return child;
-        }
-
-        public ParseContext getParent() {
-            return parent;
+// In EvalResult class:
+        public void reset() {
+            this.scalar = 0.0;
+            this.vector = null;
+            this.matrix = null;
+            this.textRes = null;
+            this.boolVal = false;
+            this.error = null;
+            this.type = TYPE_SCALAR;
         }
 
         @Override
         public String toString() {
-            StringBuilder sb = new StringBuilder();
-            buildString(sb, 0);
-            return sb.toString();
-        }
-
-        private void buildString(StringBuilder sb, int depth) {
-            // Create indentation based on nesting depth
-            for (int i = 0; i < depth; i++) {
-                sb.append("  ");
-            }
-
-            // Append context details
-            sb.append("Context{")
-                    .append("type=").append(getTypeName(type))
-                    .append(", token='").append(token).append('\'')
-                    .append(", start=").append(start)
-                    .append("}\n");
-
-            // Recurse into the child if it exists
-            if (child != null) {
-                child.buildString(sb, depth + 1);
-            }
-        }
-
-        private String getTypeName(int type) {
             switch (type) {
-                case CONTEXT_IS_STAT_METHOD:
-                    return "STAT";
-                case CONTEXT_IS_ALGEBRAIC:
-                    return "ALGEBRAIC";
-                case CONTEXT_IS_NON_STAT_METHOD:
-                    return "FUNCTION";
+                case TYPE_SCALAR:
+                    return String.valueOf(scalar);
+                case TYPE_VECTOR:
+                    return Arrays.toString(vector);
+                case TYPE_MATRIX:
+                    return matrix.toString();
+                case TYPE_STRING:
+                    return textRes;
+                case TYPE_BOOLEAN:
+                    return String.valueOf(boolVal);
+                case TYPE_ERROR:
+                    return error == ParserResult.SYNTAX_ERROR ? SYNTAX_ERROR : error.toString();
                 default:
-                    return "UNKNOWN";
+                    return "0.0";
             }
+        }
+
+        public String getTypeName() {
+            switch (type) {
+                case TYPE_SCALAR:
+                    return "TYPE_SCALAR(double)";
+                case TYPE_STRING:
+                    return "TYPE_STRING(text)";
+                case TYPE_VECTOR:
+                    return "TYPE_VECTOR(an array of doubles)";
+                case TYPE_MATRIX:
+                    return "TYPE_MATRIX(Matrix)";
+                case TYPE_BOOLEAN:
+                    return "TYPE_BOOLEAN(Boolean)";
+                case TYPE_ERROR:
+                    return "TYPE_ERROR(" + error.name() + ")";
+                default:
+                    return "TYPE_UNKNOWN";
+            }
+        }
+
+        public TYPE getType() {
+            switch (type) {
+                case TYPE_SCALAR:
+                    return TYPE.NUMBER;
+                case TYPE_STRING:
+                    return TYPE.STRING;
+                case TYPE_VECTOR:
+                    return TYPE.LIST;
+                case TYPE_MATRIX:
+                    return TYPE.MATRIX;
+                case TYPE_BOOLEAN:
+                    return TYPE.BOOLEAN;
+                case TYPE_ERROR:
+                    return TYPE.ERROR;
+                default:
+                    return TYPE.ALGEBRAIC_EXPRESSION;
+            }
+        }
+
+        public EvalResult absorb(Function f) {
+            if (f != null) {
+                TYPE tt = f.getType();
+                switch (tt) {
+                    case MATRIX:
+                        wrap(f.getMatrix());
+                        break;
+                    case ALGEBRAIC_EXPRESSION:
+                        wrap(f.getMathExpression().getExpression());
+                        break;
+                    case LIST:
+                        wrap(f.getMatrix().getFlatArray());
+                        break;
+                    default:
+                        break;
+                }
+                return this;
+            }
+            return null;
         }
     }
-
-    public static final class ExpressionSolver {
-
-        // List-based wrapper for compatibility
-        public static double evaluate(List<String> tokens) {
-            return evaluate(tokens.toArray(new String[0]));
+ 
+// In ExpressionSolver.getNextResult():
+    public EvalResult getNextResult() {
+        if (poolPointer >= pool.length) {
+            // Expand pool if needed
+            EvalResult[] newPool = new EvalResult[pool.length * 2];
+            System.arraycopy(pool, 0, newPool, 0, pool.length);
+            for (int i = pool.length; i < newPool.length; i++) {
+                newPool[i] = new EvalResult();
+            }
+            // Note: You'd need to make pool non-final to do this
+ 
         }
+        EvalResult result = pool[poolPointer++];
+        result.reset();
+        return result;
+    }
 
-        /**
-         * Array-based entry point for maximum performance.
-         */
-        public static double evaluate(String[] ts) {
-            final int n = ts.length;
-            final double[] valStack = new double[n];
-            final int[] opStack = new int[n];
-            int vIdx = -1;
-            int oIdx = -1;
-
-            for (int i = 0; i < n; i++) {
-                final String s = ts[i];
-                if (s == null || s.isEmpty()) {
-                    continue;
-                }
-
-                final char c0 = s.charAt(0);
-                final int sLen = s.length();
-
-                // 1. NUMERIC CHECK 
-                // Ensures -5 is a number, but -¹ and - are not.
-                if ((c0 >= '0' && c0 <= '9') || (c0 == '-' && sLen > 1 && s.charAt(1) >= '0' && s.charAt(1) <= '9')) {
-                    valStack[++vIdx] = fastParseDouble(s);
-                    continue;
-                }
-
-                // 2. UNARY PREFIX (ROOTS)
-                if (c0 == '√' || s.equals("³√")) {
-                    opStack[++oIdx] = (c0 == '√') ? '√' : 'R';
-                    continue;
-                }
-
-                // 3. UNARY POSTFIX (FACTORIAL/POWERS/INVERSE)
-                // Explicitly handles the "-¹" token
-                if (c0 == '!' || c0 == '²' || c0 == '³' || s.equals("-¹")) {
-                    final double a = valStack[vIdx];
-                    if (c0 == '!') {
-                        valStack[vIdx] = Maths.fact(a);
-                    } else if (c0 == '²') {
-                        valStack[vIdx] = a * a;
-                    } else if (c0 == '³') {
-                        valStack[vIdx] = a * a * a;
-                    } else if (s.equals("-¹")) {
-                        valStack[vIdx] = 1.0 / a; // Fixed: Explicit inverse
-                    }
-                    continue;
-                }
-
-                // 4. BINARY OPERATORS
-                final int currentPrec = getPrec(c0);
-                while (oIdx >= 0) {
-                    final char topOp = (char) opStack[oIdx];
-                    final int topPrec = getPrec(topOp);
-
-                    if (c0 == '^' ? topPrec > currentPrec : topPrec >= currentPrec) {
-                        vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
-                    } else {
-                        break;
-                    }
-                }
-                opStack[++oIdx] = c0;
-            }
-
-            while (oIdx >= 0) {
-                vIdx = applyOp((char) opStack[oIdx--], valStack, vIdx);
-            }
-            return valStack[0];
-        }
-
-        private static int getPrec(char op) {
-            switch (op) {
-                case '+':
-                case '-':
-                    return 1;
-                case '*':
-                case '/':
-                case '%':
-                case 'Р':
-                case 'Č':
-                    return 2;
-                case '^':
-                    return 3;
-                case '√':
-                case 'R':
-                    return 4;
-                default:
-                    return 0;
-            }
-        }
-
-        private static int applyOp(char op, double[] valStack, int vIdx) {
-            if (op == '√') {
-                if (vIdx < 0) {
-                    return vIdx; // Safety guard
-                }
-                valStack[vIdx] = Math.sqrt(valStack[vIdx]);
-                return vIdx;
-            }
-            if (op == 'R') {
-                if (vIdx < 0) {
-                    return vIdx; // Safety guard
-                }
-                valStack[vIdx] = Math.cbrt(valStack[vIdx]);
-                return vIdx;
-            }
-
-            if (vIdx < 1) {
-                return vIdx; // CRITICAL: Prevents Index -1 crash if stack is too short
-            }
-            double b = valStack[vIdx--];
-            double a = valStack[vIdx];
-            switch (op) {
-                case '+':
-                    valStack[vIdx] = a + b;
-                    break;
-                case '-':
-                    valStack[vIdx] = a - b;
-                    break;
-                case '*':
-                    valStack[vIdx] = a * b;
-                    break;
-                case '/':
-                    valStack[vIdx] = a / b;
-                    break;
-                case '%':
-                    valStack[vIdx] = a % b;
-                    break;
-                case '^':
-                    valStack[vIdx] = Math.pow(a, b);
-                    break;
-                case 'Р':
-                    valStack[vIdx] = Maths.fact(a) / Maths.fact(a - b);
-                    break;
-                case 'Č':
-                    valStack[vIdx] = Maths.fact(a) / (Maths.fact(b) * Maths.fact(a - b));
-                    break;
-            }
-            return vIdx;
-        }
-
-        private static double fastParseDouble(String s) {
-            if (s.equals("NaN")) {
-                return Double.NaN;
-            }
-            if (s.equals("Infinity") || s.equals("+Infinity")) {
-                return Double.POSITIVE_INFINITY;
-            }
-            if (s.equals("-Infinity")) {
-                return Double.NEGATIVE_INFINITY;
-            }
-            int len = s.length();
-            if (len == 0) {
-                return 0.0; // or throw if empty not allowed
-            }
-            int idx = 0;
-            boolean negative = false;
-            char first = s.charAt(0);
-
-            // Handle sign
-            if (first == '-') {
-                negative = true;
-                idx = 1;
-            } else if (first == '+') {
-                idx = 1;
-            }
-
-            double value = 0.0;
-
-            // Integer part
-            boolean hasIntPart = false;
-            while (idx < len) {
-                char c = s.charAt(idx);
-                if (c >= '0' && c <= '9') {
-                    value = value * 10.0 + (c - '0');
-                    hasIntPart = true;
-                    idx++;
-                } else {
-                    break;
-                }
-            }
-
-            // Fractional part
-            boolean hasFracPart = false;
-            if (idx < len && s.charAt(idx) == '.') {
-                idx++;
-                double frac = 0.0;
-                double div = 1.0;
-                while (idx < len) {
-                    char c = s.charAt(idx);
-                    if (c >= '0' && c <= '9') {
-                        div *= 10.0;
-                        frac = frac * 10.0 + (c - '0');
-                        hasFracPart = true;
-                        idx++;
-                    } else {
-                        break;
-                    }
-                }
-                value += frac / div;
-            }
-
-            // Scientific notation
-            if (idx < len && (s.charAt(idx) == 'e' || s.charAt(idx) == 'E')) {
-                idx++;
-                boolean negExp = false;
-                if (idx < len && s.charAt(idx) == '-') {
-                    negExp = true;
-                    idx++;
-                } else if (idx < len && s.charAt(idx) == '+') {
-                    idx++;
-                }
-
-                long exp = 0;
-                boolean hasExpDigits = false;
-                while (idx < len) {
-                    char c = s.charAt(idx);
-                    if (c >= '0' && c <= '9') {
-                        exp = exp * 10 + (c - '0');
-                        hasExpDigits = true;
-                        if (exp > 1000000000L) { // Prevent insane overflow
-                            value = negative ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-                            break;
-                        }
-                        idx++;
-                    } else {
-                        break;
-                    }
-                }
-                if (hasExpDigits) {
-                    value *= Math.pow(10.0, negExp ? -exp : exp);
-                }
-            }
-
-            // Basic validation (since scanner is trusted, but good to have)
-            if (idx != len || (!hasIntPart && !hasFracPart)) {
-                return 0.0; // or throw if strict
-            }
-
-            return negative ? -value : value;
-        }
-
+// Add a reset method to clear the pool between evaluations
+    private void resetPool() {
+        poolPointer = 0;
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2788,7 +1813,7 @@ public class MathExpression implements Savable, Solvable {
             passes++;
             try {
                 i = scanner.indexOf(")");//index of first )
-                j = LISTS.prevIndexOf(scanner, i, "("); //index of enclosing bracket of ) above
+                j = LISTS.prevIndexOf(scanner, i, "("); //index of enclosing brackets of ) above
                 List<String> sub = scanner.subList(j, i + 1);
                 solve(sub);
 
@@ -2809,19 +1834,189 @@ public class MathExpression implements Savable, Solvable {
         System.out.println(new MathExpression(in).solve());
     }//end method
 
-    public static void main(String... args) { 
-        System.out.println(new MathExpression("x=0.9;sqrt(0.64-x^2)").solve());
-        System.out.println("differential calculus:>>1 "+new MathExpression("x=3;diff(@(x)sin(ln(x)),vw);").solve());
-        System.out.println("differential calculus:>>2 "+new MathExpression("diff(@(x)sin(ln(x)), b);").solve());
-        System.out.println("differential calculus:>>3 "+new MathExpression("diff(@(x)sin(ln(x)), 1);").solve());
-        System.out.println("differential calculus:>>4 "+new MathExpression("diff(@(x)x^10, m,1);").solve());
+ 
+    static class Test {
+
+        public static void main(String... args) {
+            System.out.println("=".repeat(80));
+            System.out.println("POSTFIX EVALUATION ACCURACY TESTS");
+            System.out.println("=".repeat(80));
+
+            // Test 1: Basic arithmetic
+            testExpression("2+3", 5.0, "Basic addition");
+            testExpression("10-4", 6.0, "Basic subtraction");
+            testExpression("3*4", 12.0, "Basic multiplication");
+            testExpression("12/3", 4.0, "Basic division");
+            testExpression("2^3", 8.0, "Basic exponentiation");
+
+            // Test 2: Operator precedence
+            testExpression("2+3*4", 14.0, "Precedence: multiply before add");
+            testExpression("2*3+4", 10.0, "Precedence: multiply before add (reversed)");
+            testExpression("2^3*4", 32.0, "Precedence: power before multiply");
+            testExpression("2+3^2", 11.0, "Precedence: power before add");
+
+            // Test 3: Parentheses
+            testExpression("(2+3)*4", 20.0, "Parentheses override precedence");
+            testExpression("2*(3+4)", 14.0, "Parentheses with multiplication");
+            testExpression("((2+3)*4)+1", 21.0, "Nested parentheses");
+
+            // Test 4: Single argument functions
+            testExpression("sin(0)", 0.0, "sin(0) = 0", 1e-10);
+            testExpression("cos(0)", 1.0, "cos(0) = 1", 1e-10);
+            testExpression("sqrt(16)", 4.0, "sqrt(16) = 4", 1e-10);
+            testExpression("abs(-5)", 5.0, "abs(-5) = 5", 1e-10);
+
+            // Test 5: Nested functions
+            testExpression("sin(cos(0))", Math.sin(Math.cos(0)), "Nested: sin(cos(0))", 1e-10);
+            testExpression("sqrt(abs(-16))", 4.0, "Nested: sqrt(abs(-16))", 1e-10);
+
+            // Test 6: Variable substitution
+            MathExpression me = new MathExpression("x=5;2*x+3");
+            double result = Double.parseDouble(me.solve());
+            testValue(result, 13.0, "Variable: x=5; 2*x+3", 1e-10);
+
+            // Test 7: Multi-argument functions
+            testExpression("listsum(1,2,3,4,5)", 15.0, "listsum(1,2,3,4,5) = 15", 1e-10);
+            testExpression("listsum(10,20,30)", 60.0, "listsum(10,20,30) = 60", 1e-10);
+
+            // Test 8: Functions with grouped expressions
+            testExpression("listsum((2+3),(4+1),5)", 15.0, "listsum with grouped args", 1e-10);
+            testExpression("sort(3,-1,2,0,1)", "sorted array", "sort function");
+
+            // Test 9: Complex nested expressions
+            testExpression("sin(3.14159/2)", 1.0, "sin(π/2) ≈ 1", 0.001);
+            testExpression("sqrt(2^2 + 3^2)", 3.605551275, "sqrt(4+9) = sqrt(13)", 1e-6);
+
+            // Test 10: Mixed operators and functions
+            testExpression("2*sin(0)+3*cos(0)", 3.0, "2*sin(0) + 3*cos(0) = 3", 1e-10);
+            testExpression("sqrt(9)+2^3-1", 12.0, "sqrt(9) + 2^3 - 1 = 12", 1e-10);
+
+            // Test 11: Edge cases
+            testExpression("0+0", 0.0, "Zero addition");
+            testExpression("1*1", 1.0, "One multiplication");
+            testExpression("5-5", 0.0, "Subtraction to zero");
+
+            System.out.println("\n" + "=".repeat(80));
+            System.out.println("ACCURACY TEST SUMMARY");
+            System.out.println("=".repeat(80));
+        }
+
+        private static void testExpression(String expr, double expected, String description) {
+            testExpression(expr, expected, description, 1e-9);
+        }
+
+        private static void testExpression(String expr, double expected, String description, double tolerance) {
+            try {
+                MathExpression me = new MathExpression(expr);
+                String resultStr = me.solve();
+                double result = Double.parseDouble(resultStr);
+                testValue(result, expected, description, tolerance);
+            } catch (Exception e) {
+                System.out.printf("❌ %s: EXCEPTION - %s%n", description, e.getMessage());
+            }
+        }
+
+        private static void testExpression(String expr, String expectedType, String description) {
+            try {
+                MathExpression me = new MathExpression(expr);
+                String result = me.solve();
+                System.out.printf("✓ %s: %s%n", description, result);
+            } catch (Exception e) {
+                System.out.printf("❌ %s: EXCEPTION - %s%n", description, e.getMessage());
+            }
+        }
+
+        private static void testValue(double actual, double expected, String description, double tolerance) {
+            if (Math.abs(actual - expected) <= tolerance) {
+                System.out.printf("✓ %s: %.10f (expected %.10f)%n", description, actual, expected);
+            } else {
+                System.out.printf("❌ %s: got %.10f, expected %.10f (diff: %.2e)%n",
+                        description, actual, expected, Math.abs(actual - expected));
+            }
+        }
+    }
+
+    public static void main(String... args) {
+
+        Test.main(args);
+
+        System.out.println("________________________________________________________________TESTS-DONE________________________________________________________________");
+        System.out.println("sum(32,12,10,18,1,3,2,5,6): -->> " + new MathExpression("sum(32,12,10,18,1,3,2,5,6)").solve());
+        MathExpression lin = new MathExpression("linear_sys(2,3,-5,3,-4,20)");
+        System.out.println("linear_sys(2,3,-5,3,-4,20): -->> " + lin.solve());
+        MathExpression lin1 = new MathExpression("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18)");
+        System.out.println("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18): -->> " + lin1.solve());
+        System.out.println("linear_sys(12,16, 24,15,21, 24): -->> " + new MathExpression("linear_sys(@(2,3)(12,16, 24,15,21, 32))").solve());
+        System.out.println("det(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5): -->> " + new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
+        System.out.println("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5)): -->> " + new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
+        System.out.println("sin(5,6)-->>" + new MathExpression("sin(5,6)").solve());
+        System.out.println("√81 + ³√(27) + 2^10-->>" + new MathExpression("√81 + ³√(27) + 2^10").solve());
+        System.out.println(new MathExpression("5! + 9Р3 + 6Č5").solve());
+        System.out.println(new MathExpression("f(x,y)=2*x*y;f(3,4);").solve());
+        System.out.println("sum(sum(5),sum(6)): " + new MathExpression("sum(sum(5),sum(6))").solve());
+        System.out.println("sum(sum(5,3,4,5),sum(6,12,14,1,2,1)): " + new MathExpression("sum(sum(5,3,4,5),sum(6,12,14,1,2,1))").solve());
+        System.out.println("prod(sin(5),sin(5)): " + new MathExpression("prod(sin(5),sin(5))").solve());
+
+        System.out.println("differential calculus:>>1 " + new MathExpression("diff(@(x)sin(ln(x)), 1);").solve());
+        System.out.println("differential calculus:>>2 " + new MathExpression("diff(@(x)x^10, m);").solve());
+        System.out.println("differential calculus:>>2a " + new MathExpression("diff(@(x)x^10, n,1);").solve());
+        MathExpression meDiff = new MathExpression("x=3;diff(@(x)sin(ln(x)),vw);");
+        System.out.println("--------------------------" + FunctionManager.FUNCTIONS);
+        System.out.println("differential calculus:>>3 " + meDiff.solve());
+        System.out.println("differential calculus:>>4 " + new MathExpression("diff(@(x)sin(ln(x)), b);").solve());
         System.out.println(new MathExpression("sin(ln(x));").solve());
-        System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS);
-        
-           MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);B=eigvalues(A);B;");
-        System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS);
-        System.out.println("----------"+mex.solve());
-        
+        System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
+// Expected: 11
+
+        System.out.println("sort(-3,8,3,2,6,-7,9,1,0,-1): " + new MathExpression("sort(-3,8,3,2,6,-7,9,1,0,-1)").solve());
+        System.out.println("sort(0,4+0,2+0): " + new MathExpression("sort(0,4+0,2+0)").solve());
+        System.out.println("sort(3+1,-3): " + new MathExpression("sort(3+1, -3)").solve());
+        System.out.println("sort(4+2): " + new MathExpression("sort(4+2)").solve());
+        System.out.println(new MathExpression("x=0.9;sqrt(0.64-x^2)").solve());
+
+        MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);B=eigvalues(A);C=eigvec(A);D=eigpoly(A);eigpoly(A);");
+        System.out.println(FunctionManager.FUNCTIONS);
+        System.out.println("----------" + mex.solve());
+
+        Function f = FunctionManager.add("f(x,y) = x - x/y");
+        double r = f.calc(2, 3);
+        System.out.println("r = " + r);
+        int iterations = 1;
+        long start = System.nanoTime();
+        double vvv[] = new double[1];
+        for (int i = 1; i <= iterations; i++) {
+            vvv[0] = f.calc(2, 3);
+        }
+        double duration = (System.nanoTime() - start) / iterations;
+        System.out.println("dur = " + (duration / 1000) + " microns, ans = " + vvv[0]);//μμμ
+
+        String geom = "geom((2,8,4))+geom(((2,8,4)))";
+        System.out.println(geom + ": " + new MathExpression(geom).solve());
+        String sum = "sum(3,1,4,5,9)";
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
+        sum = "sum(3+3)";
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
+        sum = "sum(sum(5),sum(6))";
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
+
+        sum = "sum(sin(5),sin(5))";
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
+
+        sum = "listsum(listsum(5))";
+        System.out.println(sum + "--->>" + new MathExpression(sum).solve());
+        System.out.println("____________________________________________________________________________________________________________________________________________");
+
+        String prod = "prod(5)";
+        System.out.println(prod + "--->>" + new MathExpression(prod).solve());
+        prod = "prod(5+5)";
+        System.out.println(prod + "--->>" + new MathExpression(prod).solve());
+        prod = "prod(5+5)";
+        System.out.println(prod + "--->>" + new MathExpression(prod).solve());
+        System.out.println(new MathExpression("sort(3,4,-2,-13,21,34,-99,1,-1.498,sin(28))").solve());
+        System.out.println(new MathExpression("3/2").solve());
+        System.out.println(new MathExpression("x=20;sin(ln(x));").solve());
+        System.out.println(new MathExpression("x=20;sin(listsum(3,9,sin(19),cos(21),4,13,2))").solve());
+ 
         MathExpression ml = new MathExpression("D=@(3,3)(3,4,1,2,4,7,9,1,-2);tri_mat(D)");
         System.out.println("ml.solve():" + ml.solve());
         MathExpression linear = new MathExpression("a=4;a11=3.14159265357;b=2.718281828;M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");
@@ -2829,19 +2024,26 @@ public class MathExpression implements Savable, Solvable {
         System.out.println("M:" + FunctionManager.lookUp("M").getMatrix());
         System.out.println("N:" + FunctionManager.lookUp("N").getMatrix());
         System.out.println("C:" + FunctionManager.lookUp("C").getMatrix());
+
+        System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
         String ls = linear.solve();
         System.out.println("ls = " + ls);
-        String s = "sum(sum(5),sin(5))";
-        System.out.println("--->" + new MathExpression(s).solve());
-        String s1 = "x=9;g(x)=((sin(x)-tan(x)));v(x)=((ln(x)/tan(x)));f(x)=g(x);sin(1.75)+cos(1.23)+tan(1.86-0.26)+log(10,3)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));v(3);";
+        String s = "listsum(listsum(5),sin(5))";
+        MathExpression ms = new MathExpression(s);
+        System.out.println("s--->" + ms.solve());
+        String ss = "listsum(sin(5),sin(5))";
+        System.out.println("ss--->" + new MathExpression(ss).solve());
+        String s1 = "x=9;g(x)=((sin(x)-tan(x)));v(x)=((ln(x)/tan(x)));f(x)=g(x);sin(1.75)+cos(1.23)+tan(1.86-0.26)+log(10,3)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+listsum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));v(3);";
         String s2 = "v(x)=((ln(x)/tan(x)));2+v(3);";
         String s3 = "2+sin(3)-ln(12)+1/3.689";
-        String s4 = "sin(2)+cos(3)-sum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
-        String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), 12, sum(3,4,8,9,2000)),12000, mode(3,2,2,1),32.897, mode(1,5,7,7,1,1,7))";
+        String s4 = "sin(2)+cos(3)-listsum(2,3,4,sin(2),ln(42),3,4,5,6,1,2,3,45,2)+12";
+        String s5 = "listsum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,listsum(3,4,5,6,9,12,23), 12, listsum(3,4,8,9, 2000)), 12000, mode(3,2,2,1),32.897, mode(1,5,7,7,1,1,7))";
 
         MathExpression m = new MathExpression(s5);
         System.out.println("m.solve(): " + m.solve());
         System.out.println("m.solve(): " + new MathExpression("avgN(0,4+0,2+3,-2)").solve());
+
+        System.out.println(new MathExpression("sort(0,4+0,2+0)").solve());
 
         //   double N = 100; 
         //   Shootouts.benchmark(s2, (int) N);

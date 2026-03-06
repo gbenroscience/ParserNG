@@ -24,7 +24,7 @@ public class VariableManager {
 //const a=1,const b=2;const q,w,e,r,t=9.2; constant cannot be pi or ans.
     //check if the variable already exists.
 //if so,the user cannot define it by var x = 2; instead use x =9; to change the value in x.
-    public static final Map<String, Variable> VARIABLES = Collections.synchronizedMap(new HashMap<String, Variable>());
+    public static final Map<String, Variable> VARIABLES = Collections.synchronizedMap(new HashMap<>());
 
     /**
      * Parses commands used to insert and update Variables loaded into the
@@ -139,7 +139,7 @@ public class VariableManager {
                 }
                 try {
                     String value = new MathExpression(cmd.substring(indexOfEqual + 1)).solve();
-                    Variable vv = new Variable(var, value, false);
+                    Variable vv = new Variable(var, Double.parseDouble(value), false);
                     VARIABLES.put(vv.getName(), vv);
                     update();
                     return vv;
@@ -159,9 +159,9 @@ public class VariableManager {
      *
      * @param cmd The command string to parse.
      */
-    public void parseCommand(String cmd) {
+    public final void parseCommand(String cmd) {
         if (commandParser == null) {
-            commandParser = new CommandInterpreter(cmd);
+            commandParser =  new CommandInterpreter(cmd); 
         } else {
             commandParser.setCommand(cmd);
         }
@@ -201,7 +201,7 @@ public class VariableManager {
      * not found.
      */
     public static Variable lookUp(String vName) {
-        return VariableManager.getVariable(vName);
+        return VARIABLES.get(vName);
     }//end method
 
     /**
@@ -344,7 +344,7 @@ public class VariableManager {
      *
      *
      */
-    public class CommandInterpreter {
+    public final class CommandInterpreter {
 
         private String command;
 
@@ -479,7 +479,7 @@ public class VariableManager {
                 String part2 = line.substring(ind + 1);
                 Scanner scanner = new Scanner(part1, true, ",", " ");
                 List<String> scan = scanner.scan();
-                List<String> whitespaceremover = new ArrayList<String>();
+                List<String> whitespaceremover = new ArrayList<>();
                 whitespaceremover.add(" ");
                 scan.removeAll(whitespaceremover);
                 int sz = scan.size();
@@ -580,14 +580,14 @@ public class VariableManager {
                                         try {
                                             boolean variable = isVariable(scan.get(i));
                                             if (variable) {
-                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), getValue(part2), false));
+                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), Double.parseDouble(getValue(part2)), false));
                                             }//end else if
                                             else if (!variable && !contains(scan.get(i))) {
                                                 boolean isFunction = FunctionManager.contains(scan.get(i));
                                                 if (isFunction) {
                                                     FunctionManager.delete(scan.get(i));
                                                 }
-                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), getValue(part2), false));
+                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), Double.parseDouble(getValue(part2)), false));
                                             }//end else if.
                                         }//end try
                                         catch (Exception e) {
@@ -612,7 +612,7 @@ public class VariableManager {
                                         boolean variable = isVariable(scan.get(0));
 
                                         if (variable) {
-                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), getValue(part2), false));
+                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), Double.parseDouble(getValue(part2)), false));
                                         }//end else if
                                         else if (!variable && !contains(scan.get(0))) {
                                             boolean isFunction = FunctionManager.contains(scan.get(0));
@@ -620,7 +620,7 @@ public class VariableManager {
                                                 FunctionManager.delete(scan.get(0));
                                             }
 
-                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), getValue(part2), false));
+                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), Double.parseDouble(getValue(part2)), false));
                                         }//end else if.
                                     }//end try
                                     catch (Exception e) {

@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.List;
 
 import com.github.gbenroscience.logic.DRG_MODE;
+import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.TYPE;
 import com.github.gbenroscience.parser.methods.ext.Avg;
 import com.github.gbenroscience.parser.methods.ext.Abs;
@@ -23,28 +24,35 @@ import com.github.gbenroscience.parser.methods.ext.Rounding;
 
 public class Declarations {
 
-
     public static final String SIN = "sin";
     public static final String COS = "cos";
     public static final String TAN = "tan";
-    public static final String SINH = "sinh";
-    public static final String COSH = "cosh";
-    public static final String TANH = "tanh";
     public static final String ARC_SIN = "sin-¹";
     public static final String ARC_COS = "cos-¹";
     public static final String ARC_TAN = "tan-¹";
-    public static final String ARC_SINH = "sinh-¹";
-    public static final String ARC_COSH = "cosh-¹";
-    public static final String ARC_TANH = "tanh-¹";
     public static final String SEC = "sec";
     public static final String COSEC = "csc";
     public static final String COT = "cot";
-    public static final String SECH = "sech";
-    public static final String COSECH = "csch";
-    public static final String COTH = "coth";
     public static final String ARC_SEC = "sec-¹";
     public static final String ARC_COSEC = "csc-¹";
     public static final String ARC_COT = "cot-¹";
+    public static final String ARC_SIN_ALT = "asin";
+    public static final String ARC_COS_ALT = "acos";
+    public static final String ARC_TAN_ALT = "atan";
+    public static final String ARC_SEC_ALT = "asec";
+    public static final String ARC_COSEC_ALT = "acsc";
+    public static final String ARC_COT_ALT = "acot";
+
+  
+    public static final String SINH = "sinh";
+    public static final String COSH = "cosh";
+    public static final String TANH = "tanh";
+    public static final String ARC_SINH = "sinh-¹";
+    public static final String ARC_COSH = "cosh-¹";
+    public static final String ARC_TANH = "tanh-¹";
+    public static final String SECH = "sech";
+    public static final String COSECH = "csch";
+    public static final String COTH = "coth";
     public static final String ARC_SECH = "sech-¹";
     public static final String ARC_COSECH = "csch-¹";
     public static final String ARC_COTH = "coth-¹";
@@ -55,15 +63,9 @@ public class Declarations {
     public static final String LN_INV = "ln-¹";
     public static final String LG_INV = "lg-¹";
     public static final String LOG_INV = "log-¹";
-    public static final String ARC_SIN_ALT = "asin";
-    public static final String ARC_COS_ALT = "acos";
-    public static final String ARC_TAN_ALT = "atan";
     public static final String ARC_SINH_ALT = "asinh";
     public static final String ARC_COSH_ALT = "acosh";
     public static final String ARC_TANH_ALT = "atanh";
-    public static final String ARC_SEC_ALT = "asec";
-    public static final String ARC_COSEC_ALT = "acsc";
-    public static final String ARC_COT_ALT = "acot";
     public static final String ARC_SECH_ALT = "asech";
     public static final String ARC_COSECH_ALT = "acsch";
     public static final String ARC_COTH_ALT = "acoth";
@@ -79,7 +81,11 @@ public class Declarations {
     public static final String FACT = "fact";
     public static final String COMBINATION = "comb";
     public static final String PERMUTATION = "perm";
+    public static final String LIST_SUM = "listsum";
+    public static final String SUM = "sum";
     public static final String PROD = "prod";
+    public static final String MEAN = "mean";
+    public static final String AVG = "listavg";
     public static final String MEDIAN = "med";
     public static final String MODE = "mode";
     public static final String RANGE = "rng";
@@ -100,6 +106,13 @@ public class Declarations {
     public static final String QUADRATIC = "quad";
     public static final String TARTAGLIA_ROOTS = "t_root";
     public static final String GENERAL_ROOT = "root";
+    /**
+     * May take its input matrix as a list or as an anonymous function or as a
+     * Matrix variable. e.g linear_sys(3,2,-1,4,5,-8) [returns the raw matrix
+     * data] or linear_sys(@(2,3)(3,2,-1,4,5,-8)) [returns a function that
+     * points to the solution matrix] or linear_sys(A) [returns a function that
+     * points to the solution matrix]
+     */
     public static final String LINEAR_SYSTEM = "linear_sys";
     public static final String DETERMINANT = "det";
     public static final String INVERSE_MATRIX = "invert";
@@ -116,11 +129,56 @@ public class Declarations {
     public static final String MATRIX_ADJOINT = "adjoint";
     public static final String MATRIX_EIGENVEC = "eigvec";
     public static final String MATRIX_EIGENVALUES = "eigvalues";
-    public static final String MATRIX_EIGENPOLY = "eigpoly";
+    public static final String MATRIX_EIGENPOLY = "eigpoly"; 
     public static final String HELP = "help";
 
+    
+      public static final String getTrigFuncDRGVariant(String methodName, DRG_MODE drg) {
+        String mode = drg == DRG_MODE.DEG ? "_deg" : (drg == DRG_MODE.RAD ? "_rad" : "_grad");
+        switch (methodName) {
+            case SIN:
+                return SIN + mode;
+            case COS:
+                   return COS + mode;
+            case TAN:
+                   return TAN + mode;
+            case ARC_SIN:
+                   return ARC_SIN + mode;
+            case ARC_COS:
+                   return ARC_COS + mode;
+            case ARC_TAN:
+                   return ARC_TAN + mode;
+            case SEC:
+                   return SEC + mode;
+            case COSEC:
+                   return COSEC + mode;
+            case COT:
+                   return COT + mode;
+            case ARC_SEC:
+                   return ARC_SEC + mode;
+            case ARC_COSEC:
+                   return ARC_COSEC + mode;
+            case ARC_COT:
+                   return ARC_COT + mode;
+            case ARC_SIN_ALT:
+                   return ARC_SIN_ALT + mode;
+            case ARC_COS_ALT:
+                   return ARC_COS_ALT + mode;
+            case ARC_TAN_ALT:
+                   return ARC_TAN_ALT + mode;
+            case ARC_SEC_ALT:
+                   return ARC_SEC_ALT + mode;
+            case ARC_COSEC_ALT:
+                   return ARC_COSEC_ALT + mode;
+            case ARC_COT_ALT:
+                return ARC_COT_ALT + mode;
+            default:
+                return methodName;
+        }
+    }
+
     /**
-     * A list user registered hardcoded methods
+     * A list user registered hard-coded methods
      */
     private static final List<BasicNumericalMethod> BASIC_NUMERICAL_METHODS = new ArrayList<>();
 
@@ -131,17 +189,48 @@ public class Declarations {
     public static void registerBasicNumericalMethod(BasicNumericalMethod basicNumericalMethod) {
         unregisterBasicNumericalMethod(basicNumericalMethod.getClass());
         BASIC_NUMERICAL_METHODS.add(basicNumericalMethod);
+        /**
+         * Add to the new method registry also
+         */
+        MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression.EvalResult nextRes, int arity, MathExpression.EvalResult[] args) -> {
+            List<String> tokens = new ArrayList<>();
+            for (MathExpression.EvalResult arg : args) {
+                if (arg.type == MathExpression.EvalResult.TYPE_SCALAR) {
+                    tokens.add(String.valueOf(arg.scalar));
+                } else if (arg.type == MathExpression.EvalResult.TYPE_STRING) {
+                    tokens.add(arg.textRes);
+                }
+            }
+            String res = basicNumericalMethod.solve(tokens);
+            nextRes.wrap(Double.parseDouble(res));
+            return nextRes;
+        });
     }
 
     public static void unregisterBasicNumericalMethod(Class clazz) {
-        for(int i = BASIC_NUMERICAL_METHODS.size()-1; i>=0; i--) {
-            if (BASIC_NUMERICAL_METHODS.get(i).getClass().equals(clazz)){
+        for (int i = BASIC_NUMERICAL_METHODS.size() - 1; i >= 0; i--) {
+            if (BASIC_NUMERICAL_METHODS.get(i).getClass().equals(clazz)) {
                 BASIC_NUMERICAL_METHODS.remove(i);
             }
         }
     }
 
+    public static void registerBasicNumericalMethodInMethodRegistry(BasicNumericalMethod basicNumericalMethod) {
+        MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression.EvalResult nextRes, int arity, MathExpression.EvalResult[] args) -> {
+            List<String> tokens = new ArrayList<>();
+            for (MathExpression.EvalResult arg : args) {
+                if (arg.type == MathExpression.EvalResult.TYPE_STRING) {
+                    tokens.add(arg.textRes);
+                }
+            }
+            //System.out.println("tokens: "+tokens); 
+            nextRes.wrap(basicNumericalMethod.solve(tokens));
+            return nextRes;
+        });
+    }
+
     static {
+        //System.out.println("registring BasicNumeralMethods--------------------------------------------------------------------------------");
         registerBasicNumericalMethod(new Echo());
         registerBasicNumericalMethod(new Echo.EchoN());
         registerBasicNumericalMethod(new Echo.EchoNI());
@@ -172,6 +261,7 @@ public class Declarations {
     /**
      * A list of all inbuilt methods of the parser of this software.The user is
      * free to define his own functions.
+     *
      * @return Array of strings
      */
     public static String[] getInbuiltMethods() {
@@ -180,12 +270,30 @@ public class Declarations {
 
     public static String[] createInBuiltMethods() {
         List<String> stats = Arrays.asList(getStatsMethods());
-        List<String> rest = Arrays.asList(
-                new String[]{HELP, SIN, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN, ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH, COTH, ARC_SEC, ARC_COSEC, ARC_COT, ARC_SECH,
-                        ARC_COSECH, ARC_COTH, EXP, LN, LG, LOG, LN_INV, LG_INV, LOG_INV, ARC_SIN_ALT, ARC_COS_ALT, ARC_TAN_ALT, ARC_SINH_ALT, ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
-                        ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT, LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, SQRT, CBRT, INVERSE, SQUARE, CUBE, POW, FACT, PRINT, COMBINATION,
-                        PERMUTATION, PLOT, DIFFERENTIATION, INTEGRATION, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT, LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX, ECHELON_MATRIX,
-                        MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD, MATRIX_SUBTRACT, MATRIX_POWER, MATRIX_TRANSPOSE, MATRIX_EDIT, MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC, MATRIX_EIGENPOLY, MATRIX_EIGENVALUES});
+ 
+        String[] functionConstants = {
+            SIN, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN,
+            ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH,
+            COTH, ARC_SEC, ARC_COSEC, ARC_COT, ARC_SECH, ARC_COSECH,
+            ARC_COTH, EXP, LN, LG, LOG, LN_INV, LG_INV, LOG_INV,
+            ARC_SIN_ALT, ARC_COS_ALT, ARC_TAN_ALT, ARC_SINH_ALT,
+            ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
+            ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT,
+            LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, SQRT, CBRT, INVERSE,
+            SQUARE, CUBE, POW, FACT, COMBINATION, PERMUTATION, SUM, LIST_SUM, PROD,
+            MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED,
+            COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE,
+            STD_ERR, RANDOM, SORT, PLOT, PRINT, DIFFERENTIATION,
+            INTEGRATION, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT,
+            LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX,
+            ECHELON_MATRIX, MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD,
+            MATRIX_SUBTRACT, MATRIX_POWER, MATRIX_TRANSPOSE, MATRIX_EDIT,
+            MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC, MATRIX_EIGENVALUES,
+            MATRIX_EIGENPOLY, HELP
+        };
+
+        List<String> rest = Arrays.asList(functionConstants);
+ 
         List<String> r = new ArrayList<>(stats.size() + rest.size());
         r.addAll(stats);
         r.addAll(rest);
@@ -352,6 +460,10 @@ public class Declarations {
             case RANDOM:
                 return TYPE.LIST.toString();
             case SORT:
+                return TYPE.LIST.toString();
+            case SUM:
+                return TYPE.NUMBER.toString();
+            case LIST_SUM:
                 return TYPE.NUMBER.toString();
             case PLOT:
                 return TYPE.VOID.toString();
@@ -405,18 +517,17 @@ public class Declarations {
 
     }
 
-
     /**
      * @return all the statistical methods used by the parser.
      */
     static String[] getStatsMethods() {
-        return new String[]{PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT};
+        return new String[]{LIST_SUM, PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, RANDOM, SORT};
 
     }
 
-    public static boolean isBasicNumericalFunction(String op){
-        for(BasicNumericalMethod basicNumericalMethod: Declarations.getBasicNumericalMethods()){
-            if (op.equals(basicNumericalMethod.getName())){
+    public static boolean isBasicNumericalFunction(String op) {
+        for (BasicNumericalMethod basicNumericalMethod : Declarations.getBasicNumericalMethods()) {
+            if (op.equals(basicNumericalMethod.getName())) {
                 return true;
             }
         }
@@ -435,10 +546,15 @@ public class Declarations {
             return DRG_MODE.DEG;
         } else if (userDrgMode.toUpperCase().trim().equals("RAD")) {
             return DRG_MODE.RAD;
-        } if (userDrgMode.toUpperCase().trim().equals("GRAD")) {
+        }
+        if (userDrgMode.toUpperCase().trim().equals("GRAD")) {
             return DRG_MODE.GRAD;
         } else {
             return DRG_MODE.RAD;
         }
+    }
+
+    public static void main(String[] args) {
+        createInBuiltMethods();
     }
 }

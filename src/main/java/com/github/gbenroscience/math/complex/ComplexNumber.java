@@ -375,7 +375,7 @@ return comp;
 
 
 
-    public static void main(String args[]){
+    public static void example(String args[]){
 
  ComplexNumber Z = new ComplexNumber(2, -3.5, ComplexState.CARTESIAN);
  ComplexNumber Z1 = new ComplexNumber(2, -3.5, ComplexState.CARTESIAN);

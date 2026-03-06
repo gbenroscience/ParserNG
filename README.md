@@ -12,7 +12,26 @@ ParserNG v0.2.3 breaks the barrier in fully featured math parser frequencies!
 With various other optimizations, v0.2.3 comes with inner loop optimizations which uses a blazing fast, post-fix style algorithm to quickly evaluate inner brackets with less checks and less string manipulations.
 This obviously will make graphing and other iterative tasks super responsive.
 
-Looking for a leaner parser in native C for even faster execution? checkout [tinymath](https://github.com/gbenroscience/tinymath) 
+ParserNG v0.2.4 is an extremely feature rich math tool which also doubles as (arguably) the fastest pure Java expression evaluator on the planet.
+In benchmarks, it beats com.expression.parser(Java Math Expression Parser) by almost (10x-14x) and edges out Exp4J (which is lightweight) in many benchmarks.
+
+ #### Here are some benchmarks
+
+##### 1. (sin(3) + cos(4 - sin(2))) ^ (-2) 
+```
+Benchmark              Mode  Cnt    Score    Error  Units
+ParserNGWars.exp4j     avgt   10  184.211 ± 10.622  ns/op
+ParserNGWars.parserNg  avgt   10  175.858 ±  6.081  ns/op
+```
+
+#### 2. ((12+5)*3 - (45/9))^2
+```
+Benchmark              Mode  Cnt    Score    Error  Units
+ParserNGWars.exp4j     avgt   10  102.845 ± 23.153  ns/op
+ParserNGWars.parserNg  avgt   10   85.417 ±  4.763  ns/op
+```
+
+<br>
 
 * [ParserNG](#ParserNG)
     * [Usage and note](#usage-and-note)
@@ -23,7 +42,7 @@ Looking for a leaner parser in native C for even faster execution? checkout [tin
     * [Inbuilt Functions](#inbuilt-functions)
     * [User defined functions](#user-defined-functions)
     * [User hardcoded functions](#user-hardcoded-functions)
-    * [Differential Calculus](#differential-Calculus)
+    * [Differential Calculus](#differential-calculus)
     * [ParserNG for Graphing](#graphing-on-various-java-platforms)
 * [More Examples](#more-examples)
     * [Or using variables and calculating simple expressions](#or-using-variables-and-calculating-simple-expressions)
@@ -334,23 +353,25 @@ It uses its very own implementation of a symbolic differentiator.
   of the function at some supplied x-value.
   <br><br>
   
+ ## The 4 modes of doing differentiation in ParserNG
   
-  To compute the gradient function of (differentiate) `x^3` once,
-  do:
-         
- ```java
- MathExpression expr = new MathExpression("diff(@(x)x^3)");
+ 
+  To differentiate a function, you may do one of: <br><br>
   
- System.out.println(ex.solve());
- ```
- 
- ```java
- MathExpression expr = new MathExpression("diff(@(x)x^3,1)");
- System.out.println(ex.solve());
- ```
- 
+  ```C
+  diff(F)
+  diff(F, v)
+  diff(F, n)
+  diff(F, v, n)
+  diff(F, x, n)
+  ```
 
-  To differentiate a function, say `x^3` once and evaluate its value at `x = 3;` do: <br><br>
+  1.  `diff(F)` Will return the gradient function, i.e the derivative of the function, F
+  2. `diff(F,v)` Here v is a function pointer or reference which hold the gradient function of F, i.e `diff(F)`. Use this to assign the gradient function of `F` to a new function `v`
+  3. `diff(F, n)` Here we wish to differentiate the function `F` a number of times, i.e `n` It is advised to keep n=1. The more the value of n, the less certain the accuracy of the derivative engine.
+  4. `diff(F, v, n)` Here, the function, `F` will be differentiated, `n` times and the resulting function stored in a new function, `v`.
+  5. `diff(F, x, n)` Differentiates the function n times and evaluates the value of the resulting function at the supplied value of x.
+   
   
     
        

@@ -59,7 +59,9 @@ public class GeomNTest {
         me = new MathExpression("geomN(1+1)");
         Assertions.assertEquals("0.0", me.solve());
         me = new MathExpression("geomN(1)");
-        Assertions.assertEquals("0.0", me.solve());
+ 
+        Assertions.assertEquals(0, me.solveGeneric().scalar);
+ 
     }
 
     @Test

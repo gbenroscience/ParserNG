@@ -6,14 +6,16 @@
 package com.github.gbenroscience.math.differentialcalculus;
 
 import com.github.gbenroscience.parser.Number;
-import com.github.gbenroscience.parser.Bracket;
-import com.github.gbenroscience.parser.DataSetFormatter1;
+ 
+import com.github.gbenroscience.parser.Bracket; 
+import com.github.gbenroscience.parser.DataSetFormatter;
+ 
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.LISTS;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathScanner;
 import com.github.gbenroscience.parser.Operator;
-import com.github.gbenroscience.parser.Parser_Result;
+import com.github.gbenroscience.parser.ParserResult;
 import com.github.gbenroscience.parser.Variable;
 import com.github.gbenroscience.parser.methods.Method;
 import java.util.Arrays;
@@ -58,7 +60,7 @@ public class Parser {
      * The number of times to differentiate the function.
      */
     private int orderOfDifferentiation = Integer.MAX_VALUE;
-    public Parser_Result result = Parser_Result.VALID;
+    public ParserResult result = ParserResult.VALID;
 
     /**
      * This is a very important field as it tells if the function is to be
@@ -94,7 +96,7 @@ public class Parser {
      */
     public Parser(String expression) {
 
-        DataSetFormatter1 dsf = new DataSetFormatter1(expression);
+        DataSetFormatter dsf = new DataSetFormatter(expression);
         List<String> scanner = dsf.getDataset();
 
         MathScanner.recognizeAnonymousFunctions(scanner);
@@ -155,13 +157,19 @@ public class Parser {
      * has been pre-defined. The parser will load the function and differentiate
      * it wrt x, twice, and then evaluate it at x = 5.
      *
-     * Direct examples would be: diff(@(x)sin(x+1),4) diff(F,5.32) where F is a
+     * Direct examples would be: diff(@(x)sin(x+1),4), diff(F,5.32) where F is a
      * function that has been defined before in the workspace.. and so on.
      * @return the Function object in the expression and in the process also
      * discovers the point at which the derivative is to be evaluated.
      *
      */
     private Function localParseDerivativeCommand(List<String> list) {
+        /*
+        diff(F,v|x)
+        diff(F,v|x, n)
+        
+        
+        */
 
         list.removeAll(Arrays.asList(","));
         String args1, args2 = "";
@@ -183,8 +191,10 @@ public class Parser {
                         } else if (Variable.isVariableString(tk) & !Method.isDefinedMethod(tk)) {
                             Variable v = VariableManager.getVariable(list.get(i));
                             if (v != null) {
-                                String val = v.getValue();
-                                list.set(i, val);
+ 
+                                double val = v.getValue();
+                                list.set(i, String.valueOf(val));
+ 
                             }
                         }
 
@@ -245,19 +255,16 @@ public class Parser {
      * Direct examples would be: diff(@(x)sin(x+1),4) diff(F,5.32) where F is a
      * function that has been defined before in the workspace.. and so on.
      *
-     * diff(F) Evaluate F's grad func and return the result diff(F,v) Evaluate
-     * F's grad func and store the result in a function called v diff(F,n)
-     * Evaluate F's grad func n times diff(F,v,n) Evaluate F's grad func n times
-     * and store the result in a function called v diff(F,x,n) Evaluate F's grad
-     * func n times and calculate the result at x
+     * diff(F) Evaluate F's grad func and return the result 
+     * diff(F,v) Evaluate F's grad func and store the result in a function pointer called v 
+     * diff(F,n) Evaluate F's grad func n times 
+     * diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v 
+     * diff(F,x,n) Evaluate F's grad func n times and calculate the result at x
      *
      */
     public static void parseDerivativeCommand(List<String> list) {
-        /**
-         *
-         *
-         */
-        list.removeAll(Arrays.asList(","));
+      //  System.out.println("list-1: "+list); 
+ 
 
         String args1, args2 = "";
         if (list.get(0).equals("diff") && list.get(1).equals("(") && list.get(list.size() - 1).equals(")")) {
@@ -266,9 +273,7 @@ public class Parser {
             if (Variable.isVariableString(functionName)) {
 
                 boolean exists = FunctionManager.contains(functionName);
-
                 if (exists) {
-
                     for (int i = 3; i < list.size(); i++) {
                         String tk = list.get(i);
                         if (Operator.isOpeningBracket(tk)) {
@@ -276,45 +281,22 @@ public class Parser {
                             args1 = new MathExpression(LISTS.createStringFrom(list, i, closeBracket + 1)).solve();
                             List l = list.subList(i, closeBracket + 1);
                             l.clear();
-                            l.add(args1);
+ 
+                            l.add(args1); 
                         } else if (Variable.isVariableString(tk) & !Method.isDefinedMethod(tk)) {
                             Variable v = VariableManager.getVariable(list.get(i));
                             if (v != null) {
-                                String val = v.getValue();
-                                list.set(i, val);
+                                double val = v.getValue();
+                                list.set(i, String.valueOf(val));
+ 
                             }
                         }
-
                     }
-
                 }
-
             }
-
-            int sz = list.size();
-
-            /**
-             * diff,(,f,)--sz = 4 diff,(,f,1,)--sz = 5 diff,(,f,2,3,)--sz = 6
-             */
-            switch (sz) {
-
-                case 4:
-
-                    break;
-                case 5:
-                    args1 = list.get(3);
-                    break;
-                case 6:
-                    args1 = list.get(3);
-                    args2 = list.get(4);
-                    break;
-                default:
-                    list.clear();
-                    break;
-            }
-
+          
         }
-
+ 
     }//end method
 
     public static void main(String[] args) {

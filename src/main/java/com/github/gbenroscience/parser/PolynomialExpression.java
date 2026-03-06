@@ -102,7 +102,7 @@ public class PolynomialExpression extends MathExpression {
         }
 //Create a collection to serve as a garbage collector for the empty memory
 //locations and other unwanted locations created in the processing collection
-        ArrayList<String> real = new ArrayList<String>();
+        ArrayList<String> real = new ArrayList<>();
 //insert an empty string in it so that we can use it to remove empty spaces from the processing collection.
         real.add("");
         real.add("(");

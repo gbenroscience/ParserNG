@@ -183,10 +183,10 @@ public class NumericalIntegral {
         String variable = function.getIndependentVariables().get(0).getName();
 
 
-        fun.setValue(variable, String.valueOf(xLower));
+        fun.setValue(variable, xLower);
         double first = Double.parseDouble( fun.solve() );
 
-        fun.setValue(variable, String.valueOf(xUpper));
+        fun.setValue(variable, xUpper);
         double last = Double.parseDouble( fun.solve() );
 
         double count = 1.0;
@@ -201,11 +201,11 @@ public class NumericalIntegral {
             x= xLower+count*h;
             try{
                 if( (count%2) == 0 ){
-                    fun.setValue(variable, String.valueOf(x));
+                    fun.setValue(variable,  x);
                     sumEven += Double.parseDouble(fun.solve());
                 }//end if
                 else if( (count%2) == 1 ){
-                    fun.setValue(variable, String.valueOf(x));
+                    fun.setValue(variable, x);
                     sumOdd += Double.parseDouble(fun.solve());
                 }//end else if
                 ++count;
@@ -243,10 +243,10 @@ public class NumericalIntegral {
         String variable = function.getIndependentVariables().get(0).getName();
 
 
-        fun.setValue(variable, String.valueOf(xLower));
+        fun.setValue(variable, xLower);
         double first = Double.parseDouble( fun.solve() );
 
-        fun.setValue(variable, String.valueOf(xUpper));
+        fun.setValue(variable, xUpper);
         double last = Double.parseDouble( fun.solve() );
 
         double count = 1.0;
@@ -260,11 +260,11 @@ public class NumericalIntegral {
             x= xLower+count*h;
             try{
                 if( (count%2) == 0 ){
-                    fun.setValue(variable, String.valueOf(x));
+                    fun.setValue(variable, x);
                     sumEven += Double.parseDouble(fun.solve());
                 }//end if
                 else if( (count%2) == 1 ){
-                    fun.setValue(variable, String.valueOf(x));
+                    fun.setValue(variable, x);
                     sumOdd += Double.parseDouble(fun.solve());
                 }//end else if
                 ++count;
@@ -285,10 +285,10 @@ public class NumericalIntegral {
             xUpper = this.xUpper;
 
             h = (xUpper-xLower)/(10.0);
-            fun.setValue(variable, String.valueOf(xLower));
+            fun.setValue(variable, xLower);
             first = Double.parseDouble( fun.solve() );
 
-            fun.setValue(variable, String.valueOf(xUpper));
+            fun.setValue(variable, xUpper);
             last = Double.parseDouble( fun.solve() );
             count = 1.0;
             sumFirstAndLast=first+last;
@@ -303,11 +303,11 @@ public class NumericalIntegral {
                 try{
 
                     if( (count%2) == 0 ){
-                        fun.setValue(variable, String.valueOf(x));
+                        fun.setValue(variable, x);
                         sumEven += Double.parseDouble(fun.solve());
                     }//end if
                     else if( (count%2) == 1 ){
-                        fun.setValue(variable, String.valueOf(x));
+                        fun.setValue(variable, x);
                         sumOdd += Double.parseDouble(fun.solve());
                     }//end else if
                     ++count;
@@ -333,16 +333,16 @@ public class NumericalIntegral {
         double dx = (xUpper - xLower)/( 10000.0 );
         MathExpression fun = function.getMathExpression();
         String variable = function.getIndependentVariables().get(0).getName();
-        fun.setValue(variable, String.valueOf(xLower));
+        fun.setValue(variable, xLower);
 
 
         double first = Double.parseDouble(fun.solve());
 
-        fun.setValue(variable, String.valueOf(xUpper));
+        fun.setValue(variable, xUpper);
 
         double last = Double.parseDouble(fun.solve());
 
-        fun.setValue(variable, String.valueOf(xLower+dx));
+        fun.setValue(variable,  xLower+dx);
 
         double y = 0.0;
         double count=0.0;
@@ -350,7 +350,7 @@ public class NumericalIntegral {
         double x=xLower+dx;
         for(;x<(xUpper);){
             try{
-                fun.setValue(variable, String.valueOf(x));
+                fun.setValue(variable, x);
                 sum += Double.parseDouble(fun.solve());
                 ++count;
                 x = xLower+count*dx;
@@ -380,12 +380,12 @@ public class NumericalIntegral {
 
         MathExpression fun = function.getMathExpression();
         String variable = function.getIndependentVariables().get(0).getName();
-        fun.setValue(variable, String.valueOf(xLower));
+        fun.setValue(variable, xLower);
 
 
         double first = Double.parseDouble(fun.solve());
 
-        fun.setValue(variable, String.valueOf(xUpper));
+        fun.setValue(variable, xUpper);
 
         double last = Double.parseDouble(fun.solve());
 
@@ -395,7 +395,7 @@ public class NumericalIntegral {
         double x=xLower+h;
         for(;x<(xUpper);){
             try{
-                fun.setValue(variable, String.valueOf(x));
+                fun.setValue(variable, x);
                 mainSum += Double.parseDouble(fun.solve());
                 ++count;
                 x = xLower+count*h;
@@ -413,10 +413,10 @@ public class NumericalIntegral {
             xLower=xUpper;
             xUpper=this.xUpper;
 
-            fun.setValue(variable, String.valueOf(xLower));
+            fun.setValue(variable, xLower);
             first = Double.parseDouble(fun.solve());
 
-            fun.setValue(variable, String.valueOf(xUpper));
+            fun.setValue(variable, xUpper);
 
             last = Double.parseDouble(fun.solve());
             double sum = 0.50*(xUpper-xLower)*(first+last);
@@ -444,11 +444,11 @@ public class NumericalIntegral {
         MathExpression approxFunction = new MathExpression(expander.getPolynomialIntegral());
 
         String variable = function.getIndependentVariables().get(0).getName();
-        approxFunction.setValue(variable, String.valueOf( xLower ) );
+        approxFunction.setValue(variable, xLower );
 
         double lower = Double.parseDouble( approxFunction.solve() );
 
-        approxFunction.setValue(variable, String.valueOf( xUpper ) );
+        approxFunction.setValue(variable,  xUpper );
 
         double upper = Double.parseDouble( approxFunction.solve() );
 
@@ -644,8 +644,8 @@ public class NumericalIntegral {
 
             double x1 = ( x+(x+dx) )/2.0;
 
-            fun.setValue( variable, String.valueOf(x1) );
-            approxFunction.setValue( variable ,   String.valueOf(x1) );
+            fun.setValue( variable,  x1);
+            approxFunction.setValue( variable , x1);
             try{
                 sum2+=( Double.parseDouble(approxFunction.solve()) - Double.parseDouble(fun.solve()) );
             }//end try
@@ -694,8 +694,8 @@ public class NumericalIntegral {
                             l.add(args1);
                         }
                         else if(Variable.isVariableString(list.get(i))){
-                            String val = VariableManager.getVariable(list.get(i)).getValue();
-                            list.set(i, val);
+                            double val = VariableManager.getVariable(list.get(i)).getValue();
+                            list.set(i, String.valueOf(val));
                         }
 
 

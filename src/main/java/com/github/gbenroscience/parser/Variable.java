@@ -5,12 +5,12 @@
 package com.github.gbenroscience.parser;
 
 import com.github.gbenroscience.interfaces.Savable;
-import java.io.StringReader;
 import java.util.InputMismatchException;
 
 import com.github.gbenroscience.math.Maths;
 import java.util.NoSuchElementException;
 import com.github.gbenroscience.util.Serializer;
+import com.github.gbenroscience.util.VariableManager;
 
 /**
  *
@@ -26,7 +26,7 @@ public class Variable implements Savable {
     private TYPE type;
 
     //the value stored by this variable
-    private String value;
+    private double value;
     //the units stored by this variable..not compulsory
     private String units = "";
 
@@ -39,14 +39,14 @@ public class Variable implements Savable {
     /**
      * The constant PI
      */
-    public static final Variable PI = new Variable("pi", Maths.PI(), true);
+    public static final Variable PI = new Variable("pi", Math.PI, true);
 
     /**
      * The last answer variable used for flexibility on computational systems.
      */
-    public static Variable ans = new Variable("ans", "0.0", false);
+    public static Variable ans = new Variable("ans", 0.0, false);
 
-    public static Variable e = new Variable("e", String.valueOf(Math.E), true);
+    public static Variable e = new Variable("e", Math.E, true);
 
     static {
         ans.type = TYPE.NUMBER;
@@ -54,14 +54,36 @@ public class Variable implements Savable {
         PI.type = TYPE.NUMBER;
     }
 
+    /**
+     *
+     * @param name The name of the variable (will create and initialize the
+     * variable with the given name to 0.0) or a variable assignment statement
+     * like a=4; or b=a; (where a is an existing stored variable)
+     */
     public Variable(String name) {
 
         if (isVariableString(name)) {
             this.name = name;
-            this.value = "0.0";
+            this.value = 0.0;
             this.type = TYPE.NUMBER;
-        } else {
-
+        } else {//may be variable assignment statement a=4.43 etc
+            int commaIndex = name.indexOf("=");
+            if (commaIndex != -1) {
+                String n = name.substring(0, commaIndex);
+                String v = name.substring(commaIndex + 1);
+                Variable someVar = null;
+                if (isVariableString(n)) {
+                    if (Number.isNumber(v)) {
+                        this.name = n;
+                        this.value = Double.parseDouble(v);
+                        this.type = TYPE.NUMBER;
+                    } else if (isVariableString(v) && (someVar = VariableManager.lookUp(v)) != null) {
+                        this.name = n;
+                        this.value = someVar.value;
+                        this.type = TYPE.NUMBER;
+                    }
+                }
+            }
         }
     }
 
@@ -74,7 +96,7 @@ public class Variable implements Savable {
      * represents a constant, whose value cannot be altered.Else,it represents a
      * Variable object whose value can change.
      */
-    public Variable(String name, String value, boolean constant) {
+    public Variable(String name, double value, boolean constant) {
         this(name, "", value, constant);
     }
 
@@ -89,11 +111,12 @@ public class Variable implements Savable {
      * represents a constant, whose value cannot be altered.Else,it represents a
      * Variable object whose value can change.
      */
-    public Variable(String name, String fullName, String value, boolean constant) {
+    public Variable(String name, String fullName, double value, boolean constant) {
 
         if (isVariableString(name)) {
             this.name = name;
             setValue(value);
+            this.type = TYPE.NUMBER;
             this.fullName = fullName;
             this.constant = constant;
         }
@@ -106,19 +129,6 @@ public class Variable implements Savable {
 
     public TYPE getType() {
         return type;
-    }
-
-    /**
-     *
-     * @param name the name of the Variable object e.g A,B...e.t.c
-     * @param value the value stored by the Variable object
-     * @param constant the nature of the Variable object whether it is
-     * modifiable or not. If constant = true , then the Variable object
-     * represents a constant, whose value cannot be altered.Else,it represents a
-     * Variable object whose value can change.
-     */
-    public Variable(String name, double value, boolean constant) {
-        this(name, value + "", constant);
     }
 
     public void setFullName(String fullName) {
@@ -330,7 +340,7 @@ public class Variable implements Savable {
      * units.
      *
      */
-    public void setValue(String value) {
+    public final void setValue(String value) {
 
         if (value.contains(" ")) {
             String[] vals = value.split(" ");
@@ -339,11 +349,15 @@ public class Variable implements Savable {
         }
 
         if (Number.validNumber(value)) {
-            this.value = value;
+            this.value = Double.parseDouble(value);
         } else {
             throw new NumberFormatException("Bad Value! " + value + ".\nVariables store only valid real numbers.");
         }
 
+    }
+
+    public final void setValue(double value) {
+        this.value = value;
     }
 
     /**
@@ -351,12 +365,14 @@ public class Variable implements Savable {
      *
      * @return the value stored in the variable
      */
-    public String getValue() {
+    public double getValue() {
         String name = getName();
         if (isPI(name)) {
-            return value = Maths.PI();
+            return value = Math.PI;
         } else if (isLastEvaluatedAnswer(name)) {
-            return value = MathExpression.lastResult;
+            if (Number.isNumber(MathExpression.lastResult)) {
+                return value = Double.parseDouble(MathExpression.lastResult);
+            }
         } else if (isExpNumber(name)) {
             return value;
         } else if (isConstant()) {
@@ -462,7 +478,13 @@ public class Variable implements Savable {
      * @param args
      */
     public static void main(String args[]) {
-        System.out.println(isVariableString("sin"));
+        Variable a = new Variable("a=4");
+        VariableManager.add(a);
+        System.out.println("REGISTRY: " + VariableManager.VARIABLES);
+        Variable b = new Variable("b=a");
+        System.out.println(b);
+        VariableManager.add(b);
+        System.out.println("REGISTRY: " + VariableManager.VARIABLES);
     }//end method
 
 }//end class Variable

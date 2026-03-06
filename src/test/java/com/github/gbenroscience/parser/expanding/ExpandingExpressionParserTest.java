@@ -149,9 +149,9 @@ class ExpandingExpressionParserTest {
         comp = new ExpandingExpressionParser("L{1+L{1+0}}+L{-2+MN/0.8}", revert(Arrays.asList("22", "0", "66")), log);
         Assertions.assertEquals("0.0", comp.solve());
         comp = new ExpandingExpressionParser("L{{1}}", revert(Arrays.asList("2", "4", "6")), log);
-        Assertions.assertEquals("4", comp.solve());
+        Assertions.assertEquals("4.0", comp.solve());
         comp = new ExpandingExpressionParser("L{{MN/2}}", revert(Arrays.asList("2", "4", "6")), log);
-        Assertions.assertEquals("4", comp.solve());
+        Assertions.assertEquals("4.0", comp.solve());
     }
 
     @Test

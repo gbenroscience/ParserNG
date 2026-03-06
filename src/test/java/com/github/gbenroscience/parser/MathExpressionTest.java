@@ -94,8 +94,9 @@ class MathExpressionTest {
             }
         };
         MathExpression.setAutoInitOn(false);
-        MathExpression me = new MathExpression("b1(1,2,3)");
-        System.out.println("scanner for b1: "+me.scanner+", autoInitOn: "+MathExpression.isAutoInitOn());
+ 
+        MathExpression me = new MathExpression("b1(1,2,3)"); 
+ 
         Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b1);
         me = new MathExpression("b1(1,2,3)");
@@ -165,18 +166,30 @@ class MathExpressionTest {
         Assertions.assertEquals("\n"
                 + "   -1.0  ,    3.0  ,   -7.0            \n"
                 + "    0.0  ,    3.0  ,    4.0            \n"
-                + "    4.0  ,    0.0  ,  -11.0            \n", ls);
+                + "    4.0  ,    0.0  ,  -11.0            \n", FunctionManager.lookUp(ls).getMatrix().toString());
 
 
-        MathExpression expr = new MathExpression("tri_mat(M)");
-        String tm = expr.solve();
-        if (print) System.out.println(tm);
-        Assertions.assertTrue(tm.endsWith("@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0)") );
+ 
+        MathExpression expr = new MathExpression("tri_mat(M)"); 
+        Matrix m = FunctionManager.lookUp(expr.solve()).getMatrix(); System.out.println(m.toString());
+        if (print) System.out.println(m.toString());
+        Function f = new Function("fExpr=@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0)");
+        FunctionManager.add(f);
+        Assertions.assertTrue( f.getMatrix().equals(m) );
+        FunctionManager.delete("fExpr");
+         
+ 
 
         MathExpression expr2 = new MathExpression("echelon(M)");
-        String echelon = expr2.solve();
+        Matrix echelon = FunctionManager.lookUp(expr2.solve()).getMatrix();//expr2.solveGeneric().matrix;
         if (print) System.out.println(echelon);
-        Assertions.assertTrue(echelon.contains("@(3,3)(3.0,4.0,1.0,0.0,4.0,19.0,0.0,0.0,567.0)"));
+ 
+        
+        f = new Function("fExpr=@(3,3)(3.0,4.0,1.0,0.0,4.0,19.0,0.0,0.0,567.0)");
+        FunctionManager.add(f);
+        Assertions.assertTrue( f.getMatrix().equals(echelon) );
+        FunctionManager.delete("fExpr");
+         
 
         Function matrixFunction = FunctionManager.lookUp("M");
         Matrix matrix = matrixFunction.getMatrix();
@@ -274,10 +287,10 @@ class MathExpressionTest {
         if (print) System.out.println("solution: " + exprs.solve());
         Assertions.assertEquals("20.0", exprs.solve());
 
-        //ni idea what is this trying to do, resuts sounds buggy anyway
+        //no idea what is this trying to do, results sounds buggy anyway
         expr.setExpression("44+22*(3)");
         if (print) System.out.println("solution--: " + expr.solve());
-        Assertions.assertEquals("44, +, 22, *, 3", expr.solve());
+        Assertions.assertEquals("110.0", expr.solve());
 
         if (print) System.out.println("return type: " + exprs.returnType);
         Assertions.assertEquals(TYPE.NUMBER, exprs.returnType);
@@ -297,24 +310,26 @@ class MathExpressionTest {
 //                        + ".0), anon6=anon6=@(x,y)(x-x/y), f=f=@(x,y)(x-x/y), r=r=@(x)(ln(sin(x)))]",
 //                l.toString());
         if (print) System.out.println("VariableManager: " + VariableManager.VARIABLES);
-        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, x=x:0.0, pi=pi:3.1415926535897932, y=y:0.0, r1=r1:4}", VariableManager.VARIABLES.toString());
+        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, x=x:0.0, pi=pi:3.141592653589793, y=y:0.0, r1=r1:4.0}", VariableManager.VARIABLES.toString());
 
         MathExpression expression = new MathExpression("x=0;sin(ln(x))");
 
-        expression.setValue("x", 0 + "");
+        expression.setValue("x", 0 );
         if (print) System.out.println(expression.solve());
-        Assertions.assertEquals("-Infinity", expression.solve());
-        expression.setValue("x", 1 + "");
+ 
+        Assertions.assertEquals("NaN", expression.solve());
+        expression.setValue("x", 1 );
+ 
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals("0.0", expression.solve());
-        expression.setValue("x", 50 + "");
+        expression.setValue("x", 50 );
         if (print) System.out.println(expression.solve());
         Assertions.assertTrue("-0.6964441283311967".equals(expression.solve()) || "-0.6964441283311968".equals(expression.solve()));
-        expression.setValue("x", 100 + "");
+        expression.setValue("x", 100 );
         if (print) System.out.println(expression.solve());
         Assertions.assertEquals(Number.fastParseDouble("-0.9942575694137897"), Number.fastParseDouble(expression.solve()));
 
-        Function f = FunctionManager.lookUp("N");
+         f = FunctionManager.lookUp("N");
         long start = System.nanoTime();
         int iterations = 100;
         for (int i = 0; i < iterations; i++) {

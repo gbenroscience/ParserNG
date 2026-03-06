@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.List;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.parser.methods.MethodRegistry;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.Serializer;
 import com.github.gbenroscience.util.VariableManager;
@@ -19,7 +20,7 @@ import com.github.gbenroscience.util.VariableManager;
  *
  * @author JIBOYE OLUWAGBEMIRO OLAOLUWA
  */
-public class Function implements Savable {
+public class Function implements Savable, MethodRegistry.MethodAction {
 
     /**
      * The dependent variable
@@ -207,19 +208,60 @@ public class Function implements Savable {
      * @return the value of the function with these variables set.
      */
     public double calc(double... x) {
-        int i = 0;
-        if (x.length == independentVariables.size()) {
-            for (Variable var : independentVariables) {
-                mathExpression.setValue(var.getName(), String.valueOf(x[i++]));
-            }
-
-            return Double.parseDouble(mathExpression.solve());
+        // Check for null and size equality
+        if (x == null || x.length != independentVariables.size()) {
+            return Double.NaN;
         }
-        return Double.NaN;
+
+        for (int i = 0; i < x.length; i++) {
+            Variable var = independentVariables.get(i);
+            mathExpression.setValue(var.getName(), x[i]);
+        }
+
+        return mathExpression.solveGeneric().scalar;
+    }
+
+    /**
+     *
+     * @param x A list of variable values to set for the function. The supplied
+     * value list is applied to the function's parameter list in the order they
+     * were supplied in the original question.
+     * @return the value of the function with these variables set.
+     */
+    public MathExpression.EvalResult calc(MathExpression.EvalResult... x) {
+
+        if (type == TYPE.ALGEBRAIC_EXPRESSION) {
+            if (x.length == independentVariables.size()) {
+                for (int i = 0; i < x.length; i++) {
+                    Variable var = independentVariables.get(i);
+                    mathExpression.setValue(var.getName(), x[i].scalar);
+                }
+                return mathExpression.solveGeneric();
+            }
+        } else if (type == TYPE.MATRIX) {
+            MathExpression.EvalResult res = new MathExpression.EvalResult();
+            return res.wrap(matrix);
+        }
+        return new MathExpression.EvalResult();
+    }
+
+    @Override
+    public MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult... x) {
+        if (type == TYPE.ALGEBRAIC_EXPRESSION) {
+            if (x.length == independentVariables.size()) {
+                for (int i = 0; i < x.length; i++) {
+                    Variable var = independentVariables.get(i);
+                    mathExpression.setValue(var.getName(), x[i].scalar);
+                }
+                return nextResult.wrap(mathExpression.solveGeneric());
+            }
+        } else if (type == TYPE.MATRIX) {
+            return nextResult.wrap(matrix);
+        }
+        return nextResult;
     }
 
     public static boolean assignObject(String input) {
-          
         /**
          * Check if it is a function assignment operation...e.g:
          * f=matrix_mul(A,B)
@@ -258,11 +300,11 @@ public class Function implements Savable {
 
             if (Number.validNumber(rhs)) {
                 if (Variable.isVariableString(newFuncName)) {
-                    VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, rhs, false));
+                    VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(rhs), false));
                 } else if (isVarNamesList) {
                     List<String> vars = new Scanner(newFuncName, false, ",").scan();
                     for (String var : vars) {
-                        VariableManager.VARIABLES.put(var, new Variable(var, rhs, false));
+                        VariableManager.VARIABLES.put(var, new Variable(var, Double.parseDouble(rhs), false));
                     }
                 }
 
@@ -270,18 +312,18 @@ public class Function implements Savable {
             } else {
 
                 MathExpression expr = new MathExpression(rhs);
-                List<String> scanner = expr.getScanner(); 
-                if (scanner.size() == 3 && scanner.get(1).startsWith(FunctionManager.ANON_PREFIX)) {//function assigments will always be like this: [(,anon1,)] when they get here
+ 
+                List<String> scanner = expr.getScanner();
+                if (scanner.size() == 3 && scanner.get(1).startsWith("anon")) {//function assigments will always be like this: [(,anon1,)] when they get here
+ 
                     Function f = FunctionManager.lookUp(scanner.get(1));
-
                     if (f != null) {
-                
                         FunctionManager.delete(scanner.get(1));
                         if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
                             f.setDependentVariable(new Variable(newFuncName));
                             FunctionManager.add(f);
                         } else if (f.getType() == TYPE.MATRIX) {
-                             f.getMatrix().setName(newFuncName);
+                            f.getMatrix().setName(newFuncName);
                             FunctionManager.add(f);
                         }
                     } else {
@@ -291,8 +333,9 @@ public class Function implements Savable {
 
                     return true;
                 }
-                String val = expr.solve();
-                String referenceName = expr.getReturnObjectName(); 
+                MathExpression.EvalResult val = expr.solveGeneric();
+                System.out.println("val.type = " + val.getTypeName());
+                String referenceName = expr.getReturnObjectName();
 
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
                     Function f;
@@ -301,8 +344,9 @@ public class Function implements Savable {
                             if (isVarNamesList && hasCommas) {
                                 throw new InputMismatchException("Initialize a function at a time!");
                             }
-                            f = FunctionManager.lookUp(referenceName);
-                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
+
+                            val.matrix.setName(newFuncName);
+                            Function fm = new Function(val.matrix);
                             success = true;
                             break;
                         case ALGEBRAIC_EXPRESSION:
@@ -328,11 +372,12 @@ public class Function implements Savable {
                             if (isVarNamesList && hasCommas) {
                                 List<String> vars = new Scanner(newFuncName, false, ",").scan();
                                 for (String var : vars) {
-                                    VariableManager.VARIABLES.put(var, new Variable(var, val, false));
+                                    VariableManager.VARIABLES.put(var, new Variable(var, val.scalar, false));
                                 }
                                 success = true;
                             } else {
-                                VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, val, false));
+                                System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
+                                VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, val.scalar, false));
                                 success = true;
                             }
 
@@ -398,7 +443,7 @@ public class Function implements Savable {
                 for (int i = 0; i < scan.size(); i++) {
                     try {
                         if (Variable.isVariableString(scan.get(i))) {
-                            independentVariables.add(new Variable(scan.get(i), "0.0", false));
+                            independentVariables.add(new Variable(scan.get(i), 0.0, false));
                             vars = vars.concat(scan.get(i) + "=" + "0.0;");//build variable command list
                         }//end if
                     }//end try
@@ -470,6 +515,10 @@ public class Function implements Savable {
         }
 
         return independentVariables.size();
+    }
+
+    public int getArity() {
+        return this.independentVariables.size();
     }
 
     /**
@@ -761,10 +810,9 @@ public class Function implements Savable {
             int i = 0;
             int len = sz + 1;
             for (double x = x1; i < len && x <= x2; x += xStep, i++) {
-                String xStr = String.valueOf(x);
-                mathExpression.setValue(variableName, xStr);
+                mathExpression.setValue(variableName, x);
                 results[0][i] = mathExpression.solve();
-                results[1][i] = xStr;
+                results[1][i] = String.valueOf(x);
             }//end for
             return results;
         }//end if
@@ -801,7 +849,7 @@ public class Function implements Savable {
         int len = sz + 1;
         int i = 0;
         for (double x = xLower; i < len && x <= xUpper; x += xStep, i++) {
-            mathExpression.setValue(variableName, String.valueOf(x));
+            mathExpression.setValue(variableName, x);
             results[0][i] = Double.parseDouble(mathExpression.solve());
             results[1][i] = x;
         }//end for
@@ -812,6 +860,8 @@ public class Function implements Savable {
 
     /**
      * Prints the content of a 2D array
+     *
+     * @param obj
      */
     public static void print2DArray(Object[][] obj) {
         int rows = obj.length;
@@ -900,7 +950,6 @@ public class Function implements Savable {
                 return f.matrix.getName().startsWith(FunctionManager.ANON_PREFIX);
             default:
                 return false;
-
         }
 
     }

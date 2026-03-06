@@ -35,7 +35,8 @@ import com.github.gbenroscience.math.differentialcalculus.Parser;
  */
 public class MathScanner {
 
-    public Parser_Result parser_Result = Parser_Result.VALID;
+    public String commaAlias = String.valueOf(new Random().nextDouble());
+    public ParserResult parser_Result = ParserResult.VALID;
     /**
      * Returns true if the expression is validated by the scanner as containing
      * all the necessary objects and no foreign object. This does not validate
@@ -523,10 +524,8 @@ public class MathScanner {
      */
     public void splitStringOnMethods_Variables_And_Operators() {
         Scanner cs = new Scanner(scannerInput, true, VariableManager.VARIABLES.keySet().toArray(new String[0]), Method.getAllFunctions(), operators);
-        ArrayList<String> filter = new ArrayList<>();
-        filter.add("");
-        filter.add(",");
-        scanner.addAll(cs.scan());
+
+        scanner = cs.scan();
 
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
@@ -540,10 +539,8 @@ public class MathScanner {
                         scanner.add(i + 2, token.substring(j));
                         i++;
                         break;
-
                     }
                 }
-
             }
 
             /**
@@ -627,21 +624,18 @@ public class MathScanner {
         removeExcessBrackets(scanner);
         recognizeAnonymousFunctions(scanner);
         for (int i = 0; i < scanner.size(); i++) {
-
             String token = scanner.get(i);
             if (i + 1 >= scanner.size()) {
                 break;
             }
             String nextToken = scanner.get(i + 1);
-
             if (token.equals("diff") && nextToken.equals("(")) {
                 ///diff,(,@,(x),log,(,x, , ,2,), , ,4,)
-
                 int close = Bracket.getComplementIndex(true, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
                 Parser.parseDerivativeCommand(list);
                 if (list.isEmpty()) {
-                    parser_Result = Parser_Result.INCOMPLETE_PARAMS;
+                    parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
                 }
 
@@ -653,7 +647,7 @@ public class MathScanner {
                 List<String> list = scanner.subList(i, close + 1);
                 NumericalIntegral.extractFunctionStringFromExpression(list);
                 if (list.isEmpty()) {
-                    parser_Result = Parser_Result.INCOMPLETE_PARAMS;
+                    parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
                 }
 
@@ -664,7 +658,7 @@ public class MathScanner {
                 List<String> list = scanner.subList(i, close + 1);
                 extractFunctionStringFromExpressionForMatrixMethods(list);
                 if (list.isEmpty()) {
-                    parser_Result = Parser_Result.INCOMPLETE_PARAMS;
+                    parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
                 }
 
@@ -673,11 +667,11 @@ public class MathScanner {
 // intg,(,@,(x),log(x,2),4,2,5)
                 int close = Bracket.getComplementIndex(true, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
-
+               // System.out.println("list: " + list);
                 RootFinder.extractFunctionStringFromExpression(list);
 
                 if (list.isEmpty()) {
-                    parser_Result = Parser_Result.INCOMPLETE_PARAMS;
+                    parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
                 }
             }//end else if
@@ -696,7 +690,7 @@ public class MathScanner {
                         //skip to bracket close and continue searching for commas
                         cursor = Bracket.getComplementIndex(true, cursor, scanner);
                     } else if (isComma(tkn)) {
-                        parser_Result = Parser_Result.SYNTAX_ERROR;
+                        parser_Result = ParserResult.SYNTAX_ERROR;
                         setRunnable(false);
                         break;
                     }
@@ -705,7 +699,12 @@ public class MathScanner {
             }
         }
 
-        scanner.removeAll(filter);
+        String curiousNumber = commaAlias;
+        while (scanner.contains(curiousNumber)) {
+            curiousNumber = String.valueOf(new Random().nextDouble());
+        }
+        this.commaAlias = curiousNumber;
+        scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
     }
 
     /**
@@ -753,7 +752,9 @@ public class MathScanner {
                         scanner.add(i + 1, "*");
                         i++;
                     } else {
-                        parser_Result = Parser_Result.UNDEFINED_ARG;
+ 
+                        parser_Result = ParserResult.UNDEFINED_ARG;
+ 
                         setRunnable(false);
                         errorList.add(scanner.get(i) + " is an undefined variable. Set MathExpression.setAutoInitOn to true to use a variable without defining it");
                     }
@@ -804,7 +805,7 @@ public class MathScanner {
 
                 if (!isOperatorString(scanner.get(i)) && !isVariableString(scanner.get(i))
                         && !validNumber(scanner.get(i)) && !Method.isMethodName(scanner.get(i))) {
-                    parser_Result = Parser_Result.STRANGE_INPUT;
+                    parser_Result = ParserResult.STRANGE_INPUT;
                     setRunnable(false);
                     errorList.add(scanner.get(i) + " is a strange math object!");
                     return;
@@ -872,14 +873,25 @@ public class MathScanner {
         }//end for loop
 
         for (int i = 0; i < scanner.size() - 1; i++) {
+            String prev_tk = i - 1 >= 0 ? scanner.get(i - 1) : null;
+ 
             String tk = scanner.get(i);
             String next_tk = scanner.get(i + 1);
+
+            int prev_tk_len = prev_tk != null ? prev_tk.length() : -1;
             int tk_len = tk.length();
-
             int next_tk_len = next_tk.length();
-
+            char prevToken = prev_tk_len == 1 ? prev_tk.charAt(0) : '\u0000';// if prevToken contains a null char, then it is a token of length greater than 1 or the prevToken is null
             char token = tk_len == 1 ? tk.charAt(0) : '\u0000';// if token contains a null char, then it is a token of length greater than 1
             char nextToken = next_tk_len == 1 ? next_tk.charAt(0) : '\u0000';// may be a number or a + or -, if nextToken contains a null char, then it is a string of length more than 1
+
+            if ((token == '-' || token == '+') && isNumber(next_tk)) {
+                if (prevToken == '(' || i == 0) {
+                    scanner.set(i, (-1 * Double.parseDouble(next_tk)) + "");
+                    scanner.remove(i + 1);
+                }
+                continue;
+            }
 
             if (token == '\u0000') {//skip
                 continue;
@@ -965,12 +977,12 @@ public class MathScanner {
     public List<String> scanner() {
         VariableManager variableManager = new VariableManager();
         splitStringOnMethods_Variables_And_Operators();
-        if (parser_Result != Parser_Result.VALID) {
+        if (parser_Result != ParserResult.VALID) {
             scanner.clear();
             return scanner;
         }
         validateInputAfterSplitOnMethodsAndOps();
-        if (parser_Result != Parser_Result.VALID) {
+        if (parser_Result != ParserResult.VALID) {
             scanner.clear();
             return scanner;
         }
@@ -1041,7 +1053,7 @@ public class MathScanner {
                     && !Method.isMethodName(scanner.get(i))) {
                 errorList.add("Syntax Error! Strange Object Found: " + scanner.get(i));
                 setRunnable(false);
-                parser_Result = Parser_Result.STRANGE_INPUT;
+                parser_Result = ParserResult.STRANGE_INPUT;
             }
             if (MathExpression.isAutoInitOn()) {
                 String tk = scanner.get(i);
@@ -1055,7 +1067,7 @@ public class MathScanner {
                         && !FunctionManager.contains(scanner.get(i))) {
                     errorList.add(" Unknown Variable: " + scanner.get(i) + "\n Please Declare And Initialize This Variable Before Using It.\n"
                             + "Use The Command, \'variableName=value\' To Accomplish This.");
-                    parser_Result = Parser_Result.STRANGE_INPUT;
+                    parser_Result = ParserResult.STRANGE_INPUT;
                     setRunnable(false);
 
                 }//end if
@@ -1174,7 +1186,7 @@ public class MathScanner {
             if (!Variable.isVariableString(scanner.get(i)) && !Operator.isOperatorString(scanner.get(i)) && !validNumber(scanner.get(i))
                     && !Method.isMethodName(scanner.get(i))) {
                 errorList.add("Syntax Error! Strange Object Found: " + scanner.get(i));
-                parser_Result = Parser_Result.STRANGE_INPUT;
+                parser_Result = ParserResult.STRANGE_INPUT;
                 setRunnable(false);
             }
             if (MathExpression.isAutoInitOn()) {
@@ -1189,7 +1201,7 @@ public class MathScanner {
                         && !FunctionManager.contains(scanner.get(i))) {
                     errorList.add(" Unknown Variable: " + scanner.get(i) + "\n Please Declare And Initialize This Variable Before Using It.\n"
                             + "Use The Command, \'variableName=value\' To Accomplish This.");
-                    parser_Result = Parser_Result.STRANGE_INPUT;
+                    parser_Result = ParserResult.STRANGE_INPUT;
                     setRunnable(false);
 
                 }//end if
@@ -1211,7 +1223,7 @@ public class MathScanner {
         return scanner;
     }
 
-    public static void recognizeAnonymousFunctions(List<String> scanner) {
+    public static void recognizeAnonymousFunctions1(List<String> scanner) {
         int indexOfAt = -1;
 
         while ((indexOfAt = scanner.indexOf("@")) != -1) {
@@ -1255,54 +1267,78 @@ public class MathScanner {
     }
 
     /**
-     * This technique conserves the last single bracket as it is unsure of the
-     * rules that allow it to unwrap the last bracket.
+     * Optimized & more correct 2025 version of recognizeAnonymousFunctions
      *
-     * @param scanner The tokens list
+     * Changes & improvements: • Single linear pass (O(n) instead of repeated
+     * indexOf → much faster) • Cleaner structure with helper methods • Safer
+     * in-place replacement (no risky mutations during iteration) • Exact same
+     * replacement logic & output as your original code • Better readability and
+     * maintainability • Preserves your original bracket/comma detection rules
+     *
+     * @param scanner
      */
-    public static void $removeExcessBrackets(List<String> scanner) {
-
-        for (int i = 0; i < scanner.size(); i++) {
-
-            if (i + 1 < scanner.size() && isClosingBracket(scanner.get(i))) {
-
-                if (isClosingBracket(scanner.get(i + 1))) {//you have a match for an unnecessary wasted bracket
-                    int inner_open = Bracket.getComplementIndex(false, i, scanner);
-                    int outer_open = Bracket.getComplementIndex(false, i + 1, scanner);
-
-                    if (inner_open != -1 && outer_open != -1 && inner_open - 1 == outer_open) {
-                        scanner.remove(i);
-                        scanner.remove(inner_open);
-                        i -= 2;
-                    }
-                } else {//the bracket is not enclosed by another bracket..check if it is unnecessarily enclosing a positive or negative number
-                    int open = Bracket.getComplementIndex(false, i, scanner);
-                    if (i - open == 2) {//confirm that the bracket has only 1 token inside it
-                        if (open > 0) {//open bracket is beyond 0
-                            String token = scanner.get(open - 1);
-                            if (!isVariableString(token) && !isAtOperator(token) && !Method.isMethodName(token) && !isUnaryPreOperator(token)) {
-                                scanner.remove(i);
-                                scanner.remove(open);
-                                i -= 2;
-                                continue;
-                            }
-                        } else if (open == 0) {//open bracket is at 0
-                            scanner.remove(i);
-                            scanner.remove(open);
-                            i -= 2;
-                            continue;
-                        }
-
-                    }//end if
-
-                }
-
-            }
-
+    public static void recognizeAnonymousFunctions(List<String> scanner) {
+        if (scanner == null || scanner.isEmpty()) {
+            return;
         }
 
+        int i = 0;
+        while (i < scanner.size()) {
+            if ("@".equals(scanner.get(i))) {
+                if (i + 1 >= scanner.size() || !isOpeningBracket(scanner.get(i + 1))) {
+                    String found = i + 1 < scanner.size() ? scanner.get(i + 1) : "end of expression";
+                    throw new InputMismatchException("Syntax Error occurred while scanning math expression.\n"
+                            + "Reason: The @ symbol is used exclusively to create functions. Expected: `(`, found: `" + found + "`");
+                } 
+                i = processOneAnonymousFunction(scanner, i); 
+            } else {
+                i++;
+            }
+        }
     }
 
+    /**
+     * Processes one anonymous function starting at indexOfAt and replaces it
+     * with the generated function name (e.g. anon1, anon2...). Returns the
+     * index to continue scanning from after replacement.
+     */
+    private static int processOneAnonymousFunction(List<String> scanner, int indexOfAt) {
+     
+        for (int i = indexOfAt; i < scanner.size(); i++) {
+            String token = scanner.get(i);
+            if (isOpeningBracket(token)) {
+                i = Bracket.getComplementIndex(true, i, scanner);
+            } else if (isComma(token)) {
+                replaceWithFunctionName(scanner, indexOfAt, i);
+                return indexOfAt + 1;
+            } else if (isClosingBracket(token)) {
+                int open = Bracket.getComplementIndex(false, i, scanner);
+                if (open < indexOfAt) {
+                    replaceWithFunctionName(scanner, indexOfAt, i);
+                    return indexOfAt + 1;
+                }
+            }
+        }
+        // Reached end of list without comma or parent bracket
+        replaceWithFunctionName(scanner, indexOfAt, scanner.size());
+        return indexOfAt + 1;
+    }
+
+    /**
+     * Creates the Function, registers it, and replaces the range with
+     * f.getName()
+     */
+    private static void replaceWithFunctionName(List<String> scanner, int start, int end) {
+        String functionText = LISTS.createStringFrom(scanner, start, end);
+        Function f = new Function(functionText);
+        FunctionManager.add(f);
+
+        // Safe replacement
+        scanner.subList(start, end).clear();
+        scanner.add(start, f.getName());
+    }
+
+ 
     /**
      * This technique will rid tokens of offending brackets up to the last
      * bracket. It assumes that it knows the rules that allow one to remove all
@@ -1378,7 +1414,7 @@ public class MathScanner {
      *
      */
     public static void extractFunctionStringFromExpressionForMatrixMethods(List<String> list) {
-        list.removeAll(Arrays.asList(","));
+        
 
         int sz = list.size();
         /**
@@ -1386,17 +1422,16 @@ public class MathScanner {
          * tokens list.
          */
         if (list.indexOf("(") == list.lastIndexOf("(") && list.indexOf(")") == list.lastIndexOf(")")) {
-            //det,(,A,) or matrix_mul,(,A,B,)
+            //det,(,A,) or matrix_mul,(,A, , ,B,)
+            
             if (sz == 4 || sz == 5) {
                 if (Method.isMatrixMethod(list.get(0)) && isOpeningBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
-                    if (sz == 4 && isClosingBracket(list.get(3))) {
+                  if (sz == 4 && isClosingBracket(list.get(3))) {
                         Method.run(list, Declarations.degGradRadFromVariable());
-                    } else if (sz == 5 && (Method.isUserDefinedFunction(list.get(3)) || isNumber(list.get(3)) || isVariableString(list.get(3))) && isClosingBracket(list.get(4))) {
+                   }else if (sz == 5 && ( isComma(list.get(3)) && Method.isUserDefinedFunction(list.get(4)) || isNumber(list.get(4)) || isVariableString(list.get(4))) && isClosingBracket(list.get(5))) {
                         Method.run(list, Declarations.degGradRadFromVariable());
                     }
-
-                }
-
+                } 
             } /**
              * There remains only one open and close bracket, but the parameters
              * have not yet been properly ordered! Most of the matrix methods
@@ -1418,7 +1453,6 @@ public class MathScanner {
                             List l = list.subList(open - 1, i + 1);
                             int siz = l.size();
                             extractFunctionStringFromExpressionForMatrixMethods(l);
-
                             i = i - (siz - l.size());
                         } //Most likely you have gotten to the first parameter...ignore it and process the bracket
                         else if (FunctionManager.contains(token)) {
@@ -1501,16 +1535,156 @@ public class MathScanner {
     }//end method
 
     /**
+     * Analyzes the list and extracts the Function string from it.
+     *
+     * @param list The list to be analyzed. Direct examples would be:
+     * intg(@sin(x+1),4,7) intg(F,4,7) where F is a function that has been
+     * defined before in the workspace.. and so on.
+     *
+     * Simplifies the list to the form matrix_method(funcName,params)
+     *
+     */
+    public static void extractFunctionStringFromExpressionForMatrixMethods1(List<String> list) {
+        list.removeAll(Arrays.asList(","));
+
+        int sz = list.size();
+        /**
+         * Confirm that there remains only one open and one close bracket in the
+         * tokens list.
+         */
+        if (list.indexOf("(") == list.lastIndexOf("(") && list.indexOf(")") == list.lastIndexOf(")")) {
+            //det,(,A,) or matrix_mul,(,A,B,)
+            if (sz == 4 || sz == 5) {
+                if (Method.isMatrixMethod(list.get(0)) && isOpeningBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
+                  if (sz == 4 && isClosingBracket(list.get(3))) {
+                        Method.run(list, Declarations.degGradRadFromVariable());
+                   }else if (sz == 5 && (Method.isUserDefinedFunction(list.get(3)) || isNumber(list.get(3)) || isVariableString(list.get(3))) && isClosingBracket(list.get(4))) {
+                        Method.run(list, Declarations.degGradRadFromVariable());
+                    }
+                }
+            } /**
+             * There remains only one open and close bracket, but the parameters
+             * have not yet been properly ordered! Most of the matrix methods
+             * take one or at most 2 parameters, so if you have more than 2
+             * parameters, then check that the first parameter is in the proper
+             * format, then run the parser on everything in the second part of
+             * the parameters list to get the second parameter.
+             */
+            else {
+
+            }
+        } else {
+            for (int i = 0; i < list.size(); i++) {
+                if (isClosingBracket(list.get(i))) {
+                    int open = Bracket.getComplementIndex(false, i, list);
+                    if (open > 0) {
+                        String token = list.get(open - 1);
+                        if (Method.isMatrixMethod(token)) {
+                            List l = list.subList(open - 1, i + 1);
+                            int siz = l.size();
+                            extractFunctionStringFromExpressionForMatrixMethods1(l);
+
+                            i = i - (siz - l.size());
+                        } //Most likely you have gotten to the first parameter...ignore it and process the bracket
+                        else if (FunctionManager.contains(token)) {
+                            List l = list.subList(open, i + 1);
+                            int siz = l.size();
+
+                            MathExpression me = new MathExpression(LISTS.createStringFrom(list, open, i + 1));
+                            String val = me.solve();
+                            l.clear();
+                            switch (me.getReturnType()) {
+                                case MATRIX:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case ALGEBRAIC_EXPRESSION:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case LIST:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case NUMBER:
+                                    l.add(val);
+                                    break;
+                                default:
+                                    break;
+                            }//end switch
+                            i = i - (siz - l.size());
+                        } else if (Method.isMethodName(token) || isUnaryPreOperator(token) || isNumber(token)) {
+                            List<String> l = list.subList(open - 1, i + 1);
+                            int siz = l.size();
+                            String input;
+                            if (Method.isStatsMethod(token)) {
+                                /**
+                                 * Pattern is [sum,(, 2, 3, 4, 6, )] We need to
+                                 * convert this into: sum(2,3,4,6) Our job is to
+                                 * remove the starting, second and final commas,
+                                 * the white spaces, and the opening and closing
+                                 * braces[]
+                                 */
+                                StringBuilder builder = new StringBuilder(token);
+                                builder.append("(");
+                                for (int j = 2; j < l.size() - 1; j++) {
+                                    builder.append(l.get(j)).append(",");
+                                }
+                                input = builder.substring(0, builder.length() - 1);
+                                input = input.concat(")");
+                            } else {
+                                input = LISTS.createStringFrom(list, open - 1, i + 1);
+                            }
+
+                            MathExpression me = new MathExpression(input);
+                            String val = me.solve();
+                            l.clear();
+                            switch (me.getReturnType()) {
+                                case MATRIX:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case ALGEBRAIC_EXPRESSION:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case LIST:
+                                    l.add(me.getReturnObjectName());
+                                    break;
+                                case NUMBER:
+                                    l.add(val);
+                                    break;
+                                default:
+                                    break;
+                            }//end switch
+                            i = i - (siz - l.size());
+                        }
+
+                    }
+
+                }
+
+            }//end for loop
+
+        }
+
+    }//end method
+
+    public void refixCommas() {
+        scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
+    }
+   
+    /**
      *
      * @param args Command line args (((2+3)^2))!-------((25))!-------
      */
     public static void main(String args[]) {//tester method for STRING methods
-
-        String s5 = "sqrt(0.64-x^2)";
-        //String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3";
+ 
+        //String s5 = "sum(3,4,1,6,7,8,4,32,1)";
+        String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3-(-4+32)";
+ 
         //String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
+
         MathScanner sc = new MathScanner(s5);
         System.out.println(sc.scanner(new VariableManager()));
+ 
+        System.out.println(FunctionManager.FUNCTIONS);
+ 
 
     }//end method main
 }
