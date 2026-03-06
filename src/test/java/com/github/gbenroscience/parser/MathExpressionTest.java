@@ -94,8 +94,7 @@ class MathExpressionTest {
             }
         };
         MathExpression.setAutoInitOn(false);
-        MathExpression me = new MathExpression("b1(1,2,3)");
-        System.out.println("scanner for b1: "+me.scanner+", autoInitOn: "+MathExpression.isAutoInitOn());
+        MathExpression me = new MathExpression("b1(1,2,3)"); 
         Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b1);
         me = new MathExpression("b1(1,2,3)");

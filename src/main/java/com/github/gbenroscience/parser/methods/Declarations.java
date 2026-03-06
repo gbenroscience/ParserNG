@@ -27,24 +27,32 @@ public class Declarations {
     public static final String SIN = "sin";
     public static final String COS = "cos";
     public static final String TAN = "tan";
-    public static final String SINH = "sinh";
-    public static final String COSH = "cosh";
-    public static final String TANH = "tanh";
     public static final String ARC_SIN = "sin-¹";
     public static final String ARC_COS = "cos-¹";
     public static final String ARC_TAN = "tan-¹";
-    public static final String ARC_SINH = "sinh-¹";
-    public static final String ARC_COSH = "cosh-¹";
-    public static final String ARC_TANH = "tanh-¹";
     public static final String SEC = "sec";
     public static final String COSEC = "csc";
     public static final String COT = "cot";
-    public static final String SECH = "sech";
-    public static final String COSECH = "csch";
-    public static final String COTH = "coth";
     public static final String ARC_SEC = "sec-¹";
     public static final String ARC_COSEC = "csc-¹";
     public static final String ARC_COT = "cot-¹";
+    public static final String ARC_SIN_ALT = "asin";
+    public static final String ARC_COS_ALT = "acos";
+    public static final String ARC_TAN_ALT = "atan";
+    public static final String ARC_SEC_ALT = "asec";
+    public static final String ARC_COSEC_ALT = "acsc";
+    public static final String ARC_COT_ALT = "acot";
+
+  
+    public static final String SINH = "sinh";
+    public static final String COSH = "cosh";
+    public static final String TANH = "tanh";
+    public static final String ARC_SINH = "sinh-¹";
+    public static final String ARC_COSH = "cosh-¹";
+    public static final String ARC_TANH = "tanh-¹";
+    public static final String SECH = "sech";
+    public static final String COSECH = "csch";
+    public static final String COTH = "coth";
     public static final String ARC_SECH = "sech-¹";
     public static final String ARC_COSECH = "csch-¹";
     public static final String ARC_COTH = "coth-¹";
@@ -55,15 +63,9 @@ public class Declarations {
     public static final String LN_INV = "ln-¹";
     public static final String LG_INV = "lg-¹";
     public static final String LOG_INV = "log-¹";
-    public static final String ARC_SIN_ALT = "asin";
-    public static final String ARC_COS_ALT = "acos";
-    public static final String ARC_TAN_ALT = "atan";
     public static final String ARC_SINH_ALT = "asinh";
     public static final String ARC_COSH_ALT = "acosh";
     public static final String ARC_TANH_ALT = "atanh";
-    public static final String ARC_SEC_ALT = "asec";
-    public static final String ARC_COSEC_ALT = "acsc";
-    public static final String ARC_COT_ALT = "acot";
     public static final String ARC_SECH_ALT = "asech";
     public static final String ARC_COSECH_ALT = "acsch";
     public static final String ARC_COTH_ALT = "acoth";
@@ -105,9 +107,11 @@ public class Declarations {
     public static final String TARTAGLIA_ROOTS = "t_root";
     public static final String GENERAL_ROOT = "root";
     /**
-     * May take its input  matrix as a list or as an anonymous function or as a Matrix variable.
-     * e.g linear_sys(3,2,-1,4,5,-8) [returns the raw matrix data] or linear_sys(@(2,3)(3,2,-1,4,5,-8)) [returns a function that points to the solution matrix] 
-     * or linear_sys(A) [returns a function that points to the solution matrix]
+     * May take its input matrix as a list or as an anonymous function or as a
+     * Matrix variable. e.g linear_sys(3,2,-1,4,5,-8) [returns the raw matrix
+     * data] or linear_sys(@(2,3)(3,2,-1,4,5,-8)) [returns a function that
+     * points to the solution matrix] or linear_sys(A) [returns a function that
+     * points to the solution matrix]
      */
     public static final String LINEAR_SYSTEM = "linear_sys";
     public static final String DETERMINANT = "det";
@@ -128,6 +132,51 @@ public class Declarations {
     public static final String MATRIX_EIGENVALUES = "eigvalues";
     public static final String HELP = "help";
 
+    
+      public static final String getTrigFuncDRGVariant(String methodName, DRG_MODE drg) {
+        String mode = drg == DRG_MODE.DEG ? "_deg" : (drg == DRG_MODE.RAD ? "_rad" : "_grad");
+        switch (methodName) {
+            case SIN:
+                return SIN + mode;
+            case COS:
+                   return COS + mode;
+            case TAN:
+                   return TAN + mode;
+            case ARC_SIN:
+                   return ARC_SIN + mode;
+            case ARC_COS:
+                   return ARC_COS + mode;
+            case ARC_TAN:
+                   return ARC_TAN + mode;
+            case SEC:
+                   return SEC + mode;
+            case COSEC:
+                   return COSEC + mode;
+            case COT:
+                   return COT + mode;
+            case ARC_SEC:
+                   return ARC_SEC + mode;
+            case ARC_COSEC:
+                   return ARC_COSEC + mode;
+            case ARC_COT:
+                   return ARC_COT + mode;
+            case ARC_SIN_ALT:
+                   return ARC_SIN_ALT + mode;
+            case ARC_COS_ALT:
+                   return ARC_COS_ALT + mode;
+            case ARC_TAN_ALT:
+                   return ARC_TAN_ALT + mode;
+            case ARC_SEC_ALT:
+                   return ARC_SEC_ALT + mode;
+            case ARC_COSEC_ALT:
+                   return ARC_COSEC_ALT + mode;
+            case ARC_COT_ALT:
+                return ARC_COT_ALT + mode;
+            default:
+                return methodName;
+        }
+    }
+
     /**
      * A list user registered hard-coded methods
      */
@@ -143,20 +192,18 @@ public class Declarations {
         /**
          * Add to the new method registry also
          */
-        MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression ctx, String funcName, int arity, MathExpression.EvalResult[] args) -> {
+        MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression.EvalResult nextRes, int arity, MathExpression.EvalResult[] args) -> {
             List<String> tokens = new ArrayList<>();
-            for (MathExpression.EvalResult arg : args) { 
+            for (MathExpression.EvalResult arg : args) {
                 if (arg.type == MathExpression.EvalResult.TYPE_SCALAR) {
                     tokens.add(String.valueOf(arg.scalar));
-                }
-                else if (arg.type == MathExpression.EvalResult.TYPE_STRING) {
+                } else if (arg.type == MathExpression.EvalResult.TYPE_STRING) {
                     tokens.add(arg.textRes);
                 }
-            }       
-            MathExpression.EvalResult result = ctx.getNextResult();
+            }
             String res = basicNumericalMethod.solve(tokens);
-            result.wrap(Double.parseDouble(res)); 
-            return result;
+            nextRes.wrap(Double.parseDouble(res));
+            return nextRes;
         });
     }
 
@@ -169,17 +216,16 @@ public class Declarations {
     }
 
     public static void registerBasicNumericalMethodInMethodRegistry(BasicNumericalMethod basicNumericalMethod) {
-        MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression ctx, String funcName, int arity, MathExpression.EvalResult[] args) -> {
+        MethodRegistry.registerMethod(basicNumericalMethod.getName(), (MathExpression.EvalResult nextRes, int arity, MathExpression.EvalResult[] args) -> {
             List<String> tokens = new ArrayList<>();
             for (MathExpression.EvalResult arg : args) {
                 if (arg.type == MathExpression.EvalResult.TYPE_STRING) {
                     tokens.add(arg.textRes);
                 }
             }
-            //System.out.println("tokens: "+tokens);
-            MathExpression.EvalResult result = ctx.getNextResult();
-            result.wrap(basicNumericalMethod.solve(tokens));
-            return result;
+            //System.out.println("tokens: "+tokens); 
+            nextRes.wrap(basicNumericalMethod.solve(tokens));
+            return nextRes;
         });
     }
 
@@ -241,7 +287,7 @@ public class Declarations {
             LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX,
             ECHELON_MATRIX, MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD,
             MATRIX_SUBTRACT, MATRIX_POWER, MATRIX_TRANSPOSE, MATRIX_EDIT,
-            MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC,MATRIX_EIGENVALUES,
+            MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC, MATRIX_EIGENVALUES,
             MATRIX_EIGENPOLY, HELP
         };
 

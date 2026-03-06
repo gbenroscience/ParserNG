@@ -201,7 +201,7 @@ public class VariableManager {
      * not found.
      */
     public static Variable lookUp(String vName) {
-        return VariableManager.getVariable(vName);
+        return VARIABLES.get(vName);
     }//end method
 
     /**
@@ -479,7 +479,7 @@ public class VariableManager {
                 String part2 = line.substring(ind + 1);
                 Scanner scanner = new Scanner(part1, true, ",", " ");
                 List<String> scan = scanner.scan();
-                List<String> whitespaceremover = new ArrayList<String>();
+                List<String> whitespaceremover = new ArrayList<>();
                 whitespaceremover.add(" ");
                 scan.removeAll(whitespaceremover);
                 int sz = scan.size();

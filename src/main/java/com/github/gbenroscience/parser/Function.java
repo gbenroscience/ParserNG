@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.InputMismatchException;
 import java.util.List;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import com.github.gbenroscience.parser.methods.MethodRegistry;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.Serializer;
 import com.github.gbenroscience.util.VariableManager;
@@ -19,7 +20,7 @@ import com.github.gbenroscience.util.VariableManager;
  *
  * @author JIBOYE OLUWAGBEMIRO OLAOLUWA
  */
-public class Function implements Savable {
+public class Function implements Savable, MethodRegistry.MethodAction {
 
     /**
      * The dependent variable
@@ -205,7 +206,7 @@ public class Function implements Savable {
      * value list is applied to the function's parameter list in the order they
      * were supplied in the original question.
      * @return the value of the function with these variables set.
-  */
+     */
     public double calc(double... x) {
         // Check for null and size equality
         if (x == null || x.length != independentVariables.size()) {
@@ -217,7 +218,7 @@ public class Function implements Savable {
             mathExpression.setValue(var.getName(), x[i]);
         }
 
-         return mathExpression.solveGeneric().scalar;
+        return mathExpression.solveGeneric().scalar;
     }
 
     /**
@@ -228,19 +229,36 @@ public class Function implements Savable {
      * @return the value of the function with these variables set.
      */
     public MathExpression.EvalResult calc(MathExpression.EvalResult... x) {
-        MathExpression.EvalResult res = new MathExpression.EvalResult();
+
         if (type == TYPE.ALGEBRAIC_EXPRESSION) {
-            int i = 0;
             if (x.length == independentVariables.size()) {
-                for (Variable var : independentVariables) {
-                    mathExpression.setValue(var.getName(), x[i++].scalar);
+                for (int i = 0; i < x.length; i++) {
+                    Variable var = independentVariables.get(i);
+                    mathExpression.setValue(var.getName(), x[i].scalar);
                 }
-                res.wrap(Double.parseDouble(mathExpression.solve()));
+                return mathExpression.solveGeneric();
             }
         } else if (type == TYPE.MATRIX) {
+            MathExpression.EvalResult res = new MathExpression.EvalResult();
             return res.wrap(matrix);
         }
-        return res;
+        return new MathExpression.EvalResult();
+    }
+
+    @Override
+    public MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult... x) {
+        if (type == TYPE.ALGEBRAIC_EXPRESSION) {
+            if (x.length == independentVariables.size()) {
+                for (int i = 0; i < x.length; i++) {
+                    Variable var = independentVariables.get(i);
+                    mathExpression.setValue(var.getName(), x[i].scalar);
+                }
+                return nextResult.wrap(mathExpression.solveGeneric());
+            }
+        } else if (type == TYPE.MATRIX) {
+            return nextResult.wrap(matrix);
+        }
+        return nextResult;
     }
 
     public static boolean assignObject(String input) {
@@ -314,7 +332,8 @@ public class Function implements Savable {
 
                     return true;
                 }
-                MathExpression.EvalResult val = expr.solveGeneric();System.out.println("val.type = "+val.getTypeName());
+                MathExpression.EvalResult val = expr.solveGeneric();
+                System.out.println("val.type = " + val.getTypeName());
                 String referenceName = expr.getReturnObjectName();
 
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
@@ -324,9 +343,9 @@ public class Function implements Savable {
                             if (isVarNamesList && hasCommas) {
                                 throw new InputMismatchException("Initialize a function at a time!");
                             }
-                              
+
                             val.matrix.setName(newFuncName);
-                            Function fm = new Function(val.matrix); 
+                            Function fm = new Function(val.matrix);
                             success = true;
                             break;
                         case ALGEBRAIC_EXPRESSION:
@@ -356,7 +375,7 @@ public class Function implements Savable {
                                 }
                                 success = true;
                             } else {
-                                System.out.println("FUNCTIONS: "+FunctionManager.FUNCTIONS); 
+                                System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
                                 VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, val.scalar, false));
                                 success = true;
                             }

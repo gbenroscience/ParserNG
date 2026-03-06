@@ -166,6 +166,7 @@ public class MathExpression implements Savable, Solvable {
         public boolean isRightAssoc;
         public boolean isPostfix;
         public int arity;
+        private MethodRegistry.MethodAction action;
 
         // NEW FIELDS FOR FUNCTION ASSIGNMENT
         public String assignToName;  // The variable to assign result to (e.g., "vw")
@@ -197,6 +198,15 @@ public class MathExpression implements Savable, Solvable {
             this.id = id;
             this.precedence = PREC_POSTFIX + 1;  // Bind tighter than postfix
             this.isRightAssoc = false;
+            //This is an inbuilt method call
+            if (id != -1) {
+                this.action = MethodRegistry.getAction(id);
+            } else {
+                this.action = FunctionManager.lookUp(this.name);
+                if (this.action == null) {
+                    throw new RuntimeException("Function " + this.name + " not found");
+                }
+            }
         }
 
         // Constructor for Parens
@@ -366,7 +376,7 @@ public class MathExpression implements Savable, Solvable {
      * state, objects of this class are optimized to run at very high speeds.
      */
     public boolean isScannedAndOptimized() {
-            return scanner != null && !scanner.isEmpty() && correctFunction && this != null;
+        return scanner != null && !scanner.isEmpty() && correctFunction && this != null;
     }//end method
 
     public static void setAutoInitOn(boolean autoInitOn) {
@@ -392,7 +402,7 @@ public class MathExpression implements Savable, Solvable {
         scanner = opScanner.getScanner();
 
         correctFunction = opScanner.isRunnable();
-       
+
         parser_Result = opScanner.parser_Result;
         if (parser_Result == ParserResult.VALID) {
             statsVerifier();
@@ -426,19 +436,32 @@ public class MathExpression implements Savable, Solvable {
      * @param DRG
      */
     public void setDRG(DRG_MODE DRG) {
+        if (DRG != this.DRG) {
+            for (int i = 0; i < cachedPostfix.length; i++) {
+                Token t = cachedPostfix[i];
+                if (t.kind == Token.METHOD) {
+                    if (t.name.endsWith("_deg") || t.name.endsWith("_rad") || t.name.endsWith("_grad")) { 
+                        String name = t.name.substring(0, t.name.lastIndexOf("_"));
+                        t.name = Declarations.getTrigFuncDRGVariant(name, DRG);
+                        t.id = MethodRegistry.getMethodID(t.name); 
+                        t.action = MethodRegistry.getAction(t.id);
+                    }
+                }
+            }
+        }
         this.DRG = DRG;
     }
 
     public void setDRG(int mode) {
         switch (mode) {
             case 0:
-                this.DRG = DRG_MODE.DEG;
+                setDRG(DRG_MODE.DEG);
                 break;
             case 1:
-                this.DRG = DRG_MODE.RAD;
+                setDRG(DRG_MODE.RAD);
                 break;
             case 2:
-                this.DRG = DRG_MODE.GRAD;
+                setDRG(DRG_MODE.GRAD);
                 break;
             default:
                 break;
@@ -652,6 +675,7 @@ public class MathExpression implements Savable, Solvable {
      * return this variable, but instead returns the data which it refers
      * to..e.g a {@link Matrix} function or other. But we at times need that
      * function name...So we cache this value here.
+     *
      * @return the object returned via its string reference name
      */
     public String getReturnObjectName() {
@@ -1174,8 +1198,9 @@ public class MathExpression implements Savable, Solvable {
 
         // 5. Identify Methods
         if (Method.isInBuiltMethod(s)) {
-            int methodId = MethodRegistry.getMethodID(s);
-            return new Token(Token.METHOD, s, -1, methodId); // Arity set during compile
+            String transformedMethodName = Declarations.getTrigFuncDRGVariant(s, DRG);
+            int methodId = MethodRegistry.getMethodID(transformedMethodName);
+            return new Token(Token.METHOD, transformedMethodName, -1, methodId); // Arity set during compile
         }
 
         // 6. Fallback: Treat as Variable/Constant
@@ -1194,7 +1219,7 @@ public class MathExpression implements Savable, Solvable {
         }
         return s.equals("³√");
     }
- 
+
     private void compileToPostfix() {
         if (cachedPostfix != null) {
             return;
@@ -1347,7 +1372,7 @@ public class MathExpression implements Savable, Solvable {
 
     private final class ExpressionSolver {
 
-        public EvalResult evaluate() { 
+        public EvalResult evaluate() {
             final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
             int ptr = -1;
 
@@ -1419,16 +1444,8 @@ public class MathExpression implements Savable, Solvable {
 //                                + ", values on stack=" + valuesOnStack);
                         // CASE 1: Zero-argument function
                         if (arity == 0) {
-                            Function f = FunctionManager.lookUp(t.name);
-                            if (f != null) {
-                                EvalResult e = new EvalResult();
-                                e.absorb(f);
-                                EvalResult result = f.calc(new EvalResult[]{e});
-                                stack[++ptr] = result;
-//                                System.out.println("  Evaluated zero-arg function: " + result.toString());
-                            } else {
-                                throw new RuntimeException("Function " + t.name + " not found");
-                            }
+                            EvalResult result = t.action.calc(getNextResult(), arity);
+                            stack[++ptr] = result;
                             break;
                         }
 
@@ -1450,11 +1467,7 @@ public class MathExpression implements Savable, Solvable {
 //                                + " " + t.name + " with " + arity + " args");
                         EvalResult result;
                         try {
-                            if (t.kind == Token.METHOD) {
-                                result = MethodRegistry.getAction(t.id).execute(MathExpression.this, t.name, arity, args);
-                            } else {
-                                result = FunctionManager.lookUp(t.name).calc(args);
-                            }
+                            result = t.action.calc(getNextResult(), arity, args);
                         } catch (Exception e) {
                             throw new RuntimeException("Error executing " + t.name + ": " + e.getMessage(), e);
                         }
@@ -1608,6 +1621,33 @@ public class MathExpression implements Savable, Solvable {
             return this;
         }
 
+        public EvalResult wrap(EvalResult evr) {
+            switch (evr.type) {
+                case TYPE_ERROR:
+                    wrap(evr.error);
+                    break;
+                case TYPE_BOOLEAN:
+                    wrap(evr.boolVal);
+                    break;
+                case TYPE_SCALAR:
+                    wrap(evr.scalar);
+                    break;
+                case TYPE_MATRIX:
+                    wrap(evr.matrix);
+                    break;
+                case TYPE_STRING:
+                    wrap(evr.textRes);
+                    break;
+                case TYPE_VECTOR:
+                    wrap(evr.vector);
+                    break;
+                default:
+                    throw new AssertionError();
+            }
+            this.type = evr.type;
+            return this;
+        }
+
 // In EvalResult class:
         public void reset() {
             this.scalar = 0.0;
@@ -1715,14 +1755,11 @@ public class MathExpression implements Savable, Solvable {
         return result;
     }
 
-
-
 // Add a reset method to clear the pool between evaluations
     private void resetPool() {
         poolPointer = 0;
     }
 
-  
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**
      *
@@ -1875,14 +1912,14 @@ public class MathExpression implements Savable, Solvable {
         Test.main(args);
 
         System.out.println("________________________________________________________________TESTS-DONE________________________________________________________________");
-        System.out.println("sum(32,12,10,18,1,3,2,5,6): -->> "+new MathExpression("sum(32,12,10,18,1,3,2,5,6)").solve());
- MathExpression lin = new MathExpression("linear_sys(2,3,-5,3,-4,20)");
-        System.out.println("linear_sys(2,3,-5,3,-4,20): -->> "+lin.solve());
- MathExpression lin1 = new MathExpression("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18)");
-        System.out.println("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18): -->> "+lin1.solve());
-             System.out.println("linear_sys(12,16, 24,15,21, 24): -->> "+new MathExpression("linear_sys(@(2,3)(12,16, 24,15,21, 32))").solve());
-        System.out.println("det(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5): -->> "+new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
-        System.out.println("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5)): -->> "+new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
+        System.out.println("sum(32,12,10,18,1,3,2,5,6): -->> " + new MathExpression("sum(32,12,10,18,1,3,2,5,6)").solve());
+        MathExpression lin = new MathExpression("linear_sys(2,3,-5,3,-4,20)");
+        System.out.println("linear_sys(2,3,-5,3,-4,20): -->> " + lin.solve());
+        MathExpression lin1 = new MathExpression("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18)");
+        System.out.println("linear_sys(2,3,-5,12,3,-4,8,20,7,-6,2,18): -->> " + lin1.solve());
+        System.out.println("linear_sys(12,16, 24,15,21, 24): -->> " + new MathExpression("linear_sys(@(2,3)(12,16, 24,15,21, 32))").solve());
+        System.out.println("det(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5): -->> " + new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
+        System.out.println("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5)): -->> " + new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
         System.out.println("sin(5,6)-->>" + new MathExpression("sin(5,6)").solve());
         System.out.println("√81 + ³√(27) + 2^10-->>" + new MathExpression("√81 + ³√(27) + 2^10").solve());
         System.out.println(new MathExpression("5! + 9Р3 + 6Č5").solve());
