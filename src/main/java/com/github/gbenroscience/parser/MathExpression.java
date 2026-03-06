@@ -440,10 +440,10 @@ public class MathExpression implements Savable, Solvable {
             for (int i = 0; i < cachedPostfix.length; i++) {
                 Token t = cachedPostfix[i];
                 if (t.kind == Token.METHOD) {
-                    if (t.name.endsWith("_deg") || t.name.endsWith("_rad") || t.name.endsWith("_grad")) { 
+                    if (t.name.endsWith("_deg") || t.name.endsWith("_rad") || t.name.endsWith("_grad")) {
                         String name = t.name.substring(0, t.name.lastIndexOf("_"));
                         t.name = Declarations.getTrigFuncDRGVariant(name, DRG);
-                        t.id = MethodRegistry.getMethodID(t.name); 
+                        t.id = MethodRegistry.getMethodID(t.name);
                         t.action = MethodRegistry.getAction(t.id);
                     }
                 }
@@ -1372,6 +1372,17 @@ public class MathExpression implements Savable, Solvable {
 
     private final class ExpressionSolver {
 
+        private static final int MAX_ARITY = 32;
+        private static final int ABSOLUTE_MAX_ARITY = 100_000;
+        private EvalResult[][] argCache = new EvalResult[MAX_ARITY + 1][];
+
+        public ExpressionSolver() {
+            // Pre-allocate ONE array per arity that we reuse
+            for (int i = 0; i <= MAX_ARITY; i++) {
+                argCache[i] = new EvalResult[i];
+            }
+        }
+
         public EvalResult evaluate() {
             final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
             int ptr = -1;
@@ -1432,39 +1443,35 @@ public class MathExpression implements Savable, Solvable {
 
                     case Token.METHOD:
                     case Token.FUNCTION:
-                        /*    System.out.println("Function: " + t.name + ", arity=" + t.arity);
-                        for (int j = 0; j < t.arity; j++) {
-                            System.out.println("  arg[" + j + "] = " + (ptr - t.arity + j + 1) + " -> " + stack[ptr - t.arity + j + 1]);
-                        }*/
-
                         int arity = t.arity;
-                        // CRITICAL FIX: Calculate how many values are actually on stack
+
+                        if (arity > ABSOLUTE_MAX_ARITY) {
+                            throw new RuntimeException(
+                                    "Function " + t.name + " has too many arguments (" + arity
+                                    + "). Maximum supported: " + ABSOLUTE_MAX_ARITY);
+                        }
+
                         int valuesOnStack = ptr + 1;
-//                        System.out.println("  Function " + t.name + " expects arity=" + arity
-//                                + ", values on stack=" + valuesOnStack);
-                        // CASE 1: Zero-argument function
+
                         if (arity == 0) {
                             EvalResult result = t.action.calc(getNextResult(), arity);
                             stack[++ptr] = result;
                             break;
                         }
 
-                        // CASE 2: Function with arguments expected
                         if (valuesOnStack < arity) {
                             throw new RuntimeException("Function " + t.name + " requires " + arity
                                     + " arguments but only " + valuesOnStack + " values available on stack");
                         }
 
-                        // Pop exactly 'arity' arguments from the stack
-                        EvalResult[] args = new EvalResult[arity];
+                        // ULTRA FAST: Reuse cached array for this arity
+                        EvalResult[] args = (arity <= MAX_ARITY) ? argCache[arity] : new EvalResult[arity];
+
+                        // Direct loop (fastest for small arrays)
                         for (int j = arity - 1; j >= 0; j--) {
                             args[j] = stack[ptr--];
-//                            System.out.println("  Popped arg[" + j + "] from stack ptr=" + (ptr + 1)
-//                                    + " value=" + args[j].toString());
                         }
 
-//                        System.out.println("  Executing " + (t.kind == Token.METHOD ? "METHOD" : "FUNCTION")
-//                                + " " + t.name + " with " + arity + " args");
                         EvalResult result;
                         try {
                             result = t.action.calc(getNextResult(), arity, args);
@@ -1472,10 +1479,7 @@ public class MathExpression implements Savable, Solvable {
                             throw new RuntimeException("Error executing " + t.name + ": " + e.getMessage(), e);
                         }
 
-                        // Push result back on stack (exactly ONE value replaces the popped arguments)
                         stack[++ptr] = result;
-//                        System.out.println("  Function result: " + result.toString() + " at ptr=" + ptr
-//                                + ", type: " + result.getTypeName());
                         break;
                 }
             }
