@@ -1467,18 +1467,25 @@ public class MathExpression implements Savable, Solvable {
                         // ULTRA FAST: Reuse cached array for this arity
                         EvalResult[] args = (arity <= MAX_ARITY) ? argCache[arity] : new EvalResult[arity];
 
-                        // Direct loop (fastest for small arrays)
-                        for (int j = arity - 1; j >= 0; j--) {
-                            args[j] = stack[ptr--];
+                        // This eliminates loop overhead for the most common cases
+                        if (arity == 1) {
+                            args[0] = stack[ptr--];
+                        } else if (arity == 2) {
+                            args[1] = stack[ptr--];
+                            args[0] = stack[ptr--];
+                        } else if (arity == 3) {
+                            args[2] = stack[ptr--];
+                            args[1] = stack[ptr--];
+                            args[0] = stack[ptr--];
+                        } else {
+                            // General case for arity > 3
+                            for (int j = arity - 1; j >= 0; j--) {
+                                args[j] = stack[ptr--];
+                            }
                         }
 
-                        EvalResult result;
-                        try {
-                            result = t.action.calc(getNextResult(), arity, args);
-                        } catch (Exception e) {
-                            throw new RuntimeException("Error executing " + t.name + ": " + e.getMessage(), e);
-                        }
-
+                        EvalResult result = t.action.calc(getNextResult(), arity, args);
+ 
                         stack[++ptr] = result;
                         break;
                 }
