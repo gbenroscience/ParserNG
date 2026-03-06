@@ -1,6 +1,9 @@
 # ParserNG
 <b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. Its latest release on mavn-central (version 0.2.1) can be used to plot 2D graphs(Geometric plots and function plots) It works seamlessly on all Java platforms.
 
+ParserNG v0.2.4 is an extremely feature rich math tool which also doubles as (arguably) the fastest pure Java expression evaluator on the planet.
+In benchmarks, it beats com.expression.parser(Java Math Expression Parser) by almost (10x-14x) and edges out Exp4J (which is lightweight) in many benchmarks.
+
  
 
 * [ParserNG](#ParserNG)
