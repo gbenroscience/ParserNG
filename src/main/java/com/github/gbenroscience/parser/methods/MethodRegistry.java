@@ -41,7 +41,6 @@ import java.util.List;
  */
 public class MethodRegistry {
 
-    // Functional interface for method execution
     public interface MethodAction {
 
         /**
@@ -57,39 +56,57 @@ public class MethodRegistry {
         MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult... args);
     }
 
-    // 1. Map for compilation phase (String -> ID)
     private static final Map<String, Integer> methodIds = new HashMap<>();
 
-    // 2. Array/List for evaluation phase (ID -> Action)
-    // Using an ArrayList backed by an array for dynamic growth, 
-    // but accessed via index for extreme speed.
-    private static final List<MethodAction> actions = new ArrayList<>();
+    // Using a raw array for the absolute fastest access
+    private static MethodAction[] actions = new MethodAction[128];
 
     private static int nextId = 0;
 
     // --- Core Methods ---
-    // Called when a user (or the system) registers a new method
     public static void registerMethod(String name, MethodAction action) {
-        if (!methodIds.containsKey(name)) {
-            methodIds.put(name, nextId);
-            actions.add(action); // Placed exactly at index 'nextId'
-            nextId++;
+        Integer existingId = methodIds.get(name);
+
+        if (existingId == null) {
+            int id = nextId++;
+            ensureCapacity(id);
+            methodIds.put(name, id);
+            actions[id] = action;
         } else {
-            // Overwrite existing method logic if re-registered
-            int id = methodIds.get(name);
-            actions.set(id, action);
+            // Overwrite existing method logic
+            actions[existingId] = action;
+        }
+    }
+
+    /**
+     * Ensures the array is large enough to hold the given index. Uses a
+     * standard growth factor of 1.5x to balance memory and performance.
+     */
+    private static void ensureCapacity(int index) {
+        if (index >= actions.length) {
+            int newSize = actions.length + (actions.length >> 1); // 1.5x growth
+            if (newSize <= index) {
+                newSize = index + 1;
+            }
+            actions = Arrays.copyOf(actions, newSize);
         }
     }
 
     // Called during the translate() phase
     public static int getMethodID(String name) {
         Integer id = methodIds.get(name);
-        return (id != null) ? id : -1; // -1 means method not found
+        return (id != null) ? id : -1;
     }
 
-    // Called during the evaluate() hot loop
+    // --- THE HOT LOOP TARGET ---
+    /**
+     * This is now a direct array access. The JIT compiler can easily inline
+     * this and potentially eliminate bounds checks if it recognizes the loop
+     * patterns.
+     * @param id 
+     */
     public static MethodAction getAction(int id) {
-        return actions.get(id); // O(1) array access
+        return actions[id];
     }
 
     // --- Pre-register Built-ins ---
@@ -158,13 +175,14 @@ public class MethodRegistry {
         String acotAltDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.DEG);
         String acotAltRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.RAD);
         String acotAltGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.GRAD);
- 
+
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////
         registerMethod(sinDeg, (ctx, arity, args) -> ctx.wrap(Maths.sinDegToRad(args[0].scalar)));
         registerMethod(sinRad, (ctx, arity, args) -> ctx.wrap(Math.sin(args[0].scalar)));
         //registerMethod(sinGrad, (ctx, arity, args) -> ctx.wrap(Maths.sinGradToRad(args[0].scalar)));
-        registerMethod(sinGrad, (ctx, arity, args) -> { 
-            return ctx.wrap(Maths.sinGradToRad(args[0].scalar));});
+        registerMethod(sinGrad, (ctx, arity, args) -> {
+            return ctx.wrap(Maths.sinGradToRad(args[0].scalar));
+        });
 
         registerMethod(cosDeg, (ctx, arity, args) -> ctx.wrap(Maths.cosDegToRad(args[0].scalar)));
         registerMethod(cosRad, (ctx, arity, args) -> ctx.wrap(Math.cos(args[0].scalar)));
@@ -220,21 +238,19 @@ public class MethodRegistry {
 
         registerMethod(acscDeg, (ctx, arity, args) -> ctx.wrap(Maths.asinRadToDeg(1 / args[0].scalar)));
         registerMethod(acscRad, (ctx, arity, args) -> ctx.wrap(Maths.asin(1 / args[0].scalar)));
-        registerMethod(acscGrad, (ctx, arity, args) -> ctx.wrap( Maths.asinRadToGrad(1 / args[0].scalar)));
+        registerMethod(acscGrad, (ctx, arity, args) -> ctx.wrap(Maths.asinRadToGrad(1 / args[0].scalar)));
 
         registerMethod(acscAltDeg, (ctx, arity, args) -> ctx.wrap(Maths.asinRadToDeg(1 / args[0].scalar)));
         registerMethod(acscAltRad, (ctx, arity, args) -> ctx.wrap(Maths.asin(1 / args[0].scalar)));
-        registerMethod(acscAltGrad, (ctx, arity, args) -> ctx.wrap( Maths.asinRadToGrad(1 / args[0].scalar)));
+        registerMethod(acscAltGrad, (ctx, arity, args) -> ctx.wrap(Maths.asinRadToGrad(1 / args[0].scalar)));
 
         registerMethod(acotDeg, (ctx, arity, args) -> ctx.wrap(Maths.atanRadToDeg(1 / args[0].scalar)));
         registerMethod(acotRad, (ctx, arity, args) -> ctx.wrap(Maths.atan(1 / args[0].scalar)));
-        registerMethod(acotGrad, (ctx, arity, args) -> ctx.wrap( Maths.atanRadToGrad(1 / args[0].scalar)));
-        
+        registerMethod(acotGrad, (ctx, arity, args) -> ctx.wrap(Maths.atanRadToGrad(1 / args[0].scalar)));
+
         registerMethod(acotAltDeg, (ctx, arity, args) -> ctx.wrap(Maths.atanRadToDeg(1 / args[0].scalar)));
         registerMethod(acotAltRad, (ctx, arity, args) -> ctx.wrap(Maths.atan(1 / args[0].scalar)));
-        registerMethod(acotAltGrad, (ctx, arity, args) -> ctx.wrap( Maths.atanRadToGrad(1 / args[0].scalar)));
-
-        
+        registerMethod(acotAltGrad, (ctx, arity, args) -> ctx.wrap(Maths.atanRadToGrad(1 / args[0].scalar)));
 
         registerMethod(Declarations.SINH, (ctx, arity, args) -> ctx.wrap(Math.sinh(args[0].scalar)));
         registerMethod(Declarations.COSH, (ctx, arity, args) -> ctx.wrap(Math.cosh(args[0].scalar)));

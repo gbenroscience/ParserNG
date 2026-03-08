@@ -11,12 +11,20 @@ import java.util.InputMismatchException;
 import java.util.List;
 
 import static com.github.gbenroscience.parser.Number.*;
+import com.github.gbenroscience.parser.methods.Method;
+import java.util.Arrays;
 
 /**
  *
  * @JIBOYE OLUWAGBEMIRO OLAOLUWA
  */
 public class PolynomialExpression extends MathExpression {
+    
+    private boolean hasMulOrDivOps;
+    private boolean hasPlusOrMinusOps;
+    private boolean hasPowerOps;
+    
+    
 
     /**
      * Solves the Polynomial with normal double precision....about 16d.p.
@@ -42,11 +50,24 @@ public class PolynomialExpression extends MathExpression {
     public PolynomialExpression(String expression, int precision) {
         super(expression);
         setPrecision(precision);
-        if (isHasLogicOperators() || isHasListReturningOperators() || isHasPreNumberOperators() || isHasNumberReturningStatsOperators()
-                || isHasPermOrCombOperators() || isHasRemainderOperators() || isHasPostNumberOperators()) {
-            setCorrectFunction(false);
+        for(String token : scanner){
+            if(Operator.isLogicOperator(token) || Method.isListReturningStatsMethod(token) || Operator.isUnaryPreOperator(token) ||
+                    Method.isNumberReturningStatsMethod(token) || Operator.isPermOrComb(token) || Operator.isRemainder(token) || Operator.isUnaryPostOperator(token)){
+                setCorrectFunction(false);
             com.github.gbenroscience.util.Utils.logError("Only Polynomial Expressions Treated Here!");
-        }//end if
+            }
+            if(Operator.isPower(token)){
+                hasPowerOps = true;
+            }
+            if(Operator.isMulOrDiv(token)){
+                hasMulOrDivOps = true;
+            }
+            if(Operator.isPlusOrMinus(token)){
+                hasPlusOrMinusOps = true;
+            }
+            
+        }
+     
     }//end constructor
 
     /**
@@ -85,225 +106,7 @@ public class PolynomialExpression extends MathExpression {
      * here is that of double numbers, namely about 16d.p
      */
     public List<String> doublePrecisionSolve(List<String> list) {
-
-//correct the anomaly: [ (,-,number....,)  ]
-        //   turn it into: [ (,,-number........,)     ]
-        //The double commas show that there exists an empty location in between the 2 commas
-        if (list.get(0).equals("(") && list.get(1).equals(Operator.MINUS) && isNumber(list.get(2))) {
-            list.set(1, "");
-
-            //if the number is negative,make it positive
-            if (list.get(2).substring(0, 1).equals(Operator.MINUS)) {
-                list.set(2, list.get(2).substring(1));
-            } //if the number is positive,make it negative
-            else {
-                list.set(2, Operator.MINUS + list.get(2));
-            }
-        }
-//Create a collection to serve as a garbage collector for the empty memory
-//locations and other unwanted locations created in the processing collection
-        ArrayList<String> real = new ArrayList<>();
-//insert an empty string in it so that we can use it to remove empty spaces from the processing collection.
-        real.add("");
-        real.add("(");
-        real.add(")");
-
-        list.removeAll(real);
-
-        if (isHasPowerOperators()) {
-
-            /*Deals with powers.Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
-instead of sin(A^B).
-Also instructs the software to multiply any 2 numbers in consecutive positions in the vector.
-This is important in distinguishing between functions such as sinAB and sinA*B.Note:sinAB=sin(A*B),while sinA*B=B*sinA.
-             */
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (list.get(i).equals("^") && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                            list.set(i + 1, String.valueOf(Math.pow(Double.parseDouble(list.get(i - 1)), Double.parseDouble(list.get(i + 1)))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end if
-                    }//end if
-                    else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i + 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) == 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) > 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) == 0) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i + 1)) < 1 && Double.parseDouble(list.get(i + 1)) < 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-                    } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        if (Double.parseDouble(list.get(i - 1)) > 1) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) == 1) {
-                            list.set(i + 1, "1.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) > 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) == 0) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        } else if (Double.parseDouble(list.get(i - 1)) < 1 && Double.parseDouble(list.get(i - 1)) < 0) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }//end else if
-                    }//end else if
-                    else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                        list.set(i + 1, "Infinity");
-                        list.set(i - 1, "");
-                        list.set(i, "");
-                    }
-
-                }//end try
-                catch (NumberFormatException numerror) {
-
-                } catch (NullPointerException nullerror) {
-
-                } catch (IndexOutOfBoundsException inderror) {
-
-                }
-            }//end for
-
-            list.removeAll(real);
-
-        }//end if
-
-        list.removeAll(real);
-
-        boolean skip = false;
-        if (isHasMulOrDivOperators()) {
-            for (int i = 0; i < list.size(); i++) {
-
-                try {
-
-                    if (list.get(i).equals(Operator.MULTIPLY)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) * Double.parseDouble(list.get(i + 1))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        }
-
-                    }//end if
-                    else if (list.get(i).equals(Operator.DIVIDE)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) / Double.parseDouble(list.get(i + 1))));
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (!list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "0.0");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        } else if (list.get(i - 1).equals("Infinity") && list.get(i + 1).equals("Infinity")) {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                            skip = true;
-                        }
-
-                    }//end else if
-
-                }//end try
-                catch (NullPointerException nolan) {
-
-                }//end catch
-                catch (NumberFormatException numerr) {
-
-                }//end catch
-                catch (IndexOutOfBoundsException inderr) {
-
-                }//end catch
-
-            }//end for
-            list.removeAll(real);
-
-        }//end if
-        if (isHasPlusOrMinusOperators()) {
-            //Handles the subtraction and addition operators
-            for (int i = 0; i < list.size(); i++) {
-                try {
-                    if (list.get(i).equals(Operator.PLUS) || list.get(i).equals(Operator.MINUS)) {
-                        if (!list.get(i - 1).equals("Infinity") && !list.get(i + 1).equals("Infinity")) {
-                            if (list.get(i).equals(Operator.PLUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) + Double.parseDouble(list.get(i + 1))));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }//end else
-                            else if (list.get(i).equals(Operator.MINUS) && isNumber(list.get(i - 1)) && isNumber(list.get(i + 1))) {
-                                list.set(i + 1, String.valueOf(Double.parseDouble(list.get(i - 1)) - Double.parseDouble(list.get(i + 1))));
-                                list.set(i - 1, "");
-                                list.set(i, "");
-                            }//end else if
-                        }//end if
-                        else {
-                            list.set(i + 1, "Infinity");
-                            list.set(i - 1, "");
-                            list.set(i, "");
-                        }
-                    }
-
-                }//end try
-                catch (NullPointerException | NumberFormatException | IndexOutOfBoundsException nolerr) {
-
-                }
-            }//end for
-        }//end if
-
-        real.add("(");
-        real.add(")");
-
-        list.removeAll(real);
-        if (list.size() != 1) {
-            this.correctFunction = false;
-        }//end if
-//Now de-list or un-package the input.If all goes well the list should have only its first memory location occupied.
-        return list;
-
+        return Arrays.asList(super.solve());
     }//end method solve
 
     /**
@@ -339,7 +142,7 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
 
         list.removeAll(real);
 
-        if (isHasPowerOperators()) {
+        if (hasPowerOps) {
 
             /*Deals with powers.Handles the  primary power operator e.g in 3^sin3^4.This is necessary at this stage to dis-allow operations like sinA^Bfrom giving the result:(sinA)^B
 instead of sin(A^B).
@@ -425,7 +228,7 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
         list.removeAll(real);
 
         boolean skip = false;
-        if (isHasMulOrDivOperators()) {
+        if (hasMulOrDivOps) {
             for (int i = 0; i < list.size(); i++) {
 
                 try {
@@ -499,7 +302,7 @@ This is important in distinguishing between functions such as sinAB and sinA*B.N
             list.removeAll(real);
 
         }//end if
-        if (isHasPlusOrMinusOperators()) {
+        if (hasPlusOrMinusOps) {
             //Handles the subtraction and addition operators
             for (int i = 0; i < list.size(); i++) {
                 try {

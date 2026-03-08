@@ -35,6 +35,13 @@ public class Variable implements Savable {
      * The full name of the variable
      */
     private String fullName;
+    
+    /**
+     * THE SECRET SAUCE: The Frame Index.
+     * This represents the variable's "Drawer Number" in the execution frame.
+     * Initialized to -1 to indicate it hasn't been mapped yet.
+     */
+    private int frameIndex = -1;
 
     /**
      * The constant PI
@@ -88,6 +95,15 @@ public class Variable implements Savable {
     }
 
     /**
+     * Creates a non-constant Variable
+     * @param name the name of the Variable object e.g A,B...e.t.c
+     * @param value the value stored by the Variable object
+     */
+    public Variable(String name, double value) {
+        this(name, "", value, false);
+    }
+
+    /**
      *
      * @param name the name of the Variable object e.g A,B...e.t.c
      * @param value the value stored by the Variable object
@@ -121,6 +137,41 @@ public class Variable implements Savable {
             this.constant = constant;
         }
 
+    }
+    
+    
+    /**
+     * High-Speed Handle Method: SET
+     * Use this in your loops to update values without Map lookups.
+     */
+    public void set(double[] frame, double newValue) {
+        if (constant) return; // Protect constants
+        
+        if (frameIndex != -1) {
+            frame[frameIndex] = newValue; // O(1) Absolute Speed
+        } else {
+            // Fallback for legacy code not using Frames
+            this.value = newValue;
+        }
+    }
+
+    /**
+     * High-Speed Handle Method: GET
+     * Use this in your evaluator loop.
+     */
+    public double get(double[] frame) {
+        if (frameIndex != -1) {
+            return frame[frameIndex]; // O(1) Absolute Speed
+        }
+        return getValue(); // Fallback to legacy logic
+    }
+
+    public int getFrameIndex() {
+        return frameIndex;
+    }
+
+    public void setFrameIndex(int frameIndex) {
+        this.frameIndex = frameIndex;
     }
 
     public void setType(TYPE type) {
@@ -357,7 +408,7 @@ public class Variable implements Savable {
     }
 
     public final void setValue(double value) {
-        this.value = value;
+        this.value = constant ? this.value : value;
     }
 
     /**
@@ -365,8 +416,7 @@ public class Variable implements Savable {
      *
      * @return the value stored in the variable
      */
-    public double getValue() {
-        String name = getName();
+    public double getValue() { 
         if (isPI(name)) {
             return value = Math.PI;
         } else if (isLastEvaluatedAnswer(name)) {
@@ -473,18 +523,15 @@ public class Variable implements Savable {
         return this.name + ":" + this.value;
     }
 
-    /**
-     *
-     * @param args
-     */
-    public static void main(String args[]) {
-        Variable a = new Variable("a=4");
-        VariableManager.add(a);
-        System.out.println("REGISTRY: " + VariableManager.VARIABLES);
-        Variable b = new Variable("b=a");
-        System.out.println(b);
-        VariableManager.add(b);
-        System.out.println("REGISTRY: " + VariableManager.VARIABLES);
-    }//end method
+    public String toJSON(){
+        return "{\n"
+                + "\"name\": \""+name+"\",\n"
+                + "\"value\": "+value+",\n"
+                + "\"constant\": "+constant+",\n"
+                + "\"units\": \""+units+"\",\n"
+                + "\"type\": \""+type.name()+"\"\n" 
+                + "}\n";
+    }
+  
 
 }//end class Variable

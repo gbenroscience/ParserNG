@@ -94,9 +94,9 @@ class MathExpressionTest {
             }
         };
         MathExpression.setAutoInitOn(false);
- 
-        MathExpression me = new MathExpression("b1(1,2,3)"); 
- 
+
+        MathExpression me = new MathExpression("b1(1,2,3)");
+
         Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
         Declarations.registerBasicNumericalMethod(b1);
         me = new MathExpression("b1(1,2,3)");
@@ -136,15 +136,15 @@ class MathExpressionTest {
 
     @Test
     void moreJunkExamples() {
-//        System.out.println(0xFF000000);
-//        System.out.println(0xFF888888);
-//        System.out.println(0xFFFFFFFF);
+
         Function f = FunctionManager.add("f(x,y) = x - x/y");
-        double r = f.calc(2, 3);
+        f.updateArgs(2,3);
+        double r = f.calc(0,0);
         Assertions.assertEquals((double) 2 - ((double) 2 / (double) 3), r);
         int iterations = 10000;
         long start = System.nanoTime();
         for (int i = 1; i < iterations; i++) {
+            f.updateArgs(2, 3);
             f.calc(2, 3);
         }
         long duration = System.nanoTime() - start;
@@ -162,52 +162,59 @@ class MathExpressionTest {
         VariableManager.clearVariables();
         MathExpression linear = new MathExpression("M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");
         String ls = linear.solve();
-        if (print) System.out.println("soln: " + ls);
+        if (print) {
+            System.out.println("soln: " + ls);
+        }
         Assertions.assertEquals("\n"
                 + "   -1.0  ,    3.0  ,   -7.0            \n"
                 + "    0.0  ,    3.0  ,    4.0            \n"
                 + "    4.0  ,    0.0  ,  -11.0            \n", FunctionManager.lookUp(ls).getMatrix().toString());
 
-
- 
-        MathExpression expr = new MathExpression("tri_mat(M)"); 
-        Matrix m = FunctionManager.lookUp(expr.solve()).getMatrix(); System.out.println(m.toString());
-        if (print) System.out.println(m.toString());
+        MathExpression expr = new MathExpression("tri_mat(M)");
+        Matrix m = FunctionManager.lookUp(expr.solve()).getMatrix();
+        System.out.println(m.toString());
+        if (print) {
+            System.out.println(m.toString());
+        }
         Function f = new Function("fExpr=@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0)");
         FunctionManager.add(f);
-        Assertions.assertTrue( f.getMatrix().equals(m) );
+        Assertions.assertTrue(f.getMatrix().equals(m));
         FunctionManager.delete("fExpr");
-         
- 
 
         MathExpression expr2 = new MathExpression("echelon(M)");
         Matrix echelon = FunctionManager.lookUp(expr2.solve()).getMatrix();//expr2.solveGeneric().matrix;
-        if (print) System.out.println(echelon);
- 
-        
+        if (print) {
+            System.out.println(echelon);
+        }
+
         f = new Function("fExpr=@(3,3)(3.0,4.0,1.0,0.0,4.0,19.0,0.0,0.0,567.0)");
         FunctionManager.add(f);
-        Assertions.assertTrue( f.getMatrix().equals(echelon) );
+        Assertions.assertTrue(f.getMatrix().equals(echelon));
         FunctionManager.delete("fExpr");
-         
 
         Function matrixFunction = FunctionManager.lookUp("M");
         Matrix matrix = matrixFunction.getMatrix();
-        if (print) System.out.println("underlying matrix: " + matrix);
+        if (print) {
+            System.out.println("underlying matrix: " + matrix);
+        }
         Assertions.assertEquals("\n"
                 + "    3.0  ,    4.0  ,    1.0            \n"
                 + "    2.0  ,    4.0  ,    7.0            \n"
                 + "    9.0  ,    1.0  ,   -2.0            \n", matrix.toString());
 
         Matrix inv = matrix.inverse();
-        if (print) System.out.println("inverted matrix: " + inv);
+        if (print) {
+            System.out.println("inverted matrix: " + inv);
+        }
         Assertions.assertEquals("\n"
                 + "-0.07936507936507936  ,0.04761904761904753  ,0.12698412698412698            \n"
                 + "0.3544973544973545  ,-0.0793650793650793  ,-0.10052910052910052            \n"
                 + "-0.1798941798941799  ,0.1746031746031746  ,0.021164021164021166            \n", inv.toString());
 
         matrix.multiply(inv);
-        if (print) System.out.println("mul matrix: " + matrix);
+        if (print) {
+            System.out.println("mul matrix: " + matrix);
+        }
         Assertions.assertEquals("\n"
                 + "0.9999999999999999  ,-2.7755575615628914E-17  ,3.469446951953614E-18            \n"
                 + "-2.220446049250313E-16  ,    1.0  ,2.7755575615628914E-17            \n"
@@ -218,7 +225,9 @@ class MathExpressionTest {
 
         MathExpression parserng = new MathExpression("f(x,y) = x-x/y; f(2,3);f(2,5);");
         String parsengr = parserng.solve();
-        if (print) System.out.println("SEE???????\n " + parsengr);
+        if (print) {
+            System.out.println("SEE???????\n " + parsengr);
+        }
         Assertions.assertEquals("0.0", parsengr);
         /*
          MathExpression f = new MathExpression("x=17;3*x+1/x");//runs in about 2.3 milliSecs
@@ -274,25 +283,34 @@ class MathExpressionTest {
         //WORK ON sum(3,-2sin(3)^2,4,5) error //matrix_mul(@(2,2)(3,1,4,2),@(2,2)(2,-9,-4,3))...sum(3,2sin(4),5,-3cos(2*sin(5)),4,1,3)
         //matrix_mul(invert(@(2,2)(3,1,4,2)),@(2,2)(2,-9,-4,3)).............matrix_mul(invert(@(2,2)(3,1,4,2)),@(2,2)(2,-9,-4,3))
         //matrix_mul(invert(@(2,2)(3,1,4,2)),matrix_mul(M2,2sin(3)sum(3,6,5,3)cos(9/8*6)det(@(2,2)(2,-9,-4,3))))
-        if (print) System.out.println("lookup M: " + FunctionManager.lookUp("M"));
+        if (print) {
+            System.out.println("lookup M: " + FunctionManager.lookUp("M"));
+        }
         Assertions.assertEquals("M=@(3,3)(3.0,4.0,1.0,2.0,4.0,7.0,9.0,1.0,-2.0)", FunctionManager.lookUp("M").toString());
         //MathExpression expr = new MathExpression("f=3;5f");//BUGGY
         //MathExpression expr = new MathExpression("quad(@(x)3*x-2+3*x^2)");//BUGGY
         //MathExpression expr = new MathExpression("root(@(x)3*x-sin(x)-0.5,2)");//BUGGY
-        MathExpression exprs = new MathExpression("r1=4;r1*5");
-
+        MathExpression exprs = new MathExpression("r1=4;r1*5"); 
         //A+k.A+AxB+A^c
-        if (print) System.out.println("scanner: " + exprs.scanner);
+        if (print) {
+            System.out.println("scanner: " + exprs.scanner);
+        }
         Assertions.assertEquals("[(, r1, *, 5, )]", exprs.scanner.toString());
-        if (print) System.out.println("solution: " + exprs.solve());
+        if (print) {
+            System.out.println("solution: " + exprs.solve());
+        }
         Assertions.assertEquals("20.0", exprs.solve());
 
         //no idea what is this trying to do, results sounds buggy anyway
         expr.setExpression("44+22*(3)");
-        if (print) System.out.println("solution--: " + expr.solve());
+        if (print) {
+            System.out.println("solution--: " + expr.solve());
+        }
         Assertions.assertEquals("110.0", expr.solve());
 
-        if (print) System.out.println("return type: " + exprs.returnType);
+        if (print) {
+            System.out.println("return type: " + exprs.returnType);
+        }
         Assertions.assertEquals(TYPE.NUMBER, exprs.returnType);
         List<Map.Entry<String, Function>> l = new ArrayList(FunctionManager.FUNCTIONS.entrySet());
         Collections.sort(l, new Comparator<Map.Entry<String, Function>>() {
@@ -302,34 +320,47 @@ class MathExpressionTest {
             }
         });
         //although the sort is maaking it deterministic, the assert is fragile and afaik have no sense
-        if (print) System.out.println("FunctionManager: " + l.toString());
+        if (print) {
+            System.out.println("FunctionManager: " + l.toString());
+        }
 //        Assertions.assertEquals(
 //                "[C=C=@(3,3)(-1.0,3.0,-7.0,0.0,3.0,4.0,4.0,0.0,-11.0), M=M=@(3,3)(3.0,4.0,1.0,2.0,4.0,7.0,9.0,1.0,-2.0), M1=M1=@(2,2)(3.0,4.0,1.0,2.0), M2=M2=@(2,2)(3.0,4.0,1.0,2.0), N=N=@(x)(sin"
 //                        + "(x)), anon1=anon1=@(3,3)(3.0,4.0,1.0,2.0,4.0,7.0,9.0,1.0,-2.0), anon2=anon2=@(3,3)(4.0,1.0,8.0,2.0,1.0,3.0,5.0,1.0,9.0), anon3=anon3=@(3,3)(-1.0,3.0,-7.0,0.0,3.0,4.0,4.0,"
 //                        + "0.0,-11.0), anon4=anon4=@(3,3)(1.0,1.3333333333333333,0.3333333333333333,0.0,1.0,4.749999999999999,0.0,0.0,1.0), anon5=anon5=@(3,3)(3.0,4.0,1.0,0.0,4.0,19.0,0.0,0.0,567"
 //                        + ".0), anon6=anon6=@(x,y)(x-x/y), f=f=@(x,y)(x-x/y), r=r=@(x)(ln(sin(x)))]",
 //                l.toString());
-        if (print) System.out.println("VariableManager: " + VariableManager.VARIABLES);
-        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, x=x:0.0, pi=pi:3.141592653589793, y=y:0.0, r1=r1:4.0}", VariableManager.VARIABLES.toString());
+        if (print) {
+            System.out.println("VariableManager: " + VariableManager.VARIABLES);
+        }
+        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, x=x:0.0, pi=pi:3.141592653589793, y=y:0.0, r1=r1:4.0}", 
+                VariableManager.VARIABLES.toString());
 
         MathExpression expression = new MathExpression("x=0;sin(ln(x))");
 
-        expression.setValue("x", 0 );
-        if (print) System.out.println(expression.solve());
- 
+        expression.setValue("x", 0);
+        if (print) {
+            System.out.println(expression.solve());
+        }
+
         Assertions.assertEquals("NaN", expression.solve());
-        expression.setValue("x", 1 );
- 
-        if (print) System.out.println(expression.solve());
+        expression.setValue("x", 1);
+
+        if (print) {
+            System.out.println(expression.solve());
+        }
         Assertions.assertEquals("0.0", expression.solve());
-        expression.setValue("x", 50 );
-        if (print) System.out.println(expression.solve());
+        expression.setValue("x", 50);
+        if (print) {
+            System.out.println(expression.solve());
+        }
         Assertions.assertTrue("-0.6964441283311967".equals(expression.solve()) || "-0.6964441283311968".equals(expression.solve()));
-        expression.setValue("x", 100 );
-        if (print) System.out.println(expression.solve());
+        expression.setValue("x", 100);
+        if (print) {
+            System.out.println(expression.solve());
+        }
         Assertions.assertEquals(Number.fastParseDouble("-0.9942575694137897"), Number.fastParseDouble(expression.solve()));
 
-         f = FunctionManager.lookUp("N");
+        f = FunctionManager.lookUp("N");
         long start = System.nanoTime();
         int iterations = 100;
         for (int i = 0; i < iterations; i++) {
@@ -338,11 +369,15 @@ class MathExpressionTest {
         long elapsedNanos = (System.nanoTime() - start) / iterations;
         double durationms = (double) elapsedNanos / 1.0E6;
         System.out.println("DONE: " + durationms + " ms");
-        if (print) System.out.println("DONE: " + durationms + " ms");
+        if (print) {
+            System.out.println("DONE: " + durationms + " ms");
+        }
         Assertions.assertTrue(durationms < 1);
 
         MathExpression det = new MathExpression("det(@(5,5)(-21,12,13,64,5,6,2.7,18,9,0,4,2,3,4,23,6,7,8,9,0,1,2,32,4,5));");
-        if (print) System.out.println("determinant: " + det.solve());
+        if (print) {
+            System.out.println("determinant: " + det.solve());
+        }
         Assertions.assertEquals("-1739274.3000000003", det.solve());
 
         /**

@@ -51,18 +51,7 @@ public class Set {
     public Set(List<String> data) {
         this.data = data;
     }
-
-    /**
-     * Creates a new Set object initialized with a set of data coming from a
-     * mathematical MathExpression.
-     *
-     * @param function the Math MathExpression from which the set of data is
-     * coming.
-     * @param data the incoming data set
-     */
-    public Set(MathExpression function, List<String> data) {
-        this.data = function.solveSubPortions(data);
-    }//end constructor
+ 
 
     /**
      *

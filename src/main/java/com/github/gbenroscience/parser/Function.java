@@ -200,6 +200,13 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         return type;
     }
 
+    public void updateArgs(double... x) {
+        MathExpression m = getMathExpression();
+        if (m != null) {
+            m.updateArgs(x);
+        }
+    }
+
     /**
      *
      * @param x A list of variable values to set for the function. The supplied
@@ -212,12 +219,12 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         if (x == null || x.length != independentVariables.size()) {
             return Double.NaN;
         }
-
+        /*
         for (int i = 0; i < x.length; i++) {
             Variable var = independentVariables.get(i);
             mathExpression.setValue(var.getName(), x[i]);
-        }
-
+            var.setValue(x[i]);
+        }*/
         return mathExpression.solveGeneric().scalar;
     }
 
@@ -276,7 +283,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         if (equalsIndex == -1 && semiColonIndex == -1 && indexOfOpenBrac == -1) {
             throw new InputMismatchException("Wrong Input!");
         }
-    
+
         /**
          * Check if the user used the form f(x)=.... instead of f=@(x).... If so
          * convert to the latter format, and then recompute the necessary
@@ -299,12 +306,22 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             String rhs = input.substring(equalsIndex + 1, semiColonIndex);
 
             if (Number.validNumber(rhs)) {
-                if (Variable.isVariableString(newFuncName)) {
-                    VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(rhs), false));
+                if (Variable.isVariableString(newFuncName)) { 
+                    Variable v = VariableManager.lookUp(newFuncName);
+                    if (v == null) {
+                        VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(rhs), false));
+                    } else {
+                        v.setValue(rhs);
+                    }
                 } else if (isVarNamesList) {
                     List<String> vars = new Scanner(newFuncName, false, ",").scan();
                     for (String var : vars) {
-                        VariableManager.VARIABLES.put(var, new Variable(var, Double.parseDouble(rhs), false));
+                        Variable v = VariableManager.lookUp(var);
+                        if (v == null) {
+                            VariableManager.VARIABLES.put(var, new Variable(var, Double.parseDouble(rhs), false));
+                        } else {
+                            v.setValue(rhs);
+                        }
                     }
                 }
 
@@ -312,15 +329,21 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             } else {
 
                 MathExpression expr = new MathExpression(rhs);
- 
+
                 List<String> scanner = expr.getScanner();
                 if (scanner.size() == 3 && scanner.get(1).startsWith("anon")) {//function assigments will always be like this: [(,anon1,)] when they get here
- 
+
                     Function f = FunctionManager.lookUp(scanner.get(1));
                     if (f != null) {
                         FunctionManager.delete(scanner.get(1));
                         if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
-                            f.setDependentVariable(new Variable(newFuncName));
+                            Variable v = VariableManager.lookUp(newFuncName);
+                            if (v != null) {
+                                f.setDependentVariable(v);
+                            } else {
+                                f.setDependentVariable(new Variable(newFuncName));
+                            }
+
                             FunctionManager.add(f);
                         } else if (f.getType() == TYPE.MATRIX) {
                             f.getMatrix().setName(newFuncName);
@@ -334,7 +357,6 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                     return true;
                 }
                 MathExpression.EvalResult val = expr.solveGeneric();
-                System.out.println("val.type = " + val.getTypeName());
                 String referenceName = expr.getReturnObjectName();
 
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
@@ -372,12 +394,23 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                             if (isVarNamesList && hasCommas) {
                                 List<String> vars = new Scanner(newFuncName, false, ",").scan();
                                 for (String var : vars) {
-                                    VariableManager.VARIABLES.put(var, new Variable(var, val.scalar, false));
+                                    Variable v = VariableManager.lookUp(var);
+                                    if (v == null) {
+                                        v = new Variable(var, val.scalar, false);
+                                    } else {
+                                        v.setValue(val.scalar);
+                                    }
+                                    VariableManager.VARIABLES.put(var, v);
                                 }
                                 success = true;
                             } else {
-                                System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
-                                VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, val.scalar, false));
+                                Variable v = VariableManager.lookUp(newFuncName);
+                                if (v == null) {
+                                    v = new Variable(newFuncName, val.scalar, false);
+                                } else {
+                                    v.setValue(val.scalar);
+                                }
+                                VariableManager.VARIABLES.put(newFuncName, v);
                                 success = true;
                             }
 
@@ -430,10 +463,10 @@ public class Function implements Savable, MethodRegistry.MethodAction {
 
             Scanner cs = new Scanner(cutUpInput[1], false, ",", "(", ")");
             List<String> scan = cs.scan();
-            
+
             if (Variable.isVariableString(cutUpInput[0]) && isParameterList(cutUpInput[1])) {
                 if (cutUpInput[0].startsWith(FunctionManager.ANON_PREFIX) && !anonymous) {
-                    throw new InputMismatchException("Function Name Cannot Start With \'anon\'.\n \'anon\' is a reserved name for anonymous functions..culprit: "+cutUpInput[0]);
+                    throw new InputMismatchException("Function Name Cannot Start With \'anon\'.\n \'anon\' is a reserved name for anonymous functions..culprit: " + cutUpInput[0]);
                 } else if (Method.isInBuiltMethod(cutUpInput[0])) {
                     throw new InputMismatchException(cutUpInput[0] + " is a reserved name for inbuilt methods.");
                 } else {
@@ -443,8 +476,10 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 for (int i = 0; i < scan.size(); i++) {
                     try {
                         if (Variable.isVariableString(scan.get(i))) {
-                            independentVariables.add(new Variable(scan.get(i), 0.0, false));
-                            vars = vars.concat(scan.get(i) + "=" + "0.0;");//build variable command list
+                            Variable searchVal = VariableManager.lookUp(scan.get(i));
+                            Variable v = searchVal != null ? searchVal : new Variable(scan.get(i), 0.0, false);
+                            independentVariables.add(v);
+                            vars = vars.concat(scan.get(i) + "=" + v.getValue() + ";");//build variable command list
                         }//end if
                     }//end try
                     catch (IndexOutOfBoundsException boundsException) {

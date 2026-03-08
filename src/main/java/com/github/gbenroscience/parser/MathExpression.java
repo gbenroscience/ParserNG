@@ -16,31 +16,32 @@ import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.parser.methods.Help;
 import com.github.gbenroscience.parser.methods.Method;
 
- 
 import com.github.gbenroscience.math.Maths;
- 
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.InputMismatchException;
 import java.util.Iterator;
- 
+
 import java.util.List;
- 
 
 import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Operator.*;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
- 
+
 import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
 import static com.github.gbenroscience.parser.TYPE.LIST;
 import static com.github.gbenroscience.parser.TYPE.MATRIX;
 import com.github.gbenroscience.parser.benchmarks.GG;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Random;
 import java.util.Stack;
- 
 
 /**
  *
@@ -97,17 +98,9 @@ public class MathExpression implements Savable, Solvable {
     protected boolean hasListReturningOperators;
     private boolean hasNumberReturningStatsOperators;
     private boolean hasPlusOrMinusOperators;
-    private boolean hasMulOrDivOperators;
-    private boolean hasPowerOperators;
-    private boolean hasPostNumberOperators;
-    private boolean hasPreNumberOperators;
-    private boolean hasRemainderOperators;
-    private boolean hasPermOrCombOperators;
-    private boolean hasLogicOperators;
- 
 
     private ExpressionSolver expressionSolver = new ExpressionSolver();
- 
+
     /**
      * If set to true, MathExpression objects will automatically initialize
      * undeclared variables to zero and store them.
@@ -123,7 +116,6 @@ public class MathExpression implements Savable, Solvable {
      * <b><strong>where c has been declared before!</b></strong>
      */
     private boolean hasFunctionOrVariableInitStatement;
-     
 
     /**
      * The VariableManager object that allows an object of this class to
@@ -151,6 +143,9 @@ public class MathExpression implements Savable, Solvable {
     private static final int PREC_UNARY = 100;  // Unary minus
     private Token[] cachedPostfix = null;  // Cache the compiled postfix
 
+    private double[] executionFrame;
+    VariableRegistry registry = new VariableRegistry();
+
     /**
      * Sometimes, after evaluation the evaluation list which is a local
      * variable, is reduced to a function name(or other object as time goes on)
@@ -161,7 +156,6 @@ public class MathExpression implements Savable, Solvable {
      */
     private String returnObjectName;
     public static final String SYNTAX_ERROR = "SYNTAX ERROR";
-     
 
     // Updated Token class (from your provided)
     static class Token {
@@ -170,6 +164,13 @@ public class MathExpression implements Savable, Solvable {
         public int kind;
         public double value;
         public String name; // REQUIRED for functions/methods/variables
+        /**
+         * The slot in the execution frame where this token's value lives. Used
+         * only when kind == NUMBER and it represents a variable.
+         */
+        public int frameIndex = -1;
+        public Variable v;//cache the variable here
+
         public int id;
         public char opChar;
         public int precedence;
@@ -264,9 +265,9 @@ public class MathExpression implements Savable, Solvable {
 
         public String toJsonString() {
             return "{\n"
-                    + "\"kind\": " + kind + ",\n"
+                    + "\"kind\": \"" + kind + "\",\n"
                     + "\"value\": " + value + ",\n"
-                    + "\"name\": " + name + ",\n"
+                    + "\"name\": \"" + name + "\",\n"
                     + "\"id\": " + id + ",\n"
                     + "\"opChar\": " + opChar + ",\n"
                     + "\"precedence\": " + precedence + ",\n"
@@ -291,7 +292,8 @@ public class MathExpression implements Savable, Solvable {
                     + "\"isPostfix\": " + isPostfix + ","
                     + "\"arity\": " + arity + ","
                     + "\"assignToName\": " + assignToName + ","
-                    + "\"isAssignmentTarget\": " + isAssignmentTarget
+                    + "\"isAssignmentTarget\": " + isAssignmentTarget + ","
+                    + "\n\"v\": " + (v == null ? "null" : v.toJSON()) + "\n"
                     + "}";
         }
 
@@ -322,12 +324,12 @@ public class MathExpression implements Savable, Solvable {
     }//end constructor MathExpression
 
     public MathExpression(String input, VariableManager variableManager) {
- 
+
         this.help = input.equals(Declarations.HELP);
         for (int i = 0; i < INIT_POOL_SIZE; i++) {
             pool[i] = new EvalResult();
         }
- 
+
         this.variableManager = variableManager;
 
         Scanner cs = new Scanner(STRING.purifier(input), false, VariableManager.endOfLine);
@@ -358,7 +360,7 @@ public class MathExpression implements Savable, Solvable {
         else {
             setExpression("(0.0)");
         }
-        
+
     }
 
     public String getExpression() {
@@ -595,91 +597,6 @@ public class MathExpression implements Savable, Solvable {
     }
 
     /**
-     *
-     * @param hasPreNumberOperators sets whether the input has pre-number
-     * operators or not
-     */
-    public void setHasPreNumberOperators(boolean hasPreNumberOperators) {
-        this.hasPreNumberOperators = hasPreNumberOperators;
-    }
-
-    /**
-     *
-     * @return true if the input has pre number operators
-     */
-    public boolean isHasPreNumberOperators() {
-        return hasPreNumberOperators;
-    }
-
-    /**
-     *
-     * @param hasLogicOperators sets whether the input has logic operators or
-     * not.
-     */
-    public void setHasLogicOperators(boolean hasLogicOperators) {
-        this.hasLogicOperators = hasLogicOperators;
-    }
-
-    /**
-     *
-     * @return true if the input has logic operators
-     */
-    public boolean isHasLogicOperators() {
-        return hasLogicOperators;
-    }
-
-    /**
-     *
-     * @param hasPostNumberOperators sets whether the input has post number
-     * operators
-     */
-    public void setHasPostNumberOperators(boolean hasPostNumberOperators) {
-        this.hasPostNumberOperators = hasPostNumberOperators;
-    }
-
-    /**
-     *
-     * @return true if post number operators like factorial, inverse e.t.c
-     */
-    public boolean isHasPostNumberOperators() {
-        return hasPostNumberOperators;
-    }
-
-    /**
-     *
-     * @param hasPowerOperators sets whether or not the input has the power
-     * operator
-     */
-    public void setHasPowerOperators(boolean hasPowerOperators) {
-        this.hasPowerOperators = hasPowerOperators;
-    }
-
-    /**
-     *
-     * @return true if the input has the power operator
-     */
-    public boolean isHasPowerOperators() {
-        return hasPowerOperators;
-    }
-
-    /**
-     *
-     * @param hasMulOrDivOperators sets whether the input has multiplication or
-     * division operators
-     */
-    public void setHasMulOrDivOperators(boolean hasMulOrDivOperators) {
-        this.hasMulOrDivOperators = hasMulOrDivOperators;
-    }
-
-    /**
-     *
-     * @return true if the input has multiplication or division operators
-     */
-    public boolean isHasMulOrDivOperators() {
-        return hasMulOrDivOperators;
-    }
-
-    /**
      * Sometimes, after evaluation the evaluation list which is a local
      * variable, is reduced to a function name(or other object as time goes on)
      * instead of a number of other list. The parser unfortunately will not
@@ -691,76 +608,6 @@ public class MathExpression implements Savable, Solvable {
      */
     public String getReturnObjectName() {
         return returnObjectName;
-    }
-
-    /**
-     *
-     * @param hasPlusOrMinusOperators sets whether or not the input contains
-     * plus or minus operators
-     */
-    public void setHasPlusOrMinusOperators(boolean hasPlusOrMinusOperators) {
-        this.hasPlusOrMinusOperators = hasPlusOrMinusOperators;
-    }
-
-    /**
-     *
-     * @return true if plus or minus operators are found in the input
-     */
-    public boolean isHasPlusOrMinusOperators() {
-        return hasPlusOrMinusOperators;
-    }
-
-    /**
-     *
-     * @param hasRemainderOperators sets whether or not remainder operators are
-     * found in the input
-     */
-    public void setHasRemainderOperators(boolean hasRemainderOperators) {
-        this.hasRemainderOperators = hasRemainderOperators;
-    }
-
-    /**
-     *
-     * @return true if remainder operators are found in the input
-     */
-    public boolean isHasRemainderOperators() {
-        return hasRemainderOperators;
-    }
-
-    /**
-     *
-     * @param hasPermOrCombOperators sets whether permutation and combination
-     * operators are found in the input
-     */
-    public void setHasPermOrCombOperators(boolean hasPermOrCombOperators) {
-        this.hasPermOrCombOperators = hasPermOrCombOperators;
-    }
-
-    /**
-     *
-     * @return true if permutation and combination operators are found in the
-     * input
-     */
-    public boolean isHasPermOrCombOperators() {
-        return hasPermOrCombOperators;
-    }
-
-    /**
-     *
-     * @param hasNumberReturningStatsOperators sets whether or not the input
-     * contains a data set that will evaluate to a number
-     */
-    public void setHasNumberReturningStatsOperators(boolean hasNumberReturningStatsOperators) {
-        this.hasNumberReturningStatsOperators = hasNumberReturningStatsOperators;
-    }
-
-    /**
-     *
-     * @return true if the input contains a data set that will evaluate to a
-     * number
-     */
-    public boolean isHasNumberReturningStatsOperators() {
-        return hasNumberReturningStatsOperators;
     }
 
     public void setVariableHandlerOnly(boolean variableHandlerOnly) {
@@ -780,35 +627,112 @@ public class MathExpression implements Savable, Solvable {
     }
 
     /**
+     * Retrieves a Variable handle from the expression's registry. This handle
+     * is "Pre-Bound" to the correct slot in the execution frame.
      *
-     * @return an ArrayList object containing all Variable objects found in the
-     * current input expression. This is only a subset of all Variable objects
-     * used in the workspace of operation of this MathExpression object.
+     * @param name
+     * @return {@link Variable}
      */
-    public ArrayList<Variable> getVars() {
+    public Variable getVariable(String name) {
+        // 1. Check if this variable exists in our compiled registry
+        if (this.registry.hasVariable(name)) {
+            int slot = this.registry.getSlot(name);
 
-        ArrayList<Variable> usedVars = new ArrayList<>();
+            // 2. Look up the variable in our existing token list or VariableManager
+            Variable v = VariableManager.lookUp(name);
 
-        for (int i = 0; i < scanner.size(); i++) {
-            if (isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1))) {
-                String str = scanner.get(i);
-                Variable v = VariableManager.lookUp(str);
-                //Variable does not exist
-                if (v == null) {
-                    setCorrectFunction(false);
-                    throw new NullPointerException("Variable " + str + " Was Never Initialized!!");
-                } //Variable exists
-                else {
-                    //  if var is in workspace but not yet recognized in this expression, add to usedVars
-                    if (!usedVars.contains(v)) {
-                        usedVars.add(v);
-                    }
+            if (v == null) {
+                // Fallback: Create a new one if it's a dynamic variable
+                v = new Variable(name);
+            }
+
+            // 3. IMPORTANT: Sync the index so the Handle knows where to write
+            v.setFrameIndex(slot);
+
+            return v;
+        }
+
+        throw new NoSuchElementException("Variable '" + name + "' was not found in the compiled expression.");
+    }
+
+    public static final class Slot {
+
+        /**
+         * The slot or frame index
+         */
+        private final int slot;
+        /**
+         * The name of the Variable that owns this slot
+         */
+        private final String name;
+
+        public Slot(String name, int slot) {
+            this.slot = slot;
+            this.name = name;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public int getSlot() {
+            return slot;
+        }
+
+        @Override
+        public String toString() {
+            return "name=" + name + ", slot=" + slot;
+        }
+
+        public String toJSON() {
+            return "{\n"
+                    + "\"name\": \"" + name + "\",\n"
+                    + "\"slot\": \"" + slot + "\"\n"
+                    + "}";
+        }
+
+    }
+
+    /**
+     *
+     * @return an array of {@link Slot} objects(name of variable and frame index
+     * of variables in the expression)
+     */
+    public Slot[] getSlotItems() {
+        ArrayList<Slot> slots = new ArrayList<>();
+        for (int i = 0; i < cachedPostfix.length; i++) {
+            Token t = cachedPostfix[i];
+            if (t.v != null) {
+                Slot s = new Slot(t.v.getName(), t.frameIndex);
+                if (!slots.contains(s)) {
+                    slots.add(s);
                 }
             }//end if
-
         }//end for loop
-        return usedVars;
+        return slots.toArray(new Slot[0]);
+    }
 
+    /**
+     *
+     * @return an array of {@link Integer} objects which are the frame index of
+     * variables in the expression
+     */
+    public int[] getSlots() {
+        ArrayList<Integer> slots = new ArrayList<>();
+
+        for (int i = 0; i < cachedPostfix.length; i++) {
+            Token t = cachedPostfix[i];
+            if (t.v != null) {
+                if (!slots.contains(t.frameIndex)) {
+                    slots.add(t.frameIndex);
+                }
+            }//end if
+        }//end for loop
+        int[] array = new int[slots.size()];
+        for (int i = 0; i < array.length; i++) {
+            array[i] = slots.get(i);
+        }
+        return array;
     }
 
     private void statsVerifier() {
@@ -1111,13 +1035,54 @@ public class MathExpression implements Savable, Solvable {
      * @param value The value to set to the variable
      * @throws NullPointerException if a Variable object that has that name id
      * not found.
+     *
+     * public void setValue(String name, double value) throws
+     * NullPointerException, NumberFormatException { Variable v =
+     * VariableManager.lookUp(name); if (v != null) { v.setValue(value); } }
      */
-    public void setValue(String name, double value) throws NullPointerException, NumberFormatException {
-        Variable v = VariableManager.lookUp(name);
-        if (v != null) {
-            v.setValue(value);
+    public void setValue(String name, double value) {
+        // 1. Ask the Registry where this name lives (O(1) Map lookup)
+        // This replaces the entire for-loop and String.equals()
+        int slot = this.registry.getSlot(name);
+        if (slot != -1 && slot < executionFrame.length) {
+            // 2. Write directly to the frame
+            this.executionFrame[slot] = value;//.v.setValue(value);
         }
+    }
 
+    /**
+     * Updates the entire execution frame in one go. The order of values must
+     * match the order of the Registry indices.
+     *
+     * @param values
+     */
+    public void updateArgs(double... values) {
+        /*int slots[] = getSlots();
+        updateArgs(slots, values);*/
+        // Check to prevent array out-of-bounds
+        int length = Math.min(values.length, executionFrame.length);
+
+        // System.arraycopy is a native call - it is incredibly fast
+        System.arraycopy(values, 0, executionFrame, 0, length);
+
+    }
+
+    /**
+     * Updates specific slots with specific values. Usage: updateArgs(new
+     * int[]{0, 2}, new double[]{valX, valZ});
+     *
+     * @param slots
+     * @param values
+     */
+    public void updateArgs(int[] slots, double... values) {
+        for (int i = 0; i < slots.length; i++) {
+            this.executionFrame[slots[i]] = values[i];
+        }
+    }
+
+    // Or, for a single variable update (the most common benchmark case):
+    public void updateSlot(int slot, double value) {
+        this.executionFrame[slot] = value;
     }
 
     public void setReturnType(TYPE returnType) {
@@ -1127,7 +1092,7 @@ public class MathExpression implements Savable, Solvable {
     public TYPE getReturnType() {
         return returnType;
     }
- 
+
     public EvalResult solveGeneric() {
         if (help) {
             EvalResult res = new EvalResult();
@@ -1150,12 +1115,9 @@ public class MathExpression implements Savable, Solvable {
     @Override
     public String solve() {
         return solveGeneric().toString();
- 
+
     }//end method solve()
-     
-     
-     
-      
+
     protected List<String> solve(List<String> list) {
         return Arrays.asList(String.valueOf(GG.evaluate(list)));
     }
@@ -1166,10 +1128,11 @@ public class MathExpression implements Savable, Solvable {
         }
         char c0 = s.charAt(0);
         int len = s.length();
-
+        Variable vv = null;
+        boolean isNumber = false;
         // 1. Identify Numbers
-        if (isNumber(s)) {
-            return new Token(fastParseDouble(s));
+        if ((isNumber = isNumber(s)) || ((vv = VariableManager.lookUp(s)) != null && vv.isConstant())) {
+            return new Token(isNumber ? fastParseDouble(s) : vv.getValue());
         }
 
         // 2. Identify Brackets
@@ -1221,9 +1184,13 @@ public class MathExpression implements Savable, Solvable {
         // 6. Fallback: Treat as Variable/Constant
         Token t = new Token(0.0);
         t.name = s;
+        if (!FunctionManager.contains(s) && vv != null) {
+            t.v = vv;
+            t.frameIndex = registry.getSlot(s);
+            t.v.setFrameIndex(t.frameIndex);
+        }
         t.kind = Token.NUMBER;
-
-        return t; 
+        return t;
     }
 
     // Helper for isOperator (your custom ops)
@@ -1234,7 +1201,7 @@ public class MathExpression implements Savable, Solvable {
         }
         return s.equals("³√");
     }
- 
+
     private void compileToPostfix() {
         if (cachedPostfix != null) {
             return;
@@ -1270,6 +1237,14 @@ public class MathExpression implements Savable, Solvable {
                         argCounts.push(currentCount + 1);
                         lastWasComma.pop();
                         lastWasComma.push(false);
+                    }
+                    if (t.v != null) {
+// Get or create a slot for this variable name
+                        int slot = registry.getSlot(t.name);
+                        // Link the Token directly to that slot
+                        t.frameIndex = slot;
+                        // Link the Variable object to that slot so the user can update it
+                        t.v.setFrameIndex(slot);
                     }
                     break;
 
@@ -1383,12 +1358,20 @@ public class MathExpression implements Savable, Solvable {
 
         cachedPostfix = new Token[p];
         System.arraycopy(postfix, 0, cachedPostfix, 0, p);
+// Initialize the frame size based on how many unique variables were found
+        this.executionFrame = new double[registry.size()];
+        for (Token t : cachedPostfix) {
+            if (t.v != null) {
+                executionFrame[t.frameIndex] = t.v.getValue();
+            }
+        }
     }
 
     private final class ExpressionSolver {
 
         private static final int MAX_ARITY = 32;
         private static final int ABSOLUTE_MAX_ARITY = 100_000;
+
         private EvalResult[][] argCache = new EvalResult[MAX_ARITY + 1][];
 
         public ExpressionSolver() {
@@ -1396,6 +1379,7 @@ public class MathExpression implements Savable, Solvable {
             for (int i = 0; i <= MAX_ARITY; i++) {
                 argCache[i] = new EvalResult[i];
             }
+
         }
 
         public EvalResult evaluate() {
@@ -1415,10 +1399,11 @@ public class MathExpression implements Savable, Solvable {
                     case Token.NUMBER:
                         if (t.name != null && !t.name.isEmpty()) {
                             // Could be a variable OR a function reference (like anon1)
-                            Variable var = VariableManager.lookUp(t.name);
-                            if (var != null) {
+                            if (t.v != null) {
                                 // It's a variable
-                                stack[++ptr] = getNextResult().wrap(var.getValue());
+                                double v = executionFrame[t.frameIndex];
+                                stack[++ptr] = getNextResult().wrap(v);
+                                t.v.setValue(v);
                             } else if (FunctionManager.FUNCTIONS.containsKey(t.name)) {
                                 // It's a function reference - wrap it as a special object
                                 // The diff method will know how to handle it
@@ -1500,7 +1485,7 @@ public class MathExpression implements Savable, Solvable {
                         }
 
                         EvalResult result = t.action.calc(getNextResult(), arity, args);
- 
+
                         stack[++ptr] = result;
                         break;
                 }
@@ -1562,7 +1547,7 @@ public class MathExpression implements Savable, Solvable {
                     break;
                 case '/':
                     if (b == 0) {
-                        throw new ArithmeticException("Division by zero");
+                        throw new ArithmeticException("Division by zero---op=" + op + ", b=" + b + ", aRes=" + aRes + ", aRes.type = " + aRes.getTypeName());
                     }
                     aRes.scalar = a / b;
                     break;
@@ -1581,7 +1566,6 @@ public class MathExpression implements Savable, Solvable {
             }
         }
     }
- 
 
     public static final class EvalResult {
 
@@ -1765,7 +1749,7 @@ public class MathExpression implements Savable, Solvable {
             return null;
         }
     }
- 
+
 // In ExpressionSolver.getNextResult():
     public EvalResult getNextResult() {
         if (poolPointer >= pool.length) {
@@ -1776,7 +1760,7 @@ public class MathExpression implements Savable, Solvable {
                 newPool[i] = new EvalResult();
             }
             // Note: You'd need to make pool non-final to do this
- 
+
         }
         EvalResult result = pool[poolPointer++];
         result.reset();
@@ -1788,43 +1772,40 @@ public class MathExpression implements Savable, Solvable {
         poolPointer = 0;
     }
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**
-     *
-     * @param scanner is a list of scanner functions, gotten during the
-     * evaluation of sets of data that contain functions that need to be
-     * evaluated instead of numbers.If the data set does not contain functions
-     * e.g avg(2,3,7,1,0,9,5), then method solve will easily solve it. But if it
-     * does e.g avg(2,sin,3,5,cos,(,5,) ), then we invoke this method in class
-     * Set's constructor before we evaluate the data set. Note this is method is
-     * not called directly by MathExpression objects but by objects of class Set
-     * invoked by a MathExpression object.
-     * @return the solution to the scanner function
+     * Manages the mapping of variable names to frame slots. Use one instance
+     * per MathExpression compilation.
      */
-    public List<String> solveSubPortions(List<String> scanner) {
+    public final class VariableRegistry {
 
-        scanner.add(0, "(");
-        scanner.add(")");
-//[3,4,2,sin,2,sin,(,3,),3,*,cos,5,(,3,+,(,6,-,78,),)]
-        int passes = 0;
-        int i = 0;
-        int j = 0;
-        while (scanner.size() > 1) {
-            passes++;
-            try {
-                i = scanner.indexOf(")");//index of first )
-                j = LISTS.prevIndexOf(scanner, i, "("); //index of enclosing brackets of ) above
-                List<String> sub = scanner.subList(j, i + 1);
-                solve(sub);
+        private final Map<String, Integer> nameToSlot = new HashMap<>();
+        private int nextAvailableSlot = 0;
 
-            }//end try
-            catch (IndexOutOfBoundsException indexerr) {
-                break;
-            }//end catch
-        }//end while
+        /**
+         * Returns the slot index for a variable name. If the name is new, it
+         * assigns a new slot.
+         */
+        public int getSlot(String name) {
+            // We use computeIfAbsent to keep it atomic and clean
+            return nameToSlot.computeIfAbsent(name, k -> nextAvailableSlot++);
+        }
 
-        return scanner;
-    }//end method solveSubPortions()
+        public boolean hasVariable(String name) {
+            return this.nameToSlot.containsKey(name);
+        }
+
+        /**
+         * Returns the total number of slots required for the execution frame.
+         */
+        public int size() {
+            return nextAvailableSlot;
+        }
+
+        public void reset() {
+            nameToSlot.clear();
+            nextAvailableSlot = 0;
+        }
+    }
 
     public static void main1(String... args) {
         String in = Main.joinArgs(Arrays.asList(args), true);
@@ -1834,7 +1815,6 @@ public class MathExpression implements Savable, Solvable {
         System.out.println(new MathExpression(in).solve());
     }//end method
 
- 
     static class Test {
 
         public static void main(String... args) {
@@ -1939,7 +1919,14 @@ public class MathExpression implements Savable, Solvable {
     public static void main(String... args) {
 
         Test.main(args);
-
+        MathExpression mathy = new MathExpression("x=12;sin(x-2)+cos(x-2)");
+        System.out.println("x=12;sin(x-2)+cos(x-2)---->" + mathy.solveGeneric().scalar);
+        System.out.println("VARIABLES--A = " + VariableManager.VARIABLES);
+        for (int i = 0; i < 10; i++) {
+            mathy.setValue("x", i);
+            System.out.println("x=" + i + ";sin(x-2)+cos(x-2)---->" + mathy.solveGeneric().scalar);
+        }
+        System.out.println("VARIABLES--B = " + VariableManager.VARIABLES);
         System.out.println("________________________________________________________________TESTS-DONE________________________________________________________________");
         System.out.println("sum(32,12,10,18,1,3,2,5,6): -->> " + new MathExpression("sum(32,12,10,18,1,3,2,5,6)").solve());
         MathExpression lin = new MathExpression("linear_sys(2,3,-5,3,-4,20)");
@@ -1977,19 +1964,24 @@ public class MathExpression implements Savable, Solvable {
         MathExpression mex = new MathExpression("A=@(3,3)(3,4,2,9,12,5,4,1,2);B=eigvalues(A);C=eigvec(A);D=eigpoly(A);eigpoly(A);");
         System.out.println(FunctionManager.FUNCTIONS);
         System.out.println("----------" + mex.solve());
-
+        System.out.println("VARIABLES--1 = " + VariableManager.VARIABLES);
         Function f = FunctionManager.add("f(x,y) = x - x/y");
-        double r = f.calc(2, 3);
+        System.out.println("VARIABLES--2 = " + VariableManager.VARIABLES);
+        f.updateArgs(2, 3);
+        double r = f.calc(0, 0);
+        System.out.println("VARIABLES--3 = " + VariableManager.VARIABLES);
         System.out.println("r = " + r);
         int iterations = 1;
-        long start = System.nanoTime();
         double vvv[] = new double[1];
+        long start = System.nanoTime();
         for (int i = 1; i <= iterations; i++) {
-            vvv[0] = f.calc(2, 3);
+            f.updateArgs(2, 3);
+            vvv[0] = f.calc(0, 0);
         }
         double duration = (System.nanoTime() - start) / iterations;
         System.out.println("dur = " + (duration / 1000) + " microns, ans = " + vvv[0]);//μμμ
 
+        System.out.println("VARIABLES---4: " + VariableManager.VARIABLES);
         String geom = "geom((2,8,4))+geom(((2,8,4)))";
         System.out.println(geom + ": " + new MathExpression(geom).solve());
         String sum = "sum(3,1,4,5,9)";
@@ -2016,7 +2008,7 @@ public class MathExpression implements Savable, Solvable {
         System.out.println(new MathExpression("3/2").solve());
         System.out.println(new MathExpression("x=20;sin(ln(x));").solve());
         System.out.println(new MathExpression("x=20;sin(listsum(3,9,sin(19),cos(21),4,13,2))").solve());
- 
+
         MathExpression ml = new MathExpression("D=@(3,3)(3,4,1,2,4,7,9,1,-2);tri_mat(D)");
         System.out.println("ml.solve():" + ml.solve());
         MathExpression linear = new MathExpression("a=4;a11=3.14159265357;b=2.718281828;M=@(3,3)(3,4,1,2,4,7,9,1,-2);N=@(3,3)(4,1,8,2,1,3,5,1,9);C=matrix_sub(M,N);C;");
@@ -2042,7 +2034,9 @@ public class MathExpression implements Savable, Solvable {
         MathExpression m = new MathExpression(s5);
         System.out.println("m.solve(): " + m.solve());
         System.out.println("m.solve(): " + new MathExpression("avgN(0,4+0,2+3,-2)").solve());
+        System.out.println("cos(pi): " + new MathExpression("cos(pi)").solve());
 
+        System.out.println("VARIABLES--1 = " + VariableManager.VARIABLES);
         System.out.println(new MathExpression("sort(0,4+0,2+0)").solve());
 
         //   double N = 100; 

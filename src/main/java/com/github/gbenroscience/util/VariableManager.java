@@ -25,6 +25,12 @@ public class VariableManager {
     //check if the variable already exists.
 //if so,the user cannot define it by var x = 2; instead use x =9; to change the value in x.
     public static final Map<String, Variable> VARIABLES = Collections.synchronizedMap(new HashMap<>());
+    
+    static {
+        saveIfNotExists(Variable.PI);
+        saveIfNotExists(Variable.ans);
+        saveIfNotExists(Variable.e);
+    }
 
     /**
      * Parses commands used to insert and update Variables loaded into the
@@ -32,11 +38,27 @@ public class VariableManager {
      */
     private CommandInterpreter commandParser;
 
+    private final Map<String, Integer> nameToIndex = new HashMap<>();
+    private int nextSlot = 0;
+
     public VariableManager() {
-        VARIABLES.put(Variable.PI.getName(), Variable.PI);
-        VARIABLES.put(Variable.ans.getName(), Variable.ans);
-        VARIABLES.put(Variable.e.getName(), Variable.e);
         commandParser = new CommandInterpreter();
+    }
+
+    public int getSlot(String name) {
+        return nameToIndex.computeIfAbsent(name, k -> nextSlot++);
+    }
+
+    /**
+     * Returns the total number of slots required for the execution frame.
+     */
+    public int size() {
+        return nextSlot;
+    }
+
+    public void reset() {
+        nameToIndex.clear();
+        nextSlot = 0;
     }
 
     public CommandInterpreter getCommandParser() {
@@ -161,7 +183,7 @@ public class VariableManager {
      */
     public final void parseCommand(String cmd) {
         if (commandParser == null) {
-            commandParser =  new CommandInterpreter(cmd); 
+            commandParser = new CommandInterpreter(cmd);
         } else {
             commandParser.setCommand(cmd);
         }
@@ -189,7 +211,7 @@ public class VariableManager {
      * no such Variable object exists, then it returns null.
      */
     public static Variable getVariable(String vName) {
-        return VARIABLES.get(vName);
+        return lookUp(vName);
     }//end method
 
     /**
@@ -200,8 +222,16 @@ public class VariableManager {
      * @return the Variable object that has that name or null if the Variable is
      * not found.
      */
-    public static Variable lookUp(String vName) {
+   public static Variable lookUp(String vName) {
         return VARIABLES.get(vName);
+    }//end method
+ 
+    public static Variable saveIfNotExists(Variable v) {
+        return VARIABLES.putIfAbsent(v.getName(), v);
+    }//end method
+
+    public static Variable saveOrUpdate(Variable v) {
+        return VARIABLES.put(v.getName(), v);
     }//end method
 
     /**
@@ -260,7 +290,7 @@ public class VariableManager {
         Iterator<Map.Entry<String, Variable>> it = VARIABLES.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<String, Variable> var = it.next();
-            if (!var.getValue().isConstant()) {
+            if (!var.getValue().isConstant() && var.getValue() != Variable.ans ) {
                 it.remove();
             }
         }
@@ -559,7 +589,7 @@ public class VariableManager {
                     String part2 = line.substring(ind + 1);
                     Scanner scanner = new Scanner(part1, false, ",", " ");
                     List<String> scan = scanner.scan();
-                    List<String> whitespaceremover = new ArrayList<String>();
+                    List<String> whitespaceremover = new ArrayList<>();
                     whitespaceremover.add(" ");
                     whitespaceremover.add(",");
                     scan.removeAll(whitespaceremover);

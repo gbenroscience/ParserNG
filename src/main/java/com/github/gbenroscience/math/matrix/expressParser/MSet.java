@@ -45,18 +45,7 @@ public MSet(double...data){
 public MSet(List<String>data ){
     this.data=data;
 }
-
-/**
- * Creates a new MSet object initialized with a set of data coming from a mathematical
- * MathExpression.
- * @param function the Math MathExpression from which the
- * set of data is coming.
- * @param data the incoming data set
- */
-public MSet(MatrixFunction function, List<String>data ){
-    System.out.println(data);
-     this.data=function.solveSubPortions(data);
-}//end constructor
+ 
 
 /*    public MSet(math.MathExpression aThis, List<String> executable) {
        this.data=aThis.solveSubPortions(executable);

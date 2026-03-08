@@ -18,9 +18,7 @@ package com.github.gbenroscience.util;
 /**
  *
  * @author GBEMIRO
- */
-import java.util.Arrays;
-
+ */ 
 public class ConsoleTable {
     private final String title;
     private final String[] headers;

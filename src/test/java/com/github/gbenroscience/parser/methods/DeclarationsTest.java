@@ -1,13 +1,12 @@
 package com.github.gbenroscience.parser.methods;
 
-import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
-import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.logic.DRG_MODE;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.TYPE;
 import com.github.gbenroscience.parser.methods.ext.Utils;
+import com.github.gbenroscience.util.VariableManager;
 
 import java.math.BigDecimal;
 import java.util.List;
