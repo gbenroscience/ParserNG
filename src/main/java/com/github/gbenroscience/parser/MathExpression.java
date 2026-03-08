@@ -40,7 +40,6 @@ import com.github.gbenroscience.parser.methods.MethodRegistry;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Random;
 import java.util.Stack;
 
 /**
@@ -98,6 +97,11 @@ public class MathExpression implements Savable, Solvable {
     protected boolean hasListReturningOperators;
     private boolean hasNumberReturningStatsOperators;
     private boolean hasPlusOrMinusOperators;
+    /**
+     * If set to true, the constants folding algorithm will be run to further
+     * optimize the compiled postfix and so make the speed of evaluation faster.
+     */
+    private boolean willFoldConstants = true;
 
     private ExpressionSolver expressionSolver = new ExpressionSolver();
 
@@ -426,6 +430,14 @@ public class MathExpression implements Savable, Solvable {
             compileToPostfix();  // Compile once if not already done
         }//end if
     }//end method initializing(args)
+
+    public void setWillFoldConstants(boolean willFoldConstants) {
+        this.willFoldConstants = willFoldConstants;
+    }
+
+    public boolean isWillFoldConstants() {
+        return willFoldConstants;
+    }
 
     private void removeCommas() {
         scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
@@ -1358,6 +1370,13 @@ public class MathExpression implements Savable, Solvable {
 
         cachedPostfix = new Token[p];
         System.arraycopy(postfix, 0, cachedPostfix, 0, p);
+
+        // CRITICAL FOR PRODUCTION: Multi-pass constant folding with safety guards
+        if (willFoldConstants) {
+            foldConstantsWithSafetyGuards();  // <-- PRODUCTION VERSION
+        }
+         
+
 // Initialize the frame size based on how many unique variables were found
         this.executionFrame = new double[registry.size()];
         for (Token t : cachedPostfix) {
@@ -1565,6 +1584,304 @@ public class MathExpression implements Savable, Solvable {
                     break;
             }
         }
+    }
+
+    /**
+     * PRODUCTION-GRADE constant folding with DRG mode awareness.
+     *
+     * CRITICAL CHANGE: Trigonometric functions are NEVER folded, because
+     * setDRG() must be able to change them after compilation.
+     */
+    private void foldConstantsWithSafetyGuards() {
+        if (cachedPostfix == null || cachedPostfix.length < 2) {
+            return;
+        }
+
+        boolean changed = true;
+        int passes = 0;
+        final int MAX_PASSES = 5;
+
+        while (changed && passes < MAX_PASSES) {
+            changed = false;
+            passes++;
+
+            Token[] original = cachedPostfix;
+            Token[] folded = new Token[original.length];
+            int writePtr = 0;
+
+            for (int i = 0; i < original.length; i++) {
+                Token t = original[i];
+
+                // ========== BINARY OPERATORS ==========
+                if (t.kind == Token.OPERATOR && !t.isPostfix && writePtr >= 2) {
+                    Token right = folded[writePtr - 1];
+                    Token left = folded[writePtr - 2];
+
+                    if (isLiteralConstant(left) && isLiteralConstant(right)) {
+                        double result = evaluateBinaryOpWithIEEECompliance(t.opChar, left.value, right.value);
+
+                        if (isFoldableResult(result)) {
+                            writePtr -= 2;
+                            folded[writePtr++] = new Token(result);
+                            changed = true;
+                            continue;
+                        }
+                    }
+                }
+
+                // ========== UNARY OPERATORS ==========
+                if (t.kind == Token.OPERATOR && t.isPostfix && writePtr >= 1) {
+                    Token operand = folded[writePtr - 1];
+
+                    if (isLiteralConstant(operand)) {
+                        double result = evaluateUnaryOpWithIEEECompliance(t.opChar, operand.value);
+
+                        if (isFoldableResult(result)) {
+                            writePtr--;
+                            folded[writePtr++] = new Token(result);
+                            changed = true;
+                            continue;
+                        }
+                    }
+                }
+
+                // ========== PURE FUNCTIONS (WITH DRG AWARENESS) ==========
+                if ((t.kind == Token.FUNCTION || t.kind == Token.METHOD) && writePtr >= t.arity) {
+
+                    // CRITICAL: Never fold trigonometric functions!
+                    if (isTrigonometricFunction(t)) {
+                        folded[writePtr++] = t;  // Keep the function token as-is
+                        continue;
+                    }
+
+                    if (!isConstantFoldableFunction(t)) {
+                        folded[writePtr++] = t;
+                        continue;
+                    }
+
+                    boolean allConstant = true;
+                    for (int j = 0; j < t.arity; j++) {
+                        if (!isLiteralConstant(folded[writePtr - t.arity + j])) {
+                            allConstant = false;
+                            break;
+                        }
+                    }
+
+                    if (allConstant) {
+                        EvalResult[] args = new EvalResult[t.arity];
+                        for (int j = 0; j < t.arity; j++) {
+                            args[j] = new EvalResult().wrap(folded[writePtr - t.arity + j].value);
+                        }
+
+                        try {
+                            EvalResult evalResult = t.action.calc(new EvalResult(), t.arity, args);
+
+                            if (evalResult.type == EvalResult.TYPE_SCALAR && isFoldableResult(evalResult.scalar)) {
+                                writePtr -= t.arity;
+                                folded[writePtr++] = new Token(evalResult.scalar);
+                                changed = true;
+                                continue;
+                            }
+                        } catch (Exception e) {
+                            // Don't fold if runtime error occurs
+                        }
+                    }
+                }
+
+                folded[writePtr++] = t;
+            }
+
+            cachedPostfix = new Token[writePtr];
+            System.arraycopy(folded, 0, cachedPostfix, 0, writePtr);
+        }
+    }
+
+    /**
+     * CRITICAL: Detect trigonometric functions that must NOT be folded because
+     * setDRG() needs to be able to modify them after compilation.
+     */
+    private boolean isTrigonometricFunction(Token t) {
+        if (t.name == null) {
+            return false;
+        }
+
+        String name = t.name.toLowerCase();
+
+        // All trig functions (in any DRG variant) must NOT be folded
+        java.util.Set<String> trigFunctions = new java.util.HashSet<>(
+                Arrays.asList(
+                        // Basic trig
+                        "sin_deg", "sin_rad", "sin_grad", "sin",
+                        "cos_deg", "cos_rad", "cos_grad", "cos",
+                        "tan_deg", "tan_rad", "tan_grad", "tan",
+                        // Inverse trig
+                        "asin", "acos", "atan", "atan2",
+                        // Hyperbolic (also angle-dependent in some contexts)
+                        "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+                        // Cotangent, Secant, Cosecant (if you support them)
+                        "cot", "sec", "csc",
+                        // DRG-aware variants
+                        "arcsin", "arccos", "arctan")
+        );
+
+        return trigFunctions.stream().anyMatch(name::equalsIgnoreCase);
+    }
+
+    /**
+     * Whitelist of functions that ARE safe to constant-fold. Note: Trig
+     * functions are handled separately (never folded).
+     */
+    private boolean isConstantFoldableFunction(Token t) {
+        if (t.name == null) {
+            return false;
+        }
+
+        String name = t.name.toLowerCase();
+
+        // ===== BLACKLIST: NON-FOLDABLE =====
+        java.util.Set<String> nonFoldable = new java.util.HashSet<>(
+                Arrays.asList(
+                        // Stochastic
+                        "rand", "random", "randbetween", "randi", "randint", "randnormal",
+                        // Time-dependent
+                        "now", "time", "today", "clock", "timestamp", "millis",
+                        // Side effects
+                        "print", "println", "debug", "log",
+                        // System-dependent
+                        "random_seed", "env", "getenv",
+                        // I/O
+                        "read", "readline", "input", "scan")
+        );
+
+        if (nonFoldable.contains(name)) {
+            return false;
+        }
+
+        // ===== WHITELIST: SAFE TO FOLD =====
+        java.util.Set<String> definitelyFoldable = new java.util.HashSet<>(
+                Arrays.asList(// Exponential & Logarithmic (NOT angle-dependent)
+                        "exp", "log", "log10", "log2", "ln",
+                        // Power & Root
+                        "sqrt", "cbrt", "pow", "hypot",
+                        // Rounding & Absolute
+                        "abs", "floor", "ceil", "round", "trunc", "sign",
+                        // Special functions
+                        "min", "max", "gcd", "lcm",
+                        "gamma", "lgamma",
+                        // List operations
+                        "listsum", "listmean", "listmedian", "listmin", "listmax", "liststdev",
+                        // Interpolation
+                        "lerp", "hermite")
+        );
+
+        if (definitelyFoldable.contains(name)) {
+            return true;
+        }
+
+        // Conservative: don't fold unknown functions
+        return false;
+    }
+
+    /**
+     * CRITICAL: IEEE 754 compliance check. Results that are valid but
+     * exceptional should NOT be folded—let them fail/succeed at runtime where
+     * they belong.
+     */
+    private boolean isFoldableResult(double result) {
+        // FOLD: Normal numbers (including very small ones, subnormals, etc.)
+        if (Double.isFinite(result)) {
+            return true;
+        }
+
+        // DO NOT FOLD: Infinities or NaN
+        // These are EXCEPTIONAL but defined by IEEE 754.
+        // Folding them risks hiding:
+        // - Overflow conditions that should be caught
+        // - Invalid operation exceptions (sqrt(-1) in some strict modes)
+        // - Rounding edge cases
+        if (Double.isInfinite(result) || Double.isNaN(result)) {
+            return false;
+        }
+
+        return false;
+    }
+
+    /**
+     * Binary operator evaluation with IEEE 754 semantics preserved. This is
+     * evaluated at compile-time, so it uses the JVM's double precision, which
+     * should match runtime evaluation.
+     */
+    private double evaluateBinaryOpWithIEEECompliance(char op, double a, double b) {
+        // NOTE: The JVM guarantees IEEE 754 semantics for these operations.
+        // This is the gold standard for Java.
+
+        switch (op) {
+            case '+':
+                return a + b;  // IEEE 754: exact rounding, handles +/- 0.0, Inf, NaN
+
+            case '-':
+                return a - b;  // IEEE 754: exact rounding, handles signed zero
+
+            case '*':
+                return a * b;  // IEEE 754: rounding, Inf * 0 = NaN, etc.
+
+            case '/':
+                // CRITICAL: IEEE 754 specifies 1.0/0.0 = +Inf, -1.0/0.0 = -Inf, 0.0/0.0 = NaN
+                return a / b;
+
+            case '%':
+                return a % b;  // IEEE 754 remainder (same as Java %)
+
+            case '^':
+                return Math.pow(a, b);  // Built on IEEE 754; watch for edge cases like 0^0
+
+            case 'Р':  // Permutation
+                return Maths.permutation(a, b);
+
+            case 'Č':  // Combination
+                return Maths.combination(a, b);
+
+            default:
+                return Double.NaN;
+        }
+    }
+
+    /**
+     * Unary operator evaluation with IEEE 754 semantics preserved.
+     */
+    private double evaluateUnaryOpWithIEEECompliance(char op, double val) {
+        switch (op) {
+            case '√':
+                return Math.sqrt(val);  // IEEE 754: sqrt(-1) = NaN, sqrt(Inf) = Inf
+
+            case 'R':  // Cube root
+                return Math.cbrt(val);  // IEEE 754 compliant
+
+            case '!':
+                return Maths.fact(val);  // Watch: factorial of negative or non-integer is NaN
+
+            case '²':
+                return val * val;  // IEEE 754: Inf^2 = Inf, NaN^2 = NaN
+
+            case '³':
+                return val * val * val;
+
+            case 'i':  // Reciprocal (x^-1)
+                return 1.0 / val;  // IEEE 754: 1/0 = Inf, 1/Inf = 0.0
+
+            default:
+                return Double.NaN;
+        }
+    }
+
+    /**
+     * Identify literal constants (not variables, not function references).
+     */
+    private boolean isLiteralConstant(Token t) {
+        // Must be a NUMBER token with no variable or function name attached
+        return t.kind == Token.NUMBER
+                && t.v == null
+                && (t.name == null || t.name.isEmpty());
     }
 
     public static final class EvalResult {

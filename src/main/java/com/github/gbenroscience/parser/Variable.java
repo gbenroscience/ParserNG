@@ -47,6 +47,8 @@ public class Variable implements Savable {
      * The constant PI
      */
     public static final Variable PI = new Variable("pi", Math.PI, true);
+    public static final Variable PI_ALT = new Variable("π", Math.PI, true);
+    public static final Variable GOLDEN_RATIO = new Variable("φ", (1.0 + Math.sqrt(5)) / 2, true);
 
     /**
      * The last answer variable used for flexibility on computational systems.
@@ -54,6 +56,7 @@ public class Variable implements Savable {
     public static Variable ans = new Variable("ans", 0.0, false);
 
     public static Variable e = new Variable("e", Math.E, true);
+     
 
     static {
         ans.type = TYPE.NUMBER;
