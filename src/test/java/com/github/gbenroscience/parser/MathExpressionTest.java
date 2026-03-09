@@ -138,8 +138,8 @@ class MathExpressionTest {
     void moreJunkExamples() {
 
         Function f = FunctionManager.add("f(x,y) = x - x/y");
-        f.updateArgs(2,3);
-        double r = f.calc(0,0);
+        f.updateArgs(2, 3);
+        double r = f.calc(0, 0);
         Assertions.assertEquals((double) 2 - ((double) 2 / (double) 3), r);
         int iterations = 10000;
         long start = System.nanoTime();
@@ -290,7 +290,7 @@ class MathExpressionTest {
         //MathExpression expr = new MathExpression("f=3;5f");//BUGGY
         //MathExpression expr = new MathExpression("quad(@(x)3*x-2+3*x^2)");//BUGGY
         //MathExpression expr = new MathExpression("root(@(x)3*x-sin(x)-0.5,2)");//BUGGY
-        MathExpression exprs = new MathExpression("r1=4;r1*5"); 
+        MathExpression exprs = new MathExpression("r1=4;r1*5");
         //A+k.A+AxB+A^c
         if (print) {
             System.out.println("scanner: " + exprs.scanner);
@@ -332,7 +332,7 @@ class MathExpressionTest {
         if (print) {
             System.out.println("VariableManager: " + VariableManager.VARIABLES);
         }
-        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, x=x:0.0, pi=pi:3.141592653589793, y=y:0.0, r1=r1:4.0}", 
+        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, x=x:0.0, pi=pi:3.141592653589793, y=y:0.0, r1=r1:4.0}",
                 VariableManager.VARIABLES.toString());
 
         MathExpression expression = new MathExpression("x=0;sin(ln(x))");
@@ -385,6 +385,53 @@ class MathExpressionTest {
          *
          * The code runs the solve() method at 3.8 microseconds.
          */
+    }
+
+    @Test
+    public void testMixedConstantVariableFolding() {
+        MathExpression expr = new MathExpression("1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17+18+19+20+sin(x)");
+
+        MathExpression.Token[]cachedPostfix= expr.getCachedPostfix();
+        System.out.println("Cached postfix tokens: " +cachedPostfix.length);
+
+        // Print all tokens
+        for (int i = 0; i < cachedPostfix.length; i++) {
+            MathExpression.Token t = cachedPostfix[i];
+            String desc = "";
+            switch (t.kind) {
+                case 0:
+                    desc = "NUMBER(" + t.value + ")";
+                    break;
+                case 1:
+                    desc = "OPERATOR(" + t.opChar + ")";
+                    break;
+                case 2:
+                    desc = "FUNCTION(" + t.name + ")";
+                    break;
+                case 3:
+                    desc = "METHOD(" + t.name + ")";
+                    break;
+                default:
+                    desc = "OTHER(" + t.kind + ")";
+            }
+            System.out.println("  Token[" + i + "]: " + desc);
+        }
+
+        // Verify folding
+        Assertions.assertTrue(cachedPostfix.length <= 4, "Should have at most 4 tokens");
+
+        // Evaluate with variable
+        expr.updateSlot(expr.registry.getSlot("x"), 0.0);
+        String result = expr.solve();
+        // Expected: 210 + sin(0) = 210
+        double resultVal = Double.parseDouble(result);
+        Assertions.assertEquals(210.0, resultVal, 0.0001);
+
+        expr.updateSlot(expr.registry.getSlot("x"), Math.PI / 2);
+        result = expr.solve();
+        // Expected: 210 + sin(π/2) = 210 + 1 = 211
+        resultVal = Double.parseDouble(result);
+        Assertions.assertEquals(211.0, resultVal, 0.0001);
     }
 
 }

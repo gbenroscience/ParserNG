@@ -796,6 +796,10 @@ public class MathExpression implements Savable, Solvable {
 
     }//end method statsVerifier
 
+    public Token[] getCachedPostfix() {
+        return cachedPostfix;
+    }
+
     /**
      * The method establishes meaning to some shorthand techniques in math that
      * the average mathematician might expect to see in a math device.
