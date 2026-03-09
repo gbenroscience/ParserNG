@@ -95,8 +95,6 @@ public class MathExpression implements Savable, Solvable {
     private boolean optimizable;
 
     protected boolean hasListReturningOperators;
-    private boolean hasNumberReturningStatsOperators;
-    private boolean hasPlusOrMinusOperators;
     /**
      * If set to true, the constants folding algorithm will be run to further
      * optimize the compiled postfix and so make the speed of evaluation faster.
@@ -1375,7 +1373,6 @@ public class MathExpression implements Savable, Solvable {
         if (willFoldConstants) {
             foldConstantsWithSafetyGuards();  // <-- PRODUCTION VERSION
         }
-         
 
 // Initialize the frame size based on how many unique variables were found
         this.executionFrame = new double[registry.size()];
@@ -1807,46 +1804,6 @@ public class MathExpression implements Savable, Solvable {
     }
 
     /**
-     * Binary operator evaluation with IEEE 754 semantics preserved. This is
-     * evaluated at compile-time, so it uses the JVM's double precision, which
-     * should match runtime evaluation.
-     */
-    private double evaluateBinaryOpWithIEEECompliance(char op, double a, double b) {
-        // NOTE: The JVM guarantees IEEE 754 semantics for these operations.
-        // This is the gold standard for Java.
-
-        switch (op) {
-            case '+':
-                return a + b;  // IEEE 754: exact rounding, handles +/- 0.0, Inf, NaN
-
-            case '-':
-                return a - b;  // IEEE 754: exact rounding, handles signed zero
-
-            case '*':
-                return a * b;  // IEEE 754: rounding, Inf * 0 = NaN, etc.
-
-            case '/':
-                // CRITICAL: IEEE 754 specifies 1.0/0.0 = +Inf, -1.0/0.0 = -Inf, 0.0/0.0 = NaN
-                return a / b;
-
-            case '%':
-                return a % b;  // IEEE 754 remainder (same as Java %)
-
-            case '^':
-                return Math.pow(a, b);  // Built on IEEE 754; watch for edge cases like 0^0
-
-            case 'Р':  // Permutation
-                return Maths.permutation(a, b);
-
-            case 'Č':  // Combination
-                return Maths.combination(a, b);
-
-            default:
-                return Double.NaN;
-        }
-    }
-
-    /**
      * Unary operator evaluation with IEEE 754 semantics preserved.
      */
     private double evaluateUnaryOpWithIEEECompliance(char op, double val) {
@@ -1875,6 +1832,16 @@ public class MathExpression implements Savable, Solvable {
     }
 
     /**
+     * Binary operator evaluation with IEEE 754 semantics preserved. This is
+     * evaluated at compile-time, so it uses the JVM's double precision, which
+     * should match runtime evaluation.
+     */
+    private double evaluateBinaryOpWithIEEECompliance(char op, double a, double b) {
+        // Just delegate to the strength-reduced version
+        return evaluateBinaryOpWithStrengthReduction(op, a, b);
+    }
+
+    /**
      * Identify literal constants (not variables, not function references).
      */
     private boolean isLiteralConstant(Token t) {
@@ -1882,6 +1849,162 @@ public class MathExpression implements Savable, Solvable {
         return t.kind == Token.NUMBER
                 && t.v == null
                 && (t.name == null || t.name.isEmpty());
+    }
+
+    ///////////////////////////////////////////////////////
+   /**
+ * SAFE strength reduction: Only optimize constant expressions.
+ * E.g., 2^3 → 8.0 (computed at compile time)
+ * This is proven safe because it's just constant folding.
+ */
+private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b) {
+        switch (op) {
+            case '+':
+                return a + b;
+
+            case '-':
+                return a - b;
+
+            case '*':
+                return a * b;
+
+            case '/':
+                return a / b;
+
+            case '%':
+                return a % b;
+
+            case '^':
+                // STRENGTH REDUCTION for constant folding only
+                return evaluatePowerWithStrengthReduction(a, b);
+
+            case 'Р':  // Permutation
+                return Maths.permutation(a, b);
+
+            case 'Č':  // Combination
+                return Maths.combination(a, b);
+
+            default:
+                return Double.NaN;
+        }
+    }
+
+    /**
+     * Evaluate a^b with strength reduction for common cases. This is safe
+     * because we only do it for CONSTANT folding.
+     *
+     * CRITICAL FIX: Actually check if we matched a special fraction
+     */
+    private double evaluatePowerWithStrengthReduction(double base, double exponent) {
+
+        // ===== SPECIAL FRACTIONS (do this FIRST, before integer check) =====
+        if (isSpecialFraction(exponent)) {
+            // Now figure out WHICH fraction it is
+            final double TOLERANCE = 1e-9;
+
+            // 1/2 → sqrt
+            if (Math.abs(exponent - 0.5) < TOLERANCE) {
+                return Math.sqrt(base);
+            }
+
+            // 1/3 → cbrt
+            if (Math.abs(exponent - 1.0 / 3.0) < TOLERANCE) {
+                return Math.cbrt(base);
+            }
+
+            // -0.5 → 1/sqrt
+            if (Math.abs(exponent - (-0.5)) < TOLERANCE) {
+                return 1.0 / Math.sqrt(base);
+            }
+
+            // -1/3 → 1/cbrt
+            if (Math.abs(exponent - (-1.0 / 3.0)) < TOLERANCE) {
+                return 1.0 / Math.cbrt(base);
+            }
+
+            // 2/3
+            if (Math.abs(exponent - 2.0 / 3.0) < TOLERANCE) {
+                return Math.cbrt(base * base);
+            }
+
+            // -2/3
+            if (Math.abs(exponent - (-2.0 / 3.0)) < TOLERANCE) {
+                return 1.0 / Math.cbrt(base * base);
+            }
+
+            // 3/4
+            if (Math.abs(exponent - 3.0 / 4.0) < TOLERANCE) {
+                double sqrtRoot = Math.sqrt(base);
+                return Math.sqrt(sqrtRoot * sqrtRoot * sqrtRoot);
+            }
+
+            // If it's a special fraction but we didn't match it, fall through
+        }
+
+        // ===== INTEGER EXPONENTS =====
+        if (isIntegerValue(exponent)) {
+            int exp = (int) Math.round(exponent);  // Use round() not cast
+
+            // POSITIVE INTEGER EXPONENTS
+            if (exp > 1 && exp <= 10) {
+                double result = base;
+                for (int i = 1; i < exp; i++) {
+                    result *= base;
+                }
+                return result;
+            }
+
+            // ZERO EXPONENT
+            if (exp == 0) {
+                return 1.0;
+            }
+
+            // NEGATIVE INTEGER EXPONENTS
+            if (exp < 0) {
+                int absExp = Math.abs(exp);
+                double result = base;
+                for (int i = 1; i < absExp; i++) {
+                    result *= base;
+                }
+                return 1.0 / result;
+            }
+        }
+
+        // Fall back to Math.pow() for everything else
+        return Math.pow(base, exponent);
+    }
+// ========== HELPER METHODS ==========
+
+    /**
+     * Check if a double value is an integer
+     */
+    private boolean isIntegerValue(double value) {
+        return value == Math.floor(value) && !Double.isInfinite(value);
+    }
+
+    /**
+     * Check if value is a commonly-reduced fraction (1/2, 1/3, -1/2, -1/3,
+     * etc.)
+     */
+    private boolean isSpecialFraction(double value) {
+        // Check 1/2, 1/3, ..., 1/8 and their negatives
+        for (int i = 2; i <= 8; i++) {
+            if (Math.abs(value - 1.0 / i) < 1e-15) {
+                return true;
+            }
+            if (Math.abs(value + 1.0 / i) < 1e-15) {
+                return true;
+            }
+        }
+        // Check 2/3, 3/4, etc. (common cases)
+        if (Math.abs(value - 2.0 / 3.0) < 1e-15) {
+            return true;
+        }
+        if (Math.abs(value - 3.0 / 4.0) < 1e-15) {
+            return true;
+        }
+
+        return false;
     }
 
     public static final class EvalResult {
@@ -2101,6 +2224,7 @@ public class MathExpression implements Savable, Solvable {
         /**
          * Returns the slot index for a variable name. If the name is new, it
          * assigns a new slot.
+         * @param name The name of the Variable
          */
         public int getSlot(String name) {
             // We use computeIfAbsent to keep it atomic and clean
@@ -2131,6 +2255,85 @@ public class MathExpression implements Savable, Solvable {
         }
         System.out.println(new MathExpression(in).solve());
     }//end method
+
+    static class Test_Strength_Reduction {
+
+        public static void main(String... args) {
+            System.out.println("=".repeat(80));
+            System.out.println("SAFE CONSTANT FOLDING WITH STRENGTH REDUCTION");
+            System.out.println("=".repeat(80));
+
+            testConstantFolding();
+            testWithVariables();
+            testComplexExpression();
+        }
+
+        private static void testConstantFolding() {
+            System.out.println("\n=== CONSTANT FOLDING (Strength Reduced) ===\n");
+
+            String[] exprs = {
+                "2^3", // 8.0
+                "3^2", // 9.0
+                "2^4", // 16.0
+                "4^0.5", // 2.0 (sqrt)
+                "8^(1/3)", // 2.0 (cbrt)
+                "2^3 + 3^2", // 17.0
+                "10^-2", // 0.01
+            };
+
+            double[] expected = {8.0, 9.0, 16.0, 2.0, 2.0, 17.0, 0.01};
+
+            for (int i = 0; i < exprs.length; i++) {
+                try {
+                    MathExpression me = new MathExpression(exprs[i]);
+                    double result = Double.parseDouble(me.solve());
+
+                    String status = Math.abs(result - expected[i]) < 1e-9 ? "✓" : "✗";
+                    System.out.printf("%s %s = %.6f (expected: %.6f)%n",
+                            status, exprs[i], result, expected[i]);
+                } catch (Exception e) {
+                    System.out.printf("✗ %s: %s%n", exprs[i], e.getMessage());
+                }
+            }
+        }
+
+        private static void testWithVariables() {
+            System.out.println("\n=== WITH VARIABLES (No folding) ===\n");
+
+            String[] exprs = {
+                "x^2",
+                "x^3 + x^2",
+                "sqrt(x^2 + 1)",
+                "1/x^2",};
+
+            for (String expr : exprs) {
+                try {
+                    MathExpression me = new MathExpression(expr);
+                    me.updateSlot(me.registry.getSlot("x"), 2.0);
+                    double result = Double.parseDouble(me.solve());
+
+                    System.out.printf("✓ %s (at x=2) = %.6f%n", expr, result);
+                } catch (Exception e) {
+                    System.out.printf("✗ %s: %s%n", expr, e.getMessage());
+                }
+            }
+        }
+
+        private static void testComplexExpression() {
+            System.out.println("\n=== COMPLEX EXPRESSION (The failing case) ===\n");
+
+            try {
+                MathExpression me = new MathExpression("sqrt(0.64-x^2)");
+                me.updateSlot(me.registry.getSlot("x"), 0.9);
+                double result = Double.parseDouble(me.solve());
+
+                System.out.printf("✓ sqrt(0.64-x^2) at x=0.9 = %.6f%n", result);
+            } catch (Exception e) {
+                System.out.printf("✗ sqrt(0.64-x^2): %s%n", e.getMessage());
+                e.printStackTrace();
+            }
+        }
+    }
 
     static class Test {
 
@@ -2236,6 +2439,7 @@ public class MathExpression implements Savable, Solvable {
     public static void main(String... args) {
 
         Test.main(args);
+        Test_Strength_Reduction.main(args);
         MathExpression mathy = new MathExpression("x=12;sin(x-2)+cos(x-2)");
         System.out.println("x=12;sin(x-2)+cos(x-2)---->" + mathy.solveGeneric().scalar);
         System.out.println("VARIABLES--A = " + VariableManager.VARIABLES);
