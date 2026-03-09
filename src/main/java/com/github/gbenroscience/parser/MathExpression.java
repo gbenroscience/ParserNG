@@ -452,27 +452,18 @@ public class MathExpression implements Savable, Solvable {
     public DRG_MODE getDRG() {
         return DRG;
     }
-
-    /**
-     * sets the DRG property
-     *
-     * @param DRG
-     */
+ 
     public void setDRG(DRG_MODE DRG) {
         if (DRG != this.DRG) {
-            for (int i = 0; i < cachedPostfix.length; i++) {
-                Token t = cachedPostfix[i];
-                if (t.kind == Token.METHOD) {
-                    if (t.name.endsWith("_deg") || t.name.endsWith("_rad") || t.name.endsWith("_grad")) {
-                        String name = t.name.substring(0, t.name.lastIndexOf("_"));
-                        t.name = Declarations.getTrigFuncDRGVariant(name, DRG);
-                        t.id = MethodRegistry.getMethodID(t.name);
-                        t.action = MethodRegistry.getAction(t.id);
-                    }
-                }
+            this.DRG = DRG;
+            this.cachedPostfix = null;  // Invalidate cache
+            this.poolPointer = 0;
+
+            // Recompile for new mode if we have a valid expression
+            if (scanner != null && !scanner.isEmpty() && correctFunction) {
+                compileToPostfix();
             }
         }
-        this.DRG = DRG;
     }
 
     public void setDRG(int mode) {
