@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>0.2.4</version>
+    <version>0.2.5</version>
     <packaging>jar</packaging>
     <!-- 
       I started this project 2009 and have been upgrading it since then.
@@ -12,7 +12,7 @@
     -->
    
     <name>ParserNG</name>
-    <description>Rich and Performant, Cross Platform Java Library(100% Java)... Major speed bump, by inner loop optimizations Consider donations through my Github Sponsor at 
+    <description>Rich and Performant, Cross Platform Java Library(100% Java)... Major optimizations in constant folding, strength reduction, and frame(array) based argument passing to enforce O(1) (faster than Map based) passing of arguments during the evaluation phase.
         </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
     

@@ -82,13 +82,12 @@ public class NumericalDerivative {
      * @return the numerical value of the
      * derivative very near the given point.
      */
-    public String findDerivativeByPolynomialExpander(){
+    public double findDerivativeByPolynomialExpander(){
         FunctionExpander expander = new FunctionExpander(xPoint-0.0001, xPoint+0.1, 20,FunctionExpander.DOUBLE_PRECISION, function );
         MathExpression polyDerivative = new MathExpression( expander.getPolynomialDerivative() );
-
-        String  variable = function.getIndependentVariables().get(0).getName();
-        polyDerivative.setValue(variable,  xPoint);
-        return polyDerivative.solve();
+ 
+        polyDerivative.updateArgs(xPoint);
+        return polyDerivative.solveGeneric().scalar;
     }
 
 
@@ -99,16 +98,15 @@ public class NumericalDerivative {
      * @return the numerical value of the
      * derivative very near the given point.
      */
-    public String findDerivativeByLimit(double dx){
+    public double findDerivativeByLimit(double dx){
         MathExpression func = function.getMathExpression();
-        func.setValue(function.getIndependentVariables().get(0).getName(), xPoint+dx);
-        String upper = func.solve();
+        func.updateArgs(xPoint+dx);
+        double upper = func.solveGeneric().scalar;
 
-        func.setValue(function.getIndependentVariables().get(0).getName(),  xPoint-dx);
-        String lower = func.solve();
+        func.updateArgs(xPoint-dx);
+        double lower = func.solveGeneric().scalar;
 
-        double derived = ( Double.parseDouble(upper) -  Double.parseDouble(lower) )/(2.0*dx);
-        return String.valueOf(derived);
+        return ( upper -  lower )/(2.0*dx);
     }//end method
 
 

@@ -103,7 +103,7 @@ public class Declarations {
     public static final String PRINT = "print";
     public static final String DIFFERENTIATION = "diff";
     public static final String INTEGRATION = "intg";
-    public static final String QUADRATIC = "quad";
+    public static final String QUADRATIC = "quadratic";
     public static final String TARTAGLIA_ROOTS = "t_root";
     public static final String GENERAL_ROOT = "root";
     /**

@@ -341,14 +341,15 @@ public class MethodRegistry {
             }
         });
         registerMethod(Declarations.INTEGRATION, (ctx, arity, args) -> {
-            boolean has2NumberArguments = args.length == 2;
-            boolean has3NumberArguments = args.length == 3;
-            if (has2NumberArguments) {
-                NumericalIntegral intg = new NumericalIntegral(args[0].scalar, args[1].scalar, 0, args[2].textRes);
+            System.out.println("args: "+Arrays.toString(args));
+            boolean hasIterations = args.length == 4;//[F, 2.0, 3.0, 10000]
+            boolean hasNoIterations = args.length == 3;//[F, 2.0, 3.0]
+            if (hasNoIterations) {
+                NumericalIntegral intg = new NumericalIntegral(args[1].scalar, args[2].scalar, 0, args[0].textRes);
                 return ctx.wrap(intg.findHighRangeIntegral());
             }//end if
-            else if (has3NumberArguments) {
-                NumericalIntegral intg = new NumericalIntegral(args[0].scalar, args[1].scalar, (int) args[2].scalar, args[3].textRes);
+            else if (hasIterations) {
+                NumericalIntegral intg = new NumericalIntegral(args[1].scalar, args[2].scalar, (int) args[3].scalar, args[0].textRes);
                 return ctx.wrap(intg.findHighRangeIntegral());
             }//end else if
             return ctx.wrap(Double.NaN);

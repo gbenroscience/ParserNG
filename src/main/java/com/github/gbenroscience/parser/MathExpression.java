@@ -452,7 +452,7 @@ public class MathExpression implements Savable, Solvable {
     public DRG_MODE getDRG() {
         return DRG;
     }
- 
+
     public void setDRG(DRG_MODE DRG) {
         if (DRG != this.DRG) {
             this.DRG = DRG;
@@ -501,14 +501,6 @@ public class MathExpression implements Savable, Solvable {
 
     /**
      *
-     * @return the number of list returning operators found in the input.
-     */
-    public int getNoOfListReturningOperators() {
-        return noOfListReturningOperators;
-    }
-
-    /**
-     *
      * @param noOfListReturningOperators sets the number of list returning
      * operators found in the input.
      */
@@ -522,30 +514,6 @@ public class MathExpression implements Savable, Solvable {
      */
     public List<String> getScanner() {
         return scanner;
-    }
-
-    /**
-     *
-     * @param scanner sets the ArrayList object that the input is scanned into.
-     */
-    public void setScanner(ArrayList<String> scanner) {
-        this.scanner = scanner;
-    }
-
-    /**
-     *
-     * @return the white space remover ArrayList object.
-     */
-    public ArrayList<String> getWhitespaceremover() {
-        return whitespaceremover;
-    }
-
-    /**
-     *
-     * @param whitespaceremover sets the white space remover ArrayList object.
-     */
-    public void setWhitespaceremover(ArrayList<String> whitespaceremover) {
-        this.whitespaceremover = whitespaceremover;
     }
 
     /**
@@ -997,7 +965,7 @@ public class MathExpression implements Savable, Solvable {
 
             try {
                 if (i + 1 < sz) {//a next token exists (at i+1) so check the next token
-                    if (isVariableString(scan.get(i)) && !isOpeningBracket(scan.get(i + 1))) {
+                    if (isVariableString(varName) && !isOpeningBracket(scan.get(i + 1))) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
                             scan.set(i, String.valueOf(v.getValue()));
@@ -1005,7 +973,7 @@ public class MathExpression implements Savable, Solvable {
 
                     }//end if
                 } else {//no next token exists
-                    if (isVariableString(scan.get(i))) {
+                    if (isVariableString(varName)) {
                         Variable v = VariableManager.lookUp(varName);
                         if (v != null) {
                             scan.set(i, String.valueOf(v.getValue()));
@@ -1307,8 +1275,7 @@ public class MathExpression implements Savable, Solvable {
                             Token callable = opStack.pop();
 
                             int actualArgCount = argCounts.pop();
-                            lastWasComma.pop();
-
+                            lastWasComma.pop(); 
                             callable.arity = Math.max(1, actualArgCount);
                             postfix[p++] = callable;
 
@@ -1496,7 +1463,6 @@ public class MathExpression implements Savable, Solvable {
                         }
 
                         EvalResult result = t.action.calc(getNextResult(), arity, args);
-
                         stack[++ptr] = result;
                         break;
                 }
@@ -1641,10 +1607,10 @@ public class MathExpression implements Savable, Solvable {
                 if ((t.kind == Token.FUNCTION || t.kind == Token.METHOD) && writePtr >= t.arity) {
 
                     // CRITICAL: Never fold trigonometric functions!
-                    if (isTrigonometricFunction(t)) {
+                   /* if (isTrigonometricFunction(t)) {
                         folded[writePtr++] = t;  // Keep the function token as-is
                         continue;
-                    }
+                    }*/
 
                     if (!isConstantFoldableFunction(t)) {
                         folded[writePtr++] = t;
@@ -1734,7 +1700,7 @@ public class MathExpression implements Savable, Solvable {
         java.util.Set<String> nonFoldable = new java.util.HashSet<>(
                 Arrays.asList(
                         // Stochastic
-                        "rand", "random", "randbetween", "randi", "randint", "randnormal",
+                        "rand", "random", "randbetween", "randi", "randint", "randnormal","rnd",
                         // Time-dependent
                         "now", "time", "today", "clock", "timestamp", "millis",
                         // Side effects
@@ -1751,19 +1717,7 @@ public class MathExpression implements Savable, Solvable {
 
         // ===== WHITELIST: SAFE TO FOLD =====
         java.util.Set<String> definitelyFoldable = new java.util.HashSet<>(
-                Arrays.asList(// Exponential & Logarithmic (NOT angle-dependent)
-                        "exp", "log", "log10", "log2", "ln",
-                        // Power & Root
-                        "sqrt", "cbrt", "pow", "hypot",
-                        // Rounding & Absolute
-                        "abs", "floor", "ceil", "round", "trunc", "sign",
-                        // Special functions
-                        "min", "max", "gcd", "lcm",
-                        "gamma", "lgamma",
-                        // List operations
-                        "listsum", "listmean", "listmedian", "listmin", "listmax", "liststdev",
-                        // Interpolation
-                        "lerp", "hermite")
+                Arrays.asList()
         );
 
         if (definitelyFoldable.contains(name)) {
@@ -2187,18 +2141,26 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
 // In ExpressionSolver.getNextResult():
     public EvalResult getNextResult() {
-        if (poolPointer >= pool.length) {
-            // Expand pool if needed
-            EvalResult[] newPool = new EvalResult[pool.length * 2];
-            System.arraycopy(pool, 0, newPool, 0, pool.length);
-            for (int i = pool.length; i < newPool.length; i++) {
-                newPool[i] = new EvalResult();
+        // 1. Check if we need to expand (using a local copy for thread safety)
+        EvalResult[] currentPool = this.pool;
+        if (poolPointer >= currentPool.length) {
+            synchronized (this) {
+                // Double-check pattern to prevent multi-thread OOM
+                if (poolPointer >= pool.length) {
+                    int newSize = pool.length * 2;
+                    EvalResult[] newPool = new EvalResult[newSize];
+                    System.arraycopy(pool, 0, newPool, 0, pool.length);
+                    for (int i = pool.length; i < newSize; i++) {
+                        newPool[i] = new EvalResult();
+                    }
+                    this.pool = newPool; // Now the pointer won't OOM
+                }
             }
-            // Note: You'd need to make pool non-final to do this
-
         }
+
+        // 2. Fetch and Reset
         EvalResult result = pool[poolPointer++];
-        result.reset();
+        result.reset(); // Clear old state (crucial for complex objects!)
         return result;
     }
 
@@ -2219,6 +2181,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         /**
          * Returns the slot index for a variable name. If the name is new, it
          * assigns a new slot.
+         *
          * @param name The name of the Variable
          */
         public int getSlot(String name) {
@@ -2274,14 +2237,17 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
                 "8^(1/3)", // 2.0 (cbrt)
                 "2^3 + 3^2", // 17.0
                 "10^-2", // 0.01
+                "sin(3)+cos(5)",
+                "2*sinh(5)"
             };
 
-            double[] expected = {8.0, 9.0, 16.0, 2.0, 2.0, 17.0, 0.01};
+            double[] expected = {8.0, 9.0, 16.0, 2.0, 2.0, 17.0, 0.01, 0.42478219352309348656738397432167,5*148.40642115557751795401894399213};
 
             for (int i = 0; i < exprs.length; i++) {
                 try {
                     MathExpression me = new MathExpression(exprs[i]);
                     double result = Double.parseDouble(me.solve());
+                  
 
                     String status = Math.abs(result - expected[i]) < 1e-9 ? "✓" : "✗";
                     System.out.printf("%s %s = %.6f (expected: %.6f)%n",
@@ -2483,16 +2449,18 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println("VARIABLES--1 = " + VariableManager.VARIABLES);
         Function f = FunctionManager.add("f(x,y) = x - x/y");
         System.out.println("VARIABLES--2 = " + VariableManager.VARIABLES);
-        f.updateArgs(2, 3);
-        double r = f.calc(0, 0);
+       
+        
+        f.updateArgs(2,3);
+        double r = f.calc();
         System.out.println("VARIABLES--3 = " + VariableManager.VARIABLES);
         System.out.println("r = " + r);
         int iterations = 1;
         double vvv[] = new double[1];
         long start = System.nanoTime();
+        f.updateArgs(2,3);
         for (int i = 1; i <= iterations; i++) {
-            f.updateArgs(2, 3);
-            vvv[0] = f.calc(0, 0);
+            vvv[0] = f.calc();
         }
         double duration = (System.nanoTime() - start) / iterations;
         System.out.println("dur = " + (duration / 1000) + " microns, ans = " + vvv[0]);//μμμ
@@ -2554,6 +2522,10 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
         System.out.println("VARIABLES--1 = " + VariableManager.VARIABLES);
         System.out.println(new MathExpression("sort(0,4+0,2+0)").solve());
+        System.out.println(new MathExpression("F=@(x)sin(x);intg(F,2,3)").solve());
+        System.out.println(new MathExpression("F=@(x)sin(x);intg(F,2,3,100000)").solve());
+        System.out.println(new MathExpression("G=@(x)sin(x)-cos(x);intg(G,2,30,1000)").solve());
+        System.out.println(new MathExpression("I=@(x)-1*cos(x);I(3)-I(2)").solve());
 
         //   double N = 100; 
         //   Shootouts.benchmark(s2, (int) N);

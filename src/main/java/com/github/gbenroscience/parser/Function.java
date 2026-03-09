@@ -207,25 +207,11 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         }
     }
 
-    /**
-     *
-     * @param x A list of variable values to set for the function. The supplied
-     * value list is applied to the function's parameter list in the order they
-     * were supplied in the original question.
+    /** 
      * @return the value of the function with these variables set.
      */
-    public double calc(double... x) {
-        // Check for null and size equality
-        if (x == null || x.length != independentVariables.size()) {
-            return Double.NaN;
-        }
-        /*
-        for (int i = 0; i < x.length; i++) {
-            Variable var = independentVariables.get(i);
-            mathExpression.setValue(var.getName(), x[i]);
-            var.setValue(x[i]);
-        }*/
-        return mathExpression.solveGeneric().scalar;
+    public double calc() {
+          return mathExpression.solveGeneric().scalar; 
     }
 
     /**
@@ -239,9 +225,12 @@ public class Function implements Savable, MethodRegistry.MethodAction {
 
         if (type == TYPE.ALGEBRAIC_EXPRESSION) {
             if (x.length == independentVariables.size()) {
+
                 for (int i = 0; i < x.length; i++) {
-                    Variable var = independentVariables.get(i);
-                    mathExpression.setValue(var.getName(), x[i].scalar);
+                    Variable v = independentVariables.get(i);
+                    String vName = v.getName();
+                    int slot = mathExpression.getVariable(vName).getFrameIndex();
+                    mathExpression.updateSlot(slot, x[i].scalar);
                 }
                 return mathExpression.solveGeneric();
             }
@@ -256,9 +245,12 @@ public class Function implements Savable, MethodRegistry.MethodAction {
     public MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult... x) {
         if (type == TYPE.ALGEBRAIC_EXPRESSION) {
             if (x.length == independentVariables.size()) {
+
                 for (int i = 0; i < x.length; i++) {
-                    Variable var = independentVariables.get(i);
-                    mathExpression.setValue(var.getName(), x[i].scalar);
+                    Variable v = independentVariables.get(i);
+                    String vName = v.getName();
+                    int slot = mathExpression.getVariable(vName).getFrameIndex();
+                    mathExpression.updateSlot(slot, x[i].scalar);
                 }
                 return nextResult.wrap(mathExpression.solveGeneric());
             }
@@ -306,7 +298,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             String rhs = input.substring(equalsIndex + 1, semiColonIndex);
 
             if (Number.validNumber(rhs)) {
-                if (Variable.isVariableString(newFuncName)) { 
+                if (Variable.isVariableString(newFuncName)) {
                     Variable v = VariableManager.lookUp(newFuncName);
                     if (v == null) {
                         VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(rhs), false));
@@ -1200,7 +1192,9 @@ public class Function implements Savable, MethodRegistry.MethodAction {
 
         Function func = new Function("p=@(x)sin(x)+x+x^2");
         FunctionManager.add(func);
-        System.out.println(func.calc(4));
+        
+        func.updateArgs(4);
+        System.out.println(func.calc());
 
         int count = 10000;
 

@@ -15,21 +15,10 @@ This obviously will make graphing and other iterative tasks super responsive.
 ParserNG v0.2.4 is an extremely feature rich math tool which also doubles as (arguably) the fastest pure Java expression evaluator on the planet.
 In benchmarks, it beats com.expression.parser(Java Math Expression Parser) by almost (10x-14x) and edges out Exp4J (which is lightweight) in many benchmarks.
 
- #### Here are some benchmarks
 
-##### 1. (sin(3) + cos(4 - sin(2))) ^ (-2) 
-```
-Benchmark              Mode  Cnt    Score    Error  Units
-ParserNGWars.exp4j     avgt   10  184.211 ± 10.622  ns/op
-ParserNGWars.parserNg  avgt   10  175.858 ±  6.081  ns/op
-```
-
-#### 2. ((12+5)*3 - (45/9))^2
-```
-Benchmark              Mode  Cnt    Score    Error  Units
-ParserNGWars.exp4j     avgt   10  102.845 ± 23.153  ns/op
-ParserNGWars.parserNg  avgt   10   85.417 ±  4.763  ns/op
-```
+ParserNG 0.2.5 features strength reduction, constant folding and execution frame(array) based args passing(in contrast to Map based) to ensure O(1) complexity in passage of args to the evaluation stage.
+ 
+[Here are a few benchmarks here](./BENCHMARK_RESULTS.md)
 
 <br>
 

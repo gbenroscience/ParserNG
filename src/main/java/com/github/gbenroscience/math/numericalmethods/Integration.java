@@ -70,9 +70,9 @@ public class Integration{
         private boolean setIntegration = false;     // = true when integration performed
 
     	// ArrayLists to hold Gauss-Legendre Coefficients saving repeated calculation
-    	private static ArrayList<Integer> gaussQuadIndex = new ArrayList<Integer>();         // Gauss-Legendre indices
-    	private static ArrayList<double[]> gaussQuadDistArrayList = new ArrayList<double[]>();  // Gauss-Legendre distances
-    	private static ArrayList<double[]> gaussQuadWeightArrayList = new ArrayList<double[]>();// Gauss-Legendre weights
+    	private static ArrayList<Integer> gaussQuadIndex = new ArrayList<>();         // Gauss-Legendre indices
+    	private static ArrayList<double[]> gaussQuadDistArrayList = new ArrayList<>();  // Gauss-Legendre distances
+    	private static ArrayList<double[]> gaussQuadWeightArrayList = new ArrayList<>();// Gauss-Legendre weights
 
     	// Iterative trapezium rule
     	private double requiredAccuracy = 0.0D;     // required accuracy at which iterative trapezium is terminated
@@ -207,8 +207,9 @@ public class Integration{
 
         	// Perform summation
         	for(int i=0; i<glPoints; i++){
-            		dx = xminus*gaussQuadDist[i];
-            		sum += gaussQuadWeight[i]*this.function.calc(xplus+dx);
+            		dx = xminus*gaussQuadDist[i]; 
+                          this.function.updateArgs(xplus+dx);
+            		sum += gaussQuadWeight[i]*this.function.calc();
         	}
         	this.integralSum = sum*xminus;      // rescale
         	this.setIntegration = true;         // integration performed
@@ -216,7 +217,7 @@ public class Integration{
     	}
 
     	// Numerical integration using n point Gaussian-Legendre quadrature (instance method)
-        // All parametes except the number of points in the Gauss-Legendre integration preset
+        // All parameters except the number of points in the Gauss-Legendre integration preset
     	public double gaussQuad(int glPoints){
     	    this.glPoints = glPoints;
     	    this.setGLpoints = true;
@@ -291,7 +292,8 @@ public class Integration{
         	double 	interval = (this.upperLimit - this.lowerLimit)/this.nIntervals;
         	double	x0 = this.lowerLimit;
         	double 	x1 = this.lowerLimit + interval;
-        	double	y0 = this.function.calc(x0);
+                 this.function.updateArgs(x0);
+        	double	y0 = this.function.calc();
         	this.integralSum = 0.0D;
 
 		    for(int i=0; i<nIntervals; i++){
@@ -299,10 +301,10 @@ public class Integration{
 		            if(x1>this.upperLimit){
 		                x1 = this.upperLimit;
 		                interval -= (x1 - this.upperLimit);
-		            }
-
+		            } 
+                              this.function.updateArgs(x1);
 		            // perform summation
-            		y1 = this.function.calc(x1);
+            		y1 = this.function.calc();
             		this.integralSum += 0.5D*(y0+y1)*interval;
             		x0 = x1;
             		y0 = y1;
@@ -395,7 +397,8 @@ public class Integration{
 
         	double interval = (this.upperLimit - this.lowerLimit)/this.nIntervals;
         	double x = this.lowerLimit + interval;
-        	double y = this.function.calc(x);
+                  this.function.updateArgs(x);
+                 double y = this.function.calc();
         	this.integralSum = 0.0D;
 
         	for(int i=0; i<this.nIntervals; i++){
@@ -404,9 +407,9 @@ public class Integration{
 		                x = this.upperLimit;
 		                interval -= (x - this.upperLimit);
 		            }
-
+   this.function.updateArgs(x);
 		            // perform summation
-            		y = this.function.calc(x);
+            		y = this.function.calc();
             		this.integralSum += y*interval;
             		x += interval;
         	}
@@ -438,7 +441,8 @@ public class Integration{
 
         	double interval = (this.upperLimit - this.lowerLimit)/this.nIntervals;
         	double x = this.lowerLimit;
-        	double y = this.function.calc(x);
+                this.function.updateArgs(x);
+        	double y = this.function.calc();
         	this.integralSum = 0.0D;
 
         	for(int i=0; i<this.nIntervals; i++){
@@ -447,9 +451,9 @@ public class Integration{
 		                x = this.upperLimit;
 		                interval -= (x - this.upperLimit);
 		            }
-
+   this.function.updateArgs(x);
 		            // perform summation
-            		y = this.function.calc(x);
+            		y = this.function.calc();
             		this.integralSum += y*interval;
             		x += interval;
         	}
@@ -481,13 +485,13 @@ public class Integration{
          
          public static void main(String[] args) {
         
-        Function func = new Function("y=@(x)1/(x^2+1)");
-         Integration intg = new Integration(func, 2, 30);
+        Function func = new Function("y=@(x)sin(x)-cos(x)");
+         Integration intg = new Integration(func, 2, 3);
          intg.gaussQuad(20);
              System.err.println("The value "+intg.getIntegralSum() );
          
          
-         
+         //0.84887248854057823517082799192315
          }
          
 

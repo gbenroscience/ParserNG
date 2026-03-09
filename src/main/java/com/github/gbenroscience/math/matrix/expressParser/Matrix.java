@@ -79,7 +79,7 @@ public class Matrix {
 
     /**
      *
-     * @param array the 2D data supplied as a 1D array used to create this
+     * @param flatArray the 2D data supplied as a 1D array used to create this
      * @param rows
      * @param columns Matrix object
      */

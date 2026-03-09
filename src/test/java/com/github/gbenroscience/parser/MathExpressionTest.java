@@ -1,8 +1,5 @@
 package com.github.gbenroscience.parser;
 
-import com.github.gbenroscience.parser.Function;
-import com.github.gbenroscience.parser.TYPE;
-import com.github.gbenroscience.parser.MathExpression;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -139,13 +136,13 @@ class MathExpressionTest {
 
         Function f = FunctionManager.add("f(x,y) = x - x/y");
         f.updateArgs(2, 3);
-        double r = f.calc(0, 0);
+        double r = f.calc();
         Assertions.assertEquals((double) 2 - ((double) 2 / (double) 3), r);
         int iterations = 10000;
         long start = System.nanoTime();
+        f.updateArgs(2, 3);
         for (int i = 1; i < iterations; i++) {
-            f.updateArgs(2, 3);
-            f.calc(2, 3);
+            f.calc();
         }
         long duration = System.nanoTime() - start;
 
@@ -364,7 +361,8 @@ class MathExpressionTest {
         long start = System.nanoTime();
         int iterations = 100;
         for (int i = 0; i < iterations; i++) {
-            f.calc(i + 3);
+        f.updateArgs(i+3);
+            f.calc();
         }
         long elapsedNanos = (System.nanoTime() - start) / iterations;
         double durationms = (double) elapsedNanos / 1.0E6;
@@ -391,8 +389,8 @@ class MathExpressionTest {
     public void testMixedConstantVariableFolding() {
         MathExpression expr = new MathExpression("1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17+18+19+20+sin(x)");
 
-        MathExpression.Token[]cachedPostfix= expr.getCachedPostfix();
-        System.out.println("Cached postfix tokens: " +cachedPostfix.length);
+        MathExpression.Token[] cachedPostfix = expr.getCachedPostfix();
+        System.out.println("Cached postfix tokens: " + cachedPostfix.length);
 
         // Print all tokens
         for (int i = 0; i < cachedPostfix.length; i++) {

@@ -235,7 +235,7 @@ public class RootFinder {
      *
      */
 
-    public Function parseFunction(String expression){
+    final Function parseFunction(String expression){
 
         expression = expression.trim();
         if(expression.startsWith("root(") && expression.endsWith(")")){
@@ -377,7 +377,7 @@ public class RootFinder {
         return function.getMathExpression().getExpression().length() > 0;
     }
 
-    public void setFunction(Function function) {
+    public final void setFunction(Function function) {
         this.function = function;
     }
 
@@ -453,14 +453,14 @@ public class RootFinder {
 
                 x_middle = 0.50*(xOne+xTwo);
 
-                function.getMathExpression().setValue(variable, xOne);
-                f1 = Double.valueOf( function.getMathExpression().solve() );
+                function.getMathExpression().updateArgs(xOne);
+                f1 = function.getMathExpression().solveGeneric().scalar;
 
-                function.getMathExpression().setValue(variable, xTwo);
-                f2 = Double.valueOf( function.getMathExpression().solve() );
+                function.getMathExpression().updateArgs(xTwo);
+                f2 = function.getMathExpression().solveGeneric().scalar;
 
-                function.getMathExpression().setValue(variable, x_middle);
-                f_middle = Double.valueOf( function.getMathExpression().solve() );
+                function.getMathExpression().updateArgs(x_middle);
+                f_middle = function.getMathExpression().solveGeneric().scalar;
 
 
                 boolean sign_middle = f_middle<0;
@@ -530,11 +530,11 @@ public class RootFinder {
             Function gradFunc = new Function("@("+variable+")"+gradFunxn);
             //System.err.println("gradient function is "+gradFunc.expressionForm());
 
-            function.getMathExpression().setValue(variable, xOne);
-            double f_x = Double.parseDouble(  function.eval() );
+            function.getMathExpression().updateArgs(xOne);
+            double f_x = function.getMathExpression().solveGeneric().scalar;
 
-            gradFunc.getMathExpression().setValue(variable, xOne);
-            double df_x = Double.parseDouble(  gradFunc.eval() );
+            gradFunc.getMathExpression().updateArgs(xOne);
+            double df_x = gradFunc.getMathExpression().solveGeneric().scalar;
 
             double x = xOne;
             int count = 0;
@@ -549,11 +549,11 @@ public class RootFinder {
                     x = x - ratio;
 
 
-                    function.getMathExpression().setValue(variable, x);
-                    f_x = Double.parseDouble(  function.eval() );
+                    function.updateArgs(x);
+                    f_x = function.calc();
 
-                    gradFunc.getMathExpression().setValue(variable, x);
-                    df_x = Double.parseDouble(  gradFunc.eval() );
+                    gradFunc.updateArgs(x);
+                    df_x = gradFunc.calc();
 
                     ++count;
                     System.err.println(variable+" = "+x+" at count = "+count);
@@ -594,12 +594,11 @@ public class RootFinder {
 
             String variable = getVariable();
 
-            function.getMathExpression().setValue(variable, xOne);
-            System.err.println("xOne = "+xOne+", expression: "+function.getMathExpression().getExpression());
-            double f1 = Double.parseDouble(  function.eval() );
+            function.getMathExpression().updateArgs(xOne);
+            double f1 = function.calc();
 
-            function.getMathExpression().setValue(variable, xTwo);
-            double f2 = Double.parseDouble(  function.eval() );
+            function.updateArgs(xTwo);
+            double f2 = function.calc();
 
             double x = 0.5*(xOne+xTwo);
             int count = 0;
@@ -615,10 +614,10 @@ public class RootFinder {
                     xOne = xTwo;
                     xTwo =  x;
 
-                    function.getMathExpression().setValue(variable, xOne);
-                    f1 = Double.parseDouble(  function.getMathExpression().solve() );
-                    function.getMathExpression().setValue(variable, xTwo);
-                    f2 = Double.parseDouble( function.getMathExpression().solve()  );
+                    function.getMathExpression().updateArgs(xOne);
+                    f1 = function.calc();
+                    function.updateArgs(xTwo);
+                    f2 = function.calc();
                     ++count;
 
                 }
@@ -659,14 +658,14 @@ public class RootFinder {
 
 
             String variable = getVariable();
-            function.getMathExpression().setValue(variable, x1);
-            double f1 = Double.parseDouble(  function.getMathExpression().solve() );
+            function.updateArgs(x1);
+            double f1 = function.calc();
 
             int count = 0;
             while( abs(f1) >= 5.0E-16 &&count < 2000 ){
 
-                function.getMathExpression().setValue(variable, x1);
-                f1 = Double.parseDouble(  function.getMathExpression().solve() );
+                function.updateArgs(x1);
+                f1 = function.calc();
                 x1 = x1 - ( f1/ ( f1 - 8 ) );
 
                 ++count;
@@ -678,11 +677,10 @@ public class RootFinder {
                 count = 0;
                 x1 = x1backup;
 
-                function.getMathExpression().setValue(variable, x1);
+                function.updateArgs(x1);
                 while( abs(f1) >= 5.0E-16 &&count < 2000 ){
-
-                    function.getMathExpression().setValue(variable, x1);
-                    f1 = Double.parseDouble(  function.getMathExpression().solve() );
+                    function.updateArgs(x1);
+                    f1 = function.calc();
                     x1 = x1 - ( f1/ ( f1 + 8 ) );
 
                     ++count;
