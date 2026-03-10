@@ -23,6 +23,7 @@ import com.github.gbenroscience.math.numericalmethods.NumericalIntegral;
 import com.github.gbenroscience.math.numericalmethods.RootFinder;
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
 import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
+import com.github.gbenroscience.math.tartaglia.TartagliaSolver;
 import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
 import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Function;
@@ -103,7 +104,8 @@ public class MethodRegistry {
      * This is now a direct array access. The JIT compiler can easily inline
      * this and potentially eliminate bounds checks if it recognizes the loop
      * patterns.
-     * @param id 
+     *
+     * @param id
      */
     public static MethodAction getAction(int id) {
         return actions[id];
@@ -341,7 +343,6 @@ public class MethodRegistry {
             }
         });
         registerMethod(Declarations.INTEGRATION, (ctx, arity, args) -> {
-            System.out.println("args: "+Arrays.toString(args));
             boolean hasIterations = args.length == 4;//[F, 2.0, 3.0, 10000]
             boolean hasNoIterations = args.length == 3;//[F, 2.0, 3.0]
             if (hasNoIterations) {
@@ -747,25 +748,35 @@ public class MethodRegistry {
         });
 
         registerMethod(Declarations.GENERAL_ROOT, (ctx, arity, args) -> {
-            RootFinder rf = new RootFinder(FunctionManager.lookUp(args[0].textRes), args[1].scalar);
-            String root = rf.findRoots();
-            MathExpression.EvalResult res = ctx;
-            res.wrap(com.github.gbenroscience.parser.Number.isNumber(root) ? Double.parseDouble(root) : Double.NaN);
-            return res;
-        });
-        registerMethod(Declarations.QUADRATIC, (ctx, arity, args) -> {
-            QuadraticSolver qs = new QuadraticSolver(args[0].scalar, args[1].scalar, args[2].scalar);
-            MathExpression.EvalResult res = ctx;
-            if (qs.isComplex()) {
-                // Return a vector [real1, imag1, real2, imag2]
-                res.wrap(qs.solutions);
-            } else {
-                // Return a vector [root1, root2]
-                res.wrap(new double[]{qs.solutions[0], qs.solutions[1]});
+            System.out.println("args: " + Arrays.toString(args));
+
+            RootFinder rf;
+            switch (args.length) {
+                case 1:
+                    rf = new RootFinder(FunctionManager.lookUp(args[0].textRes));
+                    ctx.wrap(rf.findRoots());
+                    break;
+                case 2:
+                    rf = new RootFinder(FunctionManager.lookUp(args[0].textRes), args[1].scalar);
+                    ctx.wrap(rf.findRoots());
+                    break;
+                case 3:
+                    rf = new RootFinder(FunctionManager.lookUp(args[0].textRes), args[1].scalar, args[2].scalar );
+                    ctx.wrap(rf.findRoots());
+                    break;
+                case 4:
+                    rf = new RootFinder(FunctionManager.lookUp(args[0].textRes), args[1].scalar, args[2].scalar, (int) args[3].scalar);
+                    ctx.wrap(rf.findRoots());
+                    break;
+
+                default:
+                    throw new AssertionError();
             }
-            return res;
+
+            return ctx;
         });
-        registerMethod(Declarations.QUADRATIC, (ctx, arity, args) -> {
+       
+         registerMethod(Declarations.QUADRATIC, (ctx, arity, args) -> {
             Function f = FunctionManager.lookUp(args[0].textRes);
             String input = f.expressionForm();
             input = input.substring(1);//remove the @
@@ -779,11 +790,10 @@ public class MethodRegistry {
             QuadraticSolver alg = solver.getAlgorithm();
             return ctx.wrap(alg.solutions);
         });
+        
         registerMethod(Declarations.TARTAGLIA_ROOTS, (ctx, arity, args) -> {
-
             Function f = FunctionManager.lookUp(args[0].textRes);
-
-            String input = f.expressionForm();
+            String input = f.expressionForm();System.out.println("input: "+input);
             input = input.substring(1);//remove the @
             int closeBracOfAt = Bracket.getComplementIndex(true, 0, input);
             input = input.substring(closeBracOfAt + 1);
@@ -793,50 +803,8 @@ public class MethodRegistry {
             }
 
             Tartaglia_Equation solver = new Tartaglia_Equation(input);
-            // Equation: c*x^3 + a*x + b = 0
-            double c_coeff = solver.getAlgorithm().getA(); // c
-            double a_coeff = solver.getAlgorithm().getB(); // a
-            double b_coeff = solver.getAlgorithm().getC(); // b
-
-            if (Math.abs(c_coeff) < 1e-12) {
-                // Fallback to linear: ax + b = 0
-                MathExpression.EvalResult res = ctx;
-                res.wrap(-b_coeff / a_coeff);
-                return res;
-            }
-
-            // Normalize to x^3 + px + q = 0
-            double p = a_coeff / c_coeff;
-            double q = b_coeff / c_coeff;
-
-            // Cardano's Discriminant for depressed cubic
-            double discriminant = (q * q / 4.0) + (p * p * p / 27.0);
-
-            MathExpression.EvalResult res = ctx;
-
-            if (discriminant > 0) {
-                // 1 Real Root
-                double sqrtD = Math.sqrt(discriminant);
-                double u = Math.cbrt(-q / 2.0 + sqrtD);
-                double v = Math.cbrt(-q / 2.0 - sqrtD);
-                res.wrap(u + v); // Returns scalar
-            } else if (discriminant == 0) {
-                // Multiple Real Roots
-                double u = Math.cbrt(-q / 2.0);
-                res.wrap(new double[]{2 * u, -u}); // Returns vector
-            } else {
-                // 3 Distinct Real Roots (Trigonometric solution)
-                double r = Math.sqrt(-(p * p * p) / 27.0);
-                double phi = Math.acos(-q / (2.0 * r));
-                double s = 2.0 * Math.pow(r, 1.0 / 3.0);
-
-                double root1 = s * Math.cos(phi / 3.0);
-                double root2 = s * Math.cos((phi + 2 * Math.PI) / 3.0);
-                double root3 = s * Math.cos((phi + 4 * Math.PI) / 3.0);
-
-                res.wrap(new double[]{root1, root2, root3}); // Returns vector
-            }
-            return res;
+            
+            return ctx.wrap(solver.solutions());
         });
 
         registerMethod(Declarations.HELP, (ctx, arity, args) -> {

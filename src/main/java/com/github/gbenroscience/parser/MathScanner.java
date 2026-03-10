@@ -664,7 +664,7 @@ public class MathScanner {
 
             }//end else if
             else if ((token.equals("root")) && nextToken.equals("(")) {
-// intg,(,@,(x),log(x,2),4,2,5)
+// root,(,@,(x),log(x,2),4,2,5)
                 int close = Bracket.getComplementIndex(true, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
                // System.out.println("list: " + list);

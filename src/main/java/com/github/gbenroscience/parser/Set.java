@@ -710,7 +710,7 @@ public class Set {
      *
      * @return one of the roots of the Function object.
      */
-    public String rootOfEquation() {
+    public double rootOfEquation() throws Exception {
         int sz = data.size();
         boolean has2NumberArguments = false;
  
@@ -730,7 +730,7 @@ public class Set {
             return rf.findRoots();
 
         }//end if
-        return "Function Syntax Error!";
+        throw new Exception("Function Syntax Error!");
     }
 
     /**

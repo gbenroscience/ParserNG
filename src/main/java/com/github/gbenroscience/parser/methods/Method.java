@@ -21,6 +21,8 @@ import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.Operator;
 import com.github.gbenroscience.util.FunctionManager;
 import java.util.Arrays;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Models the methods that perform calculations in the parser.
@@ -398,13 +400,10 @@ public class Method {
 
     }
 
-    
-    
-    
-        public static MathExpression.EvalResult exec(MathExpression.EvalResult ctx, int methodId, int arity, MathExpression.EvalResult[]args, DRG_MODE DRG) {
-            return MethodRegistry.getAction(methodId).calc(ctx, arity, args);
-        }
-        
+    public static MathExpression.EvalResult exec(MathExpression.EvalResult ctx, int methodId, int arity, MathExpression.EvalResult[] args, DRG_MODE DRG) {
+        return MethodRegistry.getAction(methodId).calc(ctx, arity, args);
+    }
+
     /**
      *
      * @param list A list containing a portion of a scanned function that has
@@ -517,9 +516,13 @@ public class Method {
                 return list;
             } else if (name.equals(GENERAL_ROOT)) {
                 Set set = new Set(list);
-                result = String.valueOf(set.rootOfEquation());
-                list.clear();
-                list.add(result);
+                try {
+                    result = String.valueOf(set.rootOfEquation());
+                    list.clear();
+                    list.add(result);
+                } catch (Exception ex) {
+                    Logger.getLogger(Method.class.getName()).log(Level.SEVERE, null, ex);
+                }
                 return list;
             } else if ((name.equals(DETERMINANT))) {
                 Set set = new Set(list);
@@ -712,7 +715,7 @@ public class Method {
                 Function.storeAnonymousFunction("@(" + Matrix.lambda + ")" + poly);
                 list.add(ref);
                 return list;
-            } else if (name.equals(MATRIX_EIGENVALUES)) { 
+            } else if (name.equals(MATRIX_EIGENVALUES)) {
                 Set set = new Set(list);
                 Matrix matrix = set.eigenValues();
                 list.clear();

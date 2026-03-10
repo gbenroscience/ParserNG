@@ -810,7 +810,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
      * the rangeDescr parameter is not valid.. it returns a2D array containing 2
      * null arrays.
      */
-    public String[][] evalRange(String rangeDescr) {
+    public double[][] evalRange(String rangeDescr) {
 
 //x:0:10:xStep
         String variableName = rangeDescr.substring(0, rangeDescr.indexOf(":"));
@@ -827,7 +827,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             double x2 = Double.parseDouble(xEnd);
             int sz = (int) ((x2 - x1) / xStep);
 
-            String[][] results = new String[2][sz + 1];
+            double[][] results = new double[2][sz + 1];
 
             if (x1 > x2) {
                 double p = x1;
@@ -836,15 +836,16 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             }
             int i = 0;
             int len = sz + 1;
+            int xSlot = mathExpression.getVariable(variableName).getFrameIndex();
             for (double x = x1; i < len && x <= x2; x += xStep, i++) {
-                mathExpression.setValue(variableName, x);
-                results[0][i] = mathExpression.solve();
-                results[1][i] = String.valueOf(x);
+                mathExpression.updateSlot(xSlot, x);
+                results[0][i] = mathExpression.solveGeneric().scalar;
+                results[1][i] = x;
             }//end for
             return results;
         }//end if
 
-        return new String[][]{null, null};
+        return new double[][]{null, null};
     }//end method
 
     /**
@@ -875,9 +876,10 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         double[][] results = new double[2][sz + 1];
         int len = sz + 1;
         int i = 0;
+        int xSlot = mathExpression.getVariable(variableName).getFrameIndex();
         for (double x = xLower; i < len && x <= xUpper; x += xStep, i++) {
-            mathExpression.setValue(variableName, x);
-            results[0][i] = Double.parseDouble(mathExpression.solve());
+            mathExpression.updateSlot(xSlot, x);
+            results[0][i] = mathExpression.solveGeneric().scalar;
             results[1][i] = x;
         }//end for
 

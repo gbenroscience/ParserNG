@@ -507,7 +507,7 @@ public class NumericalIntegral {
     public double findHighRangeIntegral() {
         double dx = 0.2;
         NumericalIntegral integral = new NumericalIntegral();
-        
+
         try {
             if (Math.abs(xUpper - xLower) < dx) {
                 return findGaussianQuadrature();
@@ -548,10 +548,10 @@ public class NumericalIntegral {
                 } else if (xUpper < xLower) {
                     double x = xLower;
                     for (; x > (xUpper + dx); x -= dx) {
-                            integral.xLower = x;
-                            integral.xUpper = x-dx;
-                            integral.iterations = iterations;
-                            integral.function = function;
+                        integral.xLower = x;
+                        integral.xUpper = x - dx;
+                        integral.iterations = iterations;
+                        integral.function = function;
                         sum += integral.findGaussianQuadrature();
                     }//end for
 
@@ -641,13 +641,14 @@ public class NumericalIntegral {
      *
      */
     public static void extractFunctionStringFromExpression(List<String> list) {
-        //[intg,(,F,1,2]
+        //[intg, (, F, ,, 2, ,, 3, )]
 
         if (list.get(0).equals("quad")) {
             list.set(0, "intg");
         }
+        String methodName = list.get(0);
         String args1, args2, args3;
-        if (list.get(0).equals("intg") && list.get(1).equals("(") && list.get(list.size() - 1).equals(")")) {
+        if (methodName.equals("intg") && list.get(1).equals("(") && list.get(list.size() - 1).equals(")")) {
             String functionName = list.get(2);
             if (Variable.isVariableString(functionName)) {
                 boolean exists = FunctionManager.contains(functionName);
@@ -666,14 +667,36 @@ public class NumericalIntegral {
                     }
                 }
             }
-            args1 = list.get(3);
-            args2 = list.get(4);
-            args3 = list.get(5);
-            if (Number.validNumber(args1) && Number.validNumber(args2)) {
-                if (!Number.validNumber(args3) && !Operator.isClosingBracket(args3)) {
-                    list.clear();
+            //[intg,(,F,|,n1,|,n2,|,i,),]
+            int sz = list.size();
+            args1 = sz >= 8 ? list.get(4) : null;//compulsory---xLower
+            args2 = sz >= 8 ? list.get(6) : null;//compulsory---xUpper
+            args3 = sz >= 10 ? list.get(8) : null;//optional---iterations
+
+            if (Number.isNumber(args1) && Number.isNumber(args2)) {//found 2 number args
+                if(Number.isNumber(args3)){//3rd number arg exists
+                    if(Operator.isClosingBracket(list.get(9))){//ensure that the next token is a close bracket
+                        //valid
+                    }else{
+                        System.err.println("The next token must be a close bracket after the 3 number arguments supplied to the `"+methodName+"` method");
+                        list.clear();
+                    }
+                }else if(args3 == null){//2 number args only---still fair
+                    if(Operator.isClosingBracket(list.get(7))){//enforce that the next token is a close bracket
+                        //valid
+                    }else{
+                         System.err.println("The next token must be a close bracket after the 2 number arguments supplied to the `"+methodName+"` method");
+                         list.clear();
+                    }
                 }
+                else{
+                     list.clear();
+                }
+            } else {
+               System.err.println("The `"+methodName+"` method needs at least 2 number args after the function handle: `"+functionName+"`");
+                list.clear();
             }
+ 
         }
     }//end method
 

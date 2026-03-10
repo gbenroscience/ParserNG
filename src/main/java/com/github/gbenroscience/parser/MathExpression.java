@@ -2525,7 +2525,12 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println(new MathExpression("F=@(x)sin(x);intg(F,2,3)").solve());
         System.out.println(new MathExpression("F=@(x)sin(x);intg(F,2,3,100000)").solve());
         System.out.println(new MathExpression("G=@(x)sin(x)-cos(x);intg(G,2,30,1000)").solve());
-        System.out.println(new MathExpression("I=@(x)-1*cos(x);I(3)-I(2)").solve());
+        MathExpression meRoots = new MathExpression("root(@(x)x^2+2*x+1, 3)");
+        System.out.println(meRoots.solve());
+        MathExpression quadRoots = new MathExpression("quadratic(@(x)3*x^2-8*x+3)");
+        System.out.println(quadRoots.solve());
+        MathExpression tartRoots = new MathExpression("t_root(@(x)5*x^3-12*x+120)");
+        System.out.println(tartRoots.solve());
 
         //   double N = 100; 
         //   Shootouts.benchmark(s2, (int) N);

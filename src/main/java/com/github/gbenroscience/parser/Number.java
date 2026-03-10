@@ -113,6 +113,9 @@ public class Number {
     public static boolean isNumber(String num) {
         //sign_num_._num_E_sign_num
         boolean verily = false;
+        if(num == null){
+            return false;
+        }
         if (STRING.isDigit(STRING.firstElement(num))) {
             verily = true;
         } else if (STRING.firstChar(num) == Operator.PLUS.charAt(0) || STRING.firstChar(num) == Operator.MINUS.charAt(0)) {
