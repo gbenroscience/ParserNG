@@ -221,7 +221,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
      * were supplied in the original question.
      * @return the value of the function with these variables set.
      */
-    public MathExpression.EvalResult calc(MathExpression.EvalResult... x) {
+    public MathExpression.EvalResult calc(MathExpression.EvalResult[] x) {
 
         if (type == TYPE.ALGEBRAIC_EXPRESSION) {
             if (x.length == independentVariables.size()) {
@@ -242,7 +242,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
     }
 
     @Override
-    public MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult... x) {
+    public MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult[] x) {
         if (type == TYPE.ALGEBRAIC_EXPRESSION) {
             if (x.length == independentVariables.size()) {
 

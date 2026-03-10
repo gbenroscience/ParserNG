@@ -22,8 +22,7 @@ import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.math.numericalmethods.NumericalIntegral;
 import com.github.gbenroscience.math.numericalmethods.RootFinder;
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
-import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
-import com.github.gbenroscience.math.tartaglia.TartagliaSolver;
+import com.github.gbenroscience.math.quadratic.Quadratic_Equation; 
 import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
 import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Function;
@@ -31,10 +30,8 @@ import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.Utils;
 import java.util.HashMap;
-import java.util.Map;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.Map; 
+import java.util.Arrays; 
 
 /**
  *
@@ -54,7 +51,7 @@ public class MethodRegistry {
          * @param args The args passed to the function
          * @return
          */
-        MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult... args);
+        MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult[] args);
     }
 
     private static final Map<String, Integer> methodIds = new HashMap<>();
@@ -111,6 +108,7 @@ public class MethodRegistry {
         return actions[id];
     }
 
+    public static final String[] expandedTrigAndHypMethodNames = new String[72];
     // --- Pre-register Built-ins ---
     static {
         loadInBuiltMethods();
@@ -118,73 +116,102 @@ public class MethodRegistry {
 
     private static void loadInBuiltMethods() {
 
-        String sinDeg = Declarations.getTrigFuncDRGVariant(Declarations.SIN, DRG_MODE.DEG);
-        String sinRad = Declarations.getTrigFuncDRGVariant(Declarations.SIN, DRG_MODE.RAD);
-        String sinGrad = Declarations.getTrigFuncDRGVariant(Declarations.SIN, DRG_MODE.GRAD);
-        String cosDeg = Declarations.getTrigFuncDRGVariant(Declarations.COS, DRG_MODE.DEG);
-        String cosRad = Declarations.getTrigFuncDRGVariant(Declarations.COS, DRG_MODE.RAD);
-        String cosGrad = Declarations.getTrigFuncDRGVariant(Declarations.COS, DRG_MODE.GRAD);
-        String tanDeg = Declarations.getTrigFuncDRGVariant(Declarations.TAN, DRG_MODE.DEG);
-        String tanRad = Declarations.getTrigFuncDRGVariant(Declarations.TAN, DRG_MODE.RAD);
-        String tanGrad = Declarations.getTrigFuncDRGVariant(Declarations.TAN, DRG_MODE.GRAD);
+        // Standard Trig
+        String sinDeg = expandedTrigAndHypMethodNames[0] = Declarations.getTrigFuncDRGVariant(Declarations.SIN, DRG_MODE.DEG);
+        String sinRad = expandedTrigAndHypMethodNames[1] = Declarations.getTrigFuncDRGVariant(Declarations.SIN, DRG_MODE.RAD);
+        String sinGrad = expandedTrigAndHypMethodNames[2] = Declarations.getTrigFuncDRGVariant(Declarations.SIN, DRG_MODE.GRAD);
+        String cosDeg = expandedTrigAndHypMethodNames[3] = Declarations.getTrigFuncDRGVariant(Declarations.COS, DRG_MODE.DEG);
+        String cosRad = expandedTrigAndHypMethodNames[4] = Declarations.getTrigFuncDRGVariant(Declarations.COS, DRG_MODE.RAD);
+        String cosGrad = expandedTrigAndHypMethodNames[5] = Declarations.getTrigFuncDRGVariant(Declarations.COS, DRG_MODE.GRAD);
+        String tanDeg = expandedTrigAndHypMethodNames[6] = Declarations.getTrigFuncDRGVariant(Declarations.TAN, DRG_MODE.DEG);
+        String tanRad = expandedTrigAndHypMethodNames[7] = Declarations.getTrigFuncDRGVariant(Declarations.TAN, DRG_MODE.RAD);
+        String tanGrad = expandedTrigAndHypMethodNames[8] = Declarations.getTrigFuncDRGVariant(Declarations.TAN, DRG_MODE.GRAD);
 
-        String asinDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN, DRG_MODE.DEG);
-        String asinRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN, DRG_MODE.RAD);
-        String asinGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN, DRG_MODE.GRAD);
-        String acosDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS, DRG_MODE.DEG);
-        String acosRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS, DRG_MODE.RAD);
-        String acosGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS, DRG_MODE.GRAD);
-        String atanDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN, DRG_MODE.DEG);
-        String atanRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN, DRG_MODE.RAD);
-        String atanGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN, DRG_MODE.GRAD);
+// Inverse Trig (Standard)
+        String asinDeg = expandedTrigAndHypMethodNames[9] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN, DRG_MODE.DEG);
+        String asinRad = expandedTrigAndHypMethodNames[10] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN, DRG_MODE.RAD);
+        String asinGrad = expandedTrigAndHypMethodNames[11] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN, DRG_MODE.GRAD);
+        String acosDeg = expandedTrigAndHypMethodNames[12] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS, DRG_MODE.DEG);
+        String acosRad = expandedTrigAndHypMethodNames[13] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS, DRG_MODE.RAD);
+        String acosGrad = expandedTrigAndHypMethodNames[14] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS, DRG_MODE.GRAD);
+        String atanDeg = expandedTrigAndHypMethodNames[15] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN, DRG_MODE.DEG);
+        String atanRad = expandedTrigAndHypMethodNames[16] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN, DRG_MODE.RAD);
+        String atanGrad = expandedTrigAndHypMethodNames[17] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN, DRG_MODE.GRAD);
 
-        String asinAltDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN_ALT, DRG_MODE.DEG);
-        String asinAltRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN_ALT, DRG_MODE.RAD);
-        String asinAltGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN_ALT, DRG_MODE.GRAD);
-        String acosAltDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS_ALT, DRG_MODE.DEG);
-        String acosAltRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS_ALT, DRG_MODE.RAD);
-        String acosAltGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS_ALT, DRG_MODE.GRAD);
-        String atanAltDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN_ALT, DRG_MODE.DEG);
-        String atanAltRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN_ALT, DRG_MODE.RAD);
-        String atanAltGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN_ALT, DRG_MODE.GRAD);
+// Inverse Trig (Alt)
+        String asinAltDeg = expandedTrigAndHypMethodNames[18] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN_ALT, DRG_MODE.DEG);
+        String asinAltRad = expandedTrigAndHypMethodNames[19] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN_ALT, DRG_MODE.RAD);
+        String asinAltGrad = expandedTrigAndHypMethodNames[20] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SIN_ALT, DRG_MODE.GRAD);
+        String acosAltDeg = expandedTrigAndHypMethodNames[21] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS_ALT, DRG_MODE.DEG);
+        String acosAltRad = expandedTrigAndHypMethodNames[22] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS_ALT, DRG_MODE.RAD);
+        String acosAltGrad = expandedTrigAndHypMethodNames[23] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COS_ALT, DRG_MODE.GRAD);
+        String atanAltDeg = expandedTrigAndHypMethodNames[24] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN_ALT, DRG_MODE.DEG);
+        String atanAltRad = expandedTrigAndHypMethodNames[25] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN_ALT, DRG_MODE.RAD);
+        String atanAltGrad = expandedTrigAndHypMethodNames[26] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_TAN_ALT, DRG_MODE.GRAD);
 
-        String secDeg = Declarations.getTrigFuncDRGVariant(Declarations.SEC, DRG_MODE.DEG);
-        String secRad = Declarations.getTrigFuncDRGVariant(Declarations.SEC, DRG_MODE.RAD);
-        String secGrad = Declarations.getTrigFuncDRGVariant(Declarations.SEC, DRG_MODE.GRAD);
-        String cscDeg = Declarations.getTrigFuncDRGVariant(Declarations.COSEC, DRG_MODE.DEG);
-        String cscRad = Declarations.getTrigFuncDRGVariant(Declarations.COSEC, DRG_MODE.RAD);
-        String cscGrad = Declarations.getTrigFuncDRGVariant(Declarations.COSEC, DRG_MODE.GRAD);
-        String cotDeg = Declarations.getTrigFuncDRGVariant(Declarations.COT, DRG_MODE.DEG);
-        String cotRad = Declarations.getTrigFuncDRGVariant(Declarations.COT, DRG_MODE.RAD);
-        String cotGrad = Declarations.getTrigFuncDRGVariant(Declarations.COT, DRG_MODE.GRAD);
+// Reciprocal Trig
+        String secDeg = expandedTrigAndHypMethodNames[27] = Declarations.getTrigFuncDRGVariant(Declarations.SEC, DRG_MODE.DEG);
+        String secRad = expandedTrigAndHypMethodNames[28] = Declarations.getTrigFuncDRGVariant(Declarations.SEC, DRG_MODE.RAD);
+        String secGrad = expandedTrigAndHypMethodNames[29] = Declarations.getTrigFuncDRGVariant(Declarations.SEC, DRG_MODE.GRAD);
+        String cscDeg = expandedTrigAndHypMethodNames[30] = Declarations.getTrigFuncDRGVariant(Declarations.COSEC, DRG_MODE.DEG);
+        String cscRad = expandedTrigAndHypMethodNames[31] = Declarations.getTrigFuncDRGVariant(Declarations.COSEC, DRG_MODE.RAD);
+        String cscGrad = expandedTrigAndHypMethodNames[32] = Declarations.getTrigFuncDRGVariant(Declarations.COSEC, DRG_MODE.GRAD);
+        String cotDeg = expandedTrigAndHypMethodNames[33] = Declarations.getTrigFuncDRGVariant(Declarations.COT, DRG_MODE.DEG);
+        String cotRad = expandedTrigAndHypMethodNames[34] = Declarations.getTrigFuncDRGVariant(Declarations.COT, DRG_MODE.RAD);
+        String cotGrad = expandedTrigAndHypMethodNames[35] = Declarations.getTrigFuncDRGVariant(Declarations.COT, DRG_MODE.GRAD);
 
-        String asecDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC, DRG_MODE.DEG);
-        String asecRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC, DRG_MODE.RAD);
-        String asecGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC, DRG_MODE.GRAD);
-        String acscDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC, DRG_MODE.DEG);
-        String acscRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC, DRG_MODE.RAD);
-        String acscGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC, DRG_MODE.GRAD);
-        String acotDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.DEG);
-        String acotRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.RAD);
-        String acotGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.GRAD);
+// Inverse Reciprocal (Standard)
+        String asecDeg = expandedTrigAndHypMethodNames[36] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC, DRG_MODE.DEG);
+        String asecRad = expandedTrigAndHypMethodNames[37] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC, DRG_MODE.RAD);
+        String asecGrad = expandedTrigAndHypMethodNames[38] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC, DRG_MODE.GRAD);
+        String acscDeg = expandedTrigAndHypMethodNames[43] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC, DRG_MODE.DEG);
+        String acscRad = expandedTrigAndHypMethodNames[40] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC, DRG_MODE.RAD);
+        String acscGrad = expandedTrigAndHypMethodNames[41] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC, DRG_MODE.GRAD);
+        String acotDeg = expandedTrigAndHypMethodNames[42] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.DEG);
+        String acotRad = expandedTrigAndHypMethodNames[43] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.RAD);
+        String acotGrad = expandedTrigAndHypMethodNames[44] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.GRAD);
 
-        String asecAltDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC, DRG_MODE.DEG);
-        String asecAltRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC, DRG_MODE.RAD);
-        String asecAltGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC, DRG_MODE.GRAD);
-        String acscAltDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC, DRG_MODE.DEG);
-        String acscAltRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC, DRG_MODE.RAD);
-        String acscAltGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC, DRG_MODE.GRAD);
-        String acotAltDeg = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.DEG);
-        String acotAltRad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.RAD);
-        String acotAltGrad = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT, DRG_MODE.GRAD);
+// Inverse Reciprocal (Alt)
+        String asecAltDeg = expandedTrigAndHypMethodNames[45] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC_ALT, DRG_MODE.DEG);
+        String asecAltRad = expandedTrigAndHypMethodNames[46] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC_ALT, DRG_MODE.RAD);
+        String asecAltGrad = expandedTrigAndHypMethodNames[47] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_SEC_ALT, DRG_MODE.GRAD);
+        String acscAltDeg = expandedTrigAndHypMethodNames[48] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC_ALT, DRG_MODE.DEG);
+        String acscAltRad = expandedTrigAndHypMethodNames[49] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC_ALT, DRG_MODE.RAD);
+        String acscAltGrad = expandedTrigAndHypMethodNames[50] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COSEC_ALT, DRG_MODE.GRAD);
+        String acotAltDeg = expandedTrigAndHypMethodNames[51] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT_ALT, DRG_MODE.DEG);
+        String acotAltRad = expandedTrigAndHypMethodNames[52] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT_ALT, DRG_MODE.RAD);
+        String acotAltGrad = expandedTrigAndHypMethodNames[53] = Declarations.getTrigFuncDRGVariant(Declarations.ARC_COT_ALT, DRG_MODE.GRAD);
+        
+        
+        
+         expandedTrigAndHypMethodNames[54] = Declarations.SINH;  
+         expandedTrigAndHypMethodNames[55] = Declarations.COSH;  
+         expandedTrigAndHypMethodNames[56] = Declarations.TANH;  
+         expandedTrigAndHypMethodNames[57] = Declarations.SECH;  
+         expandedTrigAndHypMethodNames[58] = Declarations.COSECH;  
+         expandedTrigAndHypMethodNames[59] = Declarations.COTH;  
+
+         expandedTrigAndHypMethodNames[60] = Declarations.ARC_SINH;  
+         expandedTrigAndHypMethodNames[61] = Declarations.ARC_SINH_ALT;  
+         expandedTrigAndHypMethodNames[62] = Declarations.ARC_COSH; 
+         expandedTrigAndHypMethodNames[63] = Declarations.ARC_COSH_ALT;  
+         expandedTrigAndHypMethodNames[64] = Declarations.ARC_TANH; 
+         expandedTrigAndHypMethodNames[65] = Declarations.ARC_TANH_ALT;
+
+         expandedTrigAndHypMethodNames[66] = Declarations.ARC_SECH;  
+         expandedTrigAndHypMethodNames[67] = Declarations.ARC_SECH_ALT; 
+         expandedTrigAndHypMethodNames[68] = Declarations.ARC_COSECH; 
+         expandedTrigAndHypMethodNames[69] = Declarations.ARC_COSECH_ALT; 
+         expandedTrigAndHypMethodNames[70] = Declarations.ARC_COTH; 
+         expandedTrigAndHypMethodNames[71] = Declarations.ARC_COTH_ALT;  
+
+
 
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////
         registerMethod(sinDeg, (ctx, arity, args) -> ctx.wrap(Maths.sinDegToRad(args[0].scalar)));
         registerMethod(sinRad, (ctx, arity, args) -> ctx.wrap(Math.sin(args[0].scalar)));
         //registerMethod(sinGrad, (ctx, arity, args) -> ctx.wrap(Maths.sinGradToRad(args[0].scalar)));
-        registerMethod(sinGrad, (ctx, arity, args) -> {
-            return ctx.wrap(Maths.sinGradToRad(args[0].scalar));
-        });
+        registerMethod(sinGrad, (ctx, arity, args) -> ctx.wrap(Maths.sinGradToRad(args[0].scalar)));
 
         registerMethod(cosDeg, (ctx, arity, args) -> ctx.wrap(Maths.cosDegToRad(args[0].scalar)));
         registerMethod(cosRad, (ctx, arity, args) -> ctx.wrap(Math.cos(args[0].scalar)));
@@ -368,13 +395,13 @@ public class MethodRegistry {
                                     System.out.println(f.toString());
                                     break;
                                 case MATRIX:
-                                    System.out.println(f.getName() +"="+ f.getMatrix().toString());
+                                    System.out.println(f.getName() + "=" + f.getMatrix().toString());
                                     break;
                                 default:
                                     System.out.println(f.toString());
                                     break;
                             }
-                        }else{
+                        } else {
                             System.out.println(arg.textRes);
                         }
                         break;
@@ -382,7 +409,7 @@ public class MethodRegistry {
                         System.out.println(arg.toString());
                         break;
                     case MathExpression.EvalResult.TYPE_MATRIX:
-                        System.out.println(arg.matrix.getName()+"="+arg.matrix.toString());
+                        System.out.println(arg.matrix.getName() + "=" + arg.matrix.toString());
                         arg.matrix.print();
                         break;
                     case MathExpression.EvalResult.TYPE_VECTOR:
@@ -392,7 +419,7 @@ public class MethodRegistry {
                     default:
                         System.out.println(arg.toString());
                 }
-         
+
             }
             return ctx.wrap(-1);
         });

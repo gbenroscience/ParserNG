@@ -595,6 +595,14 @@ public class MathExpression implements Savable, Solvable {
         this.variableManager = variableManager;
     }
 
+    public VariableRegistry getRegistry() {
+        return registry;
+    }
+
+    public boolean hasVariable(String var) {
+        return registry.hasVariable(var);
+    }
+
     /**
      * Retrieves a Variable handle from the expression's registry. This handle
      * is "Pre-Bound" to the correct slot in the execution frame.
@@ -620,8 +628,7 @@ public class MathExpression implements Savable, Solvable {
 
             return v;
         }
-
-        throw new NoSuchElementException("Variable '" + name + "' was not found in the compiled expression.");
+        return null;
     }
 
     public static final class Slot {
@@ -1049,13 +1056,19 @@ public class MathExpression implements Savable, Solvable {
      */
     public void updateArgs(int[] slots, double... values) {
         for (int i = 0; i < slots.length; i++) {
-            this.executionFrame[slots[i]] = values[i];
+            int slot = slots[i];
+            double value = values[i];
+            if (slot >= 0 && slot < this.executionFrame.length) {
+                this.executionFrame[slot] = value;
+            }
         }
     }
 
     // Or, for a single variable update (the most common benchmark case):
     public void updateSlot(int slot, double value) {
-        this.executionFrame[slot] = value;
+        if (slot >= 0 && slot < this.executionFrame.length) {
+            this.executionFrame[slot] = value;
+        }
     }
 
     public void setReturnType(TYPE returnType) {
@@ -1275,7 +1288,7 @@ public class MathExpression implements Savable, Solvable {
                             Token callable = opStack.pop();
 
                             int actualArgCount = argCounts.pop();
-                            lastWasComma.pop(); 
+                            lastWasComma.pop();
                             callable.arity = Math.max(1, actualArgCount);
                             postfix[p++] = callable;
 
@@ -1351,17 +1364,24 @@ public class MathExpression implements Savable, Solvable {
         private static final int ABSOLUTE_MAX_ARITY = 100_000;
 
         private EvalResult[][] argCache = new EvalResult[MAX_ARITY + 1][];
+        private EvalResult[] stack;
 
         public ExpressionSolver() {
             // Pre-allocate ONE array per arity that we reuse
             for (int i = 0; i <= MAX_ARITY; i++) {
                 argCache[i] = new EvalResult[i];
             }
-
         }
 
         public EvalResult evaluate() {
-            final EvalResult[] stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
+            if(stack == null){
+                stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];    
+            }else{
+                if(cachedPostfix.length > stack.length ){
+                    stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
+                }
+            }
+            
             int ptr = -1;
 
             for (int i = 0; i < cachedPostfix.length; i++) {
@@ -1432,7 +1452,7 @@ public class MathExpression implements Savable, Solvable {
                         int valuesOnStack = ptr + 1;
 
                         if (arity == 0) {
-                            EvalResult result = t.action.calc(getNextResult(), arity);
+                            EvalResult result = t.action.calc(getNextResult(), arity,argCache[arity]);
                             stack[++ptr] = result;
                             break;
                         }
@@ -1607,11 +1627,10 @@ public class MathExpression implements Savable, Solvable {
                 if ((t.kind == Token.FUNCTION || t.kind == Token.METHOD) && writePtr >= t.arity) {
 
                     // CRITICAL: Never fold trigonometric functions!
-                   /* if (isTrigonometricFunction(t)) {
+                    /* if (isTrigonometricFunction(t)) {
                         folded[writePtr++] = t;  // Keep the function token as-is
                         continue;
                     }*/
-
                     if (!isConstantFoldableFunction(t)) {
                         folded[writePtr++] = t;
                         continue;
@@ -1655,37 +1674,6 @@ public class MathExpression implements Savable, Solvable {
     }
 
     /**
-     * CRITICAL: Detect trigonometric functions that must NOT be folded because
-     * setDRG() needs to be able to modify them after compilation.
-     */
-    private boolean isTrigonometricFunction(Token t) {
-        if (t.name == null) {
-            return false;
-        }
-
-        String name = t.name.toLowerCase();
-
-        // All trig functions (in any DRG variant) must NOT be folded
-        java.util.Set<String> trigFunctions = new java.util.HashSet<>(
-                Arrays.asList(
-                        // Basic trig
-                        "sin_deg", "sin_rad", "sin_grad", "sin",
-                        "cos_deg", "cos_rad", "cos_grad", "cos",
-                        "tan_deg", "tan_rad", "tan_grad", "tan",
-                        // Inverse trig
-                        "asin", "acos", "atan", "atan2",
-                        // Hyperbolic (also angle-dependent in some contexts)
-                        "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
-                        // Cotangent, Secant, Cosecant (if you support them)
-                        "cot", "sec", "csc",
-                        // DRG-aware variants
-                        "arcsin", "arccos", "arctan")
-        );
-
-        return trigFunctions.stream().anyMatch(name::equalsIgnoreCase);
-    }
-
-    /**
      * Whitelist of functions that ARE safe to constant-fold. Note: Trig
      * functions are handled separately (never folded).
      */
@@ -1696,36 +1684,79 @@ public class MathExpression implements Savable, Solvable {
 
         String name = t.name.toLowerCase();
 
-        // ===== BLACKLIST: NON-FOLDABLE =====
+        // ===== BLACKLIST: NON-FOLDABLE (Side effects, randomness, I/O, user-defined) =====
         java.util.Set<String> nonFoldable = new java.util.HashSet<>(
                 Arrays.asList(
-                        // Stochastic
-                        "rand", "random", "randbetween", "randi", "randint", "randnormal","rnd",
+                        // Stochastic - different result each time
+                        "rand", "random", "randbetween", "randi", "randint", "randnormal", "rnd",
                         // Time-dependent
                         "now", "time", "today", "clock", "timestamp", "millis",
-                        // Side effects
-                        "print", "println", "debug", "log",
+                        // Side effects (I/O, output)
+                        "print", "println", "debug", "log", "plot",
                         // System-dependent
                         "random_seed", "env", "getenv",
-                        // I/O
-                        "read", "readline", "input", "scan")
+                        // I/O operations
+                        "read", "readline", "input", "scan",
+                        // User-defined or dynamic
+                        "diff", "intg", "differentiation", "integration",
+                        // Matrix operations (complex state-dependent results)
+                        "linear_sys", "det", "determinant", "invert", "inverse_matrix",
+                        "tri_mat", "triangular_matrix", "echelon", "echelon_matrix",
+                        "matrix_mul", "matrix_multiply", "matrix_div", "matrix_divide",
+                        "matrix_add", "matrix_subtract", "matrix_sub",
+                        "matrix_pow", "matrix_power", "transpose", "matrix_edit",
+                        "matrix_cofactors", "cofactor", "matrix_adjoint", "adjoint",
+                        "matrix_eigenvec", "eigvec", "matrix_eigenvalues", "eigvalues",
+                        "matrix_eigenpoly", "eigpoly",
+                        // List sorting (order-dependent, may depend on implementation)
+                        "sort",
+                        // Help
+                        "help",
+                        // Quadratic/root solving (may have multiple solutions or complex numbers)
+                        "quadratic", "tartaglia_roots", "t_root", "general_root", "root")
         );
 
         if (nonFoldable.contains(name)) {
             return false;
         }
 
-        // ===== WHITELIST: SAFE TO FOLD =====
-        java.util.Set<String> definitelyFoldable = new java.util.HashSet<>(
-                Arrays.asList()
+        // ===== SPECIAL HANDLING: Trigonometric functions =====
+        // These ARE foldable, but ONLY if NOT being used with setDRG() changes
+        // For safety, we fold them ONLY when the expression contains constants
+        // Since we're in compile-time, we CAN fold them with current DRG mode
+        java.util.Set<String> trigonometric = new java.util.HashSet<>(
+                Arrays.asList(MethodRegistry.expandedTrigAndHypMethodNames)
         );
 
-        if (definitelyFoldable.contains(name)) {
-            return true;
-        }
+        // ===== WHITELIST: DEFINITELY FOLDABLE =====
+        java.util.Set<String> definitelyFoldable = new java.util.HashSet<>(
+                Arrays.asList(
+                        // ===== EXPONENTIAL & LOGARITHMIC =====
+                        "exp", "ln", "lg", "log", "log10", "log2",
+                        "ln-¹", "lg-¹", "log-¹", "aln", "alg", "alog",
+                        // ===== POWER & ROOT =====
+                        "sqrt", "cbrt", "pow", "hypot",
+                        "inverse", "square", "cube",
+                        "fact",
+                        // ===== COMBINATORICS =====
+                        "comb", "perm",
+                        // ===== ROUNDING & ABSOLUTE =====
+                        "abs", "floor", "ceil", "round", "trunc", "sign",
+                        // ===== LIST STATISTICS (pure functions - no state) =====
+                        "listsum", "sum", "prod", "product",
+                        "mean", "listavg", "avg", "average",
+                        "median", "med",
+                        "min", "max",
+                        "mode", "sort",
+                        "range", "rng", "mid_range", "mrng",
+                        "rms",
+                        "s_d", "std_dev",
+                        "variance", "st_err",
+                        "cov"
+                ));
+        definitelyFoldable.addAll(trigonometric);
 
-        // Conservative: don't fold unknown functions
-        return false;
+        return definitelyFoldable.contains(name);
     }
 
     /**
@@ -2241,13 +2272,12 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
                 "2*sinh(5)"
             };
 
-            double[] expected = {8.0, 9.0, 16.0, 2.0, 2.0, 17.0, 0.01, 0.42478219352309348656738397432167,5*148.40642115557751795401894399213};
+            double[] expected = {8.0, 9.0, 16.0, 2.0, 2.0, 17.0, 0.01, 0.42478219352309348656738397432167, 5 * 148.40642115557751795401894399213};
 
             for (int i = 0; i < exprs.length; i++) {
                 try {
                     MathExpression me = new MathExpression(exprs[i]);
                     double result = Double.parseDouble(me.solve());
-                  
 
                     String status = Math.abs(result - expected[i]) < 1e-9 ? "✓" : "✗";
                     System.out.printf("%s %s = %.6f (expected: %.6f)%n",
@@ -2449,16 +2479,15 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println("VARIABLES--1 = " + VariableManager.VARIABLES);
         Function f = FunctionManager.add("f(x,y) = x - x/y");
         System.out.println("VARIABLES--2 = " + VariableManager.VARIABLES);
-       
-        
-        f.updateArgs(2,3);
+
+        f.updateArgs(2, 3);
         double r = f.calc();
         System.out.println("VARIABLES--3 = " + VariableManager.VARIABLES);
         System.out.println("r = " + r);
         int iterations = 1;
         double vvv[] = new double[1];
         long start = System.nanoTime();
-        f.updateArgs(2,3);
+        f.updateArgs(2, 3);
         for (int i = 1; i <= iterations; i++) {
             vvv[0] = f.calc();
         }
@@ -2533,9 +2562,9 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println(quadRoots1.solve());
         MathExpression tartRoots = new MathExpression("t_root(@(x)5*x^3-12*x+120)");
         System.out.println(tartRoots.solve());
-                
+
         MathExpression printer = new MathExpression("print(anon22,C)");
-        System.out.println(printer.solve()); 
+        System.out.println(printer.solve());
         System.out.println(new MathExpression("M=@(x)7*x^2;M(2)").solve());
 
         //   double N = 100; 
