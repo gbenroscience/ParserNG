@@ -101,7 +101,7 @@ public class MathExpression implements Savable, Solvable {
      */
     private boolean willFoldConstants = true;
 
-    private ExpressionSolver expressionSolver = new ExpressionSolver();
+    private ExpressionSolver expressionSolver;
 
     /**
      * If set to true, MathExpression objects will automatically initialize
@@ -1356,6 +1356,7 @@ public class MathExpression implements Savable, Solvable {
                 executionFrame[t.frameIndex] = t.v.getValue();
             }
         }
+        expressionSolver = new ExpressionSolver();
     }
 
     private final class ExpressionSolver {
@@ -1363,25 +1364,33 @@ public class MathExpression implements Savable, Solvable {
         private static final int MAX_ARITY = 32;
         private static final int ABSOLUTE_MAX_ARITY = 100_000;
 
-        private EvalResult[][] argCache = new EvalResult[MAX_ARITY + 1][];
-        private EvalResult[] stack;
+        // Pre-allocate and reuse
+        private final EvalResult[] stack;
+        private final EvalResult[][] argCache;
 
         public ExpressionSolver() {
-            // Pre-allocate ONE array per arity that we reuse
+            // Allocate stack ONCE, with sufficient capacity
+            // Max stack depth is usually cachedPostfix.length, but we pad for safety
+            int maxStackDepth = Math.max(cachedPostfix.length * 2, 256);
+            this.stack = new EvalResult[maxStackDepth];
+
+            // CRITICAL: Initialize all stack slots with EvalResult objects
+            for (int i = 0; i < stack.length; i++) {
+                stack[i] = new EvalResult();
+            }
+
+            // Pre-allocate argument arrays
+            this.argCache = new EvalResult[MAX_ARITY + 1][];
             for (int i = 0; i <= MAX_ARITY; i++) {
                 argCache[i] = new EvalResult[i];
+                for (int j = 0; j < i; j++) {
+                    argCache[i][j] = new EvalResult();  // Initialize
+                }
             }
         }
 
         public EvalResult evaluate() {
-            if(stack == null){
-                stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];    
-            }else{
-                if(cachedPostfix.length > stack.length ){
-                    stack = new EvalResult[Math.max(cachedPostfix.length * 2, 64)];
-                }
-            }
-            
+            // Just use the pre-allocated stack - no allocation per call
             int ptr = -1;
 
             for (int i = 0; i < cachedPostfix.length; i++) {
@@ -1452,7 +1461,7 @@ public class MathExpression implements Savable, Solvable {
                         int valuesOnStack = ptr + 1;
 
                         if (arity == 0) {
-                            EvalResult result = t.action.calc(getNextResult(), arity,argCache[arity]);
+                            EvalResult result = t.action.calc(getNextResult(), arity, argCache[arity]);
                             stack[++ptr] = result;
                             break;
                         }
