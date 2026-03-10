@@ -108,7 +108,7 @@ public class QuadraticSolver {
             solutions[0] = realPart;
             solutions[1] = imagPart;
             solutions[2] = realPart;
-            solutions[3] = imagPart; 
+            solutions[3] = -imagPart; 
 
             complexCoords1[0] = realPart; complexCoords1[1] = imagPart;
             complexCoords2[0] = realPart; complexCoords2[1] = -imagPart;

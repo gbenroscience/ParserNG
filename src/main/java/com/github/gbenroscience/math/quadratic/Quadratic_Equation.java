@@ -61,7 +61,9 @@ public QuadraticSolver getSolver(){
     return algorithm;
 }
 
-
+public boolean isComplexSolution(){
+    return algorithm.isComplex();
+}
 
 public static void main(String args[]){
     Quadratic_Equation eqn=new Quadratic_Equation("-2*X^2+3*X+1+X=-9-9X^2");

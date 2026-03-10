@@ -359,7 +359,40 @@ public class MethodRegistry {
 
         registerMethod(Declarations.PRINT, (ctx, arity, args) -> {
             for (MathExpression.EvalResult arg : args) {
-                System.out.println(arg);
+                switch (arg.type) {
+                    case MathExpression.EvalResult.TYPE_STRING:
+                        Function f = FunctionManager.lookUp(arg.textRes);
+                        if (f != null) {
+                            switch (f.getType()) {
+                                case ALGEBRAIC_EXPRESSION:
+                                    System.out.println(f.toString());
+                                    break;
+                                case MATRIX:
+                                    System.out.println(f.getName() +"="+ f.getMatrix().toString());
+                                    break;
+                                default:
+                                    System.out.println(f.toString());
+                                    break;
+                            }
+                        }else{
+                            System.out.println(arg.textRes);
+                        }
+                        break;
+                    case MathExpression.EvalResult.TYPE_ERROR:
+                        System.out.println(arg.toString());
+                        break;
+                    case MathExpression.EvalResult.TYPE_MATRIX:
+                        System.out.println(arg.matrix.getName()+"="+arg.matrix.toString());
+                        arg.matrix.print();
+                        break;
+                    case MathExpression.EvalResult.TYPE_VECTOR:
+                        System.out.println(Arrays.toString(arg.vector));
+                        break;
+
+                    default:
+                        System.out.println(arg.toString());
+                }
+         
             }
             return ctx.wrap(-1);
         });
@@ -748,8 +781,6 @@ public class MethodRegistry {
         });
 
         registerMethod(Declarations.GENERAL_ROOT, (ctx, arity, args) -> {
-            System.out.println("args: " + Arrays.toString(args));
-
             RootFinder rf;
             switch (args.length) {
                 case 1:
@@ -761,7 +792,7 @@ public class MethodRegistry {
                     ctx.wrap(rf.findRoots());
                     break;
                 case 3:
-                    rf = new RootFinder(FunctionManager.lookUp(args[0].textRes), args[1].scalar, args[2].scalar );
+                    rf = new RootFinder(FunctionManager.lookUp(args[0].textRes), args[1].scalar, args[2].scalar);
                     ctx.wrap(rf.findRoots());
                     break;
                 case 4:
@@ -775,8 +806,8 @@ public class MethodRegistry {
 
             return ctx;
         });
-       
-         registerMethod(Declarations.QUADRATIC, (ctx, arity, args) -> {
+
+        registerMethod(Declarations.QUADRATIC, (ctx, arity, args) -> {
             Function f = FunctionManager.lookUp(args[0].textRes);
             String input = f.expressionForm();
             input = input.substring(1);//remove the @
@@ -788,12 +819,16 @@ public class MethodRegistry {
             }
             Quadratic_Equation solver = new Quadratic_Equation(input);
             QuadraticSolver alg = solver.getAlgorithm();
-            return ctx.wrap(alg.solutions);
+            if (alg.isComplex()) {
+                return ctx.wrap(alg.solutions);
+            } else {
+                return ctx.wrap(new double[]{alg.solutions[0], alg.solutions[1]});
+            }
         });
-        
+
         registerMethod(Declarations.TARTAGLIA_ROOTS, (ctx, arity, args) -> {
             Function f = FunctionManager.lookUp(args[0].textRes);
-            String input = f.expressionForm();System.out.println("input: "+input);
+            String input = f.expressionForm();
             input = input.substring(1);//remove the @
             int closeBracOfAt = Bracket.getComplementIndex(true, 0, input);
             input = input.substring(closeBracOfAt + 1);
@@ -803,7 +838,7 @@ public class MethodRegistry {
             }
 
             Tartaglia_Equation solver = new Tartaglia_Equation(input);
-            
+
             return ctx.wrap(solver.solutions());
         });
 

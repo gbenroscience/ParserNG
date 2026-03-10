@@ -2529,8 +2529,14 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println(meRoots.solve());
         MathExpression quadRoots = new MathExpression("quadratic(@(x)3*x^2-8*x+3)");
         System.out.println(quadRoots.solve());
+        MathExpression quadRoots1 = new MathExpression("quadratic(@(x)3*x^2-8*x+203)");
+        System.out.println(quadRoots1.solve());
         MathExpression tartRoots = new MathExpression("t_root(@(x)5*x^3-12*x+120)");
         System.out.println(tartRoots.solve());
+                
+        MathExpression printer = new MathExpression("print(anon22,C)");
+        System.out.println(printer.solve()); 
+        System.out.println(new MathExpression("M=@(x)7*x^2;M(2)").solve());
 
         //   double N = 100; 
         //   Shootouts.benchmark(s2, (int) N);

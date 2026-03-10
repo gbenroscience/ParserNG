@@ -103,14 +103,15 @@ To verify constant folding behavior:
 
 ```java
 MathExpression expr = new MathExpression("2+3*4+sin(0)");
-Token[] tokens = expr.cachedPostfix;  // Public access for testing
+Token[] tokens = expr.getCachedPostfix();  // Public access for testing
 System.out.println("Tokens after folding: " + tokens.length);  // Should be 1 or 2
 ```
 
 ### Disable Folding (If Needed)
 
 ```java
-MathExpression.setConstantFoldingEnabled(false);  // (once implemented)
+MathExpression me = new MathExpression("2+5+3^x");
+me.setWillFoldConstants(false);
 ```
 
 ---
@@ -138,7 +139,7 @@ For companies requiring compliance verification, the folding process includes:
 
 ## Testing
 
-Run the test suite in `MathExpression.Test`:
+Run the test suite in class `MathExpression.Test_Strength_Reduction`:
 
 ```
 ✓ Basic arithmetic: 2+3 = 5.0
