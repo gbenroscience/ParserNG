@@ -43,7 +43,17 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 Also available on **Maven Central**:  
 https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng/1.1.1
 
-## ⚡ Turbo Mode — The 1.1.1 Game Changer
+## 🧮 Standard Mode — The old way
+
+```java
+import com.github.gbenroscience.parser.MathExpression;
+
+MathExpression me = new MathExpression("x=2;sin(3*x+2)+sec(5*x/4)");
+double res = me.solveGeneric().scalar;
+```
+
+
+## ⚡ Turbo Mode — The Game Changer
 
 ```java
 import com.github.gbenroscience.parser.MathExpression;

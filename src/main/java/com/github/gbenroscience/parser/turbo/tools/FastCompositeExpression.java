@@ -90,6 +90,10 @@ public interface FastCompositeExpression extends Savable{
     }
    
        String checkErrorLogs();
+       
+       default TurboExpressionEvaluator getCompiler(){
+          return null;
+       }
     
     /**
      * Convenience method for string extraction.

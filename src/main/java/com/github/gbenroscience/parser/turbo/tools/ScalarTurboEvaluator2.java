@@ -407,12 +407,17 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                     }
                 }
 
-            @Override
-            public String checkErrorLogs() {
-                String logs = errorLog.getLogs();
-                errorLog.print();
-                return logs;
-            }
+                @Override
+                public String checkErrorLogs() {
+                    String logs = errorLog.getLogs();
+                    errorLog.print();
+                    return logs;
+                }
+
+                @Override
+                public TurboExpressionEvaluator getCompiler() {
+                    return ScalarTurboEvaluator2.this;
+                }
             };
 
         } catch (Throwable t) {

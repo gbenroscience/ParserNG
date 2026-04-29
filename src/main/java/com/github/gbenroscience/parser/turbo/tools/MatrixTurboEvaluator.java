@@ -293,6 +293,11 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                 errorLog.print();
                 return logs;
             }
+            
+            @Override
+            public TurboExpressionEvaluator getCompiler() {
+                return MatrixTurboEvaluator.this;
+            }
         };
     }
 

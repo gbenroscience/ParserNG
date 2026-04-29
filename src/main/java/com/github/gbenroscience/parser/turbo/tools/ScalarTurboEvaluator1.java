@@ -358,6 +358,12 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 errorLog.print();
                 return logs;
             }
+
+            @Override
+            public TurboExpressionEvaluator getCompiler() {
+                return ScalarTurboEvaluator1.this;
+            }
+            
             
         };
     }
