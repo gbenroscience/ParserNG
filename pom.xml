@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>1.1.2</version>
+    <version>1.1.3</version>
     <packaging>jar</packaging>
     <!-- 
       I started this project 2009 and have been upgrading it since then.
@@ -14,8 +14,8 @@
     <name>ParserNG</name>
     <description>Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies. 
         ParserNG is the height of interpreted Math parsing in Java. It is the fastest of all interpreted Java math parsers.
-        Version 1.1.2 fixes bugs and makes MatrixTurboEvaluator natively support turbo execution of the rot function. Note that the ScalarTurboEvaluators already support it
-        Also FastCompositeExpression is now aware of its compiler as it now sports a getCompiler default method(which can be overriden to specify the turbo class that compiled it)
+        Version 1.1.3 squashes a bug where the result of rot(swarm,args...) cannot be assigned to a matrix..e.g V=rot(@(10,3)(matrix-entries), pi, origin, direction)
+        crashes
     </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
     

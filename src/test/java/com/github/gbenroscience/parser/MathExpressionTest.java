@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
 import com.github.gbenroscience.parser.methods.Declarations;
-import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator2;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.VariableManager;
@@ -504,6 +503,17 @@ class MathExpressionTest {
         System.out.println("p=" + p);
 
         Assertions.assertTrue(p.getType() == TYPE.MATRIX && (p.getMatrix().getRows() == 2 && p.getMatrix().getCols() == 3));
+    }
+
+    @Test
+    void rotSwarmOfPointsAssignmentTest() {
+        MathExpression me = new MathExpression("swarm=@(10,3)(1,4,3, 2,4,5, 5,8,2, 12,18,25, 9,0.5,4, 15,32,48, 9,19,49, 32,5,82, 8,18,28, 4,9,12);"
+                + "P(1,3)=(0,0,0);D(1,3)=(0,0,1);V=rot(swarm,pi,P,D);print(V)");
+        System.out.println("solve: " + me.solveGeneric());
+        System.out.println("swarm=" + FunctionManager.lookUp("swarm"));
+        Function p = FunctionManager.lookUp("swarm");
+
+        Assertions.assertTrue(p.getType() == TYPE.MATRIX && (p.getMatrix().getRows() == 10 && p.getMatrix().getCols() == 3));
     }
 
     @Test

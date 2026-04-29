@@ -421,11 +421,9 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                              * FunctionManager.add(rotF); return true;
                              */
                         }
-                        if (f.type == TYPE.MATRIX) {//is a Point rotation
-                            String fname = f.getFullName();
-                            String fullName = "@" + fname.substring(fname.indexOf("("));
-                            String fexpr = newFuncName + "=" + fullName + ev.toString().replace('[', '(').replace(']', ')');
-                            Function rotP = new Function(fexpr);
+                        if (f.type == TYPE.MATRIX) {//is a Point rotation 
+                            ev.matrix.setName(newFuncName);
+                            Function rotP = new Function(ev.matrix);
                             FunctionManager.add(rotP);
                             return true;
                         }
@@ -635,7 +633,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             int cols = Integer.parseInt(varList.get(1));
             List<String> entries = new Scanner(expr, false, "(", ")", ",", ";").scan();
             int sz = entries.size();
-
+  
             if (rows * cols != sz) {
                 String err = "Invalid matrix! rows x cols must be equal to items supplied in matrix list. Expected: " + (rows * cols) + ", Found: " + sz + " items";
                 errorLog.info(err);
