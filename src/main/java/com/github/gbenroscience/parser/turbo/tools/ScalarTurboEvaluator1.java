@@ -1657,7 +1657,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                     Point p11Rot = r.rotate(p11);
                     Point p22Rot = r.rotate(p22);
-                    return ctx.wrap(new double[]{p11Rot.x, p11Rot.y, p11Rot.z, p22Rot.x, p22Rot.y, p22Rot.z});
+                    Matrix m = new Matrix(new double[]{p11Rot.x, p11Rot.y, p11Rot.z, p22Rot.x, p22Rot.y, p22Rot.z},2,3);
+                    return ctx.wrap(m);
                 } else {
                     return MathExpression.EvalResult.ERROR;
                 }

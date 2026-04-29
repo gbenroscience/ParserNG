@@ -133,7 +133,7 @@ In CLI, you can use -e/-E/--expanding switch to work with Expanding expressions.
 <br>
 Example:<br>
 ```
-VALUES_PNG="1 8 5 2" java -jar target/parser-ng-1.1.1.jar -e "avg(..L{MN/2})*1.1-MN <  L0 | (L1+L{MN-1})*1.3 + MN<  L0" -v
+VALUES_PNG="1 8 5 2" java -jar target/parser-ng-1.1.2.jar -e "avg(..L{MN/2})*1.1-MN <  L0 | (L1+L{MN-1})*1.3 + MN<  L0" -v
 avg(..L{MN/2})*1.1-MN <  L0 | (L1+L{MN-1})*1.3 + MN<  L0 
 Expression : avg(..L{MN/2})*1.1-MN <L0 | (L1+L{MN-1})*1.3 + MN<L0 
 Upon       : 1,8,5,2

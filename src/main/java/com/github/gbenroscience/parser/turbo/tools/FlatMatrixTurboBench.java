@@ -17,10 +17,12 @@ package com.github.gbenroscience.parser.turbo.tools;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.Function;
-import com.github.gbenroscience.parser.MathExpression; 
+import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.STRING;
 import com.github.gbenroscience.util.FunctionManager;
 import java.util.Arrays;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  *
@@ -28,20 +30,22 @@ import java.util.Arrays;
  * scalar, small matrix, and large matrix operations.
  */
 public class FlatMatrixTurboBench {
-    
-    
-    private static final int N = 1000000;
-    
 
+    private static final int N = 1000000;
 
     public static void main(String[] args) throws Throwable {
-          String rpt = STRING.repeating("=", 80);
+        String rpt = STRING.repeating("=", 80);
         System.out.println(rpt);
         System.out.println("PARSERNG FLAT-ARRAY MATRIX TURBO BENCHMARKS");
         System.out.println(rpt);
+        checkRot2Point();
+        checkRotPointSwarm();
+        checkRotFunction();
+        checkMatrixAlgebra();
+        benchmarkPointSwarm();
 
         benchmarkPrint();
-        benchmarkMatrixAlgrebra();
+        benchmarkMatrixAlgebra();
         benchmarkScalar();
         benchmarkWithVariablesSimple();
         benchmarkWithVariablesAdvanced();
@@ -73,8 +77,7 @@ public class FlatMatrixTurboBench {
         System.out.printf("Speed: %.2f ns/op%n", duration / 1_000_000.0);
         System.out.printf("Throughput: %.2f ops/sec%n", 1_000_000.0 / (duration / 1e9));
     }
-    
-    
+
     private static void benchmarkWithVariablesSimple() throws Throwable {
         System.out.println("\n=== WITH VARIABLES: SIMPLE; FOLDING OFF ===\n");
 
@@ -163,15 +166,114 @@ public class FlatMatrixTurboBench {
         System.out.println("values=" + Arrays.toString(res));
     }
 
-    private static void benchmarkMatrixAlgrebra() throws Throwable {
-        System.out.println("\n--- MATRIX ALGEBRA ---");
+    private static void checkMatrixAlgebra() {
+        System.out.println("\n--- MATRIX ALGEBRA Check---");
+        try {
+            String expression = "R=@(3,3)(5,1,3, 2,9,12, 1,5,18);A=@(3,3)(2,0,5, 8,9,13, 1,2,1);A+2*R-1/A;";
+            MathExpression me = new MathExpression(expression);
+            FastCompositeExpression turbo = TurboEvaluatorFactory.getCompiler(me).compile();
+            System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
+            double[] vars = {};
+            MathExpression.EvalResult result = turbo.apply(vars);
+            System.out.println("result:" + result.toString());
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    private static void checkRot2Point() {
+        try {
+            System.out.println("===============MatrixTurboEvaluator-Rot-2-Point-Eval====================");
+            MathExpression m = new MathExpression(" rot(@(1,3)(3,1,4), @(1,3)(2,2,8), pi, @(1,3)(0,0,0), @(1,3)(0,0,1) ) ");
+            System.out.println("scanner: " + m.getScanner() + ", std-res: " + m.solveGeneric());
+            FastCompositeExpression fce = m.compileTurbo();
+            System.out.println("compiler class: " + fce.getCompiler().getClass());
+            MathExpression.EvalResult evr = fce.apply(new double[0]);
+            fce.checkErrorLogs();
+            System.out.println("turbo: " + evr);
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    private static void checkRotPointSwarm() {
+        try {
+            System.out.println("===============MatrixTurboEvaluator-Rot-Eval-Point-Swarm====================");
+            MathExpression m = new MathExpression(" rot(@(5,3)(3,1,4, 2,2,8, 7,1,3, 4,5,19, 8,7,21), pi, @(1,3)(0,0,0), @(1,3)(0,0,1) ) ");
+            System.out.println("scanner: " + m.getScanner() + ", std-res: " + m.solveGeneric());
+            FastCompositeExpression fce = m.compileTurbo();
+            System.out.println("compiler class: " + fce.getCompiler().getClass());
+            MathExpression.EvalResult evr = fce.apply(new double[0]);
+            fce.checkErrorLogs();
+            System.out.println("turbo: " + evr);
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    private static void checkRotFunction() {
+        try {
+            System.out.println("===============MatrixTurboEvaluator-Rot-Eval-Point-Swarm====================");
+            MathExpression m = new MathExpression("f=@(x,y)sin(x)+3*y;rot(f, pi, @(1,3)(0,0,0), @(1,3)(0,0,1) ) ");
+            System.out.println("scanner: " + m.getScanner() + ", std-res: " + m.solveGeneric());
+            FastCompositeExpression fce = m.compileTurbo();
+            System.out.println("compiler class: " + fce.getCompiler().getClass());
+            MathExpression.EvalResult evr = fce.apply(new double[0]);
+            fce.checkErrorLogs();
+            System.out.println("turbo: " + evr);
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    private static void benchmarkPointSwarm() {
+        try {
+            System.out.println("===============BenchmarkMatrixTurboEvaluator-VS-Std-Mode-Rot-Eval-For-Point-Swarm====================");
+            MathExpression m = new MathExpression(" rot(@(5,3)(3,1,4, 2,2,8, 7,1,3, 4,5,19, 8,7,21), pi, @(1,3)(0,0,0), @(1,3)(0,0,1) ) ");
+
+            double n = 1000_000;
+
+            MathExpression.EvalResult ev = null;
+            long start = System.nanoTime();
+            for (int i = 0; i < n; i++) {
+                ev = m.solveGeneric();
+            }
+            long stdDur = System.nanoTime() - start;
+
+            FastCompositeExpression fce = new MatrixTurboEvaluator(m).compile();
+
+            MathExpression.EvalResult evr = null;
+
+            double[] d = new double[0];
+            start = System.nanoTime();
+            for (int i = 0; i < n; i++) {
+                evr = fce.apply(d);
+            }
+            long turboDur = System.nanoTime() - start;
+
+            System.out.printf("Expression: %s%n", m.getExpression());
+            System.out.println("std-res: " + ev);
+            System.out.println("turbo-res: " + evr);
+
+            System.out.printf("Std-Speed: %.2f ns/op%n", stdDur / n);
+            System.out.printf("Std-Throughput: %.2f ops/sec%n", n / (stdDur / 1e9));
+            System.out.printf("Turbo-Speed: %.2f ns/op%n", turboDur / n);
+            System.out.printf("Turbo-Throughput: %.2f ops/sec%n", n / (turboDur / 1e9));
+            System.out.printf("Speedup:     %.1fx%n", (double) stdDur / turboDur);
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    private static void benchmarkMatrixAlgebra() throws Throwable {
+        System.out.println("\n--- MATRIX ALGEBRA 2(Benchmark)---");
         int n = 20;
         Matrix t = new Matrix(n, n);
         t.setName("T");
         t.randomFill(35);
         t.print();
         System.out.println("T: After fill-----\n");
-         
+
         FunctionManager.add(new Function(t));
 
         Matrix v = new Matrix(n, n);
@@ -179,33 +281,29 @@ public class FlatMatrixTurboBench {
         v.randomFill(35);
         v.print();
         System.out.println("V: After fill-----\n");
-        
+
         FunctionManager.add(new Function(v));
 
- 
         String ex = "2*T+V";
         MathExpression expr = new MathExpression(ex);
- 
+
         FastCompositeExpression turbo = expr.compileTurbo();
         double[] vars = {};
         MathExpression.EvalResult er = null;
-   
+
         long start = System.nanoTime();
         for (int i = 0; i < 1_000_000; i++) {
             er = turbo.apply(vars);
         }
         long duration = System.nanoTime() - start;
 
-        
         System.out.printf("Expression: %s%n", ex);
-        System.out.println("res: "+er);
+        System.out.println("res: " + er);
         System.out.printf("Speed: %.2f ns/op%n", duration / 1_000_000.0);
         System.out.printf("Throughput: %.2f ops/sec%n", 1_000_000.0 / (duration / 1e9));
     }
-    
-    
-    
-      private static void benchmarkPrint() throws Throwable {
+
+    private static void benchmarkPrint() throws Throwable {
         System.out.println("\n--- SMALL MATRIX (3x3) ---");
 
         MathExpression expr = new MathExpression(
@@ -213,10 +311,9 @@ public class FlatMatrixTurboBench {
         );
         FastCompositeExpression turbo = expr.compileTurbo();
         double[] vars = {};
-           expr.solve();
-           turbo.apply(vars);
+        expr.solve();
+        turbo.apply(vars);
 
-     
     }
 
     private static void benchmarkSmallMatrix() throws Throwable {
@@ -300,7 +397,7 @@ public class FlatMatrixTurboBench {
         long duration = System.nanoTime() - start;
 
         System.out.printf("Operation: matrix_mul(10x10, 10x10)%n");
-        System.out.printf("Speed: %d ns/op%n", duration );
+        System.out.printf("Speed: %d ns/op%n", duration);
         System.out.printf("Complexity: O(n^3) = O(1000) operations%n");
     }
 

@@ -1,6 +1,10 @@
 # ParserNG
 
 
+### Parser 1.1.2 has been released on maven-central!
+1. Fixes bugs and makes `MatrixTurboEvaluator` natively support turbo execution of the rot function. Note that the `ScalarTurboEvaluator`s already support it.
+2. Also `FastCompositeExpression` is now aware of its compiler as it now sports a `getCompiler` default method(which can be overriden to specify the turbo class that compiled it) 
+
 ### Parser 1.1.1 has been released on maven-central!
 Implemented version retrieval for ParserNG
 

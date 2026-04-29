@@ -403,6 +403,7 @@ public class MethodRegistry {
         });
 
         registerMethod(Declarations.ROTOR, (ctx, arity, args) -> {
+  
             int sz = args.length;
             if (args.length == 4) {//rot(F,a,O,D) function, angle, origin, direction vector
                 //confirm the last 3 other args
@@ -549,7 +550,8 @@ public class MethodRegistry {
 
                         Point p11Rot = r.rotate(p11);
                         Point p22Rot = r.rotate(p22);
-                        return ctx.wrap(new double[]{p11Rot.x, p11Rot.y, p11Rot.z, p22Rot.x, p22Rot.y, p22Rot.z});
+                        Matrix out = new Matrix(new double[]{p11Rot.x, p11Rot.y, p11Rot.z, p22Rot.x, p22Rot.y, p22Rot.z}, 2, 3);//BREAKING CHANGE---CHANGED 2 point rotation to 2x3 Matrix output
+                        return ctx.wrap(out);
                     } else {
                         return MathExpression.EvalResult.ERROR;
                     }

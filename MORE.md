@@ -1,5 +1,5 @@
 # ParserNG
-<b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. Its latest release on mavn-central (version 1.1.1) can be used to plot 2D graphs(Geometric plots and function plots) It works seamlessly on all Java platforms.<br><br>
+<b>ParserNG</b> is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. Its latest release on mavn-central (version 1.1.2) can be used to plot 2D graphs(Geometric plots and function plots) It works seamlessly on all Java platforms.<br><br>
 
 
 
@@ -8,15 +8,15 @@
       Click the Sponsor button to do this.
 
 
-ParserNG v1.1.1 breaks the barrier in fully featured math parser frequencies!
-With various other optimizations, v1.1.1 comes with inner loop optimizations which uses a blazing fast, post-fix style algorithm to quickly evaluate inner brackets with less checks and less string manipulations.
+ParserNG v1.1.2 breaks the barrier in fully featured math parser frequencies!
+With various other optimizations, v1.1.2 comes with inner loop optimizations which uses a blazing fast, post-fix style algorithm to quickly evaluate inner brackets with less checks and less string manipulations.
 This obviously will make graphing and other iterative tasks super responsive.
 
-ParserNG v1.1.1 is an extremely feature rich math tool which also doubles as (arguably) the fastest pure Java expression evaluator on the planet.
+ParserNG v1.1.2 is an extremely feature rich math tool which also doubles as (arguably) the fastest pure Java expression evaluator on the planet.
 In benchmarks, it beats com.expression.parser(Java Math Expression Parser) by almost (10x-14x) and edges out Exp4J (which is lightweight) in many benchmarks.
 
 
-ParserNG 1.1.1 features strength reduction, constant folding and execution frame(array) based args passing(in contrast to Map based) to ensure O(1) complexity in passage of args to the evaluation stage.
+ParserNG 1.1.2 features strength reduction, constant folding and execution frame(array) based args passing(in contrast to Map based) to ensure O(1) complexity in passage of args to the evaluation stage.
  
 [Here are a few benchmarks here](./BENCHMARK_RESULTS.md)
 
@@ -68,7 +68,7 @@ If you need to access this library via Maven Central, do:
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
-            <version>1.1.1</version>
+            <version>1.1.2</version>
         </dependency>
        
 
@@ -101,20 +101,20 @@ ParserNG is written completely in (pure) Java and so is as cross-platform as Jav
 ## Using ParserNG as commandline tool
 You can use jar directly as commandline calculus. Unless the tool is packed to your distribution:
 ```
-java -jar parser-ng-1.1.1.jar  1+1
+java -jar parser-ng-1.1.2.jar  1+1
 2.0
 ```
 Or as logical parser
 ```
-java -jar parser-ng-1.1.1.jar -l true and true
+java -jar parser-ng-1.1.2.jar -l true and true
 true
-java -jar parser-ng-1.1.1.jar -l "2 == (4-2)"
+java -jar parser-ng-1.1.2.jar -l "2 == (4-2)"
 true
 ```
 You can get help by 
 ```
-java -jar parser-ng-1.1.1.jar  -h
-  ParserNG 1.1.1 math.Main
+java -jar parser-ng-1.1.2.jar  -h
+  ParserNG 1.1.2 math.Main
 -h/-H/--help         this text; do not change for help (witout dashes), which lists functions
 -v/-V/--verbose      output is reprinted to stderr with some inter-steps
 -l/-L/--logic        will add logical expression wrapper around the expression
@@ -136,11 +136,11 @@ java -jar parser-ng-1.1.1.jar  -h
 ```
 You  can get examples by verbose help:
 ```
-java -jar parser-ng-1.1.1.jar  -h -v
+java -jar parser-ng-1.1.2.jar  -h -v
 ```
 you can list functions:
 ```
-java -jar parser-ng-1.1.1.jar  help
+java -jar parser-ng-1.1.2.jar  help
 List of currently known methods:
 acos        - help not yet written. See https://github.com/gbenroscience/ParserNG
 ...
@@ -149,7 +149,7 @@ List of functions is just tip of iceberg, see: https://github.com/gbenroscience/
 ```
 you can list logical operators:
 ```
-java -jar parser-ng-1.1.1.jar  -l help
+java -jar parser-ng-1.1.2.jar  -l help
 Comparing operators: !=, ==, >=, <=, le, ge, lt, gt, <, >
 Logical operators: impl, xor, imp, eq, or, and, |, &
 As Mathematical parts are using () as brackets, Logical parts must be grouped by [] eg.
@@ -164,40 +164,40 @@ Program can work with stdin, out and err properly. Can work with multiline input
 ### cmdline examples
 Following lines describes, how stdin/arguments are processed, and how different is input/output with `-t` on/off
 ```
-   java -jar parser-ng-1.1.1.jar -h
+   java -jar parser-ng-1.1.2.jar -h
     this help
-  java -jar parser-ng-1.1.1.jar 1+1
+  java -jar parser-ng-1.1.2.jar 1+1
     2.0
-  java -jar parser-ng-1.1.1.jar "1+1
+  java -jar parser-ng-1.1.2.jar "1+1
                                  +2+2"
     2.0
     4.0
-  java -jar parser-ng-1.1.1.jar -t "1+1
+  java -jar parser-ng-1.1.2.jar -t "1+1
                                     +2+2"
     6.0
-  java -jar parser-ng-1.1.1.jar -i  1+1
+  java -jar parser-ng-1.1.2.jar -i  1+1
     nothing, will expect manual output, and calculate line by line
-  java -jar parser-ng-1.1.1.jar -i -t  1+1
+  java -jar parser-ng-1.1.2.jar -i -t  1+1
     nothing, will expect manual output and calcualte it all as one expression
-  echo 2+2 | java -jar parser-ng-1.1.1.jar  1+1
+  echo 2+2 | java -jar parser-ng-1.1.2.jar  1+1
     2.0
   echo "1+1 
-        +2+2 | java -jar parser-ng-1.1.1.jar -i
+        +2+2 | java -jar parser-ng-1.1.2.jar -i
     2.0
     4.0
   echo "1+1 
-        +2+2 | java -jar parser-ng-1.1.1.jar -i -t
+        +2+2 | java -jar parser-ng-1.1.2.jar -i -t
     6.0
-  java -cp parser-ng-1.1.1.jar parser.cmd.ParserCmd "1+1
+  java -cp parser-ng-1.1.2.jar parser.cmd.ParserCmd "1+1
     will ask for manual imput en evaluate per line
   echo "1+1 
-        +2+2 | java -cp parser-ng-1.1.1.jar parser.cmd.ParserCmd 2>/dev/null
+        +2+2 | java -cp parser-ng-1.1.2.jar parser.cmd.ParserCmd 2>/dev/null
     2.0
     4.0
-  java -cp parser-ng-1.1.1.jar parser.MathExpression "1+1
+  java -cp parser-ng-1.1.2.jar parser.MathExpression "1+1
                                                       +2+2"
     6.0
-  java -cp parser-ng-1.1.1.jar parser.LogicalExpression "true or false"
+  java -cp parser-ng-1.1.2.jar parser.LogicalExpression "true or false"
     true
 
 ```
@@ -773,7 +773,7 @@ This would give:
 
 #### ParserNG and eigenvalues
 
-Version 1.1.1 of ParserNG allows you to quickly compute the eigenvalues of a Matrix.
+Version 1.1.2 of ParserNG allows you to quickly compute the eigenvalues of a Matrix.
 
 Do:
 ```Java
@@ -782,7 +782,7 @@ Do:
 ```
 #### ParsrNG and eigenvectors
 
-As of ParserNG 1.1.1 also, eigenvector computations have been added, do:
+As of ParserNG 1.1.2 also, eigenvector computations have been added, do:
 Do:
 ```Java
     MathExpression expression = new MathExpression("eigvec(@(5,5)(12,1,4,2,9,3,1,8,-5,6,13,9,7,3,5,7,3,5,4,9,13,2,4,8,6))");

@@ -503,7 +503,7 @@ class MathExpressionTest {
         Function p = FunctionManager.lookUp("p");
         System.out.println("p=" + p);
 
-        Assertions.assertTrue(p.getType() == TYPE.MATRIX && ((p.getMatrix().getRows() == 1 && p.getMatrix().getCols() == 6) || (p.getMatrix().getRows() == 6 && p.getMatrix().getCols() == 1)));
+        Assertions.assertTrue(p.getType() == TYPE.MATRIX && (p.getMatrix().getRows() == 2 && p.getMatrix().getCols() == 3));
     }
 
     @Test

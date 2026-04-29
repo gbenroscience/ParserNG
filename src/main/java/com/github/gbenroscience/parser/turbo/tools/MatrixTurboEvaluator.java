@@ -19,11 +19,16 @@ package com.github.gbenroscience.parser.turbo.tools;
  *
  * @author GBEMIRO
  */
+import com.github.gbenroscience.math.geom.Direction;
+import com.github.gbenroscience.math.geom.Line3D;
+import com.github.gbenroscience.math.geom.Point;
+import com.github.gbenroscience.math.geom.ROTOR;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathExpression.EvalResult;
 import com.github.gbenroscience.parser.ParserResult;
+import com.github.gbenroscience.parser.TYPE;
 import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
 import static com.github.gbenroscience.parser.TYPE.MATRIX;
 import com.github.gbenroscience.parser.Variable;
@@ -234,7 +239,7 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                         String[] rawArgs = t.getRawArgs();
                         stack.push(MethodHandles.insertArguments(bridge, 0, (Object) rawArgs));
 
-                    } else if (Method.isMatrixMethod(t.name)) {
+                    } else if (Method.isMatrixMethod(t.name) || t.name.equals(Declarations.ROTOR)) {
                         MethodHandle[] args = new MethodHandle[t.arity];
                         for (int i = t.arity - 1; i >= 0; i--) {
                             args[i] = stack.pop();
@@ -264,9 +269,19 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         final MethodHandle finalHandle = stack.pop().asType(MethodType.methodType(EvalResult.class));
 
         return new FastCompositeExpression() {
+            double args[] = new double[turboArgs == null ? 0 : turboArgs.length];
+
             private void loadVars(double[] variables) {
-                for (int i = 0; i < turboArgs.length; i++) {
-                    turboArgs[slots[i]] = variables[i];
+                // Safety check: ensure we don't null pointer if arrays aren't initialized
+                if (variables == null || turboArgs == null || slots == null) {
+                    return;
+                }
+
+                // Use the smallest length to prevent print-of-bounds access
+                int limit = Math.min(variables.length, Math.min(args.length, slots.length));
+
+                for (int i = 0; i < limit; i++) {
+                    args[slots[i]] = variables[i];
                 }
             }
 
@@ -293,7 +308,7 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                 errorLog.print();
                 return logs;
             }
-            
+
             @Override
             public TurboExpressionEvaluator getCompiler() {
                 return MatrixTurboEvaluator.this;
@@ -398,7 +413,6 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         for (int i = 0; i < args.length; i++) {
             finalFunc = MethodHandles.collectArguments(finalFunc, 0, args[i]);
         }
-
         return finalFunc;
     }
 
@@ -676,9 +690,205 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                 System.arraycopy(target.getFlatArray(), 0, result.getFlatArray(), 0, target.getFlatArray().length);
                 result.getFlatArray()[row * target.getCols() + col] = args[3].scalar;
                 return cache.result.wrap(result);
+            case Declarations.ROTOR:
+              //rot(F,a,O,D) function, angle, origin, direction vector
+              //We have 2 scenarios:
+                    /**
+                     * 1. rot(F, a, O, D)  function, angle, origin, direction vector
+                     * 2. rot(P1, P2, a, O, D) First Point, Second Point, angle, Origin and Direction
+                     * These scenarios are further broken down into 2:
+                     * The args may come in raw form. e.g F, O and D may come as function handles or as the raw data(more uncommon, but happens in MatrixTurboEvaluator)
+                     */
+                  if (args.length == 4) {
+                    //args[0] is always either a function handle or a Matrix of points
+                    Matrix pointsVector = args[0].matrix;
+                    double angle = args[1].scalar;
+                    Matrix origin = args[2].matrix;
+                    Matrix dir = args[3].matrix;
+                    Function f = null;
+                    if (args[0].type == EvalResult.TYPE_STRING) {
+                        f = FunctionManager.lookUp(args[0].textRes);
+                        if (f == null) {
+                            return cache.result.wrap(EvalResult.ERROR);
+                        }
+                        if (f.isMatrix()) {
+                            pointsVector = f.getMatrix();
+                        }
+                    }
+                    Function v = null;
+                    if (args[2].type == EvalResult.TYPE_STRING) {
+                        v = FunctionManager.lookUp(args[2].textRes);
+                        if (v == null) {
+                            return cache.result.wrap(EvalResult.ERROR);
+                        }
+                        if (v.isMatrix()) {
+                            origin = v.getMatrix();
+                        }
+                    }
+                    if (args[3].type == EvalResult.TYPE_STRING) {
+                        v = FunctionManager.lookUp(args[3].textRes);
+                        if (v == null) {
+                            return cache.result.wrap(EvalResult.ERROR);
+                        }
+                        if (v.isMatrix()) {
+                            dir = v.getMatrix();
+                        }
+                    }
+                    double[] pArr = origin.getRowMatrix(0).getFlatArray();
+                    Point p = new Point(pArr[0], pArr[1], pArr[2]);
+                    double[] dirArr = dir.getFlatArray();
+                    Direction d = new Direction(dirArr[0], dirArr[1], dirArr[2]);
+                    if (origin.getRows() != 1) {
+                        return cache.result.wrap(EvalResult.ERROR);
+                    }
+                    if (origin.getCols() != 3) {
+                        return cache.result.wrap(EvalResult.ERROR);
+                    }
+
+                    if (dir.getRows() != 1) {
+                        return cache.result.wrap(EvalResult.ERROR);
+                    }
+                    if (dir.getCols() != 3) {
+                        return cache.result.wrap(EvalResult.ERROR);
+                    }
+
+                    if (pointsVector != null) {
+                        //rotate a set of points
+
+                        ROTOR r = new ROTOR(angle, p, d);
+                        int rows = pointsVector.getRows();
+                        int cols = pointsVector.getCols();//@(n,3)
+
+                        if (cols == 3) {
+                            double outArr[] = new double[3 * rows];
+                            int j = 0;
+                            for (int i = 0; i < rows; i++) {
+                                double[] pm = pointsVector.getRowMatrix(i).getFlatArray();
+                                Point pt = new Point(pm[0], pm[1], pm[2]);
+                                Point rotP = r.rotate(pt);
+                                outArr[j] = rotP.x;
+                                outArr[j + 1] = rotP.y;
+                                outArr[j + 2] = rotP.z;
+                                j += 3;
+                            }
+                            return cache.result.wrap(new Matrix(outArr, rows, 3));
+                        } else {
+                            return cache.result.wrap(EvalResult.ERROR);
+                        }
+                    }
+                    if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
+                        ArrayList<Variable> vars = f.getIndependentVariables();
+                        int siz = vars.size();
+                        if (siz > 3) {
+                            return MathExpression.EvalResult.ERROR;
+                        }
+                        String expr = f.getMathExpression().getExpression();
+                        String fullExpr = f.getName() + "=" + expr;
+                        String transformedFuncName = f.getName();
+
+                        ROTOR r = new ROTOR(angle, p, d);
+
+                        if (siz == 2) {
+                            r.setXAxisName(vars.get(0).getName());
+                            r.setYAxisName(vars.get(1).getName());
+                            r.setZAxisName(transformedFuncName);
+                        }
+                        if (siz == 1) {
+                            r.setXAxisName(vars.get(0).getName());
+                            r.setYAxisName(transformedFuncName);
+                        }
+
+                        String res = r.rotate(fullExpr);
+                        return cache.result.wrap(res);
+                    }
+ 
+                return null;
+
+                }
+                if (args.length == 5) {
+                    Matrix p1Vector = args[0].matrix;
+                    Matrix p2Vector = args[1].matrix;
+
+                    double angle = args[2].scalar;
+                    Matrix origin = args[3].matrix;
+                    Matrix dir = args[4].matrix;
+                    Function p1 = null;
+                    if (args[0].type == EvalResult.TYPE_STRING) {
+                        p1 = FunctionManager.lookUp(args[0].textRes);
+                        if (p1 == null) {
+                            return cache.result.wrap(EvalResult.ERROR);
+                        }
+                        if (p1.isMatrix()) {
+                            p1Vector = p1.getMatrix();
+                        }
+                    }
+
+                    Function p2 = null;
+                    if (args[1].type == EvalResult.TYPE_STRING) {
+                        p2 = FunctionManager.lookUp(args[1].textRes);
+                        if (p2 == null) {
+                            return cache.result.wrap(EvalResult.ERROR);
+                        }
+                        if (p2.isMatrix()) {
+                            p2Vector = p2.getMatrix();
+                        }
+                    }
+
+                    Function v = null;
+                    if (args[3].type == EvalResult.TYPE_STRING) {
+                        v = FunctionManager.lookUp(args[3].textRes);
+                        if (v == null) {
+                            return cache.result.wrap(EvalResult.ERROR);
+                        }
+                        if (v.isMatrix()) {
+                            origin = v.getMatrix();
+                        }
+                    }
+                    if (args[4].type == EvalResult.TYPE_STRING) {
+                        v = FunctionManager.lookUp(args[4].textRes);
+                        if (v == null) {
+                            return cache.result.wrap(EvalResult.ERROR);
+                        }
+                        if (v.isMatrix()) {
+                            dir = v.getMatrix();
+                        }
+                    }
+
+                    double[] pArr = origin.getRowMatrix(0).getFlatArray();
+                    Point p = new Point(pArr[0], pArr[1], pArr[2]);
+                    double[] dirArr = dir.getFlatArray();
+                    Direction d = new Direction(dirArr[0], dirArr[1], dirArr[2]);
+                    ROTOR r = new ROTOR(angle, p, d);
+                    int rows = p1Vector.getRows();
+                    int cols = p1Vector.getCols();//@(n,3)
+                    if (rows != 1) {
+                        return cache.result.wrap(EvalResult.ERROR);
+                    }
+                    if (cols != 3) {
+                        return cache.result.wrap(EvalResult.ERROR);
+                    }
+
+                    rows = p2Vector.getRows();
+                    cols = p2Vector.getCols();//@(n,3)
+                    if (rows != 1) {
+                        return cache.result.wrap(EvalResult.ERROR);
+                    }
+                    if (cols != 3) {
+                        return cache.result.wrap(EvalResult.ERROR);
+                    }
+
+                    double p1Arr[] = p1Vector.getFlatArray();
+                    double p2Arr[] = p2Vector.getFlatArray();
+                    Point rotP1 = r.rotate(new Point(p1Arr[0], p1Arr[1], p1Arr[2]));
+                    Point rotP2 = r.rotate(new Point(p2Arr[0], p2Arr[1], p2Arr[2]));
+                    Matrix outMatrix = new Matrix(new double[]{rotP1.x, rotP1.y, rotP1.z, rotP2.x, rotP2.y, rotP2.z}, 2, 3);//BREAKING CHANGE---CHANGED 2 point rotation to 2x3 Matrix output
+                    return cache.result.wrap(outMatrix);
+                }
+
             default:
-                throw new UnsupportedOperationException("Function: " + funcName);
+                throw new UnsupportedOperationException("Function: `" + funcName + "` not supported");
         }
+
     }
 
     private static double executeScalarStatAtCompileTime(String method, double[] args) {

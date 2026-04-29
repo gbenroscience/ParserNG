@@ -86,8 +86,7 @@ public class Parser {
 
     public static final int GRAD_FUNC = 1;
     public static final int GRAD_VAL = 2;
-    
-    private ErrorLog errorLog = new ErrorLog();
+     
 
     /**
      *
@@ -103,7 +102,7 @@ public class Parser {
 
         DataSetFormatter dsf = new DataSetFormatter(expression);
         List<String> scanner = dsf.getDataset(); 
-        scanner = MathScanner.plusAndMinusStringHandlerHelper(scanner, errorLog);
+        scanner = MathScanner.plusAndMinusStringHandlerHelper(scanner);
         MathScanner.recognizeAnonymousFunctions(scanner);
 
         this.function = localParseDerivativeCommand(scanner);

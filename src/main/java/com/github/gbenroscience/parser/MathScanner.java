@@ -717,7 +717,8 @@ public class MathScanner {
                  * ALSO Skip the function operating methods...their syntax is
                  * too complex to be analyzed here.
                  */
-                if ((Method.isFunctionOperatingMethod(scanner.get(i)) || Method.isStatsMethod(scanner.get(i))) && isOpeningBracket(scanner.get(i + 1))) {
+                boolean canCheckNextToken = i+1<scanner.size();
+                if ((Method.isFunctionOperatingMethod(scanner.get(i)) || Method.isStatsMethod(scanner.get(i))) && (canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) ) {
                     i = Bracket.getComplementIndex(true, i + 1, scanner);
                 }//end if
                 /**
@@ -728,11 +729,11 @@ public class MathScanner {
                  * not a defined method, and is a valid variable name, put a *
                  * between the var and the bracket.
                  */
-                else if ((isNumber(scanner.get(i))) && isOpeningBracket(scanner.get(i + 1))) {
+                else if ((isNumber(scanner.get(i))) && canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) {
                     scanner.add(i + 1, "*");
                     i++;
                 }//end if
-                else if ((isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))) && isOpeningBracket(scanner.get(i + 1))) {
+                else if ((isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))) && canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) {
                     if (MathExpression.isAutoInitOn()) {
                         scanner.add(i + 1, "*");
                         i++;
@@ -748,7 +749,7 @@ public class MathScanner {
                  * Enable the use of number-concat-funcName(...)...e.g.
                  * 2sin(3)...becomes 2*sin(3)
                  */
-                else if (isNumber(scanner.get(i)) && Method.isDefinedMethod(scanner.get(i + 1))) {
+                else if (isNumber(scanner.get(i)) && canCheckNextToken && Method.isDefinedMethod(scanner.get(i + 1))) {
                     scanner.add(i + 1, "*");
                     i++;
                 }//end if
@@ -757,7 +758,7 @@ public class MathScanner {
                  * variable or method. Force the user to enter it as
                  * (expr)*number or (expr)*A..
                  */
-                else if (isClosingBracket(scanner.get(i)) && (isVariableString(scanner.get(i + 1)) || isNumber(scanner.get(i + 1)))) {
+                else if (isClosingBracket(scanner.get(i)) &&  ( canCheckNextToken && (isVariableString(scanner.get(i + 1)) || isNumber(scanner.get(i + 1))) ) ) {
                     scanner.add(i + 1, "*");
                     i++;
                 }//end else if
@@ -765,7 +766,7 @@ public class MathScanner {
                  * convert ),( into ),*,( e.g (3+4)(5+6) becomes (3+4)*(5+6)
                  * which both the parser and math understand
                  */
-                else if (isClosingBracket(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+                else if (isClosingBracket(scanner.get(i)) && canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) {
                     scanner.add(i + 1, "*");
                     i++;
                 }
@@ -773,6 +774,7 @@ public class MathScanner {
             }//end try
             catch (IndexOutOfBoundsException boundsException) {
                 errorLog.error(boundsException);
+                errorLog.log(ErrorLog.Level.ERROR, "More information on error... Expression was:\n"+scannerInput+", scanner-state was:\n"+scanner);
             }//end catch
 
         }//end for loop
@@ -804,7 +806,7 @@ public class MathScanner {
     }//end validateTokens
 
     private void plusAndMinusStringHandler() {
-        scanner = plusAndMinusStringHandlerHelper(scanner, errorLog);
+        scanner = plusAndMinusStringHandlerHelper(scanner);
     }
 
     /**
@@ -863,7 +865,7 @@ public class MathScanner {
         return result;
     }
 
-    public static final List<String> plusAndMinusStringHandlerHelper(List<String> scanner, ErrorLog log) {
+    public static final List<String> plusAndMinusStringHandlerHelper(List<String> scanner) {
         List<String> result = new ArrayList<>();
 
         for (int i = 0; i < scanner.size(); i++) {
@@ -911,7 +913,7 @@ public class MathScanner {
             }
 
             // --- 2. REDUNDANT "* 1" or "/ 1" REMOVAL ---
-            if ((tk.equals("*") || tk.equals("/")) && i + 1 < scanner.size() && isExactlyOne(scanner.get(i + 1), log)) {
+            if ((tk.equals("*") || tk.equals("/")) && i + 1 < scanner.size() && isExactlyOne(scanner.get(i + 1))) {
                 // Only remove if the previous token is "operand-like" (number, variable, or closing bracket/factorial)
                 if (!result.isEmpty() && isOperandLike(result.get(result.size() - 1))) {
                     i++; // Skip the operator and the '1'
@@ -942,11 +944,10 @@ public class MathScanner {
         return s.equals("+") || s.equals("-");
     }
 
-    private static boolean isExactlyOne(String s, ErrorLog log) {
+    private static boolean isExactlyOne(String s) {
         try {
             return Double.parseDouble(s) == 1.0;
         } catch (Exception e) {
-            log.error(e);
             return false;
         }
     }

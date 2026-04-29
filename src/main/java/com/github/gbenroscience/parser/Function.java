@@ -429,7 +429,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                             FunctionManager.add(rotP);
                             return true;
                         }
-                    } else if (sz == 12) {// line rotation: [rot, (, P, ,, Q ,, pi, ,, anon2, ,, anon3, )] P AND Q are 2 points on the line
+                    } else if (sz == 12) {// line rotation: [rot, (, P, ,, Q ,, pi, ,, anon2, ,, anon3, )] P AND Q are 2 pts on the line
 
                         String pn = scanner.get(2);
                         String qn = scanner.get(4);
@@ -437,9 +437,8 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                         Function q = FunctionManager.lookUp(qn);
                         MathExpression.EvalResult ev = expr.solveGeneric();
                         if (p.type == TYPE.MATRIX && q.type == TYPE.MATRIX) {//is a Point rotation
-                            double[] points = ev.vector;
-                            String pexpr = newFuncName + "=@(1," + points.length + ")" + ev.toString().replace('[', '(').replace(']', ')');
-                            Function rotP = new Function(pexpr);
+                            ev.matrix.setName(newFuncName);
+                            Function rotP = new Function(ev.matrix);
                             FunctionManager.add(rotP);
                             return true;
                         }

@@ -1,6 +1,6 @@
 # ParserNG 🧮⚡
 
-**ParserNG 1.1.1** is a **blazing-fast**, nigh zero allocation(memory wise), **pure Java**, **zero-native-dependencies** math expression parser and evaluator.
+**ParserNG 1.1.2** is a **blazing-fast**, nigh zero allocation(memory wise), **pure Java**, **zero-native-dependencies** math expression parser and evaluator.
 
 It **beats exp4J, and com.expression.parser on evaluation speed** across every kind of expression — from simple algebra to heavy trig, matrices, and calculus; and manages to beat Janino, the gold standard on some, while rivalling it on a host of other expressions  
 The normal mode routinely does about **3-10 million evaluations per second** while the new Turbo mode easily peaks at about **10 million to 90 million evaluations per second**.
@@ -12,11 +12,11 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![License](https://img.shields.io/github/license/gbenroscience/ParserNG?color=blue)](https://github.com/gbenroscience/ParserNG/blob/master/LICENSE)
 ![Java](https://img.shields.io/badge/Java-8%2B-orange)
-![Latest Version](https://img.shields.io/badge/version-1.1.1-success)
+![Latest Version](https://img.shields.io/badge/version-1.1.2-success)
 
-> **1.1.1** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
+> **1.1.2** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
 
-## ✨ Highlights (v1.1.1)
+## ✨ Highlights (v1.1.2)
 
 - **Speed champion** — rivals Janino in most benchmarks, and beats exp4J, com.expression.parser and Parsii in every benchmark (see [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md))
 - **Turbo Mode** — compile once, evaluate millions of times per second (Scalar + Matrix paths)
@@ -36,12 +36,12 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>1.1.1</version>
+    <version>1.1.2</version>
 </dependency>
 ```
 
 Also available on **Maven Central**:  
-https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng/1.1.1
+https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng/1.1.2
 
 ## 🧮 Standard Mode — The old way
 
@@ -81,16 +81,84 @@ for (double t = 0; t < 10_000_000; t += 0.001) {
 }
 ```
 
+OR in more modern versions of Turbo, JUST
+```java
+double[] frame = new double[3];
+
+for (double t = 0; t < 10_000_000; t += 0.001) {
+    frame[0] = t;
+    frame[1] = t * 1.5;
+    frame[2] = t / 2.0;
+    //the slots are auto-computed  inside the applyScalar and other applyXXX methods
+    double result = turbo.applyScalar(frame);   // ← ultra-fast!
+}
+```
+
 ### Turbo Matrix (eigvalues, linear systems, etc.)
 
 ```java
+String expression="R=@(3,3)(5,1,3, 2,9,12, 1,5,18)"
 MathExpression me = new MathExpression("eigvalues(R)");
 FastCompositeExpression turbo = TurboEvaluatorFactory.getCompiler(me).compile();
 
 Matrix result = turbo.applyMatrix(new double[0]);   // works for: linear_sys, adjoint, cofactor, A/B, etc.
 ```
 
-## Quick Start (Normal Mode + Turbo)
+
+### Turbo Matrix (Matrix Algebra)
+
+```java
+    String expression = "R=@(3,3)(5,1,3, 2,9,12, 1,5,18);A=@(3,3)(2,0,5, 8,9,13, 1,2,1);A+2*R-1/A;";
+            MathExpression me = new MathExpression(expression);
+            FastCompositeExpression turbo = TurboEvaluatorFactory.getCompiler(me).compile();
+              double[] vars = {};
+            MathExpression.EvalResult result = turbo.apply(vars);
+            System.out.println("result:"+result.toString());   // works for: linear_sys, adjoint, cofactor, A/B, etc.
+```
+
+
+### Turbo Matrix(non-JMH Benchmark)
+```Java
+   public static void benchmarkMatrixAlgebra() throws Throwable {
+        int n = 20;
+        Matrix t = new Matrix(n, n);
+        t.setName("T");
+        t.randomFill(35);
+        t.print();
+        System.out.println("T: After fill-----\n");
+
+        FunctionManager.add(new Function(t));
+
+        Matrix v = new Matrix(n, n);
+        v.setName("V");
+        v.randomFill(35);
+        v.print();
+        System.out.println("V: After fill-----\n");
+
+        FunctionManager.add(new Function(v));
+
+        String ex = "2*T+V";
+        MathExpression expr = new MathExpression(ex);
+
+        FastCompositeExpression turbo = expr.compileTurbo();
+        double[] vars = {};
+        MathExpression.EvalResult er = null;
+
+        long start = System.nanoTime();
+        for (int i = 0; i < 1_000_000; i++) {
+            er = turbo.apply(vars);
+        }
+        long duration = System.nanoTime() - start;
+
+        System.out.printf("Expression: %s%n", ex);
+        System.out.println("res: " + er);
+        System.out.printf("Speed: %.2f ns/op%n", duration / 1_000_000.0);
+        System.out.printf("Throughput: %.2f ops/sec%n", 1_000_000.0 / (duration / 1e9));
+    }
+```
+
+
+## Go Deeper (Normal Mode + Turbo)
 
 ### 1. Simple expression
 
@@ -139,13 +207,13 @@ System.out.println("Determinant = " + expr.solve());
 ```
 
 
-### 6. ROTOR
+### 6a. ROTOR
 You may use the rot function to rotate functions, surfaces(plane or curved), lines and even raw points in 3D space.
 
 To rotate any of these, you need the orbital center, the coordinates of the direction vector(a,b,c) and the angle of rotation.
 
 The example below shows two ways to use the ParserNG library to rotate the point `p` and `q` about the orbital center (1,0,1)
-with the directio vector,(1,1,0). The angle of rotation is pi radians.
+with the direction vector(0,0,1). The angle of rotation is pi radians.
 
 ```Java
  String expression = "p=@(1,3)(4,2,5);q=@(1,3)(12,3,-1);rot(p,q, pi, @(1,3)(1,0,1),@(1,3)(1,1,0))";
@@ -162,16 +230,36 @@ with the directio vector,(1,1,0). The angle of rotation is pi radians.
         MathExpression.EvalResult evr = compiled.apply(vars);
         System.out.println("turbo: " + evr);
 ```
+The result is an array of 6 elements. The first 3 represent the coordinates of the new P after rotation and the last coordinates represent the coordinates of Q after rotation.
 
+The next example is even more interesting.
+
+### 6b. ROTOR - A swarm or Matrix of Points
+ParserNG can take a Matrix of N points in 3D space(so each point has x,y,z coordinates) and rotate them through an angle, about an origin (O) in a specified direction, D. The Matrix would hence be of dimensions (N x 3) and its output will be a Matrix of similar dimensions, and each row in the initial Matrix would have its rotated result in the corresponding rows of the output Matrix.
+```Java
+String expression = "M_IN=@(5,3)(3,1,4, 2,2,8, 7,1,3, 4,5,19, 8,7,21);O=@(1,3)(0,0,0);D=@(1,3)(0,0,1);";
+MathExpression me = new MathExpression(expression);
+MathExpression m = new  MathExpression("rot(M_IN,pi,O,D)");
+FastCompositeExpression fce =  m.compileTurbo();
+MathExpression.EvalResult evr = fce.apply(new double[0]);
+System.out.println("turbo: " + evr);
+```
+OR, you could do it with one object using anonymous syntax:
+```Java
+MathExpression m = new MathExpression(" rot(@(5,3)(3,1,4, 2,2,8, 7,1,3, 4,5,19, 8,7,21), pi, @(1,3)(0,0,0), @(1,3)(0,0,1) ) ");
+FastCompositeExpression fce =  m.compileTurbo();
+MathExpression.EvalResult evr = fce.apply(new double[0]);
+System.out.println("turbo: " + evr);
+```
 
  
 ## ⌨️ Command-line tool (REPL)
 
 ```bash
-java -jar parser-ng-1.1.1.jar "sin(x) + cos(x)"
-java -jar parser-ng-1.1.1.jar "eigvalues(R=@(5,5)(...))"
-java -jar parser-ng-1.1.1.jar help
-java -jar parser-ng-1.1.1.jar -i          # interactive mode
+java -jar parser-ng-1.1.2.jar "sin(x) + cos(x)"
+java -jar parser-ng-1.1.2.jar "eigvalues(R=@(5,5)(...))"
+java -jar parser-ng-1.1.2.jar help
+java -jar parser-ng-1.1.2.jar -i          # interactive mode
 ```
 
 ## 📊 Supported Features at a Glance
@@ -192,8 +280,8 @@ Full list: run `help` or `new MathExpression("help").solve()`.
 
 - [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) — full speed comparisons
 - [GRAPHING.md](GRAPHING.md) — plotting on Swing / JavaFX / Android
-- [LATEST.md](LATEST.md) — what’s new in 1.1.1
-- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/1.1.1
+- [LATEST.md](LATEST.md) — what’s new in 1.1.2
+- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/1.1.2
 - [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md) — Original readme for pre-1.0 versions with a lot of, still valid, examples
 
 ## ❤️ Support the Project
@@ -211,7 +299,7 @@ ParserNG is built with love in my free time. If it helps you:
 
 ---
 
-**ParserNG 1.1.1** — faster than the competition, stronger on matrices, and now with real Turbo Scalar + Turbo Matrix compiled power.
+**ParserNG 1.1.2** — faster than the competition, stronger on matrices, and now with real Turbo Scalar + Turbo Matrix compiled power.
 
 Happy parsing! 🚀  
 — **GBENRO JIBOYE** (@gbenroscience)

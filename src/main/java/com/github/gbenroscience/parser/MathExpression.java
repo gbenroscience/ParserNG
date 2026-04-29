@@ -439,7 +439,7 @@ public class MathExpression implements Savable, Solvable {
                         s.append(t);
                     }
                 });
-                System.out.println("s:" + s.toString());
+               
                 Function f = FunctionManager.add(s.toString());
                 l.clear();
                 l.add(fnNameToLeftOfEquals);
@@ -468,6 +468,7 @@ public class MathExpression implements Savable, Solvable {
                 s.append(t);
             }
         });
+        
         return s.toString();
     }
 
