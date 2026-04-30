@@ -1,5 +1,7 @@
 # ParserNG
 
+### Parser 1.1.3 has been released on maven-central!
+Fixed validation bugs in parser, made relevant matrix maethods support algebraic operations, like A*invert(B) etc, fixed bad bugs in flat matrix turbo implementations and optimized them further. Added tests
 
 ### Parser 1.1.2 has been released on maven-central!
 1. Fixes bugs and makes `MatrixTurboEvaluator` natively support turbo execution of the rot function. Note that the `ScalarTurboEvaluator`s already support it.
