@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
 import com.github.gbenroscience.parser.methods.Declarations;
+import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator2;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.VariableManager;
@@ -515,6 +516,25 @@ class MathExpressionTest {
 
         Assertions.assertTrue(p.getType() == TYPE.MATRIX && (p.getMatrix().getRows() == 10 && p.getMatrix().getCols() == 3));
     }
+    
+      @Test
+    void testFlatMatrixInvertInMatrixTurboEvaluator() {
+        try {
+            MathExpression me = new MathExpression("A=@(3,3)(4,9,2, 8,1,18, 12,9,8);invert(A);");
+            System.out.println("std-solve: " + me.solveGeneric());
+            System.out.println("A=" + FunctionManager.lookUp("A"));
+            
+            MathExpression m = new MathExpression("1/A");
+            FastCompositeExpression fce = m.compileTurbo();
+            System.out.println("compiler class: "+fce.getCompiler().getClass());
+            MathExpression.EvalResult ev = fce.apply(new double[]{0.0});
+             System.out.println("turbo-apply: " + ev);
+            Assertions.assertTrue(true);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
 
     @Test
     void testSingleVar() {

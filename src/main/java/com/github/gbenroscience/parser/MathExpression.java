@@ -706,7 +706,7 @@ public class MathExpression implements Savable, Solvable {
             if (t.kind == Token.FUNCTION || t.kind == Token.METHOD) {
                 String name = t.name.toLowerCase();
                 if (name.contains("matrix") || name.equals("det") || name.equals("invert")
-                        || name.equals("inverse") || name.equals("transpose")) {
+                        || name.equals("inverse") || name.equals("transpose") || Method.isMatrixMethod(t.name)) {
                     return true;
                 }
             }
@@ -1005,15 +1005,15 @@ public class MathExpression implements Savable, Solvable {
 
                 for (int i = 0; i < scanner.size(); i++) {
                     try {
-                        if (Method.isListReturningStatsMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+                        if (i+1 < scanner.size() && !Method.isListReturningStatsMethodThatAllowsAlgebraicOps(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
                             if (isBinaryOperator(scanner.get(i - 1))) {
-                                errorLog.info("Invalid Association Discovered For: \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\".\n");
+                                errorLog.info("1. Invalid Association Discovered For: \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\".\n");
                                 correctFunction = false;
                                 break;
                             }
                             if (isOpeningBracket(scanner.get(i - 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i - 2))
                                     && !Method.isListReturningStatsMethod(scanner.get(i - 2))) {
-                                errorLog.info("Invalid Association Discovered For: \"(\" And "+scanner.get(i-2)+" And \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n ");
+                                errorLog.info("2. Invalid Association Discovered For: \"(\" And "+scanner.get(i-2)+" And \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n ");
                                 correctFunction = false;
                                 break;
                             }
@@ -1021,6 +1021,7 @@ public class MathExpression implements Savable, Solvable {
                         }//end if
                     }//end try
                     catch (IndexOutOfBoundsException ind) {
+                        errorLog.info("Let developer handle the indexing of this checks properly!");
                     }
 
                 }//end for

@@ -51,9 +51,10 @@ import java.util.HashSet;
  */
 public class MethodRegistry {
 
-    public interface MethodAction extends Savable{
+    public interface MethodAction extends Savable {
 
-          static final long serialVersionUID = 1L;
+        static final long serialVersionUID = 1L;
+
         /**
          * Allows methods like diff(fn,args) to differentiate an expression
          * using the MethodRegistry interface Is the intersection between
@@ -403,7 +404,7 @@ public class MethodRegistry {
         });
 
         registerMethod(Declarations.ROTOR, (ctx, arity, args) -> {
-  
+
             int sz = args.length;
             if (args.length == 4) {//rot(F,a,O,D) function, angle, origin, direction vector
                 //confirm the last 3 other args
@@ -449,11 +450,11 @@ public class MethodRegistry {
                 }
                 if (f.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
                     String expr = f.getMathExpression().getExpression();
-                    String fullExpr=f.getName()+"="+expr;
-                    String transformedFuncName = f.getName(); 
+                    String fullExpr = f.getName() + "=" + expr;
+                    String transformedFuncName = f.getName();
 
                     ROTOR r = new ROTOR(angle, origin, dir);
-                    
+
                     if (siz == 2) {
                         r.setXAxisName(vars.get(0).getName());
                         r.setYAxisName(vars.get(1).getName());
@@ -463,7 +464,7 @@ public class MethodRegistry {
                         r.setXAxisName(vars.get(0).getName());
                         r.setYAxisName(transformedFuncName);
                     }
-                     
+
                     String res = r.rotate(fullExpr);
                     return ctx.wrap(res);
                 }
@@ -473,22 +474,22 @@ public class MethodRegistry {
                     ROTOR r = new ROTOR(angle, origin, dir);
                     rows = pointVectors.getRows();
                     cols = pointVectors.getCols();//@(n,3)
-                    
-                    if(cols==3){
+
+                    if (cols == 3) {
                         int n = rows;
-                        double outArr[]=new double[3*n];
-                        int j=0;
-                        for(int i=0;i<n;i++){
+                        double outArr[] = new double[3 * n];
+                        int j = 0;
+                        for (int i = 0; i < n; i++) {
                             double[] pm = pointVectors.getRowMatrix(i).getFlatArray();
                             Point p = new Point(pm[0], pm[1], pm[2]);
                             Point rotP = r.rotate(p);
-                            outArr[j]=rotP.x;
-                            outArr[j+1]=rotP.y;
-                            outArr[j+2]=rotP.z;
-                            j+=3;
+                            outArr[j] = rotP.x;
+                            outArr[j + 1] = rotP.y;
+                            outArr[j + 2] = rotP.z;
+                            j += 3;
                         }
                         return ctx.wrap(new Matrix(outArr, rows, 3));
-                    }else {
+                    } else {
                         return MathExpression.EvalResult.ERROR;
                     }
                 }
@@ -646,7 +647,7 @@ public class MethodRegistry {
         });
          */
         registerMethod(Declarations.LIST_SUM, (ctx, arity, args) -> {
-           // System.out.println("arg-type-in-registry-call: " + Arrays.toString(args));
+            // System.out.println("arg-type-in-registry-call: " + Arrays.toString(args));
             double total = 0.0;
 
             ByteArrayBuilder bab = new ByteArrayBuilder();
@@ -661,7 +662,7 @@ public class MethodRegistry {
 
             for (double d : data) {
                 total += d;
-            } 
+            }
             ctx.wrap(total);
             return ctx;
         });
@@ -1126,11 +1127,25 @@ public class MethodRegistry {
             return ctx.wrap(m);
         });
         registerMethod(Declarations.MATRIX_DIVIDE, (ctx, arity, args) -> {
-            Function fA = FunctionManager.lookUp(args[0].textRes);
-            Function fB = FunctionManager.lookUp(args[1].textRes);
-            Matrix mA = fA.getMatrix();
-            Matrix mB = fB.getMatrix();
-            return ctx.wrap(Matrix.multiply(mA, mB.inverse()));
+            if (args[0].type == MathExpression.EvalResult.TYPE_SCALAR && args[1].type == MathExpression.EvalResult.TYPE_SCALAR) {
+                return ctx.wrap(args[0].scalar / args[1].scalar);
+            } else if (args[0].type == MathExpression.EvalResult.TYPE_STRING && args[1].type == MathExpression.EvalResult.TYPE_SCALAR) {
+                Function fA = FunctionManager.lookUp(args[0].textRes);
+                Matrix mA = fA.getMatrix();
+                return ctx.wrap(mA.scalarMultiply(1.0 / args[1].scalar));
+            } else if (args[0].type == MathExpression.EvalResult.TYPE_SCALAR && args[1].type == MathExpression.EvalResult.TYPE_STRING) {
+                Function fA = FunctionManager.lookUp(args[1].textRes);
+                Matrix mA = fA.getMatrix();
+                Matrix inv = mA.inverse();
+                return ctx.wrap(inv.scalarMultiply(args[0].scalar));
+            } else if (args[0].type == MathExpression.EvalResult.TYPE_STRING && args[1].type == MathExpression.EvalResult.TYPE_STRING) {
+                Function fA = FunctionManager.lookUp(args[0].textRes);
+                Function fB = FunctionManager.lookUp(args[1].textRes);
+                Matrix mA = fA.getMatrix();
+                Matrix mB = fB.getMatrix();
+                return ctx.wrap(Matrix.multiply(mA, mB.inverse()));
+            }
+              return MathExpression.EvalResult.ERROR;
         });
         registerMethod(Declarations.MATRIX_EDIT, (ctx, arity, args) -> {
             Function f = FunctionManager.lookUp(args[0].textRes);

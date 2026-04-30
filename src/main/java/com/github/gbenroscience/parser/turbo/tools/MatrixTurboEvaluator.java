@@ -86,10 +86,12 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
     public static final class ResultCache {
 
         public final EvalResult result = new EvalResult();
+        private double lastDeterminant;
         public double[] matrixData;
         public Matrix matrix;
 
         public double[] eigenValueBuffer;
+        public int[] intBuffer;
         // Secondary buffer for re-entrant operations like Matrix Power
         private double[] matrixData2;
         private Matrix matrix2;
@@ -136,6 +138,13 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                 eigenValueBuffer = new double[n];
             }
             return eigenValueBuffer;
+        }
+
+        public int[] getIntBuffer(int n) {
+            if (intBuffer == null || intBuffer.length != n) {
+                intBuffer = new int[n];
+            }
+            return intBuffer;
         }
     }
 
@@ -475,25 +484,40 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                 if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_SCALAR) {
                     cache.result.wrap(left.scalar / right.scalar);
                 } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
-                    double det = right.matrix.determinant();
+                    double det = computeDeterminantTurbo(right.matrix, cache);
                     if (Math.abs(det) < 1e-15) {
                         throw new ArithmeticException("Matrix B is singular");
                     }
-                    Matrix adjB = right.matrix.adjoint();
-                    Matrix invB = flatMatrixScalarMultiply(1.0 / det, adjB, cache);
-                    Matrix out = cache.getMatrixBuffer(left.matrix.getRows(), invB.getCols());
-                    cache.result.wrap(flatMatrixMultiply(left.matrix, invB, out));
+                    Matrix A = left.matrix;
+                    Matrix B = right.matrix;
+                    // 1. Calculate the inverse first. 
+                    // This will occupy the primary MatrixBuffer.
+                    Matrix invB = flatMatrixInverseLUTurbo(B, cache);
+                    // 2. Request a DIFFERENT buffer for the final output.
+                    // Using getTertiaryBuffer ensures there is no overlap with invB.
+                    Matrix out = cache.getTertiaryBuffer(A.getRows(), invB.getCols());
+                    // 3. Perform the multiplication.
+                    // A (source), invB (primary buffer), out (tertiary buffer) are now independent.
+                    return cache.result.wrap(flatMatrixMultiply(A, invB, out));
                 } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
                     if (Math.abs(right.scalar) < 1e-15) {
                         throw new ArithmeticException("Division by zero scalar");
                     }
                     cache.result.wrap(flatMatrixScalarMultiply(1.0 / right.scalar, left.matrix, cache));
                 } else if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_MATRIX) {
-                    double det = right.matrix.determinant();
+                    // Use turbo determinant
+                    //double det = right.matrix.determinant(); // Or use computeDeterminantTurbo if available for the full matrix
+                    double det = computeDeterminantTurbo(right.matrix, cache);
                     if (Math.abs(det) < 1e-15) {
                         throw new ArithmeticException("Matrix is singular");
                     }
-                    Matrix adjB = right.matrix.adjoint();
+
+                    // Use turbo adjoint buffers instead of right.matrix.adjoint()
+                    int n = right.matrix.getRows();
+                    Matrix adjB = cache.getMatrixBuffer(n, n);
+                    Matrix minorBuf = cache.getSecondaryBuffer(n - 1, n - 1);
+                    computeAdjointInto(right.matrix, adjB, minorBuf, cache);
+
                     cache.result.wrap(flatMatrixScalarMultiply(left.scalar / det, adjB, cache));
                 }
                 break;
@@ -512,6 +536,18 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         return cache.result;
     }
 
+    private static void computeAdjointInto(Matrix input, Matrix adjoint, Matrix minorBuf, ResultCache cache) {
+        int n = input.getRows();
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                fillMinor(input.getFlatArray(), minorBuf.getFlatArray(), i, j, n);
+                double minorDet = computeDeterminantTurbo(minorBuf, cache);
+                // This safely applies the alternating signs you were missing
+                adjoint.getFlatArray()[j * n + i] = (((i + j) % 2 == 0) ? 1.0 : -1.0) * minorDet;
+            }
+        }
+    }
+
     private static Matrix flatMatrixScalarMultiply(double scalar, Matrix m, ResultCache cache) {
         double[] mF = m.getFlatArray();
         Matrix out = cache.getMatrixBuffer(m.getRows(), m.getCols());
@@ -522,7 +558,126 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         return out;
     }
 
+    private static Matrix flatMatrixInverseLUTurbo(Matrix input, ResultCache cache) {
+        final int n = input.getRows();
+        if (n != input.getCols()) {
+            throw new IllegalArgumentException("Matrix must be square for inversion.");
+        }
+
+        Matrix luMat = cache.getSecondaryBuffer(n, n);
+        Matrix invMat = cache.getMatrixBuffer(n, n);
+        double[] lu = luMat.getFlatArray();
+        double[] inv = invMat.getFlatArray();
+        double[] work = cache.getEigenBuffer(n);
+        int[] pivot = cache.getIntBuffer(n);
+
+        double det = 1.0; // Track the determinant
+        int swapCount = 0;
+
+        System.arraycopy(input.getFlatArray(), 0, lu, 0, n * n);
+        for (int i = 0; i < n; i++) {
+            pivot[i] = i;
+        }
+
+        // === LU DECOMPOSITION ===
+        for (int k = 0; k < n; k++) {
+            int kOff = k * n;
+            int pivotRow = k;
+            double maxVal = Math.abs(lu[kOff + k]);
+
+            for (int i = k + 1; i < n; i++) {
+                double absVal = Math.abs(lu[i * n + k]);
+                if (absVal > maxVal) {
+                    maxVal = absVal;
+                    pivotRow = i;
+                }
+            }
+
+            if (maxVal < 1e-16) { // Slightly more lenient threshold
+                cache.lastDeterminant = 0;
+                throw new ArithmeticException("Matrix is singular.");
+            }
+
+            if (pivotRow != k) {
+                int tmp = pivot[k];
+                pivot[k] = pivot[pivotRow];
+                pivot[pivotRow] = tmp;
+
+                int pOff = pivotRow * n;
+                // FIX: Must swap the FULL row (start from 0) to keep L consistent
+                for (int j = 0; j < n; j++) {
+                    double t = lu[kOff + j];
+                    lu[kOff + j] = lu[pOff + j];
+                    lu[pOff + j] = t;
+                }
+                swapCount++; // Increment swap counter
+            }
+
+            // The diagonal element of U is lu[kOff + k]
+            det *= lu[kOff + k];
+            double invPivot = 1.0 / lu[kOff + k];
+            for (int i = k + 1; i < n; i++) {
+                int iOff = i * n;
+                double mult = (lu[iOff + k] *= invPivot);
+                for (int j = k + 1; j < n; j++) {
+                    lu[iOff + j] -= mult * lu[kOff + j];
+                }
+            }
+        }
+
+        double[] uInvDiag = cache.getTertiaryBuffer(1, n).getFlatArray();
+        for (int i = 0; i < n; i++) {
+            uInvDiag[i] = 1.0 / lu[i * n + i];
+        }
+
+        if ((swapCount & 1) != 0) {
+            det = -det;
+        }
+        cache.lastDeterminant = det; // Cache the determinant for reuse
+
+        // === SOLVE PHASE ===
+        // Loop over the current pivot positions instead of columns
+        for (int pIdx = 0; pIdx < n; pIdx++) {
+            // pivot[pIdx] tells us exactly which original column this represents
+            int j = pivot[pIdx];
+
+            Arrays.fill(work, 0.0);
+            work[pIdx] = 1.0;
+
+            // Forward substitution: Solve L*y = Pb
+            // Start from pIdx + 1 because work[0...pIdx-1] is all zeros
+            for (int i = pIdx + 1; i < n; i++) {
+                double sum = work[i]; // effectively 0.0 initially
+                int iOff = i * n;
+                for (int k = pIdx; k < i; k++) {
+                    sum -= lu[iOff + k] * work[k];
+                }
+                work[i] = sum;
+            }
+
+            // Backward substitution: Solve U*x = y
+            for (int i = n - 1; i >= 0; i--) {
+                double sum = work[i];
+                int iOff = i * n;
+                for (int k = i + 1; k < n; k++) {
+                    sum -= lu[iOff + k] * work[k];
+                }
+                work[i] = sum * uInvDiag[i];
+            }
+
+            // Store result strictly into the correct original column 'j'
+            for (int i = 0; i < n; i++) {
+                inv[i * n + j] = work[i];
+            }
+        }
+
+        return invMat;
+    }
+
     private static double computeDeterminantTurbo(Matrix minor, ResultCache cache) {
+        if (minor.getRows() != minor.getCols()) {
+            throw new IllegalArgumentException("Determinant is only defined for square matrices.");
+        }
         int n = minor.getRows();
         if (n == 1) {
             return minor.getFlatArray()[0];
@@ -543,7 +698,7 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                 det *= -1;
             }
             double v = data[i * n + i];
-            if (Math.abs(v) < 1e-18) {
+            if (Math.abs(v) < 1e-14) {
                 return 0;
             }
             det *= v;
@@ -600,12 +755,22 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                 return cache.result.wrap(flatMatrixSubtract(args[0].matrix, args[1].matrix, cache));
             case Declarations.MATRIX_MULTIPLY:
             case "matrix_multiply":
-                Matrix out = cache.getMatrixBuffer(args[0].matrix.getRows(), args[1].matrix.getCols());
-                return cache.result.wrap(flatMatrixMultiply(args[0].matrix, args[1].matrix, out));
+                if (args[0].type == EvalResult.TYPE_SCALAR && args[1].type == EvalResult.TYPE_SCALAR) {
+                    return cache.result.wrap(args[0].scalar * args[1].scalar);
+                } else if (args[0].type == EvalResult.TYPE_SCALAR && args[1].type == EvalResult.TYPE_MATRIX) {
+                    return cache.result.wrap(flatMatrixScalarMultiply(args[0].scalar, args[1].matrix, cache));
+                } else if (args[0].type == EvalResult.TYPE_MATRIX && args[1].type == EvalResult.TYPE_SCALAR) {
+                    return cache.result.wrap(flatMatrixScalarMultiply(args[1].scalar, args[0].matrix, cache));
+                } else if (args[0].type == EvalResult.TYPE_MATRIX && args[1].type == EvalResult.TYPE_MATRIX) {
+                    Matrix out = cache.getMatrixBuffer(args[0].matrix.getRows(), args[1].matrix.getCols());
+                    return cache.result.wrap(flatMatrixMultiply(args[0].matrix, args[1].matrix, out));
+                }
             case Declarations.DETERMINANT:
                 return cache.result.wrap(args[0].matrix.determinant());
+            case Declarations.MATRIX_POWER:
+                return cache.result.wrap(flatMatrixPower(args[0].matrix, args[1].scalar, cache));
             case Declarations.INVERSE_MATRIX:
-                return cache.result.wrap(args[0].matrix.inverse());
+                return cache.result.wrap(flatMatrixInverseLUTurbo(args[0].matrix, cache));
             case Declarations.MATRIX_TRANSPOSE:
                 return cache.result.wrap(args[0].matrix.transpose());
             case Declarations.TRIANGULAR_MATRIX:
@@ -660,28 +825,18 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                 }
                 return cache.result.wrap(adjoint);
             case Declarations.MATRIX_DIVIDE:
-                Matrix A = args[0].matrix,
-                 B = args[1].matrix;
-                n = B.getRows();
-                int m = A.getCols();
-                Matrix augmented = cache.getSecondaryBuffer(n, n + m);
-                double[] augF = augmented.getFlatArray();
-                for (int i = 0; i < n; i++) {
-                    System.arraycopy(B.getFlatArray(), i * n, augF, i * (n + m), n);
-                    System.arraycopy(A.getFlatArray(), i * m, augF, i * (n + m) + n, m);
-                }
-                augmented.reduceToTriangularMatrixInPlace();
-                result = cache.getMatrixBuffer(n, m);
-                for (int k = 0; k < m; k++) {
-                    for (int i = n - 1; i >= 0; i--) {
-                        double sum = 0;
-                        for (int j = i + 1; j < n; j++) {
-                            sum += augF[i * (n + m) + j] * result.getFlatArray()[j * m + k];
-                        }
-                        result.getFlatArray()[i * m + k] = (augF[i * (n + m) + n + k] - sum) / augF[i * (n + m) + i];
-                    }
-                }
-                return cache.result.wrap(result);
+                Matrix A = args[0].matrix;
+                Matrix B = args[1].matrix;
+
+                // 1. Calculate the inverse FIRST. 
+                // This internally locks up getSecondaryBuffer (for LU) and getMatrixBuffer (for the returned inverse).
+                Matrix invB = flatMatrixInverseLUTurbo(B, cache);
+
+                // 2. Safely grab a completely independent buffer for the final output.
+                Matrix out = cache.getTertiaryBuffer(A.getRows(), invB.getCols());
+
+                // 3. Multiply and wrap. A (source), invB (primary buffer), out (tertiary buffer) -> No collisions!
+                return cache.result.wrap(flatMatrixMultiply(A, invB, out));
             case Declarations.MATRIX_EDIT:
                 Matrix target = args[0].matrix;
                 int row = (int) args[1].scalar,
@@ -691,15 +846,17 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                 result.getFlatArray()[row * target.getCols() + col] = args[3].scalar;
                 return cache.result.wrap(result);
             case Declarations.ROTOR:
-              //rot(F,a,O,D) function, angle, origin, direction vector
-              //We have 2 scenarios:
-                    /**
-                     * 1. rot(F, a, O, D)  function, angle, origin, direction vector
-                     * 2. rot(P1, P2, a, O, D) First Point, Second Point, angle, Origin and Direction
-                     * These scenarios are further broken down into 2:
-                     * The args may come in raw form. e.g F, O and D may come as function handles or as the raw data(more uncommon, but happens in MatrixTurboEvaluator)
-                     */
-                  if (args.length == 4) {
+                //rot(F,a,O,D) function, angle, origin, direction vector
+                //We have 2 scenarios:
+                /**
+                 * 1. rot(F, a, O, D) function, angle, origin, direction vector
+                 * 2. rot(P1, P2, a, O, D) First Point, Second Point, angle,
+                 * Origin and Direction These scenarios are further broken down
+                 * into 2: The args may come in raw form. e.g F, O and D may
+                 * come as function handles or as the raw data(more uncommon,
+                 * but happens in MatrixTurboEvaluator)
+                 */
+                if (args.length == 4) {
                     //args[0] is always either a function handle or a Matrix of points
                     Matrix pointsVector = args[0].matrix;
                     double angle = args[1].scalar;
@@ -801,8 +958,8 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                         String res = r.rotate(fullExpr);
                         return cache.result.wrap(res);
                     }
- 
-                return null;
+
+                    return null;
 
                 }
                 if (args.length == 5) {
@@ -1132,9 +1289,11 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         return out;
     }
 
-    private static Matrix flatMatrixMultiply(Matrix a, Matrix b, Matrix out) {
+    private static Matrix flatMatrixMultiply1(Matrix a, Matrix b, Matrix out) {
         int aR = a.getRows(), aC = a.getCols(), bC = b.getCols();
         double[] aF = a.getFlatArray(), bF = b.getFlatArray(), resF = out.getFlatArray();
+        // Required for i-k-j because it accumulates results
+        out.reset();
         for (int i = 0; i < aR; i++) {
             int iRow = i * aC, outRow = i * bC;
             for (int j = 0; j < bC; j++) {
@@ -1143,6 +1302,29 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                     s += aF[iRow + k] * bF[k * bC + j];
                 }
                 resF[outRow + j] = s;
+            }
+        }
+        return out;
+    }
+
+    private static Matrix flatMatrixMultiply(Matrix a, Matrix b, Matrix out) {
+        int aR = a.getRows(), aC = a.getCols(), bC = b.getCols();
+        double[] aF = a.getFlatArray(), bF = b.getFlatArray(), resF = out.getFlatArray();
+
+        // Required for i-k-j because it accumulates results
+        out.reset();
+
+        for (int i = 0; i < aR; i++) {
+            int iRow = i * aC;
+            int outRow = i * bC;
+            for (int k = 0; k < aC; k++) {
+                double aVal = aF[iRow + k]; // Load once, use for the whole row
+                int kRow = k * bC;
+
+                // This loop is the performance heart: perfectly sequential access
+                for (int j = 0; j < bC; j++) {
+                    resF[outRow + j] += aVal * bF[kRow + j];
+                }
             }
         }
         return out;

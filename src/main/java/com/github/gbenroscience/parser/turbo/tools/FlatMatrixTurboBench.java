@@ -38,6 +38,10 @@ public class FlatMatrixTurboBench {
         System.out.println(rpt);
         System.out.println("PARSERNG FLAT-ARRAY MATRIX TURBO BENCHMARKS");
         System.out.println(rpt);
+        checkMatrixInvertPreMulErrors();
+        checkMatrixDiv();
+        checkMatrixPowerFunction();
+        checkInbuiltMatrixFunctionInteractionsWithScalarsAndMatrices();
         checkRot2Point();
         checkRotPointSwarm();
         checkRotFunction();
@@ -166,6 +170,91 @@ public class FlatMatrixTurboBench {
         System.out.println("values=" + Arrays.toString(res));
     }
 
+    private static void checkInbuiltMatrixFunctionInteractionsWithScalarsAndMatrices() {
+        System.out.println("\n--- MATRIX INBUILT FUNCTION ALGEBRA INTERACTIONS Check---");
+        try {
+            String expression = "R=@(3,3)(5,1,3, 2,9,12, 1,5,18);A=@(3,3)(2,0,5, 8,9,13, 1,2,1);matrix_mul(A,2)*A";
+            MathExpression me = new MathExpression(expression);
+            FastCompositeExpression turbo = TurboEvaluatorFactory.getCompiler(me).compile();
+            System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
+            double[] vars = {};
+            MathExpression.EvalResult result = turbo.apply(vars);
+            System.out.println("result:" + result.toString());
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+        private static void checkMatrixInvertPreMulErrors() {
+        System.out.println("\n--- MATRIX INVERT PRE-MUL FIX---");
+        try {
+            String expression = "A(3,3)=(4,1,2, 3,1,5, 9,2,7);B(3,3)=(7,1,6, 6,1,5, 8,9,11);A*invert(B)";
+            MathExpression me = new MathExpression(expression);
+            FastCompositeExpression turbo = TurboEvaluatorFactory.getCompiler(me).compile();
+            System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
+            double[] vars = {};
+            MathExpression.EvalResult result = turbo.apply(vars);
+            System.out.println("result---A*invert(B):" + result.toString()); 
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    private static void checkMatrixDiv() {
+        System.out.println("\n--- MATRIX DIV---");
+        try {
+            String expression = "A(3,3)=(4,1,2, 3,1,5, 9,2,7);B(3,3)=(7,1,6, 6,1,5, 8,9,11);matrix_div(A,B);";
+            MathExpression me = new MathExpression(expression);
+            FastCompositeExpression turbo = TurboEvaluatorFactory.getCompiler(me).compile();
+            System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
+            double[] vars = {};
+            MathExpression.EvalResult result = turbo.apply(vars);
+            System.out.println("result---matrix_div(A,B):" + result.toString());
+            
+            
+            
+            String expression1 = "A/B";
+            MathExpression m = new MathExpression(expression1);
+            turbo = TurboEvaluatorFactory.getCompiler(m).compile();
+            System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
+             
+            MathExpression.EvalResult res = turbo.apply(vars);
+            System.out.println("result1--A/B---:" + res.toString());
+            
+            
+            
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    private static void checkMatrixPowerFunction() {
+        System.out.println("\n--- MATRIX POW---");
+        try {
+            String expression = "R=@(3,3)(5,1,3, 2,9,12, 1,5,18);A=@(3,3)(2,0,5, 8,9,13, 1,2,1);matrix_pow(A,5)";
+            MathExpression me = new MathExpression(expression);
+            FastCompositeExpression turbo = TurboEvaluatorFactory.getCompiler(me).compile();
+            System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
+            double[] vars = {};
+            MathExpression.EvalResult result = turbo.apply(vars);
+            System.out.println("result---matrix_pow(A,5):" + result.toString());
+            
+            
+            
+            String expression1 = "R=@(3,3)(5,1,3, 2,9,12, 1,5,18);A=@(3,3)(2,0,5, 8,9,13, 1,2,1);A^5";
+            MathExpression m = new MathExpression(expression1);
+            turbo = TurboEvaluatorFactory.getCompiler(m).compile();
+            System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
+             
+            MathExpression.EvalResult res = turbo.apply(vars);
+            System.out.println("result1--A^5---:" + res.toString());
+            
+            
+            
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
     private static void checkMatrixAlgebra() {
         System.out.println("\n--- MATRIX ALGEBRA Check---");
         try {
@@ -231,7 +320,7 @@ public class FlatMatrixTurboBench {
             System.out.println("===============BenchmarkMatrixTurboEvaluator-VS-Std-Mode-Rot-Eval-For-Point-Swarm====================");
             MathExpression m = new MathExpression(" rot(@(5,3)(3,1,4, 2,2,8, 7,1,3, 4,5,19, 8,7,21), pi, @(1,3)(0,0,0), @(1,3)(0,0,1) ) ");
 
-            double n = 1000_000;
+            double n = 10000;
 
             MathExpression.EvalResult ev = null;
             long start = System.nanoTime();

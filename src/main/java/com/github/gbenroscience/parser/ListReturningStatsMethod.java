@@ -273,7 +273,8 @@ public final class ListReturningStatsMethod implements Validatable {
 
         if (!isSuperParent()) {
             try {
-                if (isBinaryOperator(scan.get(index - 1)) || Method.isUnaryPreOperatorORDefinedMethod(scan.get(index - 1))) {
+                if (!Method.isListReturningStatsMethodThatAllowsAlgebraicOps(name) && 
+                        (isBinaryOperator(scan.get(index - 1)) || Method.isUnaryPreOperatorORDefinedMethod(scan.get(index - 1)))) {
                     valid = false;
                     errorMessage += "\n Bad Syntax! Do Not Concatenate operator " + scan.get(index - 1) + " With " + name;
                 }//end if
@@ -282,7 +283,9 @@ public final class ListReturningStatsMethod implements Validatable {
 
             }//end catch
             try {
-                if (isBinaryOperator(scan.get(closeBracket.getIndex() + 1)) || isUnaryPostOperator(scan.get(closeBracket.getIndex() + 1))) {
+                if ( 
+                        !Method.isListReturningStatsMethodThatAllowsAlgebraicOps(name) &&
+                        (isBinaryOperator(scan.get(closeBracket.getIndex() + 1)) || isUnaryPostOperator(scan.get(closeBracket.getIndex() + 1))  )) {
                     valid = false;
                     errorMessage += "\n Bad Syntax! Do Not Append operator " + scan.get(index - 1) + " To " + name;
                 }//end else if
@@ -295,8 +298,9 @@ public final class ListReturningStatsMethod implements Validatable {
                 loopBackwards:
                 {
                     boolean openBracsOnly = true;
-                    for (int i = index - 1; i >= 0; i--) {
+                    for (int i = index - 1; i > 0; i--) {
                         //this logic disallows non-listtypestatsoperators from enveloping listtypestatsoperators.
+                       
                         String prevToken = scan.get(i - 1);
                         if (isOpeningBracket(scan.get(i)) && Method.isUnaryPreOperatorORDefinedMethod(prevToken) && !Method.isStatsMethod(prevToken)) {
                             int compIndex = Bracket.getComplementIndex(true, i, scan);

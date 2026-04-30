@@ -279,6 +279,12 @@ public class Matrix {
         }
     }//end method fill.
 
+    public void reset() {
+        for (int i = 0; i < array.length; i++) {
+            array[i] = 0;
+        }
+    }//end method fill.
+
     /**
      *
      * @param matrice the matrix to be added to this one. The operation is (
@@ -491,7 +497,7 @@ public class Matrix {
      * Place the first Matrix object side by side with the second one passed as
      * argument to this method. The result is a new matrix where:
      *
-     * if 3 4 5 7 5 9 mat1 = 2 3 1 and mat2 = 4 2 6 1 6 7 5 7 3 in a new matrix
+     * if mat1 = 3 4 5 7 5 9 2 3 1 and mat2 = 4 2 6 1 6 7 5 7 3 in a new matrix
      * object (mat).
      *
      *
@@ -1389,8 +1395,9 @@ public class Matrix {
         }//end if
         return null;
     }
-
-    /**
+    
+    
+     /**
      * Row reduction technique used to compute the determinant of this matrix.
      * The other method using recursion is not worth it above n = 10; The memory
      * consumed by the process and the time used to compute it is incomparable
@@ -1788,11 +1795,12 @@ public class Matrix {
     }
 
     /**
-     * Computes the real and imaginary eigenvalues of a Matrix.
-     * Each pair of entries in the returned array represent the real and imaginary values of each eigenvalue.
-     * So the entries at index 0 and index 1 represent 1 eigenvalue(its real and complex part).
-     * So also entries at index 2 and index 3 represent the second eigenvalue and so on.
-     * 
+     * Computes the real and imaginary eigenvalues of a Matrix. Each pair of
+     * entries in the returned array represent the real and imaginary values of
+     * each eigenvalue. So the entries at index 0 and index 1 represent 1
+     * eigenvalue(its real and complex part). So also entries at index 2 and
+     * index 3 represent the second eigenvalue and so on.
+     *
      * R: 3.6960389979858523 ,10.656660507703922 ,8.250361808124694
      * ,1.2864528025782198 ,9.735431283674686 5.585459956012235
      * ,7.5122356839343745 ,6.063066728284797 ,8.559695263800457
