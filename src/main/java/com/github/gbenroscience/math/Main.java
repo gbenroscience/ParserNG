@@ -225,7 +225,7 @@ public class Main {
         System.out.println("  Note, that " + ParserCmd.class.getName() + " class takes single parameter " + logcalSwitch + " to contorl its evaluation");
         System.out.println("Logical extension:");
         System.out.println(new LogicalExpression(" 1 == 1", ExpressionLogger.DEV_NULL).getHelp());
-        System.out.println("Extandable extension:");
+        System.out.println("Extendable extension:");
         System.out.println(new ExpandingExpression(" 1 == 1", new ArrayList<String>(), ExpressionLogger.DEV_NULL).getHelp());
     }
 

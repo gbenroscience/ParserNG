@@ -1,9 +1,16 @@
-# ParserNG 🧮⚡
+# ParserNG 🧮⚡ 
+### The Fastest, Interpreted(non-compiling) Math Engine for Java.
+
+For benchmarks showing ParserNG duking it out in the ring with other parsers, 
+[check ParserNg-wars](https://github.com/gbenroscience/ParserNG-wars)
 
 **ParserNG 1.1.3** is a **blazing-fast**, nigh zero allocation(memory wise), **pure Java**, **zero-native-dependencies** math expression parser and evaluator.
 
 It **beats exp4J, and com.expression.parser on evaluation speed** across every kind of expression — from simple algebra to heavy trig, matrices, and calculus; and manages to beat Janino, the gold standard on some, while rivalling it on a host of other expressions  
 The normal mode routinely does about **3-10 million evaluations per second** while the new Turbo mode easily peaks at about **10 million to 90 million evaluations per second**.
+
+
+
 
 It goes far beyond basic parsing — offering **symbolic differentiation**, **resilient numerical integration**, **full matrix algebra**, **statistics**, **equation solving**, **user-defined functions**, **2D graphing**, and more — all in one lightweight, cross-platform library.
 
