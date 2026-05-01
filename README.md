@@ -2,7 +2,7 @@
 ### The Fastest, Interpreted(non-compiling) Math Engine for Java.
 
 For benchmarks showing ParserNG duking it out in the ring with other parsers, 
-[check ParserNg-wars](https://github.com/gbenroscience/ParserNG-wars)
+[check ParserNg-wars]( https://github.com/gbenroscience/ParserNg-wars )
 
 **ParserNG 1.1.3** is a **blazing-fast**, nigh zero allocation(memory wise), **pure Java**, **zero-native-dependencies** math expression parser and evaluator.
 
