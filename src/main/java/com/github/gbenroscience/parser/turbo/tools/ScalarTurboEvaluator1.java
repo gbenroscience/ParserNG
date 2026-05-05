@@ -759,8 +759,10 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
     /**
      * Combines multiple handles of type (double[])double into a single handle
      * of type (double[])double[].
+     * @param argumentHandles 
+     * @throws Exception
      */
-    private static MethodHandle combineArgs(List<MethodHandle> argumentHandles) throws Exception {
+    public static MethodHandle combineArgs(List<MethodHandle> argumentHandles) throws Exception {
         int arity = argumentHandles.size();
 
         // JVM Slot Limit check: 1 double = 2 slots. 

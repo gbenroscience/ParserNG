@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,8 +19,7 @@ package com.github.gbenroscience.parser.turbo.tools;
  *
  * @author GBEMIRO
  */
-import com.github.gbenroscience.math.geom.Direction;
-import com.github.gbenroscience.math.geom.Line3D;
+import com.github.gbenroscience.math.geom.Direction; 
 import com.github.gbenroscience.math.geom.Point;
 import com.github.gbenroscience.math.geom.ROTOR;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
@@ -58,6 +57,9 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
     protected final int[] slots;
     private ErrorLog errorLog = new ErrorLog();
     private MathExpression.Token[] postfix;
+    private MethodHandle finalHandle;
+    // Enables True AST Inlining for user-defined functions
+    private MethodHandle[] inlinedVariables;
 
     public MatrixTurboEvaluator(MathExpression me) {
         this.postfix = me.getCachedPostfix();
@@ -146,6 +148,16 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
             }
             return intBuffer;
         }
+
+        public EvalResult[] argsBuffer;
+
+        public EvalResult[] getArgsBuffer(int arity) {
+            if (argsBuffer == null || argsBuffer.length != arity) {
+                argsBuffer = new EvalResult[arity];
+            }
+            return argsBuffer;
+        }
+
     }
 
     public void setWillFoldConstants(boolean willFoldConstants) {
@@ -179,28 +191,28 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                     MethodHandle leaf;
                     if (t.name != null && !t.name.isEmpty()) {
                         if (t.v != null) {
-                            // OPTIMIZED: Bound Variable Lookup (Zero arguments)
-                            leaf = compileVariableLookupByIndex(t.frameIndex);
+                            // TRUE AST INLINING: If we are inside an inlined function, grab the caller's handle!
+                            if (inlinedVariables != null && t.frameIndex < inlinedVariables.length) {
+                                leaf = inlinedVariables[t.frameIndex];
+                            } else {
+                                leaf = compileVariableLookupByIndex(t.frameIndex);
+                            }
                         } else {
                             Function f = FunctionManager.lookUp(t.name);
                             if (f != null && f.getMatrix() != null) {
-                                MathExpression.EvalResult res = new MathExpression.EvalResult();
-                                res.wrap(f.getMatrix());
+                                MathExpression.EvalResult res = new MathExpression.EvalResult().wrap(f.getMatrix());
                                 leaf = MethodHandles.constant(MathExpression.EvalResult.class, res);
                             } else {
-                                MathExpression.EvalResult res = new MathExpression.EvalResult();
-                                res.wrap(t.name);
+                                MathExpression.EvalResult res = new MathExpression.EvalResult().wrap(t.name);
                                 leaf = MethodHandles.constant(MathExpression.EvalResult.class, res);
                             }
                         }
                     } else {
-                        MathExpression.EvalResult res = new MathExpression.EvalResult();
-                        res.wrap(t.value);
+                        MathExpression.EvalResult res = new MathExpression.EvalResult().wrap(t.value);
                         leaf = MethodHandles.constant(MathExpression.EvalResult.class, res);
                     }
                     stack.push(leaf);
                     break;
-
                 case MathExpression.Token.OPERATOR:
                     if (t.isPostfix) {
                         MethodHandle operand = stack.pop();
@@ -259,7 +271,30 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                         for (int i = t.arity - 1; i >= 0; i--) {
                             args[i] = stack.pop();
                         }
-                        stack.push(compileFunction(t, args));
+
+                        Function userFunc = FunctionManager.lookUp(t.name);
+                        if (userFunc != null) {
+                            MathExpression bodyExpr = userFunc.getMathExpression();
+                            MatrixTurboEvaluator inlineEvaluator = new MatrixTurboEvaluator(bodyExpr);
+                            inlineEvaluator.inlinedVariables = args;
+                            inlineEvaluator.compile();
+
+                            MethodHandle inlinedHandle = inlineEvaluator.finalHandle;
+
+                            // CRITICAL FIX: Ensure the inlined handle matches (double[])EvalResult
+                            final MethodType expectedType = MethodType.methodType(EvalResult.class, double[].class);
+                            if (!inlinedHandle.type().equals(expectedType)) {
+                                if (inlinedHandle.type().parameterCount() == 0) {
+                                    inlinedHandle = MethodHandles.dropArguments(inlinedHandle, 0, double[].class);
+                                } else {
+                                    inlinedHandle = inlinedHandle.asType(expectedType);
+                                }
+                            }
+
+                            stack.push(mergeDoubleArrays(inlinedHandle));
+                        } else {
+                            stack.push(compileFunction(t, args));
+                        }
                     }
                     break;
                 default:
@@ -274,8 +309,20 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
             throw new IllegalArgumentException(err);
         }
 
-        // OPTIMIZED: The final handle now takes zero arguments () -> EvalResult
-        final MethodHandle finalHandle = stack.pop().asType(MethodType.methodType(EvalResult.class));
+        this.finalHandle = stack.pop();
+
+        // Ensure ALL redundant double[] arguments are securely merged down to 1
+        finalHandle = mergeDoubleArrays(finalHandle);
+
+        // Enforce the strict public interface (double[])EvalResult
+        final MethodType expectedType = MethodType.methodType(EvalResult.class, double[].class);
+        if (!finalHandle.type().equals(expectedType)) {
+            if (finalHandle.type().parameterCount() == 0) {
+                finalHandle = MethodHandles.dropArguments(finalHandle, 0, double[].class);
+            } else {
+                finalHandle = finalHandle.asType(expectedType);
+            }
+        }
 
         return new FastCompositeExpression() {
             double args[] = new double[turboArgs == null ? 0 : turboArgs.length];
@@ -298,8 +345,8 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
             public EvalResult apply(double[] variables) {
                 try {
                     loadVars(variables);
-                    // OPTIMIZED: Invoke without arguments. turboArgs is already bound inside.
-                    return (EvalResult) finalHandle.invokeExact();
+                    // OPTIMIZED: Invoke with the single double[] array.
+                    return (EvalResult) finalHandle.invokeExact(args);
                 } catch (Throwable e) {
                     errorLog.error(e);
                     throw new RuntimeException("Turbo matrix execution failed", e);
@@ -325,21 +372,127 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         };
     }
 
-    private MethodHandle compileVariableLookupByIndex(int frameIndex) throws NoSuchMethodException, IllegalAccessException {
-        MethodHandle getter = LOOKUP.findStatic(MatrixTurboEvaluator.class,
-                "getVariableFromFrame",
-                MethodType.methodType(EvalResult.class, double[].class, int.class)
-        );
+    /**
+     * Safely collapses any duplicate double[] arguments down to a single
+     * instance. Prevents MethodHandle signature explosion during AST
+     * construction.
+     */
+    private static MethodHandle mergeDoubleArrays(MethodHandle mh) {
+        MethodType type = mh.type();
+        int doubleArrayCount = 0;
+        for (int i = 0; i < type.parameterCount(); i++) {
+            if (type.parameterType(i) == double[].class) {
+                doubleArrayCount++;
+            }
+        }
 
-        // OPTIMIZED: Bind the array AND the index. The resulting handle is () -> EvalResult
-        return MethodHandles.insertArguments(getter, 0, turboArgs, frameIndex);
+        if (doubleArrayCount <= 1) {
+            return mh; // Nothing to merge
+        }
+
+        Class<?>[] newParams = new Class<?>[type.parameterCount() - doubleArrayCount + 1];
+        int[] reorder = new int[type.parameterCount()];
+
+        int firstDoubleIdx = -1;
+        int newIdx = 0;
+
+        for (int i = 0; i < type.parameterCount(); i++) {
+            if (type.parameterType(i) == double[].class) {
+                if (firstDoubleIdx == -1) {
+                    firstDoubleIdx = newIdx;
+                    newParams[newIdx] = double[].class;
+                    reorder[i] = newIdx;
+                    newIdx++;
+                } else {
+                    reorder[i] = firstDoubleIdx;
+                }
+            } else {
+                newParams[newIdx] = type.parameterType(i);
+                reorder[i] = newIdx;
+                newIdx++;
+            }
+        }
+
+        MethodType newType = MethodType.methodType(type.returnType(), newParams);
+        return MethodHandles.permuteArguments(mh, newType, reorder);
     }
 
-    private static EvalResult getVariableFromFrame(double[] variables, int index) {
-        MathExpression.EvalResult res = new MathExpression.EvalResult();
-        double val = (index < variables.length) ? variables[index] : 0.0;
-        res.wrap(val);
-        return res;
+    /**
+     * Safely locates the next target EvalResult parameter and binds it, merging
+     * arrays afterward.
+     */
+    private static MethodHandle collectNextEvalResult(MethodHandle target, MethodHandle valueToInject) {
+        int fillPos = -1;
+        for (int p = 0; p < target.type().parameterCount(); p++) {
+            if (target.type().parameterType(p) == EvalResult.class) {
+                fillPos = p;
+                break;
+            }
+        }
+        if (fillPos == -1) {
+            throw new IllegalStateException("Internal Error: No EvalResult parameter found to collect into.");
+        }
+        MethodHandle collected = MethodHandles.collectArguments(target, fillPos, valueToInject);
+        return mergeDoubleArrays(collected);
+    }
+
+    private MethodHandle compileVariableLookupByIndex(final int index) throws NoSuchMethodException, IllegalAccessException {
+        if (inlinedVariables != null && index >= 0 && index < inlinedVariables.length) {
+            return inlinedVariables[index];
+        }
+
+        MethodHandle getter = LOOKUP.findStatic(MatrixTurboEvaluator.class, "getVar",
+                MethodType.methodType(double.class, double[].class, int.class));
+        getter = MethodHandles.insertArguments(getter, 1, index);
+
+        MethodHandle wrapper = LOOKUP.findStatic(MatrixTurboEvaluator.class, "wrapDouble",
+                MethodType.methodType(EvalResult.class, double.class, ResultCache.class));
+        wrapper = MethodHandles.insertArguments(wrapper, 1, new ResultCache());
+
+        // Chain: (double[]) -> double -> EvalResult
+        return MethodHandles.filterReturnValue(getter, wrapper);
+    }
+
+    /**
+     * Rebuilt using the unified collectNextEvalResult logic!
+     */
+    private static MethodHandle combineArgsToArray(MethodHandle[] args, ResultCache cache) throws Throwable {
+        int arity = args.length;
+        MethodHandle packer;
+
+        if (arity <= 5) {
+            Class<?>[] ptypes = new Class<?>[arity + 1];
+            ptypes[0] = ResultCache.class;
+            for (int i = 0; i < arity; i++) {
+                ptypes[i + 1] = EvalResult.class;
+            }
+            packer = LOOKUP.findStatic(MatrixTurboEvaluator.class, "packArgs" + arity,
+                    MethodType.methodType(EvalResult[].class, ptypes));
+        } else {
+            packer = LOOKUP.findStatic(MatrixTurboEvaluator.class, "packArgsN",
+                    MethodType.methodType(EvalResult[].class, ResultCache.class, EvalResult[].class)).asVarargsCollector(EvalResult[].class);
+            Class<?>[] ptypes = new Class<?>[arity + 1];
+            ptypes[0] = ResultCache.class;
+            for (int i = 0; i < arity; i++) {
+                ptypes[i + 1] = EvalResult.class;
+            }
+            packer = packer.asType(MethodType.methodType(EvalResult[].class, ptypes));
+        }
+
+        MethodHandle result = MethodHandles.insertArguments(packer, 0, cache);
+
+        for (int i = 0; i < arity; i++) {
+            result = collectNextEvalResult(result, args[i]);
+        }
+        return result;
+    }
+
+    public static EvalResult wrapDouble(double val, ResultCache cache) {
+        return cache.result.wrap(val);
+    }
+
+    public static double getVar(double[] vars, int index) {
+        return vars[index];
     }
 
     private MethodHandle compileBinaryOpOnEvalResult(char op, MethodHandle left, MethodHandle right) throws Throwable {
@@ -350,9 +503,9 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         dispatcher = MethodHandles.insertArguments(dispatcher, 3, nodeCache);
         dispatcher = MethodHandles.insertArguments(dispatcher, 0, op);
 
-        // OPTIMIZED: Use collectArguments to chain the zero-argument operands
-        dispatcher = MethodHandles.collectArguments(dispatcher, 0, left);
-        dispatcher = MethodHandles.collectArguments(dispatcher, 0, right);
+        // Fill Left then Right using the safe array-merging collector
+        dispatcher = collectNextEvalResult(dispatcher, left);
+        dispatcher = collectNextEvalResult(dispatcher, right);
 
         return dispatcher;
     }
@@ -365,7 +518,33 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         dispatcher = MethodHandles.insertArguments(dispatcher, 2, nodeCache);
         dispatcher = MethodHandles.insertArguments(dispatcher, 0, op);
 
-        return MethodHandles.collectArguments(dispatcher, 0, operand);
+        return collectNextEvalResult(dispatcher, operand);
+    }
+
+    private MethodHandle compileMatrixFunction(MathExpression.Token t, MethodHandle[] args) throws Throwable {
+        String funcName = t.name.toLowerCase();
+        MethodHandle dispatcher = LOOKUP.findStatic(MatrixTurboEvaluator.class, "dispatchMatrixFunction",
+                MethodType.methodType(EvalResult.class, EvalResult[].class, String.class, ResultCache.class));
+
+        ResultCache nodeCache = new ResultCache();
+        MethodHandle boundBridge = MethodHandles.insertArguments(dispatcher, 1, funcName, nodeCache);
+
+        MethodHandle combinedArgs = combineArgsToArray(args, nodeCache);
+        dispatcher = MethodHandles.collectArguments(boundBridge, 0, combinedArgs);
+        return mergeDoubleArrays(dispatcher);
+    }
+
+    private static MethodHandle compileFunction(MathExpression.Token t, MethodHandle[] args) throws Throwable {
+        int methodId = MethodRegistry.getMethodID(t.name);
+        MethodHandle bridge = LOOKUP.findStatic(MatrixTurboEvaluator.class, "invokeRegistryMethod",
+                MethodType.methodType(MathExpression.EvalResult.class, int.class, ResultCache.class, EvalResult[].class));
+
+        ResultCache nodeCache = new ResultCache();
+        MethodHandle boundBridge = MethodHandles.insertArguments(bridge, 0, methodId, nodeCache);
+
+        MethodHandle combinedArgs = combineArgsToArray(args, nodeCache);
+        MethodHandle dispatcher = MethodHandles.collectArguments(boundBridge, 0, combinedArgs);
+        return mergeDoubleArrays(dispatcher);
     }
 
     static MathExpression.EvalResult executePrint(String[] args) {
@@ -401,49 +580,67 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         return ctx.wrap(v);
     }
 
-    private MethodHandle compileMatrixFunction(MathExpression.Token t, MethodHandle[] args) throws Throwable {
-        String funcName = t.name.toLowerCase();
-
-        MethodHandle dispatcher = LOOKUP.findStatic(MatrixTurboEvaluator.class, "dispatchMatrixFunction",
-                MethodType.methodType(EvalResult.class, EvalResult[].class, String.class, ResultCache.class));
-
-        ResultCache nodeCache = new ResultCache();
-        dispatcher = MethodHandles.insertArguments(dispatcher, 1, funcName, nodeCache);
-
-        MethodHandle collector = LOOKUP.findStatic(MatrixTurboEvaluator.class, "collectArgsArray",
-                MethodType.methodType(EvalResult[].class, EvalResult[].class)).asVarargsCollector(EvalResult[].class);
-
-        collector = collector.asType(MethodType.methodType(EvalResult[].class,
-                Collections.nCopies(t.arity, EvalResult.class).toArray(new Class[0])));
-
-        MethodHandle finalFunc = MethodHandles.collectArguments(dispatcher, 0, collector);
-
-        // Chain the zero-argument operands into the collector
-        for (int i = 0; i < args.length; i++) {
-            finalFunc = MethodHandles.collectArguments(finalFunc, 0, args[i]);
-        }
-        return finalFunc;
-    }
-
     public static EvalResult[] collectArgsArray(EvalResult... args) {
         return args;
     }
 
-    private static MethodHandle compileFunction(MathExpression.Token t, MethodHandle[] args) throws Throwable {
-        int methodId = MethodRegistry.getMethodID(t.name);
-
-        MethodHandle bridge = LOOKUP.findStatic(MatrixTurboEvaluator.class, "invokeRegistryMethod",
-                MethodType.methodType(MathExpression.EvalResult.class, int.class, EvalResult[].class));
-
-        MethodHandle boundBridge = MethodHandles.insertArguments(bridge, 0, methodId);
-        MethodHandle collector = boundBridge.asCollector(EvalResult[].class, args.length);
-
-        for (int i = 0; i < args.length; i++) {
-            collector = MethodHandles.collectArguments(collector, 0, args[i]);
-        }
-
-        return collector;
+    /////////////////////////////////////////////////////////////////
+    public static MathExpression.EvalResult invokeRegistryMethod(int methodId, ResultCache cache, EvalResult[] argsValues) {
+        MethodRegistry.getAction(methodId).calc(cache.result, argsValues.length, argsValues);
+        return cache.result;
     }
+
+    public static EvalResult[] packArgs0(ResultCache cache) {
+        return cache.getArgsBuffer(0);
+    }
+
+    public static EvalResult[] packArgs1(ResultCache cache, EvalResult a) {
+        EvalResult[] buf = cache.getArgsBuffer(1);
+        buf[0] = a;
+        return buf;
+    }
+
+    public static EvalResult[] packArgs2(ResultCache cache, EvalResult a, EvalResult b) {
+        EvalResult[] buf = cache.getArgsBuffer(2);
+        buf[0] = a;
+        buf[1] = b;
+        return buf;
+    }
+
+    public static EvalResult[] packArgs3(ResultCache cache, EvalResult a, EvalResult b, EvalResult c) {
+        EvalResult[] buf = cache.getArgsBuffer(3);
+        buf[0] = a;
+        buf[1] = b;
+        buf[2] = c;
+        return buf;
+    }
+
+    public static EvalResult[] packArgs4(ResultCache cache, EvalResult a, EvalResult b, EvalResult c, EvalResult d) {
+        EvalResult[] buf = cache.getArgsBuffer(4);
+        buf[0] = a;
+        buf[1] = b;
+        buf[2] = c;
+        buf[3] = d;
+        return buf;
+    }
+
+    public static EvalResult[] packArgs5(ResultCache cache, EvalResult a, EvalResult b, EvalResult c, EvalResult d, EvalResult e) {
+        EvalResult[] buf = cache.getArgsBuffer(5);
+        buf[0] = a;
+        buf[1] = b;
+        buf[2] = c;
+        buf[3] = d;
+        buf[4] = e;
+        return buf;
+    }
+
+    public static EvalResult[] packArgsN(ResultCache cache, EvalResult... args) {
+        EvalResult[] buf = cache.getArgsBuffer(args.length);
+        System.arraycopy(args, 0, buf, 0, args.length);
+        return buf;
+    }
+
+    //////////////////////////////
 
     // ========== RUNTIME DISPATCHERS ==========
     private static EvalResult dispatchBinaryOp(char op, EvalResult left, EvalResult right, ResultCache cache) {

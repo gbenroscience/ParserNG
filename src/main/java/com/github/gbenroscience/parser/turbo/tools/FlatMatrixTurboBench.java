@@ -38,6 +38,7 @@ public class FlatMatrixTurboBench {
         System.out.println(rpt);
         System.out.println("PARSERNG FLAT-ARRAY MATRIX TURBO BENCHMARKS");
         System.out.println(rpt);
+        checkTurboUserDefinedFunctionsInMatrixMode();
         checkMatrixInvertPreMulErrors();
         checkMatrixDiv();
         checkMatrixPowerFunction();
@@ -57,6 +58,159 @@ public class FlatMatrixTurboBench {
         benchmarkLargeMatrix();
         benchmarkMatrixMultiplication();
         benchmarkMatrixPower();
+    }
+
+    private static void checkTurboUserDefinedFunctionsInMatrixMode() throws Throwable {
+        /*
+        String expr="sin(3*x)+cos(5*y)-sin(2*z^2)";
+        String fnCall="f(x,y,z)";
+        String fnDef=fnCall+"="+expr;
+        */
+        
+         String expr = "sin(sqrt(x^2+y^2+z^2))";
+        String fnCall="f(x,y,z)";
+        String fnDef=fnCall+"="+expr;
+        
+        MathExpression baseFnDef = new MathExpression(fnDef+";"+fnCall);
+        MatrixTurboEvaluator matrixTurboCompilerForBaseFn = new MatrixTurboEvaluator(baseFnDef);
+        ScalarTurboEvaluator1 turboCompiler1ForFn = new ScalarTurboEvaluator1(baseFnDef);
+        MathExpression rawMathDef = new MathExpression(expr);
+        MatrixTurboEvaluator matrixTurboCompilerForRawMathExp = new MatrixTurboEvaluator(rawMathDef);
+        ScalarTurboEvaluator1 turboCompiler1ForRawMathExp = new ScalarTurboEvaluator1(rawMathDef);
+
+        ScalarTurboEvaluator2 turboCompiler2ForFn = new ScalarTurboEvaluator2(baseFnDef);
+        ScalarTurboEvaluator2 turboCompiler2ForRawMathExp = new ScalarTurboEvaluator2(rawMathDef);
+
+        FastCompositeExpression matrixTurboExecForBaseFn = matrixTurboCompilerForBaseFn.compile();
+        FastCompositeExpression matrixTurboExecForRawMathExp = matrixTurboCompilerForRawMathExp.compile();
+        FastCompositeExpression scalarTurboExecForBaseFn = turboCompiler1ForFn.compile();
+        FastCompositeExpression scalarTurboExecForRawMathExp = turboCompiler1ForRawMathExp.compile();
+        FastCompositeExpression scalarTurbo2ExecForBaseFn = turboCompiler2ForFn.compile();
+        FastCompositeExpression scalarTurbo2ExecForRawMathExp = turboCompiler2ForRawMathExp.compile();
+
+        double v = -100;
+        double iterations = 10_000_000;
+
+        System.out.println("=============Execute f(x,y,z)-IN-STD-MODE================");
+        int xSlot = baseFnDef.getVariable("x").getFrameIndex();
+        int ySlot = baseFnDef.getVariable("y").getFrameIndex();
+        int zSlot = baseFnDef.getVariable("z").getFrameIndex();
+        long strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            baseFnDef.updateSlot(xSlot, i % 9);
+            baseFnDef.updateSlot(ySlot, i % 8);
+            baseFnDef.updateSlot(zSlot, i % 9 - 2);
+            v = baseFnDef.solveGeneric().scalar;
+        }
+        long duration1 = System.nanoTime() - strt;
+        System.out.println("waste-product of standard-base-fn-exec---" + v);
+
+        System.out.println("=============Execute sin(3*x)+cos(5*y)-sin(2*z^2) -IN-STD-MODE================");
+
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            rawMathDef.updateSlot(xSlot, i % 9);
+            rawMathDef.updateSlot(ySlot, i % 8);
+            rawMathDef.updateSlot(zSlot, i % 9 - 2);
+            v = rawMathDef.solveGeneric().scalar;
+        }
+        long duration2 = System.nanoTime() - strt;
+        System.out.println("waste-product of standard-raw-math-exp-exec--- " + v);
+
+        System.out.println("=============BASE-FN-DEF-EXECUTED-MATRIX-TURBO-MODE (f(x,y,z))================");
+
+        double[] vars = {0, 0, 0};
+
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = matrixTurboExecForBaseFn.applyScalar(vars);
+        }
+        long duration3 = System.nanoTime() - strt;
+        System.out.println("waste-product of matrix-turbo-base-fn---" + v);
+
+        System.out.println("=============RAW-MATH-EXP-EXECUTED-MATRIX-TURBO-MODE (sin(3*x)+cos(5*y)-sin(2*z^2))================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = matrixTurboExecForRawMathExp.applyScalar(vars);
+        }
+        long duration4 = System.nanoTime() - strt;
+        System.out.println("waste-product of matrix-turbo-raw-math-exp---" + v);
+
+        System.out.println("=============BASE-FN-DEF-EXECUTED-SCALAR-TURBO-1-MODE================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = scalarTurboExecForBaseFn.applyScalar(vars);
+        }
+        long duration5 = System.nanoTime() - strt;
+        System.out.println("waste-product of scalar-turbo1-base-fn-exec---" + v);
+
+        System.out.println("=============RAW-MATH-EXP-EXECUTED-SCALAR-TURBO-1-MODE================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = scalarTurboExecForRawMathExp.applyScalar(vars);
+        }
+        long duration6 = System.nanoTime() - strt;
+        System.out.println("waste-product of scalar-turbo1-raw-exp-exec---" + v);
+
+        System.out.println("=============BASE-FN-DEF-EXECUTED-SCALAR-TURBO-2-MODE================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = scalarTurbo2ExecForBaseFn.applyScalar(vars);
+        }
+        long duration7 = System.nanoTime() - strt;
+        System.out.println("waste-product of scalar-turbo2-fn---" + v);
+
+        System.out.println("=============RAW-MATH-EXP-EXECUTED-SCALAR-TURBO-2-MODE================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = scalarTurbo2ExecForRawMathExp.applyScalar(vars);
+        }
+        long duration8 = System.nanoTime() - strt;
+        System.out.println("waste-product of scalar-turbo2-raw-exp-exec---" + v);
+
+        System.out.printf("Expressions: %s and %s %n", baseFnDef.getExpression(), rawMathDef.getExpression());
+        System.out.printf("Value =  %.18f%n", v);
+        System.out.printf("Speed-standard-fn: %.2f ns/op%n", duration1 / iterations);
+        System.out.printf("Speed-standard-raw-exp: %.2f ns/op%n", duration2 / iterations);
+        System.out.printf("Speed-matrix-turbo-fn: %.2f ns/op%n", duration3 / iterations);
+        System.out.printf("Speed-matrix-turbo-raw-exp: %.2f ns/op%n", duration4 / iterations);
+        System.out.printf("Speed-scalar-turbo1-fn: %.2f ns/op%n", duration5 / iterations);
+        System.out.printf("Speed-scalar-turbo1-raw-exp: %.2f ns/op%n", duration6 / iterations);
+        System.out.printf("Speed-scalar-turbo2-fn: %.2f ns/op%n", duration7 / iterations);
+        System.out.printf("Speed-scalar-turbo2-raw-exp: %.2f ns/op%n", duration8 / iterations);
+        System.out.printf("Throughput-standard-fn: %.2f ops/sec%n", iterations / (duration1 / 1e9));
+        System.out.printf("Throughput-standard-raw-exp: %.2f ops/sec%n", iterations / (duration2 / 1e9));
+        System.out.printf("Throughput-matrix-turbo-fn: %.2f ops/sec%n", iterations / (duration3 / 1e9));
+        System.out.printf("Throughput-matrix-turbo-raw-exp: %.2f ops/sec%n", iterations / (duration4 / 1e9));
+        System.out.printf("Throughput-scalar-turbo1-fn: %.2f ops/sec%n", iterations / (duration5 / 1e9));
+        System.out.printf("Throughput-scalar-turbo1-raw: %.2f ops/sec%n", iterations / (duration6 / 1e9));
+        System.out.printf("Throughput-scalar-turbo2-fn: %.2f ops/sec%n", iterations / (duration7 / 1e9));
+        System.out.printf("Throughput-scalar-turbo2-raw: %.2f ops/sec%n", iterations / (duration8 / 1e9));
+        System.out.println("=================SPEED-UP-ZONE================");
+        System.out.printf("Matrix-Turbo-fn vs Standard-fn:              %.1fx%n", (double) duration1 / duration3);
+        System.out.printf("Matrix-Turbo-raw-exp vs Standard-raw-exp     %.1fx%n", (double) duration2 / duration4);
+        System.out.printf("Scalar-Turbo1-fn vs Standard-fn:     %.1fx%n", (double) duration1 / duration5);
+        System.out.printf("Scalar-Turbo1-raw-exp vs Standard-raw-exp:     %.1fx%n", (double) duration2 / duration6);
+        System.out.printf("Scalar-Turbo2-fn vs Standard-fn:     %.1fx%n", (double) duration1 / duration7);
+        System.out.printf("Scalar-Turbo2-raw-exp vs Standard-raw-exp:     %.1fx%n", (double) duration2 / duration8);
     }
 
     private static void benchmarkScalar() throws Throwable {
@@ -102,12 +256,8 @@ public class FlatMatrixTurboBench {
         MathExpression turbo = new MathExpression(expr, false);
         FastCompositeExpression compiled = new MatrixTurboEvaluator(turbo).compile();
 
-        double[] vars = new double[3];
+        double[] vars = new double[1];
         vars[xSlot] = 2.5;
-
-        for (int i = 0; i < 1000; i++) {
-            compiled.applyScalar(vars);
-        }
 
         start = System.nanoTime();
         for (int i = 0; i < N; i++) {
@@ -120,7 +270,8 @@ public class FlatMatrixTurboBench {
         System.out.printf("Interpreted:     %.2f ns/op%n", intDur / N);
         System.out.printf("Turbo:     %.2f ns/op%n", turboDur / N);
         System.out.printf("Speedup:     %.1fx%n", (double) intDur / turboDur);
-        System.out.println("values=" + Arrays.toString(res));
+        System.out.println("Standard- values=" + res[0]);
+        System.out.println("Turbo- values=" + res[1]);
     }
 
     private static void benchmarkWithVariablesAdvanced() throws Throwable {
@@ -184,8 +335,8 @@ public class FlatMatrixTurboBench {
             Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
-        private static void checkMatrixInvertPreMulErrors() {
+
+    private static void checkMatrixInvertPreMulErrors() {
         System.out.println("\n--- MATRIX INVERT PRE-MUL FIX---");
         try {
             String expression = "A(3,3)=(4,1,2, 3,1,5, 9,2,7);B(3,3)=(7,1,6, 6,1,5, 8,9,11);A*invert(B)";
@@ -194,7 +345,7 @@ public class FlatMatrixTurboBench {
             System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
             double[] vars = {};
             MathExpression.EvalResult result = turbo.apply(vars);
-            System.out.println("result---A*invert(B):" + result.toString()); 
+            System.out.println("result---A*invert(B):" + result.toString());
         } catch (Throwable ex) {
             Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
         }
@@ -210,23 +361,20 @@ public class FlatMatrixTurboBench {
             double[] vars = {};
             MathExpression.EvalResult result = turbo.apply(vars);
             System.out.println("result---matrix_div(A,B):" + result.toString());
-            
-            
-            
+
             String expression1 = "A/B";
             MathExpression m = new MathExpression(expression1);
             turbo = TurboEvaluatorFactory.getCompiler(m).compile();
             System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
-             
+
             MathExpression.EvalResult res = turbo.apply(vars);
             System.out.println("result1--A/B---:" + res.toString());
-            
-            
-            
+
         } catch (Throwable ex) {
             Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
+
     private static void checkMatrixPowerFunction() {
         System.out.println("\n--- MATRIX POW---");
         try {
@@ -237,19 +385,15 @@ public class FlatMatrixTurboBench {
             double[] vars = {};
             MathExpression.EvalResult result = turbo.apply(vars);
             System.out.println("result---matrix_pow(A,5):" + result.toString());
-            
-            
-            
+
             String expression1 = "R=@(3,3)(5,1,3, 2,9,12, 1,5,18);A=@(3,3)(2,0,5, 8,9,13, 1,2,1);A^5";
             MathExpression m = new MathExpression(expression1);
             turbo = TurboEvaluatorFactory.getCompiler(m).compile();
             System.out.println("compiler class: " + turbo.getCompiler().getClass() + ", errorLog:" + me.checkErrorLogs());
-             
+
             MathExpression.EvalResult res = turbo.apply(vars);
             System.out.println("result1--A^5---:" + res.toString());
-            
-            
-            
+
         } catch (Throwable ex) {
             Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
         }
