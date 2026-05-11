@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *      http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,11 +14,7 @@
  * limitations under the License.
  */
 package com.github.gbenroscience.parser.turbo.tools;
-
-/**
- *
- * @author GBEMIRO
- */
+ 
 
 import com.github.gbenroscience.math.*;
 import com.github.gbenroscience.math.geom.*;
@@ -49,7 +45,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * implementation. Uses compile-time bound ResultCaches and Zero-Argument
  * MethodHandle trees to maximize JIT inlining and execution speed.
  */
-public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
+public final class  AndroidCapableMatrixTurboEvaluator implements TurboExpressionEvaluator {
 
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
     private boolean willFoldConstants;
@@ -62,7 +58,7 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
     // Enables True AST Inlining for user-defined functions
     private MethodHandle[] inlinedVariables;
 
-    public MatrixTurboEvaluator(MathExpression me) {
+    public AndroidCapableMatrixTurboEvaluator(MathExpression me) {
         this.postfix = me.getCachedPostfix();
         this.willFoldConstants = me.isWillFoldConstants();
         int num_vars = me.getVariablesNames().length;
@@ -244,7 +240,7 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                             stack.pop();
                         }
 
-                        MethodHandle bridge = LOOKUP.findStatic(MatrixTurboEvaluator.class, "evaluatePrint",
+                        MethodHandle bridge = LOOKUP.findStatic(AndroidCapableMatrixTurboEvaluator.class, "evaluatePrint",
                                 MethodType.methodType(EvalResult.class, String[].class, double[].class));
                         stack.push(MethodHandles.insertArguments(bridge, 0, (Object) t.getRawArgs()));
 
@@ -263,7 +259,7 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                         Function userFunc = FunctionManager.lookUp(t.name);
                         if (userFunc != null) {
                             MathExpression bodyExpr = userFunc.getMathExpression();
-                            MatrixTurboEvaluator inlineEvaluator = new MatrixTurboEvaluator(bodyExpr);
+                            AndroidCapableMatrixTurboEvaluator inlineEvaluator = new AndroidCapableMatrixTurboEvaluator(bodyExpr);
                             inlineEvaluator.inlinedVariables = args;
                             inlineEvaluator.compile();
 
@@ -327,7 +323,7 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
 
             @Override
             public TurboExpressionEvaluator getCompiler() {
-                return MatrixTurboEvaluator.this;
+                return AndroidCapableMatrixTurboEvaluator.this;
             }
         };
     }
@@ -355,7 +351,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
         if (inlinedVariables != null && index >= 0 && index < inlinedVariables.length) {
             return inlinedVariables[index];
         }
-        MethodHandle evaluator = LOOKUP.findStatic(MatrixTurboEvaluator.class, "evaluateVariable",
+        MethodHandle evaluator = LOOKUP.findStatic(AndroidCapableMatrixTurboEvaluator.class, "evaluateVariable",
                 MethodType.methodType(EvalResult.class, int.class, ResultCache.class, double[].class));
         ResultCache nodeCache = new ResultCache();
         return MethodHandles.insertArguments(evaluator, 0, index, nodeCache);
@@ -368,7 +364,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
     }
 
     private MethodHandle compileBinaryOpOnEvalResult(char op, MethodHandle left, MethodHandle right) throws Throwable {
-        MethodHandle evaluator = LOOKUP.findStatic(MatrixTurboEvaluator.class, "evaluateBinary",
+        MethodHandle evaluator = LOOKUP.findStatic(AndroidCapableMatrixTurboEvaluator.class, "evaluateBinary",
                 MethodType.methodType(EvalResult.class, char.class, MethodHandle.class, MethodHandle.class, ResultCache.class, double[].class));
         ResultCache nodeCache = new ResultCache();
         return MethodHandles.insertArguments(evaluator, 0, op, left, right, nodeCache);
@@ -380,7 +376,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
     }
 
     private MethodHandle compileUnaryOpOnEvalResult(char op, MethodHandle operand) throws Throwable {
-        MethodHandle evaluator = LOOKUP.findStatic(MatrixTurboEvaluator.class, "evaluateUnary",
+        MethodHandle evaluator = LOOKUP.findStatic(AndroidCapableMatrixTurboEvaluator.class, "evaluateUnary",
                 MethodType.methodType(EvalResult.class, char.class, MethodHandle.class, ResultCache.class, double[].class));
         ResultCache nodeCache = new ResultCache();
         return MethodHandles.insertArguments(evaluator, 0, op, operand, nodeCache);
@@ -395,7 +391,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
     }
 
     private MethodHandle compileMatrixFunction(MathExpression.Token t, MethodHandle[] args) throws Throwable {
-        MethodHandle evaluator = LOOKUP.findStatic(MatrixTurboEvaluator.class, "evaluateMatrixFunction",
+        MethodHandle evaluator = LOOKUP.findStatic(AndroidCapableMatrixTurboEvaluator.class, "evaluateMatrixFunction",
                 MethodType.methodType(EvalResult.class, String.class, MethodHandle[].class, ResultCache.class, double[].class));
         ResultCache nodeCache = new ResultCache();
         return MethodHandles.insertArguments(evaluator, 0, t.name.toLowerCase(), args, nodeCache);
@@ -411,7 +407,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
 
     private static MethodHandle compileFunction(MathExpression.Token t, MethodHandle[] args) throws Throwable {
         int methodId = MethodRegistry.getMethodID(t.name);
-        MethodHandle evaluator = LOOKUP.findStatic(MatrixTurboEvaluator.class, "evaluateRegistryFunction",
+        MethodHandle evaluator = LOOKUP.findStatic(AndroidCapableMatrixTurboEvaluator.class, "evaluateRegistryFunction",
                 MethodType.methodType(EvalResult.class, int.class, MethodHandle[].class, ResultCache.class, double[].class));
         ResultCache nodeCache = new ResultCache();
         return MethodHandles.insertArguments(evaluator, 0, methodId, args, nodeCache);

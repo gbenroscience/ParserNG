@@ -39,6 +39,7 @@ public class FlatMatrixTurboBench {
         System.out.println("PARSERNG FLAT-ARRAY MATRIX TURBO BENCHMARKS");
         System.out.println(rpt);
         checkTurboUserDefinedFunctionsInMatrixMode();
+        checkTurboUserDefinedFunctionsWithAndroidCapableMatrixTurboEvaluatorInMatrixMode();
         checkMatrixInvertPreMulErrors();
         checkMatrixDiv();
         checkMatrixPowerFunction();
@@ -61,6 +62,8 @@ public class FlatMatrixTurboBench {
     }
 
     private static void checkTurboUserDefinedFunctionsInMatrixMode() throws Throwable {
+        
+        System.out.println("=====================MATRIX-BENCHING-checkTurboUserDefinedFunctionsInMatrixMode()============================");
         /*
         String expr="sin(3*x)+cos(5*y)-sin(2*z^2)";
         String fnCall="f(x,y,z)";
@@ -207,6 +210,160 @@ public class FlatMatrixTurboBench {
         System.out.println("=================SPEED-UP-ZONE================");
         System.out.printf("Matrix-Turbo-fn vs Standard-fn:              %.1fx%n", (double) duration1 / duration3);
         System.out.printf("Matrix-Turbo-raw-exp vs Standard-raw-exp     %.1fx%n", (double) duration2 / duration4);
+        System.out.printf("Scalar-Turbo1-fn vs Standard-fn:     %.1fx%n", (double) duration1 / duration5);
+        System.out.printf("Scalar-Turbo1-raw-exp vs Standard-raw-exp:     %.1fx%n", (double) duration2 / duration6);
+        System.out.printf("Scalar-Turbo2-fn vs Standard-fn:     %.1fx%n", (double) duration1 / duration7);
+        System.out.printf("Scalar-Turbo2-raw-exp vs Standard-raw-exp:     %.1fx%n", (double) duration2 / duration8);
+    }
+    private static void checkTurboUserDefinedFunctionsWithAndroidCapableMatrixTurboEvaluatorInMatrixMode() throws Throwable {
+        
+        System.out.println("=====================ANDROID-CAPABLE-MATRIX-BENCHING-checkTurboUserDefinedFunctionsWithAndroidCapableMatrixTurboEvaluatorInMatrixMode()============================");
+        /*
+        String expr="sin(3*x)+cos(5*y)-sin(2*z^2)";
+        String fnCall="f(x,y,z)";
+        String fnDef=fnCall+"="+expr;
+        */
+        
+         String expr = "sin(sqrt(x^2+y^2+z^2))";
+        String fnCall="f(x,y,z)";
+        String fnDef=fnCall+"="+expr;
+        
+        MathExpression baseFnDef = new MathExpression(fnDef+";"+fnCall);
+        AndroidCapableMatrixTurboEvaluator matrixTurboCompilerForBaseFn = new AndroidCapableMatrixTurboEvaluator(baseFnDef);
+        ScalarTurboEvaluator1 turboCompiler1ForFn = new ScalarTurboEvaluator1(baseFnDef);
+        MathExpression rawMathDef = new MathExpression(expr);
+        AndroidCapableMatrixTurboEvaluator matrixTurboCompilerForRawMathExp = new AndroidCapableMatrixTurboEvaluator(rawMathDef);
+        ScalarTurboEvaluator1 turboCompiler1ForRawMathExp = new ScalarTurboEvaluator1(rawMathDef);
+
+        ScalarTurboEvaluator2 turboCompiler2ForFn = new ScalarTurboEvaluator2(baseFnDef);
+        ScalarTurboEvaluator2 turboCompiler2ForRawMathExp = new ScalarTurboEvaluator2(rawMathDef);
+
+        FastCompositeExpression matrixTurboExecForBaseFn = matrixTurboCompilerForBaseFn.compile();
+        FastCompositeExpression matrixTurboExecForRawMathExp = matrixTurboCompilerForRawMathExp.compile();
+        FastCompositeExpression scalarTurboExecForBaseFn = turboCompiler1ForFn.compile();
+        FastCompositeExpression scalarTurboExecForRawMathExp = turboCompiler1ForRawMathExp.compile();
+        FastCompositeExpression scalarTurbo2ExecForBaseFn = turboCompiler2ForFn.compile();
+        FastCompositeExpression scalarTurbo2ExecForRawMathExp = turboCompiler2ForRawMathExp.compile();
+
+        double v = -100;
+        double iterations = 50_000_000;
+
+        System.out.println("=============Execute f(x,y,z)-IN-STD-MODE================");
+        int xSlot = baseFnDef.getVariable("x").getFrameIndex();
+        int ySlot = baseFnDef.getVariable("y").getFrameIndex();
+        int zSlot = baseFnDef.getVariable("z").getFrameIndex();
+        long strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            baseFnDef.updateSlot(xSlot, i % 9);
+            baseFnDef.updateSlot(ySlot, i % 8);
+            baseFnDef.updateSlot(zSlot, i % 9 - 2);
+            v = baseFnDef.solveGeneric().scalar;
+        }
+        long duration1 = System.nanoTime() - strt;
+        System.out.println("waste-product of standard-base-fn-exec---" + v);
+
+        System.out.println("=============Execute sin(3*x)+cos(5*y)-sin(2*z^2) -IN-STD-MODE================");
+
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            rawMathDef.updateSlot(xSlot, i % 9);
+            rawMathDef.updateSlot(ySlot, i % 8);
+            rawMathDef.updateSlot(zSlot, i % 9 - 2);
+            v = rawMathDef.solveGeneric().scalar;
+        }
+        long duration2 = System.nanoTime() - strt;
+        System.out.println("waste-product of standard-raw-math-exp-exec--- " + v);
+
+        System.out.println("=============BASE-FN-DEF-EXECUTED-MATRIX-TURBO-MODE (f(x,y,z))================");
+
+        double[] vars = {0, 0, 0};
+
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = matrixTurboExecForBaseFn.applyScalar(vars);
+        }
+        long duration3 = System.nanoTime() - strt;
+        System.out.println("waste-product of matrix-turbo-base-fn---" + v);
+
+        System.out.println("=============RAW-MATH-EXP-EXECUTED-MATRIX-TURBO-MODE (sin(3*x)+cos(5*y)-sin(2*z^2))================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = matrixTurboExecForRawMathExp.applyScalar(vars);
+        }
+        long duration4 = System.nanoTime() - strt;
+        System.out.println("waste-product of matrix-turbo-raw-math-exp---" + v);
+
+        System.out.println("=============BASE-FN-DEF-EXECUTED-SCALAR-TURBO-1-MODE================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = scalarTurboExecForBaseFn.applyScalar(vars);
+        }
+        long duration5 = System.nanoTime() - strt;
+        System.out.println("waste-product of scalar-turbo1-base-fn-exec---" + v);
+
+        System.out.println("=============RAW-MATH-EXP-EXECUTED-SCALAR-TURBO-1-MODE================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = scalarTurboExecForRawMathExp.applyScalar(vars);
+        }
+        long duration6 = System.nanoTime() - strt;
+        System.out.println("waste-product of scalar-turbo1-raw-exp-exec---" + v);
+
+        System.out.println("=============BASE-FN-DEF-EXECUTED-SCALAR-TURBO-2-MODE================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = scalarTurbo2ExecForBaseFn.applyScalar(vars);
+        }
+        long duration7 = System.nanoTime() - strt;
+        System.out.println("waste-product of scalar-turbo2-fn---" + v);
+
+        System.out.println("=============RAW-MATH-EXP-EXECUTED-SCALAR-TURBO-2-MODE================");
+        strt = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            vars[0] = i % 9;
+            vars[1] = i % 8;
+            vars[2] = i % 9 - 2;
+            v = scalarTurbo2ExecForRawMathExp.applyScalar(vars);
+        }
+        long duration8 = System.nanoTime() - strt;
+        System.out.println("waste-product of scalar-turbo2-raw-exp-exec---" + v);
+
+        System.out.printf("Expressions: %s and %s %n", baseFnDef.getExpression(), rawMathDef.getExpression());
+        System.out.printf("Value =  %.18f%n", v);
+        System.out.printf("Speed-standard-fn: %.2f ns/op%n", duration1 / iterations);
+        System.out.printf("Speed-standard-raw-exp: %.2f ns/op%n", duration2 / iterations);
+        System.out.printf("Speed-android-capable-matrix-turbo-fn: %.2f ns/op%n", duration3 / iterations);
+        System.out.printf("Speed-android-capable-matrix-turbo-raw-exp: %.2f ns/op%n", duration4 / iterations);
+        System.out.printf("Speed-scalar-turbo1-fn: %.2f ns/op%n", duration5 / iterations);
+        System.out.printf("Speed-scalar-turbo1-raw-exp: %.2f ns/op%n", duration6 / iterations);
+        System.out.printf("Speed-scalar-turbo2-fn: %.2f ns/op%n", duration7 / iterations);
+        System.out.printf("Speed-scalar-turbo2-raw-exp: %.2f ns/op%n", duration8 / iterations);
+        System.out.printf("Throughput-standard-fn: %.2f ops/sec%n", iterations / (duration1 / 1e9));
+        System.out.printf("Throughput-standard-raw-exp: %.2f ops/sec%n", iterations / (duration2 / 1e9));
+        System.out.printf("Throughput-android-capable-matrix-turbo-fn: %.2f ops/sec%n", iterations / (duration3 / 1e9));
+        System.out.printf("Throughput-android-capable-matrix-turbo-raw-exp: %.2f ops/sec%n", iterations / (duration4 / 1e9));
+        System.out.printf("Throughput-scalar-turbo1-fn: %.2f ops/sec%n", iterations / (duration5 / 1e9));
+        System.out.printf("Throughput-scalar-turbo1-raw: %.2f ops/sec%n", iterations / (duration6 / 1e9));
+        System.out.printf("Throughput-scalar-turbo2-fn: %.2f ops/sec%n", iterations / (duration7 / 1e9));
+        System.out.printf("Throughput-scalar-turbo2-raw: %.2f ops/sec%n", iterations / (duration8 / 1e9));
+        System.out.println("=================SPEED-UP-ZONE================");
+        System.out.printf("android-capable-Matrix-Turbo-fn vs Standard-fn:              %.1fx%n", (double) duration1 / duration3);
+        System.out.printf("android-capable-Matrix-Turbo-raw-exp vs Standard-raw-exp     %.1fx%n", (double) duration2 / duration4);
         System.out.printf("Scalar-Turbo1-fn vs Standard-fn:     %.1fx%n", (double) duration1 / duration5);
         System.out.printf("Scalar-Turbo1-raw-exp vs Standard-raw-exp:     %.1fx%n", (double) duration2 / duration6);
         System.out.printf("Scalar-Turbo2-fn vs Standard-fn:     %.1fx%n", (double) duration1 / duration7);
