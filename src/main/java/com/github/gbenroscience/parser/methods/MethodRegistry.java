@@ -647,9 +647,8 @@ public class MethodRegistry {
         });
          */
         registerMethod(Declarations.LIST_SUM, (ctx, arity, args) -> {
-            // System.out.println("arg-type-in-registry-call: " + Arrays.toString(args));
             double total = 0.0;
-
+//System.out.println("listsum -> arity = "+arity+", args = "+Arrays.toString(args));
             ByteArrayBuilder bab = new ByteArrayBuilder();
             for (MathExpression.EvalResult e : args) {
                 if (e.type == MathExpression.EvalResult.TYPE_SCALAR) {
@@ -663,6 +662,8 @@ public class MethodRegistry {
             for (double d : data) {
                 total += d;
             }
+           // System.out.println("IN->"+Arrays.toString(args)+"   total: "+total);
+            
             ctx.wrap(total);
             return ctx;
         });
@@ -905,6 +906,8 @@ public class MethodRegistry {
         });
 
         registerMethod(Declarations.SORT, (ctx, arity, args) -> {
+ 
+           // System.out.println("sort -> arity = "+arity+", args = "+Arrays.toString(args));
             // 1. Handle edge cases
             if (args == null || args.length == 0) {
                 MathExpression.EvalResult res = ctx;
@@ -925,6 +928,8 @@ public class MethodRegistry {
             double[] sortedData = bab.getAsDoubleArray();
             // 3. Perform the high-speed Dual-Pivot Quicksort 
             java.util.Arrays.sort(sortedData);
+            
+         //   System.out.println("IN->"+Arrays.toString(sortedData));
             ctx.wrap(sortedData);
             return ctx;
         });

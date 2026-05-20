@@ -707,7 +707,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                                 stack.push(MethodHandles.filterArguments(MethodHandles.insertArguments(fn, 0, val), 0, right));
                             } else {
                                 // USE NEW METHOD HERE TOO: applyBinaryOpNoPermute
-                                stack.push(applyBinaryOpNoPermute('_', left, right, fn));
+                                stack.push(applyBinaryOpNoPermute(left, right, fn));
                             }
                         }
                     } // Inside your FUNCTION/METHOD case handler for user-defined functions
@@ -975,7 +975,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
      * Helper for binary ops with already-resolved function handle. Used for
      * intrinsic functions like pow, min, max, etc.
      */
-    private static MethodHandle applyBinaryOpNoPermute(char op, MethodHandle left, MethodHandle right, MethodHandle fn) throws Throwable {
+    private static MethodHandle applyBinaryOpNoPermute(MethodHandle left, MethodHandle right, MethodHandle fn) throws Throwable {
         int lParams = left.type().parameterCount();
         int rParams = right.type().parameterCount();
 

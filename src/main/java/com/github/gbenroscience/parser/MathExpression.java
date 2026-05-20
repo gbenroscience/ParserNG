@@ -439,7 +439,7 @@ public class MathExpression implements Savable, Solvable {
                         s.append(t);
                     }
                 });
-               
+
                 Function f = FunctionManager.add(s.toString());
                 l.clear();
                 l.add(fnNameToLeftOfEquals);
@@ -468,7 +468,7 @@ public class MathExpression implements Savable, Solvable {
                 s.append(t);
             }
         });
-        
+
         return s.toString();
     }
 
@@ -575,8 +575,8 @@ public class MathExpression implements Savable, Solvable {
     public FastCompositeExpression getCompiledTurbo() {
         return compiledTurbo;
     }
-    
-    public void copyErrorLogTo(ErrorLog log){
+
+    public void copyErrorLogTo(ErrorLog log) {
         log.copyFrom(errorLog);
     }
 
@@ -971,12 +971,13 @@ public class MathExpression implements Savable, Solvable {
 
     public String checkErrorLogs() {
         String logs = errorLog.getLogs();
-         errorLog.print();
-         return logs;
+        errorLog.print();
+        return logs;
     }
-    
-    
-    
+
+    private boolean isCommaAlias(String token) {
+        return token.equals(commaAlias);
+    }
 
     private void statsVerifier() {
         scanner.removeAll(whitespaceremover);
@@ -1005,15 +1006,17 @@ public class MathExpression implements Savable, Solvable {
 
                 for (int i = 0; i < scanner.size(); i++) {
                     try {
-                        if (i+1 < scanner.size() && !Method.isListReturningStatsMethodThatAllowsAlgebraicOps(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+                        if (i + 1 < scanner.size() && !Method.isListReturningStatsMethodThatAllowsAlgebraicOps(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
                             if (isBinaryOperator(scanner.get(i - 1))) {
-                                errorLog.info("1. Invalid Association Discovered For: \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\".\n");
+                                errorLog.info("1. Invalid Association Discovered For: \"" + scanner.get(i - 1) + "\" And \"" + scanner.get(i) + "\".\n");
                                 correctFunction = false;
                                 break;
                             }
-                            if (isOpeningBracket(scanner.get(i - 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i - 2))
-                                    && !Method.isListReturningStatsMethod(scanner.get(i - 2))) {
-                                errorLog.info("2. Invalid Association Discovered For: \"(\" And "+scanner.get(i-2)+" And \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n ");
+                            if (isOpeningBracket(scanner.get(i - 1))
+                                    && !Method.isNumberReturningStatsMethod(scanner.get(i - 2))
+                                    && !Method.isListReturningStatsMethod(scanner.get(i - 2))
+                                    && !isCommaAlias(scanner.get(i - 2))) { 
+                                errorLog.info("2. Invalid Association Discovered For: \"(\" And " + scanner.get(i - 2) + " And \"" + scanner.get(i - 1) + "\" And \"" + scanner.get(i) + "\"\n ");
                                 correctFunction = false;
                                 break;
                             }
@@ -1132,7 +1135,7 @@ public class MathExpression implements Savable, Solvable {
                                 && !isLogicOperator(scanner.get(i - 1)) && !isUnaryPreOperator(scanner.get(i - 1))
                                 && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1)) && !isNumber(scanner.get(i - 1))
                                 && !isVariableString(scanner.get(i - 1)) && !isComma(scanner.get(i - 1))) {
-                            errorLog.info("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n");
+                            errorLog.info("ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i - 1) + "\" And \"" + scanner.get(i) + "\"\n");
                             correctFunction = false;
                             scanner.clear();
                             break;
@@ -1144,7 +1147,7 @@ public class MathExpression implements Savable, Solvable {
                                 && !isUnaryPreOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
                                 && !Method.isLogToAnyBase(scanner.get(i + 1)) && !Method.isAntiLogToAnyBase(scanner.get(i + 1)) && !isNumber(scanner.get(i + 1))
                                 && !isVariableString(scanner.get(i + 1)) && !isComma(scanner.get(i + 1))) {
-                            errorLog.info("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i)+"\" And \""+scanner.get(i+1)+"\"PLUS As You Have Done.\n");
+                            errorLog.info("ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i) + "\" And \"" + scanner.get(i + 1) + "\"PLUS As You Have Done.\n");
                             correctFunction = false;
                             scanner.clear();
                             break;
@@ -1303,7 +1306,6 @@ public class MathExpression implements Savable, Solvable {
         if (scanner == null || scanner.isEmpty() || !correctFunction || parser_Result != ParserResult.VALID) {
             return EvalResult.ERROR;
         }
-
         return EvalResult.ERROR;
     }
 
@@ -1450,10 +1452,10 @@ public class MathExpression implements Savable, Solvable {
         return t;
     }
 
-     public void readErrorLog(){
-         errorLog.print();
-     }
-    
+    public void readErrorLog() {
+        errorLog.print();
+    }
+
     private void compileToPostfix() {
 
         if (cachedPostfix != null) {
@@ -1794,49 +1796,58 @@ public class MathExpression implements Savable, Solvable {
                         EvalResult[] args = (arity <= MAX_ARITY) ? argCache[arity] : new EvalResult[arity];
 
                         // This eliminates loop overhead for the most common cases
-                        if (arity == 1) {
-                            args[0] = stack[ptr--];
-                        } else if (arity == 2) {
-                            args[1] = stack[ptr--];
-                            args[0] = stack[ptr--];
-                        } else if (arity == 3) {
-                            args[2] = stack[ptr--];
-                            args[1] = stack[ptr--];
-                            args[0] = stack[ptr--];
-                        } else if (arity == 4) {
-                            args[3] = stack[ptr--];
-                            args[2] = stack[ptr--];
-                            args[1] = stack[ptr--];
-                            args[0] = stack[ptr--];
-                        } else if (arity == 5) {
-                            args[4] = stack[ptr--];
-                            args[3] = stack[ptr--];
-                            args[2] = stack[ptr--];
-                            args[1] = stack[ptr--];
-                            args[0] = stack[ptr--];
-                        } else if (arity == 6) {
-                            args[5] = stack[ptr--];
-                            args[4] = stack[ptr--];
-                            args[3] = stack[ptr--];
-                            args[2] = stack[ptr--];
-                            args[1] = stack[ptr--];
-                            args[0] = stack[ptr--];
-                        } else if (arity == 7) {
-                            args[6] = stack[ptr--];
-                            args[5] = stack[ptr--];
-                            args[4] = stack[ptr--];
-                            args[3] = stack[ptr--];
-                            args[2] = stack[ptr--];
-                            args[1] = stack[ptr--];
-                            args[0] = stack[ptr--];
-                        } else {
-                            // General case for arity > 7
-                            for (int j = arity - 1; j >= 0; j--) {
-                                args[j] = stack[ptr--];
-                            }
+                        switch (arity) {
+                            case 1:
+                                args[0] = stack[ptr--];
+                                break;
+                            case 2:
+                                args[1] = stack[ptr--];
+                                args[0] = stack[ptr--];
+                                break;
+                            case 3:
+                                args[2] = stack[ptr--];
+                                args[1] = stack[ptr--];
+                                args[0] = stack[ptr--];
+                                break;
+                            case 4:
+                                args[3] = stack[ptr--];
+                                args[2] = stack[ptr--];
+                                args[1] = stack[ptr--];
+                                args[0] = stack[ptr--];
+                                break;
+                            case 5:
+                                args[4] = stack[ptr--];
+                                args[3] = stack[ptr--];
+                                args[2] = stack[ptr--];
+                                args[1] = stack[ptr--];
+                                args[0] = stack[ptr--];
+                                break;
+                            case 6:
+                                args[5] = stack[ptr--];
+                                args[4] = stack[ptr--];
+                                args[3] = stack[ptr--];
+                                args[2] = stack[ptr--];
+                                args[1] = stack[ptr--];
+                                args[0] = stack[ptr--];
+                                break;
+                            case 7:
+                                args[6] = stack[ptr--];
+                                args[5] = stack[ptr--];
+                                args[4] = stack[ptr--];
+                                args[3] = stack[ptr--];
+                                args[2] = stack[ptr--];
+                                args[1] = stack[ptr--];
+                                args[0] = stack[ptr--];
+                                break;
+                            default:
+                                // General case for arity > 7
+                                for (int j = arity - 1; j >= 0; j--) {
+                                    args[j] = stack[ptr--];
+                                }
+                                break;
                         }
 
-                        if (t.name == Declarations.DIFFERENTIATION) {
+                        if (t.name.equals(Declarations.DIFFERENTIATION)) {
                             for (int k = 0; k < t.rawArgs.length; k++) {
                                 args[k] = getNextResult().wrap(t.rawArgs[k]);
                             }
@@ -1845,6 +1856,7 @@ public class MathExpression implements Savable, Solvable {
                         EvalResult result = t.action.calc(getNextResult(), arity, args);
                         stack[++ptr] = result;
                         break;
+
                 }
             }
 
@@ -1856,7 +1868,7 @@ public class MathExpression implements Savable, Solvable {
             }
 
             if (ptr > 0) {
-                String err = "WARNING: Evalaution stack has " + (ptr + 1) + " values at end, returning top";
+                String err = "WARNING: Evaluation stack has " + (ptr + 1) + " values at end, returning top";
                 errorLog.info(err);
                 System.out.println(err);
             }
@@ -3124,7 +3136,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println("anon9: " + FunctionManager.lookUp("anon9"));
         MathExpression mee = new MathExpression("sum(2,3,sort(3,0,1,2))");
 
-        System.out.println("sum(2,3,sort(3,0,1,2)): " + mee.solve());
+        System.out.println("listsum(2,3,sort(3,0,1,2)): " + mee.solve());
         System.out.println(printer.solve());
 
         MathExpression me = new MathExpression("A=@(x,y)sin(x)+cos(y-x);B=@(x,y)cos(x*y);C(x,y)=A(x,2*y)+B(3*x,2*y);D=C;print(D)");

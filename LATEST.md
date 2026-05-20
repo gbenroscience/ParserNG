@@ -1,5 +1,9 @@
 # ParserNG
 
+### Parser 1.1.4 has been released on maven-central!
+Version 1.1.4 squashes a bug where an over active syntax checker disables nested stats functions e.g. sort(3,1,5,listsum(4,12,18,-9),5,2,31,4) returns a syntax error Added tests
+
+
 ### Parser 1.1.3 has been released on maven-central!
 Fixed validation bugs in parser, made relevant matrix maethods support algebraic operations, like A*invert(B) etc, fixed bad bugs in flat matrix turbo implementations and optimized them further. Added tests
 

@@ -565,5 +565,13 @@ class MathExpressionTest {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
+    
+    
+    @Test
+    void nestedStatsTest() {
+        MathExpression me = new MathExpression("listsum(4,1,3,5,9,sort(2,1,3,12,8,4),5,9,2,2,10,10)");
+        Assertions.assertEquals(90, me.solveGeneric().scalar); 
+    }
+
 
 }

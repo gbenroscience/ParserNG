@@ -16,7 +16,6 @@
 package com.github.gbenroscience.parser.turbo.tools;
  
 
-import com.github.gbenroscience.math.*;
 import com.github.gbenroscience.math.geom.*;
 import com.github.gbenroscience.math.geom.Point;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
@@ -30,9 +29,6 @@ import com.github.gbenroscience.parser.Variable;
 import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.parser.methods.Method;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
-import com.github.gbenroscience.parser.turbo.tools.EigenEngineTurbo;
-import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
-import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.VariableManager;

@@ -33,7 +33,7 @@ import java.util.logging.Logger;
 public class ScalarTurboBench {
 
     private static final int N = 1000000;
-    private static boolean useWidening = true;
+    private static boolean useWidening = false;
 
     public static void main(String[] args) throws Throwable {
         String rpt = STRING.repeating("=", 80);
@@ -490,7 +490,7 @@ public class ScalarTurboBench {
 
         // Warm up JIT
         MathExpression interpreted = new MathExpression(expr, false);
-
+ 
         MathExpression.EvalResult ev = interpreted.solveGeneric();
 
         double[] v = null;
@@ -500,10 +500,9 @@ public class ScalarTurboBench {
             v = interpreted.solveGeneric().vector;
         }
         double interpretedDur = System.nanoTime() - start;
-
         System.out.printf("Expression: %s%n", expr);
-        v[0] *= 1;
-
+             v[0] *= 1;
+        
         // Compile to turbo
         FastCompositeExpression compiled = get(interpreted, false);
         // Warm up turbo JIT
@@ -900,7 +899,7 @@ public class ScalarTurboBench {
         double turboDur = System.nanoTime() - start;
         System.out.println("res = " + res[0]);
 
-        System.out.printf("Expression: %s%n", "f(x,y)"); 
+        System.out.printf("Expression: %s%n", "f(x,y)");
         System.out.printf("Interpreted:     %.2f ns/op%n", interpretedDur / N);
         System.out.printf("Turbo:     %.2f ns/op%n", turboDur / N);
         System.out.printf("Speedup:     %.1fx%n", (double) interpretedDur / turboDur);
@@ -939,7 +938,7 @@ public class ScalarTurboBench {
         double turboDur = System.nanoTime() - start;
         System.out.println("res = " + res[0]);
 
-        System.out.printf("Expression: %s%n", "f(x,y)"); 
+        System.out.printf("Expression: %s%n", "f(x,y)");
         System.out.printf("Interpreted:     %.2f ns/op%n", interpretedDur / N);
         System.out.printf("Turbo:     %.2f ns/op%n", turboDur / N);
         System.out.printf("Speedup:     %.1fx%n", (double) interpretedDur / turboDur);
