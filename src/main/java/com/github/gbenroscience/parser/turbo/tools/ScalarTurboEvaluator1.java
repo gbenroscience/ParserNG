@@ -352,6 +352,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 }
                 return MathExpression.EvalResult.ERROR;
             }
+
             @Override
             public String checkErrorLogs() {
                 String logs = errorLog.getLogs();
@@ -363,8 +364,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             public TurboExpressionEvaluator getCompiler() {
                 return ScalarTurboEvaluator1.this;
             }
-            
-            
+
         };
     }
 
@@ -759,7 +759,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
     /**
      * Combines multiple handles of type (double[])double into a single handle
      * of type (double[])double[].
-     * @param argumentHandles 
+     *
+     * @param argumentHandles
      * @throws Exception
      */
     public static MethodHandle combineArgs(List<MethodHandle> argumentHandles) throws Exception {
@@ -1659,7 +1660,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                     Point p11Rot = r.rotate(p11);
                     Point p22Rot = r.rotate(p22);
-                    Matrix m = new Matrix(new double[]{p11Rot.x, p11Rot.y, p11Rot.z, p22Rot.x, p22Rot.y, p22Rot.z},2,3);
+                    Matrix m = new Matrix(new double[]{p11Rot.x, p11Rot.y, p11Rot.z, p22Rot.x, p22Rot.y, p22Rot.z}, 2, 3);
                     return ctx.wrap(m);
                 } else {
                     return MathExpression.EvalResult.ERROR;
