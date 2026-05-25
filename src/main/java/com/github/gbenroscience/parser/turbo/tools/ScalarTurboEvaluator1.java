@@ -18,6 +18,7 @@ package com.github.gbenroscience.parser.turbo.tools;
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.equations.DifferentialEquations;
 import com.github.gbenroscience.math.geom.Direction;
 import com.github.gbenroscience.math.geom.Line3D;
 import com.github.gbenroscience.math.geom.Point;
@@ -2123,8 +2124,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
      * Inlined division: a / b with zero-check
      */
     public static double divide(double a, double b) {
-        if (b == 0) {
-            throw new ArithmeticException("Division by zero");
+        if (b == 0) { 
+            return a>=0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
         }
         return a / b;
     }
@@ -2266,4 +2267,44 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             return MethodHandles.identity(type);
         }
     }
+
+    public static double executeTurboODE(MethodHandle dy_dt, int tSlot, int ySlot, int frameSize,
+            double t0, double y0, double tEnd, double initialStep,
+            DifferentialEquations.ODESolverMethod method) throws Throwable {
+
+        // 1. Pack the scalar y0 into a 1-element state vector array
+        double[] y0Vector = new double[]{y0};
+        int systemSize = 1;
+
+        // 2. Dedeprecate fixed steps from initialStep for fixed-step solvers
+        // If initialStep is h, then steps = (tEnd - t0) / h
+        int steps = (int) Math.round((tEnd - t0) / initialStep);
+        if (steps <= 0) {
+            steps = 1; // Prevent division-by-zero or negative steps
+        }
+        double[] resultVector;
+
+        // 3. Route parameters correctly matching your vectorized solvers
+        switch (method) {
+            case EULER:
+                resultVector = DifferentialEquations.stepEuler(dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps);
+                break;
+            case RK4:
+                resultVector = DifferentialEquations.stepRK4(dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps);
+                break;
+            case RK45_DORMAND_PRINCE:
+                // Adaptive solver takes initialStep directly as initialH
+                resultVector = DifferentialEquations.stepRK45Adaptive(dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, initialStep);
+                break;
+            case IMPLICIT_EULER:
+                resultVector = DifferentialEquations.stepImplicitEuler(dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps);
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported ODE method: " + method);
+        }
+
+        // 4. Unpack and return the scalar result
+        return resultVector[0];
+    }
+
 }

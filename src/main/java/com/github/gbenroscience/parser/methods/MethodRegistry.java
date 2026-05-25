@@ -402,6 +402,38 @@ public class MethodRegistry {
             }//end else if
             return ctx.wrap(Double.NaN);
         });
+        registerMethod(Declarations.DIFF_EQN, (ctx, arity, args) -> {
+//            System.out.println("Derivatives Action");
+//            System.out.println("funcName: " + funcName);
+//            System.out.println("arity: " + arity);
+
+            int sz = args.length;
+            switch (sz) {
+                case 1: {
+                    MathExpression.EvalResult solution = Derivative.eval("diff(" + args[0] + ",1)");//only the function handle was sent...e.g diff(F)
+                    return ctx.wrap(solution);
+                }
+                case 2: {//diff(F,v|n) F = func to be differentiated, v = new func to hold return value of differentiation, n = order of differentiation
+                    String anonFunc = args[0].textRes;
+                    MathExpression.EvalResult solution = Derivative.eval("diff(" + anonFunc + "," + (args[1].textRes != null ? args[1].textRes : args[1].scalar) + ")");
+                    return ctx.wrap(solution);
+                }
+                case 3: {
+//diff(F,v|x, n) F = func to be differentiated, v = new func to hold return value of differentiation, 
+//x = x point to evaluate final detivative at n = order of differentiation
+                    String anonFunc = args[0].textRes;
+                    int order = (int) args[2].scalar;
+                    /*  NumericalDerivative der = new NumericalDerivative(FunctionManager.lookUp(data.get(0)),Double.parseDouble(data.get(1)));
+                return der.findDerivativeByPolynomialExpander();
+                     */
+                    MathExpression.EvalResult ev = Derivative.eval("diff(" + anonFunc + "," + (args[1].textRes != null ? args[1].textRes : args[1].scalar) + "," + args[2] + ")");
+                    return ctx.wrap(ev);
+
+                }
+                default:
+                    return ctx.wrap(Double.NaN);
+            }
+        });
 
         registerMethod(Declarations.ROTOR, (ctx, arity, args) -> {
 

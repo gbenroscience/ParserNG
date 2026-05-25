@@ -66,7 +66,7 @@ public class Method {
      * Function objects or anonymous Functions.
      */
     public static boolean isFunctionOperatingMethod(String methodName) {
-        return methodName.equals(DIFFERENTIATION) || methodName.equals(INTEGRATION) || methodName.equals(QUADRATIC) || methodName.equals(GENERAL_ROOT)
+        return methodName.equals(DIFFERENTIATION) || methodName.equals(INTEGRATION) || methodName.equals(DIFF_EQN) ||  methodName.equals(QUADRATIC) || methodName.equals(GENERAL_ROOT)
                 || methodName.equals(TARTAGLIA_ROOTS) || methodName.equals(PLOT) || methodName.equals(MATRIX_MULTIPLY)
                 || methodName.equals(MATRIX_DIVIDE) || methodName.equals(MATRIX_ADD) || methodName.equals(MATRIX_SUBTRACT)
                 || methodName.equals(MATRIX_POWER) || methodName.equals(MATRIX_EDIT) || methodName.equals(MATRIX_TRANSPOSE)

@@ -566,6 +566,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
                     if (name.equals(Declarations.QUADRATIC) || name.equals(Declarations.TARTAGLIA_ROOTS)
                             || name.equals(Declarations.GENERAL_ROOT) || name.equals(Declarations.DIFFERENTIATION) || name.equals(Declarations.INTEGRATION)
+                            || name.equals(Declarations.DIFF_EQN) 
                             || name.equals(Declarations.PRINT) || name.equals(Declarations.ROTOR)) {
                         MethodHandle legacy = compileComplexFunction(t);
 
@@ -1526,8 +1527,8 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
     }
 
     public static double divide(double a, double b) {
-        if (b == 0) {
-            throw new ArithmeticException("Division by zero---left="+a+", right="+b);
+        if (b == 0) { 
+            return a>=0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
         }
         return a / b;
     }

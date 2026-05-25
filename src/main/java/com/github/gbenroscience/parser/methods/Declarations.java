@@ -103,6 +103,8 @@ public class Declarations {
     public static final String PRINT = "print";
     public static final String DIFFERENTIATION = "diff";
     public static final String INTEGRATION = "intg";
+    public static final String DIFF_EQN = "diffeq"; 
+    
     public static final String QUADRATIC = "quadratic";
     public static final String TARTAGLIA_ROOTS = "t_root";
     public static final String GENERAL_ROOT = "root";
@@ -290,7 +292,7 @@ public class Declarations {
             MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED,
             COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE,
             STD_ERR, RANDOM, SORT, PLOT, PRINT, DIFFERENTIATION,
-            INTEGRATION, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT,
+            INTEGRATION,DIFF_EQN, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT,
             LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX,
             ECHELON_MATRIX, MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD,
             MATRIX_SUBTRACT, MATRIX_POWER, MATRIX_TRANSPOSE, MATRIX_EDIT,
@@ -476,6 +478,8 @@ public class Declarations {
             case DIFFERENTIATION:
                 return TYPE.NUMBER.toString();
             case INTEGRATION:
+                return TYPE.NUMBER.toString();
+            case DIFF_EQN:
                 return TYPE.NUMBER.toString();
             case QUADRATIC:
                 return TYPE.VECTOR.toString();
