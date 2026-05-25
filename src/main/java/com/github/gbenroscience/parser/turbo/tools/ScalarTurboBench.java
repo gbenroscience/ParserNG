@@ -33,7 +33,7 @@ import java.util.logging.Logger;
 public class ScalarTurboBench {
 
     private static final int N = 1000000;
-    private static boolean useWidening = true;
+    private static boolean useWidening = false;
 
     public static void main(String[] args) throws Throwable {
         String rpt = STRING.repeating("=", 80);

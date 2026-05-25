@@ -938,7 +938,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         MethodHandle widened = target;
         for (int i = arity - 1; i >= 0; i--) {
             if (argFilters[i].type().parameterCount() == 0 && wideTypes.length > 0) {
-                argFilters[i] = liftConstant((double) argFilters[i].invoke(), wideTypes.length);
+                argFilters[i] = liftConstant((double) argFilters[i].invokeExact(), wideTypes.length);
             }
             widened = MethodHandles.collectArguments(widened, i, argFilters[i]);
         }
@@ -1019,61 +1019,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         stack.push(widened);
     }
 
-    private static void applyBinaryWide1(MathExpression.Token t, Deque<MethodHandle> stack,
-            boolean fold, int varCount, Class<?>[] pTypes, int[] mask) throws Throwable {
-
-        MethodHandle right = stack.pop();
-        MethodHandle left = stack.pop();
-        String name = (t.kind == MathExpression.Token.OPERATOR) ? String.valueOf(t.opChar) : t.name;
-        MethodHandle op = getBinaryHandle(name);
-
-        if (fold && left.type().parameterCount() == 0 && right.type().parameterCount() == 0) {
-            double valL = (double) left.invoke();
-            double valR = (double) right.invoke();
-            stack.push(liftConstant((double) op.invoke(valL, valR), varCount));
-            return;
-        }
-
-        if (left.type().parameterCount() == 0 && varCount > 0) {
-            left = liftConstant((double) left.invoke(), varCount);
-        }
-        if (right.type().parameterCount() == 0 && varCount > 0) {
-            right = liftConstant((double) right.invoke(), varCount);
-        }
-
-        MethodHandle widened = op;
-        widened = MethodHandles.collectArguments(widened, 1, right);
-        widened = MethodHandles.collectArguments(widened, 0, left);
-
-        if (varCount > 0) {
-            int[] combinedMask = new int[varCount * 2];
-            for (int i = 0; i < varCount; i++) {
-                combinedMask[i] = i;
-                combinedMask[i + varCount] = i;
-            }
-            widened = MethodHandles.permuteArguments(widened, MethodType.methodType(double.class, pTypes), combinedMask);
-        }
-        stack.push(widened);
-    }
-
-    private static void applyUnaryWide1(MathExpression.Token t, Deque<MethodHandle> stack, boolean fold, int varCount) throws Throwable {
-        MethodHandle input = stack.pop();
-        String name = (t.kind == MathExpression.Token.OPERATOR) ? String.valueOf(t.opChar) : t.name;
-        MethodHandle op = getUnaryHandle(name);
-
-        if (fold && input.type().parameterCount() == 0) {
-            double result = (double) op.invoke((double) input.invoke());
-            stack.push(liftConstant(result, varCount));
-            return;
-        }
-
-        if (input.type().parameterCount() == 0 && varCount > 0) {
-            input = liftConstant((double) input.invoke(), varCount);
-        }
-
-        stack.push(MethodHandles.collectArguments(op, 0, input));
-    }
-
+ 
     static MathExpression.EvalResult executePrint(MathExpression.EvalResult ctx, String[] args) {
 
         StringBuilder sb = new StringBuilder();

@@ -280,10 +280,10 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         // 1. The RAW handle: Returns primitive double, accepts double[]
         // Modified via compileScalar to directly target user input array indices.
         final MethodHandle rawScalarHandle = compileScalar(postfix);
-        
+
         // 2. The GENERIC handle: Returns Object, accepts double[]
         final MethodHandle genericHandle = rawScalarHandle.asType(
-            java.lang.invoke.MethodType.methodType(Object.class, double[].class)
+                java.lang.invoke.MethodType.methodType(Object.class, double[].class)
         );
 
         return new FastCompositeExpression() {
@@ -348,7 +348,6 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         };
     }
 
-
     private static boolean isIntrinsic(String name, int arity) {
         if (arity < 1 || arity > 2) {
             return false;
@@ -402,14 +401,37 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     break;
 
                 case MathExpression.Token.OPERATOR:
-                    if (t.isPostfix || t.opChar == '√') {  // ADD THIS CHECK FOR √
+                    if (t.isPostfix || t.opChar == '√') {
                         stack.push(applyUnaryOp(t.opChar, ensurePrimitive(stack.pop())));
+                    } else if (t.opChar == '^') {
+                        MethodHandle exponentHandle = ensurePrimitive(stack.pop());
+                        MethodHandle baseHandle = ensurePrimitive(stack.pop());
+                        double constantExponent = getConstantValue(exponentHandle);
+
+                        if (!Double.isNaN(constantExponent)) {
+                            // Fetch the direct, fast (double)double handle for this exponent
+                            MethodHandle optimizedUnary = getOptimizedPowerHandle(constantExponent);
+
+                            // If base and exponent are literal constant numbers, fold them immediately
+                            if (baseHandle.type().parameterCount() == 0 && exponentHandle.type().parameterCount() == 0) {
+                                double baseVal = (double) baseHandle.invokeExact();
+                                double result = (double) optimizedUnary.invokeExact(baseVal);
+                                stack.push(MethodHandles.constant(double.class, result));
+                            } else {
+                                // Pipe the (double[])double output of the base straight into the optimized power handle
+                                stack.push(MethodHandles.filterReturnValue(baseHandle, optimizedUnary));
+                            }
+                        } else {
+                            // Fall back to standard binary operation processing if the exponent is a variable (e.g. x^y)
+                            stack.push(applyBinaryOpNoPermute(t.opChar, baseHandle, exponentHandle));
+                        }
                     } else {
                         MethodHandle right = ensurePrimitive(stack.pop());
                         MethodHandle left = ensurePrimitive(stack.pop());
                         stack.push(applyBinaryOpNoPermute(t.opChar, left, right));
                     }
                     break;
+
                 case MathExpression.Token.FUNCTION:
                 case MathExpression.Token.METHOD:
                     String name = t.name.toLowerCase();
@@ -674,14 +696,20 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     } else if (name.equals("log")) {
                         System.out.println("log!!! found!!!! arity=" + t.arity + ", args=" + t.getRawArgs().length + ",\n args=" + Arrays.toString(t.getRawArgs()));
                     } else if (isIntrinsic(name, t.arity)) {
+                        // Optimization patch for your isIntrinsic block
                         if (t.arity == 1) {
                             MethodHandle operand = ensurePrimitive(stack.pop());
                             MethodHandle fn = getUnaryFunctionHandle(name);
 
+                            // If the operand is a constant literal, fold the entire intrinsic operation!
                             if (operand.type().parameterCount() == 0) {
-                                double val = (double) operand.invoke();
-                                stack.push(MethodHandles.constant(double.class, (double) fn.invoke(val)));
+                                double innerConstant = (double) operand.invokeExact();
+                                // Pre-calculate the result (e.g., sqrt(6.28) -> 2.50)
+                                double foldedResult = (double) fn.invokeExact(innerConstant);
+
+                                stack.push(MethodHandles.constant(double.class, foldedResult));
                             } else {
+                                // Fall back to standard runtime handle generation
                                 stack.push(MethodHandles.filterArguments(fn, 0, operand));
                             }
                         } else if (t.arity == 2) {
@@ -692,17 +720,23 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             int lParams = left.type().parameterCount();
                             int rParams = right.type().parameterCount();
 
+                            // === CONSTANT FOLDING: Upgraded with strict primitive invokeExact extractions ===
                             if (lParams == 0 && rParams == 0) {
-                                stack.push(MethodHandles.constant(double.class, (double) fn.invoke(left.invoke(), right.invoke())));
+                                double lVal = (double) left.invokeExact();
+                                double rVal = (double) right.invokeExact();
+                                double result = (double) fn.invokeExact(lVal, rVal);
+                                stack.push(MethodHandles.constant(double.class, result));
                             } else if (lParams == 1 && rParams == 0) {
-                                double val = (double) right.invoke();
+                                double val = (double) right.invokeExact();
                                 stack.push(MethodHandles.filterArguments(MethodHandles.insertArguments(fn, 1, val), 0, left));
                             } else if (lParams == 0 && rParams == 1) {
-                                double val = (double) left.invoke();
+                                double val = (double) left.invokeExact();
                                 stack.push(MethodHandles.filterArguments(MethodHandles.insertArguments(fn, 0, val), 0, right));
                             } else {
-                                // USE NEW METHOD HERE TOO: applyBinaryOpNoPermute
-                                stack.push(applyBinaryOpNoPermute(left, right, fn));
+                                // Order arguments matching your original working method signature
+                                // Assuming signature is: applyBinaryOpNoPermute(char op, MethodHandle left, MethodHandle right)
+                                // If passing 'fn' directly, adjust your method parameters accordingly!
+                                stack.push(applyBinaryOpNoPermute(t.opChar, left, right));
                             }
                         }
                     } // Inside your FUNCTION/METHOD case handler for user-defined functions
@@ -749,6 +783,33 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             // BUT the input parameter MUST remain double[].class for the turboArgs pipeline.
             return result.asType(MethodType.methodType(Object.class, double[].class));
         }
+    }
+
+    /**
+     * Extracts the primitive scalar value from a MethodHandle if it represents
+     * a structural constant literal node (i.e., a zero-argument constant
+     * handle). Returns null if the handle depends on variable parameters.
+     *
+     * @param handle The MethodHandle node to check.
+     * @return The constant double value, or null if it is a variable
+     * expression.
+     */
+    /**
+     * Extracts the primitive value from a constant handle without any object
+     * boxing. Returns Double.NaN if the handle is dynamic or requires parameter
+     * variables.
+     */
+    private static double getConstantValue(MethodHandle handle) {
+        // A handle can only be a constant literal if it requires ZERO parameters
+        if (handle != null && handle.type().parameterCount() == 0) {
+            try {
+                // Returns a raw primitive double. Zero allocation. Zero boxing.
+                return (double) handle.invokeExact();
+            } catch (Throwable t) {
+                return Double.NaN;
+            }
+        }
+        return Double.NaN;
     }
 
     /**
@@ -901,8 +962,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
     private static MethodHandle applyUnaryOp(char op, MethodHandle operand) throws Throwable {
         // Constant Folding: √4 -> 2.0
         if (operand.type().parameterCount() == 0) {
-            double val = (double) operand.invoke();
-            return MethodHandles.constant(double.class, (double) getUnaryOpHandle(op).invoke(val));
+            double val = (double) operand.invokeExact();
+            return MethodHandles.constant(double.class, (double) getUnaryOpHandle(op).invokeExact(val));
         }
         return MethodHandles.filterArguments(getUnaryOpHandle(op), 0, operand);
     }
@@ -921,49 +982,27 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
         // === CONSTANT FOLDING ===
         if (lParams == 0 && rParams == 0) {
-            double lVal = (double) left.invoke();
-            double rVal = (double) right.invoke();
-            double result = (double) opHandle.invoke(lVal, rVal);
+            double lVal = (double) left.invokeExact();
+            double rVal = (double) right.invokeExact();
+            double result = (double) opHandle.invokeExact(lVal, rVal);
             return MethodHandles.constant(double.class, result);
         }
 
         // === ARITY REDUCTION: One constant, one variable ===
         if (lParams == 0 && rParams >= 1) {
-            // left is constant, right depends on array
-            double lVal = (double) left.invoke();
+            double lVal = (double) left.invokeExact();
             MethodHandle boundFn = MethodHandles.insertArguments(opHandle, 0, lVal);
-            // Replace arg at position 0 with right(array)
             return MethodHandles.filterArguments(boundFn, 0, right);
         }
 
         if (lParams >= 1 && rParams == 0) {
-            // left depends on array, right is constant
-            double rVal = (double) right.invoke();
+            double rVal = (double) right.invokeExact();
             MethodHandle boundFn = MethodHandles.insertArguments(opHandle, 1, rVal);
-            // Replace arg at position 0 with left(array)
             return MethodHandles.filterArguments(boundFn, 0, left);
         }
 
-        // === BOTH VARIABLES: Use foldArguments (NO PERMUTATION) ===
-        // This is the critical optimization!
-        //
-        // Instead of:
-        //   filterArguments(fn, [left, right]) -> (double[], double[]) -> double
-        //   permuteArguments(..., 0, 0) -> (double[]) -> double (BOTTLENECK!)
-        //
-        // We use foldArguments to create natural data flow:
-        //   1. Evaluate right(array) -> rightValue
-        //   2. Pass rightValue + array to combiner
-        //   3. Combiner computes left(array), then fn(left, right)
-        //   All in a single, JIT-friendly pipeline!
-        // Create a "combiner" that takes (rightValue, array) and computes fn(left(array), rightValue)
-        // Signature: (double, double[]) -> double
+        // === BOTH VARIABLES: Direct Combiner Generation ===
         MethodHandle combiner = createBinaryCombiner(opHandle, left);
-
-        // foldArguments(target, source):
-        //   - Calls source(array) -> rightValue
-        //   - Calls target(rightValue, array) -> result
-        //   - Result type: (array) -> result
         return MethodHandles.foldArguments(combiner, right);
     }
 
@@ -976,19 +1015,19 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         int rParams = right.type().parameterCount();
 
         if (lParams == 0 && rParams == 0) {
-            double lVal = (double) left.invoke();
-            double rVal = (double) right.invoke();
-            return MethodHandles.constant(double.class, (double) fn.invoke(lVal, rVal));
+            double lVal = (double) left.invokeExact();
+            double rVal = (double) right.invokeExact();
+            return MethodHandles.constant(double.class, (double) fn.invokeExact(lVal, rVal));
         }
 
         if (lParams == 0 && rParams >= 1) {
-            double lVal = (double) left.invoke();
+            double lVal = (double) left.invokeExact();
             MethodHandle boundFn = MethodHandles.insertArguments(fn, 0, lVal);
             return MethodHandles.filterArguments(boundFn, 0, right);
         }
 
         if (lParams >= 1 && rParams == 0) {
-            double rVal = (double) right.invoke();
+            double rVal = (double) right.invokeExact();
             MethodHandle boundFn = MethodHandles.insertArguments(fn, 1, rVal);
             return MethodHandles.filterArguments(boundFn, 0, left);
         }
@@ -2239,8 +2278,9 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         /**
          * Drop-in replacement for MethodHandles.identity() that chooses the
          * most performant path based on the environment.
+         *
          * @param type
-         * @return 
+         * @return
          */
         public static MethodHandle identity(Class<?> type) {
             if (type == double.class) {
