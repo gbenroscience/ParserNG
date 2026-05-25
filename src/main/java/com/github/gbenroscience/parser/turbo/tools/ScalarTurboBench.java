@@ -73,6 +73,7 @@ public class ScalarTurboBench {
         benchmarkComplexExpression(true);
         benchmarkWithVariablesSimple();
         benchmarkWithVariablesAdvanced();
+        benchmarkWithVariablesArithmetic();
         benchmarkConstantFolding();
         benchmarkUnaryOps();
 
@@ -699,6 +700,52 @@ public class ScalarTurboBench {
             interpreted.updateSlot(ySlot, 3.7);
             interpreted.updateSlot(zSlot, 1.2);
             res[0] = interpreted.solveGeneric().scalar;
+        }
+
+        double intDur = System.nanoTime() - start;
+
+        FastCompositeExpression compiled = get(interpreted, false);
+        double[] vars = new double[3];
+        vars[xSlot] = 2.5;
+        vars[ySlot] = 3.7;
+        vars[zSlot] = 1.2;
+
+        for (int i = 0; i < 1000; i++) {
+            compiled.applyScalar(vars);
+        }
+
+        start = System.nanoTime();
+        for (int i = 0; i < N; i++) {
+            res[1] = compiled.applyScalar(vars);
+        }
+        double turboDur = System.nanoTime() - start;
+
+        System.out.printf("Expression: %s%n", expr);
+        System.out.printf("Variables: x=2.5, y=3.7, z=1.2%n");
+        System.out.printf("Interpreted:     %.2f ns/op%n", intDur / N);
+        System.out.printf("Turbo:     %.2f ns/op%n", turboDur / N);
+        System.out.printf("Speedup:     %.1fx%n", (double) intDur / turboDur);
+        System.out.println("values=" + Arrays.toString(res));
+    }
+    
+    
+    private static void benchmarkWithVariablesArithmetic() throws Throwable {
+        System.out.println("\n=== WITH VARIABLES: ARITHMETIC; FOLDING OFF ===\n");
+        /**
+         * Function pointers cannot have same name as variables e.g y may be a
+         * function pointer somewhere, if so, this will affect the result of
+         * this calculation
+         */
+        String expr = "x1+x2+x3";
+        MathExpression interpreted = new MathExpression(expr, false);
+        int xSlot = interpreted.getVariable("x1").getFrameIndex();
+        int ySlot = interpreted.getVariable("x2").getFrameIndex();
+        int zSlot = interpreted.getVariable("x3").getFrameIndex();
+
+        double[] res = new double[3];
+        long start = System.nanoTime();
+        for (int i = 0; i < N; i++) {
+            res[0] = interpreted.solveGeneric(2.5,3.7,1.2).scalar;
         }
 
         double intDur = System.nanoTime() - start;

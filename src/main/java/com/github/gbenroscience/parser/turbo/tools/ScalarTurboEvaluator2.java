@@ -285,26 +285,22 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         return resultContainer;
     }
 
-    @Override
+        @Override
     public FastCompositeExpression compile() throws Throwable {
-        int varCount = countVariables(postfix);
+        int varCount = countVariables(postfix); // Counts maxIndex + 1
         boolean foldConstants = this.willFoldConstants;
-
         try {
-            // 1. The core math handle
+            // 1. The core math handle: accepts 'varCount' double arguments
             MethodHandle wideHandle = compileScalarWide(postfix, varCount, foldConstants);
             Class<?> returnType = wideHandle.type().returnType();
 
-            // 2. Create a "Scalar-Only" version of the handle (returns double)
-            // If it's a vector, we grab the first element. If it's a scalar, we leave it.
-// 2. Create a "Scalar-Only" version of the handle (returns double)
+            // 2. Create a "Scalar-Only" version of the handle (returns primitive double)
             MethodHandle scalarOnlyHandle = wideHandle;
             if (returnType == double[].class) {
                 MethodHandle getFirst = ScalarTurboEvaluator1.AndroidFriendlyMethodHandles.getDoubleArrayGetter();
                 scalarOnlyHandle = MethodHandles.filterReturnValue(wideHandle,
                         MethodHandles.insertArguments(getFirst, 1, 0));
             } else if (returnType == MathExpression.EvalResult.class) {
-                // FIX: Actually extract the double value from the EvalResult object
                 MethodHandle extractor = LOOKUP.findStatic(ScalarTurboEvaluator2.class, "extractScalarFromResult",
                         MethodType.methodType(double.class, MathExpression.EvalResult.class));
                 scalarOnlyHandle = MethodHandles.filterReturnValue(wideHandle, extractor);
@@ -312,12 +308,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                 scalarOnlyHandle = scalarOnlyHandle.asType(scalarOnlyHandle.type().changeReturnType(double.class));
             }
 
-            // 3. The "Manual Spreader" Strategy (The Fix for 64 B/op)
-            // This binds the handle to array indices instead of using asSpreader.
-            // It allows you to pass a double[11] to a 3-variable expression without cloning.
-            // ... inside compile() ...
-            // MULTI-VARIABLE PATH 
-            // ... inside compile() ...
+            // 3. Ultra-Turbo Compile-Time Inverse Spreader Strategy
             MethodHandle scalarSpreader;
             MethodHandle genericSpreader;
 
@@ -326,25 +317,38 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                 MethodHandle genericBase = wideHandle.asType(wideHandle.type().changeReturnType(Object.class));
                 genericSpreader = MethodHandles.dropArguments(genericBase, 0, double[].class);
             } else {
-                // 1. Get the raw handles
                 MethodHandle baseScalar = scalarOnlyHandle;
                 MethodHandle baseGeneric = wideHandle.asType(wideHandle.type().changeReturnType(Object.class));
 
-                // 2. Create an array of filters. Each filter is: (double[]) -> double
-                // specifically: variables -> variables[i]
+                // Create an array of filters mapping straight to the user's incoming indices
                 MethodHandle arrayGetter = ScalarTurboEvaluator1.AndroidFriendlyMethodHandles.getDoubleArrayGetter();
                 MethodHandle[] filters = new MethodHandle[varCount];
-                for (int i = 0; i < varCount; i++) {
-                    filters[i] = MethodHandles.insertArguments(arrayGetter, 1, i);
+
+                for (int k = 0; k < varCount; k++) {
+                    // Find which index in the user's 'variables' array matches this frameIndex parameter 'k'
+                    int targetVariableIndex = -1;
+                    if (slots != null) {
+                        for (int i = 0; i < slots.length; i++) {
+                            if (slots[i] == k) {
+                                targetVariableIndex = i;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Fallback to k if unmapped
+                    int finalSourceIndex = (targetVariableIndex != -1) ? targetVariableIndex : k;
+                    
+                    // Direct binding: tells the handle to pull straight from user input array position
+                    filters[k] = MethodHandles.insertArguments(arrayGetter, 1, finalSourceIndex);
                 }
 
-                // 3. Apply the filters. This transforms (d1, d2, ... dn) -> (double[], double[], ... double[])
+                // Apply positional filters
                 scalarSpreader = MethodHandles.filterArguments(baseScalar, 0, filters);
                 genericSpreader = MethodHandles.filterArguments(baseGeneric, 0, filters);
 
-                // 4. Collapse the multiple double[] arguments into ONE double[] argument
-                // This tells the JVM: "All those double[] inputs are actually just the same first argument."
-                int[] reorder = new int[varCount]; // [0, 0, 0, ...]
+                // Collapse all individual double[] argument requirements into ONE clean double[] argument
+                int[] reorder = new int[varCount]; // Initialize as [0, 0, 0, ...]
                 scalarSpreader = MethodHandles.permuteArguments(scalarSpreader,
                         MethodType.methodType(double.class, double[].class), reorder);
                 genericSpreader = MethodHandles.permuteArguments(genericSpreader,
@@ -354,31 +358,15 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             final MethodHandle finalScalar = scalarSpreader;
             final MethodHandle finalGeneric = genericSpreader;
 
-// ... applyScalar calls finalScalar.invokeExact(variables) ...
+            // Return the optimized execution frame without internal array state management
             return new FastCompositeExpression() {
-                double args[] = new double[turboArgs == null ? 0 : turboArgs.length];
-
-                private void loadVars(double[] variables) {
-                    // Safety check: ensure we don't null pointer if arrays aren't initialized
-                    if (variables == null || turboArgs == null || slots == null) {
-                        return;
-                    }
-
-                    // Use the smallest length to prevent print-of-bounds access
-                    int limit = Math.min(variables.length, Math.min(args.length, slots.length));
-
-                    for (int i = 0; i < limit; i++) {
-                        args[slots[i]] = variables[i];
-                    }
-                }
 
                 @Override
                 public double applyScalar(double[] variables) {
                     try {
-                        loadVars(variables);
-                        // Now this will always work because even if varCount is 0, 
-                        // the handle now expects a double[]
-                        return (double) finalScalar.invokeExact(args);
+                        // Zero loops, zero array copies, zero Math.min checks.
+                        // Variables flow directly from your iteration loop into CPU registers.
+                        return (double) finalScalar.invokeExact(variables);
                     } catch (Throwable t) {
                         errorLog.error(t);
                         throw new RuntimeException("Turbo scalar execution failed", t);
@@ -388,9 +376,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                 @Override
                 public MathExpression.EvalResult apply(double[] variables) {
                     try {
-                        loadVars(variables);
-                        // invokeExact is now safe here too
-                        Object result = finalGeneric.invokeExact(args);
+                        Object result = finalGeneric.invokeExact(variables);
                         MathExpression.EvalResult res = new MathExpression.EvalResult();
                         if (result instanceof double[]) {
                             res.type = MathExpression.EvalResult.TYPE_VECTOR;
@@ -420,7 +406,6 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                     return ScalarTurboEvaluator2.this;
                 }
             };
-
         } catch (Throwable t) {
             errorLog.error(t);
             throw new RuntimeException("Failed to compile Turbo expression", t);
