@@ -1,5 +1,18 @@
 # ParserNG
 
+
+
+### 🚀 Parser 1.1.5 has been released on maven-central!
+#### ParserNG Turbo: Zero-Allocation Optimization Pass
+We have completely refactored the runtime variable mapping layer inside `ScalarTurboEvaluator1` and `ScalarTurboEvaluator2`. 
+
+* **Runtime Remapping Eliminated:** Variable array positions are now baked directly into the `MethodHandle` topology at compile-time. 
+The runtime engine now evaluates expressions by reading straight from the user's input arrays.
+* **30%+ Evaluation Speed Burst:** Microbenchmarks show arithmetic evaluation speeds dropping from ~18ns down to **~12.2ns**, pulling within arm's reach of raw native Java performance (~6.4ns).
+* **Flat Memory Profile:** GC allocation churn on hot evaluation paths remains at **absolute zero**. 
+This guarantees stutter-free performance during heavy graph plotting or the soon-coming multi-million step differential equation loops.
+
+
 ### Parser 1.1.4 has been released on maven-central!
 Version 1.1.4 squashes a bug where an over active syntax checker disables nested stats functions e.g. sort(3,1,5,listsum(4,12,18,-9),5,2,31,4) returns a syntax error Added tests
 

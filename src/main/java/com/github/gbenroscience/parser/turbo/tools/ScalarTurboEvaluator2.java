@@ -285,7 +285,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         return resultContainer;
     }
 
-        @Override
+    @Override
     public FastCompositeExpression compile() throws Throwable {
         int varCount = countVariables(postfix); // Counts maxIndex + 1
         boolean foldConstants = this.willFoldConstants;
@@ -338,7 +338,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
                     // Fallback to k if unmapped
                     int finalSourceIndex = (targetVariableIndex != -1) ? targetVariableIndex : k;
-                    
+
                     // Direct binding: tells the handle to pull straight from user input array position
                     filters[k] = MethodHandles.insertArguments(arrayGetter, 1, finalSourceIndex);
                 }
@@ -451,7 +451,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                     }
                     break;
 
-                case MathExpression.Token.OPERATOR:
+                 case MathExpression.Token.OPERATOR:
                     if (t.isPostfix || t.opChar == '√') {
                         applyUnaryWide(t, stack, foldConstants, varCount);
                     } else if (t.opChar == '^') {
@@ -460,25 +460,32 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                         Double constantExponent = getConstantValue(exponentHandle);
 
                         if (constantExponent != null) {
-                            // Get the (double)double handle for the specific exponent
+                            // Get the primitive (double)double handle for the specific exponent
                             MethodHandle optimizedUnary = getOptimizedPowerHandle(constantExponent);
 
-                            // Case A: Everything is a constant (e.g., 2^3) -> Fully fold
-                            if (foldConstants && baseHandle.type().parameterCount() == 0) {
-                                double baseVal = (double) baseHandle.invoke();
-                                double result = (double) optimizedUnary.invoke(baseVal);
+                            // Case A: Everything is a structural constant (e.g., 2^3) -> Fully fold
+                            if (foldConstants && baseHandle.type().parameterCount() == 0 && exponentHandle.type().parameterCount() == 0) {
+                                double baseVal = (double) baseHandle.invokeExact();
+                                double result = (double) optimizedUnary.invokeExact(baseVal);
                                 stack.push(liftConstant(result, varCount));
-                            } // Case B: Base is a variable, exponent is a constant (e.g., x^2)
+                            } 
+                            // Case B: Base is variable/expression, exponent is constant (e.g., x1^3)
                             else {
-                                // Ensure baseHandle matches the current varCount width
-                                if (baseHandle.type().parameterCount() == 0 && varCount > 0) {
-                                    baseHandle = liftConstant((double) baseHandle.invoke(), varCount);
+                                // Extract and lift ONLY if the base is truly a zero-argument constant literal node
+                                if (baseHandle.type().parameterCount() == 0) {
+                                    double constantBaseVal = (double) baseHandle.invokeExact();
+                                    if (varCount > 0) {
+                                        baseHandle = liftConstant(constantBaseVal, varCount);
+                                    }
                                 }
-                                // Chain them: optimizedUnary(baseHandle(vars))
-                                stack.push(MethodHandles.collectArguments(optimizedUnary, 0, baseHandle));
+                                
+                                // High-Performance Pipe: optimizedUnary(baseHandle(vars))
+                                // filterReturnValue pipes the scalar double output of baseHandle directly into optimizedUnary
+                                MethodHandle chained = MethodHandles.filterReturnValue(baseHandle, optimizedUnary);
+                                stack.push(chained);
                             }
                         } else {
-                            // Standard Binary Path (e.g., x^y)
+                            // Standard Binary Path for dynamic powers (e.g., x^y) -> Falls back to native Math.pow
                             stack.push(baseHandle);
                             stack.push(exponentHandle);
                             applyBinaryWide(t, stack, foldConstants, varCount, pTypes, mask);
@@ -487,6 +494,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                         applyBinaryWide(t, stack, foldConstants, varCount, pTypes, mask);
                     }
                     break;
+
 
                 case MathExpression.Token.FUNCTION:
                 case MathExpression.Token.METHOD:
@@ -552,7 +560,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
                     if (name.equals(Declarations.QUADRATIC) || name.equals(Declarations.TARTAGLIA_ROOTS)
                             || name.equals(Declarations.GENERAL_ROOT) || name.equals(Declarations.DIFFERENTIATION) || name.equals(Declarations.INTEGRATION)
-                            || name.equals(Declarations.DIFF_EQN) 
+                            || name.equals(Declarations.DIFF_EQN)
                             || name.equals(Declarations.PRINT) || name.equals(Declarations.ROTOR)) {
                         MethodHandle legacy = compileComplexFunction(t);
 
@@ -957,7 +965,61 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         return MethodHandles.dropArguments(c, 0, double[].class);
     }
 
+    private static void applyUnaryWide(MathExpression.Token t, Deque<MethodHandle> stack, boolean fold, int varCount) throws Throwable {
+        MethodHandle input = stack.pop();
+        String name = (t.kind == MathExpression.Token.OPERATOR) ? String.valueOf(t.opChar) : t.name;
+        MethodHandle op = getUnaryHandle(name);
+
+        // Constant Folding: Use invokeExact to eliminate signature check overhead
+        if (fold && input.type().parameterCount() == 0) {
+            double result = (double) op.invokeExact((double) input.invokeExact());
+            stack.push(liftConstant(result, varCount));
+            return;
+        }
+
+        if (input.type().parameterCount() == 0 && varCount > 0) {
+            input = liftConstant((double) input.invokeExact(), varCount);
+        }
+
+        stack.push(MethodHandles.collectArguments(op, 0, input));
+    }
+
     private static void applyBinaryWide(MathExpression.Token t, Deque<MethodHandle> stack,
+            boolean fold, int varCount, Class<?>[] pTypes, int[] mask) throws Throwable {
+
+        MethodHandle right = stack.pop();
+        MethodHandle left = stack.pop();
+        String name = (t.kind == MathExpression.Token.OPERATOR) ? String.valueOf(t.opChar) : t.name;
+        MethodHandle op = getBinaryHandle(name);
+
+        // Constant Folding Optimization
+        if (fold && left.type().parameterCount() == 0 && right.type().parameterCount() == 0) {
+            double valL = (double) left.invokeExact();
+            double valR = (double) right.invokeExact();
+            stack.push(liftConstant((double) op.invokeExact(valL, valR), varCount));
+            return;
+        }
+
+        if (left.type().parameterCount() == 0 && varCount > 0) {
+            left = liftConstant((double) left.invokeExact(), varCount);
+        }
+        if (right.type().parameterCount() == 0 && varCount > 0) {
+            right = liftConstant((double) right.invokeExact(), varCount);
+        }
+
+        MethodHandle widened = op;
+        widened = MethodHandles.collectArguments(widened, 1, right);
+        widened = MethodHandles.collectArguments(widened, 0, left);
+
+        if (varCount > 0) {
+            // FIXED: Leverage the pre-allocated 'mask' parameter completely.
+            // Eliminates redundant 'new int[]' heap allocation and loop churn per operator node.
+            widened = MethodHandles.permuteArguments(widened, MethodType.methodType(double.class, pTypes), mask);
+        }
+        stack.push(widened);
+    }
+
+    private static void applyBinaryWide1(MathExpression.Token t, Deque<MethodHandle> stack,
             boolean fold, int varCount, Class<?>[] pTypes, int[] mask) throws Throwable {
 
         MethodHandle right = stack.pop();
@@ -994,7 +1056,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         stack.push(widened);
     }
 
-    private static void applyUnaryWide(MathExpression.Token t, Deque<MethodHandle> stack, boolean fold, int varCount) throws Throwable {
+    private static void applyUnaryWide1(MathExpression.Token t, Deque<MethodHandle> stack, boolean fold, int varCount) throws Throwable {
         MethodHandle input = stack.pop();
         String name = (t.kind == MathExpression.Token.OPERATOR) ? String.valueOf(t.opChar) : t.name;
         MethodHandle op = getUnaryHandle(name);
@@ -1513,8 +1575,8 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
     }
 
     public static double divide(double a, double b) {
-        if (b == 0) { 
-            return a>=0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+        if (b == 0) {
+            return a >= 0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
         }
         return a / b;
     }
@@ -1553,8 +1615,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         return 1.0 / Math.sqrt(x);
     }
 
-    
-      public static final class MethodHandlePolyfill {
+    public static final class MethodHandlePolyfill {
 
         private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
 
@@ -1604,8 +1665,9 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         /**
          * Drop-in replacement for MethodHandles.identity() that chooses the
          * most performant path based on the environment.
+         *
          * @param type
-         * @return 
+         * @return
          */
         public static MethodHandle identity(Class<?> type) {
             if (type == double.class) {
@@ -1629,8 +1691,6 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         }
     }
 
-    
-    
     private MethodHandle optimizePower(MethodHandle base, double exp) {
         // 1. Handle Square: x^2 -> x * x
         if (exp == 2.0) {
