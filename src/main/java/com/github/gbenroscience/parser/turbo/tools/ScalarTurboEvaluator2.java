@@ -35,6 +35,7 @@ import com.github.gbenroscience.parser.methods.Method;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
 import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.Utils;
 import com.github.gbenroscience.util.VariableManager;
 
 import java.lang.invoke.*;
@@ -1065,7 +1066,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         }
 
         //MethodHandle getter = MethodHandles.identity(double.class);
-        MethodHandle getter = ScalarTurboEvaluator1.MethodHandlePolyfill.identity(double.class);
+        MethodHandle getter = MethodHandlePolyfill.identity(double.class);
         if (index > 0) {
             Class<?>[] prefix = new Class<?>[index];
             Arrays.fill(prefix, double.class);
@@ -1457,7 +1458,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         // Positive integer powers
         if (n == 1.0) {
             //return MethodHandles.identity(double.class);
-            return ScalarTurboEvaluator1.MethodHandlePolyfill.identity(double.class);
+            return MethodHandlePolyfill.identity(double.class);
         }
         if (n == 2.0) {
             return LOOKUP.findStatic(ScalarTurboEvaluator2.class, "square", MethodType.methodType(double.class, double.class));
@@ -1567,6 +1568,84 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         return 1.0 / Math.sqrt(x);
     }
 
+    
+      public static final class MethodHandlePolyfill {
+
+        private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
+
+        // 1. Define the bare-metal static identity targets for Android fallback
+        private static double idDouble(double x) {
+            return x;
+        }
+
+        private static int idInt(int x) {
+            return x;
+        }
+
+        private static long idLong(long x) {
+            return x;
+        }
+
+        private static Object idObj(Object x) {
+            return x;
+        }
+
+        // 2. Cache the handles
+        private static final MethodHandle DOUBLE_ID;
+        private static final MethodHandle INT_ID;
+        private static final MethodHandle LONG_ID;
+        private static final MethodHandle OBJ_ID;
+
+        static {
+            try {
+                if (Utils.isAndroid()) {
+                    // Android-specific polyfill paths
+                    DOUBLE_ID = LOOKUP.findStatic(MethodHandlePolyfill.class, "idDouble", MethodType.methodType(double.class, double.class));
+                    INT_ID = LOOKUP.findStatic(MethodHandlePolyfill.class, "idInt", MethodType.methodType(int.class, int.class));
+                    LONG_ID = LOOKUP.findStatic(MethodHandlePolyfill.class, "idLong", MethodType.methodType(long.class, long.class));
+                    OBJ_ID = LOOKUP.findStatic(MethodHandlePolyfill.class, "idObj", MethodType.methodType(Object.class, Object.class));
+                } else {
+                    // Standard JVM - Use native highly-optimized identity handles
+                    DOUBLE_ID = MethodHandles.identity(double.class);
+                    INT_ID = MethodHandles.identity(int.class);
+                    LONG_ID = MethodHandles.identity(long.class);
+                    OBJ_ID = MethodHandles.identity(Object.class);
+                }
+            } catch (NoSuchMethodException | IllegalAccessException e) {
+                throw new ExceptionInInitializerError(e);
+            }
+        }
+
+        /**
+         * Drop-in replacement for MethodHandles.identity() that chooses the
+         * most performant path based on the environment.
+         * @param type
+         * @return 
+         */
+        public static MethodHandle identity(Class<?> type) {
+            if (type == double.class) {
+                return DOUBLE_ID;
+            }
+            if (type == int.class) {
+                return INT_ID;
+            }
+            if (type == long.class) {
+                return LONG_ID;
+            }
+
+            if (!type.isPrimitive()) {
+                // For reference types, adapt the cached Object identity to the specific class
+                return OBJ_ID.asType(MethodType.methodType(type, type));
+            }
+
+            // Fallback for less common primitives (boolean, float, etc.)
+            // This is safe on the JVM, but will still crash on older Android if called for these types.
+            return MethodHandles.identity(type);
+        }
+    }
+
+    
+    
     private MethodHandle optimizePower(MethodHandle base, double exp) {
         // 1. Handle Square: x^2 -> x * x
         if (exp == 2.0) {

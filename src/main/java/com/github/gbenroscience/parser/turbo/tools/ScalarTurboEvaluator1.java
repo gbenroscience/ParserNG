@@ -275,43 +275,26 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
      */
     ///////////////////////////////////////////UPDATE STARTS////////////////////////////////////////////////////////////////////////////////
     
-    @Override
+        @Override
     public FastCompositeExpression compile() throws Throwable {
         // 1. The RAW handle: Returns primitive double, accepts double[]
-        // This is the "Turbo" path. No boxing.
+        // Modified via compileScalar to directly target user input array indices.
         final MethodHandle rawScalarHandle = compileScalar(postfix);
-
+        
         // 2. The GENERIC handle: Returns Object, accepts double[]
-        // This is the "Flexible" path. Used for EvalResult.
         final MethodHandle genericHandle = rawScalarHandle.asType(
-                java.lang.invoke.MethodType.methodType(Object.class, double[].class)
+            java.lang.invoke.MethodType.methodType(Object.class, double[].class)
         );
+
         return new FastCompositeExpression() {
-
-            double args[] = new double[turboArgs == null ? 0 : turboArgs.length];
-
-            private void loadVars(double[] variables) {
-                // Safety check: ensure we don't null pointer if arrays aren't initialized
-                if (variables == null || turboArgs == null || slots == null) {
-                    return;
-                }
-
-                // Use the smallest length to prevent print-of-bounds access
-                int limit = Math.min(variables.length, Math.min(args.length, slots.length));
-
-                for (int i = 0; i < limit; i++) {
-                    args[slots[i]] = variables[i];
-                }
-            }
+            // NOTE: The internal 'args[]' tracking array is completely eliminated!
 
             @Override
             public double applyScalar(double[] variables) {
                 try {
-                    loadVars(variables);
-                    // HIGH PERFORMANCE PATH
-                    // invokeExact here is as fast as a direct method call.
-                    // No boxing, no extra objects.
-                    return (double) rawScalarHandle.invokeExact(args);
+                    // ZERO loops. ZERO array copying. ZERO bounds matching overhead.
+                    // The MethodHandle pipeline reads straight from the input array.
+                    return (double) rawScalarHandle.invokeExact(variables);
                 } catch (Throwable t) {
                     throw new RuntimeException("Turbo evaluation failed", t);
                 }
@@ -320,20 +303,17 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             @Override
             public MathExpression.EvalResult apply(double[] variables) {
                 try {
-                    loadVars(variables);
-                    // FLEXIBLE PATH 
-                    // We use the generic handle to avoid ClassCastExceptions 
-                    return handleResult(genericHandle.invokeExact(args));
+                    return handleResult(genericHandle.invokeExact(variables));
                 } catch (Throwable t) {
                     errorLog.error(t);
-                    return execute();
+                    return execute(variables);
                 }
             }
 
-            private MathExpression.EvalResult execute() {
+            private MathExpression.EvalResult execute(double[] variables) {
                 try {
-                    // Safely handle errors using the generic path
-                    Object result = genericHandle.invokeExact(MathExpression.EvalResult.ERROR);
+                    //Object result = genericHandle.invokeExact(MathExpression.EvalResult.ERROR);
+                    Object result = genericHandle.invokeExact(variables);
                     return handleResult(result);
                 } catch (Throwable t) {
                     errorLog.error(t);
@@ -365,9 +345,9 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             public TurboExpressionEvaluator getCompiler() {
                 return ScalarTurboEvaluator1.this;
             }
-
         };
     }
+
 
     private static boolean isIntrinsic(String name, int arity) {
         if (arity < 1 || arity > 2) {
@@ -396,17 +376,31 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             switch (t.kind) {
                 case MathExpression.Token.NUMBER:
                     if (t.name != null && !t.name.isEmpty()) {
-                        // Signature: (double[]) -> double
+                        // Determine which index of the runtime 'variables' array contains this variable's value
+                        int targetVariableIndex = -1;
+                        if (slots != null) {
+                            for (int k = 0; k < slots.length; k++) {
+                                if (slots[k] == t.frameIndex) {
+                                    targetVariableIndex = k;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Fallback to frameIndex if it's an unmapped execution slot parameter
+                        int finalIndex = (targetVariableIndex != -1) ? targetVariableIndex : t.frameIndex;
+
+                        // Signature: (double[]) -> double (Reading straight from target index position)
                         MethodHandle arrayGetter = AndroidFriendlyMethodHandles.getDoubleArrayGetter();
-                        stack.push(MethodHandles.insertArguments(arrayGetter, 1, t.frameIndex));
+                        stack.push(MethodHandles.insertArguments(arrayGetter, 1, finalIndex));
                     } else {
                         // Start with: () -> double
                         MethodHandle constant = MethodHandles.constant(double.class, t.value);
                         // Transform to: (double[]) -> double
-                        // This "drops" the double[] argument at index 0, simply returning the constant.
                         stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
                     }
                     break;
+
                 case MathExpression.Token.OPERATOR:
                     if (t.isPostfix || t.opChar == '√') {  // ADD THIS CHECK FOR √
                         stack.push(applyUnaryOp(t.opChar, ensurePrimitive(stack.pop())));
@@ -2124,8 +2118,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
      * Inlined division: a / b with zero-check
      */
     public static double divide(double a, double b) {
-        if (b == 0) { 
-            return a>=0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+        if (b == 0) {
+            return a >= 0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
         }
         return a / b;
     }
@@ -2245,6 +2239,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         /**
          * Drop-in replacement for MethodHandles.identity() that chooses the
          * most performant path based on the environment.
+         * @param type
+         * @return 
          */
         public static MethodHandle identity(Class<?> type) {
             if (type == double.class) {
