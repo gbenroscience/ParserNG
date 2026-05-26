@@ -57,8 +57,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
     private static final long serialVersionUID = 1L;
     private boolean willFoldConstants;
-
-    protected final double[] turboArgs;
+ 
     protected final int[] slots;
 
     private MathExpression.Token[] postfix;
@@ -220,17 +219,13 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         if (ScalarTurboEvaluator.SUPPORTS_WIDENING) {
             this.postfix = me.getCachedPostfix();
             this.willFoldConstants = me.isWillFoldConstants();
-            slots = me.getSlots();
-            turboArgs = me.getExecutionFrame();
+            slots = me.getSlots(); 
             me.copyErrorLogTo(errorLog);
         } else {
             throw new UnsupportedOperationException("This evaluator does not support adaptive widening of method signatures\nPlease use ScalarTurboEvaluator1");
         }
     }
-
-    public double[] getTurboArgs() {
-        return turboArgs;
-    }
+ 
 
     private static MethodHandle getUnaryHandle(String op) {
         MethodHandle mh = UNARY_MAP.get(op);

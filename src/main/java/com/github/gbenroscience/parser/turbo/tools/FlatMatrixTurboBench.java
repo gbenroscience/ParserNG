@@ -31,7 +31,7 @@ import java.util.logging.Logger;
  */
 public class FlatMatrixTurboBench {
 
-    private static final int N = 1000000;
+    private static final int N = 100000;
 
     public static void main(String[] args) throws Throwable {
         String rpt = STRING.repeating("=", 80);

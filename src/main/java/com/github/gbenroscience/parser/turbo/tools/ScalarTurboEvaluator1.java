@@ -58,8 +58,6 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
     private static final long serialVersionUID = 1L;
     private boolean willFoldConstants;
-
-    protected final double[] turboArgs;
     protected final int[] slots;
 
     public static final MethodHandle SCALAR_GATEKEEPER_HANDLE;
@@ -159,7 +157,6 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         this.postfix = me.getCachedPostfix();
         this.willFoldConstants = me.isWillFoldConstants();
         slots = me.getSlots();
-        turboArgs = me.getExecutionFrame();
         me.copyErrorLogTo(errorLog);
     }
 
@@ -199,10 +196,6 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
     public boolean isWillFoldConstants() {
         return willFoldConstants;
-    }
-
-    public double[] getTurboArgs() {
-        return turboArgs;
     }
 
     /**
@@ -664,6 +657,18 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             throw new RuntimeException(err);
                         }
                         break;
+                    } else if (name.equals(Declarations.DIFF_EQN)) {
+                        for (int i = 0; i < t.arity; i++) {
+                            stack.pop();
+                        }
+
+                        String[] args = t.getRawArgs();
+                         if (args == null || args.length < 4 || args.length > 5) {
+                            String err = "Invalid input for `diffeq`";
+                            errorLog.info(err);
+                            throw new RuntimeException(err);
+                        }
+
                     } else if (name.equals("rot")) {
                         for (int i = 0; i < t.arity; i++) {
                             stack.pop();
