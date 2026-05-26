@@ -4,7 +4,7 @@
 For benchmarks showing ParserNG duking it out in the ring with other parsers, 
 [check ParserNg-wars]( https://github.com/gbenroscience/ParserNg-wars )
 
-**ParserNG 1.1.4** is a **blazing-fast**, nigh zero allocation(memory wise), **pure Java**, **zero-native-dependencies** math expression parser and evaluator.
+**ParserNG** is a **blazing-fast**, nigh zero allocation(memory wise), **pure Java**, **zero-native-dependencies** math expression parser and evaluator.
 
 It **beats exp4J, and com.expression.parser on evaluation speed** across every kind of expression — from simple algebra to heavy trig, matrices, and calculus; and manages to beat Janino, the gold standard on some, while rivalling it on a host of other expressions  
 The normal mode routinely does about **3-10 million evaluations per second** while the new Turbo mode easily peaks at about **10 million to 90 million evaluations per second**.
@@ -19,11 +19,11 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![License](https://img.shields.io/github/license/gbenroscience/ParserNG?color=blue)](https://github.com/gbenroscience/ParserNG/blob/master/LICENSE)
 ![Java](https://img.shields.io/badge/Java-8%2B-orange)
-![Latest Version](https://img.shields.io/badge/version-1.1.4-success)
+![Latest Version](https://img.shields.io/badge/version-1.1.5-success)
 
-> **1.1.4** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
+> **1.1.5** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
 
-## ✨ Highlights (v1.1.4)
+## ✨ Highlights (v1.1.5)
 
 - **Speed champion** — rivals Janino in most benchmarks, and beats exp4J, com.expression.parser and Parsii in every benchmark (see [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md))
 - **Turbo Mode** — compile once, evaluate millions of times per second (Scalar + Matrix paths)
@@ -43,12 +43,12 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>1.1.4</version>
+    <version>1.1.5</version>
 </dependency>
 ```
 
 Also available on **Maven Central**:  
-https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng/1.1.4
+https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng/1.1.5
 
 ## 🧮 Standard Mode — The old way
 
@@ -263,10 +263,10 @@ System.out.println("turbo: " + evr);
 ## ⌨️ Command-line tool (REPL)
 
 ```bash
-java -jar parser-ng-1.1.4.jar "sin(x) + cos(x)"
-java -jar parser-ng-1.1.4.jar "eigvalues(R=@(5,5)(...))"
-java -jar parser-ng-1.1.4.jar help
-java -jar parser-ng-1.1.4.jar -i          # interactive mode
+java -jar parser-ng-1.1.5.jar "sin(x) + cos(x)"
+java -jar parser-ng-1.1.5.jar "eigvalues(R=@(5,5)(...))"
+java -jar parser-ng-1.1.5.jar help
+java -jar parser-ng-1.1.5.jar -i          # interactive mode
 ```
 
 ## 📊 Supported Features at a Glance
@@ -287,8 +287,8 @@ Full list: run `help` or `new MathExpression("help").solve()`.
 
 - [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) — full speed comparisons
 - [GRAPHING.md](GRAPHING.md) — plotting on Swing / JavaFX / Android
-- [LATEST.md](LATEST.md) — what’s new in 1.1.4
-- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/1.1.4
+- [LATEST.md](LATEST.md) — what’s new in 1.1.5
+- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/1.1.5
 - [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md) — Original readme for pre-1.0 versions with a lot of, still valid, examples
 
 ## ❤️ Support the Project
@@ -306,7 +306,7 @@ ParserNG is built with love in my free time. If it helps you:
 
 ---
 
-**ParserNG 1.1.4** — faster than the competition, stronger on matrices, and now with real Turbo Scalar + Turbo Matrix compiled power.
+**ParserNG 1.1.5** — faster than the competition, stronger on matrices, and now with real Turbo Scalar + Turbo Matrix compiled power.
 
 Happy parsing! 🚀  
 — **GBENRO JIBOYE** (@gbenroscience)
