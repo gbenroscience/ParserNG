@@ -15,13 +15,13 @@
  */
 package com.github.gbenroscience.math.matrix.expressParser;
 
-import com.github.gbenroscience.parser.MathExpression;
 import java.util.HashMap;
 import java.util.InputMismatchException;
 import java.util.List;
 import java.util.Random;
 import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.Operator;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  *
@@ -1033,6 +1033,50 @@ public class Matrix {
     }
 
     /**
+     * Computes and returns specifically, the bottom-right sub-block from a
+     * given coordinate to the end of the matrix), not a Minor submatrix
+     *
+     * @param A The matrix
+     * @param r The row to copy from(zero based)
+     * @param c The column to copy from(zero based)
+     * @return specifically the bottom-right sub-block from a given coordinate
+     * to the end of the matrix
+     */
+    public static Matrix getSubmatrix(Matrix A, int r, int c) {
+        int aR = A.getRows();
+        int aC = A.getCols();
+
+        // Bounds validation
+        if (r < 0 || r >= aR || c < 0 || c >= aC) {
+            throw new IndexOutOfBoundsException("Row or column index out of bounds.");
+        }
+
+        // Calculate dimensions of the new sub-block
+        int newR = aR - r;
+        int newC = aC - c;
+
+        // Borrow a buffer of the exact required size
+        Matrix B = new Matrix(newR, newC);
+
+        double[] aF = A.getFlatArray();
+        double[] bF = B.getFlatArray();
+
+        // Copy row by row using System.arraycopy
+        for (int i = 0; i < newR; i++) {
+            // Source index: (Current original row * total columns) + starting column
+            int srcOffset = (r + i) * aC + c;
+
+            // Destination index: (Current new row * new columns)
+            int destOffset = i * newC;
+
+            // Copy the entire continuous width of the new row in one instruction
+            System.arraycopy(aF, srcOffset, bF, destOffset, newC);
+        }
+
+        return B;
+    }
+
+    /**
      *
      * @param i the row on which the element whose minor is needed lies.
      * @param j the column on which the element whose minor is needed lies.
@@ -1202,7 +1246,7 @@ public class Matrix {
      * Fills the matrix with randomly generated values between 1 and 101.
      */
     public void randomFill() {
-        Random ran = new Random();
+        ThreadLocalRandom ran = ThreadLocalRandom.current();
         for (int i = 0; i < array.length; i++) {
             array[i] = 1 + (double) ran.nextInt(101);
         }
@@ -1214,7 +1258,7 @@ public class Matrix {
      * @param n the maximum possible size of the integer numbers generated.
      */
     public void randomFill(int n) {
-        Random ran = new Random();
+        ThreadLocalRandom ran = ThreadLocalRandom.current();
         for (int i = 0; i < array.length; i++) {
             array[i] = 1 + ran.nextInt(n);
         }
@@ -1395,9 +1439,8 @@ public class Matrix {
         }//end if
         return null;
     }
-    
-    
-     /**
+
+    /**
      * Row reduction technique used to compute the determinant of this matrix.
      * The other method using recursion is not worth it above n = 10; The memory
      * consumed by the process and the time used to compute it is incomparable

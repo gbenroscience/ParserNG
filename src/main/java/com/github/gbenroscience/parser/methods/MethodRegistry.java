@@ -694,8 +694,8 @@ public class MethodRegistry {
             for (double d : data) {
                 total += d;
             }
-           // System.out.println("IN->"+Arrays.toString(args)+"   total: "+total);
-            
+            // System.out.println("IN->"+Arrays.toString(args)+"   total: "+total);
+
             ctx.wrap(total);
             return ctx;
         });
@@ -938,8 +938,8 @@ public class MethodRegistry {
         });
 
         registerMethod(Declarations.SORT, (ctx, arity, args) -> {
- 
-           // System.out.println("sort -> arity = "+arity+", args = "+Arrays.toString(args));
+
+            // System.out.println("sort -> arity = "+arity+", args = "+Arrays.toString(args));
             // 1. Handle edge cases
             if (args == null || args.length == 0) {
                 MathExpression.EvalResult res = ctx;
@@ -960,8 +960,8 @@ public class MethodRegistry {
             double[] sortedData = bab.getAsDoubleArray();
             // 3. Perform the high-speed Dual-Pivot Quicksort 
             java.util.Arrays.sort(sortedData);
-            
-         //   System.out.println("IN->"+Arrays.toString(sortedData));
+
+            //   System.out.println("IN->"+Arrays.toString(sortedData));
             ctx.wrap(sortedData);
             return ctx;
         });
@@ -1182,7 +1182,7 @@ public class MethodRegistry {
                 Matrix mB = fB.getMatrix();
                 return ctx.wrap(Matrix.multiply(mA, mB.inverse()));
             }
-              return MathExpression.EvalResult.ERROR;
+            return MathExpression.EvalResult.ERROR;
         });
         registerMethod(Declarations.MATRIX_EDIT, (ctx, arity, args) -> {
             Function f = FunctionManager.lookUp(args[0].textRes);
@@ -1252,6 +1252,35 @@ public class MethodRegistry {
             Function f = FunctionManager.lookUp(args[0].textRes);
             Matrix m = f.getMatrix().reduceToRowEchelonMatrix();
             return ctx.wrap(m);
+        });
+
+        registerMethod(Declarations.SUB_MATRIX, (ctx, arity, args) -> {
+            Function f = FunctionManager.lookUp(args[0].textRes);
+            Matrix m = null;
+            if (f != null && (m = f.getMatrix()) != null) {
+                int row = (int) args[1].scalar;
+                int col = (int) args[2].scalar;
+
+                if (row > 0 & col > 0) {
+                    Matrix sm = Matrix.getSubmatrix(m, row, col);
+                    return ctx.wrap(sm);
+                }else{
+                   return ctx.wrap(MathExpression.EvalResult.ERROR);                 
+                }
+            } else {
+                return ctx.wrap(MathExpression.EvalResult.ERROR);
+            }
+        });
+        registerMethod(Declarations.RANDOM_MATRIX, (ctx, arity, args) -> {
+            int n = (int) args[0].scalar;
+            int rowSz = (int) args[1].scalar;
+            int colSz = (int) args[2].scalar;
+            if (n > 0 && rowSz > 0 && colSz > 0) {
+                Matrix sm = new Matrix(rowSz, colSz);
+                sm.randomFill(n);
+                return ctx.wrap(sm);
+            }
+            return ctx.wrap(MathExpression.EvalResult.ERROR);
         });
 
         // Users can call MethodRegistry.registerMethod("custom", (ctx, arity, args) -> ...) at runtime!

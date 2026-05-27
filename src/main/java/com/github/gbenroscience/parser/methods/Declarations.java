@@ -135,6 +135,8 @@ public class Declarations {
     public static final String MATRIX_EIGENVEC = "eigvec";
     public static final String MATRIX_EIGENVALUES = "eigvalues";
     public static final String MATRIX_EIGENPOLY = "eigpoly"; 
+    public static final String SUB_MATRIX = "sub_mat"; 
+    public static final String RANDOM_MATRIX = "rnd_mat";
     public static final String HELP = "help";
 
     
@@ -296,7 +298,7 @@ public class Declarations {
             LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX,
             ECHELON_MATRIX, MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD,
             MATRIX_SUBTRACT, MATRIX_POWER, MATRIX_TRANSPOSE, MATRIX_EDIT,
-            MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC, MATRIX_EIGENVALUES,
+            MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC, MATRIX_EIGENVALUES,SUB_MATRIX,RANDOM_MATRIX,
             MATRIX_EIGENPOLY, HELP, NOW, NANOS, ROTOR
         };
 
@@ -520,6 +522,10 @@ public class Declarations {
             case MATRIX_EIGENVEC:
                 return TYPE.MATRIX.toString();
             case MATRIX_EIGENVALUES:
+                return TYPE.MATRIX.toString();
+            case SUB_MATRIX:
+                return TYPE.MATRIX.toString();
+            case RANDOM_MATRIX:
                 return TYPE.MATRIX.toString();
             case NOW:
                 return TYPE.NUMBER.toString();
