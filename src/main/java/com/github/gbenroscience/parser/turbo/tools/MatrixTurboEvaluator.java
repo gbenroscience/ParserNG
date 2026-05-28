@@ -958,6 +958,12 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                  col = (int) args[2].scalar;
                  sm = randomFillTurbo(n, row, col, cache);
                 return cache.result.wrap(sm);
+            case Declarations.MATRIX_MINOR:
+                 main = args[0].matrix;
+                 row = (int) args[1].scalar;
+                 col = (int) args[2].scalar;
+                 sm = minor(main, row, col, cache);
+                return cache.result.wrap(sm);
             case Declarations.ROTOR:
                 if (args.length == 4) {
                     Matrix pointsVector = args[0].matrix;

@@ -517,25 +517,24 @@ class MathExpressionTest {
 
         Assertions.assertTrue(p.getType() == TYPE.MATRIX && (p.getMatrix().getRows() == 10 && p.getMatrix().getCols() == 3));
     }
-    
-      @Test
+
+    @Test
     void testFlatMatrixInvertInMatrixTurboEvaluator() {
         try {
             MathExpression me = new MathExpression("A=@(3,3)(4,9,2, 8,1,18, 12,9,8);invert(A);");
             System.out.println("std-solve: " + me.solveGeneric());
             System.out.println("A=" + FunctionManager.lookUp("A"));
-            
+
             MathExpression m = new MathExpression("1/A");
             FastCompositeExpression fce = m.compileTurbo();
-            System.out.println("compiler class: "+fce.getCompiler().getClass());
+            System.out.println("compiler class: " + fce.getCompiler().getClass());
             MathExpression.EvalResult ev = fce.apply(new double[]{0.0});
-             System.out.println("turbo-apply: " + ev);
+            System.out.println("turbo-apply: " + ev);
             Assertions.assertTrue(true);
         } catch (Throwable ex) {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-
 
     @Test
     void testSingleVar() {
@@ -566,58 +565,82 @@ class MathExpressionTest {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
-    
+
     @Test
     void nestedStatsTest() {
         MathExpression me = new MathExpression("listsum(4,1,3,5,9,sort(2,1,3,12,8,4),5,9,2,2,10,10)");
-        Assertions.assertEquals(90, me.solveGeneric().scalar); 
+        Assertions.assertEquals(90, me.solveGeneric().scalar);
     }
-    
-    
-        
+
     @Test
     void submatrixTest() {
         MathExpression me = new MathExpression("A(4,4)=(3,1,2,5,  9,8,3,6,  12,1,0,5,  3,7,5,9); sub_mat(A,1,1);");
-        System.out.println("scanner: "+me.getScanner());
+        System.out.println("scanner: " + me.getScanner());
         Matrix m = me.solveGeneric().matrix;
-        System.out.println("matrix:\n"+m);
-        Assertions.assertEquals(8, m.getFlatArray()[0]); 
+        System.out.println("matrix:\n" + m);
+        Assertions.assertEquals(8, m.getFlatArray()[0]);
     }
-   @Test
+
+    @Test
     void randomFillMatrixTest() {
         MathExpression me = new MathExpression("rnd_mat(20,10,10);");
-        System.out.println("scanner: "+me.getScanner());
+        System.out.println("scanner: " + me.getScanner());
         Matrix m = me.solveGeneric().matrix;
-        System.out.println("matrix:\n"+m);
+        System.out.println("matrix:\n" + m);
         Assertions.assertTrue(m.getFlatArray().length == 100);
     }
 
-    
     @Test
     void submatrixTurboTest() {
         try {
             MathExpression me = new MathExpression("A(4,4)=(3,1,2,5,  9,8,3,6,  12,1,0,5,  3,7,5,9); sub_mat(A,1,1);");
             FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
-            System.out.println("scanner: "+me.getScanner());
+            System.out.println("scanner: " + me.getScanner());
             Matrix m = fce.apply(new double[0]).matrix;
-            System.out.println("matrix:\n"+m); 
+            System.out.println("matrix:\n" + m);
             Assertions.assertEquals(8, m.getFlatArray()[0]);
         } catch (Throwable ex) {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-   @Test
+
+    @Test
     void randomFillMatrixTurboTest() {
         try {
             MathExpression me = new MathExpression("rnd_mat(20,10,10);");
             FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
-            System.out.println("scanner: "+me.getScanner());
+            System.out.println("scanner: " + me.getScanner());
             Matrix m = fce.apply(new double[0]).matrix;
-            System.out.println("matrix:\n"+m);
+            System.out.println("matrix:\n" + m);
             Assertions.assertTrue(m.getFlatArray().length == 100);
         } catch (Throwable ex) {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
+
+    @Test
+    void matrixMinorTest() {
+        MathExpression me = new MathExpression("A(4,4)=(3,1,2,5,  9,8,3,6,  12,1,0,5,  3,7,5,9); matrix_minor(A,1,1);");
+        System.out.println("scanner: " + me.getScanner());
+        System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
+        Matrix m = me.solveGeneric().matrix;
+        System.out.println("matrix:\n" + m);
+        Assertions.assertEquals(3, m.getFlatArray()[0]);
+    }
+
+    @Test
+    void matrixMinorTurboTest() {
+        try {
+            MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19); matrix_minor(A,2,0);");
+            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
+            System.out.println("scanner: " + me.getScanner());
+            System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
+            Matrix m = fce.apply(new double[0]).matrix;
+            System.out.println("matrix:\n" + m);
+            Assertions.assertEquals(1, m.getFlatArray()[0]);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
 }

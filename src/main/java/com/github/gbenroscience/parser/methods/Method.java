@@ -71,7 +71,8 @@ public class Method {
                 || methodName.equals(MATRIX_DIVIDE) || methodName.equals(MATRIX_ADD) || methodName.equals(MATRIX_SUBTRACT)
                 || methodName.equals(MATRIX_POWER) || methodName.equals(MATRIX_EDIT) || methodName.equals(MATRIX_TRANSPOSE)
                 || methodName.equals(DETERMINANT) || methodName.equals(MATRIX_ADJOINT) || methodName.equals(MATRIX_COFACTORS)
-                || methodName.equals(MATRIX_EIGENPOLY) || methodName.equals(MATRIX_EIGENVEC) || methodName.equals(MATRIX_EIGENVALUES)|| methodName.equals(SUB_MATRIX)
+                || methodName.equals(MATRIX_EIGENPOLY) || methodName.equals(MATRIX_EIGENVEC) || methodName.equals(MATRIX_EIGENVALUES)
+                || methodName.equals(SUB_MATRIX) || methodName.equals(MATRIX_MINOR)
                 || methodName.equals(PRINT);
     }
 
@@ -153,13 +154,14 @@ public class Method {
         return (op.equals(SORT) || op.equals(MODE) || op.equals(RANDOM) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS)
                 || op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX))
                 || op.equals(MATRIX_MULTIPLY) || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT) || op.equals(MATRIX_POWER)
-                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EDIT) || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES) || op.equals(SUB_MATRIX)|| op.equals(RANDOM_MATRIX);
+                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EDIT) || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES)
+                || op.equals(SUB_MATRIX) || op.equals(RANDOM_MATRIX) || op.equals(MATRIX_MINOR);
     }
 
     public static boolean isListReturningStatsMethodThatAllowsAlgebraicOps(String op) {
         return (op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX))
                 || op.equals(MATRIX_MULTIPLY) || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT) || op.equals(MATRIX_POWER)
-                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES) || op.equals(SUB_MATRIX)|| op.equals(RANDOM_MATRIX);
+                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES) || op.equals(SUB_MATRIX) || op.equals(RANDOM_MATRIX) || op.equals(MATRIX_MINOR);
     }
 
     /**
@@ -268,7 +270,6 @@ public class Method {
     public boolean isMatrixEigenPoly(String op) {
         return op.equals(MATRIX_EIGENPOLY);
     }
-  
 
     public boolean isPrint(String op) {
         return op.equals(PRINT);
@@ -311,8 +312,8 @@ public class Method {
                 || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX) || op.equals(MATRIX_MULTIPLY)
                 || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT)
                 || op.equals(MATRIX_POWER) || op.equals(MATRIX_EDIT) || op.equals(MATRIX_TRANSPOSE)
-                || op.equals(MATRIX_COFACTORS) || op.equals(MATRIX_ADJOINT) || op.equals(MATRIX_EIGENPOLY) 
-                || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES)|| op.equals(SUB_MATRIX)|| op.equals(RANDOM_MATRIX);
+                || op.equals(MATRIX_COFACTORS) || op.equals(MATRIX_ADJOINT) || op.equals(MATRIX_EIGENPOLY)
+                || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES) || op.equals(SUB_MATRIX) || op.equals(RANDOM_MATRIX)|| op.equals(MATRIX_MINOR);
     }
 
     /**
@@ -381,10 +382,19 @@ public class Method {
     /**
      *
      * @param op The method name
-     * @return true if the method is the submatrix method name
+     * @return true if the method is the random matrix method name
      */
     public static boolean isRandomMatrix(String op) {
         return op.equals(RANDOM_MATRIX);
+    }
+
+    /**
+     *
+     * @param op The method name
+     * @return true if the method is the matrix minor method name
+     */
+    public static boolean isMatrixMinor(String op) {
+        return op.equals(MATRIX_MINOR);
     }
 
     /**

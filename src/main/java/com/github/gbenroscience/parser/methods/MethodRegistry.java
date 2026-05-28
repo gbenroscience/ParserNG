@@ -1264,8 +1264,8 @@ public class MethodRegistry {
                 if (row > 0 & col > 0) {
                     Matrix sm = Matrix.getSubmatrix(m, row, col);
                     return ctx.wrap(sm);
-                }else{
-                   return ctx.wrap(MathExpression.EvalResult.ERROR);                 
+                } else {
+                    return ctx.wrap(MathExpression.EvalResult.ERROR);
                 }
             } else {
                 return ctx.wrap(MathExpression.EvalResult.ERROR);
@@ -1281,6 +1281,24 @@ public class MethodRegistry {
                 return ctx.wrap(sm);
             }
             return ctx.wrap(MathExpression.EvalResult.ERROR);
+        });
+
+        registerMethod(Declarations.MATRIX_MINOR, (ctx, arity, args) -> {
+            Function f = FunctionManager.lookUp(args[0].textRes);
+            Matrix m = null;
+            if (f != null && (m = f.getMatrix()) != null) {
+                int row = (int) args[1].scalar;
+                int col = (int) args[2].scalar;
+
+                if (row > 0 & col > 0) {
+                    Matrix min = m.minor(row, col);
+                    return ctx.wrap(min);
+                } else {
+                    return ctx.wrap(MathExpression.EvalResult.ERROR);
+                }
+            } else {
+                return ctx.wrap(MathExpression.EvalResult.ERROR);
+            }
         });
 
         // Users can call MethodRegistry.registerMethod("custom", (ctx, arity, args) -> ...) at runtime!
