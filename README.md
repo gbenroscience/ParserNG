@@ -1,5 +1,7 @@
 # ParserNG 🧮⚡ 
 ### The Fastest, Interpreted(non-compiling) Math Engine for Java.
+(Pure Matrix Algebra has been introduced into ParserNG Standard mode in version 1.2.0)
+
 
 For benchmarks showing ParserNG duking it out in the ring with other parsers, 
 [check ParserNg-wars]( https://github.com/gbenroscience/ParserNg-wars )
@@ -19,11 +21,11 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![License](https://img.shields.io/github/license/gbenroscience/ParserNG?color=blue)](https://github.com/gbenroscience/ParserNG/blob/master/LICENSE)
 ![Java](https://img.shields.io/badge/Java-8%2B-orange)
-![Latest Version](https://img.shields.io/badge/version-1.1.6-success)
+![Latest Version](https://img.shields.io/badge/version-1.2.0-success)
 
-> **1.1.6** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
+> **1.2.0** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
 
-## ✨ Highlights (v1.1.6)
+## ✨ Highlights (v1.2.0)
 
 - **Speed champion** — rivals Janino in most benchmarks, and beats exp4J, com.expression.parser and Parsii in every benchmark (see [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md))
 - **Turbo Mode** — compile once, evaluate millions of times per second (Scalar + Matrix paths)
@@ -43,12 +45,12 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>1.1.6</version>
+    <version>1.2.0</version>
 </dependency>
 ```
 
 Also available on **Maven Central**:  
-https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng/1.1.6
+https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng/1.2.0
 
 ## 🧮 Standard Mode — The old way
 
@@ -165,6 +167,9 @@ Matrix result = turbo.applyMatrix(new double[0]);   // works for: linear_sys, ad
 ```
 
 
+
+
+
 ## Go Deeper (Normal Mode + Turbo)
 
 ### 1. Simple expression
@@ -213,9 +218,114 @@ MathExpression expr = new MathExpression("""
 System.out.println("Determinant = " + expr.solve());
 ```
 
+Even More:
+
+```Java
+
+    void submatrixTest() {
+        MathExpression me = new MathExpression("A(4,4)=(3,1,2,5,  9,8,3,6,  12,1,0,5,  3,7,5,9); sub_mat(A,1,1);");
+        System.out.println("scanner: " + me.getScanner());
+        Matrix m = me.solveGeneric().matrix;
+        System.out.println("matrix:\n" + m); 
+    }
+
+   
+    void randomFillMatrixTest() {
+        MathExpression me = new MathExpression("rnd_mat(20,10,10);");
+        System.out.println("scanner: " + me.getScanner());
+        Matrix m = me.solveGeneric().matrix;
+        System.out.println("matrix:\n" + m); 
+    }
+
+     
+    void submatrixTurboTest() {
+        try {
+            MathExpression me = new MathExpression("A(4,4)=(3,1,2,5,  9,8,3,6,  12,1,0,5,  3,7,5,9); sub_mat(A,1,1);");
+            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
+            System.out.println("scanner: " + me.getScanner());
+            Matrix m = fce.apply(new double[0]).matrix;
+            System.out.println("matrix:\n" + m); 
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+     
+    void randomFillMatrixTurboTest() {
+        try {
+            MathExpression me = new MathExpression("rnd_mat(20,10,10);");
+            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
+            System.out.println("scanner: " + me.getScanner());
+            Matrix m = fce.apply(new double[0]).matrix;
+            System.out.println("matrix:\n" + m); 
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+   
+    void matrixMinorTest() {
+        MathExpression me = new MathExpression("A(4,4)=(3,1,2,5,  9,8,3,6,  12,1,0,5,  3,7,5,9); matrix_minor(A,1,1);");
+        System.out.println("scanner: " + me.getScanner());
+        System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
+        Matrix m = me.solveGeneric().matrix;
+        System.out.println("matrix:\n" + m); 
+    }
+
+  
+    void matrixMinorTurboTest() {
+        try {
+            MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19); matrix_minor(A,2,0);");
+            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
+            System.out.println("scanner: " + me.getScanner());
+            System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
+            Matrix m = fce.apply(new double[0]).matrix;
+            System.out.println("matrix:\n" + m); 
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+        
+      
+    void matrixTestAlgebraStdParser() {
+        try {
+            MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19);"
+                    + "B(4,4)=(3,22,8,-5,  10,18,32,8,  4,2,1,9,  7,7,2,13);"
+                    + " B^3+A^2"); 
+            System.out.println("scanner: " + me.getScanner());
+            System.out.println("result: " + me.solve());  
+            Matrix m = me.solveGeneric().matrix;
+            System.out.println("result: " + m);   
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+      
+    void matrixTestAlgebraAssignments() {
+        try {
+            MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19);"
+                    + "B(4,4)=(3,22,8,-5,  10,18,32,8,  4,2,1,9,  7,7,2,13);"
+                    + " D=A^2+B^2;D;");
+            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
+            System.out.println("scanner: " + me.getScanner());
+            System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
+            Matrix m = fce.apply(new double[0]).matrix;
+            System.out.println("matrix:\n" + m);
+            Assertions.assertEquals(15286.0, m.getFlatArray()[0]);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+```
+
+
+
+
 
 ### 6a. ROTOR
-You may use the rot function to rotate functions, surfaces(plane or curved), lines and even raw points in 3D space.
+You may use the `rot` function to rotate functions, surfaces(plane or curved), lines and even raw points in 3D space.
 
 To rotate any of these, you need the orbital center, the coordinates of the direction vector(a,b,c) and the angle of rotation.
 
@@ -263,10 +373,10 @@ System.out.println("turbo: " + evr);
 ## ⌨️ Command-line tool (REPL)
 
 ```bash
-java -jar parser-ng-1.1.6.jar "sin(x) + cos(x)"
-java -jar parser-ng-1.1.6.jar "eigvalues(R=@(5,5)(...))"
-java -jar parser-ng-1.1.6.jar help
-java -jar parser-ng-1.1.6.jar -i          # interactive mode
+java -jar parser-ng-1.2.0.jar "sin(x) + cos(x)"
+java -jar parser-ng-1.2.0.jar "eigvalues(R=@(5,5)(...))"
+java -jar parser-ng-1.2.0.jar help
+java -jar parser-ng-1.2.0.jar -i          # interactive mode
 ```
 
 ## 📊 Supported Features at a Glance
@@ -287,8 +397,8 @@ Full list: run `help` or `new MathExpression("help").solve()`.
 
 - [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) — full speed comparisons
 - [GRAPHING.md](GRAPHING.md) — plotting on Swing / JavaFX / Android
-- [LATEST.md](LATEST.md) — what’s new in 1.1.6
-- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/1.1.6
+- [LATEST.md](LATEST.md) — what’s new in 1.2.0
+- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/1.2.0
 - [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md) — Original readme for pre-1.0 versions with a lot of, still valid, examples
 
 ## ❤️ Support the Project
@@ -306,7 +416,7 @@ ParserNG is built with love in my free time. If it helps you:
 
 ---
 
-**ParserNG 1.1.6** — faster than the competition, stronger on matrices, and now with real Turbo Scalar + Turbo Matrix compiled power.
+**ParserNG 1.2.0** — faster than the competition, stronger on matrices, and now with real Turbo Scalar + Turbo Matrix compiled power.
 
 Happy parsing! 🚀  
 — **GBENRO JIBOYE** (@gbenroscience)
