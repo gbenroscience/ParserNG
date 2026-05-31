@@ -1015,7 +1015,7 @@ public class MathExpression implements Savable, Solvable {
                             if (isOpeningBracket(scanner.get(i - 1))
                                     && !Method.isNumberReturningStatsMethod(scanner.get(i - 2))
                                     && !Method.isListReturningStatsMethod(scanner.get(i - 2))
-                                    && !isCommaAlias(scanner.get(i - 2))) { 
+                                    && !isCommaAlias(scanner.get(i - 2))) {
                                 errorLog.info("2. Invalid Association Discovered For: \"(\" And " + scanner.get(i - 2) + " And \"" + scanner.get(i - 1) + "\" And \"" + scanner.get(i) + "\"\n ");
                                 correctFunction = false;
                                 break;
@@ -1759,8 +1759,8 @@ public class MathExpression implements Savable, Solvable {
                                 errorLog.info(err);
                                 throw new RuntimeException(err);
                             }
-                            double bVal = stack[ptr--].scalar;
-                            applyBinary(t.opChar, stack[ptr], bVal);
+                            EvalResult right = stack[ptr--];
+                            applyBinary(t.opChar, stack[ptr], right);
                         }
                         break;
 
@@ -1909,7 +1909,8 @@ public class MathExpression implements Savable, Solvable {
             // Note: type remains TYPE_SCALAR, so no need to call wrap()
         }
 
-        private void applyBinary(char op, EvalResult aRes, double b) {
+        /*
+        private void applyBinary(char op, EvalResult aRes, EvalResult b) {
             double a = aRes.scalar;
             switch (op) {
                 case '+':
@@ -1941,6 +1942,167 @@ public class MathExpression implements Savable, Solvable {
                 case 'Р':
                     aRes.scalar = Maths.permutation(a, b);
                     break;
+            }
+        }
+         */
+     
+        private void applyBinary(char op, EvalResult left, EvalResult right) {
+
+            // =========================================================================
+            // ⚡ ULTRA-TURBO FAST-PATH FOR PURE SCALAR ARITHMETIC
+            // Bypasses all string lookups and matrix type resolution entirely.
+            // =========================================================================
+            if (left.type == EvalResult.TYPE_SCALAR && right.type == EvalResult.TYPE_SCALAR) {
+                switch (op) {
+                    case '+':
+                        left.scalar += right.scalar;
+                        break;
+                    case '-':
+                        left.scalar -= right.scalar;
+                        break;
+                    case '*':
+                        left.scalar *= right.scalar;
+                        break;
+                    case '/':
+                        if (right.scalar == 0.0) {
+                            errorLog.info("Division by zero---op=" + op + ", b=" + right.scalar + ", aRes=" + left.scalar);
+                            left.scalar = Double.POSITIVE_INFINITY;
+                        } else {
+                            left.scalar /= right.scalar;
+                        }
+                        break;
+                    case '%':
+                        left.scalar %= right.scalar;
+                        break;
+                    case '^':
+                        double exp = right.scalar;
+                        double base = left.scalar;
+
+                        if (exp == 2.0) {
+                            left.scalar = base * base;
+                        } else if (exp == 3.0) {
+                            left.scalar = base * base * base;
+                        } else if (exp == 0.5) {
+                            left.scalar = Math.sqrt(base);
+                        } else if (exp == 1.0) {
+                            // No-op
+                        } else if (exp == 0.0) {
+                            left.scalar = 1.0;
+                        } else if (exp == -1.0) {
+                            left.scalar = 1.0 / base;
+                        } else if (exp == -2.0) {
+                            left.scalar = 1.0 / (base * base);
+                        } else if (exp == -3.0) {
+                            left.scalar = 1.0 / (base * base * base);
+                        } else if (exp == 4.0) {
+                            double a2 = base * base;
+                            left.scalar = a2 * a2;
+                        } else if (exp == 5.0) {
+                            double a2 = base * base;
+                            left.scalar = a2 * a2 * base;
+                        } else if (exp == -4.0) {
+                            double a2 = base * base;
+                            left.scalar = 1.0 / (a2 * a2);
+                        } else if (exp == -5.0) {
+                            double a2 = base * base;
+                            left.scalar = 1.0 / (a2 * a2 * base);
+                        } else if (Math.abs(exp - (1.0 / 3.0)) < 1E-9) {
+                            left.scalar = Math.cbrt(base);
+                        } else {
+                            left.scalar = Math.pow(base, exp);
+                        }
+                        break;
+                    case 'Č':
+                        left.scalar = Maths.combination(left.scalar, right.scalar);
+                        break;
+                    case 'Р':
+                        left.scalar = Maths.permutation(left.scalar, right.scalar);
+                        break;
+                    default:
+                        throw new UnsupportedOperationException("Operator not implemented: " + op);
+                }
+                return; // Hot path exit
+            }
+
+            // =========================================================================
+            // 📂 MATRIX AND MIXED-TYPE RESOLUTION PATH
+            // Only paid when at least one operand is not a pure scalar node.
+            // =========================================================================
+            Function leftFun = left.type == EvalResult.TYPE_STRING ? FunctionManager.lookUp(left.textRes) : null;
+            Function rightFun = right.type == EvalResult.TYPE_STRING ? FunctionManager.lookUp(right.textRes) : null;
+
+            int leftType = left.type;
+            if (leftFun != null && leftFun.getMatrix() != null) {
+                leftType = EvalResult.TYPE_MATRIX;
+                left.wrap(leftFun.getMatrix());
+            }
+
+            int rightType = right.type;
+            if (rightFun != null && rightFun.getMatrix() != null) {
+                rightType = EvalResult.TYPE_MATRIX;
+                right.wrap(rightFun.getMatrix());
+            }
+
+            switch (op) {
+                case '+':
+                    if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
+                        left.matrix = left.matrix.add(right.matrix);
+                    } else {
+                        throw new IllegalArgumentException("Unsupported types for '+': left=" + leftType + ", right=" + rightType);
+                    }
+                    break;
+
+                case '-':
+                    if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
+                        left.matrix = left.matrix.subtract(right.matrix);
+                    } else {
+                        throw new IllegalArgumentException("Unsupported types for '-': left=" + leftType + ", right=" + rightType);
+                    }
+                    break;
+
+                case '*':
+                    if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
+                        left.matrix = Matrix.multiply(left.matrix, right.matrix);
+                    } else if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_MATRIX) {
+                        left.wrap(right.matrix.scalarMultiply(left.scalar));
+                    } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
+                        left.matrix = left.matrix.scalarMultiply(right.scalar);
+                    } else {
+                        throw new IllegalArgumentException("Unsupported types for '*': left=" + leftType + ", right=" + rightType);
+                    }
+                    break;
+
+                case '/':
+                    if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
+                        if (Math.abs(right.matrix.determ()) < 1e-15) {
+                            throw new ArithmeticException("Matrix B is singular. Cannot compute division.");
+                        }
+                        left.matrix = Matrix.multiply(left.matrix, right.matrix.inverse());
+                    } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
+                        if (Math.abs(right.scalar) < 1e-15) {
+                            throw new ArithmeticException("Matrix division by zero scalar");
+                        }
+                        left.matrix = left.matrix.scalarDivide(right.scalar);
+                    } else if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_MATRIX) {
+                        if (Math.abs(right.matrix.determ()) < 1e-15) {
+                            throw new ArithmeticException("Matrix is singular. Cannot invert.");
+                        }
+                        left.wrap(right.matrix.inverse().scalarMultiply(left.scalar));
+                    } else {
+                        throw new IllegalArgumentException("Unsupported types for '/': left=" + leftType + ", right=" + rightType);
+                    }
+                    break;
+
+                case '^':
+                    if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
+                        left.wrap(Matrix.power(left.matrix, (int) right.scalar));
+                    } else {
+                        throw new IllegalArgumentException("Unsupported types for '^': left=" + leftType + ", right=" + rightType);
+                    }
+                    break;
+
+                default:
+                    throw new UnsupportedOperationException("Operator not implemented for complex structures: " + op);
             }
         }
     }

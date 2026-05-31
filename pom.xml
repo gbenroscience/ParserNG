@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>1.1.5</version>
+    <version>1.2.0</version>
     <packaging>jar</packaging>
     <!-- 
       I started this project 2009 and have been upgrading it since then.
@@ -14,8 +14,8 @@
     <name>ParserNG</name>
     <description>Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies. 
         ParserNG is the height of interpreted Math parsing in Java. It is the fastest of all interpreted Java math parsers.
-        Version 1.1.5 squashes a bug where an over active syntax checker disables nested stats functions e.g. sort(3,1,5,listsum(4,12,18,-9),5,2,31,4) returns a syntax error
-        crashes
+        Version 1.2.0 introduces full Matrix Algebra to the Standard Mode allowing the user(howbeit at a slower speed and less memory efficiency than turbo)
+        It also optimizes the evaluation of power operators in the Standard mode, by using more efficient paths for common powers
     </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
     

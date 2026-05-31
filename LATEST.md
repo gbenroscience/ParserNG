@@ -1,6 +1,9 @@
 # ParserNG
 
-
+### 🚀 Parser 1.2.0 has been released on maven-central!
+Version 1.2.0 introduces pure Matrix algebra into ParserNG standard. Its great performance is not at par with what
+ParserNG Turbo can do( with MatrixTurboEvaluator), in terms of memory allocation optimization and matrix evaluation speed, but it ensures that
+Matrix Algebra is fully available alongside matrix functionality on ParserNG Standard also.
 
 ### 🚀 Parser 1.1.5 has been released on maven-central!
 #### ParserNG Turbo: Zero-Allocation Optimization Pass

@@ -310,29 +310,29 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             boolean hasCommas = newFuncName.contains(",");
             String rhs = input.substring(equalsIndex + 1, semiColonIndex);
 
-            if (Number.validNumber(rhs)) {
-                if (Variable.isVariableString(newFuncName)) {
-                    Variable v = VariableManager.lookUp(newFuncName);
-                    if (v == null) {
-                        VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(rhs), false));
+            if (Number.validNumber(rhs)) {//...=number
+                if (Variable.isVariableString(newFuncName)) {//check if lhs is a variable name or function name
+                    Variable v = VariableManager.lookUp(newFuncName);//check if the variable name(lhs) is an existing variable
+                    if (v == null) {//such variable does not exist
+                        VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(rhs), false));//create and store it; it is a variable creation attempt
                     } else {
-                        v.setValue(rhs);
+                        v.setValue(rhs);//the variable exists, just update it
                     }
-                } else if (isVarNamesList) {
-                    List<String> vars = new Scanner(newFuncName, false, ",").scan();
-                    for (String var : vars) {
-                        Variable v = VariableManager.lookUp(var);
-                        if (v == null) {
+                } else if (isVarNamesList) {//lhs is no valid variable name, but is it a valid list of variable names? user may be trying to assign or update many variables at once e.g. a,b,c=5
+                    List<String> vars = new Scanner(newFuncName, false, ",").scan();//dice them into their component variable names if lhs is valid variable names list
+                    for (String var : vars) {//go through the variable names one by one
+                        Variable v = VariableManager.lookUp(var);//does a variable exist by this name
+                        if (v == null) {//if not, create it and assign the value it
                             VariableManager.VARIABLES.put(var, new Variable(var, Double.parseDouble(rhs), false));
-                        } else {
+                        } else {// if it does, just update it
                             v.setValue(rhs);
                         }
                     }
                 }
                 success = true;
-            } else {
+            } else {//rhs is no number
                 MathExpression expr = null;
-                if (rhs.startsWith("@")) {
+                if (rhs.startsWith("@")) {//it could be an anonymous function,please check it
                     Function anonFunc = new Function(rhs);
                     FunctionManager.update(anonFunc.dependentVariable.getName(), newFuncName);
                     if (anonFunc.isMatrix()) {
@@ -340,7 +340,6 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                     } else {
                         anonFunc.dependentVariable = new Variable(newFuncName);
                     }
-
                     FunctionManager.update(anonFunc);
                     return true;
                 } else {
@@ -394,7 +393,6 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                         FunctionManager.add(q);
                         return true;
                     }
-
                 }
                 if (scanner.get(0).equals(Declarations.ROTOR)) {
                     sz = scanner.size();

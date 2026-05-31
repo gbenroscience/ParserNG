@@ -1223,7 +1223,7 @@ public class MethodRegistry {
         registerMethod(Declarations.MATRIX_POWER, (ctx, arity, args) -> {
             Function fA = FunctionManager.lookUp(args[0].textRes);
             Matrix mA = fA.getMatrix();
-            return ctx.wrap(Matrix.pow(mA, (int) args[0].scalar));
+            return ctx.wrap(Matrix.power(mA, (int) args[0].scalar));
 
         });
         registerMethod(Declarations.MATRIX_SUBTRACT, (ctx, arity, args) -> {

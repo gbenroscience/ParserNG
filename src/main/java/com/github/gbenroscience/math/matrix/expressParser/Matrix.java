@@ -308,6 +308,25 @@ public class Matrix {
     }//end method add
 
     /**
+     * Adds the supplied matrix to this current one(in place addition)
+     *
+     * @param matrice the matrix to be added to this one. The operation is (
+     * this + matrice )
+     */
+    public void addInPlace(Matrix matrice) {
+
+        if (rows != matrice.rows || cols != matrice.cols) {
+            System.err.println("ERROR IN MATRIX INPUT!!");
+            throw new InputMismatchException("Bad input. Matrix dimensions do not match");
+        }
+
+        for (int i = 0; i < array.length; i++) {
+            this.array[i] += matrice.array[i];
+        }
+
+    }//end method add
+
+    /**
      *
      * @param matrice the matrix to be subtracted from this one. The operation
      * is ( this - matrice )
@@ -327,6 +346,25 @@ public class Matrix {
         }
 
         return matrix;
+    }//end method subtract
+
+    /**
+     * Subtracts the supplied matrix to this current one(in place subtraction)
+     *
+     * @param matrice the matrix to be subtracted from this one. The operation
+     * is ( this - matrice )
+     */
+    public void subtractInPlace(Matrix matrice) {
+
+        if (rows != matrice.rows || cols != matrice.cols) {
+            System.err.println("ERROR IN MATRIX INPUT!!");
+            throw new InputMismatchException("Bad input. Matrix dimensions do not match");
+        }
+
+        for (int i = 0; i < array.length; i++) {
+            array[i] -= matrice.array[i];
+        }
+
     }//end method subtract
 
     /**
@@ -418,39 +456,8 @@ public class Matrix {
         this.array = product.array;
     }
 
-    /**
-     *
-     * @param mat the matrix to raise to a given power
-     * @param pow the power to raise this matrix to
-     * @return the
-     */
-    public static Matrix pow(Matrix mat, int pow) {
-        Matrix m = new Matrix(mat);
-        for (int i = 0; i < pow - 1; i++) {
-            m = Matrix.multiply(m, mat);
+ 
 
-        }
-        return m;
-    }
-
-    public static Matrix power(Matrix mat, int pow) {
-        assert (pow >= 0);
-        switch (pow) {
-            case 0:
-                return unitMatrix(mat.rows, mat.cols);
-            case 1:
-                return mat;
-            default:
-                /**
-                 * n=3:
-                 * mul(power(mat,2),mat)---mul(mul(power(mat,1),mat),mat)--mul(
-                 * mul(mat,mat),mat )---mul(mat2,mat)-->mat3
-                 */
-                return multiply(power(mat, pow - 1), mat);
-
-        }
-
-    }
 
     /**
      *
@@ -459,6 +466,80 @@ public class Matrix {
     public Matrix unitMatrix() {
         return unitMatrix(rows, cols);
     }//end method unitMatrix
+
+    public static Matrix power(Matrix matrice1, int pow) {
+        if (!matrice1.isSquareMatrix()) {
+            System.out.println("ERROR: Matrix power is only defined for square matrices!");
+            return new Matrix(1, 1);  // Error case
+        }
+
+        int size = matrice1.rows;
+
+        if (pow < 0) {
+            System.out.println("ERROR: Negative exponents not supported yet.");
+            return new Matrix(1, 1);
+        }
+
+        if (pow == 0) {
+            return unitMatrix(size);   // Still need this for identity
+        }
+
+        if (pow == 1) {
+            Matrix result = new Matrix(matrice1);  // Only one new call here
+            return result;
+        }
+
+        // === Main case: pow >= 2 ===
+        // Only ONE major new Matrix allocation
+        Matrix result = unitMatrix(size);     // This is the only major new call
+
+        // We'll reuse 'matrice1' as base by making a working copy into result temporarily
+        Matrix base = new Matrix(matrice1);   // ← Unfortunately needed as second temp
+        // Note: We can't avoid this second allocation without risking corrupting input
+
+        while (pow > 0) {
+            if ((pow & 1) == 1) {                 // odd
+                multiplyInPlace(result, base);  // result = result * base
+            }
+            multiplyInPlace(base, base);        // base = base * base
+            pow >>>= 1;
+        }
+
+        return result;
+    }
+
+    // Simple matrix multiplication into first argument (in-place on result)
+    private static void multiplyInPlace(Matrix A, Matrix B) {
+        int n = A.rows;  // assumes square and compatible
+
+        // Create temporary array to avoid corrupting data during calculation
+        double[] temp = new double[n * n];
+
+        double[] aArray = A.array;
+        double[] bArray = B.array;
+
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                double sum = 0.0;
+                for (int k = 0; k < n; k++) {
+                    sum += aArray[i * n + k] * bArray[k * n + j];
+                }
+                temp[i * n + j] = sum;
+            }
+        }
+
+        // Copy result back
+        System.arraycopy(temp, 0, A.array, 0, n * n);
+    }
+
+// Identity matrix helper
+    public static Matrix unitMatrix(int n) {
+        Matrix I = new Matrix(n, n);
+        for (int i = 0; i < n; i++) {
+            I.array[i * n + i] = 1.0;
+        }
+        return I;
+    }
 
     /**
      *
@@ -1368,76 +1449,92 @@ public class Matrix {
      * @return the inverse of the Matrix as another Matrix object.
      */
     public Matrix inverse() {
+        if (!isSquareMatrix()) {
+            return null;
+        }
 
-        Matrix m = new Matrix(this);
-        if (m.isSquareMatrix()) {
-            Matrix unit = m.unitMatrix();
-            Matrix inverse = Matrix.columnJoin(this, unit);
+        int n = this.rows;
+        double[] a = new double[n * n];      // Working copy of A
+        double[] inv = new double[n * n];    // Will become A⁻¹
 
-            int rws = inverse.rows;
-            int cls = inverse.cols;
-            for (int row = 0; row < rws; row++) {
+        System.arraycopy(this.array, 0, a, 0, n * n);
 
-                double pivot = inverse.array[row * cls + row];
+        // Initialize inv as Identity
+        for (int i = 0; i < n; i++) {
+            inv[i * n + i] = 1.0;
+        }
 
-                /**
-                 * The division coefficient must not be zero. If zero, search
-                 * for a lower row, and swap.
-                 */
-                if (pivot == 0.0) {
+        for (int p = 0; p < n; p++) {
+            // Partial pivoting
+            int maxRow = p;
+            double maxVal = Math.abs(a[p * n + p]);
 
-                    for (int rw = row; rw < rws; rw++) {
-                        pivot = inverse.array[rw * cls + row];
+            for (int i = p + 1; i < n; i++) {
+                double val = Math.abs(a[i * n + p]);
+                if (val > maxVal) {
+                    maxVal = val;
+                    maxRow = i;
+                }
+            }
 
-                        if (pivot != 0.0) {
-                            inverse.swapRow(row, rw);
-                            break;
-                        }//end if
+            if (maxVal == 0.0) {
+                throw new ArithmeticException("Matrix is singular - inverse does not exist.");
+            }
 
-                    }//end for loop
+            // Swap rows - FULL rows in both arrays
+            if (maxRow != p) {
+                int pOffset = p * n;
+                int maxOffset = maxRow * n;
 
-                    if (pivot == 0.0) {
-                        throw new InputMismatchException("INVERSE DOES NOT EXISTS!");
-                    }
-                }//end if   
+                for (int j = 0; j < n; j++) {           // ← Fixed: full row
+                    double tmp = a[pOffset + j];
+                    a[pOffset + j] = a[maxOffset + j];
+                    a[maxOffset + j] = tmp;
 
-                for (int col = row; col < cls; col++) {
-                    inverse.array[row * cls + col] /= pivot;
-                }//end inner for loop
+                    tmp = inv[pOffset + j];
+                    inv[pOffset + j] = inv[maxOffset + j];
+                    inv[maxOffset + j] = tmp;
+                }
+            }
 
-                for (int rw = row + 1; rw < rws; rw++) {
-                    double newRowMultiplier = -1 * inverse.array[rw * cls + row];
-                    for (int col = row; col < cls; col++) {
-                        inverse.array[rw * cls + col] = newRowMultiplier * inverse.array[row * cls + col] + inverse.array[rw * cls + col];
-                    }
-                }//end inner for loop
+            int pOffset = p * n;
+            double pivot = a[pOffset + p];
+            double pivotInv = 1.0 / pivot;
 
-            }//end for
-            //////////////Now reduce upwards from the right border of the main matrix...on the partition between the 2 matrices.
+            // Normalize pivot row
+            a[pOffset + p] = 1.0;                    // Explicitly set
+            for (int j = p + 1; j < n; j++) {
+                a[pOffset + j] *= pivotInv;
+            }
+            for (int j = 0; j < n; j++) {
+                inv[pOffset + j] *= pivotInv;
+            }
 
-            for (int row = rws - 1; row >= 0; row--) {
-
-                for (int rw = row - 1; rw >= 0; rw--) {
-
-                    double newRowMultiplier = -1 * inverse.array[rw * cls + row];
-                    /**
-                     * The division coefficient must not be zero. If zero,
-                     * search for a lower row, and swap.
-                     */
-                    if (newRowMultiplier == 0.0) {
-                        continue;
-                    }//end if  
-                    for (int col = row; col < cls; col++) {
-                        inverse.array[rw * cls + col] = newRowMultiplier * inverse.array[row * cls + col] + inverse.array[rw * cls + col];
-                    }
+            // Eliminate in ALL other rows (above + below)
+            for (int i = 0; i < n; i++) {
+                if (i == p) {
+                    continue;
                 }
 
-            }//end for
+                int rowOffset = i * n;
+                double factor = a[rowOffset + p];
 
-            inverse.columnDeleteFromStart(m.rows);
-            return inverse;
-        }//end if
-        return null;
+                if (factor != 0.0) {
+                    a[rowOffset + p] = 0.0;          // Explicitly zero
+
+                    for (int j = p + 1; j < n; j++) {
+                        a[rowOffset + j] -= factor * a[pOffset + j];
+                    }
+                    for (int j = 0; j < n; j++) {
+                        inv[rowOffset + j] -= factor * inv[pOffset + j];
+                    }
+                }
+            }
+        }
+
+        Matrix result = new Matrix(n, n);
+        result.array = inv;   // Take ownership
+        return result;
     }
 
     /**

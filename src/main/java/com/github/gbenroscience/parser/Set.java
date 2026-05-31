@@ -987,7 +987,7 @@ public class Set {
                     double pow = Variable.isVariableString(nextToken) ? VariableManager.lookUp(nextToken).getValue() : Double.parseDouble(nextToken);
 
                     if (f != null) {
-                        return Matrix.pow(f.getMatrix(), (int) pow);
+                        return Matrix.power(f.getMatrix(), (int) pow);
                     }
 
                 }

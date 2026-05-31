@@ -212,19 +212,17 @@ class MathExpressionTest {
         if (print) {
             System.out.println("inverted matrix: " + inv);
         }
-        Assertions.assertEquals("\n"
-                + "-0.07936507936507936  ,0.04761904761904753  ,0.12698412698412698            \n"
-                + "0.3544973544973545  ,-0.0793650793650793  ,-0.10052910052910052            \n"
-                + "-0.1798941798941799  ,0.1746031746031746  ,0.021164021164021166            \n", inv.toString());
+        Assertions.assertArrayEquals(new double[]{
+        -0.07936507936507937  ,0.04761904761904762  ,0.12698412698412698, 0.35449735449735453  ,-0.07936507936507942  ,-0.10052910052910054, 
+            -0.1798941798941799  ,0.17460317460317462  ,0.021164021164021166
+        }, inv.getFlatArray());
 
         matrix.multiply(inv);
         if (print) {
             System.out.println("mul matrix: " + matrix);
         }
-        Assertions.assertEquals("\n"
-                + "0.9999999999999999  ,-2.7755575615628914E-17  ,3.469446951953614E-18            \n"
-                + "-2.220446049250313E-16  ,    1.0  ,2.7755575615628914E-17            \n"
-                + "1.1102230246251565E-16  ,-6.661338147750939E-16  ,    1.0            \n", matrix.toString());
+        Assertions.assertArrayEquals(new double[]{
+        1.0  ,-1.6653345369377348E-16  ,-5.204170427930421E-17,  0.0  ,0.9999999999999999  ,-2.7755575615628914E-17, -5.551115123125783E-17  ,-5.551115123125783E-17  ,    1.0          }, matrix.getFlatArray());
 
         FunctionManager.add("f(x,y) = x-x/y");
         Function fxy = FunctionManager.lookUp("f");
@@ -638,6 +636,40 @@ class MathExpressionTest {
             Matrix m = fce.apply(new double[0]).matrix;
             System.out.println("matrix:\n" + m);
             Assertions.assertEquals(1, m.getFlatArray()[0]);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+        
+        @Test
+    void matrixTestAlgebraStdParser() {
+        try {
+            MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19);"
+                    + "B(4,4)=(3,22,8,-5,  10,18,32,8,  4,2,1,9,  7,7,2,13);"
+                    + " B^3+A^2"); 
+            System.out.println("scanner: " + me.getScanner());
+            System.out.println("result: " + me.solve());  
+            Matrix m = me.solveGeneric().matrix;
+            System.out.println("result: " + m);  
+            Assertions.assertEquals(24248.0, m.getFlatArray()[0]);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+        @Test
+    void matrixTestAlgebraAssignments() {
+        try {
+            MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19);"
+                    + "B(4,4)=(3,22,8,-5,  10,18,32,8,  4,2,1,9,  7,7,2,13);"
+                    + " D=A^2+B^2;D;");
+            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
+            System.out.println("scanner: " + me.getScanner());
+            System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
+            Matrix m = fce.apply(new double[0]).matrix;
+            System.out.println("matrix:\n" + m);
+            Assertions.assertEquals(15286.0, m.getFlatArray()[0]);
         } catch (Throwable ex) {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
