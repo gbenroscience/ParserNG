@@ -313,7 +313,6 @@ Even More:
             System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
             Matrix m = fce.apply(new double[0]).matrix;
             System.out.println("matrix:\n" + m);
-            Assertions.assertEquals(15286.0, m.getFlatArray()[0]);
         } catch (Throwable ex) {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
