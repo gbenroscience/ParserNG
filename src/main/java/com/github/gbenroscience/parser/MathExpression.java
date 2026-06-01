@@ -2610,7 +2610,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
                 double[] flatArr = matrix.getFlatArray();
                 double[] arr = new double[flatArr.length];
                 System.arraycopy(flatArr, 0, arr, 0, flatArr.length);
-                Matrix m = new Matrix(flatArr, matrix.getRows(), matrix.getCols());
+                Matrix m = new Matrix(arr, matrix.getRows(), matrix.getCols());
                 e.matrix = m;
                 e.matrix.setName(matrix.getName());
             } else {
@@ -2623,7 +2623,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
                 e.vector = null;
             } else {
                 double[] v = new double[vector.length];
-                System.arraycopy(e.vector, 0, v, 0, vector.length);
+                System.arraycopy(this.vector, 0, v, 0, vector.length);
                 e.vector = v;
 
             }
