@@ -106,7 +106,7 @@
                             <mainClass>com.github.gbenroscience.math.Main</mainClass>
                         </manifest>
                         <manifestEntries>
-                            <Automatic-Module-Name>com.github.gbenroscience.parserng</Automatic-Module-Name>
+                            <Automatic-Module-Name>parser.ng</Automatic-Module-Name>
                         </manifestEntries>
                     </archive>
                 </configuration>
