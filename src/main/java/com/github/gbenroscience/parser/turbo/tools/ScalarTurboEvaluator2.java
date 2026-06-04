@@ -57,7 +57,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
     private static final long serialVersionUID = 1L;
     private boolean willFoldConstants;
- 
+
     protected final int[] slots;
 
     private MathExpression.Token[] postfix;
@@ -219,13 +219,12 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         if (ScalarTurboEvaluator.SUPPORTS_WIDENING) {
             this.postfix = me.getCachedPostfix();
             this.willFoldConstants = me.isWillFoldConstants();
-            slots = me.getSlots(); 
+            slots = me.getSlots();
             me.copyErrorLogTo(errorLog);
         } else {
             throw new UnsupportedOperationException("This evaluator does not support adaptive widening of method signatures\nPlease use ScalarTurboEvaluator1");
         }
     }
- 
 
     private static MethodHandle getUnaryHandle(String op) {
         MethodHandle mh = UNARY_MAP.get(op);
@@ -439,14 +438,22 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
             switch (t.kind) {
                 case MathExpression.Token.NUMBER:
-                    if (t.frameIndex >= 0 && varCount > 0) {
-                        stack.push(liftVariable(t.frameIndex, varCount));
-                    } else {
-                        stack.push(liftConstant(t.value, varCount));
-                    }
+                    stack.push(liftConstant(t.value, varCount));
                     break;
-
-                 case MathExpression.Token.OPERATOR:
+                case MathExpression.Token.VARIABLE:
+                    stack.push(liftVariable(t.frameIndex, varCount));
+                    break;
+                case MathExpression.Token.MATRIX:
+                    //TODO: DETERMNINE IF TO CHANNEL TO ParserNG Standard Matrix Handler OR WHETHER TO throw Exception and direct user to MatrixTurboEvaluator
+                    stack.push(liftConstant(t.value, varCount));
+                    break;
+                case MathExpression.Token.FUNCTION_HANDLE:
+                    stack.push(liftConstant(t.value, varCount));
+                    break;
+                case MathExpression.Token.FUNCTION_HANDLE_UNDEFINED:
+                    stack.push(liftConstant(t.value, varCount));
+                    break;
+                case MathExpression.Token.OPERATOR:
                     if (t.isPostfix || t.opChar == '√') {
                         applyUnaryWide(t, stack, foldConstants, varCount);
                     } else if (t.opChar == '^') {
@@ -463,8 +470,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                                 double baseVal = (double) baseHandle.invokeExact();
                                 double result = (double) optimizedUnary.invokeExact(baseVal);
                                 stack.push(liftConstant(result, varCount));
-                            } 
-                            // Case B: Base is variable/expression, exponent is constant (e.g., x1^3)
+                            } // Case B: Base is variable/expression, exponent is constant (e.g., x1^3)
                             else {
                                 // Extract and lift ONLY if the base is truly a zero-argument constant literal node
                                 if (baseHandle.type().parameterCount() == 0) {
@@ -473,7 +479,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                                         baseHandle = liftConstant(constantBaseVal, varCount);
                                     }
                                 }
-                                
+
                                 // High-Performance Pipe: optimizedUnary(baseHandle(vars))
                                 // filterReturnValue pipes the scalar double output of baseHandle directly into optimizedUnary
                                 MethodHandle chained = MethodHandles.filterReturnValue(baseHandle, optimizedUnary);
@@ -489,7 +495,6 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                         applyBinaryWide(t, stack, foldConstants, varCount, pTypes, mask);
                     }
                     break;
-
 
                 case MathExpression.Token.FUNCTION:
                 case MathExpression.Token.METHOD:
@@ -1014,7 +1019,6 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         stack.push(widened);
     }
 
- 
     static MathExpression.EvalResult executePrint(MathExpression.EvalResult ctx, String[] args) {
 
         StringBuilder sb = new StringBuilder();

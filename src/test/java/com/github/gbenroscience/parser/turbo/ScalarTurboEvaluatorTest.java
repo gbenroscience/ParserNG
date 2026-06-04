@@ -54,7 +54,7 @@ public class ScalarTurboEvaluatorTest {
         // Warm up JIT
         MathExpression interpreted = new MathExpression(ex, false);
         MathExpression.EvalResult ev = interpreted.solveGeneric();
-
+        System.out.println("scanner: " + interpreted.getScanner());
         // Compile to turbo
         FastCompositeExpression compiled = interpreted.compileTurbo();
         // Warm up turbo JIT
@@ -152,9 +152,9 @@ public class ScalarTurboEvaluatorTest {
 
         // Warm up JIT
         MathExpression interpreted = new MathExpression(expr, false);
-        System.out.println("sc_int:"+interpreted.getScanner());
+        System.out.println("sc_int:" + interpreted.getScanner());
         MathExpression.EvalResult ev = interpreted.solveGeneric();
-
+        System.out.println("scanner: " + interpreted.getScanner());
         // Compile to turbo
         FastCompositeExpression compiled = new ScalarTurboEvaluator1(interpreted).compile();//interpreted.compileTurbo();
         // Warm up turbo JIT
@@ -174,6 +174,8 @@ public class ScalarTurboEvaluatorTest {
         // Warm up JIT
         MathExpression interpreted = new MathExpression(expr, false);
         MathExpression.EvalResult ev = interpreted.solveGeneric();
+
+        System.out.println("scanner--: " + interpreted.getScanner());
 
         // Compile to turbo
         FastCompositeExpression compiled = interpreted.compileTurbo();
@@ -216,6 +218,8 @@ public class ScalarTurboEvaluatorTest {
         MathExpression.EvalResult ev = interpreted.solveGeneric();
         System.out.println("std: " + ev);
 
+        System.out.println("scanner: "+interpreted.getScanner());
+        System.out.println("postfix: "+Arrays.deepToString(interpreted.getCachedPostfix()));
         // Compile to turbo
         FastCompositeExpression compiled = new ScalarTurboEvaluator1(interpreted).compile();// interpreted.compileTurbo();
         // Warm up turbo JIT
@@ -421,5 +425,5 @@ public class ScalarTurboEvaluatorTest {
         double v1 = fce.applyScalar(vars);
 
     }
-    
+
 }
