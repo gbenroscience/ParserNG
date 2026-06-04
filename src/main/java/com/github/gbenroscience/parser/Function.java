@@ -5,7 +5,6 @@
 package com.github.gbenroscience.parser;
 
 import com.github.gbenroscience.interfaces.Savable;
-import com.github.gbenroscience.logic.DRG_MODE;
 
 import java.util.ArrayList;
 import java.util.InputMismatchException;
@@ -21,7 +20,6 @@ import static com.github.gbenroscience.util.FunctionManager.*;
 import com.github.gbenroscience.util.Serializer;
 import com.github.gbenroscience.util.Utils;
 import com.github.gbenroscience.util.VariableManager;
-import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
