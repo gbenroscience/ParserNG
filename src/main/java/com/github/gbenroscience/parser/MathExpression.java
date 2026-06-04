@@ -2125,17 +2125,19 @@ public class MathExpression implements Savable, Solvable {
                 rightType = EvalResult.TYPE_MATRIX;
                 right.wrap(rightFun.getMatrix());
             }
-            /*
-            System.out.println("left: " + left);
-            System.out.println("OP: " + op);
-            System.out.println("right: " + right);
-            */
+            
+//            System.out.println("left: " + left);
+//            System.out.println("OP: " + op);
+//            System.out.println("right: " + right);
+//            System.out.println("leftType: "+left.getTypeName()+", rightType: "+right.getTypeName());
+//            
             switch (op) {
                 case '+':
                     if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
                         Matrix m = left.matrix.add(right.matrix);
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '+': left=" + leftType + ", right=" + rightType);
                     }
@@ -2146,6 +2148,7 @@ public class MathExpression implements Savable, Solvable {
                         Matrix m = left.matrix.subtract(right.matrix);
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '-': left=" + leftType + ", right=" + rightType);
                     }
@@ -2156,14 +2159,17 @@ public class MathExpression implements Savable, Solvable {
                         Matrix m = Matrix.multiply(left.matrix, right.matrix);
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
+                        left.matrix = m;
                     } else if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_MATRIX) {
                         Matrix m = right.matrix.scalarMultiply(left.scalar);
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
+                        left.matrix = m;
                     } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
                         Matrix m = left.matrix.scalarMultiply(right.scalar);
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '*': left=" + leftType + ", right=" + rightType);
                     }
@@ -2177,6 +2183,7 @@ public class MathExpression implements Savable, Solvable {
                         Matrix m = Matrix.multiply(left.matrix, right.matrix.inverse());
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
+                        left.matrix = m;
                     } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
                         if (Math.abs(right.scalar) < 1e-15) {
                             throw new ArithmeticException("Matrix division by zero scalar");
@@ -2184,6 +2191,7 @@ public class MathExpression implements Savable, Solvable {
                         Matrix m = left.matrix.scalarDivide(right.scalar);
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
+                        left.matrix = m;
                     } else if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_MATRIX) {
                         if (Math.abs(right.matrix.determ()) < 1e-15) {
                             throw new ArithmeticException("Matrix is singular. Cannot invert.");
@@ -2191,6 +2199,7 @@ public class MathExpression implements Savable, Solvable {
                         Matrix m = right.matrix.inverse().scalarMultiply(left.scalar);
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '/': left=" + leftType + ", right=" + rightType);
                     }
@@ -2201,6 +2210,7 @@ public class MathExpression implements Savable, Solvable {
                         Matrix m = Matrix.power(left.matrix, (int) right.scalar);
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '^': left=" + leftType + ", right=" + rightType);
                     }
