@@ -213,8 +213,8 @@ class MathExpressionTest {
             System.out.println("inverted matrix: " + inv);
         }
         Assertions.assertArrayEquals(new double[]{
-        -0.07936507936507937  ,0.04761904761904762  ,0.12698412698412698, 0.35449735449735453  ,-0.07936507936507942  ,-0.10052910052910054, 
-            -0.1798941798941799  ,0.17460317460317462  ,0.021164021164021166
+            -0.07936507936507937, 0.04761904761904762, 0.12698412698412698, 0.35449735449735453, -0.07936507936507942, -0.10052910052910054,
+            -0.1798941798941799, 0.17460317460317462, 0.021164021164021166
         }, inv.getFlatArray());
 
         matrix.multiply(inv);
@@ -222,7 +222,7 @@ class MathExpressionTest {
             System.out.println("mul matrix: " + matrix);
         }
         Assertions.assertArrayEquals(new double[]{
-        1.0  ,-1.6653345369377348E-16  ,-5.204170427930421E-17,  0.0  ,0.9999999999999999  ,-2.7755575615628914E-17, -5.551115123125783E-17  ,-5.551115123125783E-17  ,    1.0          }, matrix.getFlatArray());
+            1.0, -1.6653345369377348E-16, -5.204170427930421E-17, 0.0, 0.9999999999999999, -2.7755575615628914E-17, -5.551115123125783E-17, -5.551115123125783E-17, 1.0}, matrix.getFlatArray());
 
         FunctionManager.add("f(x,y) = x-x/y");
         Function fxy = FunctionManager.lookUp("f");
@@ -524,6 +524,7 @@ class MathExpressionTest {
             System.out.println("A=" + FunctionManager.lookUp("A"));
 
             MathExpression m = new MathExpression("1/A");
+            System.out.println("1/A(STD)---" + new MathExpression("1/A").solve());
             FastCompositeExpression fce = m.compileTurbo();
             System.out.println("compiler class: " + fce.getCompiler().getClass());
             MathExpression.EvalResult ev = fce.apply(new double[]{0.0});
@@ -641,38 +642,106 @@ class MathExpressionTest {
         }
     }
     
-        
-        @Test
+    
+
+    @Test
     void matrixTestAlgebraStdParser() {
         try {
             MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19);"
                     + "B(4,4)=(3,22,8,-5,  10,18,32,8,  4,2,1,9,  7,7,2,13);"
-                    + " B^3+A^2"); 
+                    + " B^3+A^2");
             System.out.println("scanner: " + me.getScanner());
-            System.out.println("result: " + me.solve());  
-            Matrix m = me.solveGeneric().matrix;
-            System.out.println("result: " + m);  
+            String matrixResultReference = me.solveGeneric().textRes;
+            System.out.println("matrixResultReference: " + matrixResultReference);
+            Matrix m = FunctionManager.lookUp(matrixResultReference).getMatrix();
+            System.out.println("result: " + m);
             Assertions.assertEquals(24248.0, m.getFlatArray()[0]);
         } catch (Throwable ex) {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
     
-        @Test
+    
+
+    @Test
+    void matrixTestAlgebraMultiplicationStdParser() {
+        try {
+            MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19);"
+                    + "B(4,4)=(3,22,8,-5,  10,18,32,8,  4,2,1,9,  7,7,2,13);"
+                    + " V=A*B");
+            System.out.println("scanner: " + me.getScanner());
+            MathExpression.EvalResult ev = me.solveGeneric();
+            Matrix m = FunctionManager.lookUp("V").getMatrix();
+            System.out.println("result: " + m);
+            Assertions.assertEquals(416.0, m.getFlatArray()[0]);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    @Test
     void matrixTestAlgebraAssignments() {
         try {
             MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19);"
                     + "B(4,4)=(3,22,8,-5,  10,18,32,8,  4,2,1,9,  7,7,2,13);"
                     + " D=A^2+B^2;D;");
-            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
             System.out.println("scanner: " + me.getScanner());
             System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
+            System.out.println("D: " + FunctionManager.lookUp("D").getMatrix());
+            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
             Matrix m = fce.apply(new double[0]).matrix;
             System.out.println("matrix:\n" + m);
             Assertions.assertEquals(15286.0, m.getFlatArray()[0]);
         } catch (Throwable ex) {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
+    }
+
+    @Test
+    void matrixTestDetBug() {
+        try {
+            MathExpression me = new MathExpression("A(3,3)=(3,1,5,  4,2,9, 1,4,3);"
+                    + "B(3,3)=(4,0,2, 2,1,5, 5,9,4);"
+                    + " detab=det(A*B);deta=det(A)");
+            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
+            System.out.println("scanner: " + me.getScanner());
+            System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
+            System.out.println("B: " + FunctionManager.lookUp("B").getMatrix());
+            Variable detAB = VariableManager.lookUp("detab");
+            Variable detA = VariableManager.lookUp("deta");
+            System.out.println("det(A*B): " + detAB.getValue());
+            System.out.println("det(A): " + detA.getValue());
+
+            Assertions.assertNotEquals(detAB.getValue(), detA);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+    
+    
+    /**
+     * diff(F) Evaluate F's grad func and return the result 
+     * diff(F,v) Evaluate F's grad func and store the result in a function pointer called v 
+     * diff(F,n) Evaluate F's grad func n times 
+     * diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v
+     * diff(F,x,n) Evaluate F's grad func n times and calculate the result at x
+     */
+    @Test
+    void testSimpleDifferentialCalculus() {
+        try {
+            MathExpression me = new MathExpression("f(x)=x^3;diff(f)");
+            String s = me.solveGeneric().textRes;
+            System.out.println("res:\n"+s);
+            Assertions.assertTrue(true);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+    
+    public static void main(String[] args) {
+        new MathExpressionTest().matrixTestAlgebraAssignments();
     }
 
 }

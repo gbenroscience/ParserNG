@@ -191,6 +191,42 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                     }
                     stack.push(leaf);
                     break;
+
+                case MathExpression.Token.VARIABLE:
+                    if (t.name != null && !t.name.isEmpty()) {
+                        if (t.v != null) {
+                            if (inlinedVariables != null && t.frameIndex < inlinedVariables.length) {
+                                leaf = inlinedVariables[t.frameIndex];
+                            } else {
+                                leaf = compileVariableLookupByIndex(t.frameIndex);
+                            }
+                        } else {
+                            Function f = FunctionManager.lookUp(t.name);
+                            if (f != null && f.getMatrix() != null) {
+                                EvalResult res = new EvalResult().wrap(f.getMatrix());
+                                leaf = createConstantHandle(res);
+                            } else {
+                                EvalResult res = new EvalResult().wrap(t.name);
+                                leaf = createConstantHandle(res);
+                            }
+                        }
+                    } else {
+                        EvalResult res = new EvalResult().wrap(t.value);
+                        leaf = createConstantHandle(res);
+                    }
+                    stack.push(leaf);
+                    break;
+                case MathExpression.Token.MATRIX:
+                    EvalResult res = new EvalResult().wrap(t.m);
+                    leaf = createConstantHandle(res);
+                    stack.push(leaf);
+                    break;
+                case MathExpression.Token.FUNCTION_HANDLE:
+                    stack.push(createConstantHandle(new EvalResult().wrap(t.name)));
+                    break;
+                case MathExpression.Token.FUNCTION_HANDLE_UNDEFINED:
+                    stack.push(createConstantHandle(new EvalResult().wrap(t.name)));
+                    break;
                 case MathExpression.Token.OPERATOR:
                     if (t.isPostfix) {
                         MethodHandle operand = stack.pop();
@@ -948,21 +984,21 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                 return cache.result.wrap(result);
             case Declarations.SUB_MATRIX:
                 Matrix main = args[0].matrix;
-                 row = (int) args[1].scalar;
-                 col = (int) args[2].scalar;
+                row = (int) args[1].scalar;
+                col = (int) args[2].scalar;
                 Matrix sm = getSubmatrix(main, row, col, cache);
                 return cache.result.wrap(sm);
             case Declarations.RANDOM_MATRIX:
-                 n = (int) args[0].scalar;
-                 row = (int) args[1].scalar;
-                 col = (int) args[2].scalar;
-                 sm = randomFillTurbo(n, row, col, cache);
+                n = (int) args[0].scalar;
+                row = (int) args[1].scalar;
+                col = (int) args[2].scalar;
+                sm = randomFillTurbo(n, row, col, cache);
                 return cache.result.wrap(sm);
             case Declarations.MATRIX_MINOR:
-                 main = args[0].matrix;
-                 row = (int) args[1].scalar;
-                 col = (int) args[2].scalar;
-                 sm = minor(main, row, col, cache);
+                main = args[0].matrix;
+                row = (int) args[1].scalar;
+                col = (int) args[2].scalar;
+                sm = minor(main, row, col, cache);
                 return cache.result.wrap(sm);
             case Declarations.ROTOR:
                 if (args.length == 4) {

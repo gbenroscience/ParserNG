@@ -353,7 +353,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                         scanner.remove(scanner.size() - 1);
                     }
                 }
-
+ 
                 int sz = scanner.size();
                 if ((sz == 3 && scanner.get(1).startsWith(ANON_PREFIX))
                         || (sz == 1 && scanner.get(0).startsWith(ANON_PREFIX))) {//function assigments will always be like this: [(,anon1,)] when they get here
@@ -441,6 +441,8 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 }
                 MathExpression.EvalResult val = expr.solveGeneric();
 
+      
+
                 String referenceName = null;
 
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
@@ -476,8 +478,17 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                             FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
                             success = true;
                             break;
-                        case STRING://for now, this only confirms that a comma separated list has been returned
-
+                        case STRING:
+                            f = FunctionManager.lookUp(val.textRes);
+                            if (f != null) {
+                                 Function q = f.copy();
+                                    q.setDependentVariable(new Variable(newFuncName));
+                                    if (q.type == TYPE.MATRIX) {
+                                        q.getMatrix().setName(newFuncName);
+                                    }
+                                    FunctionManager.add(q);
+                                    return true;
+                            }
                             break;
                         case NUMBER:
                             if (isVarNamesList && hasCommas) {
@@ -629,7 +640,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             int cols = Integer.parseInt(varList.get(1));
             List<String> entries = new Scanner(expr, false, "(", ")", ",", ";").scan();
             int sz = entries.size();
-  
+
             if (rows * cols != sz) {
                 String err = "Invalid matrix! rows x cols must be equal to items supplied in matrix list. Expected: " + (rows * cols) + ", Found: " + sz + " items";
                 errorLog.info(err);
@@ -669,7 +680,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                     flatArray[i] = Double.parseDouble(entries.get(i));
                 }
             } catch (Exception e) {
-                     String err = "Elements of a vector must be numbers!";
+                String err = "Elements of a vector must be numbers!";
                 errorLog.info(err);
                 throw new RuntimeException(err);
             }
@@ -683,8 +694,8 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             // FunctionManager.update(anonFn);
 
         } else {
-       String err = "SYNTAX ERROR IN FUNCTION";
-                errorLog.info(err);
+            String err = "SYNTAX ERROR IN FUNCTION";
+            errorLog.info(err);
             throw new InputMismatchException(err);
         }
 
@@ -1044,15 +1055,15 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 return mathExpression.solve();
             }//end if
             else {
-                 String err = "Invalid Argument List! " + sz1 + " arguments expected!";
-                        errorLog.info(err);
+                String err = "Invalid Argument List! " + sz1 + " arguments expected!";
+                errorLog.info(err);
                 throw new InputMismatchException(err);
             }//end else
 
         }//end if
         else {
-               String err = "Pass Arguments To The Format: " + str;
-                        errorLog.info(err);
+            String err = "Pass Arguments To The Format: " + str;
+            errorLog.info(err);
             throw new InputMismatchException(err);
         }//end else
 
@@ -1535,10 +1546,10 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         d = System.nanoTime() - s;
         System.out.println("t2 = " + d + "ns");
 
-        System.out.println(Function.rewriteAsStandardFunction("f(x)=sin(x)-cos(x)",f.errorLog));
-        System.out.println(Function.rewriteAsStandardFunction("f(x,y,z)=sin(x+y)-cos(z-2*x)",f.errorLog));
-        System.out.println(Function.rewriteAsStandardFunction("f=@(x)sin(x)-cos(x)",f.errorLog));
-        System.out.println(Function.rewriteAsStandardFunction("f=@(x)sin(x)-cos(x)",f.errorLog));
+        System.out.println(Function.rewriteAsStandardFunction("f(x)=sin(x)-cos(x)", f.errorLog));
+        System.out.println(Function.rewriteAsStandardFunction("f(x,y,z)=sin(x+y)-cos(z-2*x)", f.errorLog));
+        System.out.println(Function.rewriteAsStandardFunction("f=@(x)sin(x)-cos(x)", f.errorLog));
+        System.out.println(Function.rewriteAsStandardFunction("f=@(x)sin(x)-cos(x)", f.errorLog));
 
         FunctionManager.add("K=@(3,3)(2,3,4,9,8,1,9,8,1);");
 

@@ -1099,7 +1099,6 @@ public class MethodRegistry {
             return ctx.wrap(Double.POSITIVE_INFINITY);
         });
         registerMethod(Declarations.DETERMINANT, (ctx, arity, args) -> {
-
             if (args.length == 1 && args[0].textRes != null) {//det(1,2,-1,3,)
                 Function f = FunctionManager.lookUp(args[0].textRes);
                 Matrix m = f.getMatrix();

@@ -367,30 +367,48 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         for (MathExpression.Token t : postfix) {
             switch (t.kind) {
                 case MathExpression.Token.NUMBER:
-                    if (t.name != null && !t.name.isEmpty()) {
-                        // Determine which index of the runtime 'variables' array contains this variable's value
-                        int targetVariableIndex = -1;
-                        if (slots != null) {
-                            for (int k = 0; k < slots.length; k++) {
-                                if (slots[k] == t.frameIndex) {
-                                    targetVariableIndex = k;
-                                    break;
-                                }
+                    // Start with: () -> double
+                    MethodHandle constant = MethodHandles.constant(double.class, t.value);
+                    // Transform to: (double[]) -> double
+                    stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                    break;
+                case MathExpression.Token.VARIABLE:
+                    // Determine which index of the runtime 'variables' array contains this variable's value
+                    int targetVariableIndex = -1;
+                    if (slots != null) {
+                        for (int k = 0; k < slots.length; k++) {
+                            if (slots[k] == t.frameIndex) {
+                                targetVariableIndex = k;
+                                break;
                             }
                         }
-
-                        // Fallback to frameIndex if it's an unmapped execution slot parameter
-                        int finalIndex = (targetVariableIndex != -1) ? targetVariableIndex : t.frameIndex;
-
-                        // Signature: (double[]) -> double (Reading straight from target index position)
-                        MethodHandle arrayGetter = AndroidFriendlyMethodHandles.getDoubleArrayGetter();
-                        stack.push(MethodHandles.insertArguments(arrayGetter, 1, finalIndex));
-                    } else {
-                        // Start with: () -> double
-                        MethodHandle constant = MethodHandles.constant(double.class, t.value);
-                        // Transform to: (double[]) -> double
-                        stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
                     }
+                    // Fallback to frameIndex if it's an unmapped execution slot parameter
+                    int finalIndex = (targetVariableIndex != -1) ? targetVariableIndex : t.frameIndex;
+
+                    // Signature: (double[]) -> double (Reading straight from target index position)
+                    MethodHandle arrayGetter = AndroidFriendlyMethodHandles.getDoubleArrayGetter();
+                    stack.push(MethodHandles.insertArguments(arrayGetter, 1, finalIndex));
+                    break;
+
+                case MathExpression.Token.MATRIX:
+                    //TODO: DETERMNINE IF TO ROUTE TO ParserNG Standard Matrix Handler OR WHETHER TO throw Exception and direct user to MatrixTurboEvaluator
+                    // Start with: () -> double
+                    constant = MethodHandles.constant(double.class, t.value);
+                    // Transform to: (double[]) -> double
+                    stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                    break;
+                case MathExpression.Token.FUNCTION_HANDLE:
+                    // Start with: () -> double
+                    constant = MethodHandles.constant(double.class, t.value);
+                    // Transform to: (double[]) -> double
+                    stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                    break;
+                case MathExpression.Token.FUNCTION_HANDLE_UNDEFINED:
+                    // Start with: () -> double
+                    constant = MethodHandles.constant(double.class, t.value);
+                    // Transform to: (double[]) -> double
+                    stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
                     break;
 
                 case MathExpression.Token.OPERATOR:
@@ -536,7 +554,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                         try {
                             MathExpression.EvalResult soln = executePrint(getNextResult(), rawArgs);
-                            MethodHandle constant = MethodHandles.constant(MathExpression.EvalResult.class, soln);
+                            constant = MethodHandles.constant(MathExpression.EvalResult.class, soln);
                             stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
 
                         } catch (Exception e) {
@@ -639,12 +657,12 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                         if (solution.getType() == TYPE.NUMBER) {
                             // Outcome A: Evaluated at a static point, returns a hard number.
-                            MethodHandle constant = MethodHandles.constant(double.class, solution.scalar);
+                            constant = MethodHandles.constant(double.class, solution.scalar);
                             stack.push(MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
                         } else if (solution.getType() == TYPE.STRING || solution.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
                             // Outcome B: Symbolic Derivative! (e.g., "cos(x)")
                             // We compile the new algebraic string directly into the current MethodHandle tree!
-                            MethodHandle constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
+                            constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
                             stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
                             /*
                             MathExpression solutionExpr = new MathExpression(solution.textRes, true);
@@ -663,7 +681,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         }
 
                         String[] args = t.getRawArgs();
-                         if (args == null || args.length < 4 || args.length > 5) {
+                        if (args == null || args.length < 4 || args.length > 5) {
                             String err = "Invalid input for `diffeq`";
                             errorLog.info(err);
                             throw new RuntimeException(err);
@@ -684,17 +702,17 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                         // --- THE TURBO FIX --- 
                         if (solution.getType() == TYPE.STRING || solution.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
-                            MethodHandle constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
+                            constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
                             // The pipeline ALWAYS inputs a double[] array, so we drop double[].class
                             stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
 
                         } else if (solution.getType() == TYPE.VECTOR) {
-                            MethodHandle constant = MethodHandles.constant(double[].class, solution.vector);
+                            constant = MethodHandles.constant(double[].class, solution.vector);
                             stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
 
                         } else {
                             // Fallback for EvalResult Error types
-                            MethodHandle constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
+                            constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
                             stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
                         }
                         break;

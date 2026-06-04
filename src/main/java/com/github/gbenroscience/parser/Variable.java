@@ -546,7 +546,20 @@ public class Variable implements Savable {
     public String toString() {
         return this.name + ":" + this.value;
     }
-
+    
+    @Override
+    public Variable clone(){
+        Variable v = new Variable(this.name);
+        v.fullName = this.fullName;
+        v.value = this.value;
+        v.frameIndex = this.frameIndex;
+        v.constant = this.constant;
+        v.units = this.units;
+        v.type = this.type;
+        
+        return v;
+    }
+ 
     public String toJSON(){
         return "{\n"
                 + "\"name\": \""+name+"\",\n"

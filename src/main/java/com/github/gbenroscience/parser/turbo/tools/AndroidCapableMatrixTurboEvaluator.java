@@ -15,7 +15,10 @@
  */
 package com.github.gbenroscience.parser.turbo.tools;
  
-
+/**
+ *
+ * @author GBEMIRO
+ */
 import com.github.gbenroscience.math.geom.*;
 import com.github.gbenroscience.math.geom.Point;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
@@ -46,7 +49,6 @@ public final class  AndroidCapableMatrixTurboEvaluator implements TurboExpressio
     private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
     private boolean willFoldConstants;
 
-    protected final double[] turboArgs;
     protected final int[] slots;
     private ErrorLog errorLog = new ErrorLog();
     private MathExpression.Token[] postfix;
@@ -57,9 +59,7 @@ public final class  AndroidCapableMatrixTurboEvaluator implements TurboExpressio
     public AndroidCapableMatrixTurboEvaluator(MathExpression me) {
         this.postfix = me.getCachedPostfix();
         this.willFoldConstants = me.isWillFoldConstants();
-        int num_vars = me.getVariablesNames().length;
         slots = me.getSlots();
-        turboArgs = new double[num_vars];
         me.copyErrorLogTo(errorLog);
     }
 
@@ -73,6 +73,7 @@ public final class  AndroidCapableMatrixTurboEvaluator implements TurboExpressio
     });
 
     public static final class ResultCache {
+
         public final EvalResult result = new EvalResult();
         private double lastDeterminant;
         public double[] matrixData;
@@ -150,19 +151,13 @@ public final class  AndroidCapableMatrixTurboEvaluator implements TurboExpressio
     public boolean isWillFoldConstants() {
         return willFoldConstants;
     }
-
-    public double[] getTurboArgs() {
-        return turboArgs;
-    }
-
+    
     public static MathExpression.EvalResult invokeRegistryMethod(int methodId, EvalResult[] argsValues) {
         int arity = argsValues.length;
         MathExpression.EvalResult resultContainer = new MathExpression.EvalResult();
         MethodRegistry.getAction(methodId).calc(resultContainer, arity, argsValues);
         return resultContainer;
     }
-
-
 
     @Override
     public FastCompositeExpression compile() throws Throwable {
@@ -195,6 +190,42 @@ public final class  AndroidCapableMatrixTurboEvaluator implements TurboExpressio
                         leaf = createConstantHandle(res);
                     }
                     stack.push(leaf);
+                    break;
+
+                case MathExpression.Token.VARIABLE:
+                    if (t.name != null && !t.name.isEmpty()) {
+                        if (t.v != null) {
+                            if (inlinedVariables != null && t.frameIndex < inlinedVariables.length) {
+                                leaf = inlinedVariables[t.frameIndex];
+                            } else {
+                                leaf = compileVariableLookupByIndex(t.frameIndex);
+                            }
+                        } else {
+                            Function f = FunctionManager.lookUp(t.name);
+                            if (f != null && f.getMatrix() != null) {
+                                EvalResult res = new EvalResult().wrap(f.getMatrix());
+                                leaf = createConstantHandle(res);
+                            } else {
+                                EvalResult res = new EvalResult().wrap(t.name);
+                                leaf = createConstantHandle(res);
+                            }
+                        }
+                    } else {
+                        EvalResult res = new EvalResult().wrap(t.value);
+                        leaf = createConstantHandle(res);
+                    }
+                    stack.push(leaf);
+                    break;
+                case MathExpression.Token.MATRIX:
+                    EvalResult res = new EvalResult().wrap(t.m);
+                    leaf = createConstantHandle(res);
+                    stack.push(leaf);
+                    break;
+                case MathExpression.Token.FUNCTION_HANDLE:
+                    stack.push(createConstantHandle(new EvalResult().wrap(t.name)));
+                    break;
+                case MathExpression.Token.FUNCTION_HANDLE_UNDEFINED:
+                    stack.push(createConstantHandle(new EvalResult().wrap(t.name)));
                     break;
                 case MathExpression.Token.OPERATOR:
                     if (t.isPostfix) {
@@ -281,24 +312,14 @@ public final class  AndroidCapableMatrixTurboEvaluator implements TurboExpressio
         this.finalHandle = stack.pop();
 
         return new FastCompositeExpression() {
-            double args[] = new double[turboArgs == null ? 0 : turboArgs.length];
-
-            private void loadVars(double[] variables) {
-                if (variables == null || turboArgs == null || slots == null) {
-                    return;
-                }
-                int limit = Math.min(variables.length, Math.min(args.length, slots.length));
-                for (int i = 0; i < limit; i++) {
-                    args[slots[i]] = variables[i];
-                }
-            }
+            // Internal 'args[]' tracking array is completely eliminated to guarantee thread-safety!
 
             @Override
             public EvalResult apply(double[] variables) {
                 try {
-                    loadVars(variables);
-                    // GUARANTEED SAFE PATH: finalHandle is strictly (double[]) -> EvalResult
-                    return (EvalResult) finalHandle.invokeExact(args);
+                    // ZERO runtime loops. ZERO array copying. ZERO bounds matching overhead.
+                    // finalHandle now reads straight from the user's input variable coordinates pointer.
+                    return (EvalResult) finalHandle.invokeExact(variables);
                 } catch (Throwable e) {
                     errorLog.error(e);
                     throw new RuntimeException("Turbo matrix execution failed", e);
@@ -324,10 +345,6 @@ public final class  AndroidCapableMatrixTurboEvaluator implements TurboExpressio
         };
     }
 
-
-
-
-
 ///        //////////////////////////////////////////////////////////////////////////
 
 // =========================================================================
@@ -343,14 +360,30 @@ private static MethodHandle createConstantHandle(EvalResult res) {
         return cache.result.wrap(vars[index]);
     }
 
-    private MethodHandle compileVariableLookupByIndex(final int index) throws Throwable {
-        if (inlinedVariables != null && index >= 0 && index < inlinedVariables.length) {
-            return inlinedVariables[index];
+    private MethodHandle compileVariableLookupByIndex(final int frameIndex) throws Throwable {
+        if (inlinedVariables != null && frameIndex >= 0 && frameIndex < inlinedVariables.length) {
+            return inlinedVariables[frameIndex];
         }
+
+        // Determine which index in the user's incoming 'variables' array matches this frameIndex
+        int targetVariableIndex = -1;
+        if (slots != null) {
+            for (int i = 0; i < slots.length; i++) {
+                if (slots[i] == frameIndex) {
+                    targetVariableIndex = i;
+                    break;
+                }
+            }
+        }
+        // Fallback to frameIndex if it is an unmapped execution parameter slot
+        int finalSourceIndex = (targetVariableIndex != -1) ? targetVariableIndex : frameIndex;
+
         MethodHandle evaluator = LOOKUP.findStatic(AndroidCapableMatrixTurboEvaluator.class, "evaluateVariable",
                 MethodType.methodType(EvalResult.class, int.class, ResultCache.class, double[].class));
+
         ResultCache nodeCache = new ResultCache();
-        return MethodHandles.insertArguments(evaluator, 0, index, nodeCache);
+        // Insert the directly calculated finalSourceIndex to allow register-level hardware indexing
+        return MethodHandles.insertArguments(evaluator, 0, finalSourceIndex, nodeCache);
     }
 
     private static EvalResult evaluateBinary(char op, MethodHandle left, MethodHandle right, ResultCache cache, double[] vars) throws Throwable {
@@ -413,8 +446,6 @@ private static MethodHandle createConstantHandle(EvalResult res) {
         return executePrint(args);
     }
 
-
-
     /////////////////////////////////////////////////////////////////////////////////////////////
     private static MethodHandle mergeDoubleArrays(MethodHandle mh) {
         MethodType type = mh.type();
@@ -463,10 +494,6 @@ private static MethodHandle createConstantHandle(EvalResult res) {
     public static double getVar(double[] vars, int index) {
         return vars[index];
     }
-
-
-
-
 
     static MathExpression.EvalResult executePrint(String[] args) {
         MathExpression.EvalResult ctx = new EvalResult();
@@ -562,30 +589,55 @@ private static MethodHandle createConstantHandle(EvalResult res) {
 
     // ========== RUNTIME DISPATCHERS ==========
     private static EvalResult dispatchBinaryOp(char op, EvalResult left, EvalResult right, ResultCache cache) {
-        int leftType = left.type;
-        int rightType = right.type;
+        final int leftType = left.type;
+        final int rightType = right.type;
 
+        // =========================================================================
+        // ⚡ ULTRA-TURBO FAST-PATH FOR PURE SCALAR ARITHMETIC
+        // Removes all internal conditional type-checking gates for scalar operations.
+        // =========================================================================
+        if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_SCALAR) {
         switch (op) {
             case '+':
-                if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_SCALAR) {
                     cache.result.wrap(left.scalar + right.scalar);
-                } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
+                    break;
+                case '-':
+                    cache.result.wrap(left.scalar - right.scalar);
+                    break;
+                case '*':
+                    cache.result.wrap(left.scalar * right.scalar);
+                    break;
+                case '/':
+                    cache.result.wrap(left.scalar / right.scalar);
+                    break;
+                case '^':
+                    cache.result.wrap(Math.pow(left.scalar, right.scalar));
+                    break;
+                default:
+                    throw new UnsupportedOperationException("Operator not implemented: " + op);
+            }
+            return cache.result;
+        }
+
+        // =========================================================================
+        // 📂 MATRIX AND MIXED-TYPE OPERATIONS PATH
+        // Executed only when at least one operand is a Matrix structure.
+        // =========================================================================
+        switch (op) {
+            case '+':
+                if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
                     cache.result.wrap(flatMatrixAdd(left.matrix, right.matrix, cache));
                 }
                 break;
 
             case '-':
-                if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_SCALAR) {
-                    cache.result.wrap(left.scalar - right.scalar);
-                } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
+                if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
                     cache.result.wrap(flatMatrixSubtract(left.matrix, right.matrix, cache));
                 }
                 break;
 
             case '*':
-                if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_SCALAR) {
-                    cache.result.wrap(left.scalar * right.scalar);
-                } else if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_MATRIX) {
+                if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_MATRIX) {
                     cache.result.wrap(flatMatrixScalarMultiply(left.scalar, right.matrix, cache));
                 } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
                     cache.result.wrap(flatMatrixScalarMultiply(right.scalar, left.matrix, cache));
@@ -596,9 +648,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                 break;
 
             case '/':
-                if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_SCALAR) {
-                    cache.result.wrap(left.scalar / right.scalar);
-                } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
+                if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
                     double det = computeDeterminantTurbo(right.matrix, cache);
                     if (Math.abs(det) < 1e-15) {
                         throw new ArithmeticException("Matrix B is singular");
@@ -607,7 +657,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                     Matrix B = right.matrix;
                     Matrix invB = flatMatrixInverseLUTurbo(B, cache);
                     Matrix out = cache.getTertiaryBuffer(A.getRows(), invB.getCols());
-                    return cache.result.wrap(flatMatrixMultiply(A, invB, out));
+                    cache.result.wrap(flatMatrixMultiply(A, invB, out));
                 } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
                     if (Math.abs(right.scalar) < 1e-15) {
                         throw new ArithmeticException("Division by zero scalar");
@@ -628,16 +678,15 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                 break;
 
             case '^':
-                if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_SCALAR) {
-                    cache.result.wrap(Math.pow(left.scalar, right.scalar));
-                } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
-                    cache.result.wrap(flatMatrixPower(left.matrix, right.scalar, cache));
+                if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
+             cache.result.wrap(flatMatrixPower(left.matrix, right.scalar, cache));
                 }
                 break;
 
             default:
                 throw new UnsupportedOperationException("Operator not implemented: " + op);
         }
+
         return cache.result;
     }
 
@@ -933,6 +982,24 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                 System.arraycopy(target.getFlatArray(), 0, result.getFlatArray(), 0, target.getFlatArray().length);
                 result.getFlatArray()[row * target.getCols() + col] = args[3].scalar;
                 return cache.result.wrap(result);
+            case Declarations.SUB_MATRIX:
+                Matrix main = args[0].matrix;
+                row = (int) args[1].scalar;
+                col = (int) args[2].scalar;
+                Matrix sm = getSubmatrix(main, row, col, cache);
+                return cache.result.wrap(sm);
+            case Declarations.RANDOM_MATRIX:
+                n = (int) args[0].scalar;
+                row = (int) args[1].scalar;
+                col = (int) args[2].scalar;
+                sm = randomFillTurbo(n, row, col, cache);
+                return cache.result.wrap(sm);
+            case Declarations.MATRIX_MINOR:
+                main = args[0].matrix;
+                row = (int) args[1].scalar;
+                col = (int) args[2].scalar;
+                sm = minor(main, row, col, cache);
+                return cache.result.wrap(sm);
             case Declarations.ROTOR:
                 if (args.length == 4) {
                     Matrix pointsVector = args[0].matrix;
@@ -1103,8 +1170,6 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                 throw new UnsupportedOperationException("Function: `" + funcName + "` not supported");
         }
     }
-
-
 
     private static double executeScalarStatAtCompileTime(String method, double[] args) {
         int n = args.length;
@@ -1409,6 +1474,136 @@ private static MethodHandle createConstantHandle(EvalResult res) {
         return cache.matrix;
     }
 
+    private static Matrix minor(Matrix A, int r, int c, ResultCache cache) {
+        int aR = A.getRows();
+        int aC = A.getCols();
+
+        if (aR <= 1 || aC <= 1) {
+            throw new IllegalArgumentException("Matrix is too small to extract a submatrix.");
+        }
+        if (r < 0 || r >= aR || c < 0 || c >= aC) {
+            throw new IndexOutOfBoundsException("Row or column index out of bounds.");
+        }
+
+        // The new matrix is 1 row and 1 column smaller
+        int bR = aR - 1;
+        int bC = aC - 1;
+
+        // Borrow buffer to avoid GC pressure
+        Matrix B = cache.getMatrixBuffer(bR, bC);
+
+        double[] aF = A.getFlatArray();
+        double[] bF = B.getFlatArray();
+
+        int destRow = 0;
+        for (int i = 0; i < aR; i++) {
+            // Skip the target row 'r'
+            if (i == r) {
+                continue;
+            }
+
+            int srcOffset = i * aC;
+            int destOffset = destRow * bC;
+
+            // 1. Copy the left chunk (everything before column 'c')
+            if (c > 0) {
+                System.arraycopy(aF, srcOffset, bF, destOffset, c);
+            }
+
+            // 2. Copy the right chunk (everything after column 'c')
+            if (c < aC - 1) {
+                System.arraycopy(aF, srcOffset + c + 1, bF, destOffset + c, aC - c - 1);
+            }
+
+            destRow++;
+        }
+
+        return B;
+    }
+
+    /**
+     * Computes and returns specifically, the bottom-right sub-block from a
+     * given coordinate to the end of the matrix), not a Minor submatrix
+     *
+     * @param A The matrix
+     * @param r The row to copy from(zero based)
+     * @param c The column to copy from(zero based)
+     * @param cache
+     * @return specifically the bottom-right sub-block from a given coordinate
+     * to the end of the matrix
+     */
+    private static Matrix getSubmatrix(Matrix A, int r, int c, ResultCache cache) {
+        int aR = A.getRows();
+        int aC = A.getCols();
+
+        // Bounds validation
+        if (r < 0 || r >= aR || c < 0 || c >= aC) {
+            throw new IndexOutOfBoundsException("Row or column index out of bounds.");
+        }
+
+        // Calculate dimensions of the new sub-block
+        int newR = aR - r;
+        int newC = aC - c;
+
+        // Borrow a buffer of the exact required size
+        Matrix B = cache.getMatrixBuffer(newR, newC);
+
+        double[] aF = A.getFlatArray();
+        double[] bF = B.getFlatArray();
+
+        // Copy row by row using System.arraycopy
+        for (int i = 0; i < newR; i++) {
+            // Source index: (Current original row * total columns) + starting column
+            int srcOffset = (r + i) * aC + c;
+
+            // Destination index: (Current new row * new columns)
+            int destOffset = i * newC;
+
+            // Copy the entire continuous width of the new row in one instruction
+            System.arraycopy(aF, srcOffset, bF, destOffset, newC);
+        }
+
+        return B;
+    }
+
+    public static Matrix randomFillTurbo(int n, int rowSize, int colSize, ResultCache cache) {
+        // 1. Zero Allocation: Borrow a matrix from the cache instead of using 'new'
+        Matrix m = cache.getMatrixBuffer(rowSize, colSize);
+
+        // 2. Extract the flat array for sequential memory access
+        double[] array = m.getFlatArray();
+        int len = array.length;
+
+        // 3. The Secret Weapon: ThreadLocalRandom
+        // This bypasses all atomic lock contention, making it up to 10x faster than java.util.Random
+        ThreadLocalRandom ran = ThreadLocalRandom.current();
+
+        // 4. Hot Loop
+        for (int i = 0; i < len; i++) {
+            array[i] = 1 + ran.nextInt(n);
+        }
+        return m; // Return the borrowed, filled matrix
+    }
+
+    public static void randomFillTurbo(Matrix m, int n) {
+        double[] array = m.getFlatArray();
+        int len = array.length;
+        ThreadLocalRandom ran = ThreadLocalRandom.current();
+
+        // Loop unrolling for extreme sizes (optional, but very "Turbo")
+        int i = 0;
+        for (; i <= len - 4; i += 4) {
+            array[i] = 1 + ran.nextInt(n);
+            array[i + 1] = 1 + ran.nextInt(n);
+            array[i + 2] = 1 + ran.nextInt(n);
+            array[i + 3] = 1 + ran.nextInt(n);
+        }
+        // Clean up any remaining elements
+        for (; i < len; i++) {
+            array[i] = 1 + ran.nextInt(n);
+        }
+    }
+
     private static Matrix identity(int dim, ResultCache cache) {
         Matrix id = cache.getMatrixBuffer(dim, dim);
         Arrays.fill(id.getFlatArray(), 0.0);
@@ -1419,10 +1614,13 @@ private static MethodHandle createConstantHandle(EvalResult res) {
     }
 
     public static final class EigenProvider {
+
         private static final EigenEngineTurbo ENGINE = new EigenEngineTurbo();
+
         public static Matrix getEigenvalues(int n, double[] data) {
             return new Matrix(ENGINE.getEigenvalues(n, data), n, 2);
         }
+
         public static Matrix getEigenvectors(int n, double[] data) {
             Matrix m = new Matrix(data, n, n);
             return m.getEigenVectorMatrix(m.computeEigenValues());

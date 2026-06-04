@@ -62,19 +62,19 @@ public class FlatMatrixTurboBench {
     }
 
     private static void checkTurboUserDefinedFunctionsInMatrixMode() throws Throwable {
-        
+
         System.out.println("=====================MATRIX-BENCHING-checkTurboUserDefinedFunctionsInMatrixMode()============================");
         /*
         String expr="sin(3*x)+cos(5*y)-sin(2*z^2)";
         String fnCall="f(x,y,z)";
         String fnDef=fnCall+"="+expr;
-        */
-        
-         String expr = "sin(sqrt(x^2+y^2+z^2))";
-        String fnCall="f(x,y,z)";
-        String fnDef=fnCall+"="+expr;
-        
-        MathExpression baseFnDef = new MathExpression(fnDef+";"+fnCall);
+         */
+
+        String expr = "sin(sqrt(x^2+y^2+z^2))";
+        String fnCall = "f(x,y,z)";
+        String fnDef = fnCall + "=" + expr;
+
+        MathExpression baseFnDef = new MathExpression(fnDef + ";" + fnCall);
         MatrixTurboEvaluator matrixTurboCompilerForBaseFn = new MatrixTurboEvaluator(baseFnDef);
         ScalarTurboEvaluator1 turboCompiler1ForFn = new ScalarTurboEvaluator1(baseFnDef);
         MathExpression rawMathDef = new MathExpression(expr);
@@ -215,20 +215,21 @@ public class FlatMatrixTurboBench {
         System.out.printf("Scalar-Turbo2-fn vs Standard-fn:     %.1fx%n", (double) duration1 / duration7);
         System.out.printf("Scalar-Turbo2-raw-exp vs Standard-raw-exp:     %.1fx%n", (double) duration2 / duration8);
     }
+
     private static void checkTurboUserDefinedFunctionsWithAndroidCapableMatrixTurboEvaluatorInMatrixMode() throws Throwable {
-        
+
         System.out.println("=====================ANDROID-CAPABLE-MATRIX-BENCHING-checkTurboUserDefinedFunctionsWithAndroidCapableMatrixTurboEvaluatorInMatrixMode()============================");
         /*
         String expr="sin(3*x)+cos(5*y)-sin(2*z^2)";
         String fnCall="f(x,y,z)";
         String fnDef=fnCall+"="+expr;
-        */
-        
-         String expr = "sin(sqrt(x^2+y^2+z^2))";
-        String fnCall="f(x,y,z)";
-        String fnDef=fnCall+"="+expr;
-        
-        MathExpression baseFnDef = new MathExpression(fnDef+";"+fnCall);
+         */
+
+        String expr = "sin(sqrt(x^2+y^2+z^2))";
+        String fnCall = "f(x,y,z)";
+        String fnDef = fnCall + "=" + expr;
+
+        MathExpression baseFnDef = new MathExpression(fnDef + ";" + fnCall);
         AndroidCapableMatrixTurboEvaluator matrixTurboCompilerForBaseFn = new AndroidCapableMatrixTurboEvaluator(baseFnDef);
         ScalarTurboEvaluator1 turboCompiler1ForFn = new ScalarTurboEvaluator1(baseFnDef);
         MathExpression rawMathDef = new MathExpression(expr);
@@ -246,7 +247,7 @@ public class FlatMatrixTurboBench {
         FastCompositeExpression scalarTurbo2ExecForRawMathExp = turboCompiler2ForRawMathExp.compile();
 
         double v = -100;
-        double iterations = 50_000_000;
+        double iterations = 10_000_000;
 
         System.out.println("=============Execute f(x,y,z)-IN-STD-MODE================");
         int xSlot = baseFnDef.getVariable("x").getFrameIndex();
@@ -735,24 +736,43 @@ public class FlatMatrixTurboBench {
         for (int i = 0; i < data50.length; i++) {
             data50[i] = Math.random();
         }
+        
+        
 
         Matrix m = new Matrix(data50, 50, 50);
-        MathExpression expr = new MathExpression("2*M-3*M");
-        FunctionManager.lookUp("M").setMatrix(m);
+        m.setName("A");
+        FunctionManager.add(new Function(m));
+        MathExpression expr = new MathExpression("2*A-3*A");
 
-        System.out.println("scanner: " + expr.getScanner());
+        Matrix res = null;
+        
+                System.out.println("scanner: " + expr.getScanner());
         FastCompositeExpression turbo = expr.compileTurbo();
         double[] vars = {};
 
-        long start = System.nanoTime();
+        double start1 = System.nanoTime();
         for (int i = 0; i < 10_000; i++) {
-            turbo.apply(vars);
+           res = turbo.apply(vars).matrix;
         }
-        long duration = System.nanoTime() - start;
+        double duration1 = System.nanoTime() - start1;
+        
+        
+        System.out.println("Turbo -> Elems 1 and 2: "+res.getFlatArray()[0]+", "+res.getFlatArray()[1]);
+        
+        double start = System.nanoTime();
+        for (int i = 0; i < 100; i++) { 
+           res = expr.solveGeneric().matrix;
+        }
+        double duration = System.nanoTime() - start;
+
+        System.out.println("Interpreted -> Elems 1 and 2: "+res.getFlatArray()[0]+", "+res.getFlatArray()[1]);
+
+
 
         System.out.printf("Operation: 2*M - 3*M (50x50 matrices)%n");
-        System.out.printf("Speed: %.2f μs/op%n", duration / 10_000.0 / 1000.0);
-        System.out.printf("vs Interpreted: ~50x faster%n");
+        System.out.printf("Speed(Turbo): %.2f micros/op%n", duration1 / 10_000.0 / 1000.0);
+        System.out.printf("Speed(Interpreted): %.2f micros/op%n", duration / 10_000.0 / 1000.0);
+        System.out.printf("vs Interpreted: %.2fx faster%n", (duration/duration1));
     }
 
     private static void benchmarkMatrixMultiplication() throws Throwable {

@@ -4,15 +4,7 @@
  */
 package com.github.gbenroscience.parser;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Deque;
-import java.util.InputMismatchException;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Stack;
+import java.util.*;
 
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.interfaces.Solvable;
@@ -48,6 +40,7 @@ import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.Serializer;
 import com.github.gbenroscience.util.VariableManager;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.function.Consumer;
 import java.util.logging.Level;
@@ -175,26 +168,31 @@ public class MathExpression implements Savable, Solvable {
      * variable, is reduced to a function name(or other object as time goes on)
      * instead of a number of other list. The parser unfortunately will not
      * return this variable, but instead returns the data which it refers
-     * to..e.g a {@link Matrix} function or other. But we atimes need that
+     * to..e.g a {@link Matrix} function or other. But we at times need that
      * function name...So we cache this value here.
      */
     private String returnObjectName;
     public static final String SYNTAX_ERROR = "SYNTAX ERROR";
 
-    // Updated Token class (from your provided)
+// Updated Token class with native MATRIX and VARIABLE support, fixed operator arity fallbacks, and serialization
     public static final class Token implements Savable {
 
+        public static final char CBRT_DEF = 'º';
+        public static final char INVERSE_DEF = '¹';
+
         private static final long serialVersionUID = 1L;
-        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 5, RPAREN = 6, COMMA = 7;
+        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5, COMMA = 6, MATRIX = 7, VARIABLE = 8, FUNCTION_HANDLE = 9,
+                FUNCTION_HANDLE_UNDEFINED = 10;
         public int kind;
         public double value;
-        public String name; // REQUIRED for functions/methods/variables
+        public String name; // REQUIRED for functions/methods/variables/function-handles
         /**
          * The slot in the execution frame where this token's value lives. Used
-         * only when kind == NUMBER and it represents a variable.
+         * only when kind == NUMBER or VARIABLE and it represents a variable.
          */
         public int frameIndex = -1;
-        public Variable v;//cache the variable here
+        public Variable v; // cache the variable here
+        public Matrix m;   // Direct cache for MATRIX kind tokens
 
         public int id;
         public char opChar;
@@ -204,15 +202,63 @@ public class MathExpression implements Savable, Solvable {
         public int arity;
         private MethodRegistry.MethodAction action;
 
-        // NEW FIELDS FOR FUNCTION ASSIGNMENT
+        // FIELDS FOR FUNCTION ASSIGNMENT
         public String assignToName;  // The variable to assign result to (e.g., "vw")
         public boolean isAssignmentTarget = false;
         private String[] rawArgs;
+
+        private Token() {
+            this.value = 0;
+            this.kind = Token.NUMBER;
+        }
 
         // Constructor for Numbers
         public Token(double value) {
             this.kind = NUMBER;
             this.value = value;
+            this.precedence = -1;
+            this.isRightAssoc = false;
+        }
+
+        /**
+         * Constructor for Variables
+         *
+         * @param v The scalar variable..e.g a=2
+         */
+        public Token(Variable v) {
+            this.kind = VARIABLE;
+            this.name = v.getName();
+            this.frameIndex = v.getFrameIndex();
+            this.v = v;
+            this.precedence = -1;
+            this.isRightAssoc = false;
+        }
+
+        /**
+         * Constructor for Function Handles. Used to pass references of
+         * functions as arguments to higher-order functions. e.g., in
+         * f(x)=x^3*sin(x); diff(f,1,1), 'f' is the function handle.
+         *
+         * In certain contexts, a function handle is passed to a method but it
+         * has not being defined anywhere. This method after it runs will create
+         * the function from the passed undefined handle and automatically store
+         * it. A good example is the diff method.
+         *
+         * @param fn The name of the function being referenced.
+         */
+        public Token(String fn, boolean defined) {
+            this.kind = defined ? FUNCTION_HANDLE : FUNCTION_HANDLE_UNDEFINED;
+            this.name = fn;
+            this.arity = 0; // Explicitly 0: it is an operand, it does not pop arguments
+            this.precedence = -1;
+            this.isRightAssoc = false;
+        }
+
+        // Constructor for Matrices
+        public Token(Matrix m) {
+            this.kind = MATRIX;
+            this.name = m.getName();
+            this.m = m;
             this.precedence = -1;
             this.isRightAssoc = false;
         }
@@ -224,7 +270,8 @@ public class MathExpression implements Savable, Solvable {
             this.precedence = precedence;
             this.isRightAssoc = isRightAssoc;
             this.isPostfix = isPostfix;
-            this.arity = isPostfix ? 1 : 2;
+            // FIX: Ensure unary prefix operators (like '√' or 'R' for cbrt) are fallback-assigned an arity of 1 instead of 2
+            this.arity = (isPostfix || opChar == '√' || opChar == CBRT_DEF || opChar == INVERSE_DEF) ? 1 : 2;
         }
 
         // Constructor for Functions/Methods
@@ -235,7 +282,7 @@ public class MathExpression implements Savable, Solvable {
             this.id = id;
             this.precedence = PREC_POSTFIX + 1;  // Bind tighter than postfix
             this.isRightAssoc = false;
-            //This is an inbuilt method call
+            // This is an inbuilt method call
             if (id != -1) {
                 this.action = MethodRegistry.getAction(id);
             } else {
@@ -255,7 +302,7 @@ public class MathExpression implements Savable, Solvable {
             this.isRightAssoc = false;
         }
 
-        // Add constructor for assignment
+        // Constructor for assignment
         public Token(int kind, String name, int arity, int id, String assignToName, ErrorLog log) {
             this(kind, name, arity, id, log);
             this.assignToName = assignToName;
@@ -263,7 +310,10 @@ public class MathExpression implements Savable, Solvable {
         }
 
         public Token clone() {
-            Token t = new Token(kind);
+            Token t = new Token();
+            t.kind = kind;
+            t.value = value;
+            t.name = name;
             t.action = action;
             t.arity = arity;
             t.assignToName = assignToName;
@@ -272,19 +322,17 @@ public class MathExpression implements Savable, Solvable {
             t.isAssignmentTarget = isAssignmentTarget;
             t.isPostfix = isPostfix;
             t.isRightAssoc = isRightAssoc;
-            t.name = name;
             t.opChar = opChar;
             t.precedence = precedence;
             if (rawArgs != null) {
-                t.rawArgs = new String[rawArgs.length];
-                for (int i = 0; i < rawArgs.length; i++) {
-                    t.rawArgs[i] = rawArgs[i];
-                }
+                t.rawArgs = rawArgs.clone();
             }
             if (v != null) {
-                t.v = new Variable(v.getName(), v.getValue());
+                t.v = v.clone();
             }
-            t.value = value;
+            if (m != null) {
+                t.m = this.m;
+            }
             return t;
         }
 
@@ -292,8 +340,9 @@ public class MathExpression implements Savable, Solvable {
             return rawArgs;
         }
 
+        // FIX: Account for native VARIABLE tokens alongside the legacy context validation pattern
         public boolean isVariable() {
-            return this.name != null && !this.name.isEmpty() && this.v != null && this.frameIndex >= 0;
+            return this.kind == VARIABLE || (this.name != null && !this.name.isEmpty() && this.v != null && this.frameIndex >= 0);
         }
 
         // Helper to get precedence for opChar
@@ -303,7 +352,8 @@ public class MathExpression implements Savable, Solvable {
                 case '²':
                 case '³':
                 case '√':
-                case 'R':  // Internal for ³√
+                case CBRT_DEF:  // Internal for ³√
+                case INVERSE_DEF:  // FIX: Explicit support for inverse operator (⁻¹)
                     return PREC_POSTFIX;
                 case '^':
                     return PREC_POWER;
@@ -321,6 +371,35 @@ public class MathExpression implements Savable, Solvable {
             }
         }
 
+        public static String getKind(int kind) {
+            switch (kind) {
+                case Token.NUMBER:
+                    return "NUMBER";
+                case Token.OPERATOR:
+                    return "OPERATOR";
+                case Token.FUNCTION:
+                    return "FUNCTION";
+                case Token.METHOD:
+                    return "METHOD";
+                case Token.LPAREN:
+                    return "LPAREN";
+                case Token.RPAREN:
+                    return "RPAREN";
+                case Token.COMMA:
+                    return "COMMA";
+                case Token.MATRIX:
+                    return "MATRIX";
+                case Token.VARIABLE:
+                    return "VARIABLE";
+                case Token.FUNCTION_HANDLE:
+                    return "FUNCTION_HANDLE";
+                case Token.FUNCTION_HANDLE_UNDEFINED:
+                    return "FUNCTION_HANDLE_UNDEFINED";
+                default:
+                    return "NULL-INVALID-TOKEN-KIND";
+            }
+        }
+
         public static boolean isRightAssociative(char op) {
             return op == '^';
         }
@@ -328,6 +407,7 @@ public class MathExpression implements Savable, Solvable {
         public String toJsonString() {
             return "{\n"
                     + "\"kind\": \"" + kind + "\",\n"
+                    + "\"kindName\": " + getKind(kind) + ","
                     + "\"value\": " + value + ",\n"
                     + "\"name\": \"" + name + "\",\n"
                     + "\"id\": " + id + ",\n"
@@ -338,7 +418,8 @@ public class MathExpression implements Savable, Solvable {
                     + "\"arity\": " + arity + ",\n"
                     + "\"rawArgs\": " + Arrays.toString(rawArgs) + ",\n"
                     + "\"assignToName\": " + assignToName + ",\n"
-                    + "\"isAssignmentTarget\": " + isAssignmentTarget + "\n"
+                    + "\"isAssignmentTarget\": " + isAssignmentTarget + ",\n"
+                    + "\"matrix\": " + (m == null ? "null" : m.toString()) + "\n"
                     + "}\n";
         }
 
@@ -346,6 +427,7 @@ public class MathExpression implements Savable, Solvable {
         public String toString() {
             return "{"
                     + "\"kind\": " + kind + ","
+                    + "\"kindName\": " + getKind(kind) + ","
                     + "\"value\": " + value + ","
                     + "\"name\": " + name + ","
                     + "\"id\": " + id + ","
@@ -354,13 +436,13 @@ public class MathExpression implements Savable, Solvable {
                     + "\"isRightAssoc\": " + isRightAssoc + ","
                     + "\"isPostfix\": " + isPostfix + ","
                     + "\"arity\": " + arity + ","
-                    + "\"rawArgs\": " + Arrays.toString(rawArgs) + ",\n"
+                    + "\"rawArgs\": " + Arrays.toString(rawArgs) + ","
                     + "\"assignToName\": " + assignToName + ","
                     + "\"isAssignmentTarget\": " + isAssignmentTarget + ","
+                    + "\"matrix\": " + (m == null ? "null" : m.toString()) + ","
                     + "\n\"v\": " + (v == null ? "null" : v.toJSON()) + "\n"
                     + "}";
         }
-
     }
 
     /**
@@ -689,6 +771,7 @@ public class MathExpression implements Savable, Solvable {
             return compiledTurbo;
 
         } catch (Throwable e) {
+            e.printStackTrace();
             String err = "Failed to compile expression to turbo: " + e.getMessage();
             errorLog.info(err);
             throw new RuntimeException(
@@ -1365,33 +1448,51 @@ public class MathExpression implements Savable, Solvable {
         char c0 = s.charAt(0);
         int len = s.length();
         Variable vv = null;
-        boolean isNumber = false;
-        // 1. Identify Numbers and constants here
-        if ((isNumber = isNumber(s)) || ((vv = VariableManager.lookUp(s)) != null && vv.isConstant())) {
-            return new Token(isNumber ? fastParseDouble(s) : vv.getValue());
-        }
-
-        if ((isNumber = isNumber(s))) {
+        //0 - Handle numbers
+        if (isNumber(s)) {
             return new Token(fastParseDouble(s));
         }
+
+        //1 - Handle Variables and defined constants
         if (isVariableString(s)) {
             vv = VariableManager.lookUp(s);
-            if (vv != null) {
+            if (vv != null) {//Variable Exists
                 if (vv.isConstant()) {
                     return new Token(vv.getValue());
                 } else {
-                    Token t = new Token(0.0);
-                    t.name = s;
-                    t.v = vv;
-                    t.frameIndex = registry.getSlot(s);
-                    t.v.setFrameIndex(t.frameIndex);
-                    t.kind = Token.NUMBER;
+                    vv.setFrameIndex(registry.getSlot(s));
+                    Token t = new Token(vv);
                     return t;
                 }
             }
         }
 
-        // 2. Identify Brackets
+        //2 - Identify Methods
+        if (Method.isInBuiltMethod(s)) {
+            String transformedMethodName = Declarations.getTrigFuncDRGVariant(s, DRG);
+            int methodId = MethodRegistry.getMethodID(transformedMethodName);
+            return new Token(Token.METHOD, transformedMethodName, -1, methodId, errorLog); // Arity set during compile
+        }
+
+        //3 - If it is a Matrix
+        if (FunctionManager.containsMatrix(s)) {
+            Function f = FunctionManager.lookUp(s);
+            Token t = new Token(f.getMatrix());
+            return t;
+        }
+
+        //4 - Identify Functions/Anonymous Functions (ONLY if followed by "(")
+        if (FunctionManager.containsAny(s)) {
+            // CRITICAL: Only treat as FUNCTION if it's being CALLED (has "(" after it)
+            if (next != null && next.equals("(")) {
+                return new Token(Token.FUNCTION, s, -1, -1, errorLog); // Arity set during compile
+            }
+            // If NOT followed by "(", treat as a FUNCTION REFERENCE/POINTER
+            // This allows passing function names as arguments (like to diff)
+            return new Token(s, true);//defined function handle
+        }
+
+        //5 - Identify Brackets
         if (len == 1) {
             switch (c0) {
                 case '(':
@@ -1401,55 +1502,32 @@ public class MathExpression implements Savable, Solvable {
             }
         }
 
-        // 3. Identify Operators
+        //6 - Identify Operators
         if (isOperator(s)) {
-            boolean isPostfix = (c0 == '!' || c0 == '²' || c0 == '³') && !s.equals("³√");
-            char internalOp = (len > 1 && s.equals("³√")) ? 'R' : c0;
+            if (s.equals("-¹")) {
+                c0 = Token.INVERSE_DEF;
+            }
+            if (s.equals("³√")) {
+                c0 = Token.CBRT_DEF;
+            }
+            boolean isPostfix = (c0 == '!' || c0 == '²' || c0 == '³' || c0 == Token.INVERSE_DEF);
+            char internalOp = c0;
             return new Token(internalOp, Token.getPrec(internalOp), Token.isRightAssociative(internalOp), isPostfix);
         }
 
-        // Handle commas (function argument separators)
+        //7 - Handle commas (function argument separators)
         if (s.equals(",")) {
             Token t = new Token(0.0);
             t.kind = Token.COMMA;
             return t;
         }
 
-        // 4. Identify Functions/Anonymous Functions (ONLY if followed by "(")
-        if (FunctionManager.FUNCTIONS.containsKey(s)) {
-            // CRITICAL: Only treat as FUNCTION if it's being CALLED (has "(" after it)
-            if (next != null && next.equals("(")) {
-                return new Token(Token.FUNCTION, s, -1, -1, errorLog); // Arity set during compile
-            }
-            // If NOT followed by "(", treat as a FUNCTION REFERENCE/POINTER
-            // This allows passing function names as arguments (like to diff)
-            Token t = new Token(0.0);
-            t.kind = Token.NUMBER;  // Treat as a "value" that can be passed as argument
-            t.name = s;  // Store the function name
-            return t;
+        //8 - Fallback: Treat as undefined function handle
+        if (isVariableString(s)) {
+            return new Token(s, false);
         }
 
-        // 5. Identify Methods
-        if (Method.isInBuiltMethod(s)) {
-            String transformedMethodName = Declarations.getTrigFuncDRGVariant(s, DRG);
-            int methodId = MethodRegistry.getMethodID(transformedMethodName);
-            return new Token(Token.METHOD, transformedMethodName, -1, methodId, errorLog); // Arity set during compile
-        }
-
-        // 6. Fallback: Treat as Variable/Constant
-        Token t = new Token(0.0);
-        t.name = s;
-        if (!FunctionManager.containsAlgebraicFunction(s) && isVariableString(s)) {
-            if (vv == null) {
-                vv = new Variable(s, 0.0);
-            }
-            t.v = vv;
-            t.frameIndex = registry.getSlot(s);
-            t.v.setFrameIndex(t.frameIndex);
-
-        }
-        t.kind = Token.NUMBER;
-        return t;
+        return null;
     }
 
     public void readErrorLog() {
@@ -1554,13 +1632,22 @@ public class MathExpression implements Savable, Solvable {
             switch (t.kind) {
                 case Token.NUMBER:
                     postfix[p++] = t;
-                    if (t.v != null) {
-                        int slot = registry.getSlot(t.name);
-                        t.frameIndex = slot;
-                        t.v.setFrameIndex(slot);
-                    }
                     break;
-
+                case Token.VARIABLE:
+                    postfix[p++] = t;
+                    int slot = registry.getSlot(t.name);
+                    t.frameIndex = slot;
+                    t.v.setFrameIndex(slot);
+                    break;
+                case Token.FUNCTION_HANDLE:
+                    postfix[p++] = t;
+                    break;
+                case Token.FUNCTION_HANDLE_UNDEFINED:
+                    postfix[p++] = t;
+                    break;
+                case Token.MATRIX:
+                    postfix[p++] = t;
+                    break;
                 case Token.FUNCTION:
                 case Token.METHOD:
                     opStack.push(t);
@@ -1649,7 +1736,7 @@ public class MathExpression implements Savable, Solvable {
             char c = s.charAt(0);
             return "+-*/%^√!²³ČР".indexOf(c) != -1;
         }
-        return s.equals("³√");
+        return s.equals("³√") || s.equals("-¹");
     }
 
     private final class ExpressionSolver implements Savable {
@@ -1710,40 +1797,34 @@ public class MathExpression implements Savable, Solvable {
                                         : t.kind == Token.FUNCTION ? "FUNC(" + t.name + ",arity=" + t.arity + ")"
                                                 : "METHOD(" + t.name + ",arity=" + t.arity + ")")
                         + " | Stack ptr before = " + ptr);*/
-
+//                System.out.println("stack-track-top-of-loop:"
+//                        + Arrays.deepToString(stack));
                 switch (t.kind) {
                     case Token.NUMBER:
-                        if (t.name != null && !t.name.isEmpty()) {
-
-                            // Could be a variable OR a function reference (like anon1)
-                            if (t.v != null) {
-                                // It's a variable
-                                double v = executionFrame[t.frameIndex];
-                                stack[++ptr] = getNextResult().wrap(v);
-                                t.v.setValue(v);
-                            } else if (FunctionManager.FUNCTIONS.containsKey(t.name)) {
-                                // It's a function reference - wrap it as a special object
-                                // The diff method will know how to handle it
-                                stack[++ptr] = getNextResult().wrap(t.name);  // Store the function name as string
-                            } else {
-                                String prevToken = stack[ptr].toString();
-                                if (FunctionManager.lookUp(prevToken) != null) {
-                                    //e.g diff(F,v) or diff(F,v,n) where F is the prevToken and v is the undefined variable to be used to create
-                                    //a function that will hold the return value of diff(F)
-                                    stack[++ptr] = getNextResult().wrap(t.name); // Store pointer to the to-be-created function as string
-                                } else {
-                                    String err = "Undefined variable or function: " + t.name;
-                                    errorLog.info(err);
-                                    throw new RuntimeException(err);
-                                }
-                            }
-                        } else {
-                            // Direct number
-                            stack[++ptr] = getNextResult().wrap(t.value);
-                        }
+                        // Direct number
+                        stack[++ptr] = getNextResult().wrap(t.value);
+                        break;
+                    case Token.VARIABLE:
+                        double v = executionFrame[t.frameIndex];
+                        stack[++ptr] = getNextResult().wrap(v);
+                        t.v.setValue(v);
+                        break;
+                    case Token.FUNCTION_HANDLE:
+                        // It's a function reference - wrap it as a special object
+                        // The diff method will know how to handle it
+                        stack[++ptr] = getNextResult().wrap(t.name);  // Store the function name as string
+                        break;
+                    case Token.FUNCTION_HANDLE_UNDEFINED:
+                        //e.g diff(F,v) or diff(F,v,n) where F is the prevToken and v is the undefined variable to be used to create
+                        //a function that will hold the return value of diff(F)
+                        stack[++ptr] = getNextResult().wrap(t.name); // Store pointer to the to-be-created function as string
+                        break;
+                    case Token.MATRIX:
+                        // Matrix Variable
+                        stack[++ptr] = getNextResult().wrap(t.name);
                         break;
                     case Token.OPERATOR:
-                        if (t.isPostfix || t.opChar == '√' || t.opChar == 'R') {
+                        if (t.isPostfix || t.opChar == '√' || t.opChar == Token.CBRT_DEF) {
                             // Unary operator
                             if (ptr < 0) {
                                 String err = "Insufficient operands for unary operator: " + t.opChar;
@@ -1761,6 +1842,8 @@ public class MathExpression implements Savable, Solvable {
                             }
                             EvalResult right = stack[ptr--];
                             applyBinary(t.opChar, stack[ptr], right);
+//                                System.out.println("stack-track-applyBinary:"
+//                        + Arrays.deepToString(stack));
                         }
                         break;
 
@@ -1872,7 +1955,8 @@ public class MathExpression implements Savable, Solvable {
                 errorLog.info(err);
                 System.out.println(err);
             }
-
+//  System.out.println("stack-track-end-of-loop:"
+//                        + Arrays.deepToString(stack));
             return stack[0];
         }
 
@@ -1887,7 +1971,7 @@ public class MathExpression implements Savable, Solvable {
                 case '√':
                     res.scalar = Math.sqrt(val);
                     break;
-                case 'R': // Internal mapping for ³√
+                case Token.CBRT_DEF: // Internal mapping for ³√
                     res.scalar = Math.cbrt(val);
                     break;
                 case '!':
@@ -1945,7 +2029,6 @@ public class MathExpression implements Savable, Solvable {
             }
         }
          */
-     
         private void applyBinary(char op, EvalResult left, EvalResult right) {
 
             // =========================================================================
@@ -2042,11 +2125,19 @@ public class MathExpression implements Savable, Solvable {
                 rightType = EvalResult.TYPE_MATRIX;
                 right.wrap(rightFun.getMatrix());
             }
-
+            
+//            System.out.println("left: " + left);
+//            System.out.println("OP: " + op);
+//            System.out.println("right: " + right);
+//            System.out.println("leftType: "+left.getTypeName()+", rightType: "+right.getTypeName());
+//            
             switch (op) {
                 case '+':
                     if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
-                        left.matrix = left.matrix.add(right.matrix);
+                        Matrix m = left.matrix.add(right.matrix);
+                        String fName = Function.storeAnonymousMatrixFunction(m);
+                        left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '+': left=" + leftType + ", right=" + rightType);
                     }
@@ -2054,7 +2145,10 @@ public class MathExpression implements Savable, Solvable {
 
                 case '-':
                     if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
-                        left.matrix = left.matrix.subtract(right.matrix);
+                        Matrix m = left.matrix.subtract(right.matrix);
+                        String fName = Function.storeAnonymousMatrixFunction(m);
+                        left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '-': left=" + leftType + ", right=" + rightType);
                     }
@@ -2062,11 +2156,20 @@ public class MathExpression implements Savable, Solvable {
 
                 case '*':
                     if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_MATRIX) {
-                        left.matrix = Matrix.multiply(left.matrix, right.matrix);
+                        Matrix m = Matrix.multiply(left.matrix, right.matrix);
+                        String fName = Function.storeAnonymousMatrixFunction(m);
+                        left.wrap(fName);
+                        left.matrix = m;
                     } else if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_MATRIX) {
-                        left.wrap(right.matrix.scalarMultiply(left.scalar));
+                        Matrix m = right.matrix.scalarMultiply(left.scalar);
+                        String fName = Function.storeAnonymousMatrixFunction(m);
+                        left.wrap(fName);
+                        left.matrix = m;
                     } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
-                        left.matrix = left.matrix.scalarMultiply(right.scalar);
+                        Matrix m = left.matrix.scalarMultiply(right.scalar);
+                        String fName = Function.storeAnonymousMatrixFunction(m);
+                        left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '*': left=" + leftType + ", right=" + rightType);
                     }
@@ -2077,17 +2180,26 @@ public class MathExpression implements Savable, Solvable {
                         if (Math.abs(right.matrix.determ()) < 1e-15) {
                             throw new ArithmeticException("Matrix B is singular. Cannot compute division.");
                         }
-                        left.matrix = Matrix.multiply(left.matrix, right.matrix.inverse());
+                        Matrix m = Matrix.multiply(left.matrix, right.matrix.inverse());
+                        String fName = Function.storeAnonymousMatrixFunction(m);
+                        left.wrap(fName);
+                        left.matrix = m;
                     } else if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
                         if (Math.abs(right.scalar) < 1e-15) {
                             throw new ArithmeticException("Matrix division by zero scalar");
                         }
-                        left.matrix = left.matrix.scalarDivide(right.scalar);
+                        Matrix m = left.matrix.scalarDivide(right.scalar);
+                        String fName = Function.storeAnonymousMatrixFunction(m);
+                        left.wrap(fName);
+                        left.matrix = m;
                     } else if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_MATRIX) {
                         if (Math.abs(right.matrix.determ()) < 1e-15) {
                             throw new ArithmeticException("Matrix is singular. Cannot invert.");
                         }
-                        left.wrap(right.matrix.inverse().scalarMultiply(left.scalar));
+                        Matrix m = right.matrix.inverse().scalarMultiply(left.scalar);
+                        String fName = Function.storeAnonymousMatrixFunction(m);
+                        left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '/': left=" + leftType + ", right=" + rightType);
                     }
@@ -2095,7 +2207,10 @@ public class MathExpression implements Savable, Solvable {
 
                 case '^':
                     if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
-                        left.wrap(Matrix.power(left.matrix, (int) right.scalar));
+                        Matrix m = Matrix.power(left.matrix, (int) right.scalar);
+                        String fName = Function.storeAnonymousMatrixFunction(m);
+                        left.wrap(fName);
+                        left.matrix = m;
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '^': left=" + leftType + ", right=" + rightType);
                     }
@@ -2335,7 +2450,7 @@ public class MathExpression implements Savable, Solvable {
             case '√':
                 return Math.sqrt(val);  // IEEE 754: sqrt(-1) = NaN, sqrt(Inf) = Inf
 
-            case 'R':  // Cube root
+            case Token.CBRT_DEF:  // Cube root
                 return Math.cbrt(val);  // IEEE 754 compliant
 
             case '!':
@@ -2800,6 +2915,213 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
         public V getValue() {
             return value;
+        }
+    }
+
+    public static class RpnCseOptimizer {
+
+        // A lightweight AST node representation of your RPN stream
+        private static class ASTNode {
+
+            Token token;
+            List<ASTNode> children = new ArrayList<>();
+            String signature; // Unique structural hash of this subexpression
+
+            // Tracking fields for CSE
+            boolean isCseRoot = false;
+            Token replacementVariableToken = null;
+
+            ASTNode(Token token) {
+                this.token = token;
+            }
+
+            // A list of functions that change state or return random values and MUST NOT be cached.
+            private static final HashSet<String> IMPURE_FUNCTIONS = new HashSet<>(Arrays.asList(
+                    "rand", "random", "now", "time", Declarations.RANDOM_MATRIX, Declarations.RANDOM // Add any ParserNG specific impure functions here
+            ));
+
+            String computeSignature() {
+                if (signature != null) {
+                    return signature;
+                }
+
+                if (token.kind == Token.NUMBER) {
+                    signature = "N:" + token.value;
+                } else if (token.kind == Token.VARIABLE) {
+                    signature = "V:" + token.name;
+                } else if (token.kind == Token.MATRIX) {
+                    signature = "M:" + token.name;
+                } else if (token.kind == Token.OPERATOR) {
+                    List<String> childSigs = new ArrayList<>();
+                    for (ASTNode child : children) {
+                        childSigs.add(child.computeSignature());
+                    }
+
+                    // --- PATCH: Handle Commutativity ---
+                    if (token.opChar == '+' || token.opChar == '*') {
+                        Collections.sort(childSigs); // Sort so a+b and b+a generate identical signatures
+                    }
+
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("O:").append(token.opChar).append("[");
+                    for (String cs : childSigs) {
+                        sb.append(cs).append(",");
+                    }
+                    sb.append("]");
+                    signature = sb.toString();
+
+                } else { // Functions / Methods
+                    // --- PATCH: Handle Impure Functions ---
+                    if (token.name != null && IMPURE_FUNCTIONS.contains(token.name.toLowerCase())) {
+                        // Generate a strictly unique signature so it never matches anything else
+                        signature = "IMPURE:" + UUID.randomUUID().toString();
+                        return signature;
+                    }
+
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("F:").append(token.name).append("[");
+                    for (ASTNode child : children) {
+                        sb.append(child.computeSignature()).append(",");
+                    }
+                    sb.append("]");
+                    signature = sb.toString();
+                }
+                return signature;
+            }
+        }
+
+        /**
+         * Interface to safely integrate with ParserNG's Variable system and
+         * dynamic execution frame indices.
+         */
+        public interface ExecutionFrameContext {
+
+            Token createTemporaryVariable(String name);
+        }
+
+        public static Token[] optimize(Token[] rpnTokens, ExecutionFrameContext frameCtx) {
+            if (rpnTokens == null || rpnTokens.length == 0) {
+                return rpnTokens;
+            }
+
+            // --- STEP 1: Reconstruct AST from Flat RPN tokens ---
+            Stack<ASTNode> stack = new Stack<>();
+            for (Token t : rpnTokens) {
+                ASTNode node = new ASTNode(t.clone()); // Clone to avoid breaking original structures
+                if (t.kind == Token.OPERATOR || t.kind == Token.FUNCTION || t.kind == Token.METHOD) {
+                    int arity = t.arity;
+                    // Pop operands in reverse order
+                    List<ASTNode> args = new ArrayList<>();
+                    for (int i = 0; i < arity; i++) {
+                        if (stack.isEmpty()) {
+                            // Malformed RPN fall-through fallback
+                            return rpnTokens;
+                        }
+                        args.add(stack.pop());
+                    }
+                    Collections.reverse(args);
+                    node.children.addAll(args);
+                }
+                stack.push(node);
+            }
+
+            if (stack.size() != 1) {
+                // Expression yields multiple roots or is incomplete, skip optimization safely
+                return rpnTokens;
+            }
+            ASTNode root = stack.pop();
+
+            // --- STEP 2: Count Frequencies of Subexpressions ---
+            Map<String, Integer> freqMap = new HashMap<>();
+            Map<String, ASTNode> firstOccurrenceMap = new HashMap<>();
+            analyzeFrequencies(root, freqMap, firstOccurrenceMap);
+
+            // --- STEP 3: Flag CSE targets and allocate execution variables ---
+            int tempVarCounter = 0;
+            boolean optimizationsFound = false;
+
+            // Order nodes by length to process deeper subexpressions first
+            List<String> signatures = new ArrayList<>(freqMap.keySet());
+            signatures.sort((a, b) -> Integer.compare(b.length(), a.length()));
+
+            for (String sig : signatures) {
+                // Only optimize operations/functions that occur more than once
+                if (freqMap.get(sig) > 1 && (sig.startsWith("O:") || sig.startsWith("F:"))) {
+                    optimizationsFound = true;
+                    String varName = "__cse_t" + (tempVarCounter++);
+
+                    // Use your compiler context to register a temporary variable inside the Turbo execution frame
+                    Token varToken = frameCtx.createTemporaryVariable(varName);
+
+                    // Mark all matching structural subtrees for variable replacement
+                    markAndInjectCse(root, sig, varToken);
+                }
+            }
+
+            // If no duplicates were found, return the input token stream unmodified
+            if (!optimizationsFound) {
+                return rpnTokens;
+            }
+
+            // --- STEP 4: Flatten the optimized trees back into a linear RPN Stream ---
+            List<Token> outputRpn = new ArrayList<>();
+            flattenTreeToRpn(root, outputRpn);
+
+            return outputRpn.toArray(new Token[0]);
+        }
+
+        private static void analyzeFrequencies(ASTNode node, Map<String, Integer> freqMap, Map<String, ASTNode> firstOccurrenceMap) {
+            String sig = node.computeSignature();
+            freqMap.put(sig, freqMap.getOrDefault(sig, 0) + 1);
+            if (!firstOccurrenceMap.containsKey(sig)) {
+                firstOccurrenceMap.put(sig, node);
+            }
+            for (ASTNode child : node.children) {
+                analyzeFrequencies(child, freqMap, firstOccurrenceMap);
+            }
+        }
+
+        private static void markAndInjectCse(ASTNode node, String targetSignature, Token replacementVar) {
+            if (node.computeSignature().equals(targetSignature)) {
+                if (!node.isCseRoot) {
+                    node.isCseRoot = true;
+                    node.replacementVariableToken = replacementVar;
+                    return; // Stop processing children since the parent matches completely
+                }
+            }
+            for (ASTNode child : node.children) {
+                markAndInjectCse(child, targetSignature, replacementVar);
+            }
+        }
+
+        private static void flattenTreeToRpn(ASTNode node, List<Token> output) {
+            if (node.isCseRoot) {
+                // Generate code for its original children first
+                for (ASTNode child : node.children) {
+                    flattenTreeToRpn(child, output);
+                }
+                // Emit the computation action token
+                output.add(node.token);
+
+                // Directly perform an assignment to the dynamic frame variable index
+                Token assignmentToken = node.replacementVariableToken.clone();
+                assignmentToken.isAssignmentTarget = true;
+                assignmentToken.assignToName = node.replacementVariableToken.name;
+                output.add(assignmentToken);
+                return;
+            }
+
+            if (node.replacementVariableToken != null) {
+                // This node was inside a cached calculation block, swap with variable read
+                output.add(node.replacementVariableToken.clone());
+                return;
+            }
+
+            // Regular leaf/operator node processing
+            for (ASTNode child : node.children) {
+                flattenTreeToRpn(child, output);
+            }
+            output.add(node.token);
         }
     }
 
