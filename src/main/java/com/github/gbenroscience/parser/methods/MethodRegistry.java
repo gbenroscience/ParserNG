@@ -407,12 +407,10 @@ public class MethodRegistry {
 
             }//end if
             else if (hasIterations) {
-                double x1 = args[1].scalar;
-                double x2 = args[2].scalar;
-                boolean shouldSwap = x1 > x2;
+                boolean shouldSwap = args[1].scalar > args[2].scalar;
 
                 if (shouldSwap) {
-                    NumericalIntegral intg = new NumericalIntegral(x2, x1, (int) args[3].scalar, args[0].textRes);
+                    NumericalIntegral intg = new NumericalIntegral(args[2].scalar, args[1].scalar, (int) args[3].scalar, args[0].textRes);
                     return ctx.wrap(intg.findHighRangeIntegral());
                 } else {
                     NumericalIntegral intg = new NumericalIntegral(args[1].scalar, args[2].scalar, (int) args[3].scalar, args[0].textRes);

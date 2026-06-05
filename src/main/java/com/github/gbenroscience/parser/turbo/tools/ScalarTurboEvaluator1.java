@@ -1244,10 +1244,15 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         MethodHandle primitiveHandle = handle.asType(
                 MethodType.methodType(double.class, double[].class)
         );
-        // NumericalIntegral intg = new NumericalIntegral(f, lower, upper, iterations, primitiveHandle, vars, slots);
-        //  return intg.findHighRangeIntegralTurbo();
-        NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
-        return numericalIntegrator.integrate(f);
+        boolean shouldSwap = lower > upper;
+        if (shouldSwap) {
+            NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, upper, lower, vars, slots);
+            return numericalIntegrator.integrate(f);
+        } else {
+            NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
+            return numericalIntegrator.integrate(f);
+        }
+
     }
 
     public static double scalarStatsGatekeeper(String method, double[] data) {

@@ -1126,8 +1126,14 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                     .asType(MethodType.methodType(double.class, double[].class));
         }
 
-        NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
-        return numericalIntegrator.integrate(f);
+        boolean shouldSwap = lower > upper;
+        if (shouldSwap) {
+            NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, upper, lower, vars, slots);
+            return numericalIntegrator.integrate(f);
+        } else {
+            NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
+            return numericalIntegrator.integrate(f);
+        }
     }
 
     public static double executeTurboRoot(MethodHandle baseHandle, MethodHandle derivHandle,

@@ -8,6 +8,7 @@ import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
 import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.MatrixTurboEvaluator;
+import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator2;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.VariableManager;
@@ -714,16 +715,19 @@ class MathExpressionTest {
         }
     }
 
-   /**
-     * 
+    /**
+     *
      * <ol style="font-weight:'bold';color: #68B;">
      * <li>diff(F) Evaluate F's grad func and return the result </li>
-     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function
+     * pointer called `v` </li>
      * <li>diff(F,n) Evaluate F's grad func n times </li>
-     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
-     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
-     * </ol> 
-     * 
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a
+     * function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result
+     * at x</li>
+     * </ol>
+     *
      */
     @Test
     void testSimpleDifferentialCalculusLevel1() {
@@ -739,16 +743,19 @@ class MathExpressionTest {
         }
     }
 
-   /**
-     * 
+    /**
+     *
      * <ol style="font-weight:'bold';color: #68B;">
      * <li>diff(F) Evaluate F's grad func and return the result </li>
-     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function
+     * pointer called `v` </li>
      * <li>diff(F,n) Evaluate F's grad func n times </li>
-     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
-     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
-     * </ol> 
-     * 
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a
+     * function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result
+     * at x</li>
+     * </ol>
+     *
      */
     @Test
     void testSimpleDifferentialCalculusResultAssignment() {
@@ -764,15 +771,18 @@ class MathExpressionTest {
     }
 
     /**
-     * 
+     *
      * <ol style="font-weight:'bold';color: #68B;">
      * <li>diff(F) Evaluate F's grad func and return the result </li>
-     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function
+     * pointer called `v` </li>
      * <li>diff(F,n) Evaluate F's grad func n times </li>
-     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
-     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
-     * </ol> 
-     * 
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a
+     * function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result
+     * at x</li>
+     * </ol>
+     *
      */
     @Test
     void testSimpleDifferentialCalculusLevel2() {
@@ -788,16 +798,19 @@ class MathExpressionTest {
         }
     }
 
-   /**
-     * 
+    /**
+     *
      * <ol style="font-weight:'bold';color: #68B;">
      * <li>diff(F) Evaluate F's grad func and return the result </li>
-     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function
+     * pointer called `v` </li>
      * <li>diff(F,n) Evaluate F's grad func n times </li>
-     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
-     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
-     * </ol> 
-     * 
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a
+     * function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result
+     * at x</li>
+     * </ol>
+     *
      */
     @Test
     void testSimpleDifferentialCalculusLevel3() {
@@ -806,23 +819,26 @@ class MathExpressionTest {
             String s = me.solveGeneric().textRes;
             System.out.println("s: " + s);
             System.out.println("res:\n" + FunctionManager.lookUp(s).expressionForm());
-             Assertions.assertTrue(true);
+            Assertions.assertTrue(true);
         } catch (Throwable ex) {
             Assertions.assertTrue(false);
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
-      /**
-     * 
+
+    /**
+     *
      * <ol style="font-weight:'bold';color: #68B;">
      * <li>diff(F) Evaluate F's grad func and return the result </li>
-     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function
+     * pointer called `v` </li>
      * <li>diff(F,n) Evaluate F's grad func n times </li>
-     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
-     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
-     * </ol> 
-     * 
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a
+     * function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result
+     * at x</li>
+     * </ol>
+     *
      */
     @Test
     void testSimpleDifferentialCalculusLevel4() {
@@ -831,45 +847,76 @@ class MathExpressionTest {
             String s = me.solveGeneric().textRes;
             System.out.println("s: " + s);
             System.out.println("res:\n" + FunctionManager.lookUp(s).expressionForm());
-             Assertions.assertEquals("v", s);
+            Assertions.assertEquals("v", s);
         } catch (Throwable ex) {
             Assertions.assertTrue(false);
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
+
     /**
-     * 
+     *
      * <ol style="font-weight:'bold';color: #68B;">
      * <li>diff(F) Evaluate F's grad func and return the result </li>
-     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function
+     * pointer called `v` </li>
      * <li>diff(F,n) Evaluate F's grad func n times </li>
-     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
-     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
-     * </ol> 
-     * 
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a
+     * function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result
+     * at x</li>
+     * </ol>
+     *
      */
     @Test
     void testSimpleDifferentialCalculusLevel5() {
         try {
             MathExpression me = new MathExpression("f(x)=x^3;diff(f,5,2)");
-            double s = me.solveGeneric().scalar; 
+            double s = me.solveGeneric().scalar;
             System.out.println("res:\n" + s);
-             Assertions.assertEquals(30, s);
+            Assertions.assertEquals(30, s);
         } catch (Throwable ex) {
             Assertions.assertTrue(false);
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
-        @Test
+
+    @Test
     void testNumericalIntegration() {
         try {
-            MathExpression me = new MathExpression("f(x)=3*x^2;intg(f,5, 2)");
-            double s = me.solveGeneric().scalar; 
+            MathExpression me = new MathExpression("f(x)=3*x^2;intg(f,2,5)");
+            double s = me.solveGeneric().scalar;
             System.out.println("res:\n" + s);
-             Assertions.assertTrue(Math.abs(s-(-117)) < 5E-10);
+            Assertions.assertTrue(Math.abs(s - 117) < 5E-10);
         } catch (Throwable ex) {
+            Assertions.assertTrue(false);
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    @Test
+    void testNumericalIntegrationWithXLowerGreaterThanXUpper() {
+        try {
+            MathExpression me = new MathExpression("f(x)=3*x^2;intg(f,5, 2)");
+            double s = me.solveGeneric().scalar;
+            System.out.println("res:\n" + s);
+            Assertions.assertTrue(Math.abs(s - (-117)) < 5E-10);
+        } catch (Throwable ex) {
+            Assertions.assertTrue(false);
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    @Test
+    void testNumericalIntegrationTurbo() {
+        try {
+            MathExpression me = new MathExpression("f(x)=3*x^2;intg(f,5, 2)");
+            FastCompositeExpression fce = new ScalarTurboEvaluator1(me).compile();
+            double res = fce.applyScalar(new double[]{0,1});
+            System.out.println("res:\n" + res);
+            Assertions.assertTrue(Math.abs(res - 117) < 5E-10);
+        } catch (Throwable ex) {
+            ex.printStackTrace();
             Assertions.assertTrue(false);
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
