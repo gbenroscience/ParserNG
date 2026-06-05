@@ -393,12 +393,31 @@ public class MethodRegistry {
             boolean hasIterations = args.length == 4;//[F, 2.0, 3.0, 10000] ---rotates any function in 3D including points and planes and generic functions
             boolean hasNoIterations = args.length == 3;//[F, 2.0, 3.0]
             if (hasNoIterations) {
-                NumericalIntegral intg = new NumericalIntegral(args[1].scalar, args[2].scalar, 0, args[0].textRes);
-                return ctx.wrap(intg.findHighRangeIntegral());
+                double x1 = args[1].scalar;
+                double x2 = args[2].scalar;
+                boolean shouldSwap = x1 > x2;
+
+                if (shouldSwap) {
+                    NumericalIntegral intg = new NumericalIntegral(x2, x1, 0, args[0].textRes);
+                    return ctx.wrap(-1 * intg.findHighRangeIntegral());
+                } else {
+                    NumericalIntegral intg = new NumericalIntegral(args[1].scalar, args[2].scalar, 0, args[0].textRes);
+                    return ctx.wrap(intg.findHighRangeIntegral());
+                }
+
             }//end if
             else if (hasIterations) {
-                NumericalIntegral intg = new NumericalIntegral(args[1].scalar, args[2].scalar, (int) args[3].scalar, args[0].textRes);
-                return ctx.wrap(intg.findHighRangeIntegral());
+                double x1 = args[1].scalar;
+                double x2 = args[2].scalar;
+                boolean shouldSwap = x1 > x2;
+
+                if (shouldSwap) {
+                    NumericalIntegral intg = new NumericalIntegral(x2, x1, (int) args[3].scalar, args[0].textRes);
+                    return ctx.wrap(intg.findHighRangeIntegral());
+                } else {
+                    NumericalIntegral intg = new NumericalIntegral(args[1].scalar, args[2].scalar, (int) args[3].scalar, args[0].textRes);
+                    return ctx.wrap(intg.findHighRangeIntegral());
+                }
             }//end else if
             return ctx.wrap(Double.NaN);
         });

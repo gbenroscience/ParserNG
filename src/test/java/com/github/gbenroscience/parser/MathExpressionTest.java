@@ -641,8 +641,6 @@ class MathExpressionTest {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
-    
 
     @Test
     void matrixTestAlgebraStdParser() {
@@ -660,8 +658,6 @@ class MathExpressionTest {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
-    
 
     @Test
     void matrixTestAlgebraMultiplicationStdParser() {
@@ -717,29 +713,168 @@ class MathExpressionTest {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
-    
-    
-    /**
-     * diff(F) Evaluate F's grad func and return the result 
-     * diff(F,v) Evaluate F's grad func and store the result in a function pointer called v 
-     * diff(F,n) Evaluate F's grad func n times 
-     * diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v
-     * diff(F,x,n) Evaluate F's grad func n times and calculate the result at x
+
+   /**
+     * 
+     * <ol style="font-weight:'bold';color: #68B;">
+     * <li>diff(F) Evaluate F's grad func and return the result </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,n) Evaluate F's grad func n times </li>
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
+     * </ol> 
+     * 
      */
     @Test
-    void testSimpleDifferentialCalculus() {
+    void testSimpleDifferentialCalculusLevel1() {
         try {
             MathExpression me = new MathExpression("f(x)=x^3;diff(f)");
             String s = me.solveGeneric().textRes;
-            System.out.println("res:\n"+s);
+            System.out.println("result:\n" + FunctionManager.lookUp(s).expressionForm());
             Assertions.assertTrue(true);
         } catch (Throwable ex) {
+            ex.printStackTrace();
+            Assertions.assertTrue(false);
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+   /**
+     * 
+     * <ol style="font-weight:'bold';color: #68B;">
+     * <li>diff(F) Evaluate F's grad func and return the result </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,n) Evaluate F's grad func n times </li>
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
+     * </ol> 
+     * 
+     */
+    @Test
+    void testSimpleDifferentialCalculusResultAssignment() {
+        try {
+            MathExpression me = new MathExpression("f(x)=x^3;a=diff(f)");
+            System.out.println("a:\n" + FunctionManager.lookUp("a").expressionForm());
+            Assertions.assertTrue(true);
+        } catch (Throwable ex) {
+            ex.printStackTrace();
+            Assertions.assertTrue(false);
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    /**
+     * 
+     * <ol style="font-weight:'bold';color: #68B;">
+     * <li>diff(F) Evaluate F's grad func and return the result </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,n) Evaluate F's grad func n times </li>
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
+     * </ol> 
+     * 
+     */
+    @Test
+    void testSimpleDifferentialCalculusLevel2() {
+        try {
+            MathExpression me = new MathExpression("f(x)=x^3;diff(f,v)");
+            String s = me.solveGeneric().textRes;
+            System.out.println("s: " + s);
+            System.out.println("res:\n" + FunctionManager.lookUp(s).expressionForm());
+            Assertions.assertEquals("v", s);
+        } catch (Throwable ex) {
+            Assertions.assertTrue(false);
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+   /**
+     * 
+     * <ol style="font-weight:'bold';color: #68B;">
+     * <li>diff(F) Evaluate F's grad func and return the result </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,n) Evaluate F's grad func n times </li>
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
+     * </ol> 
+     * 
+     */
+    @Test
+    void testSimpleDifferentialCalculusLevel3() {
+        try {
+            MathExpression me = new MathExpression("f(x)=x^3;diff(f,2)");
+            String s = me.solveGeneric().textRes;
+            System.out.println("s: " + s);
+            System.out.println("res:\n" + FunctionManager.lookUp(s).expressionForm());
+             Assertions.assertTrue(true);
+        } catch (Throwable ex) {
+            Assertions.assertTrue(false);
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
     
+      /**
+     * 
+     * <ol style="font-weight:'bold';color: #68B;">
+     * <li>diff(F) Evaluate F's grad func and return the result </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,n) Evaluate F's grad func n times </li>
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
+     * </ol> 
+     * 
+     */
+    @Test
+    void testSimpleDifferentialCalculusLevel4() {
+        try {
+            MathExpression me = new MathExpression("f(x)=x^3;diff(f,v,2)");
+            String s = me.solveGeneric().textRes;
+            System.out.println("s: " + s);
+            System.out.println("res:\n" + FunctionManager.lookUp(s).expressionForm());
+             Assertions.assertEquals("v", s);
+        } catch (Throwable ex) {
+            Assertions.assertTrue(false);
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
     
+    /**
+     * 
+     * <ol style="font-weight:'bold';color: #68B;">
+     * <li>diff(F) Evaluate F's grad func and return the result </li>
+     * <li>diff(F,v) Evaluate F's grad func and store the result in a function pointer called `v` </li>
+     * <li>diff(F,n) Evaluate F's grad func n times </li>
+     * <li>diff(F,v,n) Evaluate F's grad func n times and store the result in a function pointer called v</li>
+     * <li>diff(F,x,n) Evaluate F's grad func n times and calculate the result at x</li>
+     * </ol> 
+     * 
+     */
+    @Test
+    void testSimpleDifferentialCalculusLevel5() {
+        try {
+            MathExpression me = new MathExpression("f(x)=x^3;diff(f,5,2)");
+            double s = me.solveGeneric().scalar; 
+            System.out.println("res:\n" + s);
+             Assertions.assertEquals(30, s);
+        } catch (Throwable ex) {
+            Assertions.assertTrue(false);
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+        @Test
+    void testNumericalIntegration() {
+        try {
+            MathExpression me = new MathExpression("f(x)=3*x^2;intg(f,5, 2)");
+            double s = me.solveGeneric().scalar; 
+            System.out.println("res:\n" + s);
+             Assertions.assertTrue(Math.abs(s-(-117)) < 5E-10);
+        } catch (Throwable ex) {
+            Assertions.assertTrue(false);
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
     public static void main(String[] args) {
         new MathExpressionTest().matrixTestAlgebraAssignments();
     }

@@ -353,7 +353,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                         scanner.remove(scanner.size() - 1);
                     }
                 }
- 
+
                 int sz = scanner.size();
                 if ((sz == 3 && scanner.get(1).startsWith(ANON_PREFIX))
                         || (sz == 1 && scanner.get(0).startsWith(ANON_PREFIX))) {//function assigments will always be like this: [(,anon1,)] when they get here
@@ -441,8 +441,6 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 }
                 MathExpression.EvalResult val = expr.solveGeneric();
 
-      
-
                 String referenceName = null;
 
                 if (Variable.isVariableString(newFuncName) || isVarNamesList) {
@@ -478,16 +476,16 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                             FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
                             success = true;
                             break;
-                        case STRING:
+                        case STRING: 
                             f = FunctionManager.lookUp(val.textRes);
                             if (f != null) {
-                                 Function q = f.copy();
-                                    q.setDependentVariable(new Variable(newFuncName));
-                                    if (q.type == TYPE.MATRIX) {
-                                        q.getMatrix().setName(newFuncName);
-                                    }
-                                    FunctionManager.add(q);
-                                    return true;
+                                Function q = f.copy();
+                                q.setDependentVariable(new Variable(newFuncName));
+                                if (q.type == TYPE.MATRIX) {
+                                    q.getMatrix().setName(newFuncName);
+                                } 
+                                FunctionManager.add(q);
+                                return true;
                             }
                             break;
                         case NUMBER:
@@ -1007,6 +1005,62 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         }
         FunctionManager.update(f);
         return f;
+    }
+
+    /**
+     * This function may be called like this: storeNamedFunction("y",
+     * "3*x*sin(x)") OR storeNamedFunction("y", "@(x)3*x*sin(x)") OR
+     *
+     * @param fName The name of the function
+     * @param expression The expression used to create the function...e.g
+     * @(x)sin(x-1)^cos(x)
+     * @return the name assigned to the anonymous function created.
+     */
+    public static synchronized Function storeNamedFunction(String fName, String expression) {
+        
+        if(expression == null){
+               throw new InputMismatchException("The expression can not be null!");
+        }
+
+        expression = expression.trim();
+        if(fName == null){
+            return storeAnonymousFunction(expression.trim());
+        }
+        
+        fName = fName.trim();
+        
+        boolean fNameHasParenthesis = fName.contains("(") && fName.contains(")");
+        boolean isAnonFormatExpr = expression.startsWith("@");
+        if (isAnonFormatExpr && fNameHasParenthesis) {
+            throw new InputMismatchException("Bad format combination for function name and expression!");
+        }
+        if (isAnonFormatExpr && !fNameHasParenthesis) {//e.g args are: "y", "@(x)3*x*sin(x)"
+            Function f = new Function(fName + "=" + expression);
+            FunctionManager.add(f);
+            return f;
+        } else if (!isAnonFormatExpr && fNameHasParenthesis) {//e.g args are: "y(x)", "3*x*sin(x)"
+            Function f = new Function(fName + "=" + expression);
+            FunctionManager.add(f);
+            return f;
+        } else {//e.g args are: "y", "3*x*sin(x)"
+            MathExpression me = new MathExpression(expression);
+            Function f = new Function();
+            f.setType(TYPE.ALGEBRAIC_EXPRESSION);
+            f.setMathExpression(me);
+            f.dependentVariable.setName(fName);
+            String names[] = me.getVariablesNames();
+            for (String n : names) {
+                Variable v = VariableManager.lookUp(n);
+                if (v != null) {
+                    f.independentVariables.add(v);
+                } else {
+                    f.independentVariables.add(new Variable(n));
+                }
+            }
+            FunctionManager.add(f);
+            return f;
+        }
+
     }
 
     public boolean isMatrix() {
