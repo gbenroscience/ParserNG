@@ -18,7 +18,6 @@ package com.github.gbenroscience.math.matrix.expressParser;
 import java.util.HashMap;
 import java.util.InputMismatchException;
 import java.util.List;
-import java.util.Random;
 import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.Operator;
 import java.util.concurrent.ThreadLocalRandom;
