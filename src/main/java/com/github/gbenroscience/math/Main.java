@@ -173,7 +173,7 @@ public class Main {
         System.out.println("                     however for better redability, sometimes it is worthy to");
         System.out.println("                     to split the expression to multiple lines. and evaluate as one.");
         System.out.println(interactiveSwitch + "  instead of evaluating any input, interactive prompt is opened");
-        System.out.println("                     If you lunch interactive mode wit TRIM, the expression is");
+        System.out.println("                     If you launch interactive mode wit TRIM, the expression is");
         System.out.println("                     evaluated once you exit (done, quit, exit...)");
         System.out.println("                     it is the same as launching " + ParserCmd.class.getName() + " main class");
         System.out.println("           To read stdin, you have to set INTERACTIVE mode on");

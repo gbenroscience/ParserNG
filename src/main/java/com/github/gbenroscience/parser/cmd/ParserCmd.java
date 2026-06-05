@@ -16,7 +16,6 @@ import com.github.gbenroscience.math.Main;
 import com.github.gbenroscience.parser.ExpandingExpression;
 import com.github.gbenroscience.parser.LogicalExpression;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.logical.ExpressionLogger;
 
 /** 
  *
