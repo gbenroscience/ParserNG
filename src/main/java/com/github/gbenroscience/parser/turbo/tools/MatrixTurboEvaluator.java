@@ -679,7 +679,30 @@ private static MethodHandle createConstantHandle(EvalResult res) {
 
             case '^':
                 if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
-                    cache.result.wrap(flatMatrixPower(left.matrix, right.scalar, cache));
+                    int power = (int) right.scalar;
+
+                    // 1. Fail fast on non-integer exponents
+                    if (Math.abs(right.scalar - power) > 1e-9) {
+                        throw new IllegalArgumentException("floating point powers are not supported for matrices");
+                    }
+
+                    // 2. Fail fast on non-square matrices (handles power 0, positive, and negative)
+                    if (!left.matrix.isSquareMatrix()) {
+                        throw new IllegalArgumentException("matrix exponentiation is only supported for square matrices");
+                    }
+           
+
+                    Matrix m;
+                    if (power == 0) {
+                        m = unitMatrix(left.matrix.getRows(), left.matrix.getCols(), cache);
+                    } else if (power > 0) {
+                        m = flatMatrixPower(left.matrix, power, cache);
+                    } else { // power < 0
+                        Matrix rawPow =  flatMatrixPower(left.matrix, Math.abs(power), cache);//  Matrix.power(left.matrix, Math.abs(power)).inverse();
+                        m = flatMatrixInverseLUTurbo(rawPow, cache);
+                    }
+
+                    cache.result.wrap(m);
                 }
                 break;
 
@@ -1427,6 +1450,23 @@ private static MethodHandle createConstantHandle(EvalResult res) {
             }
         }
         return out;
+    }
+
+    public static Matrix unitMatrix(int rowSize, int colSize, ResultCache cache) {
+        // 1. Fetch a recycled matrix from the cache (Zero allocation!)
+        Matrix matrix = cache.getMatrixBuffer(rowSize, colSize);
+
+        double[]flatArr = matrix.getFlatArray();
+        // 2. Clear leftover garbage data from previous cache uses natively
+        Arrays.fill(flatArr, 0.0);
+
+        // 3. Set the diagonal directly without any nested loops or if/else branching
+        int limit = Math.min(rowSize, colSize);
+        for (int i = 0; i < limit; i++) {
+            flatArr[i * colSize + i] = 1.0;
+        }
+
+        return matrix;
     }
 
     private static Matrix flatMatrixMultiply(Matrix a, Matrix b, Matrix out) {

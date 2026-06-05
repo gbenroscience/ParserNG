@@ -1008,16 +1008,19 @@ public class Function implements Savable, MethodRegistry.MethodAction {
     }
 
     /**
-     * This function may be called like this: storeNamedFunction("y",
-     * "3*x*sin(x)") OR storeNamedFunction("y", "@(x)3*x*sin(x)") OR
-     *
+     * This function may be called like this: 
+     * <ol>
+     * <li>storeNamedFunction("y", "3*x*sin(x)")</li>
+     * <li>storeNamedFunction("y", "@(x)3*x*sin(x)")</li>
+     * <li>storeNamedFunction(null, "3*x*sin(x)") (creates an anonymous function)</li>
+     * <li>storeNamedFunction("y(x)", "3*x*sin(x)")</li>
+     * </ol>
      * @param fName The name of the function
      * @param expression The expression used to create the function...e.g
      * @(x)sin(x-1)^cos(x)
      * @return the name assigned to the anonymous function created.
      */
     public static synchronized Function storeNamedFunction(String fName, String expression) {
-        
         if(expression == null){
                throw new InputMismatchException("The expression can not be null!");
         }
@@ -1558,7 +1561,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 copy.independentVariables = new ArrayList<>(independentVariables);
             }
             if (dependentVariable != null) {
-                copy.dependentVariable = new Variable(dependentVariable.getName(), dependentVariable.getValue());
+                copy.dependentVariable = dependentVariable.clone();
             }
             if (mathExpression != null) {
                 copy.mathExpression = mathExpression.copy();
@@ -1574,9 +1577,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 copy.matrix.setName(matrix.getName());
             }
             copy.type = this.type;
-
             return copy;
-
         } catch (Exception e) {
             e.printStackTrace();
             throw new RuntimeException("Failed to copy Function: " + e.getMessage(), e);

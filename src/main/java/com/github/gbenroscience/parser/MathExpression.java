@@ -485,7 +485,7 @@ public class MathExpression implements Savable, Solvable {
     }//end constructor MathExpression
 
     /**
-     * MathExpression me = new
+     * MathExpression clone = new
      * MathExpression("rot(f=@(x)sin(x),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
      * scanner-output: [rot, (, (, f, =, anon1, ), ,, (, pi, /, 2, ), ,, anon2,
      * ,, anon3, )] MathExpression ma = new
@@ -2125,7 +2125,7 @@ public class MathExpression implements Savable, Solvable {
                 rightType = EvalResult.TYPE_MATRIX;
                 right.wrap(rightFun.getMatrix());
             }
-            
+
 //            System.out.println("left: " + left);
 //            System.out.println("OP: " + op);
 //            System.out.println("right: " + right);
@@ -2207,10 +2207,33 @@ public class MathExpression implements Savable, Solvable {
 
                 case '^':
                     if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
-                        Matrix m = Matrix.power(left.matrix, (int) right.scalar);
+                        int power = (int) right.scalar;
+
+                        // 1. Fail fast on non-integer exponents
+                        if (Math.abs(right.scalar - power) > 1e-9) {
+                            throw new IllegalArgumentException("floating point powers are not supported for matrices");
+                        }
+
+                        // 2. Fail fast on non-square matrices (handles power 0, positive, and negative)
+                        if (!left.matrix.isSquareMatrix()) {
+                            throw new IllegalArgumentException("matrix exponentiation is only supported for square matrices");
+                        }
+
+                        // 3. Compute the result matrix safely
+                        Matrix m;
+                        if (power == 0) {
+                            m = left.matrix.unitMatrix();
+                        } else if (power > 0) {
+                            m = Matrix.power(left.matrix, power);
+                        } else { // power < 0
+                            m = Matrix.power(left.matrix, Math.abs(power)).inverse();
+                        }
+
+                        // 4. Update wrapper state in one definitive place
                         String fName = Function.storeAnonymousMatrixFunction(m);
                         left.wrap(fName);
                         left.matrix = m;
+
                     } else {
                         throw new IllegalArgumentException("Unsupported types for '^': left=" + leftType + ", right=" + rightType);
                     }
@@ -2734,14 +2757,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
             e.scalar = scalar;
             e.textRes = textRes;
             e.type = type;
-            if (vector == null) {
-                e.vector = null;
-            } else {
-                double[] v = new double[vector.length];
-                System.arraycopy(this.vector, 0, v, 0, vector.length);
-                e.vector = v;
-
-            }
+            e.vector = this.vector == null ? null : this.vector.clone();
 
             return e;
 
@@ -3213,51 +3229,51 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
      * @return
      */
     public MathExpression copy() {
-        MathExpression me = new MathExpression(true);
-        me.DRG = DRG;
+        MathExpression clone = new MathExpression(true);
+        clone.DRG = DRG;
         Token tokens[] = new Token[cachedPostfix.length];
         int i = 0;
         for (Token t : cachedPostfix) {
             tokens[i] = t.clone();
             i++;
         }
-        me.cachedPostfix = tokens;
-        me.commaAlias = commaAlias;
-        errorLog.copyTo(me.errorLog);
+        clone.cachedPostfix = tokens;
+        clone.commaAlias = commaAlias;
+        errorLog.copyTo(clone.errorLog);
 
-        me.correctFunction = correctFunction;
-        me.executionFrame = new double[executionFrame.length];
+        clone.correctFunction = correctFunction;
+        clone.executionFrame = new double[executionFrame.length];
 
-        System.arraycopy(executionFrame, 0, me.executionFrame, 0, executionFrame.length);
-        me.expression = expression;
+        System.arraycopy(executionFrame, 0, clone.executionFrame, 0, executionFrame.length);
+        clone.expression = expression;
         if (expressionSolver != null) {
-            me.expressionSolver = expressionSolver.clone();
+            clone.expressionSolver = expressionSolver.clone();
         }
-        me.hasFunctionOrVariableInitStatement = hasFunctionOrVariableInitStatement;
-        me.hasListReturningOperators = hasListReturningOperators;
-        me.help = help;
-        me.noOfListReturningOperators = noOfListReturningOperators;
-        me.optimizable = optimizable;
-        me.parser_Result = ParserResult.valueOf(parser_Result.name());
-        me.pool = new EvalResult[pool.length];
-        for (i = 0; i < me.pool.length; i++) {
-            me.pool[i] = pool[i].clone();
+        clone.hasFunctionOrVariableInitStatement = hasFunctionOrVariableInitStatement;
+        clone.hasListReturningOperators = hasListReturningOperators;
+        clone.help = help;
+        clone.noOfListReturningOperators = noOfListReturningOperators;
+        clone.optimizable = optimizable;
+        clone.parser_Result = ParserResult.valueOf(parser_Result.name());
+        clone.pool = new EvalResult[pool.length];
+        for (i = 0; i < clone.pool.length; i++) {
+            clone.pool[i] = pool[i].clone();
         }
-        me.poolPointer = poolPointer;
+        clone.poolPointer = poolPointer;
         if (registry != null) {
-            me.registry = registry.clone();
+            clone.registry = registry.clone();
         }
-        me.returnObjectName = returnObjectName;
-        me.returnType = TYPE.valueOf(returnType.name());
-        me.scanner = new ArrayList<>(scanner);
-        me.slots = new int[slots.length];
-        System.arraycopy(slots, 0, me.slots, 0, slots.length);
-        me.treeStats = new MathExpressionTreeDepth.Result(treeStats.depth, treeStats.binaryOperators, treeStats.divOperators, treeStats.unaryOperators, treeStats.functions);
-        me.turboCompiled = turboCompiled;
-        me.variableManager = new VariableManager();
-        me.whitespaceremover = new ArrayList<>(whitespaceremover);
-        me.willFoldConstants = willFoldConstants;
-//        me.compiledTurbo = new FastCompositeExpression() {
+        clone.returnObjectName = returnObjectName;
+        clone.returnType = TYPE.valueOf(returnType.name());
+        clone.scanner = new ArrayList<>(scanner);
+        clone.slots = new int[slots.length];
+        System.arraycopy(slots, 0, clone.slots, 0, slots.length);
+        clone.treeStats = new MathExpressionTreeDepth.Result(treeStats.depth, treeStats.binaryOperators, treeStats.divOperators, treeStats.unaryOperators, treeStats.functions);
+        clone.turboCompiled = turboCompiled;
+        clone.variableManager = new VariableManager();
+        clone.whitespaceremover = new ArrayList<>(whitespaceremover);
+        clone.willFoldConstants = willFoldConstants;
+//        clone.compiledTurbo = new FastCompositeExpression() {
 //            @Override
 //            public EvalResult apply(double[] variables) {
 //                return compiledTurbo.apply(variables);
@@ -3270,13 +3286,13 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 //        };//clone this
         if (compiledTurbo != null) {
             try {
-                me.compiledTurbo = me.compileTurbo();
+                clone.compiledTurbo = clone.compileTurbo();
             } catch (Throwable ex) {
                 System.out.println("Failed to compile turbo for cloned MathExpression");
                 Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
             }
         }
-        return me;
+        return clone;
     }
 
     @Override

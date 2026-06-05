@@ -294,8 +294,7 @@ public class Matrix {
     public Matrix add(Matrix matrice) {
 
         if (rows != matrice.rows || cols != matrice.cols) {
-            System.out.println("ERROR IN MATRIX INPUT!!");
-            return new Matrix(1, 1);
+             throw new RuntimeException("ERROR IN MATRIX INPUT!! matrices have varying dimensions");
         }
 
         Matrix matrix = new Matrix(rows, cols);
@@ -315,8 +314,7 @@ public class Matrix {
      */
     public void addInPlace(Matrix matrice) {
 
-        if (rows != matrice.rows || cols != matrice.cols) {
-            System.err.println("ERROR IN MATRIX INPUT!!");
+        if (rows != matrice.rows || cols != matrice.cols) { 
             throw new InputMismatchException("Bad input. Matrix dimensions do not match");
         }
 
@@ -335,8 +333,7 @@ public class Matrix {
     public Matrix subtract(Matrix matrice) {
 
         if (rows != matrice.rows || cols != matrice.cols) {
-            System.out.println("ERROR IN MATRIX INPUT!!");
-            return new Matrix(1, 1);
+             throw new RuntimeException("ERROR IN MATRIX INPUT!!, matrices have different sizes");
         }
 
         Matrix matrix = new Matrix(rows, cols);
@@ -397,9 +394,9 @@ public class Matrix {
 
     /**
      *
-     * The operation of matrix multiplication. For this method to run, The
+     * The operation of matrix multiplication. For this method to work, the
      * pre-multiplying matrix must have its number of columns equal to the
-     * number of rows in the pre-multiplying one.
+     * number of rows in the post-multiplying matrix.
      *
      * The product matrix is one that has its number of columns equal to the
      * number of columns in the pre-multiplying matrix, and its rows equal to
@@ -424,8 +421,7 @@ public class Matrix {
         int c2 = matrice2.cols;
 
         if (c1 != r2) {
-            System.out.println("ERROR IN MATRIX INPUT!!");
-            return new Matrix(1, 1);
+             throw new RuntimeException("ERROR IN MATRIX INPUT!!");
         }
 
         Matrix m = new Matrix(r1, c2);
@@ -469,15 +465,13 @@ public class Matrix {
 
     public static Matrix power(Matrix matrice1, int pow) {
         if (!matrice1.isSquareMatrix()) {
-            System.out.println("ERROR: Matrix power is only defined for square matrices!");
-            return new Matrix(1, 1);  // Error case
+             throw new RuntimeException("ERROR: Matrix power is only defined for square matrices!");
         }
 
         int size = matrice1.rows;
 
         if (pow < 0) {
-            System.out.println("ERROR: Negative exponents not supported yet.");
-            return new Matrix(1, 1);
+             throw new RuntimeException("ERROR: Negative exponents not supported yet.");
         }
 
         if (pow == 0) {
@@ -584,7 +578,7 @@ public class Matrix {
      *
      * e.g 3 4 5 7 5 9 2 3 1 4 2 6 1 6 7 5 7 3 A necessary condition for this
      * method to run is that the 2 objects must have an equal number of rows. IF
-     * THIS CONDITION IS NOT MET, THE METHOD RETURNS A ZERO MATRIX.
+     * THIS CONDITION IS NOT MET, THE METHOD throws a {@linkplain RuntimeException}
      *
      *
      * @param mat1 the first Matrix object
@@ -595,7 +589,7 @@ public class Matrix {
     public static Matrix columnJoin(Matrix mat1, Matrix mat2) {
 
         if (mat1.rows != mat2.rows) {
-            return new Matrix(1, 1);
+             throw new RuntimeException("rows must match for column join operation");
         }
 
         int r = mat1.rows;
@@ -673,7 +667,7 @@ public class Matrix {
     public static Matrix rowJoin(Matrix mat1, Matrix mat2) {
 
         if (mat1.cols != mat2.cols) {
-            return new Matrix(1, 1);
+            throw new RuntimeException("The column sizes must match for a row join operation");
         }
 
         int r1 = mat1.rows;

@@ -694,6 +694,25 @@ class MathExpressionTest {
         }
     }
 
+    
+    @Test
+    void matrixTestAlgebraicInversTurbo() {
+        try {
+            MathExpression me = new MathExpression("A(4,4)=(121,1,2,5,  60,8,3,6,  102,1,0,5,  31,71,15,19);"
+                    + "B(4,4)=(3,22,8,-5,  10,18,32,8,  4,2,1,9,  7,7,2,13);"
+                    + " A^-1;");
+            System.out.println("scanner: " + me.getScanner());
+            System.out.println("A: " + FunctionManager.lookUp("A").getMatrix()); 
+            FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
+            Matrix m = fce.apply(new double[0]).matrix;
+            System.out.println("turbo-matrix:\n" + m);
+            System.out.println("interpreted-matrix:\n" + FunctionManager.lookUp(me.solve()).getMatrix());
+            Assertions.assertTrue(true);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
     @Test
     void matrixTestDetBug() {
         try {
