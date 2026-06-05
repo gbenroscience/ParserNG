@@ -51,7 +51,7 @@ public class ParserCmd {
                     if (Main.isVerbose()) {
                         System.err.println(all);
                     }
-                    calWitOutput(all);
+                    callWitOutput(all);
                 }
                 break;
             }
@@ -61,7 +61,7 @@ public class ParserCmd {
             }
             System.err.flush();
             if (!Main.isTrim()) {
-                calWitOutput(cmd);
+                callWitOutput(cmd);
             }
 
         }
@@ -69,7 +69,7 @@ public class ParserCmd {
 
     }
 
-    private static void calWitOutput(String cmd) {
+    private static void callWitOutput(String cmd) {
         String ans = null;
         try {
 
