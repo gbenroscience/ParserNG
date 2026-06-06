@@ -362,7 +362,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         return false;
     }
 
-    private MethodHandle compileScalar(MathExpression.Token[] postfix) throws Throwable {
+    protected MethodHandle compileScalar(MathExpression.Token[] postfix) throws Throwable {
         Stack<MethodHandle> stack = new Stack<>();
         for (MathExpression.Token t : postfix) {
             switch (t.kind) {
@@ -1859,7 +1859,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
      * variants) - Logarithmic: log, ln, log10 - Power/Root: sqrt, cbrt -
      * Rounding: floor, ceil, abs - Other: exp, fact
      */
-    private static MethodHandle getUnaryFunctionHandle(String name) throws Throwable {
+    protected static MethodHandle getUnaryFunctionHandle(String name) throws Throwable {
         // Check for single-character operators like !
         if (name.length() == 1) {
             char op = name.charAt(0);

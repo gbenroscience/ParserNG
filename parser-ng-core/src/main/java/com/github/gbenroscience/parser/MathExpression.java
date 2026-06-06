@@ -32,9 +32,12 @@ import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.parser.methods.Help;
 import com.github.gbenroscience.parser.methods.Method;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
+import com.github.gbenroscience.parser.turbo.spi.TurboEngineLocator;
+import com.github.gbenroscience.parser.turbo.spi.TurboEvaluatorProvider;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.MatrixTurboEvaluator;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator;
+import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
@@ -777,6 +780,24 @@ public class MathExpression implements Savable, Solvable {
             throw new RuntimeException(
                     err, e);
         }
+    }
+
+    // Inside MathExpression.java (in parser-ng-core)
+    /**
+     * Compiles the expression for bulk array processing. Automatically upgrades
+     * to Hardware SIMD if parser-ng-pro is installed!
+     */
+    public FastCompositeExpression compileBulkTurbo() throws Throwable {
+        TurboEvaluatorProvider proEngine = TurboEngineLocator.getProvider();
+
+        if (proEngine != null && proEngine.isVectorHardwareSupported()) {
+            // PRO TIER: Routes to the VectorTurboEvaluator in the closed-source JAR
+            return proEngine.getVectorEvaluator(this).compile();
+        }
+
+        // FREE TIER: Graceful fallback to the standard array-based scalar engine
+         System.out.println("SIMD hardware not detected. Using standard Turbo Scalar.");
+        return new ScalarTurboEvaluator1(this).compile();
     }
 
     /**
