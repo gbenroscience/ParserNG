@@ -428,10 +428,20 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             DoubleVector res = switch (name.toLowerCase()) {
                 case "sin" -> v.lanewise(VectorOperators.SIN);
                 case "cos" -> v.lanewise(VectorOperators.COS);
-                case "tanh" -> v.lanewise(VectorOperators.TANH);
+                case "tan" -> v.lanewise(VectorOperators.TAN);
+                case "asin" -> v.lanewise(VectorOperators.ASIN);
+                case "acos" -> v.lanewise(VectorOperators.ACOS);
+                case "atan" -> v.lanewise(VectorOperators.ATAN);
+                    
+                case "sinh" -> v.lanewise(VectorOperators.SINH);
+                case "cosh" -> v.lanewise(VectorOperators.COSH);
+                case "tanh" -> v.lanewise(VectorOperators.TANH); 
+                    
                 case "exp" -> v.lanewise(VectorOperators.EXP);
                 case "log" -> v.lanewise(VectorOperators.LOG);
+                case "lg" -> v.lanewise(VectorOperators.LOG10);
                 case "sqrt", "√" -> v.lanewise(VectorOperators.SQRT);
+                case "cbrt", "R" -> v.lanewise(VectorOperators.CBRT);
                 case "abs" -> v.abs();
                 default -> throw new UnsupportedOperationException("Unary: " + name);
             };
