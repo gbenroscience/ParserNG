@@ -1,7 +1,5 @@
 package com.github.gbenroscience.parser.pro.turbo;
 
-
-
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.pro.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator;
@@ -12,12 +10,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import static org.junit.jupiter.api.Assertions.*;
 
-
-
 /**
  *
  * @author GBEMIRO
- */ 
+ */
 public class VectorTurboEvaluatorTest {
 
     private static final double EPSILON = 1e-12;
@@ -47,7 +43,7 @@ public class VectorTurboEvaluatorTest {
         SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         // 17 datapoints to trigger both vector lane and tail scalar loop remainders
-        int totalElements = 17; 
+        int totalElements = 17;
         double[][] inputs = new double[3][totalElements]; // 3 variables, 17 values each
         double[] outputVector = new double[totalElements];
 
@@ -72,24 +68,24 @@ public class VectorTurboEvaluatorTest {
 
     @Test
     public void testThreadPooledParallelBulkExecution() throws Throwable {
-        MathExpression me = new MathExpression("vma(x1, x2, x3)");
+        MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
         SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         int dataSize = 100;
-        double[][] inputs = new double[3][dataSize];
+        double[][] inputs = new double[1][dataSize]; // Only 1 variable 'x' is needed for this expression
         double[] outputVector = new double[dataSize];
 
         for (int i = 0; i < dataSize; i++) {
-            inputs[0][i] = i;
-            inputs[1][i] = 2.0;
-            inputs[2][i] = 0.5;
+            inputs[0][i] = i; // x
         }
 
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
         evaluator.applyBulk(inputs, outputVector, threadPool);
 
         for (int i = 0; i < dataSize; i++) {
-            double expected = (inputs[0][i] * 2.0) + 0.5;
+            double x = inputs[0][i];
+            // Correct expected formula matching the active MathExpression
+            double expected = 4.0 * x + 3.0 * Math.sin(5.0 + (x * x));
             assertEquals(expected, outputVector[i], EPSILON, "Parallel SIMD execution drifted at index: " + i);
         }
     }
@@ -102,10 +98,10 @@ public class VectorTurboEvaluatorTest {
         // 4 elements to evaluate
         int dataSize = 4;
         double[][] inputs = new double[1][dataSize]; // 1 variable, 4 values
-        inputs[0] = new double[]{5.0, 6.0, 7.0, 8.0}; 
-        
+        inputs[0] = new double[]{5.0, 6.0, 7.0, 8.0};
+
         // Single flat 1D buffer array of length 10
-        double[] secureBuffer = new double[10]; 
+        double[] secureBuffer = new double[10];
 
         // Test API Call #3: Memory-Reuse Offset-Based Bulk Execution
         int targetOffset = 3;
@@ -128,4 +124,3 @@ public class VectorTurboEvaluatorTest {
         }
     }
 }
-
