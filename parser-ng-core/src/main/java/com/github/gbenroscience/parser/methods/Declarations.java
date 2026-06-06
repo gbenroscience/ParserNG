@@ -138,6 +138,9 @@ public class Declarations {
     public static final String SUB_MATRIX = "sub_mat"; 
     public static final String RANDOM_MATRIX = "rnd_mat";
     public static final String MATRIX_MINOR = "matrix_minor";
+    public static final String FMA = "fma";// fma(A, B, C) -> A * B + C
+    public static final String VMA = "vma";// vma(A, B, C) -> A * B + C
+    public static final String IF = "if";//if(x > 0.5, x * 2, 0)
     public static final String HELP = "help";
 
     

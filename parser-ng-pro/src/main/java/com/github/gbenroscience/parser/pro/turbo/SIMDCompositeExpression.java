@@ -2,6 +2,7 @@ package com.github.gbenroscience.parser.pro.turbo;
 
 import com.github.gbenroscience.parser.pro.turbo.tools.FlatMatrix;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
+import java.util.concurrent.ExecutorService;
 
 /**
  *
@@ -17,6 +18,10 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * @param output The output array to dump the parallel results into.
      */
     void applyBulk(double[][] variables, double[] output);
+
+    public void applyBulk(double[][] variables, double[] outputBuffer, int offset) throws Throwable;
+
+    public void applyBulk(double[][] variables, double[] output, ExecutorService executor);
 
     /**
      * Executes fused deep learning kernels directly via FlatMatrix.

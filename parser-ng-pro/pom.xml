@@ -38,6 +38,19 @@
             <version>5.10.3</version>
             <scope>test</scope>
         </dependency>
+        <!-- JMH for reliable benchmarking -->
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-core</artifactId>
+            <version>1.37</version>
+            <type>jar</type>
+        </dependency>
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-generator-annprocess</artifactId>
+            <version>1.37</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
@@ -48,6 +61,14 @@
                 <configuration>
                     <source>21</source> 
                     <target>21</target>
+                    <annotationProcessorPaths>
+                        <!-- Register the JMH annotation processor -->
+                        <path>
+                            <groupId>org.openjdk.jmh</groupId>
+                            <artifactId>jmh-generator-annprocess</artifactId>
+                            <version>1.37</version>
+                        </path>
+                    </annotationProcessorPaths>
                     <compilerArgs>
                         <arg>--add-modules</arg>
                         <arg>jdk.incubator.vector</arg>
