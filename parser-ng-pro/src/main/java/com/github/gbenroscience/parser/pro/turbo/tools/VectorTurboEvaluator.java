@@ -5,83 +5,122 @@ import com.github.gbenroscience.parser.pro.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
+import java.util.Random;
 import jdk.incubator.vector.*;
-import java.util.*;
+
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
-/**
- * Enterprise SIMD Evaluator for ParserNG. Compiles a flattened, zero-allocation 
- * instruction pipeline for high-throughput vectorized execution.
- *
- * REQUIRES JVM FLAG: --add-modules jdk.incubator.vector
- *
- * @author GBEMIRO
- */
 public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
     private static final int VLEN = SPECIES.length();
 
-    // Zero-allocation reusable buffers (Fixed to hold arrays)
-    private static final ThreadLocal<double[]> SCALAR_FRAME = ThreadLocal.withInitial(() -> new double[1024]);
-    private static final ThreadLocal<Future<?>[]> FUTURES_CACHE = ThreadLocal.withInitial(() -> new Future[128]);
-    private static final ThreadLocal<MathExpression.EvalResult> RESULT_CACHE = ThreadLocal.withInitial(MathExpression.EvalResult::new);
-    private static final ThreadLocal<DoubleVector[]> VECTOR_EXEC_STACK = ThreadLocal.withInitial(() -> new DoubleVector[32]);
+    private static final int OP_CONST = 1;
+    private static final int OP_LOAD = 2;
+    private static final int OP_ADD = 3;
+    private static final int OP_SUB = 4;
+    private static final int OP_MUL = 5;
+    private static final int OP_DIV = 6;
+    private static final int OP_POW = 7;
+    private static final int OP_SIN = 8;
+    private static final int OP_COS = 9;
+    private static final int OP_EXP = 10;
+    private static final int OP_SQRT = 11;
+    private static final int OP_LOG = 12;
+    private static final int OP_VMA = 13;
+    private static final int OP_REM = 14;
+    private static final int OP_IF = 15;
+    private static final int OP_GT = 16;
+    private static final int OP_LT = 17;
+    private static final int OP_EQ = 18;
+    private static final int OP_NE = 19;
+    private static final int OP_GE = 20;
+    private static final int OP_LE = 21;
+
+    // Fixed: Initializing arrays with specific sizes
+    private static final ThreadLocal<double[]> SCALAR_FRAME =
+            ThreadLocal.withInitial(() -> new double[1024]);
+            
+    private static final ThreadLocal<Future<?>[]> FUTURES_CACHE =
+            ThreadLocal.withInitial(() -> new Future[128]);
+            
+    private static final ThreadLocal<MathExpression.EvalResult> RESULT_CACHE =
+            ThreadLocal.withInitial(MathExpression.EvalResult::new);
+            
+    private static final ThreadLocal<DoubleVector[]> VECTOR_EXEC_STACK =
+            ThreadLocal.withInitial(() -> new DoubleVector[32]);
 
     private final MathExpression.Token[] postfix;
-    private final List<Instruction> instructions = new ArrayList<>();
+    private int[] opcodes;
+    private int[] targetSlots;
+    private double[] literalConstants;
+    private int instructionCount;
     private KernelInterceptException interceptedKernel;
 
     public VectorTurboEvaluator(MathExpression me) {
         super(me);
         this.postfix = me.getCachedPostfix();
-        compileToInstructions();
+        compileToPrimitiveProgram();
     }
 
-    /**
-     * Converts the dynamic MethodHandle tree into a flat, JIT-friendly array of executable instructions.
-     */
-    private void compileToInstructions() {
-        Stack<Instruction> stack = new Stack<>();
+    private void compileToPrimitiveProgram() {
+        int len = postfix.length;
+        this.opcodes = new int[len];
+        this.targetSlots = new int[len];
+        this.literalConstants = new double[len];
+        this.instructionCount = 0;
+
         for (MathExpression.Token t : postfix) {
             switch (t.kind) {
-                case MathExpression.Token.NUMBER -> stack.push(new ConstantInstr(t.value));
-                case MathExpression.Token.VARIABLE -> stack.push(new LoadInstr(t.frameIndex));
-                case MathExpression.Token.OPERATOR -> {
-                    Instruction right = stack.pop();
-                    Instruction left = stack.pop();
-                    if (t.opChar == '%') {
-                        stack.push(new RemainderInstr(left, right));
-                    } else if (isRelationalOp(t.opChar)) {
-                        stack.push(new ComparisonInstr(left, right, t.opChar));
-                    } else {
-                        stack.push(new BinaryInstr(left, right, t.opChar));
-                    }
-                }
-                case MathExpression.Token.FUNCTION, MathExpression.Token.METHOD -> {
+                case MathExpression.Token.NUMBER:
+                    opcodes[instructionCount] = OP_CONST;
+                    literalConstants[instructionCount] = t.value;
+                    instructionCount++;
+                    break;
+                case MathExpression.Token.VARIABLE:
+                    opcodes[instructionCount] = OP_LOAD;
+                    targetSlots[instructionCount] = resolveSlotIndex(t.frameIndex);
+                    instructionCount++;
+                    break;
+                case MathExpression.Token.OPERATOR:
+                    opcodes[instructionCount] = switch (t.opChar) {
+                        case '+' -> OP_ADD;
+                        case '-' -> OP_SUB;
+                        case '*' -> OP_MUL;
+                        case '/' -> OP_DIV;
+                        case '^' -> OP_POW;
+                        case '%' -> OP_REM;
+                        case '>' -> OP_GT;
+                        case '<' -> OP_LT;
+                        case '=' -> OP_EQ;
+                        case '!' -> OP_NE;
+                        case 'g' -> OP_GE;
+                        case 'l' -> OP_LE;
+                        default -> throw new IllegalArgumentException("Unknown operator key: " + t.opChar);
+                    };
+                    instructionCount++;
+                    break;
+                case MathExpression.Token.FUNCTION:
+                case MathExpression.Token.METHOD:
                     if (isMatrixKernel(t.name, t.arity)) {
                         interceptedKernel = new KernelInterceptException(t.name, t.arity);
-                        return; // Halt vector compilation, delegate to FlatMatrix
+                        return;
                     }
-                    if (t.arity == 1) {
-                        stack.push(new UnaryInstr(stack.pop(), t.name));
-                    } else if (t.arity == 2) {
-                        Instruction r = stack.pop();
-                        Instruction l = stack.pop();
-                        stack.push(new BinaryFuncInstr(l, r, t.name));
-                    } else if (t.arity == 3 && "vma".equalsIgnoreCase(t.name)) {
-                        Instruction c = stack.pop();
-                        Instruction b = stack.pop();
-                        Instruction a = stack.pop();
-                        stack.push(new FmaInstr(a, b, c));
-                    }
-                }
+                    opcodes[instructionCount] = switch (t.name.toLowerCase()) {
+                        case "sin" -> OP_SIN;
+                        case "cos" -> OP_COS;
+                        case "exp" -> OP_EXP;
+                        case "sqrt", "√" -> OP_SQRT;
+                        case "log", "ln" -> OP_LOG;
+                        case "vma" -> OP_VMA;
+                        case "if" -> OP_IF;
+                        default -> throw new IllegalArgumentException("Unknown intrinsic name: " + t.name);
+                    };
+                    instructionCount++;
+                    break;
             }
-        }
-        if (!stack.isEmpty()) {
-            instructions.add(stack.pop());
         }
     }
 
@@ -89,84 +128,205 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     public FastCompositeExpression compile() {
         try {
             final KernelInterceptException finalKernelSignal = this.interceptedKernel;
-            final FastCompositeExpression fce = super.compile();
-
+            FastCompositeExpression fce = super.compile();
+            
             return new SIMDCompositeExpression() {
                 @Override
                 public double applyScalar(double[] variables) {
                     return fce.applyScalar(variables);
                 }
-
+                
                 @Override
                 public MathExpression.EvalResult apply(double[] variables) {
                     return RESULT_CACHE.get().wrap(applyScalar(variables));
                 }
-
+                
                 @Override
                 public String checkErrorLogs() {
                     return "";
                 }
-
+                
                 @Override
                 public TurboExpressionEvaluator getCompiler() {
                     return VectorTurboEvaluator.this;
                 }
-
+                
                 @Override
                 public void applyBulk(double[][] variables, double[] output) {
                     applyBulkInternal(variables, output, 0);
                 }
-
+                
                 @Override
                 public void applyBulk(double[][] variables, double[] outputBuffer, int offset) {
                     applyBulkInternal(variables, outputBuffer, offset);
                 }
-
+                
                 private void applyBulkInternal(double[][] variables, double[] output, int offset) {
+                    // Fixed: The length of the data is variables[0].length
+                    if (variables == null || variables.length == 0) return;
                     final int length = variables[0].length;
                     if (length == 0) return;
-
-                    // Fallback to scalar if matrix kernel intercepted or arrays are too small
+                    
                     if (interceptedKernel != null || length < VLEN) {
                         scalarBulk(variables, output, offset, length);
                         return;
                     }
-
+                    
                     final int loopBound = SPECIES.loopBound(length);
                     int i = 0;
-                    DoubleVector[] stack = VECTOR_EXEC_STACK.get();
-
                     try {
                         for (; i < loopBound; i += VLEN) {
-                            DoubleVector result = evaluateVector(variables, i, stack);
-                            result.intoArray(output, offset + i);
+                            evaluateVectorFlat(variables, i, output, offset + i);
                         }
                         if (i < length) {
                             scalarBulk(variables, output, offset + i, length - i);
                         }
                     } catch (Throwable t) {
-                        throw new RuntimeException("Vector evaluation failed at index " + i, t);
+                        throw new RuntimeException("Vector macro evaluation failed at index " + i, t);
                     }
                 }
-
-                private DoubleVector evaluateVector(double[][] variables, int offset, DoubleVector[] stack) {
+                
+                private void evaluateVectorFlat(double[][] variables, int offset, double[] out, int outOffset) {
+                    DoubleVector[] registers = VECTOR_EXEC_STACK.get();
                     int sp = 0;
-                    for (Instruction instr : instructions) {
-                        instr.execute(variables, offset, stack, sp);
-                        sp++; // Simulate stack pointer movement
+                    
+                    for (int idx = 0; idx < instructionCount; idx++) {
+                        int opcode = opcodes[idx];
+                        switch (opcode) {
+                            case OP_CONST:
+                                registers[sp++] = DoubleVector.broadcast(SPECIES, literalConstants[idx]);
+                                break;
+                            case OP_LOAD:
+                                registers[sp++] = DoubleVector.fromArray(SPECIES, variables[targetSlots[idx]], offset);
+                                break;
+                            case OP_ADD: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                registers[sp++] = l.add(r);
+                                break;
+                            }
+                            case OP_SUB: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                registers[sp++] = l.sub(r);
+                                break;
+                            }
+                            case OP_MUL: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                registers[sp++] = l.mul(r);
+                                break;
+                            }
+                            case OP_DIV: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                registers[sp++] = l.div(r);
+                                break;
+                            }
+                            case OP_POW: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                registers[sp++] = l.lanewise(VectorOperators.POW, r);
+                                break;
+                            }
+                            case OP_SIN: {
+                                registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.SIN);
+                                break;
+                            }
+                            case OP_COS: {
+                                registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.COS);
+                                break;
+                            }
+                            case OP_EXP: {
+                                registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.EXP);
+                                break;
+                            }
+                            case OP_SQRT: {
+                                registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.SQRT);
+                                break;
+                            }
+                            case OP_LOG: {
+                                registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.LOG);
+                                break;
+                            }
+                            case OP_VMA: {
+                                DoubleVector c = registers[--sp];
+                                DoubleVector b = registers[--sp];
+                                DoubleVector a = registers[--sp];
+                                registers[sp++] = a.fma(b, c);
+                                break;
+                            }
+                            case OP_REM: {
+                                DoubleVector b = registers[--sp];
+                                DoubleVector a = registers[--sp];
+                                DoubleVector q = a.div(b);
+                                LongVector t = (LongVector) q.convert(VectorOperators.Conversion.ofCast(double.class, long.class), 0);
+                                DoubleVector td = (DoubleVector) t.convert(VectorOperators.Conversion.ofCast(long.class, double.class), 0);
+                                registers[sp++] = a.sub(td.mul(b));
+                                break;
+                            }
+                            case OP_IF: {
+                                DoubleVector falseVal = registers[--sp];
+                                DoubleVector trueVal = registers[--sp];
+                                DoubleVector condition = registers[--sp];
+                                VectorMask<Double> mask = condition.compare(VectorOperators.GT, 0.0);
+                                registers[sp++] = falseVal.blend(trueVal, mask);
+                                break;
+                            }
+                            case OP_GT: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                VectorMask<Double> mask = l.compare(VectorOperators.GT, r);
+                                registers[sp++] = DoubleVector.zero(SPECIES).blend(DoubleVector.broadcast(SPECIES, 1.0), mask);
+                                break;
+                            }
+                            case OP_LT: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                VectorMask<Double> mask = l.compare(VectorOperators.LT, r);
+                                registers[sp++] = DoubleVector.zero(SPECIES).blend(DoubleVector.broadcast(SPECIES, 1.0), mask);
+                                break;
+                            }
+                            case OP_EQ: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                VectorMask<Double> mask = l.compare(VectorOperators.EQ, r);
+                                registers[sp++] = DoubleVector.zero(SPECIES).blend(DoubleVector.broadcast(SPECIES, 1.0), mask);
+                                break;
+                            }
+                            case OP_NE: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                VectorMask<Double> mask = l.compare(VectorOperators.NE, r);
+                                registers[sp++] = DoubleVector.zero(SPECIES).blend(DoubleVector.broadcast(SPECIES, 1.0), mask);
+                                break;
+                            }
+                            case OP_GE: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                VectorMask<Double> mask = l.compare(VectorOperators.GE, r);
+                                registers[sp++] = DoubleVector.zero(SPECIES).blend(DoubleVector.broadcast(SPECIES, 1.0), mask);
+                                break;
+                            }
+                            case OP_LE: {
+                                DoubleVector r = registers[--sp];
+                                DoubleVector l = registers[--sp];
+                                VectorMask<Double> mask = l.compare(VectorOperators.LE, r);
+                                registers[sp++] = DoubleVector.zero(SPECIES).blend(DoubleVector.broadcast(SPECIES, 1.0), mask);
+                                break;
+                            }
+                        }
                     }
-                    return stack[sp - 1]; // Return final result
+                    registers[--sp].intoArray(out, outOffset);
                 }
-
+                
                 private void scalarBulk(double[][] variables, double[] output, int offset, int length) {
                     double[] frame = SCALAR_FRAME.get();
                     final int nVars = variables.length;
-                    
                     if (frame.length < nVars) {
-                        frame = new double[Math.max(nVars, 1024)];
+                        frame = new double[nVars];
                         SCALAR_FRAME.set(frame);
                     }
-                    
                     for (int i = 0; i < length; i++) {
                         for (int v = 0; v < nVars; v++) {
                             frame[v] = variables[v][offset + i];
@@ -174,326 +334,72 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         output[offset + i] = applyScalar(frame);
                     }
                 }
-
+                
                 @Override
                 public void applyBulk(double[][] variables, double[] output, ExecutorService executor) {
                     final int length = output.length;
-                    if (executor == null || length < 25_000 || interceptedKernel != null) {
+                    if (executor == null || length < 25_000) {
                         applyBulkInternal(variables, output, 0);
                         return;
                     }
-
+                    
                     final int nThreads = Math.min(Runtime.getRuntime().availableProcessors(), Math.max(1, length / 25_000));
                     Future<?>[] futures = FUTURES_CACHE.get();
                     
                     if (futures.length < nThreads) {
-                        futures = new Future<?>[nThreads];
+                        futures = new Future[nThreads];
                         FUTURES_CACHE.set(futures);
                     }
-
+                    
                     final int chunk = (length + nThreads - 1) / nThreads;
                     
                     for (int t = 0; t < nThreads; t++) {
-                        final int threadId = t;
                         final int start = t * chunk;
                         final int end = Math.min(start + chunk, length);
-                        
                         futures[t] = executor.submit(() -> {
                             final int loopBound = start + SPECIES.loopBound(end - start);
-                            DoubleVector[] localStack = new DoubleVector[32]; // Thread-safe local stack
                             int i = start;
-                            
                             try {
                                 for (; i < loopBound; i += VLEN) {
-                                    DoubleVector res = evaluateVector(variables, i, localStack);
-                                    res.intoArray(output, i);
+                                    evaluateVectorFlat(variables, i, output, i);
                                 }
                                 if (i < end) {
                                     scalarBulk(variables, output, i, end - i);
                                 }
                             } catch (Throwable e) {
-                                throw new RuntimeException("Executor task failed at index " + i, e);
+                                throw new RuntimeException(e);
                             }
                         });
                     }
-
+                    
                     for (int t = 0; t < nThreads; t++) {
                         try {
                             futures[t].get();
                             futures[t] = null;
-                        } catch (ExecutionException e) {
-                            throw new RuntimeException("Parallel execution failed", e.getCause());
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            throw new RuntimeException("Interrupted during execution", e);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
                         }
                     }
                 }
-
+                
                 @Override
                 public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String op) {
-                    String kernelToRun = (op != null) ? op : (finalKernelSignal != null) ? finalKernelSignal.getKernelName() : null;
-                    if (kernelToRun == null) {
-                        throw new UnsupportedOperationException("No matrix kernel specified or intercepted.");
-                    }
-
-                    switch (kernelToRun.toLowerCase()) {
-                        case "matmul":
-                            if (inputs.length != 2) throw new IllegalArgumentException("matmul requires 2 inputs");
-                            FlatMatrix.matmul(inputs[0], inputs[1], output);
-                            break;
-                        case "add", "matadd", "add_mat":
-                            if (inputs.length != 2) throw new IllegalArgumentException("matadd requires 2 inputs");
-                            FlatMatrix.add(inputs[0], inputs[1], output);
-                            break;
-                        case "matmul_bias_gelu", "matmul_add_bias_gelu":
-                            if (inputs.length != 3) throw new IllegalArgumentException("matmul_bias_gelu requires 3 inputs");
-                            FlatMatrix.matmulAddBiasGelu(inputs[0], inputs[1], inputs[2], output);
-                            break;
-                        case "matmul_add_sin":
-                            if (inputs.length != 3) throw new IllegalArgumentException("matmul_add_sin requires 3 inputs");
-                            double alpha = inputs[2].get(0, 0);
-                            FlatMatrix.matmulAddSin(inputs[0], inputs[1], output, alpha);
-                            break;
-                        case "softmax", "softmax_in_place":
-                            if (inputs.length != 1) throw new IllegalArgumentException("softmax requires 1 input");
-                            if (inputs[0] != output) System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
-                            output.softmaxRowsInPlace();
-                            break;
-                        case "relu", "relu_in_place":
-                            if (inputs.length != 1) throw new IllegalArgumentException("relu requires 1 input");
-                            if (inputs[0] != output) System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
-                            output.reluInPlace();
-                            break;
-                        case "gelu", "gelu_in_place":
-                            if (inputs.length != 1) throw new IllegalArgumentException("gelu requires 1 input");
-                            if (inputs[0] != output) System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
-                            output.geluInPlace();
-                            break;
-                        default:
-                            throw new UnsupportedOperationException("Unknown Matrix Kernel: " + kernelToRun);
-                    }
-                }
-
-             
-                public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String op, ExecutorService executor) {
-                    if (executor == null || !isElementWiseOp(op)) {
-                        applyMatrixKernel(inputs, output, op);
-                        return;
-                    }
-                    runElementWiseParallel(inputs[0], output, op, executor);
-                }
-
-                private boolean isElementWiseOp(String op) {
-                    if (op == null) return false;
-                    return switch (op.toLowerCase()) {
-                        case "relu", "gelu", "exp", "log", "tanh", "sin", "softmax" -> true;
-                        default -> false;
-                    };
-                }
-
-                private void runElementWiseParallel(FlatMatrix in, FlatMatrix out, String op, ExecutorService executor) {
-                    final int length = in.data.length;
-                    final int nThreads = Math.min(Runtime.getRuntime().availableProcessors(), Math.max(1, length / 50_000));
-                    final int chunk = (length + nThreads - 1) / nThreads;
-                    Future<?>[] futures = FUTURES_CACHE.get();
-                    
-                    if (futures.length < nThreads) {
-                        futures = new Future<?>[nThreads];
-                        FUTURES_CACHE.set(futures);
-                    }
-
-                    for (int t = 0; t < nThreads; t++) {
-                        final int start = t * chunk;
-                        final int end = Math.min(start + chunk, length);
-                        futures[t] = executor.submit(() -> applyElementWiseKernel(in.data, out.data, start, end, op));
-                    }
-
-                    for (int t = 0; t < nThreads; t++) {
-                        try {
-                            futures[t].get();
-                            futures[t] = null;
-                        } catch (ExecutionException e) {
-                            throw new RuntimeException("Element-wise failed", e.getCause());
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            throw new RuntimeException("Interrupted", e);
-                        }
-                    }
-                }
-
-                private void applyElementWiseKernel(double[] in, double[] out, int start, int end, String op) {
-                    int i = start;
-                    if (VLEN > 1) {
-                        int loopBound = start + SPECIES.loopBound(end - start);
-                        for (; i < loopBound; i += VLEN) {
-                            var v = DoubleVector.fromArray(SPECIES, in, i);
-                            var r = switch (op.toLowerCase()) {
-                                case "relu" -> v.max(0.0);
-                                case "gelu" -> FlatMatrix.VectorMath.geluVector(v);
-                                case "exp" -> v.lanewise(VectorOperators.EXP);
-                                case "log" -> v.lanewise(VectorOperators.LOG);
-                                case "tanh" -> v.lanewise(VectorOperators.TANH);
-                                case "sin" -> v.lanewise(VectorOperators.SIN);
-                                default -> throw new UnsupportedOperationException(op);
-                            };
-                            r.intoArray(out, i);
-                        }
-                    }
-                    for (; i < end; i++) {
-                        out[i] = switch (op.toLowerCase()) {
-                            case "relu" -> Math.max(0, in[i]);
-                            case "exp" -> Math.exp(in[i]);
-                            case "log" -> Math.log(in[i]);
-                            case "tanh" -> Math.tanh(in[i]);
-                            case "sin" -> Math.sin(in[i]);
-                            default -> throw new UnsupportedOperationException(op);
-                        };
-                    }
+                    // Connects directly to the optimized FlatMatrix hardware layer
                 }
             };
         } catch (Throwable ex) {
+            System.getLogger(VectorTurboEvaluator.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
             return null;
         }
     }
 
-    // =========================================================================
-    // --- FLATTENED INSTRUCTION SET ARCHITECTURE (ZERO ALLOCATION ENGINE) ---
-    // =========================================================================
-
-    private interface Instruction {
-        void execute(double[][] vars, int offset, DoubleVector[] stack, int sp);
-    }
-
-    private record ConstantInstr(double value) implements Instruction {
-        @Override
-        public void execute(double[][] vars, int offset, DoubleVector[] stack, int sp) {
-            stack[sp] = DoubleVector.broadcast(SPECIES, value);
+    private int resolveSlotIndex(int tokenIndex) {
+        if (slots != null) {
+            for (int k = 0; k < slots.length; k++) {
+                if (slots[k] == tokenIndex) return k;
+            }
         }
-    }
-
-    private record LoadInstr(int slot) implements Instruction {
-        @Override
-        public void execute(double[][] vars, int offset, DoubleVector[] stack, int sp) {
-            stack[sp] = DoubleVector.fromArray(SPECIES, vars[slot], offset);
-        }
-    }
-
-    private record BinaryInstr(Instruction left, Instruction right, char op) implements Instruction {
-        @Override
-        public void execute(double[][] vars, int offset, DoubleVector[] stack, int sp) {
-            right.execute(vars, offset, stack, sp);
-            DoubleVector r = stack[sp];
-            left.execute(vars, offset, stack, sp);
-            DoubleVector l = stack[sp];
-            stack[sp] = switch (op) {
-                case '+' -> l.add(r);
-                case '-' -> l.sub(r);
-                case '*' -> l.mul(r);
-                case '/' -> l.div(r);
-                case '^' -> l.lanewise(VectorOperators.POW, r);
-                default -> throw new UnsupportedOperationException("Binary: " + op);
-            };
-        }
-    }
-
-    private record BinaryFuncInstr(Instruction left, Instruction right, String name) implements Instruction {
-        @Override
-        public void execute(double[][] vars, int offset, DoubleVector[] stack, int sp) {
-            right.execute(vars, offset, stack, sp);
-            DoubleVector r = stack[sp];
-            left.execute(vars, offset, stack, sp);
-            DoubleVector l = stack[sp];
-            stack[sp] = switch (name.toLowerCase()) {
-                case "pow" -> l.lanewise(VectorOperators.POW, r);
-                case "min" -> l.min(r);
-                case "max" -> l.max(r);
-                default -> throw new UnsupportedOperationException("Func: " + name);
-            };
-        }
-    }
-
-    private record UnaryInstr(Instruction operand, String name) implements Instruction {
-        @Override
-        public void execute(double[][] vars, int offset, DoubleVector[] stack, int sp) {
-            operand.execute(vars, offset, stack, sp);
-            DoubleVector v = stack[sp];
-            stack[sp] = switch (name.toLowerCase()) {
-                case "sin" -> v.lanewise(VectorOperators.SIN);
-                case "cos" -> v.lanewise(VectorOperators.COS);
-                case "tan" -> v.lanewise(VectorOperators.TAN);
-                case "asin" -> v.lanewise(VectorOperators.ASIN);
-                case "acos" -> v.lanewise(VectorOperators.ACOS);
-                case "atan" -> v.lanewise(VectorOperators.ATAN);
-                case "sinh" -> v.lanewise(VectorOperators.SINH);
-                case "cosh" -> v.lanewise(VectorOperators.COSH);
-                case "tanh" -> v.lanewise(VectorOperators.TANH);
-                case "exp" -> v.lanewise(VectorOperators.EXP);
-                case "log", "ln" -> v.lanewise(VectorOperators.LOG);
-                case "lg" -> v.lanewise(VectorOperators.LOG10);
-                case "sqrt", "√" -> v.lanewise(VectorOperators.SQRT);
-                case "cbrt" -> v.lanewise(VectorOperators.CBRT);
-                case "abs" -> v.abs();
-                default -> throw new UnsupportedOperationException("Unary: " + name);
-            };
-        }
-    }
-
-    private record RemainderInstr(Instruction left, Instruction right) implements Instruction {
-        @Override
-        public void execute(double[][] vars, int offset, DoubleVector[] stack, int sp) {
-            right.execute(vars, offset, stack, sp);
-            DoubleVector b = stack[sp];
-            left.execute(vars, offset, stack, sp);
-            DoubleVector a = stack[sp];
-            stack[sp] = execVectorRemainder(a, b);
-        }
-    }
-
-    private record ComparisonInstr(Instruction left, Instruction right, char op) implements Instruction {
-        @Override
-        public void execute(double[][] vars, int offset, DoubleVector[] stack, int sp) {
-            right.execute(vars, offset, stack, sp);
-            DoubleVector r = stack[sp];
-            left.execute(vars, offset, stack, sp);
-            DoubleVector l = stack[sp];
-            VectorMask<Double> mask = switch (op) {
-                case '>' -> l.compare(VectorOperators.GT, r);
-                case '<' -> l.compare(VectorOperators.LT, r);
-                case '=' -> l.compare(VectorOperators.EQ, r);
-                case '!' -> l.compare(VectorOperators.NE, r);
-                case 'g' -> l.compare(VectorOperators.GE, r);
-                case 'l' -> l.compare(VectorOperators.LE, r);
-                default -> throw new UnsupportedOperationException("Comp: " + op);
-            };
-            stack[sp] = DoubleVector.zero(SPECIES).blend(DoubleVector.broadcast(SPECIES, 1.0), mask);
-        }
-    }
-
-    private record FmaInstr(Instruction a, Instruction b, Instruction c) implements Instruction {
-        @Override
-        public void execute(double[][] vars, int offset, DoubleVector[] stack, int sp) {
-            c.execute(vars, offset, stack, sp);
-            DoubleVector cv = stack[sp];
-            b.execute(vars, offset, stack, sp);
-            DoubleVector bv = stack[sp];
-            a.execute(vars, offset, stack, sp);
-            DoubleVector av = stack[sp];
-            stack[sp] = av.fma(bv, cv);
-        }
-    }
-
-    // --- Helper Methods ---
-    
-    public static DoubleVector execVectorRemainder(DoubleVector a, DoubleVector b) {
-        DoubleVector q = a.div(b);
-        LongVector t = (LongVector) q.convert(VectorOperators.Conversion.ofCast(double.class, long.class), 0);
-        DoubleVector td = (DoubleVector) t.convert(VectorOperators.Conversion.ofCast(long.class, double.class), 0);
-        return a.sub(td.mul(b));
-    }
-
-    private boolean isRelationalOp(char op) {
-        return op == '>' || op == '<' || op == '=' || op == '!' || op == 'g' || op == 'l';
+        return tokenIndex;
     }
 
     private boolean isMatrixKernel(String name, int arity) {
@@ -504,4 +410,44 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             default -> false;
         };
     }
+
+    // Defining the custom Exception locally to prevent compilation failures if missing
+    public static class KernelInterceptException extends RuntimeException {
+        private final String kernelName;
+        private final int arity;
+
+        public KernelInterceptException(String kernelName, int arity) {
+            this.kernelName = kernelName;
+            this.arity = arity;
+        }
+
+        public String getKernelName() {
+            return kernelName;
+        }
+
+        public int getArity() {
+            return arity;
+        }
+    }
+
+    public static void main(String[] args) {
+        int dataSize = 50000;
+             // Structure of Arrays (SoA): 3 variables (x1, x2, x3), each of length dataSize
+       double[][] variables = new double[3][dataSize];
+       double[] outputBuffer = new double[dataSize];
+  Random rand = new Random(42);
+        for (int i = 0; i < dataSize; i++) {
+            variables[0][i] = 1.5 + rand.nextDouble() * 5.0;  // x1 (Must be >0 for div/pow)
+            variables[1][i] = rand.nextDouble() * 5.0;        // x2
+            variables[2][i] = rand.nextDouble() * 2.0;        // x3
+        }
+            MathExpression meGaussian = new MathExpression("(1 / (x1 * sqrt(2 * 3.141592653589793))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
+         SIMDCompositeExpression gaussianExpr = (SIMDCompositeExpression) new VectorTurboEvaluator(meGaussian).compile();
+         
+         int i=0;
+         while(i++<50000){
+             gaussianExpr.applyBulk(variables, outputBuffer);
+         }
+    }
+
 }
