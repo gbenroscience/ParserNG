@@ -57,17 +57,21 @@ public class VectorTurboEvaluatorBenchmark {
         */
     }
 
-    @Benchmark
-    public double[] benchmarkLinearPolynomialBulk() {
+ 
+    
+        @Benchmark
+    public void benchmarkLinearPolynomialBulk(org.openjdk.jmh.infra.Blackhole bh) {
         linearExpr.applyBulk(variables, outputBuffer);
-        return outputBuffer;
+        // Consume just the first slot to prove execution happened without returning the array reference object
+        bh.consume(outputBuffer); 
     }
 
     @Benchmark
-    public double[] benchmarkGaussianDistributionBulk() {
+    public void benchmarkGaussianDistributionBulk(org.openjdk.jmh.infra.Blackhole bh) {
         gaussianExpr.applyBulk(variables, outputBuffer);
-        return outputBuffer;
+        bh.consume(outputBuffer);
     }
+
 /*
     @Benchmark
     public double[] benchmarkHardwareMaskConditionalBulk() {
