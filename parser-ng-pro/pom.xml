@@ -84,6 +84,23 @@
                     <argLine>--add-modules jdk.incubator.vector</argLine>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.6.3</version>
+                <configuration>
+                    <executable>java</executable>
+                    <arguments>
+                        <argument>--add-modules</argument>
+                        <argument>jdk.incubator.vector</argument>
+            
+                        <argument>-classpath</argument>
+                        <classpath/>
+            
+                        <argument>com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>
