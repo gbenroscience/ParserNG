@@ -33,7 +33,7 @@ public class VectorTurboEvaluatorBenchmark {
     @Setup(Level.Trial)
     public void setup() throws Throwable {
         Random rand = new Random(42);
-        
+
         // Structure of Arrays (SoA): 3 variables (x1, x2, x3), each of length dataSize
         variables = new double[3][dataSize];
         outputBuffer = new double[dataSize];
@@ -54,48 +54,58 @@ public class VectorTurboEvaluatorBenchmark {
         /*
         MathExpression meConditional = new MathExpression("if(x1 >= 2.5, sin(x1) % x2, x3 * vma(x1, x2, 1.5))");
         conditionalExpr = (SIMDCompositeExpression) new VectorTurboEvaluator(meConditional).compile();
-        */
+         */
     }
 
- 
-    
-        @Benchmark
+    @Benchmark
     public void benchmarkLinearPolynomialBulk(org.openjdk.jmh.infra.Blackhole bh) {
         linearExpr.applyBulk(variables, outputBuffer);
-        // Consume just the first slot to prove execution happened without returning the array reference object
-        bh.consume(outputBuffer); 
+
+        // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
+        // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
+        double checksum = 0.0;
+        for (int i = 0; i < outputBuffer.length; i += 64) { // Sample memory lines to reduce benchmark overhead
+            checksum += outputBuffer[i];
+        }
+        bh.consume(checksum);
     }
 
     @Benchmark
     public void benchmarkGaussianDistributionBulk(org.openjdk.jmh.infra.Blackhole bh) {
         gaussianExpr.applyBulk(variables, outputBuffer);
-        bh.consume(outputBuffer);
+
+        // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
+        // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
+        double checksum = 0.0;
+        for (int i = 0; i < outputBuffer.length; i += 64) { // Sample memory lines to reduce benchmark overhead
+            checksum += outputBuffer[i];
+        }
+        bh.consume(checksum);
     }
 
-/*
+    /*
     @Benchmark
     public double[] benchmarkHardwareMaskConditionalBulk() {
         conditionalExpr.applyBulk(variables, outputBuffer);
         return outputBuffer;
     }
-    */
-    
+     */
     public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
-            opt.include(VectorTurboEvaluatorBenchmark.class.getSimpleName()); // Always include baseline
-           // 4. Fluent, modern JMH Configuration
-            Options configurations = opt.mode(Mode.AverageTime)
-                    .timeUnit(TimeUnit.NANOSECONDS)
-                    .warmupIterations(5)
-                    .warmupTime(TimeValue.milliseconds(200L))
-                    .measurementIterations(5)
-                    .measurementTime(TimeValue.milliseconds(500))
-                    .forks(2)
-                    .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
-                    .jvmArgs("-Xms2g", "-Xmx2g", "-Dbenchmark.index=1")
-                    .jvmArgsAppend("--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions")
-                    .build();
+        opt.include(VectorTurboEvaluatorBenchmark.class.getSimpleName()); // Always include baseline
+        // 4. Fluent, modern JMH Configuration
+        Options configurations = opt.mode(Mode.AverageTime)
+                .timeUnit(TimeUnit.NANOSECONDS)
+                .warmupIterations(5)
+                .warmupTime(TimeValue.milliseconds(200L))
+                .measurementIterations(5)
+                .measurementTime(TimeValue.milliseconds(500))
+                .forks(2)
+                .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
+                .jvmArgs("-Xms2g", "-Xmx2g", "-Dbenchmark.index=1")
+                .jvmArgsAppend("--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions")
+                .build();
 
-            new Runner(configurations).run();
+        new Runner(configurations).run();
     }
 }
