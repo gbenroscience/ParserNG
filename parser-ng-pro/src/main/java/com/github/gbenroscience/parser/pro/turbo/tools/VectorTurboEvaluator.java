@@ -29,13 +29,42 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     private static final int OP_MUL = 5;
     private static final int OP_DIV = 6;
     private static final int OP_POW = 7;
+    
     private static final int OP_SIN = 8;
     private static final int OP_COS = 9;
-    private static final int OP_EXP = 10;
-    private static final int OP_SQRT = 11;
-    private static final int OP_LOG = 12;
-    private static final int OP_VMA = 13;
-    private static final int OP_REM = 14;
+    private static final int OP_TAN = 10;
+    
+    private static final int OP_ASIN = 11;
+    private static final int OP_ACOS = 12;
+    private static final int OP_ATAN = 13;
+    
+    private static final int OP_SINH = 14;
+    private static final int OP_COSH = 15;
+    private static final int OP_TANH = 16;
+    
+    private static final int OP_ABS = 17;
+    
+    private static final int OP_EXP = 18;
+    private static final int OP_SQRT = 19;
+    private static final int OP_CBRT = 20;
+    
+    private static final int OP_LOG = 21;
+    private static final int OP_LOG10 = 22;
+    private static final int OP_VMA = 23;
+    
+    private static final int OP_REM = 24;
+    
+    //ADD THESE
+    private static final int OP_IF = 25;
+    private static final int OP_GT = 26;
+    private static final int OP_LT = 27;
+    private static final int OP_EQ = 28;
+    private static final int OP_NE = 29;
+    private static final int OP_GE = 30;
+    private static final int OP_LE = 31;
+    
+     
+    
 
     private static final ThreadLocal<double[]> SCALAR_FRAME = ThreadLocal.withInitial(() -> new double[0]);
     private static final ThreadLocal<Future<?>[]> FUTURES_CACHE = ThreadLocal.withInitial(() -> new Future[0]);
@@ -93,10 +122,22 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     opcodes[instructionCount] = switch (t.name.toLowerCase()) {
                         case "sin" -> OP_SIN;
                         case "cos" -> OP_COS;
+                        case "tan" -> OP_TAN;
+                        case "asin" -> OP_ASIN;
+                        case "acos" -> OP_ACOS;
+                        case "atan" -> OP_ATAN;
+                        case "sinh" -> OP_SINH;
+                        case "cosh" -> OP_COSH;
+                        case "tanh" -> OP_TANH;
                         case "exp" -> OP_EXP;
                         case "sqrt" -> OP_SQRT;
+                        case "cbrt" -> OP_CBRT;
                         case "log" -> OP_LOG;
+                        case "ln" -> OP_LOG;
+                        case "lg" -> OP_LOG10;
+                        case "log10" -> OP_LOG10;
                         case "vma" -> OP_VMA;
+                        case "abs" -> OP_ABS;
                         default -> throw new IllegalArgumentException("Unknown function: " + t.name);
                     };
                     instructionCount++;
@@ -281,9 +322,18 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 case OP_POW -> { DoubleVector r = registers[--sp]; DoubleVector l = registers[--sp]; registers[sp++] = l.lanewise(VectorOperators.POW, r); }
                 case OP_SIN -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.SIN);
                 case OP_COS -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.COS);
+                case OP_TAN -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.TAN);
+                case OP_SINH -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.SINH);
+                case OP_COSH -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.COSH);
+                case OP_TANH -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.TANH);
+                case OP_ASIN -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.ASIN);
+                case OP_ACOS -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.ACOS);
+                case OP_ATAN -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.ATAN);
                 case OP_EXP -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.EXP);
                 case OP_SQRT -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.SQRT);
+                case OP_CBRT -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.CBRT);
                 case OP_LOG -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.LOG);
+                case OP_ABS -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.ABS);
                 case OP_VMA -> {
                     DoubleVector c = registers[--sp];
                     DoubleVector b = registers[--sp];
