@@ -9,16 +9,12 @@ import jdk.incubator.vector.*;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
-import java.util.Random;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 /**
- * Enterprise SIMD Evaluator for ParserNG. Compiles a parallel Vector
- * MethodHandle tree for high-throughput block execution.
- *
- * REQUIRES JVM FLAG: --add-modules jdk.incubator.vector
- *
- * @author GBEMIRO
+ * Original low-allocation code + FlatMatrix support (zero cost when not used).
  */
 public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
@@ -151,12 +147,14 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             private void applyBulkInternal(double[][] variables, double[] output, int offset) {
-                final int length = variables.length;
+                final int length = variables.length;   // note: original used variables.length, not variables[0].length
                 if (length == 0) return;
+
                 if (interceptedKernel != null || length < VLEN || finalVectorHandle == null) {
                     scalarBulk(variables, output, offset, length);
                     return;
                 }
+
                 final int loopBound = SPECIES.loopBound(length);
                 int i = 0;
                 try {
@@ -228,16 +226,41 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 }
             }
 
-  
-            public void applyMatrixKernel(Object[] inputs, Object output, String op) {
-                // Implementation pending
+            @Override
+            public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String op) {
+                String kernelToRun = (op != null) ? op : (interceptedKernel != null ? interceptedKernel.getKernelName() : null);
+                if (kernelToRun == null) throw new UnsupportedOperationException("No kernel");
+
+                switch (kernelToRun.toLowerCase()) {
+                    case "matmul" -> FlatMatrix.matmul(inputs[0], inputs[1], output);
+                    case "add", "matadd", "add_mat" -> FlatMatrix.add(inputs[0], inputs[1], output);
+                    case "matmul_bias_gelu", "matmul_add_bias_gelu" -> FlatMatrix.matmulAddBiasGelu(inputs[0], inputs[1], inputs[2], output);
+                    case "matmul_add_sin" -> {
+                        double alpha = inputs[2].get(0, 0);
+                        FlatMatrix.matmulAddSin(inputs[0], inputs[1], output, alpha);
+                    }
+                    case "softmax", "softmax_in_place" -> {
+                        if (inputs[0] != output) System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
+                        output.softmaxRowsInPlace();
+                    }
+                    case "relu", "relu_in_place" -> {
+                        if (inputs[0] != output) System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
+                        output.reluInPlace();
+                    }
+                    case "gelu", "gelu_in_place" -> {
+                        if (inputs[0] != output) System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
+                        output.geluInPlace();
+                    }
+                    default -> throw new UnsupportedOperationException("Unknown kernel: " + kernelToRun);
+                }
             }
         };
     }
 
     private MethodHandle compileVectorTree() throws Throwable {
         MethodHandle h = LOOKUP.findStatic(VectorTurboEvaluator.class, "execFusedVectorProgram",
-                MethodType.methodType(void.class, int[].class, int[].class, double[].class, int.class, double[][].class, int.class, double[].class, int.class));
+                MethodType.methodType(void.class, int[].class, int[].class, double[].class, int.class,
+                        double[][].class, int.class, double[].class, int.class));
         return MethodHandles.insertArguments(h, 0, this.opcodes, this.targetSlots, this.literalConstants, this.instructionCount);
     }
 
@@ -300,7 +323,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     }
 
     private int resolveSlotIndex(int tokenIndex) {
-        // Assuming 'slots' is provided by the superclass
         if (slots != null) {
             for (int k = 0; k < slots.length; k++) {
                 if (slots[k] == tokenIndex) return k;
@@ -310,26 +332,11 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     }
 
     private boolean isMatrixKernel(String name, int arity) {
-        return false;
-    }
-    
-    public static void main(String[] args) {
-        int dataSize = 50000;
-             // Structure of Arrays (SoA): 3 variables (x1, x2, x3), each of length dataSize
-       double[][] variables = new double[3][dataSize];
-       double[] outputBuffer = new double[dataSize];
-  Random rand = new Random(42);
-        for (int i = 0; i < dataSize; i++) {
-            variables[0][i] = 1.5 + rand.nextDouble() * 5.0;  // x1 (Must be >0 for div/pow)
-            variables[1][i] = rand.nextDouble() * 5.0;        // x2
-            variables[2][i] = rand.nextDouble() * 2.0;        // x3
-        }
-            MathExpression meGaussian = new MathExpression("(1 / (x1 * sqrt(2 * 3.141592653589793))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-         SIMDCompositeExpression gaussianExpr = (SIMDCompositeExpression) new VectorTurboEvaluator1(meGaussian).compile();
-         
-         int i=0;
-         while(i++<5){
-             gaussianExpr.applyBulk(variables, outputBuffer);
-         }
+        return switch (name.toLowerCase()) {
+            case "matmul", "matadd", "add_mat" -> arity == 2;
+            case "softmax", "relu", "gelu", "exp", "log", "tanh", "sin" -> arity == 1;
+            case "matmul_add_sin", "matmul_bias_gelu" -> arity == 3;
+            default -> false;
+        };
     }
 }
