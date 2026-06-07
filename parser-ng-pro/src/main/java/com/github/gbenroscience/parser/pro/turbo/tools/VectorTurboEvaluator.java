@@ -14,7 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 /**
- * Original low-allocation code + FlatMatrix support (zero cost when not used).
+ * Original low-allocation VectorTurboEvaluator + FlatMatrix integration.
  */
 public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
@@ -147,7 +147,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             private void applyBulkInternal(double[][] variables, double[] output, int offset) {
-                final int length = variables.length;   // note: original used variables.length, not variables[0].length
+                final int length = variables.length;
                 if (length == 0) return;
 
                 if (interceptedKernel != null || length < VLEN || finalVectorHandle == null) {
@@ -251,6 +251,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         if (inputs[0] != output) System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
                         output.geluInPlace();
                     }
+                    // Add more cases as needed
                     default -> throw new UnsupportedOperationException("Unknown kernel: " + kernelToRun);
                 }
             }
@@ -273,31 +274,11 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             switch (opcode) {
                 case OP_CONST -> registers[sp++] = DoubleVector.broadcast(SPECIES, literalConstants[idx]);
                 case OP_LOAD -> registers[sp++] = DoubleVector.fromArray(SPECIES, vars[targetSlots[idx]], off);
-                case OP_ADD -> {
-                    DoubleVector r = registers[--sp];
-                    DoubleVector l = registers[--sp];
-                    registers[sp++] = l.add(r);
-                }
-                case OP_SUB -> {
-                    DoubleVector r = registers[--sp];
-                    DoubleVector l = registers[--sp];
-                    registers[sp++] = l.sub(r);
-                }
-                case OP_MUL -> {
-                    DoubleVector r = registers[--sp];
-                    DoubleVector l = registers[--sp];
-                    registers[sp++] = l.mul(r);
-                }
-                case OP_DIV -> {
-                    DoubleVector r = registers[--sp];
-                    DoubleVector l = registers[--sp];
-                    registers[sp++] = l.div(r);
-                }
-                case OP_POW -> {
-                    DoubleVector r = registers[--sp];
-                    DoubleVector l = registers[--sp];
-                    registers[sp++] = l.lanewise(VectorOperators.POW, r);
-                }
+                case OP_ADD -> { DoubleVector r = registers[--sp]; DoubleVector l = registers[--sp]; registers[sp++] = l.add(r); }
+                case OP_SUB -> { DoubleVector r = registers[--sp]; DoubleVector l = registers[--sp]; registers[sp++] = l.sub(r); }
+                case OP_MUL -> { DoubleVector r = registers[--sp]; DoubleVector l = registers[--sp]; registers[sp++] = l.mul(r); }
+                case OP_DIV -> { DoubleVector r = registers[--sp]; DoubleVector l = registers[--sp]; registers[sp++] = l.div(r); }
+                case OP_POW -> { DoubleVector r = registers[--sp]; DoubleVector l = registers[--sp]; registers[sp++] = l.lanewise(VectorOperators.POW, r); }
                 case OP_SIN -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.SIN);
                 case OP_COS -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.COS);
                 case OP_EXP -> registers[sp - 1] = registers[sp - 1].lanewise(VectorOperators.EXP);
