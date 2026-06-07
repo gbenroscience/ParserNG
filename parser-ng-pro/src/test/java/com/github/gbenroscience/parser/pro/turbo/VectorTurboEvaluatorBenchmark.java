@@ -19,7 +19,7 @@ import org.openjdk.jmh.runner.options.TimeValue;
 @State(Scope.Thread)
 public class VectorTurboEvaluatorBenchmark {
 
-    @Param({"1000", "50000", "500000"})
+    @Param({"1000", "50000", "500000", "50000000"})
     private int dataSize;
 
     private double[][] variables;
