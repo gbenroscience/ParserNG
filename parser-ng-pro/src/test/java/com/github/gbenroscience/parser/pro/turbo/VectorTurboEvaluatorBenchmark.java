@@ -31,9 +31,9 @@ public class VectorTurboEvaluatorBenchmark {
     private double[][] variables;
     private double[] outputBuffer;
 
-    private VectorTurboEvaluator.VectorCompositeExpression linearExpr;
-    private VectorTurboEvaluator.VectorCompositeExpression gaussianExpr;
-    private VectorTurboEvaluator.VectorCompositeExpression conditionalExpr;
+    private VectorTurboEvaluator.BatchedVectorCompositeExpression linearExpr;
+    private VectorTurboEvaluator.BatchedVectorCompositeExpression gaussianExpr;
+    private VectorTurboEvaluator.BatchedVectorCompositeExpression conditionalExpr;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable {
@@ -51,11 +51,11 @@ public class VectorTurboEvaluatorBenchmark {
 
         // Compile expressions using the Vector Engine
         MathExpression meLinear = new MathExpression("12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2");
-        linearExpr = (VectorTurboEvaluator.VectorCompositeExpression)  new VectorTurboEvaluator(meLinear).compile();
+        linearExpr = (VectorTurboEvaluator.BatchedVectorCompositeExpression)  new VectorTurboEvaluator(meLinear).compile();
 
         //MathExpression meGaussian = new MathExpression("(1 / (x1 * sqrt(2 * 3.141592653589793))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
         MathExpression meGaussian = new MathExpression("0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))");
-        gaussianExpr =  (VectorTurboEvaluator.VectorCompositeExpression) new VectorTurboEvaluator(meGaussian).compile();
+        gaussianExpr =  (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(meGaussian).compile();
 
         /*
         MathExpression meConditional = new MathExpression("if(x1 >= 2.5, sin(x1) % x2, x3 * vma(x1, x2, 1.5))");

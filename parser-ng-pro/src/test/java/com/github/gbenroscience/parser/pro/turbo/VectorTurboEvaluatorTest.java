@@ -1,9 +1,10 @@
 package com.github.gbenroscience.parser.pro.turbo;
 
 import com.github.gbenroscience.logic.DRG_MODE;
-import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.pro.turbo.SIMDCompositeExpression;
+import com.github.gbenroscience.parser.MathExpression; 
 import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator;
+import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression;
+
 import java.util.Arrays;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -42,7 +43,7 @@ public class VectorTurboEvaluatorTest {
     @Test
     public void testMathematicalPrecisionVsNativeJava() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         // 17 datapoints to trigger both vector lane and tail scalar loop remainders
         int totalElements = 17;
@@ -72,7 +73,7 @@ public class VectorTurboEvaluatorTest {
     public void testThreadPooledParallelBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
         me.setDRG(DRG_MODE.RAD);
-        SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         int dataSize = 100;
         double[][] inputs = new double[1][dataSize]; // Only 1 variable 'x' is needed for this expression
@@ -83,7 +84,7 @@ public class VectorTurboEvaluatorTest {
         }
  System.out.println("inputs: "+Arrays.toString(inputs[0]));
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(inputs, outputVector, threadPool);
+        evaluator.applyBulk(inputs, outputVector);
         System.out.println("output: "+Arrays.toString(outputVector));
 
         for (int i = 0; i < dataSize; i++) {
@@ -97,7 +98,7 @@ public class VectorTurboEvaluatorTest {
     @Test
     public void testTargetMemoryOffsetBoundsSafety() throws Throwable {
         MathExpression me = new MathExpression("x1 + 10");
-        SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         // 4 elements to evaluate
         int dataSize = 4;

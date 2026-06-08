@@ -15,12 +15,14 @@ import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.TimeValue;
 
+/*
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
 @Warmup(iterations = 3, time = 2)
 @Measurement(iterations = 5, time = 2)
 @Fork(1)
 @State(Scope.Thread)
+*//*
 public class JaninoVectorTurboEvaluatorBenchmark {
 
     @Param({"1000", "50000", "500000", "50000000"})
@@ -57,10 +59,9 @@ public class JaninoVectorTurboEvaluatorBenchmark {
         MathExpression meGaussian = new MathExpression("0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))");
         gaussianExpr =  (JaninoVectorTurboEvaluator.JaninoBulkExpression) new JaninoVectorTurboEvaluator(meGaussian).compile();
 
-        /*
-        MathExpression meConditional = new MathExpression("if(x1 >= 2.5, sin(x1) % x2, x3 * vma(x1, x2, 1.5))");
-        conditionalExpr = (SIMDCompositeExpression) new VectorTurboEvaluator(meConditional).compile();
-         */
+//        MathExpression meConditional = new MathExpression("if(x1 >= 2.5, sin(x1) % x2, x3 * vma(x1, x2, 1.5))");
+//        conditionalExpr = (SIMDCompositeExpression) new VectorTurboEvaluator(meConditional).compile();
+//       
     }
 
     @Benchmark
@@ -89,13 +90,13 @@ public class JaninoVectorTurboEvaluatorBenchmark {
         bh.consume(checksum);
     }
 
-    /*
-    @Benchmark
-    public double[] benchmarkHardwareMaskConditionalBulk() {
-        conditionalExpr.applyBulk(variables, outputBuffer);
-        return outputBuffer;
-    }
-     */
+// 
+//    @Benchmark
+//    public double[] benchmarkHardwareMaskConditionalBulk() {
+//        conditionalExpr.applyBulk(variables, outputBuffer);
+//        return outputBuffer;
+//    }
+// 
     public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
         opt.include(JaninoVectorTurboEvaluatorBenchmark.class.getSimpleName()); // Always include baseline
@@ -115,3 +116,4 @@ public class JaninoVectorTurboEvaluatorBenchmark {
         new Runner(configurations).run();
     }
 }
+*/
