@@ -150,6 +150,13 @@ public class VectorTurboEvaluator1 extends ScalarTurboEvaluator1 {
                 applyBulkInternal(variables, outputBuffer, offset);
             }
 
+            @Override
+            public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
+                throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+            }
+            
+            
+
             private void applyBulkInternal(double[][] variables, double[] output, int offset) {
                 final int length = variables.length;
                 if (length == 0) return;
@@ -228,6 +235,17 @@ public class VectorTurboEvaluator1 extends ScalarTurboEvaluator1 {
                 }
             }
 
+            @Override
+            public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op) {
+                
+            }
+
+            @Override
+            public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String operation) {
+                
+            }
+            
+            
   
             public void applyMatrixKernel(Object[] inputs, Object output, String op) {
                 // Implementation pending

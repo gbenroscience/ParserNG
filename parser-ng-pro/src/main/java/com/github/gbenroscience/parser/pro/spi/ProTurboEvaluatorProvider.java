@@ -26,6 +26,11 @@ public class ProTurboEvaluatorProvider implements TurboEvaluatorProvider {
 
     @Override
     public TurboExpressionEvaluator getVectorEvaluator(MathExpression me) {
-        return new VectorTurboEvaluator(me);
+        try {
+            return new VectorTurboEvaluator(me);
+        } catch (Throwable ex) {
+            System.getLogger(ProTurboEvaluatorProvider.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+            return null;
+        }
     }
 }

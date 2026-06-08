@@ -21,7 +21,7 @@ import org.openjdk.jmh.runner.options.TimeValue;
 @Measurement(iterations = 5, time = 2)
 @Fork(1)
 @State(Scope.Thread)
-public class VectorTurboEvaluatorBenchmark {
+public class JaninoVectorTurboEvaluatorBenchmark {
 
     @Param({"1000", "50000", "500000", "50000000"})
     private int dataSize;
@@ -31,9 +31,9 @@ public class VectorTurboEvaluatorBenchmark {
     private double[][] variables;
     private double[] outputBuffer;
 
-    private VectorTurboEvaluator.OptimizedBulkCompositeExpression linearExpr;
-    private VectorTurboEvaluator.OptimizedBulkCompositeExpression gaussianExpr;
-    private VectorTurboEvaluator.OptimizedBulkCompositeExpression conditionalExpr;
+    private JaninoVectorTurboEvaluator.JaninoBulkExpression linearExpr;
+    private JaninoVectorTurboEvaluator.JaninoBulkExpression gaussianExpr;
+    private JaninoVectorTurboEvaluator.JaninoBulkExpression conditionalExpr;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable {
@@ -51,11 +51,11 @@ public class VectorTurboEvaluatorBenchmark {
 
         // Compile expressions using the Vector Engine
         MathExpression meLinear = new MathExpression("12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2");
-        linearExpr = (VectorTurboEvaluator.OptimizedBulkCompositeExpression)  new VectorTurboEvaluator(meLinear).compile();
+        linearExpr = (JaninoVectorTurboEvaluator.JaninoBulkExpression)  new JaninoVectorTurboEvaluator(meLinear).compile();
 
         //MathExpression meGaussian = new MathExpression("(1 / (x1 * sqrt(2 * 3.141592653589793))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
         MathExpression meGaussian = new MathExpression("0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))");
-        gaussianExpr =  (VectorTurboEvaluator.OptimizedBulkCompositeExpression) new VectorTurboEvaluator(meGaussian).compile();
+        gaussianExpr =  (JaninoVectorTurboEvaluator.JaninoBulkExpression) new JaninoVectorTurboEvaluator(meGaussian).compile();
 
         /*
         MathExpression meConditional = new MathExpression("if(x1 >= 2.5, sin(x1) % x2, x3 * vma(x1, x2, 1.5))");
@@ -98,7 +98,7 @@ public class VectorTurboEvaluatorBenchmark {
      */
     public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
-        opt.include(VectorTurboEvaluatorBenchmark.class.getSimpleName()); // Always include baseline
+        opt.include(JaninoVectorTurboEvaluatorBenchmark.class.getSimpleName()); // Always include baseline
         // 4. Fluent, modern JMH Configuration
         Options configurations = opt.mode(Mode.AverageTime)
                 .timeUnit(TimeUnit.NANOSECONDS)

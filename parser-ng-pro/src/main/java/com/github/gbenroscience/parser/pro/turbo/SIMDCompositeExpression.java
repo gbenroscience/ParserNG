@@ -1,6 +1,7 @@
 package com.github.gbenroscience.parser.pro.turbo;
 
 import com.github.gbenroscience.parser.pro.turbo.tools.FlatMatrix;
+import com.github.gbenroscience.parser.pro.turbo.tools.FlatMatrixF;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import java.util.concurrent.ExecutorService;
 
@@ -22,6 +23,8 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
     public void applyBulk(double[][] variables, double[] outputBuffer, int offset) throws Throwable;
 
     public void applyBulk(double[][] variables, double[] output, ExecutorService executor);
+    
+    public void applyBulkBatched(double[][] variables, double[] output, int batchSize);
 
     /**
      * Executes fused deep learning kernels directly via FlatMatrix.
@@ -30,7 +33,6 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * @param output The pre-allocated output matrix to store the result
      * @param operation The kernel identifier (e.g., "matmul", "gelu")
      */
-    default void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String operation) {
-        throw new UnsupportedOperationException("Matrix kernel not implemented for: " + operation);
-    }
+    public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String operation);
+    public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op);
 }

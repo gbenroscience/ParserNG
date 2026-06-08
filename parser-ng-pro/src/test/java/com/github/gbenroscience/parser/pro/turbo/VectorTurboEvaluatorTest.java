@@ -1,8 +1,10 @@
 package com.github.gbenroscience.parser.pro.turbo;
 
+import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.pro.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator;
+import java.util.Arrays;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -69,6 +71,7 @@ public class VectorTurboEvaluatorTest {
     @Test
     public void testThreadPooledParallelBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
+        me.setDRG(DRG_MODE.RAD);
         SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         int dataSize = 100;
@@ -78,9 +81,10 @@ public class VectorTurboEvaluatorTest {
         for (int i = 0; i < dataSize; i++) {
             inputs[0][i] = i; // x
         }
-
+ System.out.println("inputs: "+Arrays.toString(inputs[0]));
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
         evaluator.applyBulk(inputs, outputVector, threadPool);
+        System.out.println("output: "+Arrays.toString(outputVector));
 
         for (int i = 0; i < dataSize; i++) {
             double x = inputs[0][i];

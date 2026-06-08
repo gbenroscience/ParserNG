@@ -110,7 +110,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 return arr;
             });
 
-    private MathExpression.Token[] postfix;
+    protected MathExpression.Token[] postfix;
 
     private static final Set<String> FAST_PATH_METHODS = new HashSet<>(Arrays.asList(
             "acsc_deg", "sech", "tan-¹_rad", "acot_rad",

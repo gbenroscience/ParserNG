@@ -4,7 +4,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import jdk.incubator.vector.*;
 
-public final class FlatMatrix {
+public class FlatMatrix {
 
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
     private static final int VLEN = SPECIES.length();
@@ -26,6 +26,8 @@ public final class FlatMatrix {
     public final int rows, cols;
     public final int rowStride;
     public final int offset;
+
+    private byte[] byteData; // lazy backing for Q8
 
     public FlatMatrix(int rows, int cols) {
         this.rows = rows;
@@ -572,18 +574,19 @@ public final class FlatMatrix {
 
     /**
      * FUSED MATMUL + alpha * sin(C)
+     *
      * @param A
      * @param B
      * @param C
-     * @param alpha 
+     * @param alpha
      */
     public static void matmulAddSin(FlatMatrix A, FlatMatrix B, FlatMatrix C, double alpha) {
         checkDims(A, B, C);
         final int M = A.rows, N = B.cols, K = A.cols;
         final long flops = 2L * M * K * N;
 
-        if (!HAS_VECTOR || flops < 16_384 || 
-            !A.isContiguous() || !B.isContiguous() || !C.isContiguous()) {
+        if (!HAS_VECTOR || flops < 16_384
+                || !A.isContiguous() || !B.isContiguous() || !C.isContiguous()) {
             matmulAddSinScalar(A, B, C, alpha);
             return;
         }
@@ -644,17 +647,18 @@ public final class FlatMatrix {
     /**
      * Renamed and clarified contract: assumes caller wants accumulation into C
      * MATMUL IN-PLACE (C += A * B)
+     *
      * @param A
      * @param B
-     * @param C 
+     * @param C
      */
     public static void matmulInPlace(FlatMatrix A, FlatMatrix B, FlatMatrix C) {
         checkDims(A, B, C);
         final int M = A.rows, N = B.cols, K = A.cols;
         final long flops = 2L * M * K * N;
 
-        if (!HAS_VECTOR || flops < 16_384 || 
-            !A.isContiguous() || !B.isContiguous() || !C.isContiguous()) {
+        if (!HAS_VECTOR || flops < 16_384
+                || !A.isContiguous() || !B.isContiguous() || !C.isContiguous()) {
             matmulInPlaceScalar(A, B, C);
             return;
         }
@@ -737,4 +741,37 @@ public final class FlatMatrix {
             return x.mul(V_HALF).mul(t.add(V_ONE));
         }
     }
+
+    /**
+     * Get byte[] view for Q8 quantized data. Allocates on first call. Size =
+     * rows * cols bytes. Used to wrap int8 weights/cache without allocating
+     * float[]/double[].
+     */
+    public byte[] asByteArray() {
+        if (byteData == null) {
+            byteData = new byte[rows * cols];
+        }
+        return byteData;
+    }
+
+    /**
+     * Construct FlatMatrix that wraps existing byte[] for Q8. Data field stays
+     * null. Only use with kernels that expect bytes.
+     */
+    public static FlatMatrix wrapBytes(byte[] bytes, int rows, int cols) {
+        FlatMatrix m = new FlatMatrix(null, rows, cols, cols, 0) {
+            @Override
+            public double get(int r, int c) {
+                throw new UnsupportedOperationException("Use asByteArray() for Q8");
+            }
+
+            @Override
+            public void set(int r, int c, double v) {
+                throw new UnsupportedOperationException("Use asByteArray() for Q8");
+            }
+        };
+        m.byteData = bytes;
+        return m;
+    }
+
 }
