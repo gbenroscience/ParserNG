@@ -1,11 +1,13 @@
 package com.github.gbenroscience.parser.pro.turbo.tools;
 
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.pro.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import java.lang.invoke.MethodHandle;
 import java.util.Arrays;
+import java.util.concurrent.Future;
 
 /**
  * SIMD Turbo Evaluator - High-Performance Block Vectorization Engine *
@@ -18,6 +20,11 @@ import java.util.Arrays;
  * * @author GBEMIRO
  */
 public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
+
+    // Aggressive pre-sized caches
+    private static final ThreadLocal<double[]> SCALAR_FRAME = ThreadLocal.withInitial(() -> new double[128]);
+    private static final ThreadLocal<Future<?>[]> FUTURES_CACHE = ThreadLocal.withInitial(() -> new Future[128]);
+    private static final ThreadLocal<MathExpression.EvalResult> RESULT_CACHE = ThreadLocal.withInitial(MathExpression.EvalResult::new);
 
     // Opcode Constants
     private static final int OP_CONST = 1;
@@ -160,12 +167,12 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     }
 
     @Override
-    public FastCompositeExpression compile() throws Throwable {
+    public SIMDCompositeExpression compile() throws Throwable {
         return new BatchedVectorCompositeExpression(compiledScalarHandle, opcodes, targetSlots,
                 literalConstants, instructionCount);
     }
 
-    public final class BatchedVectorCompositeExpression implements FastCompositeExpression {
+    public final class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
 
         private final MethodHandle scalarHandle;
         private final int[] opcodes;
@@ -233,8 +240,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             if (variables == null || variables.length == 0 || length <= 0) {
                 return;
             }
-
+            
             final double[][] executionStack = SCRATCH_STACKS.get();
+             
+
             final int endIdx = startIdx + length;
 
             // Step 1: Chunk operations into L1/L2 cache-friendly blocks
@@ -503,8 +512,203 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 System.arraycopy(executionStack[0], 0, output, blockStart, currentBlockSize);
             }
         }
+
+        @Override
+        public void applyBulk(double[][] variables, double[] output, java.util.concurrent.ExecutorService executor) {
+            int dataSize = variables[0].length;
+            int cores = Runtime.getRuntime().availableProcessors();
+            int chunkSize = (dataSize + cores - 1) / cores; // Round up
+
+            java.util.List<java.util.concurrent.Callable<Void>> tasks = new java.util.ArrayList<>();
+
+            for (int i = 0; i < cores; i++) {
+                final int start = i * chunkSize;
+                final int end = Math.min(start + chunkSize, dataSize);
+
+                if (start < end) {
+                    tasks.add(() -> {
+                        applyBulkInternal(variables, output, start, end - start);
+                        return null;
+                    });
+                }
+            }
+
+            try {
+                executor.invokeAll(tasks);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        @Override
+        public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
+            int dataSize = variables[0].length;
+
+            // Process in chunks of 'batchSize' to keep data hot in L1/L2 cache
+            for (int start = 0; start < dataSize; start += batchSize) {
+                int length = Math.min(batchSize, dataSize - start);
+                applyBulkInternal(variables, output, start, length);
+            }
+        }
+
+        @Override
+        public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op) {
+            String kernelToRun = (op != null) ? op : (interceptedKernel != null ? interceptedKernel.getKernelName() : null);
+            if (kernelToRun == null) {
+                throw new UnsupportedOperationException("No kernel");
+            }
+
+            switch (kernelToRun.toLowerCase()) {
+                case "matmul" ->
+                    FlatMatrixF.matmul(inputs[0], inputs[1], output);
+                case "add", "matadd", "add_mat" ->
+                    FlatMatrixF.add(inputs[0], inputs[1], output);
+                case "matmul_bias_gelu", "matmul_add_bias_gelu" ->
+                    FlatMatrixF.matmulAddBiasGelu(inputs[0], inputs[1], inputs[2], output);
+                case "matmul_add_sin" -> {
+                    float alpha = inputs[2].get(0, 0);
+                    FlatMatrixF.matmulAddSin(inputs[0], inputs[1], output, alpha);
+                }
+                case "softmax", "softmax_in_place" -> {
+                    if (inputs[0] != output) {
+                        System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
+                    }
+                    output.softmaxRowsInPlace();
+                }
+                case "relu", "relu_in_place" -> {
+                    if (inputs[0] != output) {
+                        System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
+                    }
+                    output.reluInPlace();
+                }
+                case "gelu", "gelu_in_place" -> {
+                    if (inputs[0] != output) {
+                        System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
+                    }
+                    output.geluInPlace();
+                }
+
+                // === New Q8 + Attention kernels ===
+                case "q8_quantize" -> {
+                    // inputs[0] = src float, inputs[1] = scale float[1], output = dst byte wrapped as float
+                    float[] src = inputs[0].data;
+                    int srcOff = inputs[0].offset;
+                    int len = inputs[0].rows * inputs[0].cols;
+                    float scale = inputs[1].data[inputs[1].offset];
+                    byte[] dst = output.asByteArray(); // FlatMatrix needs asByteArray() helper
+                    KernelsInt8.quantize_f32_to_i8(src, srcOff, len, dst, output.offset, scale);
+                }
+                case "q8_dequant" -> {
+                    // inputs[0] = src byte wrapped as float, inputs[1] = scale float[1], output = dst float
+                    byte[] src = inputs[0].asByteArray();
+                    int srcOff = inputs[0].offset;
+                    int len = inputs[0].rows * inputs[0].cols;
+                    float scale = inputs[1].data[inputs[1].offset];
+                    float[] dst = output.data;
+                    KernelsInt8.dequant_i8_to_f32(src, srcOff, len, dst, output.offset, scale);
+                }
+                case "q8_absmax_quant" -> {
+                    // inputs[0] = src float, output[0] = dst byte, output[1] = scale float[1]
+                    float[] src = inputs[0].data;
+                    int srcOff = inputs[0].offset;
+                    int len = inputs[0].rows * inputs[0].cols;
+                    float amax = KernelsInt8.absmax(src, srcOff, len);
+                    float scale = amax / 127.0f;
+                    if (scale == 0.0f) {
+                        scale = 1e-6f;
+                    }
+                    byte[] dst = output.asByteArray();
+                    KernelsInt8.quantize_f32_to_i8(src, srcOff, len, dst, output.offset, scale);
+                    // write scale to inputs[1] which caller must provide as writable
+                    inputs[1].data[inputs[1].offset] = scale;
+                }
+                case "rope_split" -> {
+                    // inputs[0] = buf [Q||K], inputs[1] = cos, inputs[2] = sin, inputs[3] = meta[pos, qHeads, kHeads, head_dim]
+                    float[] buf = inputs[0].data;
+                    float[] cos = inputs[1].data;
+                    float[] sin = inputs[2].data;
+                    int pos = (int) inputs[3].data[inputs[3].offset + 0];
+                    int qHeads = (int) inputs[3].data[inputs[3].offset + 1];
+                    int kHeads = (int) inputs[3].data[inputs[3].offset + 2];
+                    int head_dim = (int) inputs[3].data[inputs[3].offset + 3];
+                    int qOff = inputs[0].offset;
+                    int kOff = qOff + qHeads * head_dim;
+                    KernelsFloat.rope_inplace_split_ws(buf, qOff, qHeads, kOff, kHeads, head_dim, pos, cos, sin);
+                    if (output != inputs[0]) {
+                        System.arraycopy(buf, qOff, output.data, output.offset, (qHeads + kHeads) * head_dim);
+                    }
+                }
+                case "accum_v" -> {
+                    // output += inputs[0] * inputs[1].get(0,0)
+                    float scale = (float) inputs[1].data[inputs[1].offset];
+                    float[] src = inputs[0].data;
+                    float[] dst = output.data;
+                    int len = inputs[0].rows * inputs[0].cols;
+                    KernelsFloat.accumulate_v_f32(dst, output.offset, src, inputs[0].offset, len, scale);
+                }
+                case "matmul_1xn_axpy" -> {
+                    // output = inputs[0][1,K] @ inputs[1][K,N], inputs[0] is workspace slice
+                    // inputs[2] = meta[K, N] as float[2]
+                    int K = (int) inputs[2].data[inputs[2].offset + 0];
+                    int N = (int) inputs[2].data[inputs[2].offset + 1];
+                    KernelsFloat.matmul_f32_1xN_axpy(
+                            inputs[0].data, inputs[1].data, output.data, output.offset,
+                            K, N, inputs[0].offset
+                    );
+                }
+                case "matmul_bias_relu" ->
+                    FlatMatrixF.matmulAddBiasRelu(inputs[0], inputs[1], inputs[2], output);
+                case "rms_norm" -> {
+                    // inputs[0]=x, inputs[1]=weight, inputs[2]=eps[1], output=y
+                    float eps = (float) inputs[2].data[inputs[2].offset];
+                    FlatMatrixF.rmsNorm(inputs[0], inputs[1], output, eps);
+                }
+                case "layer_norm" -> {
+                    // inputs[0]=x, inputs[1]=gamma, inputs[2]=beta, inputs[3]=eps[1]
+                    float eps = (float) inputs[3].data[inputs[3].offset];
+                    FlatMatrixF.layerNorm(inputs[0], inputs[1], inputs[2], output, eps);
+                }
+                case "matmul_bias_silu" ->
+                    FlatMatrixF.matmulAddBiasSilu(inputs[0], inputs[1], inputs[2], output);
+                case "swiglu" -> {
+                    // inputs[0]=gate, inputs[1]=up, output=gate*SiLU(up)
+                    FlatMatrixF.swiGLU(inputs[0], inputs[1], output);
+                }
+
+                case "mha_attention" -> {
+                    // inputs: [Q, K, V, scale[1]], output=attn_out
+                    float scale = (float) inputs[3].data[inputs[3].offset];
+                    FlatMatrixF.mhaAttention(inputs[0], inputs[1], inputs[2], output, scale);
+                }
+
+                default ->
+                    throw new UnsupportedOperationException("Unknown kernel: " + kernelToRun);
+            }
+        }
+
+        @Override
+        public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String op) {
+            String kernelToRun = (op != null) ? op : (interceptedKernel != null ? interceptedKernel.getKernelName() : null);
+            if (kernelToRun == null) {
+                throw new UnsupportedOperationException("No kernel");
+            }
+
+        }
     }
-   private int resolveSlotIndex(int tokenIndex) {
+/**
+ * Turbo-flattens a jagged array into a destination array.
+ * Reuses the provided 'flatBuffer' to ensure ZERO heap allocation.
+ */
+public static void flatten(double[][] jagged, double[] flatBuffer) {
+    int offset = 0;
+    for (int i = 0; i < jagged.length; i++) {
+        int length = jagged[i].length;
+        // Native-level memory copy - this is the fastest way to move data in JVM
+        System.arraycopy(jagged[i], 0, flatBuffer, offset, length);
+        offset += length;
+    }
+}
+    private int resolveSlotIndex(int tokenIndex) {
         if (slots != null) {
             for (int k = 0; k < slots.length; k++) {
                 if (slots[k] == tokenIndex) {
@@ -514,26 +718,49 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         }
         return tokenIndex;
     }
-   
-   /**
+
+    /**
      * Optimized power utility for performance-critical math kernels.
      */
     public static double pow(double base, double exp) {
         // --- Integer Powers (-4 to 4) ---
-        if (exp == 2.0) return base * base;
-        if (exp == 3.0) return base * base * base;
-        if (exp == 4.0) { double sq = base * base; return sq * sq; }
-        if (exp == 1.0) return base;
-        if (exp == 0.0) return 1.0;
-        if (exp == -1.0) return 1.0 / base;
-        if (exp == -2.0) return 1.0 / (base * base);
-        if (exp == -3.0) { double sq = base * base; return 1.0 / (sq * base); }
-        if (exp == -4.0) { double sq = base * base; return 1.0 / (sq * sq); }
+        if (exp == 2.0) {
+            return base * base;
+        }
+        if (exp == 3.0) {
+            return base * base * base;
+        }
+        if (exp == 4.0) {
+            double sq = base * base;
+            return sq * sq;
+        }
+        if (exp == 1.0) {
+            return base;
+        }
+        if (exp == 0.0) {
+            return 1.0;
+        }
+        if (exp == -1.0) {
+            return 1.0 / base;
+        }
+        if (exp == -2.0) {
+            return 1.0 / (base * base);
+        }
+        if (exp == -3.0) {
+            double sq = base * base;
+            return 1.0 / (sq * base);
+        }
+        if (exp == -4.0) {
+            double sq = base * base;
+            return 1.0 / (sq * sq);
+        }
 
         // --- Roots (Square & Cube) ---
         // Square Root
-        if (exp == 0.5) return Math.sqrt(base);
-        
+        if (exp == 0.5) {
+            return Math.sqrt(base);
+        }
+
         // Cube Root (handling direct 1/3 and common decimal approximation)
         if (Math.abs(exp - 0.3333333333333333) < 1e-15 || exp == (1.0 / 3.0)) {
             return Math.cbrt(base);
@@ -543,7 +770,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         return Math.pow(base, exp);
     }
 
-     
     private boolean isMatrixKernel(String name, int arity) {
         return switch (name.toLowerCase()) {
             // BLAS
