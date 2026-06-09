@@ -23,25 +23,58 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
     public void applyBulk(double[][] variables, double[] outputBuffer, int offset) throws Throwable;
 
     /**
-     * If the double[][] variables passed to this method is a "jagged" array or an array-of-arrays,
-     * the performance will suffer compared to the flat 1D array we used earlier. 
-     * If the API allows, encourage users to flatten their input data before calling
-     * these methods to achieve that 100x+ speedup we saw in your previous benchmark.
+     * If the double[][] variables passed to this method is a "jagged" array or
+     * an array-of-arrays, the performance will suffer compared to the flat 1D
+     * array we used earlier. If the API allows, encourage users to flatten
+     * their input data before calling these methods to achieve that 100x+
+     * speedup we saw in your previous benchmark.
+     *
      * @param variables
+     * @param output
+     * @param executor
+     */
+    public void applyBulk(double[][] variables, double[] output, ExecutorService executor);
+
+    /**
+     * We suggest a default of 1024 or 2048. This is generally large enough to
+     * saturate the SIMD pipeline but small enough to fit within most L1/L2
+     * caches across different CPU architectures.
+     *
+     * @param variables
+     * @param output
+     * @param batchSize
+     */
+    public void applyBulkBatched(double[][] variables, double[] output, int batchSize);
+
+    /**
+     * 
+     * @param flatVariables
+     * @param output 
+     */
+    public void applyBulk(double[] flatVariables, double[] output);
+    /**
+     * 
+     * @param flatVariables
+     * @param output
+     * @param offset 
+     */
+    public void applyBulk(double[] flatVariables, double[] output, int offset);
+
+    /**
+     * 
+     * @param flatVariables
      * @param output
      * @param executor 
      */
-    public void applyBulk(double[][] variables, double[] output, ExecutorService executor);
-    
+    public void applyBulk(double[] flatVariables, double[] output, java.util.concurrent.ExecutorService executor);
+
     /**
-     * We suggest a default of 1024 or 2048. 
-     * This is generally large enough to saturate the SIMD pipeline but small enough to fit 
-     * within most L1/L2 caches across different CPU architectures.
-     * @param variables
+     * 
+     * @param flatVariables
      * @param output
      * @param batchSize 
      */
-    public void applyBulkBatched(double[][] variables, double[] output, int batchSize);
+    public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize);
 
     /**
      * Executes fused deep learning kernels directly via FlatMatrix.
@@ -51,5 +84,6 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * @param operation The kernel identifier (e.g., "matmul", "gelu")
      */
     public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String operation);
+
     public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op);
 }

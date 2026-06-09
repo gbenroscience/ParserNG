@@ -21,10 +21,51 @@ import java.util.concurrent.Future;
  */
 public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
+    public class VariableBatch {
+
+        private final double[] flatVariables;
+        private final int dataSize;
+        private int currentSlot = 0;
+
+        public VariableBatch(int stride, int dataSize) {
+            this.dataSize = dataSize;
+            this.flatVariables = new double[stride * dataSize];
+        }
+
+        // Ingests a standard user array directly into Path A's contiguous slots
+        public VariableBatch bind(double[] variableData) {
+            int targetOffset = currentSlot * dataSize;
+            System.arraycopy(variableData, 0, this.flatVariables, targetOffset, dataSize);
+            currentSlot++;
+            return this;
+        }
+
+        public double[] getFlatVariables() {
+            return flatVariables;
+        }
+    }
+    
+    public class ThreadLocalBufferPool {
+    // ThreadLocal cache to keep threads from colliding in multi-threaded environments
+    private static final ThreadLocal<double[]> BUFFER_CACHE = new ThreadLocal<>();
+
+    public static double[] getOrCreateBuffer(int totalSize) {
+        double[] buffer = BUFFER_CACHE.get();
+        if (buffer == null || buffer.length < totalSize) {
+            // Only allocates on the very first pass (or if data size scales up)
+            buffer = new double[totalSize];
+            BUFFER_CACHE.set(buffer);
+        }
+        return buffer;
+    }
+}
     // Aggressive pre-sized caches
     private static final ThreadLocal<double[]> SCALAR_FRAME = ThreadLocal.withInitial(() -> new double[128]);
     private static final ThreadLocal<Future<?>[]> FUTURES_CACHE = ThreadLocal.withInitial(() -> new Future[128]);
     private static final ThreadLocal<MathExpression.EvalResult> RESULT_CACHE = ThreadLocal.withInitial(MathExpression.EvalResult::new);
+
+// Thread-local cache allocation helper for flat translation buffers
+    private static final ThreadLocal<double[]> FLAT_BUFFER_CACHE = ThreadLocal.withInitial(() -> new double[0]);
 
     // Opcode Constants
     private static final int OP_CONST = 1;
@@ -225,12 +266,51 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             return VectorTurboEvaluator.this;
         }
 
+        /////////---Uses double[][] Arrays For Conveninience
+
         public void applyBulk(double[][] variables, double[] output) {
             applyBulkInternal(variables, output, 0, output.length);
         }
 
-        public void applyBulk(double[][] variables, double[] output, int offset) {
-            applyBulkInternal(variables, output, offset, output.length - offset);
+        public void applyBulk(double[][] flatVariables, double[] output, int offset) {
+            applyBulkInternal(flatVariables, output, offset, output.length - offset);
+        }
+    @Override
+        public void applyBulk(double[][] variables, double[] output, java.util.concurrent.ExecutorService executor) {
+            int dataSize = variables[0].length;
+            int cores = Runtime.getRuntime().availableProcessors();
+            int chunkSize = (dataSize + cores - 1) / cores; // Round up
+
+            java.util.List<java.util.concurrent.Callable<Void>> tasks = new java.util.ArrayList<>();
+
+            for (int i = 0; i < cores; i++) {
+                final int start = i * chunkSize;
+                final int end = Math.min(start + chunkSize, dataSize);
+
+                if (start < end) {
+                    tasks.add(() -> {
+                        applyBulkInternal(variables, output, start, end - start);
+                        return null;
+                    });
+                }
+            }
+
+            try {
+                executor.invokeAll(tasks);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        @Override
+        public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
+            int dataSize = variables[0].length;
+
+            // Process in chunks of 'batchSize' to keep data hot in L1/L2 cache
+            for (int start = 0; start < dataSize; start += batchSize) {
+                int length = Math.min(batchSize, dataSize - start);
+                applyBulkInternal(variables, output, start, length);
+            }
         }
 
         /**
@@ -240,9 +320,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             if (variables == null || variables.length == 0 || length <= 0) {
                 return;
             }
-            
+
             final double[][] executionStack = SCRATCH_STACKS.get();
-             
 
             final int endIdx = startIdx + length;
 
@@ -513,13 +592,345 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
-        @Override
-        public void applyBulk(double[][] variables, double[] output, java.util.concurrent.ExecutorService executor) {
-            int dataSize = variables[0].length;
-            int cores = Runtime.getRuntime().availableProcessors();
-            int chunkSize = (dataSize + cores - 1) / cores; // Round up
+    
+        ///////////////////double[][] Arrays ends/////////////////////////////////////
+        ///                                                                        ///
+        /////////////////////////Uses Flat interleaved Arrays for speed///////////////
+        ///                                                                        ///
+        ///                       [x1,y1,z1, x2,y2,z2, x3,y3,z3,.....,xn,yn,z,]    ///                   
+        //////////////////////////////////////////////////////////////////////////////
+        
+        
+        
+   
 
-            java.util.List<java.util.concurrent.Callable<Void>> tasks = new java.util.ArrayList<>();
+        /**
+         * Core Column-Major Vectorized Loop Processor (Flat Memory
+         * Architecture) Bypasses jagged array pointers to execute at maximum
+         * hardware throughput.
+         *
+         * @param flatVariables Interleaved array of variables e.g.. [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
+         * concatenated.
+         * @param dataSize The total number of elements per variable row (used
+         * for stride offset).
+         */
+        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
+            if (flatVariables == null || flatVariables.length == 0 || length <= 0) {
+                return;
+            }
+
+            final double[][] executionStack = SCRATCH_STACKS.get();
+            final int endIdx = startIdx + length;
+
+            // Step 1: Chunk operations into L1/L2 cache-friendly blocks
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
+                final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
+                int sp = 0; // Flat local stack pointer resetting per block segment
+
+                // Step 2: Traverse opcodes sequentially across the entire current data chunk
+                for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
+                    final int opcode = opcodes[instIdx];
+
+                    switch (opcode) {
+                        case OP_CONST -> {
+                            final double val = literalConstants[instIdx];
+                            final double[] stackArr = executionStack[sp++];
+                            Arrays.fill(stackArr, 0, currentBlockSize, val);
+                        }
+
+                        case OP_LOAD -> {
+                            
+                            final int slotIdx = targetSlots[instIdx];
+                            final double[] stackArr = executionStack[sp++];
+
+                            // TURBO SPEED WIN: Compute linear stride instead of dereferencing an array pointer.
+                            // This is perfectly sequential memory, allowing the CPU prefetcher to run at full speed.
+                            final int flatOffset = (slotIdx * dataSize) + blockStart;
+                            System.arraycopy(flatVariables, flatOffset, stackArr, 0, currentBlockSize);
+                             
+                            /*Path B
+                            Assumes the flat array contains interleaved data and processes it, quite slower
+                            final int slotIdx = targetSlots[instIdx];
+                            final double[] stackArr = executionStack[sp++];
+                            final int stride = 3; // This would need to be passed dynamically into the engine
+
+                            // We must gather elements manually because they are non-contiguous
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                int flatIdx = (blockStart + k) * stride + slotIdx;
+                                stackArr[k] = flatVariables[flatIdx];
+                            }
+                            */
+                        }
+
+                        case OP_ADD -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] + r[k];
+                            }
+                        }
+
+                        case OP_SUB -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] - r[k];
+                            }
+                        }
+
+                        case OP_MUL -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] * r[k];
+                            }
+                        }
+
+                        case OP_DIV -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] / r[k];
+                            }
+                        }
+
+                        case OP_POW -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = pow(l[k], r[k]); // Uses your FastMath optimization utility
+                            }
+                        }
+
+                        case OP_REM -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] % r[k];
+                            }
+                        }
+
+                        case OP_SIN -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.sin(src[k]);
+                            }
+                        }
+
+                        case OP_COS -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.cos(src[k]);
+                            }
+                        }
+
+                        case OP_TAN -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.tan(src[k]);
+                            }
+                        }
+
+                        case OP_ASIN -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.asin(src[k]);
+                            }
+                        }
+
+                        case OP_ACOS -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.acos(src[k]);
+                            }
+                        }
+
+                        case OP_ATAN -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.atan(src[k]);
+                            }
+                        }
+
+                        case OP_SINH -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.sinh(src[k]);
+                            }
+                        }
+
+                        case OP_COSH -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.cosh(src[k]);
+                            }
+                        }
+
+                        case OP_TANH -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.tanh(src[k]);
+                            }
+                        }
+
+                        case OP_ABS -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.abs(src[k]);
+                            }
+                        }
+
+                        case OP_EXP -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.exp(src[k]);
+                            }
+                        }
+
+                        case OP_SQRT -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.sqrt(src[k]);
+                            }
+                        }
+
+                        case OP_CBRT -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.cbrt(src[k]);
+                            }
+                        }
+
+                        case OP_LOG -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.log(src[k]);
+                            }
+                        }
+
+                        case OP_LOG10 -> {
+                            final double[] src = executionStack[sp - 1];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                src[k] = Math.log10(src[k]);
+                            }
+                        }
+
+                        case OP_GT -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] > r[k] ? 1.0 : 0.0;
+                            }
+                        }
+
+                        case OP_LT -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] < r[k] ? 1.0 : 0.0;
+                            }
+                        }
+
+                        case OP_EQ -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] == r[k] ? 1.0 : 0.0;
+                            }
+                        }
+
+                        case OP_NE -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] != r[k] ? 1.0 : 0.0;
+                            }
+                        }
+
+                        case OP_GE -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] >= r[k] ? 1.0 : 0.0;
+                            }
+                        }
+
+                        case OP_LE -> {
+                            final double[] r = executionStack[--sp];
+                            final double[] l = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = l[k] <= r[k] ? 1.0 : 0.0;
+                            }
+                        }
+
+                        case OP_VMA -> {
+                            final double[] c = executionStack[--sp];
+                            final double[] b = executionStack[--sp];
+                            final double[] a = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = Math.fma(a[k], b[k], c[k]); // Guaranteed Fused-Multiply-Add hardware acceleration
+                            }
+                        }
+
+                        case OP_IF -> {
+                            final double[] falseVal = executionStack[--sp];
+                            final double[] trueVal = executionStack[--sp];
+                            final double[] cond = executionStack[--sp];
+                            final double[] res = executionStack[sp++];
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                res[k] = (cond[k] != 0.0) ? trueVal[k] : falseVal[k];
+                            }
+                        }
+
+                        default ->
+                            throw new UnsupportedOperationException("Unknown opcode: " + opcode);
+                    }
+                }
+
+                // Step 3: Extract final calculation results from index 0 on stack directly to output destination
+                System.arraycopy(executionStack[0], 0, output, blockStart, currentBlockSize);
+            }
+        }
+
+        /**
+         *
+         * @param flatVariables - Interleaved array of variables e.g..
+         * [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
+         * @param output
+         * @param executor
+         */
+        @Override
+        public void applyBulk(double[] flatVariables, double[] output, java.util.concurrent.ExecutorService executor) {
+            // FIX: Added output and executor null checks
+            if (flatVariables == null || flatVariables.length == 0 || output == null || executor == null) {
+                return;
+            }
+
+            int numVars = VectorTurboEvaluator.this.targetSlots.length;
+            final int dataSize = flatVariables.length / numVars;
+
+            // OPTIONAL FIX: Atomic boundary protection for the output array
+            if (output.length < dataSize) {
+                throw new IllegalArgumentException("Output buffer size (" + output.length + ") is smaller than data timeline size (" + dataSize + ")");
+            }
+
+            // Step 3: Distribute chunks evenly to processing threads
+            final int cores = Runtime.getRuntime().availableProcessors();
+            final int chunkSize = (dataSize + cores - 1) / cores;
+            java.util.List<java.util.concurrent.Callable<Void>> tasks = new java.util.ArrayList<>(cores);
 
             for (int i = 0; i < cores; i++) {
                 final int start = i * chunkSize;
@@ -527,7 +938,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
                 if (start < end) {
                     tasks.add(() -> {
-                        applyBulkInternal(variables, output, start, end - start);
+                        applyBulkInternal(flatVariables, dataSize, output, start, end - start);
                         return null;
                     });
                 }
@@ -540,17 +951,87 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
+        /**
+         *
+         * @param flatVariables - Interleaved array of variables e.g..
+         * [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
+         * @param output
+         * @param batchSize
+         */
         @Override
-        public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
-            int dataSize = variables[0].length;
+        public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
+            // FIX: Added output check and protection against infinite loops (batchSize <= 0)
+            if (flatVariables == null || flatVariables.length == 0 || output == null || batchSize <= 0) {
+                return;
+            }
 
-            // Process in chunks of 'batchSize' to keep data hot in L1/L2 cache
+            int numVars = VectorTurboEvaluator.this.targetSlots.length;
+            final int dataSize = flatVariables.length / numVars;
+
+            // Stream data using cache-friendly user configuration
             for (int start = 0; start < dataSize; start += batchSize) {
                 int length = Math.min(batchSize, dataSize - start);
-                applyBulkInternal(variables, output, start, length);
+                applyBulkInternal(flatVariables, dataSize, output, start, length);
             }
         }
 
+        /**
+         *
+         * @param flatVariables - Interleaved array of variables e.g..
+         * [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
+         * @param output
+         */
+        public void applyBulk(double[] flatVariables, double[] output) {
+            if (flatVariables == null || flatVariables.length == 0 || output == null) {
+                return;
+            }
+
+            int numVars = VectorTurboEvaluator.this.targetSlots.length;
+            final int dataSize = flatVariables.length / numVars;
+
+            // 3. Process the entire timeline synchronously from index 0
+            applyBulkInternal(flatVariables, dataSize, output, 0, dataSize);
+        }
+
+        /**
+         *
+         * @param flatVariables - Interleaved array of variables e.g..
+         * [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
+         * @param output
+         * @param offset
+         */
+        public void applyBulk(double[] flatVariables, double[] output, int offset) {
+            if (flatVariables == null || flatVariables.length == 0 || output == null) {
+                return;
+            }
+
+            int numVars = VectorTurboEvaluator.this.targetSlots.length;
+            final int dataSize = flatVariables.length / numVars;
+
+            // Boundary protection to prevent IndexOutOfBoundsException inside the kernel
+            if (offset < 0 || offset >= dataSize) {
+                return;
+            }
+
+            // 3. Compute remaining element timeline length from the specified offset point
+            final int remainingLength = dataSize - offset;
+
+            // 4. Process the subset chunk synchronously
+            applyBulkInternal(flatVariables, dataSize, output, offset, remainingLength);
+        }
+
+        ///////////////////////////////////////////////////////////
+        ///                                                     ///
+        ///                    MATRIX KERNELS                   ///
+        ///                                                     ///
+        ///////////////////////////////////////////////////////////
+        
+        /**
+         * 
+         * @param inputs
+         * @param output
+         * @param op 
+         */
         @Override
         public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op) {
             String kernelToRun = (op != null) ? op : (interceptedKernel != null ? interceptedKernel.getKernelName() : null);
@@ -695,19 +1176,30 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         }
     }
-/**
- * Turbo-flattens a jagged array into a destination array.
- * Reuses the provided 'flatBuffer' to ensure ZERO heap allocation.
- */
-public static void flatten(double[][] jagged, double[] flatBuffer) {
-    int offset = 0;
-    for (int i = 0; i < jagged.length; i++) {
-        int length = jagged[i].length;
-        // Native-level memory copy - this is the fastest way to move data in JVM
-        System.arraycopy(jagged[i], 0, flatBuffer, offset, length);
-        offset += length;
+
+    /**
+     * Turbo-flattens a jagged array into a destination array. Reuses the
+     * provided 'flatBuffer' to ensure ZERO heap allocation.
+     */
+    public static void flatten(double[][] jagged, double[] flatBuffer) {
+        int offset = 0;
+        for (int i = 0; i < jagged.length; i++) {
+            int length = jagged[i].length;
+            // Native-level memory copy - this is the fastest way to move data in JVM
+            System.arraycopy(jagged[i], 0, flatBuffer, offset, length);
+            offset += length;
+        }
     }
-}
+
+    private double[] getWorkingFlatBuffer(int requiredSize) {
+        double[] buf = FLAT_BUFFER_CACHE.get();
+        if (buf.length < requiredSize) {
+            buf = new double[requiredSize];
+            FLAT_BUFFER_CACHE.set(buf);
+        }
+        return buf;
+    }
+
     private int resolveSlotIndex(int tokenIndex) {
         if (slots != null) {
             for (int k = 0; k < slots.length; k++) {
