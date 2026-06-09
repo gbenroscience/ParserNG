@@ -50,15 +50,16 @@ public class VectorTurboEvaluatorBenchmark {
             variables[1][i] = rand.nextDouble() * 5.0;        // x2
             variables[2][i] = rand.nextDouble() * 2.0;        // x3
 
-            // 2. Calculate the flat interleaved base address for timestep 'i'
-            // For i=0, base=0. For i=1, base=3. For i=2, base=6...
-            int base = i * stride;
-
-            // 3. Populate the flat interleaved array perfectly
-            for (int k = 0; k < stride; k++) {
-                flatVariables[base + k] = variables[k][i];
-            }
+          
         }
+        
+        
+         int dataSize = variables[0].length;
+        
+        for(int i=0;i<stride;i++){
+        System.arraycopy(variables[i], 0, flatVariables, i*dataSize, dataSize);
+        }
+        
 
         // Compile expressions using the Vector Engine
         MathExpression meLinear = new MathExpression("12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2");
