@@ -21,44 +21,21 @@ import java.util.concurrent.Future;
  */
 public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
-    public class VariableBatch {
-
-        private final double[] flatVariables;
-        private final int dataSize;
-        private int currentSlot = 0;
-
-        public VariableBatch(int stride, int dataSize) {
-            this.dataSize = dataSize;
-            this.flatVariables = new double[stride * dataSize];
-        }
-
-        // Ingests a standard user array directly into Path A's contiguous slots
-        public VariableBatch bind(double[] variableData) {
-            int targetOffset = currentSlot * dataSize;
-            System.arraycopy(variableData, 0, this.flatVariables, targetOffset, dataSize);
-            currentSlot++;
-            return this;
-        }
-
-        public double[] getFlatVariables() {
-            return flatVariables;
-        }
-    }
-    
     public class ThreadLocalBufferPool {
-    // ThreadLocal cache to keep threads from colliding in multi-threaded environments
-    private static final ThreadLocal<double[]> BUFFER_CACHE = new ThreadLocal<>();
+        // ThreadLocal cache to keep threads from colliding in multi-threaded environments
 
-    public static double[] getOrCreateBuffer(int totalSize) {
-        double[] buffer = BUFFER_CACHE.get();
-        if (buffer == null || buffer.length < totalSize) {
-            // Only allocates on the very first pass (or if data size scales up)
-            buffer = new double[totalSize];
-            BUFFER_CACHE.set(buffer);
+        private static final ThreadLocal<double[]> BUFFER_CACHE = new ThreadLocal<>();
+
+        public static double[] getOrCreateBuffer(int totalSize) {
+            double[] buffer = BUFFER_CACHE.get();
+            if (buffer == null || buffer.length < totalSize) {
+                // Only allocates on the very first pass (or if data size scales up)
+                buffer = new double[totalSize];
+                BUFFER_CACHE.set(buffer);
+            }
+            return buffer;
         }
-        return buffer;
     }
-}
     // Aggressive pre-sized caches
     private static final ThreadLocal<double[]> SCALAR_FRAME = ThreadLocal.withInitial(() -> new double[128]);
     private static final ThreadLocal<Future<?>[]> FUTURES_CACHE = ThreadLocal.withInitial(() -> new Future[128]);
@@ -103,15 +80,19 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     // Pre-allocated compilation state
     private final MathExpression.Token[] postfix;
     private final MethodHandle compiledScalarHandle;
+    private int slots[];
     private int[] opcodes;
     private int[] targetSlots;
     private double[] literalConstants;
+    private int varCount;
     private int instructionCount;
     private KernelInterceptException interceptedKernel;
 
     public VectorTurboEvaluator(MathExpression me) throws Throwable {
         super(me);
         this.postfix = me.getCachedPostfix();
+        this.slots = me.getSlots();
+        this.varCount = me.getVariablesNames().length;
         this.compiledScalarHandle = compileScalar(postfix);
         compileToPrimitiveProgram();
     }
@@ -122,6 +103,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         this.targetSlots = new int[len];
         this.literalConstants = new double[len];
         this.instructionCount = 0;
+        Arrays.fill(targetSlots, -1);
         for (MathExpression.Token t : postfix) {
             switch (t.kind) {
                 case MathExpression.Token.NUMBER -> {
@@ -158,10 +140,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     instructionCount++;
                 }
                 case MathExpression.Token.FUNCTION, MathExpression.Token.METHOD -> {
-                    if (isMatrixKernel(t.name, t.arity)) {
+                    /*if (isMatrixKernel(t.name, t.arity)) {
                         interceptedKernel = new KernelInterceptException(t.name, t.arity);
                         return;
-                    }
+                    }*/
                     String name = t.name.toLowerCase();
                     opcodes[instructionCount] = switch (name) {
                         case "sin", "sin_rad" ->
@@ -205,6 +187,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 }
             }
         }
+        
     }
 
     @Override
@@ -212,15 +195,13 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         return new BatchedVectorCompositeExpression(compiledScalarHandle, opcodes, targetSlots,
                 literalConstants, instructionCount);
     }
-
-    public final class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
+public final class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
 
         private final MethodHandle scalarHandle;
         private final int[] opcodes;
         private final int[] targetSlots;
         private final double[] literalConstants;
-        private final int instructionCount;
-        private final double[] scalarFrameBuffer;
+        private final int instructionCount; 
 
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
         private static final int BLOCK_SIZE = 2048;
@@ -238,8 +219,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             this.opcodes = ops;
             this.targetSlots = slots;
             this.literalConstants = consts;
-            this.instructionCount = count;
-            this.scalarFrameBuffer = new double[128];
+            this.instructionCount = count; 
         }
 
         @Override
@@ -265,70 +245,106 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         public TurboExpressionEvaluator getCompiler() {
             return VectorTurboEvaluator.this;
         }
-
-        /////////---Uses double[][] Arrays For Conveninience
-
+		
+        //////////////////////////////////////////////////////////////////
+        ///                                                            ///
+        ///          Uses double[][] Arrays For Conveninience          ///
+        ///         Speed may drop by as much as 4ns                   ///
+        ///                                                            ///
+        //////////////////////////////////////////////////////////////////
+        @Override
         public void applyBulk(double[][] variables, double[] output) {
-            applyBulkInternal(variables, output, 0, output.length);
+            int numSamples = variables[0].length;
+            int numVars = variables.length;
+            int stride = VectorTurboEvaluator.this.varCount;
+ 
+
+            // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            // 2. Stream user columns into the flat layout
+            for (int i = 0; i < stride; i++) {
+                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
+            }
+            applyBulk(flatVariables, output);
         }
 
-        public void applyBulk(double[][] flatVariables, double[] output, int offset) {
-            applyBulkInternal(flatVariables, output, offset, output.length - offset);
+        @Override
+        public void applyBulk(double[][] variables, double[] output, int offset) {
+            int numSamples = variables[0].length;
+            int numVars = variables.length;
+            int stride = VectorTurboEvaluator.this.varCount;
+ 
+
+            // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            // 2. Stream user columns into the flat layout
+            for (int i = 0; i < stride; i++) {
+                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
+            }
+            applyBulk(flatVariables, output, offset);
         }
-    @Override
+
+        @Override
         public void applyBulk(double[][] variables, double[] output, java.util.concurrent.ExecutorService executor) {
-            int dataSize = variables[0].length;
-            int cores = Runtime.getRuntime().availableProcessors();
-            int chunkSize = (dataSize + cores - 1) / cores; // Round up
-
-            java.util.List<java.util.concurrent.Callable<Void>> tasks = new java.util.ArrayList<>();
-
-            for (int i = 0; i < cores; i++) {
-                final int start = i * chunkSize;
-                final int end = Math.min(start + chunkSize, dataSize);
-
-                if (start < end) {
-                    tasks.add(() -> {
-                        applyBulkInternal(variables, output, start, end - start);
-                        return null;
-                    });
-                }
+            int numSamples = variables[0].length;
+            int stride = VectorTurboEvaluator.this.varCount;
+            // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            // 2. Stream user columns into the flat layout
+            for (int i = 0; i < stride; i++) {
+                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
             }
-
-            try {
-                executor.invokeAll(tasks);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            applyBulk(flatVariables, output, executor);
         }
 
         @Override
         public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
-            int dataSize = variables[0].length;
-
-            // Process in chunks of 'batchSize' to keep data hot in L1/L2 cache
-            for (int start = 0; start < dataSize; start += batchSize) {
-                int length = Math.min(batchSize, dataSize - start);
-                applyBulkInternal(variables, output, start, length);
+            int numSamples = variables[0].length;
+            int stride = VectorTurboEvaluator.this.varCount;
+            // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            // 2. Stream user columns into the flat layout
+            for (int i = 0; i < stride; i++) {
+                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
             }
+            applyBulkBatched(flatVariables, output, batchSize);
         }
-
+        //////////////////////////////////////////////////////////////////////////////
+        ///                      double[][] Arrays ends                            ///
+        ///               Uses Flat interleaved Arrays for speed(0.8ns-1.8ns)      ///
+        ///                  [x1,x2..xn, y1,y2..yn, z1,z2..zn]                     ///
+        ///                                                                        ///                   
+        //////////////////////////////////////////////////////////////////////////////
+        
+        
         /**
-         * Core Column-Major Vectorized Loop Processor..
+         * Core Column-Major Vectorized Loop Processor (Flat Memory
+         * Architecture) Bypasses jagged array pointers to execute at maximum
+         * hardware throughput.
+         *
+         * @param flatVariables Grouped/Contiguous array of variables e.g. [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back.
+         * concatenated.
+         * @param dataSize The total number of elements per variable row (used
+         * for stride offset).
          */
-        private void applyBulkInternal(double[][] variables, double[] output, int startIdx, int length) {
-            if (variables == null || variables.length == 0 || length <= 0) {
+        private void applyBulkInternal(double[] flatVariables, int inputRowSize, int srcStartIdx, double[] output, int destStartIdx, int length) {
+            if (length <= 0 || output == null) {
+                return;
+            }
+            final int stride = VectorTurboEvaluator.this.varCount;
+            if (stride > 0 && (flatVariables == null || flatVariables.length == 0)) {
                 return;
             }
 
             final double[][] executionStack = SCRATCH_STACKS.get();
 
-            final int endIdx = startIdx + length;
-
             // Step 1: Chunk operations into L1/L2 cache-friendly blocks
-            for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
-                final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
+            for (int blockOffset = 0; blockOffset < length; blockOffset += BLOCK_SIZE) {
+                final int currentBlockSize = Math.min(BLOCK_SIZE, length - blockOffset);
                 int sp = 0; // Flat local stack pointer resetting per block segment
+
+                final int currentSrcBlockStart = srcStartIdx + blockOffset;
+                final int currentDestBlockStart = destStartIdx + blockOffset;
 
                 // Step 2: Traverse opcodes sequentially across the entire current data chunk
                 for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
@@ -343,16 +359,18 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
                         case OP_LOAD -> {
                             final int slotIdx = targetSlots[instIdx];
-                            final double[] varArray = variables[slotIdx];
                             final double[] stackArr = executionStack[sp++];
-                            System.arraycopy(varArray, blockStart, stackArr, 0, currentBlockSize);
+
+                             // TURBO SPEED WIN: Compute linear stride instead of dereferencing an array pointer.
+                            // This is perfectly sequential memory, allowing the CPU prefetcher to run at full speed.
+                            final int flatOffset = (slotIdx * inputRowSize) + currentSrcBlockStart;
+                            System.arraycopy(flatVariables, flatOffset, stackArr, 0, currentBlockSize);
                         }
 
                         case OP_ADD -> {
                             final double[] r = executionStack[--sp];
                             final double[] l = executionStack[--sp];
                             final double[] res = executionStack[sp++];
-                            // Clean primitive loop structure trivial for Hotspot JIT SIMD optimization
                             for (int k = 0; k < currentBlockSize; k++) {
                                 res[k] = l[k] + r[k];
                             }
@@ -568,7 +586,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                             final double[] a = executionStack[--sp];
                             final double[] res = executionStack[sp++];
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = a[k] * b[k] + c[k];
+                                res[k] = Math.fma(a[k], b[k], c[k]);
                             }
                         }
 
@@ -587,17 +605,354 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     }
                 }
 
-                // Step 3: Extract final calculation results from index 0 on stack directly to output destination
-                System.arraycopy(executionStack[0], 0, output, blockStart, currentBlockSize);
+                // Extract calculation results directly to the shifted destination window
+                System.arraycopy(executionStack[0], 0, output, currentDestBlockStart, currentBlockSize);
             }
         }
 
-    
-        ///////////////////double[][] Arrays ends/////////////////////////////////////
-        ///                                                                        ///
-        /////////////////////////Uses Flat interleaved Arrays for speed///////////////
-        ///                                                                        ///
-        ///                       [x1,y1,z1, x2,y2,z2, x3,y3,z3,.....,xn,yn,z,]    ///                   
+        @Override
+        public void applyBulk(double[] flatVariables, double[] output, java.util.concurrent.ExecutorService executor) {
+            if (output == null || executor == null) {
+                return;
+            }
+
+            final int stride = VectorTurboEvaluator.this.varCount;
+            final int inputRowSize = (stride > 0 && flatVariables != null) ? flatVariables.length / stride : 0;
+            final int length = (stride > 0) ? inputRowSize : output.length;
+
+            final int cores = Runtime.getRuntime().availableProcessors();
+            final int chunkSize = (length + cores - 1) / cores;
+            java.util.List<java.util.concurrent.Callable<Void>> tasks = new java.util.ArrayList<>(cores);
+
+            for (int i = 0; i < cores; i++) {
+                final int start = i * chunkSize;
+                final int end = Math.min(start + chunkSize, length);
+
+                if (start < end) {
+                    tasks.add(() -> {
+                        applyBulkInternal(flatVariables, inputRowSize, start, output, start, end - start);
+                        return null;
+                    });
+                }
+            }
+
+            try {
+                executor.invokeAll(tasks);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        @Override
+        public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
+            if (output == null || batchSize <= 0) {
+                return;
+            }
+
+            final int stride = VectorTurboEvaluator.this.varCount;
+            final int inputRowSize = (stride > 0 && flatVariables != null) ? flatVariables.length / stride : 0;
+            final int totalLength = (stride > 0) ? inputRowSize : output.length;
+
+            for (int start = 0; start < totalLength; start += batchSize) {
+                int length = Math.min(batchSize, totalLength - start);
+                applyBulkInternal(flatVariables, inputRowSize, start, output, start, length);
+            }
+        }
+
+        @Override
+        public void applyBulk(double[] flatVariables, double[] output) {
+            if (output == null) {
+                return;
+            }
+            final int stride = VectorTurboEvaluator.this.varCount;
+            final int inputRowSize = (stride > 0 && flatVariables != null) ? flatVariables.length / stride : 0;
+            final int length = (stride > 0) ? inputRowSize : output.length;
+
+            applyBulkInternal(flatVariables, inputRowSize, 0, output, 0, length);
+        }
+
+        @Override
+        public void applyBulk(double[] flatVariables, double[] output, int offset) {
+            if (output == null) {
+                return;
+            }
+ 
+            final int stride = VectorTurboEvaluator.this.varCount;
+            final int inputRowSize = (stride > 0 && flatVariables != null) ? flatVariables.length / stride : 0;
+            final int length = (stride > 0) ? inputRowSize : (output.length - offset);
+
+            // Bounds protection check to prevent writing beyond output footprint
+            if (offset < 0 || offset + length > output.length) {
+                return;
+            }
+			
+            // Maps input starting from index 0 into output starting at target offset
+            applyBulkInternal(flatVariables, inputRowSize, 0, output, offset, length);
+        }
+
+        ///////////////////////////////////////////////////////////
+        ///                    MATRIX KERNELS                   ///
+        ///////////////////////////////////////////////////////////
+        
+        @Override
+        public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op) {
+            String kernelToRun = (op != null) ? op : (interceptedKernel != null ? interceptedKernel.getKernelName() : null);
+            if (kernelToRun == null) {
+                throw new UnsupportedOperationException("No kernel");
+            }
+
+            switch (kernelToRun.toLowerCase()) {
+                case "matmul" ->
+                    FlatMatrixF.matmul(inputs[0], inputs[1], output);
+                case "add", "matadd", "add_mat" ->
+                    FlatMatrixF.add(inputs[0], inputs[1], output);
+                case "matmul_bias_gelu", "matmul_add_bias_gelu" ->
+                    FlatMatrixF.matmulAddBiasGelu(inputs[0], inputs[1], inputs[2], output);
+                case "matmul_add_sin" -> {
+                    float alpha = inputs[2].get(0, 0);
+                    FlatMatrixF.matmulAddSin(inputs[0], inputs[1], output, alpha);
+                }
+                case "softmax", "softmax_in_place" -> {
+                    if (inputs[0] != output) {
+                        System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
+                    }
+                    output.softmaxRowsInPlace();
+                }
+                case "relu", "relu_in_place" -> {
+                    if (inputs[0] != output) {
+                        System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
+                    }
+                    output.reluInPlace();
+                }
+                case "gelu", "gelu_in_place" -> {
+                    if (inputs[0] != output) {
+                        System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
+                    }
+                    output.geluInPlace();
+                }
+				 // === New Q8 + Attention kernels ===
+                case "q8_quantize" -> {
+				         // inputs[0] = src float, inputs[1] = scale float[1], output = dst byte wrapped as float
+                    float[] src = inputs[0].data;
+                    int srcOff = inputs[0].offset;
+                    int len = inputs[0].rows * inputs[0].cols;
+                    float scale = inputs[1].data[inputs[1].offset];
+                    byte[] dst = output.asByteArray();
+                    KernelsInt8.quantize_f32_to_i8(src, srcOff, len, dst, output.offset, scale);
+                }
+                case "q8_dequant" -> {
+				 // inputs[0] = src byte wrapped as float, inputs[1] = scale float[1], output = dst float
+                    byte[] src = inputs[0].asByteArray();
+                    int srcOff = inputs[0].offset;
+                    int len = inputs[0].rows * inputs[0].cols;
+                    float scale = inputs[1].data[inputs[1].offset];
+                    float[] dst = output.data;
+                    KernelsInt8.dequant_i8_to_f32(src, srcOff, len, dst, output.offset, scale);
+                }
+                case "q8_absmax_quant" -> {
+				// inputs[0] = src float, output[0] = dst byte, output[1] = scale float[1]
+                    float[] src = inputs[0].data;
+                    int srcOff = inputs[0].offset;
+                    int len = inputs[0].rows * inputs[0].cols;
+                    float amax = KernelsInt8.absmax(src, srcOff, len);
+                    float scale = amax / 127.0f;
+                    if (scale == 0.0f) {
+                        scale = 1e-6f;
+                    }
+                    byte[] dst = output.asByteArray();
+                    KernelsInt8.quantize_f32_to_i8(src, srcOff, len, dst, output.offset, scale);
+					     // write scale to inputs[1] which caller must provide as writable
+                    inputs[1].data[inputs[1].offset] = scale;
+                }
+                case "rope_split" -> {
+				 // inputs[0] = buf [Q||K], inputs[1] = cos, inputs[2] = sin, inputs[3] = meta[pos, qHeads, kHeads, head_dim]
+                    float[] buf = inputs[0].data;
+                    float[] cos = inputs[1].data;
+                    float[] sin = inputs[2].data;
+                    int pos = (int) inputs[3].data[inputs[3].offset + 0];
+                    int qHeads = (int) inputs[3].data[inputs[3].offset + 1];
+                    int kHeads = (int) inputs[3].data[inputs[3].offset + 2];
+                    int head_dim = (int) inputs[3].data[inputs[3].offset + 3];
+                    int qOff = inputs[0].offset;
+                    int kOff = qOff + qHeads * head_dim;
+                    KernelsFloat.rope_inplace_split_ws(buf, qOff, qHeads, kOff, kHeads, head_dim, pos, cos, sin);
+                    if (output != inputs[0]) {
+                        System.arraycopy(buf, qOff, output.data, output.offset, (qHeads + kHeads) * head_dim);
+                    }
+                }
+                case "accum_v" -> {
+				   // output += inputs[0] * inputs[1].get(0,0)
+                    float scale = (float) inputs[1].data[inputs[1].offset];
+                    float[] src = inputs[0].data;
+                    float[] dst = output.data;
+                    int len = inputs[0].rows * inputs[0].cols;
+                    KernelsFloat.accumulate_v_f32(dst, output.offset, src, inputs[0].offset, len, scale);
+                }
+                case "matmul_1xn_axpy" -> {
+				    // output = inputs[0][1,K] @ inputs[1][K,N], inputs[0] is workspace slice
+                    // inputs[2] = meta[K, N] as float[2]
+                    int K = (int) inputs[2].data[inputs[2].offset + 0];
+                    int N = (int) inputs[2].data[inputs[2].offset + 1];
+                    KernelsFloat.matmul_f32_1xN_axpy(
+                            inputs[0].data, inputs[1].data, output.data, output.offset,
+                            K, N, inputs[0].offset
+                    );
+                }
+                case "matmul_bias_relu" ->
+                    FlatMatrixF.matmulAddBiasRelu(inputs[0], inputs[1], inputs[2], output);
+                case "rms_norm" -> {
+				  // inputs[0]=x, inputs[1]=weight, inputs[2]=eps[1], output=y
+                    float eps = (float) inputs[2].data[inputs[2].offset];
+                    FlatMatrixF.rmsNorm(inputs[0], inputs[1], output, eps);
+                }
+                case "layer_norm" -> {
+				     // inputs[0]=x, inputs[1]=gamma, inputs[2]=beta, inputs[3]=eps[1]
+                    float eps = (float) inputs[3].data[inputs[3].offset];
+                    FlatMatrixF.layerNorm(inputs[0], inputs[1], inputs[2], output, eps);
+                }
+                case "matmul_bias_silu" ->
+                    FlatMatrixF.matmulAddBiasSilu(inputs[0], inputs[1], inputs[2], output);
+                case "swiglu" -> {
+				  // inputs[0]=gate, inputs[1]=up, output=gate*SiLU(up)
+                    FlatMatrixF.swiGLU(inputs[0], inputs[1], output);
+                }
+                case "mha_attention" -> {
+				     // inputs: [Q, K, V, scale[1]], output=attn_out
+                    float scale = (float) inputs[3].data[inputs[3].offset];
+                    FlatMatrixF.mhaAttention(inputs[0], inputs[1], inputs[2], output, scale);
+                }
+                default ->
+                    throw new UnsupportedOperationException("Unknown kernel: " + kernelToRun);
+            }
+        }
+
+        @Override
+        public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String op) {
+            String kernelToRun = (op != null) ? op : (interceptedKernel != null ? interceptedKernel.getKernelName() : null);
+            if (kernelToRun == null) {
+                throw new UnsupportedOperationException("No kernel");
+            }
+        }
+    }
+    public final class BatchedVectorCompositeExpression1 implements SIMDCompositeExpression {
+
+        private final MethodHandle scalarHandle;
+        private final int[] opcodes;
+        private final int[] targetSlots;
+        private final double[] literalConstants;
+        private final int instructionCount;
+
+        // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
+        private static final int BLOCK_SIZE = 2048;
+
+        // Zero-allocation reusable intermediate stack pads pooled per thread
+        private static final ThreadLocal<double[][]> SCRATCH_STACKS = ThreadLocal.withInitial(() -> {
+            // Accommodates max expression stack depth evaluation of up to 64 nested levels
+            double[][] blocks = new double[64][BLOCK_SIZE];
+            return blocks;
+        });
+
+        BatchedVectorCompositeExpression1(MethodHandle handle, int[] ops, int[] slots,
+                double[] consts, int count) {
+            this.scalarHandle = handle;
+            this.opcodes = ops;
+            this.targetSlots = slots;
+            this.literalConstants = consts;
+            this.instructionCount = count;
+        }
+
+        @Override
+        public double applyScalar(double[] variables) {
+            try {
+                return (double) scalarHandle.invokeExact(variables);
+            } catch (Throwable t) {
+                throw new RuntimeException("Turbo evaluation failed", t);
+            }
+        }
+
+        @Override
+        public MathExpression.EvalResult apply(double[] variables) {
+            return null;
+        }
+
+        @Override
+        public String checkErrorLogs() {
+            return "";
+        }
+
+        @Override
+        public TurboExpressionEvaluator getCompiler() {
+            return VectorTurboEvaluator.this;
+        }
+
+        //////////////////////////////////////////////////////////////////
+        ///                                                            ///
+        ///          Uses double[][] Arrays For Conveninience          ///
+        ///         Speed may drop by as much as 4ns                   ///
+        ///                                                            ///
+        //////////////////////////////////////////////////////////////////
+
+        @Override
+        public void applyBulk(double[][] variables, double[] output) {
+            int numSamples = variables[0].length; 
+            int stride = VectorTurboEvaluator.this.varCount;
+ 
+
+            // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            // 2. Stream user columns into the flat layout
+            for (int i = 0; i < stride; i++) {
+                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
+            }
+            applyBulk(flatVariables, output);
+        }
+
+        @Override
+        public void applyBulk(double[][] variables, double[] output, int offset) {
+            int numSamples = variables[0].length; 
+            int stride = VectorTurboEvaluator.this.varCount;
+ 
+
+            // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            // 2. Stream user columns into the flat layout
+            for (int i = 0; i < stride; i++) {
+                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
+            }
+            applyBulk(flatVariables, output, offset);
+        }
+
+        @Override
+        public void applyBulk(double[][] variables, double[] output, java.util.concurrent.ExecutorService executor) {
+            int numSamples = variables[0].length; 
+            int stride = VectorTurboEvaluator.this.varCount;
+            // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            // 2. Stream user columns into the flat layout
+            for (int i = 0; i < stride; i++) {
+                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
+            }
+            applyBulk(flatVariables, output, executor);
+        }
+
+        @Override
+        public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
+            int numSamples = variables[0].length; 
+            int stride = VectorTurboEvaluator.this.varCount;
+            // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            // 2. Stream user columns into the flat layout
+            for (int i = 0; i < stride; i++) {
+                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
+            }
+            applyBulkBatched(flatVariables, output, batchSize);
+        }
+
+        //////////////////////////////////////////////////////////////////////////////
+        ///                      double[][] Arrays ends                            ///
+        ///               Uses Flat interleaved Arrays for speed(0.8ns-1.8ns)      ///
+        ///                  [x1,x2..xn, y1,y2..yn, z1,z2..zn]                     ///
+        ///                                                                        ///                   
         //////////////////////////////////////////////////////////////////////////////
         
         
@@ -609,7 +964,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * Architecture) Bypasses jagged array pointers to execute at maximum
          * hardware throughput.
          *
-         * @param flatVariables Interleaved array of variables e.g.. [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
+         * @param flatVariables Grouped/Contiguous array of variables e.g. [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back.
          * concatenated.
          * @param dataSize The total number of elements per variable row (used
          * for stride offset).
@@ -639,7 +994,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         }
 
                         case OP_LOAD -> {
-                            
+
                             final int slotIdx = targetSlots[instIdx];
                             final double[] stackArr = executionStack[sp++];
 
@@ -647,7 +1002,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                             // This is perfectly sequential memory, allowing the CPU prefetcher to run at full speed.
                             final int flatOffset = (slotIdx * dataSize) + blockStart;
                             System.arraycopy(flatVariables, flatOffset, stackArr, 0, currentBlockSize);
-                             
+
                             /*Path B
                             Assumes the flat array contains interleaved data and processes it, quite slower
                             final int slotIdx = targetSlots[instIdx];
@@ -659,7 +1014,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                                 int flatIdx = (blockStart + k) * stride + slotIdx;
                                 stackArr[k] = flatVariables[flatIdx];
                             }
-                            */
+                             */
                         }
 
                         case OP_ADD -> {
@@ -905,13 +1260,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
-        /**
-         *
-         * @param flatVariables - Interleaved array of variables e.g..
-         * [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
-         * @param output
-         * @param executor
-         */
         @Override
         public void applyBulk(double[] flatVariables, double[] output, java.util.concurrent.ExecutorService executor) {
             // FIX: Added output and executor null checks
@@ -919,8 +1267,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 return;
             }
 
-            int numVars = VectorTurboEvaluator.this.targetSlots.length;
-            final int dataSize = flatVariables.length / numVars;
+            final int dataSize = output.length;
 
             // OPTIONAL FIX: Atomic boundary protection for the output array
             if (output.length < dataSize) {
@@ -951,13 +1298,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
-        /**
-         *
-         * @param flatVariables - Interleaved array of variables e.g..
-         * [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
-         * @param output
-         * @param batchSize
-         */
         @Override
         public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
             // FIX: Added output check and protection against infinite loops (batchSize <= 0)
@@ -965,8 +1305,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 return;
             }
 
-            int numVars = VectorTurboEvaluator.this.targetSlots.length;
-            final int dataSize = flatVariables.length / numVars;
+            final int dataSize = output.length;
 
             // Stream data using cache-friendly user configuration
             for (int start = 0; start < dataSize; start += batchSize) {
@@ -975,38 +1314,25 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
-        /**
-         *
-         * @param flatVariables - Interleaved array of variables e.g..
-         * [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
-         * @param output
-         */
+        @Override
         public void applyBulk(double[] flatVariables, double[] output) {
             if (flatVariables == null || flatVariables.length == 0 || output == null) {
                 return;
             }
-
-            int numVars = VectorTurboEvaluator.this.targetSlots.length;
-            final int dataSize = flatVariables.length / numVars;
+ 
+            final int dataSize = output.length;
 
             // 3. Process the entire timeline synchronously from index 0
             applyBulkInternal(flatVariables, dataSize, output, 0, dataSize);
         }
 
-        /**
-         *
-         * @param flatVariables - Interleaved array of variables e.g..
-         * [x1,y1,z1,x2,y2,z2,....,xn,yn,zn]
-         * @param output
-         * @param offset
-         */
+        @Override
         public void applyBulk(double[] flatVariables, double[] output, int offset) {
             if (flatVariables == null || flatVariables.length == 0 || output == null) {
                 return;
             }
-
-            int numVars = VectorTurboEvaluator.this.targetSlots.length;
-            final int dataSize = flatVariables.length / numVars;
+ 
+            final int dataSize = output.length;
 
             // Boundary protection to prevent IndexOutOfBoundsException inside the kernel
             if (offset < 0 || offset >= dataSize) {
@@ -1026,12 +1352,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         ///                                                     ///
         ///////////////////////////////////////////////////////////
         
-        /**
-         * 
-         * @param inputs
-         * @param output
-         * @param op 
-         */
+   
         @Override
         public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op) {
             String kernelToRun = (op != null) ? op : (interceptedKernel != null ? interceptedKernel.getKernelName() : null);

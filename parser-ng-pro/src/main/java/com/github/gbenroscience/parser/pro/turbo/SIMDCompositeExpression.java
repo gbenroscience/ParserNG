@@ -6,84 +6,124 @@ import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import java.util.concurrent.ExecutorService;
 
 /**
- *
- * @author GBEMIRO
+ * Super-fast, SIMD-aligned vector expression evaluator interface.
+ * Exposes a dual-path API optimized for massive parallel time-series calculation,
+ * machine learning transformations, and fused token attention operations.
+ * * @author GBEMIRO
  */
 public interface SIMDCompositeExpression extends FastCompositeExpression {
 
     /**
-     * Executes the compiled expression over massive arrays using Hardware SIMD
-     * Vectors.
+     * Executes the compiled expression over a convenient 2D array of variables.
+     * Under the hood, this method flattens and groups data into sequential memory blocks
+     * before delegating to the core vectorized execution kernel.
      *
-     * @param variables A 2D array where variables[slot][i] is the data.
-     * @param output The output array to dump the parallel results into.
+     * @param variables A 2D array of variable channels where each outer row represents an entire vector 
+     * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn], [z1, z2... zn]]}.
+     *@param output    The pre-allocated target array where the final evaluated results will be directly dumped.
      */
     void applyBulk(double[][] variables, double[] output);
 
+    /**
+     * Executes the compiled expression over a 2D array subset, beginning execution from a specified 
+     * horizontal timeline offset point.
+     *
+     * @param variables    A 2D array of variable channels where each outer row represents an entire vector 
+     * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn]]}.
+     * @param outputBuffer The pre-allocated target array where the final evaluated results will be dumped.
+     * @param offset       The starting index offset along the temporal/element timeline axis from which to begin execution.
+     * @throws Throwable   If the runtime calculation or underlying method handle invocation fails.
+     */
     public void applyBulk(double[][] variables, double[] outputBuffer, int offset) throws Throwable;
 
     /**
-     * If the double[][] variables passed to this method is a "jagged" array or
-     * an array-of-arrays, the performance will suffer compared to the flat 1D
-     * array we used earlier. If the API allows, encourage users to flatten
-     * their input data before calling these methods to achieve that 100x+
-     * speedup we saw in your previous benchmark.
+     * Distributes the evaluation of a 2D array dataset evenly across multiple processing threads
+     * using a fork-join block chunking methodology.
      *
-     * @param variables
-     * @param output
-     * @param executor
+     * @param variables A 2D array of variable channels where each outer row represents an entire vector 
+     * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn]]}.
+     * @param output    The pre-allocated target array where the parallel calculations will be written.
+     * @param executor  The multi-threaded worker pool responsible for driving core processing chunks.
      */
     public void applyBulk(double[][] variables, double[] output, ExecutorService executor);
 
     /**
-     * We suggest a default of 1024 or 2048. This is generally large enough to
-     * saturate the SIMD pipeline but small enough to fit within most L1/L2
-     * caches across different CPU architectures.
+     * Evaluates a 2D variable structure using an explicit, cache-bounded window chunk size 
+     * to enforce strict CPU L1/L2 data cache localization.
      *
-     * @param variables
-     * @param output
-     * @param batchSize
+     * @param variables A 2D array of variable channels where each outer row represents an entire vector 
+     * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn]]}.
+     * @param output    The pre-allocated target array where the evaluated blocks will be written.
+     * @param batchSize The strict memory segment window slice size processed per individual cache loop pass.
      */
     public void applyBulkBatched(double[][] variables, double[] output, int batchSize);
 
     /**
-     * 
-     * @param flatVariables
-     * @param output 
+     * <b>Warp Speed Path (Power Users):</b> Evaluates a single, raw, pre-grouped flat array at 
+     * maximum hardware throughput with zero memory copies, zero allocations, and direct sequential prefetching.
+     *
+     * @param flatVariables A single flat array containing variables contiguously grouped back-to-back by variable slot.
+     * <b>CRITICAL:</b> Data must use a Grouped structure, e.g., 
+     * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Interleaved arrays will yield corrupted data.
+     * @param output        The pre-allocated target array where the evaluated vector stream is directly copied.
      */
     public void applyBulk(double[] flatVariables, double[] output);
+
     /**
-     * 
-     * @param flatVariables
-     * @param output
-     * @param offset 
+     * <b>Warp Speed Path (Power Users):</b> Evaluates a pre-grouped flat array starting execution from 
+     * a specific temporal/element index offset point.
+     *
+     * @param flatVariables A single flat array containing variables contiguously grouped back-to-back by variable slot.
+     * <b>CRITICAL:</b> Data must use a Grouped structuree.g., 
+     * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Do NOT pass interleaved data.
+     * @param output        The pre-allocated target array where the evaluated vector stream is directly copied.
+     * @param offset        The item/timestep boundary index from which evaluation begins inside each variable segment.
      */
     public void applyBulk(double[] flatVariables, double[] output, int offset);
 
     /**
-     * 
-     * @param flatVariables
-     * @param output
-     * @param executor 
+     * <b>Warp Speed Path (Power Users):</b> Concurrently evaluates a pre-grouped flat array by cleanly dividing 
+     * segments across active CPU cores for optimal multi-threaded memory bandwidth consumption.
+     *
+     * @param flatVariables A single flat array containing variables contiguously grouped back-to-back by variable slot.
+     * <b>CRITICAL:</b> Data must use a Grouped structure (Path A), e.g., 
+     * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Do NOT pass interleaved data.
+     * @param output        The pre-allocated target array where parallel workers will drop evaluated computations.
+     * @param executor      The processing thread framework driving core mathematical chunks.
      */
     public void applyBulk(double[] flatVariables, double[] output, java.util.concurrent.ExecutorService executor);
 
     /**
-     * 
-     * @param flatVariables
-     * @param output
-     * @param batchSize 
+     * <b>Warp Speed Path (Power Users):</b> Evaluates a pre-grouped flat array using a custom-defined batch 
+     * chunk boundaries to maximize custom hardware L1/L2 execution efficiency.
+     *
+     * @param flatVariables A single flat array containing variables contiguously grouped back-to-back by variable slot.
+     * <b>CRITICAL:</b> Data must use a Grouped structure (Path A), e.g., 
+     * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Do NOT pass interleaved data.
+     * @param output        The pre-allocated target array where the evaluated blocks will be written.
+     * @param batchSize     The localized processing block window length applied across individual memory loops.
      */
     public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize);
 
     /**
-     * Executes fused deep learning kernels directly via FlatMatrix.
+     * Fuses deep learning and high-performance neural network transformations directly over pre-allocated 
+     * double-precision structural tensor types.
      *
-     * @param inputs Array of input matrices (e.g., [A, B] or [A, B, Bias])
-     * @param output The pre-allocated output matrix to store the result
-     * @param operation The kernel identifier (e.g., "matmul", "gelu")
+     * @param inputs    An ordered array of operational tensor matrices, e.g., weights, targets, scales, or vector biases.
+     * @param output    The destination matrix wrapper initialized to capture transformed weights or spatial dimensions.
+     * @param operation The explicit execution identifier targeting underlying matrix optimization layers 
+     * (e.g., "matmul", "rms_norm", "swiglu", "q8_quantize").
      */
     public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String operation);
 
+    /**
+     * Fuses deep learning and high-performance neural network transformations directly over pre-allocated 
+     * single-precision (float) tensor execution spaces.
+     *
+     * @param inputs An ordered array of float operational matrices, optimized for lightning-fast transformer workloads.
+     * @param output The destination single-precision tensor buffer designed to safely lock down mutated states.
+     * @param op     The explicit execution identifier targeting underlying matrix optimization layers 
+     * (e.g., "matmul_bias_gelu", "rope_split", "mha_attention").
+     */
     public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op);
 }
