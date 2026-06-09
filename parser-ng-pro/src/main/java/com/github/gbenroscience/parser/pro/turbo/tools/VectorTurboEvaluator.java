@@ -234,7 +234,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         }
 
         /**
-         * Core Column-Major Vectorized Loop Processor
+         * Core Column-Major Vectorized Loop Processor..
          */
         private void applyBulkInternal(double[][] variables, double[] output, int startIdx, int length) {
             if (variables == null || variables.length == 0 || length <= 0) {
