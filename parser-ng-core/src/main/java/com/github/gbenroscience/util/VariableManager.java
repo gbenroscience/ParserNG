@@ -37,30 +37,12 @@ public class VariableManager {
 VARIABLES attribute of objects of this class.
      */
     private CommandInterpreter commandParser;
-
-    private final Map<String, Integer> nameToIndex = new HashMap<>();
-    private int nextSlot = 0;
-
+ 
     public VariableManager() {
         commandParser = new CommandInterpreter();
     }
 
-    public int getSlot(String name) {
-        return nameToIndex.computeIfAbsent(name, k -> nextSlot++);
-    }
-
-    /**
-     * Returns the total number of slots required for the execution frame.
-     */
-    public int size() {
-        return nextSlot;
-    }
-
-    public void reset() {
-        nameToIndex.clear();
-        nextSlot = 0;
-    }
-
+  
     public CommandInterpreter getCommandParser() {
         return commandParser;
     }
