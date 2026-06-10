@@ -187,7 +187,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 }
             }
         }
-        
+
     }
 
     @Override
@@ -195,16 +195,22 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         return new BatchedVectorCompositeExpression(compiledScalarHandle, opcodes, targetSlots,
                 literalConstants, instructionCount);
     }
-public final class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
+
+    public final class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
 
         private final MethodHandle scalarHandle;
         private final int[] opcodes;
         private final int[] targetSlots;
         private final double[] literalConstants;
-        private final int instructionCount; 
+        private final int instructionCount;
 
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
         private static final int BLOCK_SIZE = 2048;
+
+        // Allocates a perfectly flat, contiguous scratch block (64 nested stack frames * 2048 block size)
+        private static final ThreadLocal<double[]> FLAT_SCRATCH_STACK = ThreadLocal.withInitial(()
+                -> new double[64 * BLOCK_SIZE]
+        );
 
         // Zero-allocation reusable intermediate stack pads pooled per thread
         private static final ThreadLocal<double[][]> SCRATCH_STACKS = ThreadLocal.withInitial(() -> {
@@ -219,7 +225,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
             this.opcodes = ops;
             this.targetSlots = slots;
             this.literalConstants = consts;
-            this.instructionCount = count; 
+            this.instructionCount = count;
         }
 
         @Override
@@ -245,7 +251,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
         public TurboExpressionEvaluator getCompiler() {
             return VectorTurboEvaluator.this;
         }
-		
+
         //////////////////////////////////////////////////////////////////
         ///                                                            ///
         ///          Uses double[][] Arrays For Conveninience          ///
@@ -257,7 +263,6 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
             int numSamples = variables[0].length;
             int numVars = variables.length;
             int stride = VectorTurboEvaluator.this.varCount;
- 
 
             // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
@@ -271,9 +276,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
         @Override
         public void applyBulk(double[][] variables, double[] output, int offset) {
             int numSamples = variables[0].length;
-            int numVars = variables.length;
             int stride = VectorTurboEvaluator.this.varCount;
- 
 
             // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
@@ -309,6 +312,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
             }
             applyBulkBatched(flatVariables, output, batchSize);
         }
+
         //////////////////////////////////////////////////////////////////////////////
         ///                      double[][] Arrays ends                            ///
         ///               Uses Flat interleaved Arrays for speed(0.8ns-1.8ns)      ///
@@ -326,277 +330,337 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
          * concatenated.
          * @param dataSize The total number of elements per variable row (used
          * for stride offset).
-         */
-        private void applyBulkInternal(double[] flatVariables, int inputRowSize, int srcStartIdx, double[] output, int destStartIdx, int length) {
-            if (length <= 0 || output == null) {
-                return;
-            }
-            final int stride = VectorTurboEvaluator.this.varCount;
-            if (stride > 0 && (flatVariables == null || flatVariables.length == 0)) {
+         */ 
+        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
+            if (flatVariables == null || flatVariables.length == 0 || length <= 0) {
                 return;
             }
 
-            final double[][] executionStack = SCRATCH_STACKS.get();
+            // Retrieve the completely flat contiguous scratch space for maximum CPU cache prefetching
+            final double[] scratch = FLAT_SCRATCH_STACK.get();
+            final int endIdx = startIdx + length;
 
             // Step 1: Chunk operations into L1/L2 cache-friendly blocks
-            for (int blockOffset = 0; blockOffset < length; blockOffset += BLOCK_SIZE) {
-                final int currentBlockSize = Math.min(BLOCK_SIZE, length - blockOffset);
-                int sp = 0; // Flat local stack pointer resetting per block segment
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
+                final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
+                int sp = 0; // Flat stack pointer tracking active memory block segments
 
-                final int currentSrcBlockStart = srcStartIdx + blockOffset;
-                final int currentDestBlockStart = destStartIdx + blockOffset;
-
-                // Step 2: Traverse opcodes sequentially across the entire current data chunk
+                // Step 2: Traverse opcodes sequentially across the current data chunk
                 for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
                     final int opcode = opcodes[instIdx];
 
                     switch (opcode) {
                         case OP_CONST -> {
                             final double val = literalConstants[instIdx];
-                            final double[] stackArr = executionStack[sp++];
-                            Arrays.fill(stackArr, 0, currentBlockSize, val);
+                            final int stackOffset = sp * BLOCK_SIZE;
+                            sp++;
+
+                            // JIT SIMD BROADCAST INTENSITY: Clean hardware loops optimized natively via AVX
+                            for (int k = 0; k < currentBlockSize; k++) {
+                                scratch[stackOffset + k] = val;
+                            }
                         }
 
                         case OP_LOAD -> {
                             final int slotIdx = targetSlots[instIdx];
-                            final double[] stackArr = executionStack[sp++];
+                            final int stackOffset = sp * BLOCK_SIZE;
+                            sp++;
 
-                             // TURBO SPEED WIN: Compute linear stride instead of dereferencing an array pointer.
-                            // This is perfectly sequential memory, allowing the CPU prefetcher to run at full speed.
-                            final int flatOffset = (slotIdx * inputRowSize) + currentSrcBlockStart;
-                            System.arraycopy(flatVariables, flatOffset, stackArr, 0, currentBlockSize);
+                            // DECOUPLE INPUT FROM OUTPUT:
+                            // (blockStart - startIdx) ensures we always read the input stream from its relative 0 position,
+                            // even if we are writing deep into an offset window inside the output array.
+                            final int flatOffset = (slotIdx * dataSize) + (blockStart - startIdx); 
+                            System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, currentBlockSize);
                         }
 
                         case OP_ADD -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] + r[k];
+                                scratch[resOffset + k] = scratch[lOffset + k] + scratch[rOffset + k];
                             }
                         }
 
                         case OP_SUB -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] - r[k];
+                                scratch[resOffset + k] = scratch[lOffset + k] - scratch[rOffset + k];
                             }
                         }
 
                         case OP_MUL -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] * r[k];
+                                scratch[resOffset + k] = scratch[lOffset + k] * scratch[rOffset + k];
                             }
                         }
 
                         case OP_DIV -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] / r[k];
+                                scratch[resOffset + k] = scratch[lOffset + k] / scratch[rOffset + k];
                             }
                         }
 
                         case OP_POW -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = pow(l[k], r[k]);
+                                scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
                             }
                         }
 
                         case OP_REM -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] % r[k];
+                                scratch[resOffset + k] = scratch[lOffset + k] % scratch[rOffset + k];
                             }
                         }
 
                         case OP_SIN -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.sin(src[k]);
+                                scratch[srcOffset + k] = Math.sin(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_COS -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.cos(src[k]);
+                                scratch[srcOffset + k] = Math.cos(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_TAN -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.tan(src[k]);
+                                scratch[srcOffset + k] = Math.tan(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_ASIN -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.asin(src[k]);
+                                scratch[srcOffset + k] = Math.asin(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_ACOS -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.acos(src[k]);
+                                scratch[srcOffset + k] = Math.acos(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_ATAN -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.atan(src[k]);
+                                scratch[srcOffset + k] = Math.atan(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_SINH -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.sinh(src[k]);
+                                scratch[srcOffset + k] = Math.sinh(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_COSH -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.cosh(src[k]);
+                                scratch[srcOffset + k] = Math.cosh(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_TANH -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.tanh(src[k]);
+                                scratch[srcOffset + k] = Math.tanh(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_ABS -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.abs(src[k]);
+                                scratch[srcOffset + k] = Math.abs(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_EXP -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.exp(src[k]);
+                                scratch[srcOffset + k] = Math.exp(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_SQRT -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.sqrt(src[k]);
+                                scratch[srcOffset + k] = Math.sqrt(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_CBRT -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.cbrt(src[k]);
+                                scratch[srcOffset + k] = Math.cbrt(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_LOG -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.log(src[k]);
+                                scratch[srcOffset + k] = Math.log(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_LOG10 -> {
-                            final double[] src = executionStack[sp - 1];
+                            final int srcOffset = (sp - 1) * BLOCK_SIZE;
                             for (int k = 0; k < currentBlockSize; k++) {
-                                src[k] = Math.log10(src[k]);
+                                scratch[srcOffset + k] = Math.log10(scratch[srcOffset + k]);
                             }
                         }
 
                         case OP_GT -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] > r[k] ? 1.0 : 0.0;
+                                scratch[resOffset + k] = scratch[lOffset + k] > scratch[rOffset + k] ? 1.0 : 0.0;
                             }
                         }
 
                         case OP_LT -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] < r[k] ? 1.0 : 0.0;
+                                scratch[resOffset + k] = scratch[lOffset + k] < scratch[rOffset + k] ? 1.0 : 0.0;
                             }
                         }
 
                         case OP_EQ -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] == r[k] ? 1.0 : 0.0;
+                                scratch[resOffset + k] = scratch[lOffset + k] == scratch[rOffset + k] ? 1.0 : 0.0;
                             }
                         }
 
                         case OP_NE -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] != r[k] ? 1.0 : 0.0;
+                                scratch[resOffset + k] = scratch[lOffset + k] != scratch[rOffset + k] ? 1.0 : 0.0;
                             }
                         }
 
                         case OP_GE -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] >= r[k] ? 1.0 : 0.0;
+                                scratch[resOffset + k] = scratch[lOffset + k] >= scratch[rOffset + k] ? 1.0 : 0.0;
                             }
                         }
 
                         case OP_LE -> {
-                            final double[] r = executionStack[--sp];
-                            final double[] l = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int rOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int lOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = l[k] <= r[k] ? 1.0 : 0.0;
+                                scratch[resOffset + k] = scratch[lOffset + k] <= scratch[rOffset + k] ? 1.0 : 0.0;
                             }
                         }
 
                         case OP_VMA -> {
-                            final double[] c = executionStack[--sp];
-                            final double[] b = executionStack[--sp];
-                            final double[] a = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int cOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int bOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int aOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = Math.fma(a[k], b[k], c[k]);
+                                scratch[resOffset + k] = Math.fma(scratch[aOffset + k], scratch[bOffset + k], scratch[cOffset + k]);
                             }
                         }
 
                         case OP_IF -> {
-                            final double[] falseVal = executionStack[--sp];
-                            final double[] trueVal = executionStack[--sp];
-                            final double[] cond = executionStack[--sp];
-                            final double[] res = executionStack[sp++];
+                            sp--;
+                            final int falseOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int trueOffset = sp * BLOCK_SIZE;
+                            sp--;
+                            final int condOffset = sp * BLOCK_SIZE;
+                            final int resOffset = sp * BLOCK_SIZE;
+                            sp++;
+
                             for (int k = 0; k < currentBlockSize; k++) {
-                                res[k] = (cond[k] != 0.0) ? trueVal[k] : falseVal[k];
+                                scratch[resOffset + k] = (scratch[condOffset + k] != 0.0) ? scratch[trueOffset + k] : scratch[falseOffset + k];
                             }
                         }
 
@@ -605,8 +669,8 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
                     }
                 }
 
-                // Extract calculation results directly to the shifted destination window
-                System.arraycopy(executionStack[0], 0, output, currentDestBlockStart, currentBlockSize);
+                // Step 3: Extract final calculation results from the base stack layer (offset 0) directly to output destination
+                System.arraycopy(scratch, 0, output, blockStart, currentBlockSize);
             }
         }
 
@@ -630,7 +694,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
 
                 if (start < end) {
                     tasks.add(() -> {
-                        applyBulkInternal(flatVariables, inputRowSize, start, output, start, end - start);
+                        applyBulkInternal(flatVariables, inputRowSize, output, start, end - start);
                         return null;
                     });
                 }
@@ -655,7 +719,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
 
             for (int start = 0; start < totalLength; start += batchSize) {
                 int length = Math.min(batchSize, totalLength - start);
-                applyBulkInternal(flatVariables, inputRowSize, start, output, start, length);
+                applyBulkInternal(flatVariables, inputRowSize, output, start, length);
             }
         }
 
@@ -668,7 +732,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
             final int inputRowSize = (stride > 0 && flatVariables != null) ? flatVariables.length / stride : 0;
             final int length = (stride > 0) ? inputRowSize : output.length;
 
-            applyBulkInternal(flatVariables, inputRowSize, 0, output, 0, length);
+            applyBulkInternal(flatVariables, inputRowSize, output, 0, length);
         }
 
         @Override
@@ -676,7 +740,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
             if (output == null) {
                 return;
             }
- 
+
             final int stride = VectorTurboEvaluator.this.varCount;
             final int inputRowSize = (stride > 0 && flatVariables != null) ? flatVariables.length / stride : 0;
             final int length = (stride > 0) ? inputRowSize : (output.length - offset);
@@ -685,9 +749,9 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
             if (offset < 0 || offset + length > output.length) {
                 return;
             }
-			
+
             // Maps input starting from index 0 into output starting at target offset
-            applyBulkInternal(flatVariables, inputRowSize, 0, output, offset, length);
+            applyBulkInternal(flatVariables, inputRowSize, output, offset, length);
         }
 
         ///////////////////////////////////////////////////////////
@@ -730,9 +794,9 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
                     }
                     output.geluInPlace();
                 }
-				 // === New Q8 + Attention kernels ===
+                // === New Q8 + Attention kernels ===
                 case "q8_quantize" -> {
-				         // inputs[0] = src float, inputs[1] = scale float[1], output = dst byte wrapped as float
+                    // inputs[0] = src float, inputs[1] = scale float[1], output = dst byte wrapped as float
                     float[] src = inputs[0].data;
                     int srcOff = inputs[0].offset;
                     int len = inputs[0].rows * inputs[0].cols;
@@ -741,7 +805,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
                     KernelsInt8.quantize_f32_to_i8(src, srcOff, len, dst, output.offset, scale);
                 }
                 case "q8_dequant" -> {
-				 // inputs[0] = src byte wrapped as float, inputs[1] = scale float[1], output = dst float
+                    // inputs[0] = src byte wrapped as float, inputs[1] = scale float[1], output = dst float
                     byte[] src = inputs[0].asByteArray();
                     int srcOff = inputs[0].offset;
                     int len = inputs[0].rows * inputs[0].cols;
@@ -750,7 +814,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
                     KernelsInt8.dequant_i8_to_f32(src, srcOff, len, dst, output.offset, scale);
                 }
                 case "q8_absmax_quant" -> {
-				// inputs[0] = src float, output[0] = dst byte, output[1] = scale float[1]
+                    // inputs[0] = src float, output[0] = dst byte, output[1] = scale float[1]
                     float[] src = inputs[0].data;
                     int srcOff = inputs[0].offset;
                     int len = inputs[0].rows * inputs[0].cols;
@@ -761,11 +825,11 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
                     }
                     byte[] dst = output.asByteArray();
                     KernelsInt8.quantize_f32_to_i8(src, srcOff, len, dst, output.offset, scale);
-					     // write scale to inputs[1] which caller must provide as writable
+                    // write scale to inputs[1] which caller must provide as writable
                     inputs[1].data[inputs[1].offset] = scale;
                 }
                 case "rope_split" -> {
-				 // inputs[0] = buf [Q||K], inputs[1] = cos, inputs[2] = sin, inputs[3] = meta[pos, qHeads, kHeads, head_dim]
+                    // inputs[0] = buf [Q||K], inputs[1] = cos, inputs[2] = sin, inputs[3] = meta[pos, qHeads, kHeads, head_dim]
                     float[] buf = inputs[0].data;
                     float[] cos = inputs[1].data;
                     float[] sin = inputs[2].data;
@@ -781,7 +845,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
                     }
                 }
                 case "accum_v" -> {
-				   // output += inputs[0] * inputs[1].get(0,0)
+                    // output += inputs[0] * inputs[1].get(0,0)
                     float scale = (float) inputs[1].data[inputs[1].offset];
                     float[] src = inputs[0].data;
                     float[] dst = output.data;
@@ -789,7 +853,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
                     KernelsFloat.accumulate_v_f32(dst, output.offset, src, inputs[0].offset, len, scale);
                 }
                 case "matmul_1xn_axpy" -> {
-				    // output = inputs[0][1,K] @ inputs[1][K,N], inputs[0] is workspace slice
+                    // output = inputs[0][1,K] @ inputs[1][K,N], inputs[0] is workspace slice
                     // inputs[2] = meta[K, N] as float[2]
                     int K = (int) inputs[2].data[inputs[2].offset + 0];
                     int N = (int) inputs[2].data[inputs[2].offset + 1];
@@ -801,23 +865,23 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
                 case "matmul_bias_relu" ->
                     FlatMatrixF.matmulAddBiasRelu(inputs[0], inputs[1], inputs[2], output);
                 case "rms_norm" -> {
-				  // inputs[0]=x, inputs[1]=weight, inputs[2]=eps[1], output=y
+                    // inputs[0]=x, inputs[1]=weight, inputs[2]=eps[1], output=y
                     float eps = (float) inputs[2].data[inputs[2].offset];
                     FlatMatrixF.rmsNorm(inputs[0], inputs[1], output, eps);
                 }
                 case "layer_norm" -> {
-				     // inputs[0]=x, inputs[1]=gamma, inputs[2]=beta, inputs[3]=eps[1]
+                    // inputs[0]=x, inputs[1]=gamma, inputs[2]=beta, inputs[3]=eps[1]
                     float eps = (float) inputs[3].data[inputs[3].offset];
                     FlatMatrixF.layerNorm(inputs[0], inputs[1], inputs[2], output, eps);
                 }
                 case "matmul_bias_silu" ->
                     FlatMatrixF.matmulAddBiasSilu(inputs[0], inputs[1], inputs[2], output);
                 case "swiglu" -> {
-				  // inputs[0]=gate, inputs[1]=up, output=gate*SiLU(up)
+                    // inputs[0]=gate, inputs[1]=up, output=gate*SiLU(up)
                     FlatMatrixF.swiGLU(inputs[0], inputs[1], output);
                 }
                 case "mha_attention" -> {
-				     // inputs: [Q, K, V, scale[1]], output=attn_out
+                    // inputs: [Q, K, V, scale[1]], output=attn_out
                     float scale = (float) inputs[3].data[inputs[3].offset];
                     FlatMatrixF.mhaAttention(inputs[0], inputs[1], inputs[2], output, scale);
                 }
@@ -834,6 +898,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
             }
         }
     }
+
     public final class BatchedVectorCompositeExpression1 implements SIMDCompositeExpression {
 
         private final MethodHandle scalarHandle;
@@ -894,9 +959,8 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
 
         @Override
         public void applyBulk(double[][] variables, double[] output) {
-            int numSamples = variables[0].length; 
+            int numSamples = variables[0].length;
             int stride = VectorTurboEvaluator.this.varCount;
- 
 
             // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
@@ -909,9 +973,8 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
 
         @Override
         public void applyBulk(double[][] variables, double[] output, int offset) {
-            int numSamples = variables[0].length; 
+            int numSamples = variables[0].length;
             int stride = VectorTurboEvaluator.this.varCount;
- 
 
             // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
@@ -924,7 +987,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
 
         @Override
         public void applyBulk(double[][] variables, double[] output, java.util.concurrent.ExecutorService executor) {
-            int numSamples = variables[0].length; 
+            int numSamples = variables[0].length;
             int stride = VectorTurboEvaluator.this.varCount;
             // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
@@ -937,7 +1000,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
 
         @Override
         public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
-            int numSamples = variables[0].length; 
+            int numSamples = variables[0].length;
             int stride = VectorTurboEvaluator.this.varCount;
             // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
@@ -1319,7 +1382,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
             if (flatVariables == null || flatVariables.length == 0 || output == null) {
                 return;
             }
- 
+
             final int dataSize = output.length;
 
             // 3. Process the entire timeline synchronously from index 0
@@ -1331,7 +1394,7 @@ public final class BatchedVectorCompositeExpression implements SIMDCompositeExpr
             if (flatVariables == null || flatVariables.length == 0 || output == null) {
                 return;
             }
- 
+
             final int dataSize = output.length;
 
             // Boundary protection to prevent IndexOutOfBoundsException inside the kernel
