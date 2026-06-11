@@ -59,6 +59,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
     private static final long serialVersionUID = 1L;
     private boolean willFoldConstants;
     protected final int[] slots;
+    protected MathExpression.VariableRegistry registry;
 
     public static final MethodHandle SCALAR_GATEKEEPER_HANDLE;
     public static final MethodHandle VECTOR_GATEKEEPER_HANDLE;
@@ -157,6 +158,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         this.postfix = me.getCachedPostfix();
         this.willFoldConstants = me.isWillFoldConstants();
         slots = me.getSlots();
+        registry = me.getRegistry().clone(); 
         me.copyErrorLogTo(errorLog);
     }
 
@@ -553,7 +555,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         }
 
                         try {
-                            MathExpression.EvalResult soln = executePrint(getNextResult(), rawArgs);
+                            MathExpression.EvalResult soln = executePrint(getNextResult(), rawArgs, registry);
                             constant = MethodHandles.constant(MathExpression.EvalResult.class, soln);
                             stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
 
@@ -1207,7 +1209,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         }
     }
 
-    static MathExpression.EvalResult executePrint(MathExpression.EvalResult ctx, String[] args) {
+    static MathExpression.EvalResult executePrint(MathExpression.EvalResult ctx, String[] args,MathExpression.VariableRegistry registry) {
 
         StringBuilder sb = new StringBuilder();
         for (String arg : args) {
@@ -1226,7 +1228,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 }
                 continue;
             }
-            Variable myVar = VariableManager.lookUp(arg);
+            Variable myVar = registry.lookUp(arg, false);
             if (myVar != null) {
                 sb.append(myVar.toString()).append("\n");
             } else if (com.github.gbenroscience.parser.Number.isNumber(arg)) {

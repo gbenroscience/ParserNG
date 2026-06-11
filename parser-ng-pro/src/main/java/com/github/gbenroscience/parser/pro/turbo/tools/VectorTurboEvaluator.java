@@ -80,7 +80,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     // Pre-allocated compilation state
     private final MathExpression.Token[] postfix;
     private final MethodHandle compiledScalarHandle;
-    private int slots[];
     private int[] opcodes;
     private int[] targetSlots;
     private double[] literalConstants;
@@ -91,7 +90,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     public VectorTurboEvaluator(MathExpression me) throws Throwable {
         super(me);
         this.postfix = me.getCachedPostfix();
-        this.slots = me.getSlots();
         this.varCount = me.getVariablesNames().length;
         this.compiledScalarHandle = compileScalar(postfix);
         compileToPrimitiveProgram();
@@ -224,12 +222,18 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             return opcodes;
         }
 
-        BatchedVectorCompositeExpression(MethodHandle handle, int[] ops, int[] slots,
+        public int[] getTargetSlots() {
+            return targetSlots;
+        }
+        
+        
+
+        BatchedVectorCompositeExpression(MethodHandle handle, int[] ops, int[] targetSlots,
                 double[] consts, int count, int varCount) {
             this.scalarHandle = handle;
             // DEFENSIVE: Make copies to isolate from VectorTurboEvaluator mutations
             this.opcodes = Arrays.copyOf(ops, ops.length);
-            this.targetSlots = Arrays.copyOf(slots, slots.length);
+            this.targetSlots = Arrays.copyOf(targetSlots, targetSlots.length);
             this.literalConstants = Arrays.copyOf(consts, consts.length);
             this.instructionCount = count;
             this.varCount = varCount;
@@ -395,7 +399,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                             }
                         }
 
-                        case OP_LOAD -> { 
+                        case OP_LOAD -> {
                             final int slotIdx = targetSlots[instIdx];
                             final int stackOffset = sp * BLOCK_SIZE;
                             sp++;

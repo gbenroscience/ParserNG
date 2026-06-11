@@ -129,7 +129,7 @@ public class MathScanner {
 
     /**
      *
-     * @return the input into the scanner.
+     * @return the input into the scan.
      */
     public String getScannerInput() {
         return scannerInput;
@@ -717,8 +717,8 @@ public class MathScanner {
                  * ALSO Skip the function operating methods...their syntax is
                  * too complex to be analyzed here.
                  */
-                boolean canCheckNextToken = i+1<scanner.size();
-                if ((Method.isFunctionOperatingMethod(scanner.get(i)) || Method.isStatsMethod(scanner.get(i))) && (canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) ) {
+                boolean canCheckNextToken = i + 1 < scanner.size();
+                if ((Method.isFunctionOperatingMethod(scanner.get(i)) || Method.isStatsMethod(scanner.get(i))) && (canCheckNextToken && isOpeningBracket(scanner.get(i + 1)))) {
                     i = Bracket.getComplementIndex(true, i + 1, scanner);
                 }//end if
                 /**
@@ -758,7 +758,7 @@ public class MathScanner {
                  * variable or method. Force the user to enter it as
                  * (expr)*number or (expr)*A..
                  */
-                else if (isClosingBracket(scanner.get(i)) &&  ( canCheckNextToken && (isVariableString(scanner.get(i + 1)) || isNumber(scanner.get(i + 1))) ) ) {
+                else if (isClosingBracket(scanner.get(i)) && (canCheckNextToken && (isVariableString(scanner.get(i + 1)) || isNumber(scanner.get(i + 1))))) {
                     scanner.add(i + 1, "*");
                     i++;
                 }//end else if
@@ -774,7 +774,7 @@ public class MathScanner {
             }//end try
             catch (IndexOutOfBoundsException boundsException) {
                 errorLog.error(boundsException);
-                errorLog.log(ErrorLog.Level.ERROR, "More information on error... Expression was:\n"+scannerInput+", scanner-state was:\n"+scanner);
+                errorLog.log(ErrorLog.Level.ERROR, "More information on error... Expression was:\n" + scannerInput + ", scanner-state was:\n" + scanner);
             }//end catch
 
         }//end for loop
@@ -952,168 +952,23 @@ public class MathScanner {
         }
     }
 
+    
+
     /**
-     * Utility method,more popularly used as a scanner into mathematical tokens
-     * of mathematical expressions.
-     *
-     * This method does not check expression variables against declared
-     * variables and is only useful in breaking down the input into scanned
-     * tokens of numbers,variables and operators.
-     *
-     * The overloaded one takes a VariableManager object that models the store
-     * of Variable objects in a computing application and checks if all variable
-     * names entered by the user have been declared.
+     * Utility method,more popularly used as a scan into mathematical tokens
+of mathematical expressions
      *
      * @return an ArrayList containing a properly scanned version of the string
 such that all recognized number substrings,variable substrings and
-operator substrings have been resolved. To use this method as a scanner
+operator substrings have been resolved. To use this method as a scan
 for math expressions all the programmer has to do is to take care of the
 signs where need be(e.g in -2.873*5R+sinh34.2, the scanned view will be
 [-,2.873,*,5,R,+,sinh,34.2]) To make sense of this, the programmer has to
 error minor code to concatenate the - and the 2.873 and so on.
      *
      */
-    public List<String> scanner() {
-        VariableManager variableManager = new VariableManager();
-
-        splitStringOnMethods_Variables_And_Operators();
-        if (parser_Result != ParserResult.VALID) {
-            scanner.clear();
-            return scanner;
-        }
-
-        validateInputAfterSplitOnMethodsAndOps();
-        if (parser_Result != ParserResult.VALID) {
-            scanner.clear();
-            return scanner;
-        }
-
-        /*
-         * The for loop above does not properly handle
-         * negative exponents of 10, e.g -3E-10
-         * It splits it into -3,E, -10
-         * So we need to manually couple the split objects together
-         *
-         */
-        for (int i = 0; i < scanner.size(); i++) {
-
-            if (Number.isNegative(scanner.get(i)) && scanner.get(i + 1).equals("E")
-                    && Number.isNumber(scanner.get(i + 2))) {
-                try {
-                    scanner.set(i, scanner.get(i) + scanner.get(i + 1) + scanner.get(i + 2));
-                    scanner.remove(i + 1);
-                    scanner.remove(i + 1);
-                }//end try
-                catch (IndexOutOfBoundsException indexErr) {
-                    errorLog.error(indexErr);
-                    break;
-                }//end catch//end catch
-            }//end if
-        }//end for
-
-//enable interpretation of things like 3^-4 or 3^+4 i.e ^- or ^+ patterns
-        for (int i = 0; i < scanner.size(); i++) {
-            try {
-                if (isPower(scanner.get(i))) {
-                    if (scanner.get(i + 1).equals("-") && validNumber(scanner.get(i + 2))) {
-                        scanner.set(i + 1, String.valueOf(-1 * Double.parseDouble(scanner.get(i + 2))));
-                        scanner.remove(i + 2);
-                    } else if (scanner.get(i + 1).equals("+") && validNumber(scanner.get(i + 2))) {
-                        scanner.set(i + 1, String.valueOf(Double.parseDouble(scanner.get(i + 2))));
-                        scanner.remove(i + 2);
-                    }
-                }//end if
-
-            }//end try
-            catch (IndexOutOfBoundsException indexErr) {
-                errorLog.error(indexErr);
-            } catch (NumberFormatException numErr) {
-                errorLog.error(numErr);
-            }
-        }//end for
-
-        validateTokens();
-
-        /**
-         * Automatically initialize and store undeclared variables to 0 in the
-         * first if block. To enforce variable declaration and initialization,
-         * always come here.
-         */
-        for (int i = 0; i < scanner.size(); i++) {
-            int sz = scanner.size();
-            /**
-             * Skip the methods that deal with Function objects, to allow parser
-             * to be able to deal with anonymous functions.
-             */
-            if (i + 1 < sz && Method.isFunctionOperatingMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
-                int close = Bracket.getComplementIndex(true, i + 1, scanner);
-                i = close;
-                continue;
-            }//end if
-
-            if (!Variable.isVariableString(scanner.get(i)) && !Operator.isOperatorString(scanner.get(i)) && !validNumber(scanner.get(i))
-                    && !Method.isMethodName(scanner.get(i))) {
-                errorLog.info("Syntax Error! Strange Object Found: " + scanner.get(i));
-                setRunnable(false);
-                parser_Result = ParserResult.STRANGE_INPUT;
-            }
-            if (MathExpression.isAutoInitOn()) {
-                String tk = scanner.get(i);
-                if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1)) && !variableManager.contains(tk)
-                        && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)) {
-                    variableManager.parseCommand(tk + "=0.0;");
-                    foundVariables.add(new Variable(tk, 0));
-                }//end if
-                else if (i == 0 && sz == 1 && Variable.isVariableString(tk)) {
-                    if (!FunctionManager.containsAny(tk) && !variableManager.contains(tk)) {
-                        variableManager.parseCommand(tk + "=0.0;");
-                        foundVariables.add(new Variable(tk, 0));
-                    }
-                }
-            }//end if
-            else {
-                if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !variableManager.contains(scanner.get(i))
-                        && !FunctionManager.containsAny(scanner.get(i))) {
-                    errorLog.info(" Unknown Variable: " + scanner.get(i) + "\n Please Declare And Initialize This Variable Before Using It.\n"
-                            + "Use The Command, \'variableName=value\' To Accomplish This.");
-                    parser_Result = ParserResult.STRANGE_INPUT;
-                    setRunnable(false);
-
-                }//end if
-            }//end else
-        }
-
-        if (!runnable) {
-            errorLog.info("\n"
-                    + "Sorry, Errors Were Found In Your Expression."
-                    + "Please Consult The Help File For Valid Mathematical Syntax.");
-            scanner.clear();
-        } else {
-            errorLog.info("Scan SuccessFul.No Illegal Object Found.\n"
-                    + "Putting Scanner On StandBy");
-        }
-
-        plusAndMinusStringHandler();
-        return scanner;
-    }
-
-    /**
-     * Utility method,more popularly used as a scanner into mathematical tokens
-     * of mathematical expressions
-     *
-     * @param varMan The store of all user variables already declared. The
-     * scanner will not allow the user to use any variables he/she/it has not
-     * declared
-     * @return an ArrayList containing a properly scanned version of the string
-such that all recognized number substrings,variable substrings and
-operator substrings have been resolved. To use this method as a scanner
-for math expressions all the programmer has to do is to take care of the
-signs where need be(e.g in -2.873*5R+sinh34.2, the scanned view will be
-[-,2.873,*,5,R,+,sinh,34.2]) To make sense of this, the programmer has to
-error minor code to concatenate the - and the 2.873 and so on.
-     *
-     */
-    public List<String> scanner(VariableManager varMan) {
+    public List<String> scan() {
+        VariableManager varMan = new VariableManager();
         splitStringOnMethods_Variables_And_Operators();
         validateInputAfterSplitOnMethodsAndOps();
 
@@ -1123,8 +978,8 @@ error minor code to concatenate the - and the 2.873 and so on.
          * At the end convert the ~3 back to -3
 
          for(int i=0;i<scanner.size();i++){
-         if(scanner.get(i).substring(0,1).equals("~")){
-         scanner.set(i, "-"+scanner.get(i).substring(1));
+         if(scan.get(i).substring(0,1).equals("~")){
+         scan.set(i, "-"+scan.get(i).substring(1));
          }
 
          }//end for
@@ -1204,7 +1059,7 @@ error minor code to concatenate the - and the 2.873 and so on.
                 if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(tk)
                         && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)) {
                     varMan.parseCommand(tk + "=0.0;");
-                    foundVariables.add(new Variable(tk, 0));
+                    foundVariables.add(new Variable(tk, 0)); 
                 }//end if
                 else if (i == 0 && sz == 1 && Variable.isVariableString(tk)) {
                     if (!FunctionManager.containsAny(tk) && !varMan.contains(tk)) {
@@ -1280,7 +1135,7 @@ error minor code to concatenate the - and the 2.873 and so on.
                 throw new InputMismatchException("Syntax Error occurred while scanning math expression.\nReason: The @ symbol is used exclusively to create functions. Expected: `(`, found: `" + scanner.get(indexOfAt + 1) + "`");
             }
         }
-        //System.print.println("scanner-debug: "+scanner);
+        //System.print.println("scan-debug: "+scan);
     }
 
     /**
@@ -1690,8 +1545,8 @@ error minor code to concatenate the - and the 2.873 and so on.
     }//end method
 
     /**
-     * Hides the commas in the scanner output as a double number which is not
-     * part of the output
+     * Hides the commas in the scan output as a double number which is not
+part of the output
      */
     public void maskCommas() {
         scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
@@ -1714,19 +1569,19 @@ error minor code to concatenate the - and the 2.873 and so on.
 
         System.out.println(msce.scanner);
         String s4 = "((cos(x)*1)+(-sin(x)*1))";
-        System.out.println(new MathScanner(s4).scanner());
+        System.out.println(new MathScanner(s4).scan());
         //String s5 = "sum(3,4,1,6,7,8,4,32,1)";
         String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3-(-4+32)";
-        System.out.println(new MathScanner(s5).scanner());
+        System.out.println(new MathScanner(s5).scan());
 
         //String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
         FunctionManager.add("M=@(4,5)(3,1,2,4,5,9,2,3,12,7,12,8,7,-2,3,15,4,-5,3,8)");
         System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
 
         String s2 = "F=@(x,y,z)3*x+y-z^2";
-        System.out.println("s2:\n" + new MathScanner(s2).scanner());
+        System.out.println("s2:\n" + new MathScanner(s2).scan());
         String s3 = "3*x+y-z^2";
-        System.out.println("s3:\n" + new MathScanner(s3).scanner());
+        System.out.println("s3:\n" + new MathScanner(s3).scan());
         MathExpression me = new MathExpression(s2);
         System.out.println("scanner- " + me.getScanner());
         System.out.println("correct? " + me.isCorrectFunction());
@@ -1742,19 +1597,19 @@ error minor code to concatenate the - and the 2.873 and so on.
 
         MathScanner msc = new MathScanner(s13);
 
-        System.out.println("------------------------------------" + msc.scanner());
+        System.out.println("------------------------------------" + msc.scan());
 
         MathScanner sc0 = new MathScanner(s8);
-        System.out.println("*************************" + sc0.scanner(new VariableManager()));
+        System.out.println("*************************" + sc0.scan());
 
         MathScanner sc = new MathScanner(s9);
-        System.out.println("*************************" + sc.scanner(new VariableManager()));
+        System.out.println("*************************" + sc.scan());
         MathScanner sc1 = new MathScanner(s10);
-        System.out.println("*************************" + sc1.scanner(new VariableManager()));
+        System.out.println("*************************" + sc1.scan());
         MathScanner sc2 = new MathScanner(s11);
-        System.out.println("*************************" + sc2.scanner(new VariableManager()));
+        System.out.println("*************************" + sc2.scan());
         MathScanner sc3 = new MathScanner(s12);
-        System.out.println("*************************" + sc3.scanner(new VariableManager()));
+        System.out.println("*************************" + sc3.scan());
 
         System.out.println(FunctionManager.FUNCTIONS);
 

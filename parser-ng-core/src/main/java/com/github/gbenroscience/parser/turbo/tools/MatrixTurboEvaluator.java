@@ -34,7 +34,6 @@ import com.github.gbenroscience.parser.methods.Method;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
 import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
-import com.github.gbenroscience.util.VariableManager;
 import java.lang.invoke.*;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -52,6 +51,7 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
     protected final int[] slots;
     private ErrorLog errorLog = new ErrorLog();
     private MathExpression.Token[] postfix;
+    protected MathExpression.VariableRegistry registry;
     private MethodHandle finalHandle;
     // Enables True AST Inlining for user-defined functions
     private MethodHandle[] inlinedVariables;
@@ -60,7 +60,8 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
         this.postfix = me.getCachedPostfix();
         this.willFoldConstants = me.isWillFoldConstants();
         slots = me.getSlots();
-        me.copyErrorLogTo(errorLog);
+        registry = me.getRegistry().clone();
+        me.copyErrorLogTo(errorLog); 
     }
 
     private static final ThreadLocal<MathExpression.EvalResult[]> WRAPPER_CACHE
@@ -268,8 +269,8 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                         }
 
                         MethodHandle bridge = LOOKUP.findStatic(MatrixTurboEvaluator.class, "evaluatePrint",
-                                MethodType.methodType(EvalResult.class, String[].class, double[].class));
-                        stack.push(MethodHandles.insertArguments(bridge, 0, (Object) t.getRawArgs()));
+                                MethodType.methodType(EvalResult.class, String[].class, MathExpression.VariableRegistry.class, double[].class));
+                        stack.push(MethodHandles.insertArguments(bridge, 0, (Object) t.getRawArgs(), registry));
 
                     } else if (Method.isMatrixMethod(t.name) || t.name.equals(Declarations.ROTOR)) {
                         MethodHandle[] args = new MethodHandle[t.arity];
@@ -321,6 +322,7 @@ public final class MatrixTurboEvaluator implements TurboExpressionEvaluator {
                     // finalHandle now reads straight from the user's input variable coordinates pointer.
                     return (EvalResult) finalHandle.invokeExact(variables);
                 } catch (Throwable e) {
+                    e.printStackTrace();
                     errorLog.error(e);
                     throw new RuntimeException("Turbo matrix execution failed", e);
                 }
@@ -442,8 +444,8 @@ private static MethodHandle createConstantHandle(EvalResult res) {
         return MethodHandles.insertArguments(evaluator, 0, methodId, args, nodeCache);
     }
 
-    private static EvalResult evaluatePrint(String[] args, double[] vars) {
-        return executePrint(args);
+    private static EvalResult evaluatePrint(String[] args, MathExpression.VariableRegistry registry, double[]vars) {
+        return executePrint(args, registry);
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////
@@ -495,7 +497,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
         return vars[index];
     }
 
-    static MathExpression.EvalResult executePrint(String[] args) {
+    static MathExpression.EvalResult executePrint(String[] args, MathExpression.VariableRegistry registry) {
         MathExpression.EvalResult ctx = new EvalResult();
         StringBuilder sb = new StringBuilder();
         for (String arg : args) {
@@ -514,7 +516,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                 }
                 continue;
             }
-            Variable myVar = VariableManager.lookUp(arg);
+           Variable myVar = registry.lookUp(arg, false);
             if (myVar != null) {
                 sb.append(myVar.toString()).append("\n");
             } else if (com.github.gbenroscience.parser.Number.isNumber(arg)) {

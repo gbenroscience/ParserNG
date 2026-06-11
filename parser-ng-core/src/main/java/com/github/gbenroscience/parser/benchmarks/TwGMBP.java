@@ -595,7 +595,7 @@ private static void applyTop(DoubleStack values, IntStack operators) {
              MathExpression me = new MathExpression(s1);
          System.out.println("me.solve(): "+me.solve()); 
          System.out.println("ms.scanner(): "+me.getScanner());
-         double v = evaluate(new MathScanner(s1).scanner());
+         double v = evaluate(new MathScanner(s1).scan());
          System.out.println("v = "+v);
     }
 }

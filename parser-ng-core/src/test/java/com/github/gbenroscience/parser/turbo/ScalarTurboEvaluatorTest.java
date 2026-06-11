@@ -49,7 +49,7 @@ public class ScalarTurboEvaluatorTest {
         String expr = "F=@(x,y,z)3*x+y-z^2";
         Function f = FunctionManager.add(expr);
 
-        String ex = "z=3;A=@(2,2)(4,2,-1,9);print(A,F,x,y,z)";
+        String ex = "z=3;x=pi;A=@(2,2)(4,2,-1,9);print(A,F,x,y,z)";
         System.out.printf("Expression: %s%n", ex);
         // Warm up JIT
         MathExpression interpreted = new MathExpression(ex, false);
@@ -57,6 +57,7 @@ public class ScalarTurboEvaluatorTest {
         System.out.println("scanner: " + interpreted.getScanner());
         // Compile to turbo
         FastCompositeExpression compiled = interpreted.compileTurbo();
+        System.out.println(compiled.getCompiler().getClass());
         // Warm up turbo JIT
         double[] vars = new double[3];
         MathExpression.EvalResult evr = compiled.apply(vars);
@@ -327,8 +328,7 @@ public class ScalarTurboEvaluatorTest {
         double[] vars = new double[3];
         vars[xSlot] = 2.5;
 
-        interpreted.updateSlot(xSlot, 2.5);
-        double v = interpreted.solveGeneric().scalar;
+        double v = interpreted.solveGeneric(2.5).scalar;
         TurboExpressionEvaluator tee = TurboEvaluatorFactory.getCompiler(interpreted);
         FastCompositeExpression fce = tee.compile();
 

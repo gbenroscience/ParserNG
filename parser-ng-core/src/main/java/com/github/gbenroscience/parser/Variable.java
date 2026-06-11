@@ -37,6 +37,12 @@ public class Variable implements Savable {
     private String fullName;
     
     /**
+     * This {@link Variable} is stored globally in the {@link VariableManager}'s data
+     */
+    private boolean global;
+    
+    /**
+     * Globals must have frame index
      * THE SECRET SAUCE: The Frame Index.
      * This represents the variable's "Drawer Number" in the execution frame.
      * Initialized to -1 to indicate it hasn't been mapped yet.
@@ -68,6 +74,11 @@ public class Variable implements Savable {
         ans.type = TYPE.NUMBER;
         e.type = TYPE.NUMBER;
         PI.type = TYPE.NUMBER;
+        PI.frameIndex = -1;
+        PI_ALT.frameIndex = -1;
+        PI_ALT_1.frameIndex = -1;
+        e.frameIndex = -1;
+        GOLDEN_RATIO.frameIndex = -1;
     }
 
     /**
@@ -145,8 +156,20 @@ public class Variable implements Savable {
             this.fullName = fullName;
             this.constant = constant;
         }
-
     }
+
+    public void setGlobal(boolean global) {
+       if(global){
+           frameIndex=-1;
+       }
+        this.global = global;
+    }
+
+    public boolean isGlobal() {
+        return global;
+    }
+    
+    
     
     
     /**
@@ -552,6 +575,7 @@ public class Variable implements Savable {
         Variable v = new Variable(this.name);
         v.fullName = this.fullName;
         v.value = this.value;
+        v.global = global;
         v.frameIndex = this.frameIndex;
         v.constant = this.constant;
         v.units = this.units;
@@ -565,6 +589,8 @@ public class Variable implements Savable {
                 + "\"name\": \""+name+"\",\n"
                 + "\"value\": "+value+",\n"
                 + "\"constant\": "+constant+",\n"
+                + "\"frameIndex\": "+frameIndex+",\n"
+                + "\"global\": "+global+",\n"
                 + "\"units\": \""+units+"\",\n"
                 + "\"type\": \""+type.name()+"\"\n" 
                 + "}\n";

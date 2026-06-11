@@ -22,6 +22,7 @@ public class VectorTurboEvaluatorTest {
 
     private static final double EPSILON = 1e-12;
     private static ExecutorService threadPool;
+    private static boolean active = false;
 
     @BeforeAll
     public static void setupSuite() {
@@ -40,12 +41,13 @@ public class VectorTurboEvaluatorTest {
             threadPool.shutdown();
         }
     }
- 
 
     @Test
     public void testMathematicalPrecisionVsNativeJavaFlat() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
         BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+
+          logDetails(me, evaluator, !active);
 
         // 17 datapoints to trigger both vector lane and tail scalar loop remainders
         int totalElements = 17;
@@ -68,7 +70,7 @@ public class VectorTurboEvaluatorTest {
 
         // Test API Call #1: High-Performance Flat Bulk Execution
         evaluator.applyBulk(flatInputs, outputVector);
-
+       // System.out.println("outputVector: " + Arrays.toString(outputVector));
         // Verify mathematical equality against standard Java scalar paths
         for (int i = 0; i < totalElements; i++) {
             // Extract original baseline values from flat strides for expected validation
@@ -83,10 +85,12 @@ public class VectorTurboEvaluatorTest {
         }
     }
 
-  //  @Test
+    @Test
     public void testMathematicalPrecisionVsNativeJava() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
         BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+
+           logDetails(me, evaluator, !active);
 
         // 17 datapoints to trigger both vector lane and tail scalar loop remainders
         int totalElements = 17;
@@ -98,7 +102,7 @@ public class VectorTurboEvaluatorTest {
             inputs[1][i] = 2.0 + (i * 0.5); // x2
             inputs[2][i] = 0.5;             // x3
         }
-        
+
         // Test API Call #1: Standard Bulk Execution
         evaluator.applyBulk(inputs, outputVector);
 
@@ -117,6 +121,8 @@ public class VectorTurboEvaluatorTest {
         me.setDRG(DRG_MODE.RAD);
         BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
+           logDetails(me, evaluator, !active);
+
         int dataSize = 100;
         double[][] inputs = new double[1][dataSize]; // Only 1 variable 'x' is needed for this expression
         double[] outputVector = new double[dataSize];
@@ -126,7 +132,7 @@ public class VectorTurboEvaluatorTest {
         }
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
         evaluator.applyBulk(inputs, outputVector);
-        System.out.println("output: " + Arrays.toString(outputVector));
+      //  System.out.println("output: " + Arrays.toString(outputVector));
 
         for (int i = 0; i < dataSize; i++) {
             double x = inputs[0][i];
@@ -136,12 +142,14 @@ public class VectorTurboEvaluatorTest {
         }
     }
 
-   @Test
+    @Test
     public void testTargetMemoryOffsetBoundsSafety() throws Throwable {
-        MathExpression me = new MathExpression("x1 + 10");
+        MathExpression me = new MathExpression("10 + x1");
         BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
-        // 4 elements to evaluate
+        logDetails(me, evaluator, !active);
+
+// 4 elements to evaluate
         int dataSize = 4;
         double[][] inputs = new double[1][dataSize]; // 1 variable, 4 values
         inputs[0] = new double[]{5.0, 6.0, 7.0, 8.0};
@@ -150,7 +158,7 @@ public class VectorTurboEvaluatorTest {
         double[] secureBuffer = new double[10];
 
         // Test API Call #3: Memory-Reuse Offset-Based Bulk Execution
-        int targetOffset = 3; 
+        int targetOffset = 3;
         evaluator.applyBulk(inputs, secureBuffer, targetOffset);
 
         // Verify guard bounds before the offset window are clean (0.0)
@@ -168,5 +176,20 @@ public class VectorTurboEvaluatorTest {
         for (int i = targetOffset + dataSize; i < secureBuffer.length; i++) {
             assertEquals(0.0, secureBuffer[i], "Memory overshot past target payload window.");
         }
+    }
+
+    void logDetails(MathExpression me, BatchedVectorCompositeExpression evaluator, boolean active) {
+        if(!active){return;}
+        MathExpression.Token[] tokens = me.getCachedPostfix();
+        String names[] = new String[tokens.length];
+
+        for (int i = 0; i < names.length; i++) {
+            String n = tokens[i].name == null ? (tokens[i].opChar == '\u0000' ? String.valueOf(tokens[i].value) : String.valueOf(tokens[i].opChar)) : tokens[i].name;
+            names[i] = n;
+        }
+        System.out.println("expr = " + me.getExpression() + ",\n"
+                + "token-names: " + Arrays.toString(names) + "\n"
+                + "tokens-len: " + tokens.length + "\n"
+                + " targetSlots: " + Arrays.toString(evaluator.getTargetSlots()));
     }
 }

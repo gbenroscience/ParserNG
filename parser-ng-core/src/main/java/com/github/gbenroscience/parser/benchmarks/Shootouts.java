@@ -88,7 +88,7 @@ public class Shootouts {
     }
 
     public static List<String> scan(String expr) {
-        return new MathScanner(expr).scanner();
+        return new MathScanner(expr).scan();
     }
 
     public static void testGG(String expr, int n) {

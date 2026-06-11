@@ -262,7 +262,39 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         return nextResult;
     }
 
-    public static boolean assignObject(String input, ErrorLog log) {
+    public static void saveVar(MathExpression root, String name, String val) {
+        saveVar(root, name, Number.fastParseDouble(val));
+    }
+
+    public static void saveVar(MathExpression root, String name, double val) {
+
+        if (root != null) {//no variable local to the root MathExpression exists
+            Variable v = root.getVariable(name);
+            if (v != null) {
+                 v.setValue(val);
+            } else {
+                root.setValue(name, val);
+              }
+        } else {
+            //Check globals
+            Variable v = VariableManager.lookUp(name);//check if the variable name(lhs) is an existing global
+            if (v == null) {//such variable does not exist
+                VariableManager.VARIABLES.put(name, new Variable(name, val, false));
+            } else {
+                v.setValue(val);//the variable exists, just update it
+            }
+        }
+    
+    }
+
+    /**
+     *
+     * @param input The input to parser
+     * @param root The root {@link MathExpression} that generated the input
+     * @return
+     */
+    public static boolean assignObject(String input, MathExpression root) {
+        ErrorLog log = root != null ? root.getErrorLog() : new ErrorLog();
         /**
          * Check if it is a function assignment operation...e.g:
          * f=matrix_mul(A,B)
@@ -310,21 +342,11 @@ public class Function implements Savable, MethodRegistry.MethodAction {
 
             if (Number.validNumber(rhs)) {//...=number
                 if (Variable.isVariableString(newFuncName)) {//check if lhs is a variable name or function name
-                    Variable v = VariableManager.lookUp(newFuncName);//check if the variable name(lhs) is an existing variable
-                    if (v == null) {//such variable does not exist
-                        VariableManager.VARIABLES.put(newFuncName, new Variable(newFuncName, Double.parseDouble(rhs), false));//create and store it; it is a variable creation attempt
-                    } else {
-                        v.setValue(rhs);//the variable exists, just update it
-                    }
+                    saveVar(root, newFuncName, rhs);
                 } else if (isVarNamesList) {//lhs is no valid variable name, but is it a valid list of variable names? user may be trying to assign or update many variables at once e.g. a,b,c=5
                     List<String> vars = new Scanner(newFuncName, false, ",").scan();//dice them into their component variable names if lhs is valid variable names list
                     for (String var : vars) {//go through the variable names one by one
-                        Variable v = VariableManager.lookUp(var);//does a variable exist by this name
-                        if (v == null) {//if not, create it and assign the value it
-                            VariableManager.VARIABLES.put(var, new Variable(var, Double.parseDouble(rhs), false));
-                        } else {// if it does, just update it
-                            v.setValue(rhs);
-                        }
+                        saveVar(root, var, rhs);
                     }
                 }
                 success = true;
@@ -476,14 +498,14 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                             FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
                             success = true;
                             break;
-                        case STRING: 
+                        case STRING:
                             f = FunctionManager.lookUp(val.textRes);
                             if (f != null) {
                                 Function q = f.copy();
                                 q.setDependentVariable(new Variable(newFuncName));
                                 if (q.type == TYPE.MATRIX) {
                                     q.getMatrix().setName(newFuncName);
-                                } 
+                                }
                                 FunctionManager.add(q);
                                 return true;
                             }
@@ -492,35 +514,20 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                             if (isVarNamesList && hasCommas) {
                                 List<String> vars = new Scanner(newFuncName, false, ",").scan();
                                 for (String var : vars) {
-                                    Variable v = VariableManager.lookUp(var);
-                                    if (v == null) {
-                                        v = new Variable(var, val.scalar, false);
-                                    } else {
-                                        v.setValue(val.scalar);
-                                    }
-                                    VariableManager.VARIABLES.put(var, v);
+                                    saveVar(root, var, val.scalar);
                                 }
                                 success = true;
                             } else {
-                                Variable v = VariableManager.lookUp(newFuncName);
-                                if (v == null) {
-                                    v = new Variable(newFuncName, val.scalar, false);
-                                } else {
-                                    v.setValue(val.scalar);
-                                }
-                                VariableManager.VARIABLES.put(newFuncName, v);
+                                saveVar(root, newFuncName, val.scalar);
                                 success = true;
                             }
-
                             break;
                         case VOID:
 
                             break;
 
                         default:
-
                             break;
-
                     }//end switch statement
                 }//end if
                 else {
@@ -568,7 +575,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
      * of x,y,z,...
      *
      */
-    private void parseInput(String input) {
+    private final void parseInput(String input) {
         int equalsIndex = input.indexOf("=");
         int atIndex = input.indexOf("@");
         if (atIndex == -1) {
@@ -1008,30 +1015,32 @@ public class Function implements Savable, MethodRegistry.MethodAction {
     }
 
     /**
-     * This function may be called like this: 
+     * This function may be called like this:
      * <ol>
      * <li>storeNamedFunction("y", "3*x*sin(x)")</li>
      * <li>storeNamedFunction("y", "@(x)3*x*sin(x)")</li>
-     * <li>storeNamedFunction(null, "3*x*sin(x)") (creates an anonymous function)</li>
+     * <li>storeNamedFunction(null, "3*x*sin(x)") (creates an anonymous
+     * function)</li>
      * <li>storeNamedFunction("y(x)", "3*x*sin(x)")</li>
      * </ol>
+     *
      * @param fName The name of the function
      * @param expression The expression used to create the function...e.g
      * @(x)sin(x-1)^cos(x)
      * @return the name assigned to the anonymous function created.
      */
     public static synchronized Function storeNamedFunction(String fName, String expression) {
-        if(expression == null){
-               throw new InputMismatchException("The expression can not be null!");
+        if (expression == null) {
+            throw new InputMismatchException("The expression can not be null!");
         }
 
         expression = expression.trim();
-        if(fName == null){
+        if (fName == null) {
             return storeAnonymousFunction(expression.trim());
         }
-        
+
         fName = fName.trim();
-        
+
         boolean fNameHasParenthesis = fName.contains("(") && fName.contains(")");
         boolean isAnonFormatExpr = expression.startsWith("@");
         if (isAnonFormatExpr && fNameHasParenthesis) {
