@@ -23,6 +23,7 @@ public class VectorTurboEvaluatorTest {
     private static final double EPSILON = 1e-12;
     private static ExecutorService threadPool;
     private static boolean active = false;
+    private static boolean tiledExecution = false;
 
     @BeforeAll
     public static void setupSuite() {
@@ -69,7 +70,7 @@ public class VectorTurboEvaluatorTest {
         }
 
         // Test API Call #1: High-Performance Flat Bulk Execution
-        evaluator.applyBulk(flatInputs, outputVector);
+        evaluator.applyBulk(flatInputs, outputVector, tiledExecution);
        // System.out.println("outputVector: " + Arrays.toString(outputVector));
         // Verify mathematical equality against standard Java scalar paths
         for (int i = 0; i < totalElements; i++) {
@@ -104,7 +105,7 @@ public class VectorTurboEvaluatorTest {
         }
 
         // Test API Call #1: Standard Bulk Execution
-        evaluator.applyBulk(inputs, outputVector);
+        evaluator.applyBulk(inputs, outputVector, tiledExecution);
 
         for (int i = 0; i < totalElements; i++) {
             double x1 = inputs[0][i];
@@ -131,7 +132,7 @@ public class VectorTurboEvaluatorTest {
             inputs[0][i] = i; // x
         }
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(inputs, outputVector);
+        evaluator.applyBulk(inputs, outputVector, tiledExecution);
       //  System.out.println("output: " + Arrays.toString(outputVector));
 
         for (int i = 0; i < dataSize; i++) {
@@ -159,7 +160,7 @@ public class VectorTurboEvaluatorTest {
 
         // Test API Call #3: Memory-Reuse Offset-Based Bulk Execution
         int targetOffset = 3;
-        evaluator.applyBulk(inputs, secureBuffer, targetOffset);
+        evaluator.applyBulk(inputs, secureBuffer, targetOffset, tiledExecution);
 
         // Verify guard bounds before the offset window are clean (0.0)
         for (int i = 0; i < targetOffset; i++) {

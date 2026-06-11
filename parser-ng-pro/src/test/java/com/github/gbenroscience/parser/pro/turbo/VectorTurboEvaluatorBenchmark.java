@@ -23,6 +23,9 @@ public class VectorTurboEvaluatorBenchmark {
 
     @Param({"512","1024", "65536", "524288", "67108864"})
     private int dataSize;
+    
+    @Param({"true", "false"})
+    private boolean tiledExecution;
 
     private static ExecutorService threadPool;
 
@@ -104,7 +107,7 @@ public class VectorTurboEvaluatorBenchmark {
     
        @Benchmark
     public void benchmarkLinearPolynomialBulkFlatVars(org.openjdk.jmh.infra.Blackhole bh) {
-        linearExpr.applyBulk(flatVariables, outputBuffer);
+        linearExpr.applyBulk(flatVariables, outputBuffer, tiledExecution,threadPool);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
@@ -117,7 +120,7 @@ public class VectorTurboEvaluatorBenchmark {
 
     @Benchmark
     public void benchmarkGaussianDistributionBulkFlatVars(org.openjdk.jmh.infra.Blackhole bh) {
-        gaussianExpr.applyBulk(flatVariables, outputBuffer);
+        gaussianExpr.applyBulk(flatVariables, outputBuffer, tiledExecution,threadPool);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
@@ -131,7 +134,19 @@ public class VectorTurboEvaluatorBenchmark {
     
     
     
-    
+    @TearDown(Level.Trial)
+    public void tearDown() throws InterruptedException {
+        if (threadPool != null) {
+            // Signal the threads to stop accepting new work and exit
+            threadPool.shutdown();
+            
+            // Give them a moment to clean up gracefully
+            if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                // Force kill if they don't respond
+                threadPool.shutdownNow();
+            }
+        }
+    }
     
     
     /*
