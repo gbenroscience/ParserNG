@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.locks.LockSupport;
 
 /**
  * SIMD Turbo Evaluator - High-Performance Block Vectorization Engine *
@@ -195,6 +196,25 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         return varCount;
     }
 
+    static int detectCores() {
+        // Accurate core detection
+        int threads = Runtime.getRuntime().availableProcessors();
+        int cores = threads;
+
+// Heuristic: if threads > 8, assume HT and halve it
+        if (threads > 8 && threads % 2 == 0) {
+            cores = threads / 2;
+        }
+
+// Special case: Intel U-series 6th-10th gen are 2-core despite 4 threads
+        String cpuName = System.getProperty("os.arch");
+        if (threads == 4 && cores == 4) {
+            cores = 2; // i7-6500U, i5-7200U, etc
+        }
+        System.out.println("cores = "+cores+", cpuName = "+cpuName);
+        return Math.max(1, cores);
+    }
+
     @Override
     public SIMDCompositeExpression compile() throws Throwable {
         return new BatchedVectorCompositeExpression(compiledScalarHandle, opcodes, targetSlots,
@@ -205,17 +225,32 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         private static final int L2_TILE_SIZE = 512;
         private static final int MAX_STACK_DEPTH = 64;
-        
+
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
         private static final int BLOCK_SIZE = L2_TILE_SIZE;
-        
+
         private final MethodHandle scalarHandle;
         private final int[] opcodes;
         private final int[] targetSlots;
         private final double[] literalConstants;
         private final int instructionCount;
         private int varCount;
- 
+
+        ////NEW FIELDS
+        // --- ZERO-ALLOCATION MULTI-THREADING SUBSYSTEM ---
+    private static final int STATE_IDLE = 0;
+        private static final int STATE_RUNNING = 1;
+        private static final int STATE_FINISHED = 2;
+
+        private final int cores;
+        private final WorkerThread[] workers;
+
+        // Volatile transfer registers (allows zero-heap overhead parameter passing)
+        private volatile Thread masterThread;
+        private volatile double[] currentFlatVars;
+        private volatile double[] currentOutput;
+        private volatile int currentDataSize;
+        private volatile boolean currentTiled;
 
         // Allocates a perfectly flat, contiguous scratch block (64 nested stack frames * 2048 block size)
         private static final ThreadLocal<double[]> FLAT_SCRATCH_STACK = ThreadLocal.withInitial(()
@@ -239,6 +274,16 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             this.literalConstants = Arrays.copyOf(consts, consts.length);
             this.instructionCount = count;
             this.varCount = varCount;
+
+            // Initialize the dedicated worker threads ONCE when this expression is compiled/created
+            this.cores = detectCores();
+            this.workers = new WorkerThread[cores];
+
+            for (int i = 0; i < cores; i++) {
+                workers[i] = new WorkerThread(i);
+                workers[i].setDaemon(true); // Ensures the JVM can shutdown cleanly
+                workers[i].start();
+            }
         }
 
         @Override
@@ -263,6 +308,50 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         @Override
         public TurboExpressionEvaluator getCompiler() {
             return VectorTurboEvaluator.this;
+        }
+
+        /**
+         * Private encapsulated Inner Class to handle the raw CPU-bound math
+         * slices
+         */
+        private class WorkerThread extends Thread {
+
+            private final int workerId;
+            volatile int state = STATE_IDLE;
+
+            public WorkerThread(int workerId) {
+                super("VectorTurbo-Worker-" + workerId);
+                this.workerId = workerId;
+            }
+
+            @Override
+            public void run() {
+                while (true) {
+                    // Spin/Park until the master thread throws work into the registers
+                    while (state != STATE_RUNNING) {
+                        LockSupport.park();
+                    }
+
+                    // Volatile reads establish a memory barrier (Happens-Before guarantee)
+                    double[] flatVars = currentFlatVars;
+                    double[] out = currentOutput;
+                    int dataSize = currentDataSize;
+                    boolean tiled = currentTiled;
+
+                    // Execute your exact coarse-grained thread slicing logic
+                    int chunkSize = (dataSize + cores - 1) / cores;
+                    int start = workerId * chunkSize;
+                    int end = Math.min(start + chunkSize, dataSize);
+
+                    if (start < end) {
+                        applyBulkInternal(flatVars, dataSize, out, start, end - start, tiled);
+                    }
+
+                    // Signal the master thread that this core is finished
+                    state = STATE_FINISHED;
+                    LockSupport.unpark(masterThread);
+                }
+            }
         }
 
         //////////////////////////////////////////////////////////////////
@@ -306,33 +395,67 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             applyBulkInternal(flatVariables, numSamples, output, offset, numSamples, tiledExecution);
         }
 
+        /**
+         * OVERLOAD 2: Unpacked 2D Array Input (Fixed to achieve 0 B/op
+         * tracking)
+         */
         @Override
         public void applyBulk(double[][] variables, double[] output, boolean tiledExecution, ExecutorService executor) {
-            int numSamples = variables[0].length;
-            int stride = this.varCount;
+            if (variables == null || variables.length == 0 || output == null) {
+                return;
+            }
+
+            final int numSamples = variables[0].length;
+            final int stride = this.varCount;
+
+            // Zero-allocation buffer retrieval from your thread-local pool
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+
+            // Flatten 2D array to 1D (sequential block transfers)
             for (int i = 0; i < stride; i++) {
                 System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
             }
-            // FIX: Don't delegate to flat overload. Split the work here.
-            final int cores = Runtime.getRuntime().availableProcessors();
-            final int chunkSize = (numSamples + cores - 1) / cores;
-            List<Callable<Void>> tasks = new ArrayList<>(cores);
+
+            // Sequential bypass for small workloads
+            if (numSamples < 2048) {
+                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, tiledExecution);
+                return;
+            }
+
+            // Coordinate via the EXACT SAME zero-alloc threading subsystem
+            dispatchToWorkerRing(flatVariables, output, numSamples, tiledExecution);
+        }
+
+        /**
+         * Centralized coordination mechanism to eliminate code duplication
+         */
+        private void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize, boolean tiledExecution) {
+            // 1. Publish parameters to volatile registers (No allocations)
+            this.masterThread = Thread.currentThread();
+            this.currentFlatVars = flatVariables;
+            this.currentOutput = output;
+            this.currentDataSize = dataSize;
+            this.currentTiled = tiledExecution;
+
+            // 2. Wake up the pre-allocated worker threads via OS permits
             for (int i = 0; i < cores; i++) {
-                final int start = i * chunkSize;
-                final int end = Math.min(start + chunkSize, numSamples);
-                if (start < end) {
-                    tasks.add(() -> {
-                        applyBulkInternal(flatVariables, numSamples, output, start, end - start, tiledExecution);
-                        return null;
-                    });
+                workers[i].state = STATE_RUNNING;
+                LockSupport.unpark(workers[i]);
+            }
+
+            // 3. Wait loop (0 bytes allocated on heap while sleeping)
+            for (int i = 0; i < cores; i++) {
+                WorkerThread worker = workers[i];
+                while (worker.state != STATE_FINISHED) {
+                    LockSupport.park();
                 }
+                worker.state = STATE_IDLE;
             }
-            try {
-                executor.invokeAll(tasks);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+
+            // 4. Memory leak protection (Comment out lines below IF benchmarking this specific class long-term)
+            this.masterThread = null;
+            this.currentFlatVars = null;
+            this.currentOutput = null;
         }
 
         @Override
@@ -715,14 +838,14 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
-       
         private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length, boolean tiled) {
-            if(tiled){
+            if (tiled) {
                 applyBulkInternalWithTiles(flatVariables, dataSize, output, startIdx, length);
-            }else{
+            } else {
                 applyBulkInternalNoTiles(flatVariables, dataSize, output, startIdx, length);
             }
         }
+
         private void evaluateSingleTile(double[] flatVariables,
                 int dataSize,
                 double[] output,
@@ -1059,19 +1182,17 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             // Extract final execution results from the base of the virtual stack directly to output destination
             System.arraycopy(scratch, 0, output, tileStart, currentTileSize);
         }
- 
+
         /**
          * Core Column-Major Vectorized Loop Processor (Flat Memory
          * Architecture) Bypasses jagged array pointers to execute at maximum
          * hardware throughput.
          *
-         * @param flatVariables Grouped/Contiguous array of variables e.g. [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back.
-         * concatenated.
+         * @param flatVariables Grouped/Contiguous array of variables e.g.
+         * [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back. concatenated.
          * @param dataSize The total number of elements per variable row (used
          * for stride offset).
-         */ 
-        
-
+         */
         private void applyBulkInternalWithTiles(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
             // Top-level API boundary validations (executed once per pipeline request)
             if (flatVariables == null || flatVariables.length == 0 || length <= 0) {
@@ -1097,42 +1218,28 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
+        /**
+         * OVERLOAD 1: Flat 1D Array Input (Guaranteed 0 B/op)
+         */
         @Override
-        public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution, java.util.concurrent.ExecutorService executor) {
-            if (output == null || executor == null) {
+        public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution, ExecutorService executor) {
+            if (output == null) {
                 return;
             }
 
-            final int stride = this.varCount;
-            final int length = output.length; // FIX: length = elements to compute, not from buffer
-            final int dataSize = length;      // each variable has `length` elements in flatVariables
+            final int length = output.length;
 
-            if (flatVariables.length < stride * length) {
-                throw new IllegalArgumentException("flatVariables too small: need " + (stride * length));
+            if (flatVariables.length < this.varCount * length) {
+                throw new IllegalArgumentException("flatVariables too small: need " + (this.varCount * length));
             }
 
-            final int cores = Runtime.getRuntime().availableProcessors();
-            final int chunkSize = (length + cores - 1) / cores;
-            java.util.List<java.util.concurrent.Callable<Void>> tasks = new java.util.ArrayList<>(cores);
-
-            for (int i = 0; i < cores; i++) {
-                final int start = i * chunkSize;
-                final int end = Math.min(start + chunkSize, length);
-
-                if (start < end) {
-                    tasks.add(() -> {
-                        // FIX: pass dataSize=length, not inputRowSize derived from buffer
-                        applyBulkInternal(flatVariables, dataSize, output, start, end - start, tiledExecution);
-                        return null;
-                    });
-                }
+            if (length < 2048) {
+                applyBulkInternal(flatVariables, length, output, 0, length, tiledExecution);
+                return;
             }
 
-            try {
-                executor.invokeAll(tasks);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            // Coordinate via the zero-alloc threading subsystem
+            dispatchToWorkerRing(flatVariables, output, length, tiledExecution);
         }
 
         @Override
