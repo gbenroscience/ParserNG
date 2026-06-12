@@ -2,8 +2,7 @@ package com.github.gbenroscience.parser.pro.turbo;
 
 import com.github.gbenroscience.parser.pro.turbo.tools.FlatMatrix;
 import com.github.gbenroscience.parser.pro.turbo.tools.FlatMatrixF;
-import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
-import java.util.concurrent.ExecutorService;
+import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression; 
 
 /**
  * Super-fast, SIMD-aligned vector expression evaluator interface.
@@ -51,9 +50,9 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * @param output         The pre-allocated target array where the parallel calculations will be written.
      * @param tiledExecution If {@code true}, instructs internal worker threads to use cache-localized block offsets. 
      * If {@code false}, workers sweep through their slice ranges sequentially without sub-tiling.
-     * @param executor       The multi-threaded worker pool responsible for driving core processing chunks.
+     * @param useWorkers   Activates the processing thread framework driving core mathematical chunks.
      */
-    public void applyBulk(double[][] variables, double[] output, boolean tiledExecution, ExecutorService executor);
+    public void applyBulk(double[][] variables, double[] output, boolean tiledExecution, boolean useWorkers);
 
     /**
      * Evaluates a 2D variable structure using an explicit, cache-bounded window chunk size 
@@ -105,9 +104,9 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * @param output         The pre-allocated target array where parallel workers will drop evaluated computations.
      * @param tiledExecution If {@code true}, distributes cache-bounded tile execution sets across independent workers. 
      * If {@code false}, spawns parallel workers on straight sequential segment sections.
-     * @param executor       The processing thread framework driving core mathematical chunks.
+     * @param useWorkers   Activates the processing thread framework driving core mathematical chunks.
      */
-    public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution, java.util.concurrent.ExecutorService executor);
+    public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution, boolean useWorkers);
 
     /**
      * <b>Warp Speed Path (Power Users):</b> Evaluates a pre-grouped flat array using custom-defined batch 

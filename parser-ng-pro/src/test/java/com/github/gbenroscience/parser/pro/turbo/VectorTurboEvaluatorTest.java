@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -179,6 +180,23 @@ public class VectorTurboEvaluatorTest {
         }
     }
 
+    @Test
+    public void testSingleRuntime() throws Throwable{
+        MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        
+        double t = System.nanoTime();
+        double[]out = new double[1];
+        evaluator.applyBulk(new double[]{5, 4, 1}, out, false);
+        double t1 = System.nanoTime() - t;
+        
+        System.out.println("timed at = "+t1+"ns--- answer: "+out[0]);
+        Assertions.assertTrue(true);
+        
+    }
+    
+    
+    
     void logDetails(MathExpression me, BatchedVectorCompositeExpression evaluator, boolean active) {
         if(!active){return;}
         MathExpression.Token[] tokens = me.getCachedPostfix();
@@ -193,4 +211,7 @@ public class VectorTurboEvaluatorTest {
                 + "tokens-len: " + tokens.length + "\n"
                 + " targetSlots: " + Arrays.toString(evaluator.getTargetSlots()));
     }
+    
+    
+    
 }

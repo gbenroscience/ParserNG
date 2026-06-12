@@ -2,6 +2,7 @@ package com.github.gbenroscience.parser.pro.turbo;
 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator;
+import com.github.gbenroscience.parser.pro.turbo.tools.utils.HardwareDetector;
 import org.openjdk.jmh.annotations.*;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -21,9 +22,9 @@ import org.openjdk.jmh.runner.options.TimeValue;
 @State(Scope.Thread)
 public class VectorTurboEvaluatorBenchmark {
 
-    @Param({"512","1024", "65536", "524288", "67108864"})
+    @Param({"512", "1024", "65536", "524288", "67108864"})
     private int dataSize;
-    
+
     @Param({"true", "false"})
     private boolean tiledExecution;
 
@@ -40,7 +41,10 @@ public class VectorTurboEvaluatorBenchmark {
     @Setup(Level.Trial)
     public void setup() throws Throwable {
         Random rand = new Random(42);
-        threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+        int cores = HardwareDetector.detectPhysicalCores();
+        // Optional: cap to logical in case override lies
+        cores = Math.min(cores, Runtime.getRuntime().availableProcessors());
+        threadPool = Executors.newFixedThreadPool(cores);
         // Structure of Arrays (SoA): 3 variables (x1, x2, x3), each of length dataSize
         int stride = 3;
         variables = new double[stride][dataSize];
@@ -76,7 +80,8 @@ public class VectorTurboEvaluatorBenchmark {
         conditionalExpr = (SIMDCompositeExpression) new VectorTurboEvaluator(meConditional).compile();
          */
     }
-/*
+
+    /*
     @Benchmark
     public void benchmarkLinearPolynomialBulk(org.openjdk.jmh.infra.Blackhole bh) {
         linearExpr.applyBulk(variables, outputBuffer);
@@ -102,12 +107,11 @@ public class VectorTurboEvaluatorBenchmark {
         }
         bh.consume(checksum);
     }
-*/
-    
-    
-       @Benchmark
+     */
+
+    @Benchmark
     public void benchmarkLinearPolynomialBulkFlatVars(org.openjdk.jmh.infra.Blackhole bh) {
-        linearExpr.applyBulk(flatVariables, outputBuffer, tiledExecution,threadPool);
+        linearExpr.applyBulkBatched(flatVariables, outputBuffer,1024, tiledExecution);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
@@ -120,7 +124,7 @@ public class VectorTurboEvaluatorBenchmark {
 
     @Benchmark
     public void benchmarkGaussianDistributionBulkFlatVars(org.openjdk.jmh.infra.Blackhole bh) {
-        gaussianExpr.applyBulk(flatVariables, outputBuffer, tiledExecution,threadPool);
+        gaussianExpr.applyBulkBatched(flatVariables, outputBuffer, 1024, tiledExecution);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
@@ -131,15 +135,12 @@ public class VectorTurboEvaluatorBenchmark {
         bh.consume(checksum);
     }
 
-    
-    
-    
     @TearDown(Level.Trial)
     public void tearDown() throws InterruptedException {
         if (threadPool != null) {
             // Signal the threads to stop accepting new work and exit
             threadPool.shutdown();
-            
+
             // Give them a moment to clean up gracefully
             if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
                 // Force kill if they don't respond
@@ -147,8 +148,7 @@ public class VectorTurboEvaluatorBenchmark {
             }
         }
     }
-    
-    
+
     /*
     @Benchmark
     public double[] benchmarkHardwareMaskConditionalBulk() {
