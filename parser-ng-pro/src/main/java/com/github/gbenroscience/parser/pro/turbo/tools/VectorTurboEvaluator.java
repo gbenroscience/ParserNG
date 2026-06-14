@@ -1,12 +1,11 @@
 package com.github.gbenroscience.parser.pro.turbo.tools;
 
-import com.github.gbenroscience.parser.Function;
+
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.pro.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.parser.pro.turbo.tools.utils.HardwareDetector;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
-import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
-import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator; 
 import java.lang.invoke.MethodHandle;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -87,11 +86,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     private int varCount;
     private int instructionCount;
     private KernelInterceptException interceptedKernel;
-
-    // For child evaluators - use to evaluate user defined functions
-    private int[] udfIndices; // Parallel array or repurposed targetSlots
-    private BatchedVectorCompositeExpression[] childComposites;
-    private int udfCount = 0;
+ 
 
     public VectorTurboEvaluator(MathExpression me) throws Throwable {
         super(me);
@@ -109,10 +104,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         this.instructionCount = 0;
         Arrays.fill(targetSlots, -1);
 
-        // Initialize a temporary list to collect child evaluators during compilation
-        List<BatchedVectorCompositeExpression> compiledUdfs = new ArrayList<>();
-        this.udfIndices = new int[len];
-        Arrays.fill(udfIndices, -1);
+ 
 
         for (MathExpression.Token t : postfix) {
             switch (t.kind) {
@@ -149,11 +141,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     };
                     instructionCount++;
                 }
-                case MathExpression.Token.FUNCTION, MathExpression.Token.METHOD -> {
-                    /*if (isMatrixKernel(t.name, t.arity)) {
-                        interceptedKernel = new KernelInterceptException(t.name, t.arity);
-                        return;
-                    }*/
+                case MathExpression.Token.METHOD -> {
+                 
                     String name = t.name.toLowerCase();
                     opcodes[instructionCount] = switch (name) {
                         case "sin", "sin_rad" ->
@@ -192,30 +181,17 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                             OP_IF;
                         default -> {
                             // 1. Intercept User Defined Functions
-                            if (FunctionManager.containsAlgebraicFunction(t.name)) {
-                                Function f = FunctionManager.lookUp(t.name);
-                                if (f != null) {
-                                    try {
-                                        // Fetch the inner function's MathExpression
-                                        MathExpression innerExpr = f.getMathExpression();
-                                        // Compile the inner UDF into its own VectorTurboEvaluator
-                                        BatchedVectorCompositeExpression bvce = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(innerExpr).compile();
-
-                                        // Track it structurally
-                                        udfIndices[instructionCount] = udfCount++;
-                                        compiledUdfs.add(bvce);
-                                    } catch (Throwable ex) {
-                                        System.getLogger(VectorTurboEvaluator.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
-                                    }
-                                }
-
-                                yield OP_USER_FUNC; // Return our special UDF opcode
-                            } else {
+                          
                                 throw new IllegalArgumentException("Unknown function: " + t.name);
-                            }
+ 
                         }
                     };
                     instructionCount++;
+                    
+                       /*if (isMatrixKernel(t.name, t.arity)) {
+                        interceptedKernel = new KernelInterceptException(t.name, t.arity);
+                        return;
+                    }*/
                 }
             }
         }
@@ -223,10 +199,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         this.opcodes = Arrays.copyOf(opcodes, instructionCount);
         this.targetSlots = Arrays.copyOf(targetSlots, instructionCount);
         this.literalConstants = Arrays.copyOf(literalConstants, instructionCount);
-
-        
-        this.childComposites = compiledUdfs.toArray(BatchedVectorCompositeExpression[]::new);
-        this.udfIndices = Arrays.copyOf(udfIndices, instructionCount);
+ 
     }
 
     public int getVarCount() {
@@ -527,12 +500,12 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             final int endIdx = startIdx + length;
             // 1. SHORT-CIRCUIT: Small datasets bypass tiling infrastructure entirely
             if (length <= L2_TILE_SIZE) {
-                evaluateTile(flatVariables, dataSize, output, startIdx, length, scratch);
+                evaluateTile(flatVariables, dataSize, output,startIdx, startIdx, length, scratch);
             } // 2. TILING STRATEGY: Process large datasets in cache-aligned blocks
             else {
                 for (int tileStart = startIdx; tileStart < endIdx; tileStart += L2_TILE_SIZE) {
                     final int currentTileSize = Math.min(L2_TILE_SIZE, endIdx - tileStart);
-                    evaluateTile(flatVariables, dataSize, output, tileStart, currentTileSize, scratch);
+                    evaluateTile(flatVariables, dataSize, output,startIdx, tileStart, currentTileSize, scratch);
                 }
             }
         }
@@ -569,6 +542,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 evaluateBlock(flatVariables,
                         dataSize,
                         output,
+                        startIdx,
                         start,
                         currentBlockSize,
                         scratch);
@@ -587,7 +561,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         private void evaluateBlock(double[] flatVariables,
                 int dataSize,
                 double[] output,
-                int tileStart,
+                int startIdx,
+                int blockStart,
                 int currentTileSize,
                 double[] scratch) {
 
@@ -616,8 +591,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         final int stackOffset = sp * BLOCK_SIZE;
                         sp++;
 
-                        //'tileStart' accurately streams the data slice relative to the current tile window
-                        final int flatOffset = (slotIdx * dataSize) + tileStart;
+                        //'blockStart' accurately streams the data slice relative to the current tile window
+                        final int flatOffset = (slotIdx * dataSize) + blockStart;
                         System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, currentTileSize);
                     }
 
@@ -918,12 +893,13 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             // Extract final execution results from the base of the virtual stack directly to output destination
-            System.arraycopy(scratch, 0, output, tileStart, currentTileSize);
+            System.arraycopy(scratch, 0, output, startIdx, currentTileSize);
         }
 
         private void evaluateTile(double[] flatVariables,
                 int dataSize,
                 double[] output,
+                int startIdx,
                 int tileStart,
                 int currentTileSize,
                 double[] scratch) {
@@ -1255,7 +1231,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             // Extract final execution results from the base of the virtual stack directly to output destination
-            System.arraycopy(scratch, 0, output, tileStart, currentTileSize);
+            System.arraycopy(scratch, 0, output, startIdx, currentTileSize);
         }
 
         /**

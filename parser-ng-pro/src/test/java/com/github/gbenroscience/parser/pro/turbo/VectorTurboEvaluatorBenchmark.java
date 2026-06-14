@@ -124,7 +124,7 @@ public class VectorTurboEvaluatorBenchmark {
 
     @Benchmark
     public void benchmarkGaussianDistributionBulkFlatVars(org.openjdk.jmh.infra.Blackhole bh) {
-        gaussianExpr.applyBulkBatched(flatVariables, outputBuffer, 1024, tiledExecution);
+        gaussianExpr.applyBulkBatched(flatVariables, outputBuffer, 2048, tiledExecution);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
