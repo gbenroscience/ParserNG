@@ -12,7 +12,7 @@ public enum StandardTileOps implements TileOperator {
                 dest[i] = Math.sin(src[i]); // Clean, unrollable loop
             }
         }
-    },
+    }, 
     COS {
         @Override
         public void evaluate(double[] src, double[] dest, int tileSize) {
