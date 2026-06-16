@@ -1,11 +1,12 @@
 package com.github.gbenroscience.parser.pro.turbo;
 
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator;
+import com.github.gbenroscience.parser.pro.turbo.tools.SIMDVectorTurboEvaluator;
 import com.github.gbenroscience.parser.pro.turbo.tools.utils.HardwareDetector;
-import java.util.Arrays;
 import org.openjdk.jmh.annotations.*;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
@@ -19,27 +20,31 @@ import org.openjdk.jmh.runner.options.TimeValue;
 @Measurement(iterations = 5, time = 2)
 @Fork(1)
 @State(Scope.Thread)
-public class VectorTurboEvaluatorBenchmark {
+public class SIMDTurboEvaluatorBenchmark {
 
     @Param({"512", "1024", "65536", "524288", "67108864"})
     private int dataSize;
 
     @Param({"true", "false"})
     private boolean tiledExecution;
- 
+
+    private static ExecutorService threadPool;
 
     private double[] flatVariables;
     private double[][] variables;
     private double[] outputBuffer;
 
-    private VectorTurboEvaluator.BatchedVectorCompositeExpression linearExpr;
-    private VectorTurboEvaluator.BatchedVectorCompositeExpression gaussianExpr;
-    private VectorTurboEvaluator.BatchedVectorCompositeExpression conditionalExpr;
+    private SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression linearExpr;
+    private SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression gaussianExpr;
+    private SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression conditionalExpr;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable {
         Random rand = new Random(42);
+        int cores = HardwareDetector.detectPhysicalCores();
         // Optional: cap to logical in case override lies
+        cores = Math.min(cores, Runtime.getRuntime().availableProcessors());
+        threadPool = Executors.newFixedThreadPool(cores);
         // Structure of Arrays (SoA): 3 variables (x1, x2, x3), each of length dataSize
         int stride = 3;
         variables = new double[stride][dataSize];
@@ -64,11 +69,11 @@ public class VectorTurboEvaluatorBenchmark {
 
         // Compile expressions using the Vector Engine
         MathExpression meLinear = new MathExpression("12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2");
-        linearExpr = (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(meLinear).compile();
+        linearExpr = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(meLinear).compile();
 
         //MathExpression meGaussian = new MathExpression("(1 / (x1 * sqrt(2 * 3.141592653589793))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
         MathExpression meGaussian = new MathExpression("0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))");
-        gaussianExpr = (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(meGaussian).compile();
+        gaussianExpr = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(meGaussian).compile();
 
         /*
         MathExpression meConditional = new MathExpression("if(x1 >= 2.5, sin(x1) % x2, x3 * vma(x1, x2, 1.5))");
@@ -114,7 +119,6 @@ public class VectorTurboEvaluatorBenchmark {
         for (int i = 0; i < outputBuffer.length; i += 64) { // Sample memory lines to reduce benchmark overhead
             checksum += outputBuffer[i];
         }
-     
         bh.consume(checksum);
     }
 
@@ -128,13 +132,21 @@ public class VectorTurboEvaluatorBenchmark {
         for (int i = 0; i < outputBuffer.length; i += 64) { // Sample memory lines to reduce benchmark overhead
             checksum += outputBuffer[i];
         }
-      
         bh.consume(checksum);
     }
 
     @TearDown(Level.Trial)
     public void tearDown() throws InterruptedException {
-       
+        if (threadPool != null) {
+            // Signal the threads to stop accepting new work and exit
+            threadPool.shutdown();
+
+            // Give them a moment to clean up gracefully
+            if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                // Force kill if they don't respond
+                threadPool.shutdownNow();
+            }
+        }
     }
 
     /*
@@ -146,7 +158,7 @@ public class VectorTurboEvaluatorBenchmark {
      */
     public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
-        opt.include(VectorTurboEvaluatorBenchmark.class.getSimpleName()); // Always include baseline
+        opt.include(SIMDTurboEvaluatorBenchmark.class.getSimpleName()); // Always include baseline
         // 4. Fluent, modern JMH Configuration
         Options configurations = opt.mode(Mode.AverageTime)
                 .timeUnit(TimeUnit.NANOSECONDS)

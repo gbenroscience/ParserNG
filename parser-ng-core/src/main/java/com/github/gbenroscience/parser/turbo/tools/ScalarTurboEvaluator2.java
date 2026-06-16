@@ -497,8 +497,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                         applyBinaryWide(t, stack, foldConstants, varCount, pTypes, mask);
                     }
                     break;
-
-                case MathExpression.Token.FUNCTION:
+ 
                 case MathExpression.Token.METHOD:
                     Function userFunc = FunctionManager.getFunction(t.name);
 

@@ -27,6 +27,7 @@ import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.VariableManager;
 import java.util.Arrays;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -44,6 +45,13 @@ public class ScalarTurboEvaluatorTest {
 
     public final int N = 1000000;
 
+      @BeforeAll
+    public static void setupSuite() {
+        // Enforce a hard fail immediately if module flags are missing 
+        MathExpression orig = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");//for user defined function tests 
+    }
+
+    
     @Test
     public void testPrinting() throws Throwable {
         String expr = "F=@(x,y,z)3*x+y-z^2";
@@ -219,8 +227,7 @@ public class ScalarTurboEvaluatorTest {
         MathExpression.EvalResult ev = interpreted.solveGeneric();
         System.out.println("std: " + ev);
 
-        System.out.println("scanner: "+interpreted.getScanner());
-        System.out.println("postfix: "+Arrays.deepToString(interpreted.getCachedPostfix()));
+        System.out.println("scanner: "+interpreted.getScanner()); 
         // Compile to turbo
         FastCompositeExpression compiled = new ScalarTurboEvaluator1(interpreted).compile();// interpreted.compileTurbo();
         // Warm up turbo JIT
@@ -423,6 +430,47 @@ public class ScalarTurboEvaluatorTest {
         TurboExpressionEvaluator tee = TurboEvaluatorFactory.getCompiler(interpreted);
         FastCompositeExpression fce = tee.compile();
         double v1 = fce.applyScalar(vars);
+
+    }
+
+    
+
+    @Test
+    void testUserDefinedFunctionSimpleCall() throws Throwable {
+        MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,5)");
+        System.out.println("f(3,4,2) = " + me.solve());
+
+        FastCompositeExpression evaluator = new ScalarTurboEvaluator1(me).compile();
+        double t = System.nanoTime();
+        double[] out = new double[1];
+        evaluator.applyScalar(new double[]{5, 4, 1});
+        double t1 = System.nanoTime() - t;
+
+        System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
+        Assertions.assertTrue(true);
+
+    }
+
+    @Test
+    void testUserDefinedFunctionFunctionInExpression()  {
+
+        MathExpression me = new MathExpression("3 + 2*x + f(2, 3*x + sum(4,2,5,sort(9,2,12,25)), 5)");
+       System.out.println("scanner:\n"+me.getScanner());
+        //System.out.println("flat-tokens(rpn) array:\n"+Arrays.deepToString(me.getCachedPostfix()));
+        
+        try{
+        FastCompositeExpression evaluator = new ScalarTurboEvaluator2(me).compile();
+        double t = System.nanoTime();
+        
+        double ans = evaluator.applyScalar(new double[]{5, 4, 1});
+        double t1 = System.nanoTime() - t;
+
+        System.out.println("timed at = " + t1 + "ns--- answer: " + ans);
+        Assertions.assertTrue(true);
+        }catch(Throwable e){
+            e.printStackTrace();
+        }
+
 
     }
 

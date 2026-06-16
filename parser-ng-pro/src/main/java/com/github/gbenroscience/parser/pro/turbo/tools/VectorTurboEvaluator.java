@@ -1,15 +1,12 @@
 package com.github.gbenroscience.parser.pro.turbo.tools;
 
-
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.pro.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.parser.pro.turbo.tools.utils.HardwareDetector;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
-import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator; 
+import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import java.lang.invoke.MethodHandle;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -86,7 +83,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     private int varCount;
     private int instructionCount;
     private KernelInterceptException interceptedKernel;
- 
 
     public VectorTurboEvaluator(MathExpression me) throws Throwable {
         super(me);
@@ -103,8 +99,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         this.literalConstants = new double[len];
         this.instructionCount = 0;
         Arrays.fill(targetSlots, -1);
-
- 
 
         for (MathExpression.Token t : postfix) {
             switch (t.kind) {
@@ -142,7 +136,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     instructionCount++;
                 }
                 case MathExpression.Token.METHOD -> {
-                 
+
                     String name = t.name.toLowerCase();
                     opcodes[instructionCount] = switch (name) {
                         case "sin", "sin_rad" ->
@@ -181,14 +175,14 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                             OP_IF;
                         default -> {
                             // 1. Intercept User Defined Functions
-                          
-                                throw new IllegalArgumentException("Unknown function: " + t.name);
- 
+
+                            throw new IllegalArgumentException("Unknown function: " + t.name);
+
                         }
                     };
                     instructionCount++;
-                    
-                       /*if (isMatrixKernel(t.name, t.arity)) {
+
+                    /*if (isMatrixKernel(t.name, t.arity)) {
                         interceptedKernel = new KernelInterceptException(t.name, t.arity);
                         return;
                     }*/
@@ -199,7 +193,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         this.opcodes = Arrays.copyOf(opcodes, instructionCount);
         this.targetSlots = Arrays.copyOf(targetSlots, instructionCount);
         this.literalConstants = Arrays.copyOf(literalConstants, instructionCount);
- 
     }
 
     public int getVarCount() {
@@ -368,24 +361,24 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             for (int i = 0; i < stride; i++) {
                 System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
             }
-            // FIX: Pass numSamples explicitly. Don't let applyBulk guess from flatVariables.length
+            // FIX: Pass dataSize explicitly. Don't let applyBulk guess from flatVariables.length
             applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, tiledExecution);
         }
 
         @Override
         public void applyBulk(double[][] variables, double[] output, int offset, boolean tiledExecution) {
-            int numSamples = variables[0].length;
+            int dataSize = variables[0].length;
             int stride = this.varCount;
 
             // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
-            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * dataSize);
             // 2. Stream user columns into the flat layout
             for (int i = 0; i < stride; i++) {
-                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
+                System.arraycopy(variables[i], 0, flatVariables, i * dataSize, dataSize);
             }
 
-            // FIX: Pass numSamples explicitly. Don't let applyBulk guess from flatVariables.length
-            applyBulkInternal(flatVariables, numSamples, output, offset, numSamples, tiledExecution);
+            // FIX: Pass dataSize explicitly. Don't let applyBulk guess from flatVariables.length
+            applyBulkInternal(flatVariables, dataSize, output, offset, dataSize, tiledExecution);
         }
 
         @Override
@@ -453,16 +446,16 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         @Override
         public void applyBulkBatched(double[][] variables, double[] output, int batchSize, boolean tiledExecution) {
-            int numSamples = variables[0].length;
+            int dataSize = variables[0].length;
             int stride = this.varCount;
-            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
+            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * dataSize);
             for (int i = 0; i < stride; i++) {
-                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
+                System.arraycopy(variables[i], 0, flatVariables, i * dataSize, dataSize);
             }
             // FIX: Don't delegate to flat overload. Loop here.
-            for (int start = 0; start < numSamples; start += batchSize) {
-                int length = Math.min(batchSize, numSamples - start);
-                applyBulkInternal(flatVariables, numSamples, output, start, length, tiledExecution);
+            for (int start = 0; start < dataSize; start += batchSize) {
+                int length = Math.min(batchSize, dataSize - start);
+                applyBulkInternal(flatVariables, dataSize, output, start, length, tiledExecution);
             }
         }
 
@@ -497,15 +490,15 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             final double[] scratch = FLAT_SCRATCH_STACK.get();
-            final int endIdx = startIdx + length;
             // 1. SHORT-CIRCUIT: Small datasets bypass tiling infrastructure entirely
             if (length <= L2_TILE_SIZE) {
-                evaluateTile(flatVariables, dataSize, output,startIdx, startIdx, length, scratch);
+                evaluateTile(flatVariables, dataSize, output, startIdx, startIdx, length, scratch);
             } // 2. TILING STRATEGY: Process large datasets in cache-aligned blocks
             else {
+            final int endIdx = startIdx + length;
                 for (int tileStart = startIdx; tileStart < endIdx; tileStart += L2_TILE_SIZE) {
                     final int currentTileSize = Math.min(L2_TILE_SIZE, endIdx - tileStart);
-                    evaluateTile(flatVariables, dataSize, output,startIdx, tileStart, currentTileSize, scratch);
+                    evaluateTile(flatVariables, dataSize, output, startIdx, tileStart, currentTileSize, scratch);
                 }
             }
         }
@@ -550,6 +543,45 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
+        /**
+         * Core column-major vectorized loop processor utilizing a flat memory
+         * architecture. Bypasses pointer-chasing and allocation overhead
+         * inherent to jagged multidimensional arrays (e.g., {@code double[][]})
+         * to execute loops at maximum hardware throughput.
+         * <p>
+         * Based on the {@code tiled} execution parameter, this method delegates
+         * to either a cache-conscious tiled implementation or a direct flat
+         * streaming evaluation strategy.
+         * </p>
+         *
+         * @param flatVariables a contiguous, single-dimensional array
+         * containing concatenated variable tracks back-to-back (e.g.,
+         * {@code [x1, x2...xn, y1, y2...yn, z1, z2...zn]})
+         * @param dataSize the total number of elements per individual variable
+         * row, used as the stride offset to hop between distinct variable
+         * memory blocks
+         * @param output the target destination array where the resulting
+         * mathematical evaluations are written
+         * @param startIdx the baseline index indicating where the batch
+         * processing slice begins
+         * @param length the absolute number of elements to process within this
+         * batch window
+         * @param tiled {@code true} if execution should be routed through a
+         * tiled memory pattern optimized for L1/L2 cache locality;
+         * {@code false} for flat, non-tiled bulk processing
+         *
+         * If you are processing a total dataset of 1,000,000 elements (dataSize
+         * = 1000000), but a specific thread or tile is only processing a chunk
+         * of 500 elements starting at element 200,000:
+         *
+         * startIdx = 200000
+         *
+         * length = 500
+         *
+         * It tells the engine: "Grab 500 elements starting at offset 200,000
+         * from each variable segment in the input, compute them, and write them
+         * into indices 200,000 through 200,499 of the output array."
+         */
         private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length, boolean tiled) {
             if (tiled) {
                 applyBulkInternalWithTiles(flatVariables, dataSize, output, startIdx, length);
@@ -558,6 +590,16 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
+        /**
+         *
+         * @param flatVariables
+         * @param dataSize
+         * @param output
+         * @param startIdx
+         * @param blockStart
+         * @param currentTileSize
+         * @param scratch
+         */
         private void evaluateBlock(double[] flatVariables,
                 int dataSize,
                 double[] output,
@@ -590,9 +632,12 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         final int slotIdx = targetSlots[instIdx];
                         final int stackOffset = sp * BLOCK_SIZE;
                         sp++;
-
                         //'blockStart' accurately streams the data slice relative to the current tile window
-                        final int flatOffset = (slotIdx * dataSize) + blockStart;
+                        
+                        // final int flatOffset = (slotIdx * dataSize) + blockStart;
+                          //  final int flatOffset = (slotIdx * dataSize) + ((startIdx>0)?(blockStart - startIdx):blockStart);
+                          final int flatOffset = (slotIdx * dataSize) + blockStart;
+                   //     System.out.println("flatOffset="+flatOffset+", slotIdx="+slotIdx+", dataSize: "+dataSize+", blockStart="+blockStart+", stackOffset="+stackOffset);
                         System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, currentTileSize);
                     }
 
@@ -893,7 +938,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             // Extract final execution results from the base of the virtual stack directly to output destination
-            System.arraycopy(scratch, 0, output, startIdx, currentTileSize);
+            System.arraycopy(scratch, 0, output, blockStart, currentTileSize);
         }
 
         private void evaluateTile(double[] flatVariables,
@@ -929,8 +974,19 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         final int stackOffset = sp * L2_TILE_SIZE;
                         sp++;
 
-                        //'tileStart' accurately streams the data slice relative to the current tile window
-                        final int flatOffset = (slotIdx * dataSize) + tileStart;
+                  
+                            // final int flatOffset = (slotIdx * dataSize) + (tileStart - startIdx);
+                              //    final int flatOffset = (slotIdx * dataSize) + ((startIdx>0)?(tileStart - startIdx):tileStart);
+                                    int flatOffset = (slotIdx * dataSize) + tileStart;
+                                  
+                                      //'tileStart' accurately streams the data slice relative to the current tile window
+                     // final int flatOffset = (slotIdx * dataSize) + tileStart; 
+                    /*  System.out.println("flatOffset="+flatOffset+", slotIdx="+slotIdx+", \n"
+                                  + "dataSize: "+dataSize+", tileStart="+tileStart+", stackOffset="+stackOffset+",\n"
+                                          + "flatVariables.length="+flatVariables.length+", scratch.length="+scratch.length+", \n"
+                                                  + "currentTileSize="+currentTileSize+", startIdx="+startIdx);
+                      */ 
+                    //If first tile & 
                         System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, currentTileSize);
                     }
 
@@ -1231,7 +1287,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             // Extract final execution results from the base of the virtual stack directly to output destination
-            System.arraycopy(scratch, 0, output, startIdx, currentTileSize);
+            System.arraycopy(scratch, 0, output, tileStart, currentTileSize);
         }
 
         /**

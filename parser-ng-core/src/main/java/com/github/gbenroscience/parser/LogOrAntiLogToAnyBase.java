@@ -11,6 +11,7 @@ import java.util.ArrayList;
  
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import com.github.gbenroscience.util.ErrorLog;
 import java.util.List;
 
 /**
@@ -65,7 +66,7 @@ private int index;
      * @return true if valid
      */
     @Override
-public boolean validate(List<String>scan){
+public boolean validate(List<String>scan, ErrorLog errorLog){
 boolean correct=true;
     try{
 
@@ -73,7 +74,7 @@ boolean correct=true;
    if(!isNumber(scan.get(index-1))&&!isBinaryOperator(scan.get(index-1))&&
            !isVariableString(scan.get(index-1))&&!isBracket(scan.get(index-1))
            ){
-             com.github.gbenroscience.util.Utils.logError(
+              errorLog.error(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index-1)+"\" And \""+scan.get(index)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector For LogOrAntiLogToAnyBase Operators!" );
@@ -84,7 +85,7 @@ boolean correct=true;
             &&!isUnaryPreOperator(scan.get(index+1))
             &&!Method.isLogToAnyBase(scan.get(index+1))&&!Method.isAntiLogToAnyBase(scan.get(index+1))&&!Method.isStatsMethod(scan.get(index+1))
                  ){
-            com.github.gbenroscience.util.Utils.logError(
+            errorLog.error(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index)+"\" And \""+scan.get(index+1)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector For LogOrAntiLogToAnyBase Operators!" );

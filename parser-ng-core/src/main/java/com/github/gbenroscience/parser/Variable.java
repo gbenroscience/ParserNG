@@ -328,7 +328,7 @@ public class Variable implements Savable {
      *
      */
     public static boolean isSystemConstant(String str) {
-        return str.equals("π") || str.equals("e");
+        return str.equals("π") ||str.equals("pi") ||str.equals("PI") || str.equals("φ") || str.equals("e");
     }
 
     /**
@@ -341,6 +341,9 @@ public class Variable implements Savable {
             return Maths.PI();
         }//end if
         else if (isExpNumber(name)) {
+            return Variable.e.getName();
+        }//end else if
+        else if (isGoldenRatio(name)) {
             return Variable.e.getName();
         }//end else if
         throw new InputMismatchException("Not System Constant");

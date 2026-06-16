@@ -11,6 +11,7 @@ import java.util.ArrayList;
  
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import com.github.gbenroscience.util.ErrorLog;
 import java.util.List;
 
 /**
@@ -87,7 +88,7 @@ public class NumberReturningStatsOperator extends Operator implements Validatabl
  * @return true if valid
  */
     @Override
-public boolean validate(List<String>scan){
+public boolean validate(List<String>scan, ErrorLog errorLog){
 boolean correct = true;
 
         //Number returning stats operators
@@ -100,7 +101,7 @@ boolean correct = true;
                  &&!Method.isLogToAnyBase(scan.get(index-1))&&!isUnaryPreOperator(scan.get(index-1))
                  &&!isOpeningBracket(scan.get(index-1))
           ){
-          com.github.gbenroscience.util.Utils.logError(
+          errorLog.error(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index-1)+"\" And \""+scan.get(index)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector For Number Returning Stats operators!" );
@@ -112,7 +113,7 @@ boolean correct = true;
          &&!Method.isLogToAnyBase(scan.get(index+1))&&!Method.isAntiLogToAnyBase(scan.get(index+1))
          &&!isUnaryPreOperator(scan.get(index+1))&&!isNumber(scan.get(index+1))
          ){
-        com.github.gbenroscience.util.Utils.logError(
+       errorLog.error(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index)+"\" And \""+scan.get(index+1)+"\""+
                         " As You Have Done."+
             "ParserNG Error Detector For Number Returning Stats operators!" );

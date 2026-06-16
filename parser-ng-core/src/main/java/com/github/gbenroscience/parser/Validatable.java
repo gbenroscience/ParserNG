@@ -6,6 +6,7 @@
 package com.github.gbenroscience.parser;
 
 
+import com.github.gbenroscience.util.ErrorLog;
 import java.util.List;
 
 /**
@@ -14,6 +15,6 @@ import java.util.List;
  */
 public interface Validatable {
 
-public boolean validate(List<String> scan);
+public boolean validate(List<String> scan, ErrorLog errorLog);
 
 }

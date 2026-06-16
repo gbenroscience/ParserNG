@@ -26,7 +26,13 @@ import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Number.*;
 
 import com.github.gbenroscience.math.differentialcalculus.Parser;
+import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
+import static com.github.gbenroscience.parser.TYPE.MATRIX;
+import static com.github.gbenroscience.parser.TYPE.NUMBER;
+import static com.github.gbenroscience.parser.TYPE.VECTOR;
 import com.github.gbenroscience.util.ErrorLog;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 /**
  *
@@ -781,12 +787,152 @@ public class MathScanner {
 
     }//end method validateInput...
 
+    private boolean isConstExpr(int startIdx, int endIdx) {
+        for (int i = startIdx; i <= endIdx; i++) {
+            String token = scanner.get(i);
+            if (FunctionManager.lookUp(token) != null) {
+                return false;
+            }
+            if (VariableManager.lookUp(token) != null) {
+                if (!Variable.isSystemConstant(token)) {
+                    return false;
+                }
+            }
+            if(isVariableString(token) && !Method.isDefinedMethod(token)){
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void processNestedExpressions() {
+        for (int i = 0; i < scanner.size(); i++) {
+            String token = scanner.get(i);
+            if (i + 1 < scanner.size()) {
+                String next = scanner.get(i + 1);
+                Function f = FunctionManager.lookUp(token);
+                if (f != null && f.getType() == TYPE.ALGEBRAIC_EXPRESSION && isOpeningBracket(next)) {
+
+                    int arity = f.getArity();
+                    /**
+                     * Detect if it is a function call...e.g. f(3,2) or the
+                     * function is being used as part of its host
+                     * expression..e.g. new
+                     * MathExpression("3+sin(x)+f(x,5*y,2*z-5)")
+                     */
+                    int closeBracOfFunctionCall = Bracket.getComplementIndex(true, i + 1, scanner);
+                    /**
+                     * The function is being used in another expression if all
+                     * the args passed to it are expressions themselves or
+                     * variables. If any of its args are constants, treat the
+                     * function as a function call and evaluate it based on the
+                     * values of the variables/functions passed to it .
+                     */
+                    int argStart = -1;//the start of the first argument
+
+                    int argCount = 0;
+                    boolean allArgsAreVariableExpressions = true;
+                    boolean allArgsAreConstExpressions = true;
+
+                    List<List<String>> argVectors = new ArrayList<>();
+                    for (int j = i + 1; j <= closeBracOfFunctionCall; j++) {//j=i+2---start after the bracket that comes after the function name
+                        String cToken = scanner.get(j);
+
+                        if (cToken.equals("(")) {
+                            if (j == i + 1) {
+                                argStart = j;
+                            } else {//skip the open bracket ...jump to its close to avoid any complexities inside...e.g. nested commas, more brackets etc
+                                j = Bracket.getComplementIndex(true, j, scanner);
+                            }
+                        } else if (cToken.equals(")")) {
+                            if (j == closeBracOfFunctionCall) {
+                                //capture arg here
+                                List<String>l = new ArrayList<>(scanner.subList(argStart+1, j));
+                               /* for(int k=0;k<l.size();k++){
+                                    if(l.get(k).equals(commaAlias))
+                                    l.set(k, ",");
+                                }*/
+                                argVectors.add(l); 
+                                if (isConstExpr(argStart, j)) {
+                                    allArgsAreVariableExpressions = false;
+                                } else {
+                                    allArgsAreConstExpressions = false;
+                                }
+                                argCount++;
+                            }
+                        } else if (cToken.equals(commaAlias)) {
+                            //capture arg here
+                              List<String>l = new ArrayList<>(scanner.subList(argStart+1, j));
+                                /*for(int k=0;k<l.size();k++){
+                                    if(l.get(k).equals(commaAlias))
+                                    l.set(k, ",");
+                                }*/
+                                argVectors.add(l); 
+                            if (isConstExpr(argStart + 1, j)) {
+                                allArgsAreVariableExpressions = false;
+                            } else {
+                                allArgsAreConstExpressions = false;
+                            }
+                            argCount++;
+                            argStart = j;
+                        }
+                    }
+
+                    if (argCount != arity) {
+                        throw new RuntimeException("Function(" + f.getName() + " requires `" + arity + "` parameters, but " + argCount + " parameters were supplied!");
+                    }
+                     //   System.out.println("allArgsAreConstExpressions: " + allArgsAreConstExpressions+", for args----\n"+argVectors);
+                    //f(x,y,z)=sin(x)+cos(y-3*z)+5*z
+                    if (allArgsAreConstExpressions) {
+                        //g(x,y,z)=3*x+f(3,5,2) --- the f(3,5,2) portion will be treated as a function call with default values being assigned to x and y.
+                        MathExpression transform = Function.transformExpr(f, argVectors, commaAlias);
+                        MathExpression.EvalResult ev = transform.solveGeneric();
+                        scanner.subList(i, closeBracOfFunctionCall + 1).clear();
+
+                        switch (transform.getReturnType()) {
+                            case MATRIX:
+                                scanner.add(i, transform.getReturnObjectName());
+                                break;
+                            case ALGEBRAIC_EXPRESSION:
+                                scanner.add(i, transform.getReturnObjectName());
+                                break;
+                            case VECTOR:
+                                scanner.add(i, transform.getReturnObjectName());
+                                break;
+                            case NUMBER:
+                                scanner.add(i, String.valueOf(ev.scalar));
+                                break;
+                            default:
+                                break;
+                        }//end switch
+
+                    } else {//at least one of the args is a variable expression
+                        //g(x,y,z)=3*x+f(x,y,z) --- the f(x,y,z) portion will be treated as an expression
+                        //g(x,y,z)=3*x+f(x,y,2) --- the f(x,y,2) portion will be treated as a function call with default values being assigned to x and y.
+                        //g(x,y,z)=3*x+f(1,y,2) --- the f(1,y,2) portion will be treated as a function call with default values being assigned to x and y.
+                        //g(x,y,z)=3*x+f(3,5,2) --- the f(3,5,2) portion will be treated as a function call with default values being assigned to x and y.
+//                        System.out.println("textual-input: "+scannerInput);
+//                        System.out.println("fn: "+f.getMathExpression().getExpression());
+                        
+                        List<String> scan = Function.transformScan(f, argVectors);
+//                        System.out.println("scanner before--\n" + scanner);
+//                        System.out.println("scan--\n" + scan);
+                        scanner.subList(i, closeBracOfFunctionCall + 1).clear();
+                        scanner.addAll(i, scan);
+                      //  System.out.println("scanner after--\n" + scanner);
+                    }
+
+                }
+            }
+        }
+    }
+
     /**
      * Identifies that the input is a valid one by checking that all tokens are
      * either Number objects, Variable objects or Operator objects. Then it
      * registers any Variable object found and initializes it to zero.
      */
-    public void validateTokens() {
+    private void validateTokens() {
         for (int i = 0; i < scanner.size(); i++) {
             try {
 
@@ -952,19 +1098,17 @@ public class MathScanner {
         }
     }
 
-    
-
     /**
-     * Utility method,more popularly used as a scan into mathematical tokens
-of mathematical expressions
+     * Utility method,more popularly used as a scan into mathematical tokens of
+     * mathematical expressions
      *
      * @return an ArrayList containing a properly scanned version of the string
-such that all recognized number substrings,variable substrings and
-operator substrings have been resolved. To use this method as a scan
-for math expressions all the programmer has to do is to take care of the
-signs where need be(e.g in -2.873*5R+sinh34.2, the scanned view will be
-[-,2.873,*,5,R,+,sinh,34.2]) To make sense of this, the programmer has to
-error minor code to concatenate the - and the 2.873 and so on.
+     * such that all recognized number substrings,variable substrings and
+     * operator substrings have been resolved. To use this method as a scan for
+     * math expressions all the programmer has to do is to take care of the
+     * signs where need be(e.g in -2.873*5R+sinh34.2, the scanned view will be
+     * [-,2.873,*,5,R,+,sinh,34.2]) To make sense of this, the programmer has to
+     * error minor code to concatenate the - and the 2.873 and so on.
      *
      */
     public List<String> scan() {
@@ -1020,7 +1164,6 @@ error minor code to concatenate the - and the 2.873 and so on.
                         scanner.remove(i + 2);
                     }
                 }//end if
-
             }//end try
             catch (IndexOutOfBoundsException indexErr) {
                 errorLog.error(indexErr);
@@ -1030,6 +1173,7 @@ error minor code to concatenate the - and the 2.873 and so on.
         }//end for
 
         validateTokens();
+        processNestedExpressions();
 
         /**
          * Automatically initialize and store undeclared variables to 0 in the
@@ -1059,7 +1203,7 @@ error minor code to concatenate the - and the 2.873 and so on.
                 if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(tk)
                         && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)) {
                     varMan.parseCommand(tk + "=0.0;");
-                    foundVariables.add(new Variable(tk, 0)); 
+                    foundVariables.add(new Variable(tk, 0));
                 }//end if
                 else if (i == 0 && sz == 1 && Variable.isVariableString(tk)) {
                     if (!FunctionManager.containsAny(tk) && !varMan.contains(tk)) {
@@ -1545,8 +1689,8 @@ error minor code to concatenate the - and the 2.873 and so on.
     }//end method
 
     /**
-     * Hides the commas in the scan output as a double number which is not
-part of the output
+     * Hides the commas in the scan output as a double number which is not part
+     * of the output
      */
     public void maskCommas() {
         scanner.replaceAll((String t) -> isComma(t) ? this.commaAlias : t);
@@ -1564,54 +1708,17 @@ part of the output
      * @param args Command line args (((2+3)^2))!-------((25))!-------
      */
     public static void main(String args[]) {//tester method for STRING methods
-        FunctionManager.add("y=@(x)x^2");
-        MathExpression msce = new MathExpression("(sin(x+y+3*z^2))");
 
-        System.out.println(msce.scanner);
-        String s4 = "((cos(x)*1)+(-sin(x)*1))";
-        System.out.println(new MathScanner(s4).scan());
-        //String s5 = "sum(3,4,1,6,7,8,4,32,1)";
-        String s5 = "--+-12+2^3+4%2-5-6-7*8+5!+---2E-9-0.00002+70000/32.34^8-19+9Р3+6Č5+2²+5³-3-¹/2.53+3E-12+2*-----3-(-4+32)";
-        System.out.println(new MathScanner(s5).scan());
+        MathExpression orig = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
+        System.out.println("f(3,4,2) = " + orig.solve());
 
-        //String s5 = "sum(sin(3),cos(3),ln(345),sort(3,-4,5,-6,13,2,4,5,sum(3,4,5,6,9,12,23), sum(3,4,8,9,2000)),12000, mode(3,2,2,1), mode(1,5,7,7,1,1,7))";
-        FunctionManager.add("M=@(4,5)(3,1,2,4,5,9,2,3,12,7,12,8,7,-2,3,15,4,-5,3,8)");
-        System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
+        MathExpression finalOrig = new MathExpression("3 + 2*x + f(2, 3*x + sum(4,2,5,sort(9,2,12,25)), 5)");
+        System.out.println("scan-output = " + finalOrig.scanner);
+        System.out.println("3 + 2*x + f(2, 3*x + sum(4,2,5,sort(9,2,12,25)), 5) = " + finalOrig.solve());
 
-        String s2 = "F=@(x,y,z)3*x+y-z^2";
-        System.out.println("s2:\n" + new MathScanner(s2).scan());
-        String s3 = "3*x+y-z^2";
-        System.out.println("s3:\n" + new MathScanner(s3).scan());
-        MathExpression me = new MathExpression(s2);
-        System.out.println("scanner- " + me.getScanner());
-        System.out.println("correct? " + me.isCorrectFunction());
-        System.out.println("postfix? " + me.getCachedPostfix());
-        String s6 = "2a-3b";
-        String s7 = "2*M-3*M";
-        String s8 = "linear_sys(M)";
-        String s9 = "linear_sys(@(4,5)(3,1,2,4,5,9,2,3,12,7,12,8,7,-2,3,15,4,-5,3,8))";
-        String s10 = "diff(@(x)sin(x),2,3)";
-        String s11 = "root(@(x)sin(x),2,3)";
-        String s12 = "root(@(x)sin(x),sin(2)-cos(1),13*(2+3))";
-        String s13 = "2²+3³+√-9";
-
-        MathScanner msc = new MathScanner(s13);
-
-        System.out.println("------------------------------------" + msc.scan());
-
-        MathScanner sc0 = new MathScanner(s8);
-        System.out.println("*************************" + sc0.scan());
-
-        MathScanner sc = new MathScanner(s9);
-        System.out.println("*************************" + sc.scan());
-        MathScanner sc1 = new MathScanner(s10);
-        System.out.println("*************************" + sc1.scan());
-        MathScanner sc2 = new MathScanner(s11);
-        System.out.println("*************************" + sc2.scan());
-        MathScanner sc3 = new MathScanner(s12);
-        System.out.println("*************************" + sc3.scan());
-
-        System.out.println(FunctionManager.FUNCTIONS);
+        MathExpression anotherOrig = new MathExpression("3 + 2*x + f(3*x, 4-sin(2*y), 3*x+sum(4,2,5,sort(9,2,12,25)) )");
+        System.out.println("scan-output = " + anotherOrig.scanner);
+        System.out.println("3 + 2*x + f(3*x, 4-sin(2*y), 3*x + sum(4,2,5,sort(9,2,12,25)) ) = " + anotherOrig.solve());
 
     }//end method main
 }

@@ -15,6 +15,7 @@ import static com.github.gbenroscience.math.differentialcalculus.Utilities.*;
 import com.github.gbenroscience.parser.PowerOperator;
 import com.github.gbenroscience.parser.UnaryPostOperator;
 import static com.github.gbenroscience.parser.methods.Method.*;
+import com.github.gbenroscience.util.ErrorLog;
 
 import java.util.List;
 
@@ -197,7 +198,7 @@ public class SemanticAnalyzer {
             }//end else if
 
         }//end for
-        boolean valid = validateAll(scanner);
+        boolean valid = validateAll(scanner, new ErrorLog());
 
         if (valid) {
             // scanner.removeAll(whitespaceremover);

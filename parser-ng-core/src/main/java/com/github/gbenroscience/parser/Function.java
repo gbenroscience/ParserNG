@@ -77,7 +77,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             VariableManager.delete(fName);//if so delete it.
         }//end if 
 
-        if (oldFunc != null) {//function does not exist in registry
+        if (oldFunc != null) {//function exists in registry
             FunctionManager.delete(fName);
         }
         FunctionManager.add(this);
@@ -271,10 +271,10 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         if (root != null) {//no variable local to the root MathExpression exists
             Variable v = root.getVariable(name);
             if (v != null) {
-                 v.setValue(val);
+                v.setValue(val);
             } else {
                 root.setValue(name, val);
-              }
+            }
         } else {
             //Check globals
             Variable v = VariableManager.lookUp(name);//check if the variable name(lhs) is an existing global
@@ -284,7 +284,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 v.setValue(val);//the variable exists, just update it
             }
         }
-    
+
     }
 
     /**
@@ -1134,6 +1134,85 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         }//end else
 
     }//end method
+
+    public Variable getByName(String name) {
+        for (Variable v : independentVariables) {
+            if (v.getName().equals(name)) {
+                return v;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * For a function defined by f(x,y)=3*x-sin(2*x-5*y) A user may type in:
+     * 4*x-sin(y)+f(5*x-y,2*x+3*y)
+     *
+     * The transform generates a MathExpression that looks like:
+     * 3*(5*x-y)-sin(2*(5*x-y)-5*(2*x+3*y)) = 15x-3y-sin(-2y-17y)
+     *
+     *
+     * @param f The Function(type must be algebraic) to be transformed
+     * @param argVectors An array containing the tokens representing the scanned
+     * tokens to map to the arguments of this Function
+     *
+     * @return
+     */
+    final static MathExpression transformExpr(Function f, List<List<String>> argVectors, String commaAlias) {
+        if (!f.isMatrix()) {
+            List<String> scanner = new ArrayList<>(f.getMathExpression().scanner);
+
+            for (int i = 0; i < argVectors.size(); i++) {
+                List<String> arg = argVectors.get(i);
+                Variable v = f.independentVariables.get(i);
+                for (int j = 0; j < scanner.size(); j++) {
+                    String tkn = scanner.get(j);
+                    if (tkn.equals(v.getName())) {
+                        scanner.remove(j);
+                        scanner.addAll(j, arg);
+                        j += arg.size();
+                    }
+                }
+            }
+            return new MathExpression(scanner, commaAlias);
+        }
+        return null;
+    }
+
+    /**
+     * For a function defined by f(x,y)=3*x-sin(2*x-5*y) A user may type in:
+     * 4*x-sin(y)+f(5*x-y,2*x+3*y)
+     *
+     * The transform generates a scanner whose initial expression is equivalent
+     * to: 3*(5*x-y)-sin(2*(5*x-y)-5*(2*x+3*y)) = 15x-3y-sin(-2y-17y)
+     *
+     *
+     * @param f The Function(type must be algebraic) to be transformed
+     * @param argVectors An array containing the tokens representing the scanned
+     * tokens to map to the arguments of this Function
+     *
+     * @return
+     */
+    public static List<String> transformScan(Function f, List<List<String>> argVectors) {
+        if (!f.isMatrix()) {
+            List<String> scanner = new ArrayList<>(f.getMathExpression().scanner);
+
+            for (int i = 0; i < argVectors.size(); i++) {
+                List<String> arg = argVectors.get(i);
+                Variable v = f.independentVariables.get(i);
+                for (int j = 0; j < scanner.size(); j++) {
+                    String tkn = scanner.get(j);
+                    if (tkn.equals(v.getName())) {
+                        scanner.remove(j);
+                        scanner.addAll(j, arg);
+                        j += arg.size();
+                    }
+                }
+            }
+            return scanner;
+        }
+        return null;
+    }
 
     public String evalArgs(double... args) {
         if (type != TYPE.ALGEBRAIC_EXPRESSION) {

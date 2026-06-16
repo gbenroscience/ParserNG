@@ -66,22 +66,22 @@ import java.util.logging.Logger;
  * FunctionManager and employs that value in evaluating the function.
  *
  * <p style="font-weight:'bold';color:'red'">
-NOTE: The parser operation is divided into: Step 1. Expression
-Processing...This step takes time. Step 2. Expression Evaluation....Is an
-high speed one.
-
-For expressions that contain either user defined functions or statistical
-functions however, The second part is self-referentially mixed with the first
-and so this gives rise to a problem. For iterative processes, the parser only
-needs parse (Step 1.)the expression once(which takes the bulk of the time)
-and then it can evaluate it many times over iteratively in a loop. Step 2 is
-an high speed one. But if the expression containsAlgebraicFunction
-statistical functions or user defined ones, the self-referential processes
-modify the scan output and so this scan output cannot be reliably
-referred to later on by iterative processes or any process that seeks to
-reuse the scan's output.
-
-</p>
+ * NOTE: The parser operation is divided into: Step 1. Expression
+ * Processing...This step takes time. Step 2. Expression Evaluation....Is an
+ * high speed one.
+ *
+ * For expressions that contain either user defined functions or statistical
+ * functions however, The second part is self-referentially mixed with the first
+ * and so this gives rise to a problem. For iterative processes, the parser only
+ * needs parse (Step 1.)the expression once(which takes the bulk of the time)
+ * and then it can evaluate it many times over iteratively in a loop. Step 2 is
+ * an high speed one. But if the expression containsAlgebraicFunction
+ * statistical functions or user defined ones, the self-referential processes
+ * modify the scan output and so this scan output cannot be reliably referred to
+ * later on by iterative processes or any process that seeks to reuse the scan's
+ * output.
+ *
+ * </p>
  *
  * @author GBENRO
  */
@@ -92,7 +92,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      * Backup the alias from the scan here
      */
-    private String commaAlias;
+    String commaAlias;
     public ParserResult parser_Result = ParserResult.VALID;
     //determines the mode in which trig operations will be carried print on numbers.if DRG==0,it is done in degrees
 //if DRG==1, it is done in radians and if it is 2, it is done in grads.
@@ -488,18 +488,58 @@ public class MathExpression implements Savable, Solvable {
     }//end constructor MathExpression
 
     /**
+     * Very unsafe API, designed for high speed creation of
+     * {@link MathExpression} objects when the scanner output is from a trusted
+     * source...e.g another {@link MathExpression}
+     *
+     * @param scan
+     * @param foldConstants
+     */
+    MathExpression(List<String> scan, String commaAlias) {
+        this.commaAlias = commaAlias;
+        this.scanner = scan;
+        this.willFoldConstants = true;
+        //try a light validation stage before calling this 
+        this.correctFunction = true;
+
+        this.expression = LISTS.createStringFrom(scan, 0, scan.size());
+
+        this.help = this.expression.equals(Declarations.HELP);
+        for (int i = 0; i < INIT_POOL_SIZE; i++) {
+            pool[i] = new EvalResult();
+        }
+
+        invalidateTurbo();  // Clear turbo cache
+        this.cachedPostfix = null;  // Force recompile
+        this.poolPointer = 0;
+
+        computeTreeDepth();
+        whitespaceremover.add("");
+
+        if (parser_Result == ParserResult.VALID) {
+            statsVerifier();
+            refixCommas();
+            mapBrackets();
+            functionComponentsAssociation();
+            compileToPostfix();  // Compile once if not already done 
+        }//end if
+
+        this.slots = registry.getSlots();
+    }//end constructor MathExpression
+
+    /**
      * MathExpression clone = new
-MathExpression("rot(f=@(x)sin(x),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
-scan-output: [rot, (, (, f, =, anon1, ), ,, (, pi, /, 2, ), ,, anon2,
-,, anon3, )] MathExpression ma = new
-MathExpression("rot(t(x)=ln(x),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
-scan-output: [rot, (, (, t, (, x, ), =, ln, (, x, ), ), ,, (, pi, /,2,
-), ,, anon1, ,, anon2, )] MathExpression m1 = new
-MathExpression("rot(@(1,3)(4,2,0),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
-scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
-MathExpression m = new
-MathExpression("rot(@(x)2*x+1,pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
-scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
+     * MathExpression("rot(f=@(x)sin(x),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
+     * scan-output: [rot, (, (, f, =, anon1, ), ,, (, pi, /, 2, ), ,, anon2, ,,
+     * anon3, )] MathExpression ma = new
+     * MathExpression("rot(t(x)=ln(x),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
+     * scan-output: [rot, (, (, t, (, x, ), =, ln, (, x, ), ), ,, (, pi, /,2, ),
+     * ,, anon1, ,, anon2, )] MathExpression m1 = new
+     * MathExpression("rot(@(1,3)(4,2,0),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
+     * scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
+     * MathExpression m = new
+     * MathExpression("rot(@(x)2*x+1,pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
+     * scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
      *
      * @param data
      */
@@ -590,7 +630,7 @@ scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
 
             }
             if (code.contains("=")) {
-                boolean success = Function.assignObject(code + ";", this); 
+                boolean success = Function.assignObject(code + ";", this);
                 if (!success) {
                     correctFunction = success;
                     parser_Result = ParserResult.SYNTAX_ERROR;
@@ -608,7 +648,7 @@ scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
         else {
             setExpression("(0.0)");
         }
-        
+
         this.slots = registry.getSlots();
     }
 
@@ -635,7 +675,7 @@ scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
             this.poolPointer = 0;
             setCorrectFunction(true);
             this.expression = expression;
-            initializing(expression);  
+            initializing(expression);
         } else {
             this.expression = expression;
         }
@@ -679,13 +719,16 @@ scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
         errorLog.copyFrom(opScanner.errorLog);
         for (Variable v : opScanner.foundVariables) {
             /**
-             * Do not use saveOrUpdate, so as not to overwrite
-             * the gains of assignment statements of same variables in same MathExpression.
+             * Do not use saveOrUpdate, so as not to overwrite the gains of
+             * assignment statements of same variables in same MathExpression.
              * For example.. MathExpression m= new MathExpression("r=4;3*r");
-             * The assignment phase, runs first via Function.assignObject(assignmentStatement) and saves r as 4
-             * in the registry of this MathExpression.
-             * The scanner satge detects `r` in the statement: 3*r, and sets r as a Variable to 0 and stores in MathScanner.foundVariables.
-             * If we use  registry.saveOrUpdate(v), it will overwrite the value of r stored in the assignment pass.
+             * The assignment phase, runs first via
+             * Function.assignObject(assignmentStatement) and saves r as 4 in
+             * the registry of this MathExpression. The scanner satge detects
+             * `r` in the statement: 3*r, and sets r as a Variable to 0 and
+             * stores in MathScanner.foundVariables. If we use
+             * registry.saveOrUpdate(v), it will overwrite the value of r stored
+             * in the assignment pass.
              */
             registry.saveIfNotExists(v);
         }
@@ -695,7 +738,6 @@ scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
 
         correctFunction = opScanner.isRunnable();
         parser_Result = opScanner.parser_Result;
-
         if (parser_Result == ParserResult.VALID) {
             //refixCommas(); 
             statsVerifier();
@@ -818,7 +860,7 @@ scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
      * Detect if postfix contains matrix operations. Used to select appropriate
      * turbo compiler.
      */
-    private boolean hasMatrixOperations(Token[] postfix) {
+    public boolean hasMatrixOperations(Token[] postfix) {
         for (Token t : postfix) {
             // 1. Check for explicit matrix functions (Your existing logic)
             if (t.kind == Token.FUNCTION || t.kind == Token.METHOD) {
@@ -1097,10 +1139,8 @@ scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
             }//end if
 
         }//end for
-
-        correctFunction = ListReturningStatsMethod.validateFunction(this.scanner);
+        correctFunction = ListReturningStatsMethod.validateFunction(scanner, errorLog);
         parser_Result = correctFunction ? ParserResult.VALID : ParserResult.SYNTAX_ERROR;
-        errorLog.info(ListReturningStatsMethod.getErrorMessage());
 
         if (noOfListReturningOperators > 0 && correctFunction) {
             setHasListReturningOperators(true);
@@ -1114,7 +1154,7 @@ scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
 
                 for (int i = 0; i < scanner.size(); i++) {
                     try {
-                        if (i + 1 < scanner.size() && !Method.isListReturningStatsMethodThatAllowsAlgebraicOps(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+                        if (i + 1 < scanner.size() && Method.isPureListReturningStatsMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
                             if (isBinaryOperator(scanner.get(i - 1))) {
                                 errorLog.info("1. Invalid Association Discovered For: \"" + scanner.get(i - 1) + "\" And \"" + scanner.get(i) + "\".\n");
                                 correctFunction = false;
@@ -1221,16 +1261,15 @@ scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
 
     /**
      *
-     * method functionComponentsAssociation does final adjustments to the
-scan function e.g it will check for errors in operator combination in
-the scan function and so on
+     * method functionComponentsAssociation does final adjustments to the scan
+     * function e.g it will check for errors in operator combination in the scan
+     * function and so on
      */
     private void functionComponentsAssociation() {
 
         if (correctFunction) {
             scanner.removeAll(whitespaceremover);//remove white spaces that may result from past parser actions
 //check for good combinations of operators and numbers and dis-allow any other.
-
             int sz = scanner.size();
             for (int i = 0; i < scanner.size(); i++) {
 //check for the various valid arrangements for all members of the function.
@@ -1266,11 +1305,9 @@ the scan function and so on
                         ind.printStackTrace();
                     }//end catch
                 }//end else if
-
             }//end for
-
             if (correctFunction) {
-                setCorrectFunction(validateAll(scanner));
+                setCorrectFunction(validateAll(scanner, errorLog));
             }
 
             if (correctFunction) {
@@ -3332,8 +3369,8 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
             nameToSlot.clear();
             nextAvailableSlot = 0;
         }
-        
-        public void dumpVars(){
+
+        public void dumpVars() {
             System.out.println(variables.toString());
         }
 
