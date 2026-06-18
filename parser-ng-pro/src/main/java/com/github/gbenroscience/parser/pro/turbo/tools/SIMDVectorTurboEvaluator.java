@@ -3,12 +3,9 @@ package com.github.gbenroscience.parser.pro.turbo.tools;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator.*;
-import com.github.gbenroscience.parser.pro.turbo.tools.utils.HardwareDetector;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
-import java.lang.invoke.MethodHandle;
 import jdk.incubator.vector.*;
 
-import java.util.concurrent.locks.LockSupport;
 
 /**
  * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
