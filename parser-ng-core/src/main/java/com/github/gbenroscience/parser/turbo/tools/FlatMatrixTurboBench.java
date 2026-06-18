@@ -31,13 +31,21 @@ import java.util.logging.Logger;
  */
 public class FlatMatrixTurboBench {
 
-    private static final int N = 100000;
+    private static final int N = 10000000;
+
+    static {
+        MathExpression orig = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");//for user defined function tests 
+    }
 
     public static void main(String[] args) throws Throwable {
         String rpt = STRING.repeating("=", 80);
         System.out.println(rpt);
         System.out.println("PARSERNG FLAT-ARRAY MATRIX TURBO BENCHMARKS");
         System.out.println(rpt);
+
+        testUserDefinedFunctionSimpleCall();
+        testUserDefinedFunctionFunctionInExpression();
+
         checkTurboUserDefinedFunctionsInMatrixMode();
         checkTurboUserDefinedFunctionsWithAndroidCapableMatrixTurboEvaluatorInMatrixMode();
         checkMatrixInvertPreMulErrors();
@@ -59,6 +67,7 @@ public class FlatMatrixTurboBench {
         benchmarkLargeMatrix();
         benchmarkMatrixMultiplication();
         benchmarkMatrixPower();
+
     }
 
     private static void checkTurboUserDefinedFunctionsInMatrixMode() throws Throwable {
@@ -736,8 +745,6 @@ public class FlatMatrixTurboBench {
         for (int i = 0; i < data50.length; i++) {
             data50[i] = Math.random();
         }
-        
-        
 
         Matrix m = new Matrix(data50, 50, 50);
         m.setName("A");
@@ -745,34 +752,31 @@ public class FlatMatrixTurboBench {
         MathExpression expr = new MathExpression("2*A-3*A");
 
         Matrix res = null;
-        
-                System.out.println("scanner: " + expr.getScanner());
+
+        System.out.println("scanner: " + expr.getScanner());
         FastCompositeExpression turbo = expr.compileTurbo();
         double[] vars = {};
 
         double start1 = System.nanoTime();
         for (int i = 0; i < 10_000; i++) {
-           res = turbo.apply(vars).matrix;
+            res = turbo.apply(vars).matrix;
         }
         double duration1 = System.nanoTime() - start1;
-        
-        
-        System.out.println("Turbo -> Elems 1 and 2: "+res.getFlatArray()[0]+", "+res.getFlatArray()[1]);
-        
+
+        System.out.println("Turbo -> Elems 1 and 2: " + res.getFlatArray()[0] + ", " + res.getFlatArray()[1]);
+
         double start = System.nanoTime();
-        for (int i = 0; i < 100; i++) { 
-           res = expr.solveGeneric().matrix;
+        for (int i = 0; i < 100; i++) {
+            res = expr.solveGeneric().matrix;
         }
         double duration = System.nanoTime() - start;
 
-        System.out.println("Interpreted -> Elems 1 and 2: "+res.getFlatArray()[0]+", "+res.getFlatArray()[1]);
-
-
+        System.out.println("Interpreted -> Elems 1 and 2: " + res.getFlatArray()[0] + ", " + res.getFlatArray()[1]);
 
         System.out.printf("Operation: 2*M - 3*M (50x50 matrices)%n");
         System.out.printf("Speed(Turbo): %.2f micros/op%n", duration1 / 10_000.0 / 1000.0);
         System.out.printf("Speed(Interpreted): %.2f micros/op%n", duration / 10_000.0 / 1000.0);
-        System.out.printf("vs Interpreted: %.2fx faster%n", (duration/duration1));
+        System.out.printf("vs Interpreted: %.2fx faster%n", (duration / duration1));
     }
 
     private static void benchmarkMatrixMultiplication() throws Throwable {
@@ -836,5 +840,42 @@ public class FlatMatrixTurboBench {
         System.out.printf("Operation: M^10 (4x4 matrix)%n");
         System.out.printf("Speed: %.2f μs/op%n", duration / 1_000.0 / 1000.0);
         System.out.printf("Uses binary exponentiation: O(log 10) = 4 multiplications%n");
+    }
+
+    static void testUserDefinedFunctionSimpleCall() throws Throwable {
+        System.out.println("\n--- USER-DEFINED FUNCTIONS-SIMPLE-CALL ---");
+        MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,5)");
+        System.out.println("f(3,4,2) = " + me.solve());
+
+        FastCompositeExpression evaluator = new MatrixTurboEvaluator(me).compile();
+        double t = System.nanoTime();
+        double[] out = new double[1];
+        evaluator.applyScalar(new double[]{5, 4, 1});
+        double t1 = System.nanoTime() - t;
+        System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
+    }
+
+    static void testUserDefinedFunctionFunctionInExpression() {
+        try {
+            System.out.println("\n--- USER-DEFINED FUNCTIONS-FUNCTION-IN-EXPRESSION ---");
+            MathExpression me = new MathExpression("3 + 2*x + f(2, 3*x + sum(4,2,5,sort(9,2,12,25)), 5)");
+            System.out.println("scanner:\n" + me.getScanner());
+            //System.out.println("flat-tokens(rpn) array:\n"+Arrays.deepToString(me.getCachedPostfix()));
+            
+            FastCompositeExpression evaluator = new MatrixTurboEvaluator(me).compile();
+            double[] out = new double[10];
+            double t = System.nanoTime();
+            
+            for (int i = 0; i < N; i++) {
+                out[i % out.length] = evaluator.applyScalar(new double[]{5, 4, 1});
+            }
+            
+            double t1 = System.nanoTime() - t;
+            
+            System.out.println("timed at = " + (t1/N) + "ns--- answer: " + out[0]);
+        } catch (Throwable ex) {
+            Logger.getLogger(FlatMatrixTurboBench.class.getName()).log(Level.SEVERE, null, ex);
+        }
+
     }
 }

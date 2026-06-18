@@ -145,6 +145,10 @@ public class Method {
         return DRG;
     }
 
+       public static boolean isPureListReturningStatsMethod(String op) {
+        return (op.equals(SORT) || op.equals(MODE) || op.equals(RANDOM) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS));
+    }
+    
     /**
      * @param op the String to check
      * @return true if the operator is a statistical method that returns items
@@ -158,10 +162,11 @@ public class Method {
                 || op.equals(SUB_MATRIX) || op.equals(RANDOM_MATRIX) || op.equals(MATRIX_MINOR);
     }
 
-    public static boolean isListReturningStatsMethodThatAllowsAlgebraicOps(String op) {
+    public static boolean isMatrixReturningMethod(String op) {
         return (op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX))
                 || op.equals(MATRIX_MULTIPLY) || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT) || op.equals(MATRIX_POWER)
-                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES) || op.equals(SUB_MATRIX) || op.equals(RANDOM_MATRIX) || op.equals(MATRIX_MINOR);
+                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES) 
+                || op.equals(SUB_MATRIX) || op.equals(RANDOM_MATRIX) || op.equals(MATRIX_MINOR);
     }
 
     /**

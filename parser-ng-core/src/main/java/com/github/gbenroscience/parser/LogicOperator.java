@@ -10,6 +10,7 @@ import java.util.ArrayList;
 
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import com.github.gbenroscience.util.ErrorLog;
 import java.util.List;
 
 /**
@@ -93,7 +94,7 @@ public class LogicOperator extends Operator implements Validatable {
      * @return true if valid
      */
     @Override
-    public boolean validate(List<String> scan) {
+    public boolean validate(List<String> scan, ErrorLog errorLog) {
 
         int leftInd = index-1;
         int rightInd = index+1;
@@ -107,7 +108,7 @@ public class LogicOperator extends Operator implements Validatable {
             if (leftInd>=0 && !isNumber(prev)
                     && !isVariableString(prev) && !isUnaryPostOperator(prev)
                     && !isClosingBracket(prev)) {
-                com.github.gbenroscience.util.Utils.logError(
+                errorLog.error(
                         "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Logic operators!");
@@ -120,7 +121,7 @@ public class LogicOperator extends Operator implements Validatable {
                     && !isOpeningBracket(next)
                     && !Method.isUnaryPreOperatorORDefinedMethod(next) && !Method.isNumberReturningStatsMethod(next)
                     && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
-                com.github.gbenroscience.util.Utils.logError(
+                errorLog.error(
                         "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Logic operators!");

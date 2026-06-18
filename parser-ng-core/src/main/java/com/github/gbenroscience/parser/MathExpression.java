@@ -32,9 +32,12 @@ import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.parser.methods.Help;
 import com.github.gbenroscience.parser.methods.Method;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
+import com.github.gbenroscience.parser.turbo.spi.TurboEngineLocator;
+import com.github.gbenroscience.parser.turbo.spi.TurboEvaluatorProvider;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.MatrixTurboEvaluator;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator;
+import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
@@ -74,9 +77,9 @@ import java.util.logging.Logger;
  * and then it can evaluate it many times over iteratively in a loop. Step 2 is
  * an high speed one. But if the expression containsAlgebraicFunction
  * statistical functions or user defined ones, the self-referential processes
- * modify the scanner output and so this scanner output cannot be reliably
- * referred to later on by iterative processes or any process that seeks to
- * reuse the scanner's output.
+ * modify the scan output and so this scan output cannot be reliably referred to
+ * later on by iterative processes or any process that seeks to reuse the scan's
+ * output.
  *
  * </p>
  *
@@ -87,9 +90,9 @@ public class MathExpression implements Savable, Solvable {
     private final ErrorLog errorLog = new ErrorLog();
     private static final long serialVersionUID = 1L;
     /**
-     * Backup the alias from the scanner here
+     * Backup the alias from the scan here
      */
-    private String commaAlias;
+    String commaAlias;
     public ParserResult parser_Result = ParserResult.VALID;
     //determines the mode in which trig operations will be carried print on numbers.if DRG==0,it is done in degrees
 //if DRG==1, it is done in radians and if it is 2, it is done in grads.
@@ -102,7 +105,7 @@ public class MathExpression implements Savable, Solvable {
     private MathExpressionTreeDepth.Result treeStats;
     protected boolean correctFunction = true;//checks if the function is valid.
     protected int noOfListReturningOperators;
-    protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scanner input function
+    protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scan input function
     private boolean optimizable;
 
     protected boolean hasListReturningOperators;
@@ -485,18 +488,58 @@ public class MathExpression implements Savable, Solvable {
     }//end constructor MathExpression
 
     /**
+     * Very unsafe API, designed for high speed creation of
+     * {@link MathExpression} objects when the scanner output is from a trusted
+     * source...e.g another {@link MathExpression}
+     *
+     * @param scan
+     * @param foldConstants
+     */
+    MathExpression(List<String> scan, String commaAlias) {
+        this.commaAlias = commaAlias;
+        this.scanner = scan;
+        this.willFoldConstants = true;
+        //try a light validation stage before calling this 
+        this.correctFunction = true;
+
+        this.expression = LISTS.createStringFrom(scan, 0, scan.size());
+
+        this.help = this.expression.equals(Declarations.HELP);
+        for (int i = 0; i < INIT_POOL_SIZE; i++) {
+            pool[i] = new EvalResult();
+        }
+
+        invalidateTurbo();  // Clear turbo cache
+        this.cachedPostfix = null;  // Force recompile
+        this.poolPointer = 0;
+
+        computeTreeDepth();
+        whitespaceremover.add("");
+
+        if (parser_Result == ParserResult.VALID) {
+            statsVerifier();
+            refixCommas();
+            mapBrackets();
+            functionComponentsAssociation();
+            compileToPostfix();  // Compile once if not already done 
+        }//end if
+
+        this.slots = registry.getSlots();
+    }//end constructor MathExpression
+
+    /**
      * MathExpression clone = new
      * MathExpression("rot(f=@(x)sin(x),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
-     * scanner-output: [rot, (, (, f, =, anon1, ), ,, (, pi, /, 2, ), ,, anon2,
-     * ,, anon3, )] MathExpression ma = new
+     * scan-output: [rot, (, (, f, =, anon1, ), ,, (, pi, /, 2, ), ,, anon2, ,,
+     * anon3, )] MathExpression ma = new
      * MathExpression("rot(t(x)=ln(x),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
-     * scanner-output: [rot, (, (, t, (, x, ), =, ln, (, x, ), ), ,, (, pi, /,2,
-     * ), ,, anon1, ,, anon2, )] MathExpression m1 = new
+     * scan-output: [rot, (, (, t, (, x, ), =, ln, (, x, ), ), ,, (, pi, /,2, ),
+     * ,, anon1, ,, anon2, )] MathExpression m1 = new
      * MathExpression("rot(@(1,3)(4,2,0),pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
-     * scanner-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
+     * scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
      * MathExpression m = new
      * MathExpression("rot(@(x)2*x+1,pi/2,@(1,3)(0,0,0),@(1,3)(1,1,0))");
-     * scanner-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
+     * scan-output: [rot, (, anon1, ,, (, pi, /, 2, ), ,, anon2, ,, anon3, )]
      *
      * @param data
      */
@@ -579,7 +622,7 @@ public class MathExpression implements Savable, Solvable {
                 int eqIdx = code.indexOf("=", indexOfRot);
                 if (eqIdx != -1 && eqIdx < idxOfCloseBracForRot) {//rot(f,=,jjj,....) e.g equals index lies inside rot's bracket contents
                     MathScanner sc = new MathScanner(code.substring(indexOfRot, idxOfCloseBracForRot + 1));
-                    sc.scanner();
+                    sc.scan();
                     errorLog.copyFrom(sc.errorLog);
                     sc.unmaskCommas();
                     code = processRotScenarios(sc.getScanner());
@@ -587,7 +630,7 @@ public class MathExpression implements Savable, Solvable {
 
             }
             if (code.contains("=")) {
-                boolean success = Function.assignObject(code + ";", errorLog);
+                boolean success = Function.assignObject(code + ";", this);
                 if (!success) {
                     correctFunction = success;
                     parser_Result = ParserResult.SYNTAX_ERROR;
@@ -605,6 +648,7 @@ public class MathExpression implements Savable, Solvable {
         else {
             setExpression("(0.0)");
         }
+
         this.slots = registry.getSlots();
     }
 
@@ -671,10 +715,22 @@ public class MathExpression implements Savable, Solvable {
         //Scanner operation
 
         MathScanner opScanner = new MathScanner(expression);
-        opScanner.scanner(variableManager);
+        opScanner.scan();
         errorLog.copyFrom(opScanner.errorLog);
         for (Variable v : opScanner.foundVariables) {
-            v.setFrameIndex(registry.getSlot(v.getName()));
+            /**
+             * Do not use saveOrUpdate, so as not to overwrite the gains of
+             * assignment statements of same variables in same MathExpression.
+             * For example.. MathExpression m= new MathExpression("r=4;3*r");
+             * The assignment phase, runs first via
+             * Function.assignObject(assignmentStatement) and saves r as 4 in
+             * the registry of this MathExpression. The scanner satge detects
+             * `r` in the statement: 3*r, and sets r as a Variable to 0 and
+             * stores in MathScanner.foundVariables. If we use
+             * registry.saveOrUpdate(v), it will overwrite the value of r stored
+             * in the assignment pass.
+             */
+            registry.saveIfNotExists(v);
         }
 
         this.commaAlias = opScanner.commaAlias;
@@ -682,7 +738,6 @@ public class MathExpression implements Savable, Solvable {
 
         correctFunction = opScanner.isRunnable();
         parser_Result = opScanner.parser_Result;
-
         if (parser_Result == ParserResult.VALID) {
             //refixCommas(); 
             statsVerifier();
@@ -700,6 +755,10 @@ public class MathExpression implements Savable, Solvable {
         if (changed) {
             compileToPostfix();
         }
+    }
+
+    public ErrorLog getErrorLog() {
+        return errorLog;
     }
 
     public boolean isWillFoldConstants() {
@@ -779,11 +838,29 @@ public class MathExpression implements Savable, Solvable {
         }
     }
 
+    // Inside MathExpression.java (in parser-ng-core)
+    /**
+     * Compiles the expression for bulk array processing. Automatically upgrades
+     * to Hardware SIMD if parser-ng-pro is installed!
+     */
+    public FastCompositeExpression compileBulkTurbo() throws Throwable {
+        TurboEvaluatorProvider proEngine = TurboEngineLocator.getProvider();
+
+        if (proEngine != null && proEngine.isVectorHardwareSupported()) {
+            // PRO TIER: Routes to the VectorTurboEvaluator in the closed-source JAR
+            return proEngine.getVectorEvaluator(this).compile();
+        }
+
+        // FREE TIER: Graceful fallback to the standard array-based scalar engine
+        System.out.println("SIMD hardware not detected. Using standard Turbo Scalar.");
+        return new ScalarTurboEvaluator1(this).compile();
+    }
+
     /**
      * Detect if postfix contains matrix operations. Used to select appropriate
      * turbo compiler.
      */
-    private boolean hasMatrixOperations(Token[] postfix) {
+    public boolean hasMatrixOperations(Token[] postfix) {
         for (Token t : postfix) {
             // 1. Check for explicit matrix functions (Your existing logic)
             if (t.kind == Token.FUNCTION || t.kind == Token.METHOD) {
@@ -1000,17 +1077,7 @@ public class MathExpression implements Savable, Solvable {
      * @return {@link Variable}
      */
     public Variable getVariable(String name) {
-        // 1. Check if this variable exists in our compiled registry
-        int slot = this.registry.getSlot(name);
-        // 2. Look up the variable in our existing token list or VariableManager
-        Variable v = VariableManager.lookUp(name);
-        if (v == null) {
-            // Fallback: Create a new one if it's a dynamic variable
-            v = new Variable(name);
-        }
-        // 3. IMPORTANT: Sync the index so the Handle knows where to error
-        v.setFrameIndex(slot);
-        return v;
+        return registry.lookUp(name);
     }
 
     public static final class Slot implements Savable {
@@ -1072,10 +1139,8 @@ public class MathExpression implements Savable, Solvable {
             }//end if
 
         }//end for
-
-        correctFunction = ListReturningStatsMethod.validateFunction(this.scanner);
+        correctFunction = ListReturningStatsMethod.validateFunction(scanner, errorLog);
         parser_Result = correctFunction ? ParserResult.VALID : ParserResult.SYNTAX_ERROR;
-        errorLog.info(ListReturningStatsMethod.getErrorMessage());
 
         if (noOfListReturningOperators > 0 && correctFunction) {
             setHasListReturningOperators(true);
@@ -1089,7 +1154,7 @@ public class MathExpression implements Savable, Solvable {
 
                 for (int i = 0; i < scanner.size(); i++) {
                     try {
-                        if (i + 1 < scanner.size() && !Method.isListReturningStatsMethodThatAllowsAlgebraicOps(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+                        if (i + 1 < scanner.size() && Method.isPureListReturningStatsMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
                             if (isBinaryOperator(scanner.get(i - 1))) {
                                 errorLog.info("1. Invalid Association Discovered For: \"" + scanner.get(i - 1) + "\" And \"" + scanner.get(i) + "\".\n");
                                 correctFunction = false;
@@ -1196,16 +1261,15 @@ public class MathExpression implements Savable, Solvable {
 
     /**
      *
-     * method functionComponentsAssociation does final adjustments to the
-     * scanner function e.g it will check for errors in operator combination in
-     * the scanner function and so on
+     * method functionComponentsAssociation does final adjustments to the scan
+     * function e.g it will check for errors in operator combination in the scan
+     * function and so on
      */
     private void functionComponentsAssociation() {
 
         if (correctFunction) {
             scanner.removeAll(whitespaceremover);//remove white spaces that may result from past parser actions
 //check for good combinations of operators and numbers and dis-allow any other.
-
             int sz = scanner.size();
             for (int i = 0; i < scanner.size(); i++) {
 //check for the various valid arrangements for all members of the function.
@@ -1241,11 +1305,9 @@ public class MathExpression implements Savable, Solvable {
                         ind.printStackTrace();
                     }//end catch
                 }//end else if
-
             }//end for
-
             if (correctFunction) {
-                setCorrectFunction(validateAll(scanner));
+                setCorrectFunction(validateAll(scanner, errorLog));
             }
 
             if (correctFunction) {
@@ -1285,15 +1347,14 @@ public class MathExpression implements Savable, Solvable {
             try {
                 if (i + 1 < sz) {//a next token exists (at i+1) so check the next token
                     if (isVariableString(varName) && !isOpeningBracket(scan.get(i + 1))) {
-                        Variable v = VariableManager.lookUp(varName);
+                        Variable v = registry.lookUp(varName);
                         if (v != null) {
                             scan.set(i, String.valueOf(v.getValue()));
                         }
-
                     }//end if
                 } else {//no next token exists
                     if (isVariableString(varName)) {
-                        Variable v = VariableManager.lookUp(varName);
+                        Variable v = registry.lookUp(varName);
                         if (v != null) {
                             scan.set(i, String.valueOf(v.getValue()));
                         }
@@ -1306,6 +1367,7 @@ public class MathExpression implements Savable, Solvable {
             }//end catch
 
         }//end for
+        compileToPostfix();//recompile if you ran this method
 
     }// end method
 
@@ -1317,28 +1379,42 @@ public class MathExpression implements Savable, Solvable {
      * not found.
      */
     public double getValue(String name) throws NullPointerException {
-        Variable var = VariableManager.lookUp(name);
+        Variable var = registry.lookUp(name);
         return var == null ? Double.NaN : var.getValue();
     }
 
     /**
+     * Creates or updates a {@link Variable} in the {@link VariableRegistry} of
+     * this {@link MathExpression}
      *
      * @param name The name of the variable or constant.
      * @param value The value to set to the variable
      * @throws NullPointerException if a Variable object that has that name id
      * not found.
      *
-     * public void setValue(String name, double value) throws
-     * NullPointerException, NumberFormatException { Variable v =
-     * VariableManager.lookUp(name); if (v != null) { v.setValue(value); } }
      */
     public void setValue(String name, double value) {
-        // 1. Ask the Registry where this name lives (O(1) Map lookup)
-        // This replaces the entire for-loop and String.equals()
-        int slot = this.registry.getSlot(name);
-        if (slot != -1 && slot < executionFrame.length) {
-            // 2. Write directly to the frame
-            this.executionFrame[slot] = value;//.v.setValue(value);
+
+        int slot;
+        Variable v = registry.lookUp(name, true);
+        if (v != null) {
+            slot = v.getFrameIndex();
+            v.setValue(value);
+        } else {
+            v = new Variable(name, value);
+            registry.saveOrUpdate(v);
+            v.setFrameIndex(v.getFrameIndex());
+            slot = v.getFrameIndex();
+        }
+
+        if (executionFrame != null) {
+            if (slot < executionFrame.length) {
+                this.executionFrame[slot] = value;
+            } else {
+                double[] temp = executionFrame.clone();
+                this.executionFrame = new double[registry.size()];
+                System.arraycopy(temp, 0, executionFrame, 0, temp.length);
+            }
         }
     }
 
@@ -1455,7 +1531,7 @@ public class MathExpression implements Savable, Solvable {
 
         //1 - Handle Variables and defined constants
         if (isVariableString(s)) {
-            vv = VariableManager.lookUp(s);
+            vv = registry.lookUp(s);
             if (vv != null) {//Variable Exists
                 if (vv.isConstant()) {
                     return new Token(vv.getValue());
@@ -1463,6 +1539,11 @@ public class MathExpression implements Savable, Solvable {
                     vv.setFrameIndex(registry.getSlot(s));
                     Token t = new Token(vv);
                     return t;
+                }
+            } else {
+                Variable global = VariableManager.lookUp(s);
+                if (global != null) {
+                    return new Token(global.getValue());
                 }
             }
         }
@@ -1983,7 +2064,7 @@ public class MathExpression implements Savable, Solvable {
                 case '³':
                     res.scalar = val * val * val;
                     break;
-                case '-': // Unary negation (if supported by my scanner, actually my scanner has fixed it before this stage)
+                case '-': // Unary negation (if supported by my scan, actually my scan has fixed it before this stage)
                     res.scalar = -val;
                     break;
                 case 'i': // Reciprocal/Inverse x⁻¹
@@ -3151,6 +3232,8 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         private final Map<String, Integer> nameToSlot = new LinkedHashMap<>();
         private int nextAvailableSlot = 0;
 
+        private final Map<String, Variable> variables = new LinkedHashMap<>();
+
         /**
          * Returns the slot index for a variable name. If the name is new, it
          * assigns a new slot.
@@ -3165,6 +3248,85 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         public boolean hasVariable(String name) {
             return this.nameToSlot.containsKey(name);
         }
+
+        /**
+         * Search for a {@link Variable} only in the local
+         * {@link VariableRegistry} of the {@link MathExpression}.
+         *
+         * @param vName The name of the {@link MathExpression}
+         * @return the {@link Variable} if found or null
+         */
+        public Variable lookUp(String vName) {
+            return lookUp(vName, true);
+        }//end method
+
+        /**
+         * Gives no choice but to search for a {@link Variable} only in the
+         * local {@link VariableRegistry} of the {@link MathExpression}
+         *
+         * @param vName The name of the {@link MathExpression}
+         * @param localOnly If true, will only check the
+         * {@link MathExpression}'s {@link VariableRegistry}
+         * @return
+         */
+        public Variable lookUp(String vName, boolean localOnly) {
+            Variable v = variables.get(vName);
+            return localOnly ? v : (v != null ? v : VariableManager.lookUp(vName));
+        }//end method
+
+        public Variable saveIfNotExists(Variable v) {
+            int slot = getSlot(v.getName());
+            v.setFrameIndex(slot);
+            v.setGlobal(false);
+            return variables.putIfAbsent(v.getName(), v);
+        }//end method
+
+        /**
+         * Do not use except if necessary
+         *
+         * @param v
+         * @return
+         */
+        public Variable saveOrUpdate(Variable v) {
+            if (v != null && !v.isConstant()) {
+                int slot = getSlot(v.getName());
+                v.setFrameIndex(slot);
+                return variables.put(v.getName(), v);
+            }
+            return null;
+        }//end method
+
+        /**
+         * Introduces a Variable
+         *
+         * @param v the name of the Variable object to be added to the Variable
+         * Registry
+         */
+        public void add(Variable v) {
+            if (v != null && !v.isConstant() && !variables.containsKey(v.getName())) {
+                int slot = getSlot(v.getName());
+                v.setFrameIndex(slot);
+                variables.put(v.getName(), v);
+            }
+        }//end method
+
+        /**
+         * Introduces an array or variable-args list of Variable
+         *
+         * @param vars the variable args list of the Variable objects to be
+         * added to the Variable Registry
+         */
+        public void add(Variable... vars) {
+
+            for (Variable v : vars) {
+                if (v != null && !v.isConstant() && !variables.containsKey(v.getName())) {
+                    int slot = getSlot(v.getName());
+                    v.setFrameIndex(slot);
+                    variables.put(v.getName(), v);
+                }
+            }
+
+        }//end method
 
         /**
          * Returns the total number of slots required for the execution frame.
@@ -3208,13 +3370,21 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
             nextAvailableSlot = 0;
         }
 
-        protected VariableRegistry clone() {
+        public void dumpVars() {
+            System.out.println(variables.toString());
+        }
+
+        public VariableRegistry clone() {
             VariableRegistry vr = new VariableRegistry();
             vr.nextAvailableSlot = nextAvailableSlot;
             for (Map.Entry<String, Integer> entry : nameToSlot.entrySet()) {
                 vr.nameToSlot.put(entry.getKey(), entry.getValue());
             }
 
+            for (Map.Entry<String, Variable> entry : variables.entrySet()) {
+                Variable v = entry.getValue().clone();
+                vr.variables.put(v.getName(), v);
+            }
             return vr;
         }
     }

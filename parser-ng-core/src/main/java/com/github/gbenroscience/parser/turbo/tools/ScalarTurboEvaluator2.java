@@ -59,6 +59,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
     private boolean willFoldConstants;
 
     protected final int[] slots;
+    protected MathExpression.VariableRegistry registry;
 
     private MathExpression.Token[] postfix;
     private ErrorLog errorLog = new ErrorLog();
@@ -220,6 +221,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             this.postfix = me.getCachedPostfix();
             this.willFoldConstants = me.isWillFoldConstants();
             slots = me.getSlots();
+            registry = me.getRegistry().clone();
             me.copyErrorLogTo(errorLog);
         } else {
             throw new UnsupportedOperationException("This evaluator does not support adaptive widening of method signatures\nPlease use ScalarTurboEvaluator1");
@@ -495,8 +497,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                         applyBinaryWide(t, stack, foldConstants, varCount, pTypes, mask);
                     }
                     break;
-
-                case MathExpression.Token.FUNCTION:
+ 
                 case MathExpression.Token.METHOD:
                     Function userFunc = FunctionManager.getFunction(t.name);
 
@@ -723,10 +724,10 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         return constant;
     }
 
-    private static MethodHandle compilePrintHandle(MathExpression.Token t) throws Throwable {
+    private static MethodHandle compilePrintHandle(MathExpression.Token t, MathExpression.VariableRegistry registry) throws Throwable {
         String[] rawArgs = t.getRawArgs();
         MathExpression.EvalResult e = new MathExpression.EvalResult();
-        e = executePrint(e, rawArgs);
+        e = executePrint(e, rawArgs, registry);
         MethodHandle constant = MethodHandles.constant(e.getClass(), e);
         return constant;
     }
@@ -855,7 +856,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             case Declarations.ROTOR:
                 return compileRotorHandle(t);
             case Declarations.PRINT:
-                return compilePrintHandle(t);
+                return compilePrintHandle(t, registry);
             case Declarations.QUADRATIC:
             case Declarations.TARTAGLIA_ROOTS:
                 String funcHandle = t.getRawArgs()[0];
@@ -1019,7 +1020,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         stack.push(widened);
     }
 
-    static MathExpression.EvalResult executePrint(MathExpression.EvalResult ctx, String[] args) {
+    static MathExpression.EvalResult executePrint(MathExpression.EvalResult ctx, String[] args, MathExpression.VariableRegistry registry) {
 
         StringBuilder sb = new StringBuilder();
         for (String arg : args) {
@@ -1038,7 +1039,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                 }
                 continue;
             }
-            Variable myVar = VariableManager.lookUp(arg);
+            Variable myVar = registry.lookUp(arg, false);
             if (myVar != null) {
                 sb.append(myVar.toString()).append("\n");
             } else if (com.github.gbenroscience.parser.Number.isNumber(arg)) {

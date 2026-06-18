@@ -9,6 +9,7 @@ import com.github.gbenroscience.parser.methods.Method;
 import java.util.ArrayList;
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import com.github.gbenroscience.util.ErrorLog;
 import java.util.List;
 
 /**
@@ -70,7 +71,7 @@ public class UnaryPostOperator extends Operator implements Validatable {
      * immediate neighboring tokens to the left and to the right is correct.
      */
     @Override
-    public boolean validate(List<String> scan) {
+    public boolean validate(List<String> scan, ErrorLog errorLog) {
 
         int leftInd = index - 1;
         int rightInd = index + 1;
@@ -84,7 +85,7 @@ public class UnaryPostOperator extends Operator implements Validatable {
             //specify valid tokens that can come before a post-number operator
             if (leftInd >= 0 && !isNumber(prev) && !isClosingBracket(prev)
                     && !isVariableString(prev) && !isUnaryPostOperator(prev)) {
-                com.github.gbenroscience.util.Utils.logError(
+              errorLog.error(
                         "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Post-number operators!");
@@ -98,7 +99,7 @@ public class UnaryPostOperator extends Operator implements Validatable {
                     && !isClosingBracket(next)
                     && !Method.isNumberReturningStatsMethod(next)
                     && !isLogicOperator(next)) {
-                com.github.gbenroscience.util.Utils.logError(
+                errorLog.error(
                         "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector Post-number operators!");

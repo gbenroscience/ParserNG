@@ -4,6 +4,7 @@
  */
 package com.github.gbenroscience.parser;
 
+import com.github.gbenroscience.util.ErrorLog;
 import java.util.*;
 
 /**
@@ -543,17 +544,17 @@ public class Operator {
      * @param scan An ArrayList object containing a scanned function.
      * @return true if validated
      */
-    public static boolean validateAll(List<String> scan) {
+    public static boolean validateAll(List<String> scan, ErrorLog errorLog) {
         boolean correct = true;
         for (int i = 0; i < scan.size(); i++) {
             if (isBinaryOperator(scan.get(i))) {
-                correct = new BinaryOperator(scan.get(i), i, scan).validate(scan);
+                correct = new BinaryOperator(scan.get(i), i, scan).validate(scan, errorLog);
             } else if (isLogicOperator(scan.get(i))) {
-                correct = new LogicOperator(scan.get(i), i, scan).validate(scan);
+                correct = new LogicOperator(scan.get(i), i, scan).validate(scan, errorLog);
             } else if (isUnaryPostOperator(scan.get(i))) {
-                correct = new UnaryPostOperator(scan.get(i), i, scan).validate(scan);
+                correct = new UnaryPostOperator(scan.get(i), i, scan).validate(scan, errorLog);
             } else if (isUnaryPreOperator(scan.get(i))) {
-                correct = new UnaryPreOperator(scan.get(i), i, scan).validate(scan);
+                correct = new UnaryPreOperator(scan.get(i), i, scan).validate(scan, errorLog);
             }
         }//end for
 

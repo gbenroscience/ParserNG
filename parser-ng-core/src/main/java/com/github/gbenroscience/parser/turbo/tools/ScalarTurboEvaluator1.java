@@ -57,12 +57,16 @@ import java.util.concurrent.ThreadLocalRandom;
 public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable {
 
     private static final long serialVersionUID = 1L;
-    private boolean willFoldConstants;
+    protected boolean willFoldConstants;
     protected final int[] slots;
+    protected MathExpression.VariableRegistry registry;
 
     public static final MethodHandle SCALAR_GATEKEEPER_HANDLE;
     public static final MethodHandle VECTOR_GATEKEEPER_HANDLE;
     public static final MethodHandle VECTOR_2_GATEKEEPER_HANDLE;
+
+    // 1. ThreadLocal workspace: persists across evaluations on the same thread
+    private static final ThreadLocal<double[]> WORKSPACE = ThreadLocal.withInitial(() -> new double[256]);
 
     static {
         try {
@@ -110,7 +114,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 return arr;
             });
 
-    private MathExpression.Token[] postfix;
+    protected MathExpression.Token[] postfix;
 
     private static final Set<String> FAST_PATH_METHODS = new HashSet<>(Arrays.asList(
             "acsc_deg", "sech", "tan-¹_rad", "acot_rad",
@@ -143,7 +147,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
     // A simple pre-allocated array of results to act as a stack
     private MathExpression.EvalResult[] pool = new MathExpression.EvalResult[INIT_POOL_SIZE];
     private int poolPointer = 0;
-    private ErrorLog errorLog = new ErrorLog();
+    protected ErrorLog errorLog = new ErrorLog();
 
     ////////EvalResult Pool params ends/////////////
 /**
@@ -157,7 +161,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         this.postfix = me.getCachedPostfix();
         this.willFoldConstants = me.isWillFoldConstants();
         slots = me.getSlots();
-        me.copyErrorLogTo(errorLog);
+        registry = me.getRegistry().clone();
+        me.copyErrorLogTo(errorLog); 
     }
 
 // In ExpressionSolver.getNextResult():
@@ -289,6 +294,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     // The MethodHandle pipeline reads straight from the input array.
                     return (double) rawScalarHandle.invokeExact(variables);
                 } catch (Throwable t) {
+                    t.printStackTrace();
                     throw new RuntimeException("Turbo evaluation failed", t);
                 }
             }
@@ -362,7 +368,15 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         return false;
     }
 
-    private MethodHandle compileScalar(MathExpression.Token[] postfix) throws Throwable {
+    private void pushAndVerify(Stack<MethodHandle> stack, MethodHandle handle) {
+        // CRITICAL: Any handle entering the stack MUST be (double[])double
+        if (handle.type().parameterCount() != 1 || handle.type().parameterType(0) != double[].class) {
+            throw new IllegalStateException("CORRUPTED HANDLE PUSHED TO STACK! Signature: " + handle.type());
+        }
+        stack.push(handle);
+    }
+
+    protected MethodHandle compileScalar(MathExpression.Token[] postfix) throws Throwable {
         Stack<MethodHandle> stack = new Stack<>();
         for (MathExpression.Token t : postfix) {
             switch (t.kind) {
@@ -370,7 +384,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     // Start with: () -> double
                     MethodHandle constant = MethodHandles.constant(double.class, t.value);
                     // Transform to: (double[]) -> double
-                    stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                    pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
                     break;
                 case MathExpression.Token.VARIABLE:
                     // Determine which index of the runtime 'variables' array contains this variable's value
@@ -388,7 +402,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                     // Signature: (double[]) -> double (Reading straight from target index position)
                     MethodHandle arrayGetter = AndroidFriendlyMethodHandles.getDoubleArrayGetter();
-                    stack.push(MethodHandles.insertArguments(arrayGetter, 1, finalIndex));
+                    System.out.println("");
+                    pushAndVerify(stack, MethodHandles.insertArguments(arrayGetter, 1, finalIndex));
                     break;
 
                 case MathExpression.Token.MATRIX:
@@ -396,24 +411,24 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     // Start with: () -> double
                     constant = MethodHandles.constant(double.class, t.value);
                     // Transform to: (double[]) -> double
-                    stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                    pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
                     break;
                 case MathExpression.Token.FUNCTION_HANDLE:
                     // Start with: () -> double
                     constant = MethodHandles.constant(double.class, t.value);
                     // Transform to: (double[]) -> double
-                    stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                    pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
                     break;
                 case MathExpression.Token.FUNCTION_HANDLE_UNDEFINED:
                     // Start with: () -> double
                     constant = MethodHandles.constant(double.class, t.value);
                     // Transform to: (double[]) -> double
-                    stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                    pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
                     break;
 
                 case MathExpression.Token.OPERATOR:
                     if (t.isPostfix || t.opChar == '√') {
-                        stack.push(applyUnaryOp(t.opChar, ensurePrimitive(stack.pop())));
+                        pushAndVerify(stack, applyUnaryOp(t.opChar, ensurePrimitive(stack.pop())));
                     } else if (t.opChar == '^') {
                         MethodHandle exponentHandle = ensurePrimitive(stack.pop());
                         MethodHandle baseHandle = ensurePrimitive(stack.pop());
@@ -427,23 +442,22 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             if (baseHandle.type().parameterCount() == 0 && exponentHandle.type().parameterCount() == 0) {
                                 double baseVal = (double) baseHandle.invokeExact();
                                 double result = (double) optimizedUnary.invokeExact(baseVal);
-                                stack.push(MethodHandles.constant(double.class, result));
+                                pushAndVerify(stack, MethodHandles.constant(double.class, result));
                             } else {
                                 // Pipe the (double[])double output of the base straight into the optimized power handle
-                                stack.push(MethodHandles.filterReturnValue(baseHandle, optimizedUnary));
+                                pushAndVerify(stack, MethodHandles.filterReturnValue(baseHandle, optimizedUnary));
                             }
                         } else {
                             // Fall back to standard binary operation processing if the exponent is a variable (e.g. x^y)
-                            stack.push(applyBinaryOpNoPermute(t.opChar, baseHandle, exponentHandle));
+                            pushAndVerify(stack, applyBinaryOpNoPermute(t.opChar, baseHandle, exponentHandle));
                         }
                     } else {
                         MethodHandle right = ensurePrimitive(stack.pop());
                         MethodHandle left = ensurePrimitive(stack.pop());
-                        stack.push(applyBinaryOpNoPermute(t.opChar, left, right));
+                        pushAndVerify(stack, applyBinaryOpNoPermute(t.opChar, left, right));
                     }
                     break;
 
-                case MathExpression.Token.FUNCTION:
                 case MathExpression.Token.METHOD:
                     String name = t.name.toLowerCase();
                     Function exec = null;
@@ -480,7 +494,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         }
                         finalOp = MethodHandles.dropArguments(finalOp, 0, double[].class);
 
-                        stack.push(finalOp);
+                        pushAndVerify(stack, finalOp);
                         break;
                     } else if (name.equals(Declarations.QUADRATIC) || name.equals(Declarations.TARTAGLIA_ROOTS)) {
                         int arity = t.arity;
@@ -491,7 +505,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         finalOp = finalOp.asType(finalOp.type().changeReturnType(double[].class));
                         finalOp = MethodHandles.dropArguments(finalOp, 0, double[].class);
 
-                        stack.push(finalOp);
+                        pushAndVerify(stack, finalOp);
                         break;
                     } else if (name.equals(Declarations.GENERAL_ROOT)) {
                         int arity = t.arity;
@@ -537,7 +551,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                                 targetHandle, derivHandle, xSlot, lower, upper, iterations);
 
                         currentHandle = MethodHandles.dropArguments(currentHandle, 0, double[].class);
-                        stack.push(currentHandle);
+                        pushAndVerify(stack, currentHandle);
                         break;
                     } else if (name.equals("print")) {
                         int arity = t.arity;
@@ -553,9 +567,9 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         }
 
                         try {
-                            MathExpression.EvalResult soln = executePrint(getNextResult(), rawArgs);
+                            MathExpression.EvalResult soln = executePrint(getNextResult(), rawArgs, registry);
                             constant = MethodHandles.constant(MathExpression.EvalResult.class, soln);
-                            stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                            pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
 
                         } catch (Exception e) {
                             throw new RuntimeException("Failed to bind print handle: " + e.getMessage(), e);
@@ -591,7 +605,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                         MethodHandle finalIntgHandle = MethodHandles.insertArguments(bridge, 0, f, compiledInner, lower, upper, iterations, vars, slots);
 
-                        stack.push(MethodHandles.dropArguments(finalIntgHandle, 0, double[].class));
+                        pushAndVerify(stack, MethodHandles.dropArguments(finalIntgHandle, 0, double[].class));
                         break;
                     } else if (name.equals("diff")) {
                         for (int i = 0; i < t.arity; i++) {
@@ -658,12 +672,12 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         if (solution.getType() == TYPE.NUMBER) {
                             // Outcome A: Evaluated at a static point, returns a hard number.
                             constant = MethodHandles.constant(double.class, solution.scalar);
-                            stack.push(MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
+                            pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
                         } else if (solution.getType() == TYPE.STRING || solution.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
                             // Outcome B: Symbolic Derivative! (e.g., "cos(x)")
                             // We compile the new algebraic string directly into the current MethodHandle tree!
                             constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
-                            stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                            pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
                             /*
                             MathExpression solutionExpr = new MathExpression(solution.textRes, true);
                             MethodHandle compiledDeriv = compileScalar(solutionExpr.getCachedPostfix());
@@ -700,20 +714,19 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                         MathExpression.EvalResult solution = executeRotor(t.arity, args);
 
-                        // --- THE TURBO FIX --- 
                         if (solution.getType() == TYPE.STRING || solution.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
                             constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
                             // The pipeline ALWAYS inputs a double[] array, so we drop double[].class
-                            stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                            pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
 
                         } else if (solution.getType() == TYPE.VECTOR) {
                             constant = MethodHandles.constant(double[].class, solution.vector);
-                            stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                            pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
 
                         } else {
                             // Fallback for EvalResult Error types
                             constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
-                            stack.push(MethodHandles.dropArguments(constant, 0, double[].class));
+                            pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
                         }
                         break;
                     } else if (name.equals("log")) {
@@ -730,10 +743,10 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                                 // Pre-calculate the result (e.g., sqrt(6.28) -> 2.50)
                                 double foldedResult = (double) fn.invokeExact(innerConstant);
 
-                                stack.push(MethodHandles.constant(double.class, foldedResult));
+                                pushAndVerify(stack, MethodHandles.constant(double.class, foldedResult));
                             } else {
                                 // Fall back to standard runtime handle generation
-                                stack.push(MethodHandles.filterArguments(fn, 0, operand));
+                                pushAndVerify(stack, MethodHandles.filterArguments(fn, 0, operand));
                             }
                         } else if (t.arity == 2) {
                             MethodHandle right = ensurePrimitive(stack.pop());
@@ -748,21 +761,21 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                                 double lVal = (double) left.invokeExact();
                                 double rVal = (double) right.invokeExact();
                                 double result = (double) fn.invokeExact(lVal, rVal);
-                                stack.push(MethodHandles.constant(double.class, result));
+                                pushAndVerify(stack, MethodHandles.constant(double.class, result));
                             } else if (lParams == 1 && rParams == 0) {
                                 double val = (double) right.invokeExact();
-                                stack.push(MethodHandles.filterArguments(MethodHandles.insertArguments(fn, 1, val), 0, left));
+                                pushAndVerify(stack, MethodHandles.filterArguments(MethodHandles.insertArguments(fn, 1, val), 0, left));
                             } else if (lParams == 0 && rParams == 1) {
                                 double val = (double) left.invokeExact();
-                                stack.push(MethodHandles.filterArguments(MethodHandles.insertArguments(fn, 0, val), 0, right));
+                                pushAndVerify(stack, MethodHandles.filterArguments(MethodHandles.insertArguments(fn, 0, val), 0, right));
                             } else {
                                 // Order arguments matching your original working method signature
                                 // Assuming signature is: applyBinaryOpNoPermute(char op, MethodHandle left, MethodHandle right)
                                 // If passing 'fn' directly, adjust your method parameters accordingly!
-                                stack.push(applyBinaryOpNoPermute(t.opChar, left, right));
+                                pushAndVerify(stack, applyBinaryOpNoPermute(t.opChar, left, right));
                             }
                         }
-                    } // Inside your FUNCTION/METHOD case handler for user-defined functions
+                    }// Inside your FUNCTION/METHOD case handler for user-defined functions
                     else {
                         // 1. Pop arguments
                         List<MethodHandle> argumentHandles = new ArrayList<>(t.arity);
@@ -770,20 +783,9 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             argumentHandles.add(0, stack.pop());
                         }
 
-                        // 2. Instead of a slow-path bridge, try to "Turbo-Inline" the function
-                        Function userFunc = FunctionManager.getFunction(name);
-                        if (userFunc != null) {
-                            // Compile the body of the user function (e.g., "sin(x)") into a MethodHandle
-                            // CRITICAL: Ensure 'x' is mapped to argument index 0
-                            MathExpression bodyExpr = userFunc.getMathExpression();
-                            MethodHandle bodyHandle = compileScalar(bodyExpr.getCachedPostfix());
-                            // Use MethodHandles.collectArguments to plug your argumentHandles 
-                            // into the bodyHandle
-                            stack.push(MethodHandles.collectArguments(bodyHandle, 0,
-                                    combineArgs(argumentHandles)));
-                        } else {
-                            stack.push(compileFunction(t, argumentHandles));
-                        }
+                        // 2. Fallback to the reliable Registry Method invocation
+                        // This avoids the type-mismatch errors inherent in manual inlining
+                        pushAndVerify(stack, compileFunction(t, argumentHandles));
                         break;
                     }
             }
@@ -931,10 +933,20 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             MethodHandle massive = LOOKUP.findStatic(ScalarTurboEvaluator1.class, "invokeComplexStats",
                     MethodType.methodType(Object.class, MethodHandle.class, String.class, Object[].class, double[].class));
 
-            // We'll treat this like a pseudo-stats method for the sake of the bridge
-            return MethodHandles.insertArguments(massive, 1, t.name, argumentHandles.toArray());
-        }
+            // 1. Determine the appropriate gatekeeper
+            String lowerName = t.name.toLowerCase();
+            MethodHandle gatekeeper;
+            if (lowerName.equals(Declarations.SORT) || lowerName.equals(Declarations.MODE)) {
+                gatekeeper = VECTOR_GATEKEEPER_HANDLE;
+            } else if (lowerName.equals(Declarations.QUADRATIC) || lowerName.equals(Declarations.TARTAGLIA_ROOTS)) {
+                gatekeeper = VECTOR_2_GATEKEEPER_HANDLE;
+            } else {
+                gatekeeper = SCALAR_GATEKEEPER_HANDLE;
+            }
 
+            // 2. THE FIX: Bind starting from index 0, injecting the gatekeeper first!
+            return MethodHandles.insertArguments(massive, 0, gatekeeper, t.name, argumentHandles.toArray());
+        }
         // Standard primitive path
         MethodHandle collector = boundBridge.asCollector(double[].class, argumentHandles.size());
         for (int i = 0; i < argumentHandles.size(); i++) {
@@ -943,7 +955,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         return collector;
     }
 
-    public static Object invokeComplexStats(MethodHandle gatekeeper, String name, Object[] parts, double[] vars) throws Throwable {
+    public static Object invokeComplexStats1(MethodHandle gatekeeper, String name, Object[] parts, double[] vars) throws Throwable {
         int totalSize = 0;
         Object[] evaluated = new Object[parts.length];
 
@@ -981,6 +993,54 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         return gatekeeper.invoke(name, data);
     }
 
+    public static Object invokeComplexStats(MethodHandle gatekeeper, String name, Object[] parts, double[] vars) throws Throwable {
+        int totalSize = 0;
+        Object[] evaluated = new Object[parts.length];
+
+// Phase 1: Dynamic Evaluation
+        for (int i = 0; i < parts.length; i++) {
+            Object p = parts[i];
+            Object res;
+
+            if (p instanceof double[]) {
+                res = p;
+            } else {
+                MethodHandle mh = (MethodHandle) p;
+                // CRITICAL: We check the return type of the handle BEFORE calling it
+                Class<?> returnType = mh.type().returnType();
+
+                if (returnType == double.class) {
+                    // This is the "fast path" - no boxing, no object creation
+                    res = (double) mh.invokeExact(vars);
+                } else if (returnType == MathExpression.EvalResult.class) {
+                    MathExpression.EvalResult er = (MathExpression.EvalResult) mh.invokeExact(vars);
+                    res = (er.type == MathExpression.EvalResult.TYPE_VECTOR) ? er.vector : 
+                            (er.type == MathExpression.EvalResult.TYPE_MATRIX ? er.matrix.getFlatArray() : er.scalar);
+                } else {
+                    // Fallback for types that aren't primitives
+                    res = mh.invoke(vars);
+                }
+            }
+
+            evaluated[i] = res;
+            totalSize += (res instanceof double[]) ? ((double[]) res).length : 1;
+        }
+
+        // Phase 2: High-Speed Flattening
+        double[] data = new double[totalSize];
+        int cursor = 0;
+        for (Object obj : evaluated) {
+            if (obj instanceof double[]) {
+                double[] d = (double[]) obj;
+                System.arraycopy(d, 0, data, cursor, d.length);
+                cursor += d.length;
+            } else {
+                data[cursor++] = ((Number) obj).doubleValue();
+            }
+        }
+        return gatekeeper.invoke(name, data);
+    }
+
     // ========== ARITY REDUCTION & FOLDING ==========
     private static MethodHandle applyUnaryOp(char op, MethodHandle operand) throws Throwable {
         // Constant Folding: √4 -> 2.0
@@ -995,11 +1055,9 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
      * Apply binary operator WITHOUT using permuteArguments. Uses foldArguments
      * for natural data flow that the JIT can inline.
      *
-     * This is the "Fold Pattern" fix that beats Janino.
      */
     private static MethodHandle applyBinaryOpNoPermute(char op, MethodHandle left, MethodHandle right) throws Throwable {
         MethodHandle opHandle = getBinaryOpHandle(op);
-
         int lParams = left.type().parameterCount();
         int rParams = right.type().parameterCount();
 
@@ -1026,38 +1084,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
         // === BOTH VARIABLES: Direct Combiner Generation ===
         MethodHandle combiner = createBinaryCombiner(opHandle, left);
-        return MethodHandles.foldArguments(combiner, right);
-    }
-
-    /**
-     * Helper for binary ops with already-resolved function handle. Used for
-     * intrinsic functions like pow, min, max, etc.
-     */
-    private static MethodHandle applyBinaryOpNoPermute(MethodHandle left, MethodHandle right, MethodHandle fn) throws Throwable {
-        int lParams = left.type().parameterCount();
-        int rParams = right.type().parameterCount();
-
-        if (lParams == 0 && rParams == 0) {
-            double lVal = (double) left.invokeExact();
-            double rVal = (double) right.invokeExact();
-            return MethodHandles.constant(double.class, (double) fn.invokeExact(lVal, rVal));
-        }
-
-        if (lParams == 0 && rParams >= 1) {
-            double lVal = (double) left.invokeExact();
-            MethodHandle boundFn = MethodHandles.insertArguments(fn, 0, lVal);
-            return MethodHandles.filterArguments(boundFn, 0, right);
-        }
-
-        if (lParams >= 1 && rParams == 0) {
-            double rVal = (double) right.invokeExact();
-            MethodHandle boundFn = MethodHandles.insertArguments(fn, 1, rVal);
-            return MethodHandles.filterArguments(boundFn, 0, left);
-        }
-
-        // Both variables: use fold
-        MethodHandle combiner = createBinaryCombiner(fn, left);
-        return MethodHandles.foldArguments(combiner, right);
+        MethodHandle out = MethodHandles.foldArguments(combiner, right);
+        return out;
     }
 
     /**
@@ -1207,7 +1235,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         }
     }
 
-    static MathExpression.EvalResult executePrint(MathExpression.EvalResult ctx, String[] args) {
+    static MathExpression.EvalResult executePrint(MathExpression.EvalResult ctx, String[] args, MathExpression.VariableRegistry registry) {
 
         StringBuilder sb = new StringBuilder();
         for (String arg : args) {
@@ -1226,7 +1254,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 }
                 continue;
             }
-            Variable myVar = VariableManager.lookUp(arg);
+            Variable myVar = registry.lookUp(arg, false);
             if (myVar != null) {
                 sb.append(myVar.toString()).append("\n");
             } else if (com.github.gbenroscience.parser.Number.isNumber(arg)) {
@@ -1859,7 +1887,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
      * variants) - Logarithmic: log, ln, log10 - Power/Root: sqrt, cbrt -
      * Rounding: floor, ceil, abs - Other: exp, fact
      */
-    private static MethodHandle getUnaryFunctionHandle(String name) throws Throwable {
+    protected static MethodHandle getUnaryFunctionHandle(String name) throws Throwable {
         // Check for single-character operators like !
         if (name.length() == 1) {
             char op = name.charAt(0);
