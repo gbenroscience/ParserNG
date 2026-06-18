@@ -234,11 +234,14 @@ public final class KernelsFloat {
             arr[offset + i] *= invSum;
         }
     }
- // RoPE for workspace slices: split layout [x0,x2...][x1,x3...]
+    // RoPE for workspace slices: split layout [x0,x2...][x1,x3...]
+
     public static void rope_inplace_split_ws(float[] buf, int qOff, int qHeads, int kOff, int kHeads,
-                                             int head_dim, int pos, float[] cos_table, float[] sin_table) {
+            int head_dim, int pos, float[] cos_table, float[] sin_table) {
         final int halfDim = head_dim >> 1;
-        if ((head_dim & 1)!= 0) throw new IllegalArgumentException("head_dim must be even");
+        if ((head_dim & 1) != 0) {
+            throw new IllegalArgumentException("head_dim must be even");
+        }
         int cosOff = pos * halfDim;
 
         // Q
@@ -291,7 +294,9 @@ public final class KernelsFloat {
         java.util.Arrays.fill(out, cOff, cOff + N, 0.0f);
         for (int k = 0; k < K; k++) {
             float ak = buf[aOff + k];
-            if (ak == 0.0f) continue;
+            if (ak == 0.0f) {
+                continue;
+            }
             FloatVector av = FloatVector.broadcast(F_SPECIES, ak);
             int bRowOff = k * N;
             int n = 0;
@@ -317,21 +322,21 @@ public final class KernelsFloat {
             }
         }
     }
-    
+
     // temp[d] += scale * v[d], vectorized
-public static void accumulate_v_f32(float[] dst, int dOff, float[] src, int sOff, int len, float scale) {
-    FloatVector sv = FloatVector.broadcast(F_SPECIES, scale);
-    int i = 0;
-    for (; i < F_SPECIES.loopBound(len); i += F_SPECIES.length()) {
-        FloatVector dv = FloatVector.fromArray(F_SPECIES, dst, dOff + i);
-        FloatVector vv = FloatVector.fromArray(F_SPECIES, src, sOff + i);
-        FloatVector res = dv.fma(vv, sv); // dv + vv * scale
-        res.intoArray(dst, dOff + i);
+    public static void accumulate_v_f32(float[] dst, int dOff, float[] src, int sOff, int len, float scale) {
+        FloatVector sv = FloatVector.broadcast(F_SPECIES, scale);
+        int i = 0;
+        for (; i < F_SPECIES.loopBound(len); i += F_SPECIES.length()) {
+            FloatVector dv = FloatVector.fromArray(F_SPECIES, dst, dOff + i);
+            FloatVector vv = FloatVector.fromArray(F_SPECIES, src, sOff + i);
+            FloatVector res = dv.fma(vv, sv); // dv + vv * scale
+            res.intoArray(dst, dOff + i);
+        }
+        for (; i < len; i++) {
+            dst[dOff + i] += src[sOff + i] * scale;
+        }
     }
-    for (; i < len; i++) {
-        dst[dOff + i] += src[sOff + i] * scale;
-    }
-}
 
     // C[1,N] = A[1,K] @ B[K,N] -> AXPY: C[n] += A[k] * B[k,n]
     private static void matmul_f32_1xN_axpy(float[] a, float[] b, float[] c, int cOff, int K, int N) {

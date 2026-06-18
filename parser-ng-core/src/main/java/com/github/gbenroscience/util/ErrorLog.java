@@ -32,6 +32,8 @@ public class ErrorLog implements Savable {
         builder.append(level.name()).append(" - ").append(message).append("\n");
     }
 
+   
+
     /**
      *
      * @param message

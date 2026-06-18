@@ -252,8 +252,7 @@ attributes already processed and ready for use
 
     /**
      *
-     * @param expr The expression to be evaluated by the MathExpression to be
-created.
+     * @param expr The expression to be evaluated by the MathExpression to be created.
      */
     public MathExpression createFunction(String expr) {
         MathExpression f = new MathExpression(expr);
@@ -280,7 +279,7 @@ created.
 
             for (String code : scanned) {
                 if (code.contains("=")) {
-                    boolean success = Function.assignObject(code + ";",new ErrorLog());
+                    boolean success = Function.assignObject(code + ";",null);
                     if (!success) {
                         throw new Exception("Bad Variable or Function assignment!");
                     }

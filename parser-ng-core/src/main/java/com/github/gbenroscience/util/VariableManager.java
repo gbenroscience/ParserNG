@@ -25,7 +25,7 @@ public class VariableManager {
     //check if the variable already exists.
 //if so,the user cannot define it by var x = 2; instead use x =9; to change the value in x.
     public static final Map<String, Variable> VARIABLES = Collections.synchronizedMap(new HashMap<>());
-    
+
     static {
         saveIfNotExists(Variable.PI);
         saveIfNotExists(Variable.ans);
@@ -34,31 +34,12 @@ public class VariableManager {
 
     /**
      * Parses commands used to insert and make Variables loaded into the
-VARIABLES attribute of objects of this class.
+     * VARIABLES attribute of objects of this class.
      */
     private CommandInterpreter commandParser;
 
-    private final Map<String, Integer> nameToIndex = new HashMap<>();
-    private int nextSlot = 0;
-
     public VariableManager() {
         commandParser = new CommandInterpreter();
-    }
-
-    public int getSlot(String name) {
-        return nameToIndex.computeIfAbsent(name, k -> nextSlot++);
-    }
-
-    /**
-     * Returns the total number of slots required for the execution frame.
-     */
-    public int size() {
-        return nextSlot;
-    }
-
-    public void reset() {
-        nameToIndex.clear();
-        nextSlot = 0;
     }
 
     public CommandInterpreter getCommandParser() {
@@ -222,15 +203,19 @@ VARIABLES attribute of objects of this class.
      * @return the Variable object that has that name or null if the Variable is
      * not found.
      */
-   public static Variable lookUp(String vName) {
+    public static Variable lookUp(String vName) {
         return VARIABLES.get(vName);
     }//end method
- 
+
     public static Variable saveIfNotExists(Variable v) {
+        v.setGlobal(true);
+        v.setFrameIndex(-1);
         return VARIABLES.putIfAbsent(v.getName(), v);
     }//end method
 
     public static Variable saveOrUpdate(Variable v) {
+        v.setGlobal(true);
+        v.setFrameIndex(-1);
         return VARIABLES.put(v.getName(), v);
     }//end method
 
@@ -257,6 +242,8 @@ VARIABLES attribute of objects of this class.
      */
     public static void add(Variable var) {
         if (var != null && !var.isConstant() && !VARIABLES.containsKey(var.getName())) {
+            var.setGlobal(true);
+            var.setFrameIndex(-1);
             VARIABLES.put(var.getName(), var);
             update();
         }
@@ -272,6 +259,8 @@ VARIABLES attribute of objects of this class.
 
         for (Variable v : vars) {
             if (v != null && !v.isConstant() && !VARIABLES.containsKey(v.getName())) {
+                v.setGlobal(true);
+                v.setFrameIndex(-1);
                 VARIABLES.put(v.getName(), v);
             }
         }
@@ -287,7 +276,7 @@ VARIABLES attribute of objects of this class.
         Iterator<Map.Entry<String, Variable>> it = VARIABLES.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<String, Variable> var = it.next();
-            if (!var.getValue().isConstant() && var.getValue() != Variable.ans ) {
+            if (!var.getValue().isConstant() && var.getValue() != Variable.ans) {
                 it.remove();
             }
         }
@@ -570,7 +559,9 @@ VARIABLES attribute of objects of this class.
          *
          * @return true if the line is valid
          */
-        private void analyzeLine(String line) {
+        private Map<String, Variable> analyzeLine(String line) {
+
+            Map<String, Variable> VARIABLES = new HashMap<>();
 
             setValid(validateLine(line));
 
@@ -678,6 +669,7 @@ VARIABLES attribute of objects of this class.
 
             }//end if
 
+            return VARIABLES;
         }//end method
 
         /**

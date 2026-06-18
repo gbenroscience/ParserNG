@@ -192,8 +192,8 @@ public class DataSetFormatter {
         System.out.println("Original : " + complex);
         System.out.println("Formatted: " + f2.getFormattedDataSet());
 
-       String t1 = testOld(10, 10000);
-       String t2 = testNew(10, 10000);
+       String t1 = testOld(10, 100000);
+       String t2 = testNew(10, 100000);
        System.out.println("output is same: "+(t1.equals(t2)));
     }
 

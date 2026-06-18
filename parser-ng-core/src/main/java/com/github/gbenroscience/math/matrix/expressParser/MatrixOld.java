@@ -1134,21 +1134,7 @@ public class MatrixOld {
 
     }//end method randomFill
 
-    /**
-     *
-     * @param matrixValue A string that is to be checked if it conforms to valid
-     * syntax for representing a matrix in this software.
-     * @return true if the command string is a valid matrix.e.g
-     * [2,1,4:5,3,-2:4,4,5] value.
-     */
-    public static boolean isMatrixOldValue(String matrixValue) {
-        MatrixValueParser matrixValueParser = new MatrixValueParser(matrixValue);
-
-        boolean isValid = matrixValueParser.isValid();
-
-        return isValid;
-    }
-
+ 
     /**
      *
      * @return a string representation of the matrix in row and columns.

@@ -5,6 +5,7 @@
 package com.github.gbenroscience.parser;
 
 import com.github.gbenroscience.parser.methods.Method;
+import com.github.gbenroscience.util.ErrorLog;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -90,7 +91,7 @@ public class BinaryOperator extends Operator implements Validatable {
      * @return true if valid
      */
     @Override
-    public boolean validate(List<String> scan) {
+    public boolean validate(List<String> scan, ErrorLog errorLog) {
 
 
         int leftInd = index-1;
@@ -107,7 +108,7 @@ public class BinaryOperator extends Operator implements Validatable {
 
                 if (leftInd>=0 && !Number.isNumber(prev) && !Variable.isVariableString(prev)
                         && !isUnaryPostOperator(prev) && !isClosingBracket(prev) && !isOpeningBracket(prev)) {
-                    com.github.gbenroscience.util.Utils.logError(
+                  errorLog.error(
                             "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
@@ -120,7 +121,7 @@ public class BinaryOperator extends Operator implements Validatable {
                         && !isOpeningBracket(next)
                         && !Method.isUnaryPreOperatorORDefinedMethod(next) && !Method.isNumberReturningStatsMethod(next)
                         && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
-                    com.github.gbenroscience.util.Utils.logError(
+                    errorLog.error(
                             "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
@@ -132,7 +133,7 @@ public class BinaryOperator extends Operator implements Validatable {
             else if (!isPlusOrMinus(curr)) {
                 if (leftInd>=0 && !Number.isNumber(prev) && !Variable.isVariableString(prev)
                         && !isUnaryPostOperator(prev) && !isClosingBracket(prev)) {
-                    com.github.gbenroscience.util.Utils.logError(
+                    errorLog.error(
                             "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
@@ -144,7 +145,7 @@ public class BinaryOperator extends Operator implements Validatable {
                         && !isOpeningBracket(next)
                         && !Method.isUnaryPreOperatorORDefinedMethod(next) && !Method.isNumberReturningStatsMethod(next)
                         && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
-                    com.github.gbenroscience.util.Utils.logError(
+                   errorLog.error(
                             "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");

@@ -299,6 +299,7 @@ class MathExpressionTest {
         //MathExpression expr = new MathExpression("quad(@(x)3*x-2+3*x^2)");//BUGGY
         //MathExpression expr = new MathExpression("root(@(x)3*x-sin(x)-0.5,2)");//BUGGY
         MathExpression exprs = new MathExpression("r1=4;r1*5");
+   
         //A+k.A+AxB+A^c
         if (print) {
             System.out.println("scanner: " + exprs.scanner);
@@ -307,6 +308,8 @@ class MathExpressionTest {
         if (print) {
             System.out.println("solution: " + exprs.solve());
         }
+         
+        System.out.println("r1:" + exprs.getVariable("r1").toJSON());
         Assertions.assertEquals("20.0", exprs.solve());
 
         //no idea what is this trying to do, results sounds buggy anyway
@@ -340,7 +343,7 @@ class MathExpressionTest {
         if (print) {
             System.out.println("VariableManager: " + VariableManager.VARIABLES);
         }
-        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, x=x:0.0, pi=pi:3.141592653589793, y=y:0.0, r1=r1:4.0}",
+        Assertions.assertEquals("{e=e:2.718281828459045, ans=ans:0.0, pi=pi:3.141592653589793}",
                 VariableManager.VARIABLES.toString());
 
         MathExpression expression = new MathExpression("x=0;sin(ln(x))");
@@ -694,7 +697,6 @@ class MathExpressionTest {
         }
     }
 
-    
     @Test
     void matrixTestAlgebraicInversTurbo() {
         try {
@@ -702,7 +704,7 @@ class MathExpressionTest {
                     + "B(4,4)=(3,22,8,-5,  10,18,32,8,  4,2,1,9,  7,7,2,13);"
                     + " A^-1;");
             System.out.println("scanner: " + me.getScanner());
-            System.out.println("A: " + FunctionManager.lookUp("A").getMatrix()); 
+            System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
             FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
             Matrix m = fce.apply(new double[0]).matrix;
             System.out.println("turbo-matrix:\n" + m);
@@ -712,19 +714,19 @@ class MathExpressionTest {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
+
     @Test
     void matrixTestDetBug() {
         try {
             MathExpression me = new MathExpression("A(3,3)=(3,1,5,  4,2,9, 1,4,3);"
                     + "B(3,3)=(4,0,2, 2,1,5, 5,9,4);"
-                    + " detab=det(A*B);deta=det(A)");
+                    + " detab=det(A*B);deta=det(A);detab=1.32");
             FastCompositeExpression fce = new MatrixTurboEvaluator(me).compile();
             System.out.println("scanner: " + me.getScanner());
             System.out.println("A: " + FunctionManager.lookUp("A").getMatrix());
             System.out.println("B: " + FunctionManager.lookUp("B").getMatrix());
-            Variable detAB = VariableManager.lookUp("detab");
-            Variable detA = VariableManager.lookUp("deta");
+            Variable detAB = me.getRegistry().lookUp("detab");
+            Variable detA = me.getRegistry().lookUp("deta");
             System.out.println("det(A*B): " + detAB.getValue());
             System.out.println("det(A): " + detA.getValue());
 
@@ -931,7 +933,7 @@ class MathExpressionTest {
         try {
             MathExpression me = new MathExpression("f(x)=3*x^2;intg(f,5, 2)");
             FastCompositeExpression fce = new ScalarTurboEvaluator1(me).compile();
-            double res = fce.applyScalar(new double[]{0,1});
+            double res = fce.applyScalar(new double[]{0, 1});
             System.out.println("res:\n" + res);
             Assertions.assertTrue(Math.abs(res - 117) < 5E-10);
         } catch (Throwable ex) {

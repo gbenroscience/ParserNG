@@ -9,6 +9,7 @@ import com.github.gbenroscience.parser.methods.Method;
 import java.util.ArrayList;
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
+import com.github.gbenroscience.util.ErrorLog;
 import java.util.List;
 
 /**
@@ -73,7 +74,7 @@ to.
      * immediate neighbouring tokens to the left and to the right is correct.
      */
     @Override
-    public boolean validate(List<String> scan) {
+    public boolean validate(List<String> scan, ErrorLog errorLog) {
 
         int leftInd = index - 1;
         int rightInd = index + 1;
@@ -90,7 +91,7 @@ to.
                     && !isVariableString(prev) && !isUnaryPostOperator(prev)
                     && !isLogicOperator(prev)
                     && !isAssignmentOperator(prev)) {
-                com.github.gbenroscience.util.Utils.logError(
+                errorLog.error(
                         "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Pre-number operators!");
@@ -102,7 +103,7 @@ to.
                     && !Method.isUnaryPreOperatorORDefinedMethod(next)
                     && !isVariableString(next) && !Method.isNumberReturningStatsMethod(next)
                     && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
-                com.github.gbenroscience.util.Utils.logError(
+                errorLog.error(
                         "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Pre-number operators!");

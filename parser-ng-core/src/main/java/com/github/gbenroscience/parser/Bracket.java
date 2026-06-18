@@ -36,23 +36,18 @@ public class Bracket extends Operator {
      * Return true if the contents of the bracket have been evaluated
      */
     private boolean evaluated = false;
-    
-    public static final char CIRC_OPEN_BRAC ='(';
-    public static final char CIRC_CLOSE_BRAC =')';
-    
-    
-    public static final char SQUARE_OPEN_BRAC ='[';
-    public static final char SQUARE_CLOSE_BRAC =']';
-    
-    public static final char CURVED_OPEN_BRAC ='{';
-    public static final char CURVED_CLOSE_BRAC ='}';
-    
-    public static final char ANGULAR_OPEN_BRAC ='<';
-    public static final char ANGULAR_CLOSE_BRAC ='>';
-    
-    
-    
-    
+
+    public static final char CIRC_OPEN_BRAC = '(';
+    public static final char CIRC_CLOSE_BRAC = ')';
+
+    public static final char SQUARE_OPEN_BRAC = '[';
+    public static final char SQUARE_CLOSE_BRAC = ']';
+
+    public static final char CURVED_OPEN_BRAC = '{';
+    public static final char CURVED_CLOSE_BRAC = '}';
+
+    public static final char ANGULAR_OPEN_BRAC = '<';
+    public static final char ANGULAR_CLOSE_BRAC = '>';
 
     /**
      * Constructor of this class for creating its objects and initializing their
@@ -277,8 +272,6 @@ public class Bracket extends Operator {
         return true;
     }//end method
 
-    
-
     /**
      * @param isOpenBracket boolean variable that should be true if this bracket
      * object whose complement we seek is an opening bracket i.e (, and should
@@ -454,10 +447,12 @@ public class Bracket extends Operator {
      *
      * @param scan The ArrayList containing the scanned function inside which
      * this Bracket exists.
+     * @param registry The {@link MathExpression.VariableRegistry} of the
+     * {@link MathExpression} that owns the scanned output
      * @return true if between this Bracket and its complement, a Variable
      * object is found.
      */
-    public boolean simpleBracketPairHasVariables(List<String> scan) {
+    public boolean simpleBracketPairHasVariables(List<String> scan, MathExpression.VariableRegistry registry) {
 
         if (isOpenBracket(name)) {
             int i = this.index;
@@ -467,8 +462,8 @@ public class Bracket extends Operator {
                 String var = scan.get(i);
                 if (Variable.isVariableString(var)) {
                     try {
-                        Variable v = VariableManager.lookUp(var);
-                        return true;
+                        Variable v = registry.lookUp(var, false);
+                        return v != null;
                     }//end try
                     catch (NullPointerException exception) {
                     }//end catch
@@ -482,9 +477,9 @@ public class Bracket extends Operator {
                 String var = scan.get(j);
                 if (Variable.isVariableString(var)) {
                     try {
-                        Variable v = VariableManager.lookUp(var);
-                        return true;
-                    }//end try
+                        Variable v = registry.lookUp(var, false);
+                        return v != null;
+                    }//end try 
                     catch (NullPointerException exception) {
                     }//end catch
                 }//end if
