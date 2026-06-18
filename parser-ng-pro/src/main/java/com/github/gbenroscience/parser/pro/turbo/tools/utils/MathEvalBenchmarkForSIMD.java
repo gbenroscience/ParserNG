@@ -5,25 +5,22 @@ package com.github.gbenroscience.parser.pro.turbo.tools.utils;
  * @author GBEMIRO
  */
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator;
+import com.github.gbenroscience.parser.pro.turbo.tools.SIMDVectorTurboEvaluator; 
 import org.openjdk.jmh.annotations.*;
 import java.util.concurrent.TimeUnit;
 import java.util.Random;
 import org.openjdk.jmh.infra.Blackhole;
 
-
-
 /**
- * Use this to build in the parser-ng-pro directory
- * mvn clean install -Dgpg.skip
+ * Use this to build in the parser-ng-pro directory mvn clean install -Dgpg.skip
  * Use this to run the benchmarks
- * 
- * java -jar target/benchmarks.jar MathEvalBenchmark -prof perfasm
- * 
- * java -jar target/benchmarks.jar MathEvalBenchmark -prof perfasm > perf_output.txt
-#  Now find your specific method's assembly
- * grep -A 50 "parserNG" perf_output.txt
- * 
+ *
+ * java -jar target/benchmarks.jar MathEvalBenchmarkForSIMD -prof perfasm
+ *
+ * java -jar target/benchmarks.jar MathEvalBenchmarkForSIMD -prof perfasm >
+ * perf_output.txt # Now find your specific method's assembly grep -A 50
+ * "parserNG" perf_output.txt
+ *
  * @author GBEMIRO
  */
 @BenchmarkMode(Mode.AverageTime)
@@ -34,10 +31,10 @@ import org.openjdk.jmh.infra.Blackhole;
     "-Xms5g", "-Xmx5g",
     "-XX:+UseG1GC",
     "-XX:-UseCompressedOops", // Avoids compressed oops artifacts
-        "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"
+    "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"    
 })
 @State(Scope.Benchmark)
-public class MathEvalBenchmark {
+public class MathEvalBenchmarkForSIMD {
 
     public static interface JaninoMathFunction {
 
@@ -46,18 +43,17 @@ public class MathEvalBenchmark {
 
     @Param({"12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2", "0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))"})
     String expression;
-    
-    //static final String expression = "x1^3+x2^3+x3^3+x4^3+x5^3+x6^3";
 
+    //static final String expression = "x1^3+x2^3+x3^3+x4^3+x5^3+x6^3";
     double[] result;
 
     @Param({"1000000", "67108864"})
     private int dataSize;
 
-    private double[] flatInput; 
+    private double[] flatInput;
     private JaninoMathFunction fastEvaluator;
 
-    VectorTurboEvaluator.BatchedVectorCompositeExpression vectorTurbo;
+    SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVectorTurbo;
 
     private String[] expressionVars;
     private int varCount;
@@ -66,7 +62,7 @@ public class MathEvalBenchmark {
 
     @Setup(Level.Trial)
     public void setup() {
-
+        System.out.println("================EXPRESSION: " + expression+"================");
         MathExpression me = new MathExpression(expression);
         expressionVars = me.getVariablesNames();
         varCount = expressionVars.length;
@@ -84,8 +80,7 @@ public class MathEvalBenchmark {
         setupJanino();
 
         setupParserNG(me);
- 
-         
+
     }
 
     @Benchmark
@@ -99,8 +94,8 @@ public class MathEvalBenchmark {
             int base = i * varCount;
             System.arraycopy(flatInput, base, vars, 0, varCount);
             bh.consume(fastEvaluator.apply(vars));
-        }  
- 
+        }
+
     }
 
     @Benchmark
@@ -109,15 +104,15 @@ public class MathEvalBenchmark {
     public void parserNG(Blackhole bh) {
         // Correct usage: Call the bulk processor ONCE per benchmark invocation
         // This measures the true speed of your vectorization logic 
-        vectorTurbo.applyBulk(flatInput, result, true, true);
-         bh.consume(result); 
+        simdVectorTurbo.applyBulk(flatInput, result, true, true);
+        bh.consume(result);
     }
 
     private void setupParserNG(MathExpression me) {
         try {
-            vectorTurbo = (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+            simdVectorTurbo = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
         } catch (Throwable ex) {
-            System.getLogger(MathEvalBenchmark.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+            System.getLogger(MathEvalBenchmarkForSIMD.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }
     }
 

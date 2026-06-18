@@ -20,26 +20,12 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * @param variables      A 2D array of variable channels where each outer row represents an entire vector 
      * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn], [z1, z2... zn]]}.
      * @param output         The pre-allocated target array where the final evaluated results will be directly dumped.
-     * @param tiledExecution If {@code true}, processes data in L1/L2 cache-bounded blocks to prevent memory thrashing on 
+     * @param useBlocks If {@code true}, processes data in L1/L2 cache-bounded blocks to prevent memory thrashing on 
      * large datasets. If {@code false}, executes a raw scalar sequential stream maximizing clock throughput 
      * on low-element datasets.
      */
-    void applyBulk(double[][] variables, double[] output, boolean tiledExecution);
+    void applyBulk(double[][] variables, double[] output, boolean useBlocks);
 
-    /**
-     * Executes the compiled expression over a 2D array subset, beginning execution from a specified 
-     * horizontal timeline offset point.
-     *
-     * @param variables      A 2D array of variable channels where each outer row represents an entire vector 
-     * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn]]}.
-     * @param outputBuffer   The pre-allocated target array where the final evaluated results will be dumped.
-     * @param offset         The starting index offset along the temporal/element timeline axis from which to begin execution.
-     * @param tiledExecution If {@code true}, processes data in L1/L2 cache-bounded blocks to prevent memory thrashing on 
-     * large datasets. If {@code false}, executes a raw scalar sequential stream maximizing clock throughput 
-     * on low-element datasets.
-     * @throws Throwable     If the runtime calculation or underlying method handle invocation fails.
-     */
-    public void applyBulk(double[][] variables, double[] outputBuffer, int offset, boolean tiledExecution) throws Throwable;
 
     /**
      * Distributes the evaluation of a 2D array dataset evenly across multiple processing threads
@@ -48,11 +34,11 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * @param variables      A 2D array of variable channels where each outer row represents an entire vector 
      * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn]]}.
      * @param output         The pre-allocated target array where the parallel calculations will be written.
-     * @param tiledExecution If {@code true}, instructs internal worker threads to use cache-localized block offsets. 
+     * @param useBlocks If {@code true}, instructs internal worker threads to use cache-localized block offsets. 
      * If {@code false}, workers sweep through their slice ranges sequentially without sub-tiling.
      * @param useWorkers   Activates the processing thread framework driving core mathematical chunks.
      */
-    public void applyBulk(double[][] variables, double[] output, boolean tiledExecution, boolean useWorkers);
+    public void applyBulk(double[][] variables, double[] output, boolean useBlocks, boolean useWorkers);
 
     /**
      * Evaluates a 2D variable structure using an explicit, cache-bounded window chunk size 
@@ -62,10 +48,10 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn]]}.
      * @param output         The pre-allocated target array where the evaluated blocks will be written.
      * @param batchSize      The strict memory segment window slice size processed per individual cache loop pass.
-     * @param tiledExecution If {@code true}, overlays internal sub-tiling structures on top of the batch slice boundaries. 
+     * @param useBlocks If {@code true}, overlays internal sub-tiling structures on top of the batch slice boundaries. 
      * If {@code false}, evaluates the raw batch length sequentially in a single pass.
      */
-    public void applyBulkBatched(double[][] variables, double[] output, int batchSize, boolean tiledExecution);
+    public void applyBulkBatched(double[][] variables, double[] output, int batchSize, boolean useBlocks);
 
     /**
      * <b>Warp Speed Path (Power Users):</b> Evaluates a single, raw, pre-grouped flat array at 
@@ -75,24 +61,10 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * <b>CRITICAL:</b> Data must use a Grouped structure, e.g., 
      * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Interleaved arrays will yield corrupted data.
      * @param output         The pre-allocated target array where the evaluated vector stream is directly copied.
-     * @param tiledExecution If {@code true}, maps memory segments into cache-sized micro-tiles. If {@code false}, allows 
+     * @param useBlocks If {@code true}, maps memory segments into cache-sized micro-tiles. If {@code false}, allows 
      * the CPU prefetcher to step uninhibited sequentially through the flat segments.
      */
-    public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution);
-
-    /**
-     * <b>Warp Speed Path (Power Users):</b> Evaluates a pre-grouped flat array starting execution from 
-     * a specific temporal/element index offset point.
-     *
-     * @param flatVariables  A single flat array containing variables contiguously grouped back-to-back by variable slot.
-     * <b>CRITICAL:</b> Data must use a Grouped structure, e.g., 
-     * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Do NOT pass interleaved data.
-     * @param output         The pre-allocated target array where the evaluated vector stream is directly copied.
-     * @param offset         The item/timestep boundary index from which evaluation begins inside each variable segment.
-     * @param tiledExecution If {@code true}, tiles calculations starting past the offset boundary. If {@code false}, drops into 
-     * raw sequential loop calculations from the given offset.
-     */
-    public void applyBulk(double[] flatVariables, double[] output, int offset, boolean tiledExecution);
+    public void applyBulk(double[] flatVariables, double[] output, boolean useBlocks);
 
     /**
      * <b>Warp Speed Path (Power Users):</b> Concurrently evaluates a pre-grouped flat array by cleanly dividing 
@@ -102,11 +74,11 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * <b>CRITICAL:</b> Data must use a Grouped structure, e.g., 
      * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Do NOT pass interleaved data.
      * @param output         The pre-allocated target array where parallel workers will drop evaluated computations.
-     * @param tiledExecution If {@code true}, distributes cache-bounded tile execution sets across independent workers. 
+     * @param useBlocks If {@code true}, distributes cache-bounded tile execution sets across independent workers. 
      * If {@code false}, spawns parallel workers on straight sequential segment sections.
      * @param useWorkers   Activates the processing thread framework driving core mathematical chunks.
      */
-    public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution, boolean useWorkers);
+    public void applyBulk(double[] flatVariables, double[] output, boolean useBlocks, boolean useWorkers);
 
     /**
      * <b>Warp Speed Path (Power Users):</b> Evaluates a pre-grouped flat array using custom-defined batch 
@@ -117,10 +89,10 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Do NOT pass interleaved data.
      * @param output         The pre-allocated target array where the evaluated blocks will be written.
      * @param batchSize      The localized processing block window length applied across individual memory loops.
-     * @param tiledExecution If {@code true}, enforces inner tiling within the specified batch limits. If {@code false}, 
+     * @param useBlocks If {@code true}, enforces inner tiling within the specified batch limits. If {@code false}, 
      * trusts the user-provided batch size as the definitive sequential block length.
      */
-    public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize, boolean tiledExecution);
+    public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize, boolean useBlocks);
 
     /**
      * Fuses deep learning and high-performance neural network transformations directly over pre-allocated 

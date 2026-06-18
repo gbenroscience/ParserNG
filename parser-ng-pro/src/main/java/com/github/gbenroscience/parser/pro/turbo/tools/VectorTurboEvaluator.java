@@ -1,7 +1,6 @@
 package com.github.gbenroscience.parser.pro.turbo.tools;
 
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.parser.pro.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.parser.pro.turbo.tools.utils.HardwareDetector;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
@@ -42,137 +41,137 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     private static final ThreadLocal<double[]> FLAT_BUFFER_CACHE = ThreadLocal.withInitial(() -> new double[0]);
 
     // Opcode Constants
-    private static final int OP_CONST = 1;
-    private static final int OP_LOAD = 2;
-    private static final int OP_ADD = 3;
-    private static final int OP_SUB = 4;
-    private static final int OP_MUL = 5;
-    private static final int OP_DIV = 6;
-    private static final int OP_POW = 7;
+    static final int OP_CONST = 1;
+    static final int OP_LOAD = 2;
+    static final int OP_ADD = 3;
+    static final int OP_SUB = 4;
+    static final int OP_MUL = 5;
+    static final int OP_DIV = 6;
+    static final int OP_POW = 7;
 
-    private static final int OP_SIN = 8;
-    private static final int OP_COS = 9;
-    private static final int OP_TAN = 10;
+    static final int OP_SIN = 8;
+    static final int OP_COS = 9;
+    static final int OP_TAN = 10;
 
-    private static final int OP_SIN_DEG = 11;
-    private static final int OP_COS_DEG = 12;
-    private static final int OP_TAN_DEG = 13;
+    static final int OP_SIN_DEG = 11;
+    static final int OP_COS_DEG = 12;
+    static final int OP_TAN_DEG = 13;
 
-    private static final int OP_SIN_GRAD = 14;
-    private static final int OP_COS_GRAD = 15;
-    private static final int OP_TAN_GRAD = 16;
+    static final int OP_SIN_GRAD = 14;
+    static final int OP_COS_GRAD = 15;
+    static final int OP_TAN_GRAD = 16;
 
-    private static final int OP_ASIN = 17;
-    private static final int OP_ACOS = 18;
-    private static final int OP_ATAN = 19;
+    static final int OP_ASIN = 17;
+    static final int OP_ACOS = 18;
+    static final int OP_ATAN = 19;
 
-    private static final int OP_ASIN_ALT = 20;
-    private static final int OP_ACOS_ALT = 21;
-    private static final int OP_ATAN_ALT = 22;
+    static final int OP_ASIN_ALT = 20;
+    static final int OP_ACOS_ALT = 21;
+    static final int OP_ATAN_ALT = 22;
 
-    private static final int OP_ASIN_DEG = 23;
-    private static final int OP_ACOS_DEG = 24;
-    private static final int OP_ATAN_DEG = 25;
+    static final int OP_ASIN_DEG = 23;
+    static final int OP_ACOS_DEG = 24;
+    static final int OP_ATAN_DEG = 25;
 
-    private static final int OP_ASIN_DEG_ALT = 26;
-    private static final int OP_ACOS_DEG_ALT = 27;
-    private static final int OP_ATAN_DEG_ALT = 28;
+    static final int OP_ASIN_DEG_ALT = 26;
+    static final int OP_ACOS_DEG_ALT = 27;
+    static final int OP_ATAN_DEG_ALT = 28;
 
-    private static final int OP_ASIN_GRAD = 29;
-    private static final int OP_ACOS_GRAD = 30;
-    private static final int OP_ATAN_GRAD = 31;
+    static final int OP_ASIN_GRAD = 29;
+    static final int OP_ACOS_GRAD = 30;
+    static final int OP_ATAN_GRAD = 31;
 
-    private static final int OP_ASIN_GRAD_ALT = 32;
-    private static final int OP_ACOS_GRAD_ALT = 33;
-    private static final int OP_ATAN_GRAD_ALT = 34;
+    static final int OP_ASIN_GRAD_ALT = 32;
+    static final int OP_ACOS_GRAD_ALT = 33;
+    static final int OP_ATAN_GRAD_ALT = 34;
 
-    public static final int OP_SEC = 35;
-    public static final int OP_SEC_DEG = 36;
-    public static final int OP_SEC_GRAD = 37;
+    static final int OP_SEC = 35;
+    static final int OP_SEC_DEG = 36;
+    static final int OP_SEC_GRAD = 37;
 
-    public static final int OP_COSEC = 38;
-    public static final int OP_COSEC_DEG = 39;
-    public static final int OP_COSEC_GRAD = 40;
+    static final int OP_COSEC = 38;
+    static final int OP_COSEC_DEG = 39;
+    static final int OP_COSEC_GRAD = 40;
 
-    public static final int OP_COT = 41;
-    public static final int OP_COT_DEG = 42;
-    public static final int OP_COT_GRAD = 43;
+    static final int OP_COT = 41;
+    static final int OP_COT_DEG = 42;
+    static final int OP_COT_GRAD = 43;
 
-    public static final int OP_ARC_SEC = 44;
-    public static final int OP_ARC_SEC_DEG = 45;
-    public static final int OP_ARC_SEC_GRAD = 46;
+    static final int OP_ARC_SEC = 44;
+    static final int OP_ARC_SEC_DEG = 45;
+    static final int OP_ARC_SEC_GRAD = 46;
 
-    public static final int OP_ARC_COSEC = 47;
-    public static final int OP_ARC_COSEC_DEG = 48;
-    public static final int OP_ARC_COSEC_GRAD = 49;
+    static final int OP_ARC_COSEC = 47;
+    static final int OP_ARC_COSEC_DEG = 48;
+    static final int OP_ARC_COSEC_GRAD = 49;
 
-    public static final int OP_ARC_COT = 50;
-    public static final int OP_ARC_COT_DEG = 51;
-    public static final int OP_ARC_COT_GRAD = 52;
+    static final int OP_ARC_COT = 50;
+    static final int OP_ARC_COT_DEG = 51;
+    static final int OP_ARC_COT_GRAD = 52;
 
-    public static final int OP_ARC_SIN_ALT = 53;
-    public static final int OP_ARC_SIN_ALT_DEG = 54;
-    public static final int OP_ARC_SIN_ALT_GRAD = 55;
+    static final int OP_ARC_SIN_ALT = 53;
+    static final int OP_ARC_SIN_ALT_DEG = 54;
+    static final int OP_ARC_SIN_ALT_GRAD = 55;
 
-    public static final int OP_ARC_COS_ALT = 56;
-    public static final int OP_ARC_COS_ALT_DEG = 57;
-    public static final int OP_ARC_COS_ALT_GRAD = 58;
+    static final int OP_ARC_COS_ALT = 56;
+    static final int OP_ARC_COS_ALT_DEG = 57;
+    static final int OP_ARC_COS_ALT_GRAD = 58;
 
-    public static final int OP_ARC_TAN_ALT = 59;
-    public static final int OP_ARC_TAN_ALT_DEG = 60;
-    public static final int OP_ARC_TAN_ALT_GRAD = 61;
+    static final int OP_ARC_TAN_ALT = 59;
+    static final int OP_ARC_TAN_ALT_DEG = 60;
+    static final int OP_ARC_TAN_ALT_GRAD = 61;
 
-    public static final int OP_ARC_SEC_ALT = 62;
-    public static final int OP_ARC_SEC_ALT_DEG = 63;
-    public static final int OP_ARC_SEC_ALT_GRAD = 64;
+    static final int OP_ARC_SEC_ALT = 62;
+    static final int OP_ARC_SEC_ALT_DEG = 63;
+    static final int OP_ARC_SEC_ALT_GRAD = 64;
 
-    public static final int OP_ARC_COSEC_ALT = 65;
-    public static final int OP_ARC_COSEC_ALT_DEG = 66;
-    public static final int OP_ARC_COSEC_ALT_GRAD = 67;
+    static final int OP_ARC_COSEC_ALT = 65;
+    static final int OP_ARC_COSEC_ALT_DEG = 66;
+    static final int OP_ARC_COSEC_ALT_GRAD = 67;
 
-    public static final int OP_ARC_COT_ALT = 68;
-    public static final int OP_ARC_COT_ALT_DEG = 69;
-    public static final int OP_ARC_COT_ALT_GRAD = 70;
+    static final int OP_ARC_COT_ALT = 68;
+    static final int OP_ARC_COT_ALT_DEG = 69;
+    static final int OP_ARC_COT_ALT_GRAD = 70;
 
-    private static final int OP_SINH = 71;
-    private static final int OP_COSH = 72;
-    private static final int OP_TANH = 73;
+    static final int OP_SINH = 71;
+    static final int OP_COSH = 72;
+    static final int OP_TANH = 73;
 
-    private static final int OP_ASINH = 74;
-    private static final int OP_ACOSH = 75;
-    private static final int OP_ATANH = 76;
+    static final int OP_ASINH = 74;
+    static final int OP_ACOSH = 75;
+    static final int OP_ATANH = 76;
 
-    private static final int OP_ASINH_ALT = 77;
-    private static final int OP_ACOSH_ALT = 78;
-    private static final int OP_ATANH_ALT = 79;
+    static final int OP_ASINH_ALT = 77;
+    static final int OP_ACOSH_ALT = 78;
+    static final int OP_ATANH_ALT = 79;
 
-    private static final int OP_ABS = 80;
-    private static final int OP_EXP = 81;
-    private static final int OP_SQRT = 82;
-    private static final int OP_CBRT = 83;
-    private static final int OP_LOG = 84;
-    private static final int OP_LOG10 = 85;
-    private static final int OP_VMA = 86;
-    private static final int OP_REM = 87;
-    private static final int OP_IF = 88;
-    private static final int OP_GT = 89;
-    private static final int OP_LT = 90;
-    private static final int OP_EQ = 91;
-    private static final int OP_NE = 92;
-    private static final int OP_GE = 93;
-    private static final int OP_LE = 94;
+    static final int OP_ABS = 80;
+    static final int OP_EXP = 81;
+    static final int OP_SQRT = 82;
+    static final int OP_CBRT = 83;
+    static final int OP_LOG = 84;
+    static final int OP_LOG10 = 85;
+    static final int OP_VMA = 86;
+    static final int OP_REM = 87;
+    static final int OP_IF = 88;
+    static final int OP_GT = 89;
+    static final int OP_LT = 90;
+    static final int OP_EQ = 91;
+    static final int OP_NE = 92;
+    static final int OP_GE = 93;
+    static final int OP_LE = 94;
 
     // Pre-allocated compilation state
-    private final MathExpression.Token[] postfix;
-    private final MethodHandle compiledScalarHandle;
-    private int[] opcodes;
-    private int[] targetSlots;
-    private double[] literalConstants;
-    private int[] argumentCount;
+    protected MathExpression.Token[] postfix;
+    protected final MethodHandle compiledScalarHandle;
+    protected int[] opcodes;
+    protected int[] targetSlots;
+    protected double[] literalConstants;
+    protected int[] argumentCount;
 
-    private int varCount;
-    private int instructionCount;
-    private KernelInterceptException interceptedKernel;
+    protected int varCount;
+    protected int instructionCount;
+    protected KernelInterceptException interceptedKernel;
 
     public VectorTurboEvaluator(MathExpression me) throws Throwable {
         super(me);
@@ -182,7 +181,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         compileToPrimitiveProgram();
     }
 
-private void compileToPrimitiveProgram() {
+    protected final void compileToPrimitiveProgram() {
         int len = postfix.length;
         this.opcodes = new int[len];
         this.targetSlots = new int[len];
@@ -205,147 +204,244 @@ private void compileToPrimitiveProgram() {
                 }
                 case MathExpression.Token.OPERATOR -> {
                     opcodes[instructionCount] = switch (t.opChar) {
-                        case '+' -> OP_ADD;
-                        case '-' -> OP_SUB;
-                        case '*' -> OP_MUL;
-                        case '/' -> OP_DIV;
-                        case '^' -> OP_POW;
-                        case '%' -> OP_REM;
-                        case '>' -> OP_GT;
-                        case '<' -> OP_LT;
-                        default  -> throw new IllegalArgumentException("Unknown operator: " + t.opChar);
+                        case '+' ->
+                            OP_ADD;
+                        case '-' ->
+                            OP_SUB;
+                        case '*' ->
+                            OP_MUL;
+                        case '/' ->
+                            OP_DIV;
+                        case '^' ->
+                            OP_POW;
+                        case '%' ->
+                            OP_REM;
+                        case '>' ->
+                            OP_GT;
+                        case '<' ->
+                            OP_LT;
+                        default ->
+                            throw new IllegalArgumentException("Unknown operator: " + t.opChar);
                     };
                     instructionCount++;
                 }
                 case MathExpression.Token.METHOD -> {
                     argumentCount[instructionCount] = t.arity;
                     String name = t.name.toLowerCase();
-                    
+
                     opcodes[instructionCount] = switch (name) {
                         // Core Math Functions
-                        case "abs"                      -> OP_ABS;
-                        case "exp"                      -> OP_EXP;
-                        case "sqrt"                     -> OP_SQRT;
-                        case "cbrt"                     -> OP_CBRT;
-                        case "log", "ln"                -> OP_LOG;
-                        case "log10", "lg"              -> OP_LOG10;
-                        case "vma", "fma"               -> OP_VMA;
-                        case "rem", "mod"               -> OP_REM;
-                        case "if"                       -> OP_IF;
+                        case "abs" ->
+                            OP_ABS;
+                        case "exp" ->
+                            OP_EXP;
+                        case "sqrt" ->
+                            OP_SQRT;
+                        case "cbrt" ->
+                            OP_CBRT;
+                        case "log", "ln" ->
+                            OP_LOG;
+                        case "log10", "lg" ->
+                            OP_LOG10;
+                        case "vma", "fma" ->
+                            OP_VMA;
+                        case "rem", "mod" ->
+                            OP_REM;
+                        case "if" ->
+                            OP_IF;
 
                         // Relational Word Aliases
-                        case "gt"                       -> OP_GT;
-                        case "lt"                       -> OP_LT;
-                        case "eq"                       -> OP_EQ;
-                        case "ne"                       -> OP_NE;
-                        case "ge"                       -> OP_GE;
-                        case "le"                       -> OP_LE;
+                        case "gt" ->
+                            OP_GT;
+                        case "lt" ->
+                            OP_LT;
+                        case "eq" ->
+                            OP_EQ;
+                        case "ne" ->
+                            OP_NE;
+                        case "ge" ->
+                            OP_GE;
+                        case "le" ->
+                            OP_LE;
 
                         // Standard Trig (Radians)
-                        case "sin", "sin_rad"           -> OP_SIN;
-                        case "cos", "cos_rad"           -> OP_COS;
-                        case "tan", "tan_rad"           -> OP_TAN;
+                        case "sin", "sin_rad" ->
+                            OP_SIN;
+                        case "cos", "cos_rad" ->
+                            OP_COS;
+                        case "tan", "tan_rad" ->
+                            OP_TAN;
 
                         // Standard Trig (Degrees)
-                        case "sin_deg", "sind"          -> OP_SIN_DEG;
-                        case "cos_deg", "cosd"          -> OP_COS_DEG;
-                        case "tan_deg", "tand"          -> OP_TAN_DEG;
+                        case "sin_deg", "sind" ->
+                            OP_SIN_DEG;
+                        case "cos_deg", "cosd" ->
+                            OP_COS_DEG;
+                        case "tan_deg", "tand" ->
+                            OP_TAN_DEG;
 
                         // Standard Trig (Gradians)
-                        case "sin_grad", "sing"         -> OP_SIN_GRAD;
-                        case "cos_grad", "cosg"         -> OP_COS_GRAD;
-                        case "tan_grad", "tang"         -> OP_TAN_GRAD;
+                        case "sin_grad", "sing" ->
+                            OP_SIN_GRAD;
+                        case "cos_grad", "cosg" ->
+                            OP_COS_GRAD;
+                        case "tan_grad", "tang" ->
+                            OP_TAN_GRAD;
 
                         // Inverse Trig (Radians) [e.g., "sin-¹"]
-                        case "sin-¹", "sin-¹_rad", "arcsin" -> OP_ASIN;
-                        case "cos-¹", "cos-¹_rad", "arccos" -> OP_ACOS;
-                        case "tan-¹", "tan-¹_rad", "arctan" -> OP_ATAN;
+                        case "sin-¹", "sin-¹_rad", "arcsin" ->
+                            OP_ASIN;
+                        case "cos-¹", "cos-¹_rad", "arccos" ->
+                            OP_ACOS;
+                        case "tan-¹", "tan-¹_rad", "arctan" ->
+                            OP_ATAN;
 
                         // Inverse Trig (Degrees)
-                        case "sin-¹_deg", "arcsin_deg"  -> OP_ASIN_DEG;
-                        case "cos-¹_deg", "arccos_deg"  -> OP_ACOS_DEG;
-                        case "tan-¹_deg", "arctan_deg"  -> OP_ATAN_DEG;
+                        case "sin-¹_deg", "arcsin_deg" ->
+                            OP_ASIN_DEG;
+                        case "cos-¹_deg", "arccos_deg" ->
+                            OP_ACOS_DEG;
+                        case "tan-¹_deg", "arctan_deg" ->
+                            OP_ATAN_DEG;
 
                         // Inverse Trig (Gradians)
-                        case "sin-¹_grad", "arcsin_grad"-> OP_ASIN_GRAD;
-                        case "cos-¹_grad", "arccos_grad"-> OP_ACOS_GRAD;
-                        case "tan-¹_grad", "arctan_grad"-> OP_ATAN_GRAD;
+                        case "sin-¹_grad", "arcsin_grad" ->
+                            OP_ASIN_GRAD;
+                        case "cos-¹_grad", "arccos_grad" ->
+                            OP_ACOS_GRAD;
+                        case "tan-¹_grad", "arctan_grad" ->
+                            OP_ATAN_GRAD;
 
                         // Inverse Trig Alt (Short Prefix "asin" Form) - Radians
-                        case "asin", "asin_rad"         -> OP_ASIN_ALT;
-                        case "acos", "acos_rad"         -> OP_ACOS_ALT;
-                        case "atan", "atan_rad"         -> OP_ATAN_ALT;
+                        case "asin", "asin_rad" ->
+                            OP_ASIN_ALT;
+                        case "acos", "acos_rad" ->
+                            OP_ACOS_ALT;
+                        case "atan", "atan_rad" ->
+                            OP_ATAN_ALT;
 
                         // Inverse Trig Alt (Short Prefix) - Degrees
-                        case "asin_deg", "asind"        -> OP_ASIN_DEG_ALT;
-                        case "acos_deg", "acosd"        -> OP_ACOS_DEG_ALT;
-                        case "atan_deg", "atand"        -> OP_ATAN_DEG_ALT;
+                        case "asin_deg", "asind" ->
+                            OP_ASIN_DEG_ALT;
+                        case "acos_deg", "acosd" ->
+                            OP_ACOS_DEG_ALT;
+                        case "atan_deg", "atand" ->
+                            OP_ATAN_DEG_ALT;
 
                         // Inverse Trig Alt (Short Prefix) - Gradians
-                        case "asin_grad", "asing"       -> OP_ASIN_GRAD_ALT;
-                        case "acos_grad", "acosg"        -> OP_ACOS_GRAD_ALT;
-                        case "atan_grad", "atang"        -> OP_ATAN_GRAD_ALT;
+                        case "asin_grad", "asing" ->
+                            OP_ASIN_GRAD_ALT;
+                        case "acos_grad", "acosg" ->
+                            OP_ACOS_GRAD_ALT;
+                        case "atan_grad", "atang" ->
+                            OP_ATAN_GRAD_ALT;
 
                         // Reciprocal Trig (Secant, Cosecant, Cotangent)
-                        case "sec", "sec_rad"           -> OP_SEC;
-                        case "sec_deg", "secd"          -> OP_SEC_DEG;
-                        case "sec_grad"                 -> OP_SEC_GRAD;
-                        case "cosec", "csc", "csc_rad"  -> OP_COSEC;
-                        case "cosec_deg", "cscd"        -> OP_COSEC_DEG;
-                        case "cosec_grad"               -> OP_COSEC_GRAD;
-                        case "cot", "cot_rad"           -> OP_COT;
-                        case "cot_deg", "cotd"          -> OP_COT_DEG;
-                        case "cot_grad"                 -> OP_COT_GRAD;
+                        case "sec", "sec_rad" ->
+                            OP_SEC;
+                        case "sec_deg", "secd" ->
+                            OP_SEC_DEG;
+                        case "sec_grad" ->
+                            OP_SEC_GRAD;
+                        case "cosec", "csc", "csc_rad" ->
+                            OP_COSEC;
+                        case "cosec_deg", "cscd" ->
+                            OP_COSEC_DEG;
+                        case "cosec_grad" ->
+                            OP_COSEC_GRAD;
+                        case "cot", "cot_rad" ->
+                            OP_COT;
+                        case "cot_deg", "cotd" ->
+                            OP_COT_DEG;
+                        case "cot_grad" ->
+                            OP_COT_GRAD;
 
                         // Inverse Reciprocal Trig (Standard Form)
-                        case "sec-¹", "sec-¹_rad", "arcsec"   -> OP_ARC_SEC;
-                        case "sec-¹_deg", "arcsec_deg"        -> OP_ARC_SEC_DEG;
-                        case "sec-¹_grad", "arcsec_grad"      -> OP_ARC_SEC_GRAD;
-                        case "csc-¹", "csc-¹_rad", "arccsc"   -> OP_ARC_COSEC;
-                        case "csc-¹_deg", "arccsc_deg"        -> OP_ARC_COSEC_DEG;
-                        case "csc-¹_grad", "arccsc_grad"      -> OP_ARC_COSEC_GRAD;
-                        case "cot-¹", "cot-¹_rad", "arccot"   -> OP_ARC_COT;
-                        case "cot-¹_deg", "arccot_deg"        -> OP_ARC_COT_DEG;
-                        case "cot-¹_grad", "arccot_grad"      -> OP_ARC_COT_GRAD;
+                        case "sec-¹", "sec-¹_rad", "arcsec" ->
+                            OP_ARC_SEC;
+                        case "sec-¹_deg", "arcsec_deg" ->
+                            OP_ARC_SEC_DEG;
+                        case "sec-¹_grad", "arcsec_grad" ->
+                            OP_ARC_SEC_GRAD;
+                        case "csc-¹", "csc-¹_rad", "arccsc" ->
+                            OP_ARC_COSEC;
+                        case "csc-¹_deg", "arccsc_deg" ->
+                            OP_ARC_COSEC_DEG;
+                        case "csc-¹_grad", "arccsc_grad" ->
+                            OP_ARC_COSEC_GRAD;
+                        case "cot-¹", "cot-¹_rad", "arccot" ->
+                            OP_ARC_COT;
+                        case "cot-¹_deg", "arccot_deg" ->
+                            OP_ARC_COT_DEG;
+                        case "cot-¹_grad", "arccot_grad" ->
+                            OP_ARC_COT_GRAD;
 
                         // Inverse Trig Explicit Alt Chains (Opcodes 53 - 61)
-                        case "arc_sin_alt"              -> OP_ARC_SIN_ALT;
-                        case "arc_sin_alt_deg"          -> OP_ARC_SIN_ALT_DEG;
-                        case "arc_sin_alt_grad"         -> OP_ARC_SIN_ALT_GRAD;
-                        case "arc_cos_alt"              -> OP_ARC_COS_ALT;
-                        case "arc_cos_alt_deg"          -> OP_ARC_COS_ALT_DEG;
-                        case "arc_cos_alt_grad"         -> OP_ARC_COS_ALT_GRAD;
-                        case "arc_tan_alt"              -> OP_ARC_TAN_ALT;
-                        case "arc_tan_alt_deg"          -> OP_ARC_TAN_ALT_DEG;
-                        case "arc_tan_alt_grad"         -> OP_ARC_TAN_ALT_GRAD;
+                        case "arc_sin_alt" ->
+                            OP_ARC_SIN_ALT;
+                        case "arc_sin_alt_deg" ->
+                            OP_ARC_SIN_ALT_DEG;
+                        case "arc_sin_alt_grad" ->
+                            OP_ARC_SIN_ALT_GRAD;
+                        case "arc_cos_alt" ->
+                            OP_ARC_COS_ALT;
+                        case "arc_cos_alt_deg" ->
+                            OP_ARC_COS_ALT_DEG;
+                        case "arc_cos_alt_grad" ->
+                            OP_ARC_COS_ALT_GRAD;
+                        case "arc_tan_alt" ->
+                            OP_ARC_TAN_ALT;
+                        case "arc_tan_alt_deg" ->
+                            OP_ARC_TAN_ALT_DEG;
+                        case "arc_tan_alt_grad" ->
+                            OP_ARC_TAN_ALT_GRAD;
 
                         // Inverse Reciprocal Explicit Alt Chains (Opcodes 62 - 70)
-                        case "asec", "asec_rad", "arc_sec_alt"           -> OP_ARC_SEC_ALT;
-                        case "asec_deg", "arc_sec_alt_deg"               -> OP_ARC_SEC_ALT_DEG;
-                        case "asec_grad", "arc_sec_alt_grad"             -> OP_ARC_SEC_ALT_GRAD;
-                        case "acsc", "acsc_rad", "arc_cosec_alt"         -> OP_ARC_COSEC_ALT;
-                        case "acsc_deg", "arc_cosec_alt_deg"             -> OP_ARC_COSEC_ALT_DEG;
-                        case "acsc_grad", "arc_cosec_alt_grad"           -> OP_ARC_COSEC_ALT_GRAD;
-                        case "acot", "acot_rad", "arc_cot_alt"           -> OP_ARC_COT_ALT;
-                        case "acot_deg", "arc_cot_alt_deg"               -> OP_ARC_COT_ALT_DEG;
-                        case "acot_grad", "arc_cot_alt_grad"             -> OP_ARC_COT_GRAD;
+                        case "asec", "asec_rad", "arc_sec_alt" ->
+                            OP_ARC_SEC_ALT;
+                        case "asec_deg", "arc_sec_alt_deg" ->
+                            OP_ARC_SEC_ALT_DEG;
+                        case "asec_grad", "arc_sec_alt_grad" ->
+                            OP_ARC_SEC_ALT_GRAD;
+                        case "acsc", "acsc_rad", "arc_cosec_alt" ->
+                            OP_ARC_COSEC_ALT;
+                        case "acsc_deg", "arc_cosec_alt_deg" ->
+                            OP_ARC_COSEC_ALT_DEG;
+                        case "acsc_grad", "arc_cosec_alt_grad" ->
+                            OP_ARC_COSEC_ALT_GRAD;
+                        case "acot", "acot_rad", "arc_cot_alt" ->
+                            OP_ARC_COT_ALT;
+                        case "acot_deg", "arc_cot_alt_deg" ->
+                            OP_ARC_COT_ALT_DEG;
+                        case "acot_grad", "arc_cot_alt_grad" ->
+                            OP_ARC_COT_GRAD;
 
                         // Hyperbolic Functions
-                        case "sinh"                     -> OP_SINH;
-                        case "cosh"                     -> OP_COSH;
-                        case "tanh"                     -> OP_TANH;
-                        
-                        // Hyperbolic Inverses (Standard Form)
-                        case "sinh-¹", "arcsinh"        -> OP_ASINH;
-                        case "cosh-¹", "arccosh"        -> OP_ACOSH;
-                        case "tanh-¹", "arctanh"        -> OP_ATANH;
-                        
-                        // Hyperbolic Inverses (Alt Short Prefix Form)
-                        case "asinh"                    -> OP_ASINH_ALT;
-                        case "acosh"                    -> OP_ACOSH_ALT;
-                        case "atanh"                    -> OP_ATANH_ALT;
+                        case "sinh" ->
+                            OP_SINH;
+                        case "cosh" ->
+                            OP_COSH;
+                        case "tanh" ->
+                            OP_TANH;
 
-                        default -> throw new IllegalArgumentException("Unknown function: " + t.name);
+                        // Hyperbolic Inverses (Standard Form)
+                        case "sinh-¹", "arcsinh" ->
+                            OP_ASINH;
+                        case "cosh-¹", "arccosh" ->
+                            OP_ACOSH;
+                        case "tanh-¹", "arctanh" ->
+                            OP_ATANH;
+
+                        // Hyperbolic Inverses (Alt Short Prefix Form)
+                        case "asinh" ->
+                            OP_ASINH_ALT;
+                        case "acosh" ->
+                            OP_ACOSH_ALT;
+                        case "atanh" ->
+                            OP_ATANH_ALT;
+
+                        default ->
+                            throw new IllegalArgumentException("Unknown function: " + t.name);
                     };
                     instructionCount++;
                 }
@@ -357,6 +453,7 @@ private void compileToPrimitiveProgram() {
         this.literalConstants = Arrays.copyOf(literalConstants, instructionCount);
         this.argumentCount = Arrays.copyOf(argumentCount, instructionCount);
     }
+
     public int getVarCount() {
         return varCount;
     }
@@ -367,13 +464,11 @@ private void compileToPrimitiveProgram() {
                 literalConstants, instructionCount, varCount);
     }
 
-    public final class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
-
-        private static final int L2_TILE_SIZE = 512;
-        private static final int MAX_STACK_DEPTH = 64;
+    public class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
 
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
-        private static final int BLOCK_SIZE = L2_TILE_SIZE;
+        protected static final int BLOCK_SIZE = 512;
+        protected static final int MAX_STACK_DEPTH = 64;
 
         private final MethodHandle scalarHandle;
         private final int[] opcodes;
@@ -384,23 +479,27 @@ private void compileToPrimitiveProgram() {
 
         ////NEW FIELDS
         // --- ZERO-ALLOCATION MULTI-THREADING SUBSYSTEM ---
-    private static final int STATE_IDLE = 0;
-        private static final int STATE_RUNNING = 1;
-        private static final int STATE_FINISHED = 2;
+        protected static final int STATE_IDLE = 0;
+        protected static final int STATE_RUNNING = 1;
+        protected static final int STATE_FINISHED = 2;
 
-        private int cores;
-        private final WorkerThread[] workers;
+        protected int cores;
+        protected WorkerThread[] workers;
 
         // Volatile transfer registers (allows zero-heap overhead parameter passing)
-        private volatile Thread masterThread;
-        private volatile double[] currentFlatVars;
-        private volatile double[] currentOutput;
-        private volatile int currentDataSize;
-        private volatile boolean currentTiled;
+        protected volatile Thread masterThread;
+        protected volatile double[] currentFlatVars;
+        protected volatile double[] currentOutput;
+        protected volatile int currentDataSize;
+        protected volatile boolean currentTiled;
 
-        // Allocates a perfectly flat, contiguous scratch block (64 nested stack frames * 2048 block size)
-        private static final ThreadLocal<double[]> FLAT_SCRATCH_STACK = ThreadLocal.withInitial(()
-                -> new double[MAX_STACK_DEPTH * L2_TILE_SIZE]
+        /**
+         * Zero-allocation thread pools for internal interpretation layers
+         * Allocates a perfectly flat, contiguous scratch block (64 nested stack
+         * frames * 2048 block size)
+         */
+        protected static final ThreadLocal<double[]> FLAT_SCRATCH_STACK = ThreadLocal.withInitial(()
+                -> new double[MAX_STACK_DEPTH * BLOCK_SIZE]
         );
 
         public int[] getOpcodes() {
@@ -462,7 +561,7 @@ private void compileToPrimitiveProgram() {
          * Private encapsulated Inner Class to handle the raw CPU-bound math
          * slices
          */
-        private class WorkerThread extends Thread {
+        protected class WorkerThread extends Thread {
 
             private final int workerId;
             volatile int state = STATE_IDLE;
@@ -502,21 +601,37 @@ private void compileToPrimitiveProgram() {
             }
         }
 
+        protected void checkError(double[][] variables, double[] output) {
+             int numSamples = variables!=null && variables.length>0&&output!=null&&output.length>0 ? variables[0].length : -1;
+            int stride = this.varCount;
+            if (stride != variables.length || numSamples != output.length) {
+                throw new IllegalStateException(String.format("varCount mismatch[stride=%d, variables-count-from-input=%d] || array sizes not correct(elements-per-variable=%d vs output-array-size=%d)", stride,variables.length, numSamples,output.length));
+            }
+        }
+
+        protected void checkError(double[] flatVariables, double[] output) {
+            int totalSamples = flatVariables!=null && flatVariables.length>0&&output!=null&&output.length>0 ? flatVariables.length : -1;
+            int stride = this.varCount;
+            if (totalSamples != stride*output.length) {
+                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]", 
+                        totalSamples,stride*output.length));
+            }
+  
+        }
+
         //////////////////////////////////////////////////////////////////
         ///                                                            ///
-        ///          Uses double[][] Arrays For Conveninience          ///
+        ///          Uses double[][] Arrays For Convenience          ///
         ///         Speed may drop by as much as 4ns                   ///
         ///                                                            ///
         //////////////////////////////////////////////////////////////////
         
         @Override
-        public void applyBulk(double[][] variables, double[] output, boolean tiledExecution) {
-
+        public void applyBulk(double[][] variables, double[] output, boolean useBlocks) {
+            checkError(variables, output);
             int numSamples = variables[0].length;
             int stride = this.varCount;
-            if (stride != variables.length) {
-                throw new IllegalStateException("varCount mismatch");
-            }
+
             // Rent buffer. Don't zero it. We overwrite all of it.
             // 
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
@@ -524,33 +639,15 @@ private void compileToPrimitiveProgram() {
                 System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
             }
             // FIX: Pass dataSize explicitly. Don't let applyBulk guess from flatVariables.length
-            applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, tiledExecution);
+            applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, useBlocks);
         }
 
+    
         @Override
-        public void applyBulk(double[][] variables, double[] output, int offset, boolean tiledExecution) {
-            int dataSize = variables[0].length;
-            int stride = this.varCount;
-
-            // 1. Rent the reusable flat buffer (ZERO allocation after loop warmup)
-            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * dataSize);
-            // 2. Stream user columns into the flat layout
-            for (int i = 0; i < stride; i++) {
-                System.arraycopy(variables[i], 0, flatVariables, i * dataSize, dataSize);
-            }
-
-            // FIX: Pass dataSize explicitly. Don't let applyBulk guess from flatVariables.length
-            applyBulkInternal(flatVariables, dataSize, output, offset, dataSize, tiledExecution);
-        }
-
-        @Override
-        public void applyBulk(double[][] variables, double[] output, boolean tiledExecution, boolean useWorkers) {
-            if (variables == null || variables.length == 0 || output == null) {
-                return;
-            }
-
+        public void applyBulk(double[][] variables, double[] output, boolean useBlocks, boolean useWorkers) {
+            checkError(variables, output);
             if (!useWorkers) {
-                applyBulk(variables, output, tiledExecution);
+                applyBulk(variables, output, useBlocks);
             }
 
             final int numSamples = variables[0].length;
@@ -566,24 +663,24 @@ private void compileToPrimitiveProgram() {
 
             // Sequential bypass for small workloads
             if (numSamples < 2048) {
-                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, tiledExecution);
+                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, useBlocks);
                 return;
             }
 
             // Coordinate via the EXACT SAME zero-alloc threading subsystem
-            dispatchToWorkerRing(flatVariables, output, numSamples, tiledExecution);
+            dispatchToWorkerRing(flatVariables, output, numSamples, useBlocks);
         }
 
         /**
          * Centralized coordination mechanism to eliminate code duplication
          */
-        private void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize, boolean tiledExecution) {
+        protected void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize, boolean useBlocks) {
             // 1. Publish parameters to volatile registers (No allocations)
             this.masterThread = Thread.currentThread();
             this.currentFlatVars = flatVariables;
             this.currentOutput = output;
             this.currentDataSize = dataSize;
-            this.currentTiled = tiledExecution;
+            this.currentTiled = useBlocks;
 
             // 2. Wake up the pre-allocated worker threads via OS permits
             for (int i = 0; i < cores; i++) {
@@ -607,7 +704,8 @@ private void compileToPrimitiveProgram() {
         }
 
         @Override
-        public void applyBulkBatched(double[][] variables, double[] output, int batchSize, boolean tiledExecution) {
+        public void applyBulkBatched(double[][] variables, double[] output, int batchSize, boolean useBlocks) {
+            checkError(variables, output);
             int dataSize = variables[0].length;
             int stride = this.varCount;
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * dataSize);
@@ -617,7 +715,7 @@ private void compileToPrimitiveProgram() {
             // FIX: Don't delegate to flat overload. Loop here.
             for (int start = 0; start < dataSize; start += batchSize) {
                 int length = Math.min(batchSize, dataSize - start);
-                applyBulkInternal(flatVariables, dataSize, output, start, length, tiledExecution);
+                applyBulkInternal(flatVariables, dataSize, output, start, length, useBlocks);
             }
         }
 
@@ -641,11 +739,9 @@ private void compileToPrimitiveProgram() {
          * @param dataSize The total number of elements per variable row (used
          * for stride offset).
          */
-        private void applyBulkInternalWithTiles(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
+        private void applyBulkInternalWithBlocks(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
             // Top-level API boundary validations (executed once per pipeline request)
-            if (flatVariables == null || flatVariables.length == 0 || length <= 0) {
-                return;
-            }
+        
 
             if (dataSize * this.varCount > flatVariables.length) {
                 throw new IllegalArgumentException("flatVariables too small: need " + (dataSize * varCount) + " got " + flatVariables.length);
@@ -653,14 +749,14 @@ private void compileToPrimitiveProgram() {
 
             final double[] scratch = FLAT_SCRATCH_STACK.get();
             // 1. SHORT-CIRCUIT: Small datasets bypass tiling infrastructure entirely
-            if (length <= L2_TILE_SIZE) {
-                evaluateTile(flatVariables, dataSize, output, startIdx, startIdx, length, scratch);
+            if (length <= BLOCK_SIZE) {
+                evaluateTile(flatVariables, dataSize, output, startIdx, startIdx, true, length, scratch);
             } // 2. TILING STRATEGY: Process large datasets in cache-aligned blocks
             else {
                 final int endIdx = startIdx + length;
-                for (int tileStart = startIdx; tileStart < endIdx; tileStart += L2_TILE_SIZE) {
-                    final int currentTileSize = Math.min(L2_TILE_SIZE, endIdx - tileStart);
-                    evaluateTile(flatVariables, dataSize, output, startIdx, tileStart, currentTileSize, scratch);
+                for (int tileStart = startIdx; tileStart < endIdx; tileStart += BLOCK_SIZE) {
+                    final int currentTileSize = Math.min(BLOCK_SIZE, endIdx - tileStart);
+                    evaluateTile(flatVariables, dataSize, output, startIdx, tileStart, (tileStart == startIdx), currentTileSize, scratch);
                 }
             }
         }
@@ -675,34 +771,19 @@ private void compileToPrimitiveProgram() {
          * @param dataSize The total number of elements per variable row (used
          * for stride offset).
          */
-        private void applyBulkInternalNoTiles(double[] flatVariables, int dataSize, double[] output,
+        private void applyBulkInternalNoBlocks(double[] flatVariables, int dataSize, double[] output,
                 int startIdx, int length) {
-            if (flatVariables == null || flatVariables.length == 0 || length <= 0) {
-                return;
-            }
-
-            if (dataSize * this.varCount > flatVariables.length) {
-                throw new IllegalArgumentException("flatVariables too small: need " + (dataSize * varCount) + " got " + flatVariables.length);
-            }
             // Retrieve the completely flat contiguous scratch space for maximum CPU cache prefetching
             final double[] scratch = FLAT_SCRATCH_STACK.get();
-            final int endIdx = startIdx + length;
 
-            // Step 1: Chunk operations into L1/L2 cache-friendly blocks
-            for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
-                final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
-                int start = blockStart - startIdx;
-                // Step 2: Traverse opcodes sequentially across the current data chunk
-
-                evaluateBlock(flatVariables,
-                        dataSize,
-                        output,
-                        startIdx,
-                        start,
-                        currentBlockSize,
-                        scratch);
-
-            }
+            evaluateTile(flatVariables,
+                    dataSize,
+                    output,
+                    startIdx,
+                    0,
+                    true,
+                    dataSize,
+                    scratch);
         }
 
         /**
@@ -711,9 +792,9 @@ private void compileToPrimitiveProgram() {
          * inherent to jagged multidimensional arrays (e.g., {@code double[][]})
          * to execute loops at maximum hardware throughput.
          * <p>
-         * Based on the {@code tiled} execution parameter, this method delegates
-         * to either a cache-conscious tiled implementation or a direct flat
-         * streaming evaluation strategy.
+         * Based on the {@code useBlocks} execution parameter, this method
+         * delegates to either a cache-conscious useBlocks implementation or a
+         * direct flat streaming evaluation strategy.
          * </p>
          *
          * @param flatVariables a contiguous, single-dimensional array
@@ -728,9 +809,9 @@ private void compileToPrimitiveProgram() {
          * processing slice begins
          * @param length the absolute number of elements to process within this
          * batch window
-         * @param tiled {@code true} if execution should be routed through a
-         * tiled memory pattern optimized for L1/L2 cache locality;
-         * {@code false} for flat, non-tiled bulk processing
+         * @param useBlocks {@code true} if execution should be routed through a
+         * useBlocks memory pattern optimized for L1/L2 cache locality;
+         * {@code false} for flat, non-useBlocks bulk processing
          *
          * If you are processing a total dataset of 1,000,000 elements (dataSize
          * = 1000000), but a specific thread or tile is only processing a chunk
@@ -744,11 +825,11 @@ private void compileToPrimitiveProgram() {
          * from each variable segment in the input, compute them, and write them
          * into indices 200,000 through 200,499 of the output array."
          */
-        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length, boolean tiled) {
-            if (tiled) {
-                applyBulkInternalWithTiles(flatVariables, dataSize, output, startIdx, length);
+        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length, boolean useBlocks) {
+            if (useBlocks) {
+                applyBulkInternalWithBlocks(flatVariables, dataSize, output, startIdx, length);
             } else {
-                applyBulkInternalNoTiles(flatVariables, dataSize, output, startIdx, length);
+                applyBulkInternalNoBlocks(flatVariables, dataSize, output, startIdx, length);
             }
         }
 
@@ -758,20 +839,21 @@ private void compileToPrimitiveProgram() {
          * @param dataSize
          * @param output
          * @param startIdx
-         * @param blockStart
+         * @param tileStart
          * @param currentTileSize
          * @param scratch
          */
-        // @jdk.internal.vm.annotation.ForceInline
-        private void evaluateBlock(double[] flatVariables,
+        //@jdk.internal.vm.annotation.ForceInline
+        private void evaluateTile(double[] flatVariables,
                 int dataSize,
                 double[] output,
                 int startIdx,
-                int blockStart,
+                int tileStart,
+                boolean firstTile,
                 int currentTileSize,
                 double[] scratch) {
 
-            final int n = currentTileSize; // C2 unroll hint
+            final int n = currentTileSize; // hoist for C2 unroll
             int sp = 0;
 
             for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
@@ -792,8 +874,8 @@ private void compileToPrimitiveProgram() {
                         final int slotIdx = targetSlots[instIdx];
                         final int stackOffset = sp * BLOCK_SIZE;
                         sp++;
+                        final int flatOffset = (slotIdx * dataSize) + tileStart;
 
-                        final int flatOffset = (slotIdx * dataSize) + blockStart;
                         System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, n);
                     }
 
@@ -858,7 +940,7 @@ private void compileToPrimitiveProgram() {
                         sp++;
 
                         for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = Math.pow(scratch[lOffset + k], scratch[rOffset + k]);
+                            scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
                         }
                     }
 
@@ -897,25 +979,19 @@ private void compileToPrimitiveProgram() {
                         }
                     }
 
-                    case OP_ASIN -> {
+                    case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT -> {
                         final int base = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.asin(scratch[base + k]);
-                        }
+                        MethodSack.asinRad(base, n, scratch);
                     }
 
-                    case OP_ACOS -> {
+                    case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT -> {
                         final int base = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.acos(scratch[base + k]);
-                        }
+                        MethodSack.acosRad(base, n, scratch);
                     }
 
-                    case OP_ATAN -> {
+                    case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT -> {
                         final int base = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.atan(scratch[base + k]);
-                        }
+                        MethodSack.atanRad(base, n, scratch);
                     }
 
                     case OP_SINH -> {
@@ -981,6 +1057,7 @@ private void compileToPrimitiveProgram() {
                         }
                     }
 
+                    // Comparisons
                     case OP_GT -> {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
@@ -988,7 +1065,6 @@ private void compileToPrimitiveProgram() {
                         final int rOffset = base + BLOCK_SIZE;
                         final int resOffset = base;
                         sp++;
-
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] > scratch[rOffset + k] ? 1.0 : 0.0;
                         }
@@ -1001,7 +1077,6 @@ private void compileToPrimitiveProgram() {
                         final int rOffset = base + BLOCK_SIZE;
                         final int resOffset = base;
                         sp++;
-
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] < scratch[rOffset + k] ? 1.0 : 0.0;
                         }
@@ -1014,7 +1089,6 @@ private void compileToPrimitiveProgram() {
                         final int rOffset = base + BLOCK_SIZE;
                         final int resOffset = base;
                         sp++;
-
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] == scratch[rOffset + k] ? 1.0 : 0.0;
                         }
@@ -1027,7 +1101,6 @@ private void compileToPrimitiveProgram() {
                         final int rOffset = base + BLOCK_SIZE;
                         final int resOffset = base;
                         sp++;
-
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] != scratch[rOffset + k] ? 1.0 : 0.0;
                         }
@@ -1040,7 +1113,6 @@ private void compileToPrimitiveProgram() {
                         final int rOffset = base + BLOCK_SIZE;
                         final int resOffset = base;
                         sp++;
-
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] >= scratch[rOffset + k] ? 1.0 : 0.0;
                         }
@@ -1053,13 +1125,11 @@ private void compileToPrimitiveProgram() {
                         final int rOffset = base + BLOCK_SIZE;
                         final int resOffset = base;
                         sp++;
-
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] <= scratch[rOffset + k] ? 1.0 : 0.0;
                         }
                     }
 
-                    // Manual FMA - ART has no HW FMA intrinsic
                     case OP_VMA -> {
                         sp -= 3;
                         final int base = sp * BLOCK_SIZE;
@@ -1068,7 +1138,6 @@ private void compileToPrimitiveProgram() {
                         final int cOffset = base + (2 * BLOCK_SIZE);
                         final int resOffset = base;
                         sp++;
-
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[aOffset + k] * scratch[bOffset + k] + scratch[cOffset + k];
                         }
@@ -1082,354 +1151,86 @@ private void compileToPrimitiveProgram() {
                         final int falseOffset = base + (2 * BLOCK_SIZE);
                         final int resOffset = base;
                         sp++;
-
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = (scratch[condOffset + k] != 0.0) ? scratch[trueOffset + k] : scratch[falseOffset + k];
                         }
                     }
 
-                    default ->
-                        throw new UnsupportedOperationException("Unknown opcode: " + opcode);
-                }
-            }
+                    // --- NEW DEGREE / GRADIAN TRIG VARIANTS ---
+                    case OP_SIN_DEG ->
+                        MethodSack.sinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COS_DEG ->
+                        MethodSack.cosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_TAN_DEG ->
+                        MethodSack.tanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_SIN_GRAD ->
+                        MethodSack.sinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COS_GRAD ->
+                        MethodSack.cosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_TAN_GRAD ->
+                        MethodSack.tanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
 
-            System.arraycopy(scratch, 0, output, blockStart, n);
-        }
+                    // --- NEW INVERSE DEGREE / GRADIAN VARIANTS ---
+                    case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG ->
+                        MethodSack.asinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG ->
+                        MethodSack.acosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG ->
+                        MethodSack.atanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD ->
+                        MethodSack.asinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD ->
+                        MethodSack.acosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD ->
+                        MethodSack.atanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
 
-        private void evaluateTile(double[] flatVariables,
-                int dataSize,
-                double[] output,
-                int startIdx,
-                int tileStart,
-                int currentTileSize,
-                double[] scratch) {
+                    // --- NEW RECIPROCAL TRIG (SEC, CSC, COT) VARIANTS ---
+                    case OP_SEC ->
+                        MethodSack.sec((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_SEC_DEG ->
+                        MethodSack.secDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_SEC_GRAD ->
+                        MethodSack.secGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COSEC ->
+                        MethodSack.csc((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COSEC_DEG ->
+                        MethodSack.cscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COSEC_GRAD ->
+                        MethodSack.cscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COT ->
+                        MethodSack.cot((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COT_DEG ->
+                        MethodSack.cotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COT_GRAD ->
+                        MethodSack.cotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
 
-            final int n = currentTileSize; // hoist for C2 unroll
-            int sp = 0;
+                    // --- NEW INVERSE RECIPROCAL TRIG VARIANTS ---
+                    case OP_ARC_SEC, OP_ARC_SEC_ALT ->
+                        MethodSack.asec((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG ->
+                        MethodSack.asecDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD ->
+                        MethodSack.asecGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COSEC, OP_ARC_COSEC_ALT ->
+                        MethodSack.acsc((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG ->
+                        MethodSack.acscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD ->
+                        MethodSack.acscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COT, OP_ARC_COT_ALT ->
+                        MethodSack.acot((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG ->
+                        MethodSack.acotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD ->
+                        MethodSack.acotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
 
-            for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
-                final int opcode = opcodes[instIdx];
-
-                switch (opcode) {
-                    case OP_CONST -> {
-                        final double val = literalConstants[instIdx];
-                        final int stackOffset = sp * L2_TILE_SIZE;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[stackOffset + k] = val;
-                        }
-                    }
-
-                    case OP_LOAD -> {
-                        final int slotIdx = targetSlots[instIdx];
-                        final int stackOffset = sp * L2_TILE_SIZE;
-                        sp++;
-
-                        final int flatOffset = (slotIdx * dataSize) + tileStart;
-                        System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, n);
-                    }
-
-                    case OP_ADD -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] + scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_SUB -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] - scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_MUL -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] * scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_DIV -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] / scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_POW -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = Math.pow(scratch[lOffset + k], scratch[rOffset + k]);
-                        }
-                    }
-
-                    case OP_REM -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] % scratch[rOffset + k];
-                        }
-                    }
-
-                    // Unary ops - in-place, no sp shuffle
-                    case OP_SIN -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.sin(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_COS -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.cos(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_TAN -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.tan(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_ASIN -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.asin(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_ACOS -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.acos(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_ATAN -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.atan(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_SINH -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.sinh(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_COSH -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.cosh(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_TANH -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.tanh(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_ABS -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.abs(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_EXP -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.exp(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_SQRT -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.sqrt(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_CBRT -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.cbrt(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_LOG -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.log(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_LOG10 -> {
-                        final int base = (sp - 1) * L2_TILE_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[base + k] = Math.log10(scratch[base + k]);
-                        }
-                    }
-
-                    // Comparisons - ternary kills vectorization but keep for correctness first
-                    case OP_GT -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] > scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_LT -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] < scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_EQ -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] == scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_NE -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] != scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_GE -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] >= scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_LE -> {
-                        sp -= 2;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + L2_TILE_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] <= scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    // VMA: manual fma - ART has no HW FMA intrinsic
-                    case OP_VMA -> {
-                        sp -= 3;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int aOffset = base;
-                        final int bOffset = base + L2_TILE_SIZE;
-                        final int cOffset = base + (2 * L2_TILE_SIZE);
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[aOffset + k] * scratch[bOffset + k] + scratch[cOffset + k];
-                        }
-                    }
-
-                    case OP_IF -> {
-                        sp -= 3;
-                        final int base = sp * L2_TILE_SIZE;
-                        final int condOffset = base;
-                        final int trueOffset = base + L2_TILE_SIZE;
-                        final int falseOffset = base + (2 * L2_TILE_SIZE);
-                        final int resOffset = base;
-                        sp++;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = (scratch[condOffset + k] != 0.0) ? scratch[trueOffset + k] : scratch[falseOffset + k];
-                        }
-                    }
-
-                    /*case OP_SUM -> {
-                        final int num = argumentCount[instIdx];
-                        sp -= num;
-                        final int base = sp * BLOCK_SIZE;
-                        sp++;
-                        final int tileN = currentTileSize;
-
-                    }*/
+                    // --- NEW HYPERBOLIC INVERSES ---
+                    case OP_ASINH, OP_ASINH_ALT ->
+                        MethodSack.asinh((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ACOSH, OP_ACOSH_ALT ->
+                        MethodSack.acosh((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ATANH, OP_ATANH_ALT ->
+                        MethodSack.atanh((sp - 1) * BLOCK_SIZE, n, scratch);
 
                     default ->
                         throw new UnsupportedOperationException("Unknown opcode: " + opcode);
@@ -1443,63 +1244,47 @@ private void compileToPrimitiveProgram() {
          * OVERLOAD 1: Flat 1D Array Input (Guaranteed 0 B/op)
          */
         @Override
-        public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution, boolean useWorkers) {
-            if (output == null) {
-                return;
-            }
+        public void applyBulk(double[] flatVariables, double[] output, boolean useBlocks, boolean useWorkers) {
+            checkError(flatVariables, output);
 
             final int length = output.length;
 
-            if (flatVariables.length < this.varCount * length) {
-                throw new IllegalArgumentException("flatVariables too small: need " + (this.varCount * length));
-            }
-
             if (length < 2048) {
-                applyBulkInternal(flatVariables, length, output, 0, length, tiledExecution);
+                applyBulkInternal(flatVariables, length, output, 0, length, useBlocks);
                 return;
             }
             if (!useWorkers) {
-                applyBulk(flatVariables, output, tiledExecution);
+                applyBulk(flatVariables, output, useBlocks);
             }
 
             // Coordinate via the zero-alloc threading subsystem
-            dispatchToWorkerRing(flatVariables, output, length, tiledExecution);
+            dispatchToWorkerRing(flatVariables, output, length, useBlocks);
         }
 
         @Override
-        public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize, boolean tiledExecution) {
-            if (output == null || batchSize <= 0) {
+        public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize, boolean useBlocks) {
+            checkError(flatVariables, output);
+            if (batchSize <= 0) {
                 return;
             }
 
-            final int stride = this.varCount;
             final int totalLength = output.length; // FIX: use output.length
             final int dataSize = totalLength;      // FIX: each var has totalLength elements
 
-            if (flatVariables.length < stride * totalLength) {
-                throw new IllegalArgumentException("flatVariables too small");
-            }
-
             for (int start = 0; start < totalLength; start += batchSize) {
                 int length = Math.min(batchSize, totalLength - start);
-                applyBulkInternal(flatVariables, dataSize, output, start, length, tiledExecution);
+                applyBulkInternal(flatVariables, dataSize, output, start, length, useBlocks);
             }
         }
 
         @Override
-        public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution) {
+        public void applyBulk(double[] flatVariables, double[] output, boolean useBlocks) {
+            checkError(flatVariables, output);
             final int length = output.length; // This is the contract: output.length = elements to compute
-            applyBulkInternal(flatVariables, length, output, 0, length, tiledExecution);
+            applyBulkInternal(flatVariables, length, output, 0, length, useBlocks);
         }
 
-        @Override
-        public void applyBulk(double[] flatVariables, double[] output, int offset, boolean tiledExecution) {
-            final int length = output.length - offset;
-            if (length <= 0) {
-                return;
-            }
-            applyBulkInternal(flatVariables, length, output, offset, length, tiledExecution);
-        }
+   
 
         ///////////////////////////////////////////////////////////
         ///                    MATRIX KERNELS                   ///
@@ -1650,7 +1435,7 @@ private void compileToPrimitiveProgram() {
      * Turbo-flattens a jagged array into a destination array. Reuses the
      * provided 'flatBuffer' to ensure ZERO heap allocation.
      */
-    public static void flatten(double[][] jagged, double[] flatBuffer) {
+    public static final void flatten(double[][] jagged, double[] flatBuffer) {
         int offset = 0;
         for (int i = 0; i < jagged.length; i++) {
             int length = jagged[i].length;
@@ -1683,7 +1468,7 @@ private void compileToPrimitiveProgram() {
     /**
      * Optimized power utility for performance-critical math kernels.
      */
-    public static double pow(double base, double exp) {
+    protected static double pow(double base, double exp) {
         // --- Integer Powers (-4 to 4) ---
         if (exp == 2.0) {
             return base * base;
@@ -1731,8 +1516,7 @@ private void compileToPrimitiveProgram() {
         return Math.pow(base, exp);
     }
 
- 
-    private static final class MethodSack {
+    static final class MethodSack {
 
         private static final double DEG_TO_RAD = Math.PI / 180.0;
         private static final double RAD_TO_DEG = 180.0 / Math.PI;
@@ -1745,9 +1529,11 @@ private void compileToPrimitiveProgram() {
         static void if3(int base, int tileN, double[] s, int block) {
             final int cond = base + block;
             final int trueVal = base + 2 * block;
+            final int falseVal = base + 3 * block;
             final int res = base;
             for (int k = 0; k < tileN; k++) {
-                s[res + k] = s[cond + k] != 0 ? s[trueVal + k] : s[base + 3 * block + k];
+                double c = s[cond + k];
+                s[res + k] = c != 0.0 && !Double.isNaN(c) ? s[trueVal + k] : s[falseVal + k];
             }
         }
 
@@ -1941,7 +1727,7 @@ private void compileToPrimitiveProgram() {
                 s[base + k] = Math.atan(1.0 / s[base + k]);
             }
         }
-   
+
         static void acotDeg(int base, int n, double[] s) {
             for (int k = 0; k < n; k++) {
                 s[base + k] = Math.atan(1.0 / s[base + k]) * RAD_TO_DEG;
@@ -1976,7 +1762,7 @@ private void compileToPrimitiveProgram() {
             }
         }
     }
-    
+
     private boolean isMatrixKernel(String name, int arity) {
         return switch (name.toLowerCase()) {
             // BLAS

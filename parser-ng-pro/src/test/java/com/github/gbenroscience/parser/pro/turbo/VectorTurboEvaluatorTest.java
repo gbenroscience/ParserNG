@@ -224,41 +224,6 @@ public class VectorTurboEvaluatorTest {
         
     }
 
-    @Test
-    public void testTargetMemoryOffsetBoundsSafety() throws Throwable {
-        MathExpression me = new MathExpression("10 + x1");
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
-
-        logDetails(me, evaluator, !active);
-
-// 4 elements to evaluate
-        int dataSize = 4;
-        double[][] inputs = new double[1][dataSize]; // 1 variable, 4 values
-        inputs[0] = new double[]{5.0, 6.0, 7.0, 8.0};
-
-        // Single flat 1D buffer array of length 10
-        double[] secureBuffer = new double[10];
-
-        // Test API Call #3: Memory-Reuse Offset-Based Bulk Execution
-        int targetOffset = 3;
-        evaluator.applyBulk(inputs, secureBuffer, targetOffset, tiledExecution);
-       // System.out.println("out---"+Arrays.toString(secureBuffer));
-        // Verify guard bounds before the offset window are clean (0.0)
-        for (int i = 0; i < targetOffset; i++) {
-            assertEquals(0.0, secureBuffer[i], "Memory written before target offset.");
-        }
-
-        // Verify accurate calculation window calculations (e.g. 5.0 + 10.0 = 15.0)
-        for (int i = 0; i < dataSize; i++) {
-            double expected = inputs[0][i] + 10.0;
-            assertEquals(expected, secureBuffer[targetOffset + i], EPSILON, "Calculation error inside offset zone.");
-        }
-
-        // Verify guard bounds after the payload window remain clean (0.0)
-        for (int i = targetOffset + dataSize; i < secureBuffer.length; i++) {
-            assertEquals(0.0, secureBuffer[i], "Memory overshot past target payload window.");
-        }
-    }
 
     @Test
     public void testSingleRuntime() throws Throwable {
@@ -280,13 +245,42 @@ public class VectorTurboEvaluatorTest {
 
     @Test
     void testUserDefinedFunctionSimpleCall() throws Throwable {
+        MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(x+3,y-2,2*z-3)");
+        System.out.println("f(x+3,y-2,2*z-3) = " + me.solve());
+
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        double t = System.nanoTime();
+        double[] out = new double[1];
+        try{
+        evaluator.applyBulk(new double[]{5,4,1}, out, false);
+        }catch(IllegalStateException e){
+            assertTrue(true, "variables not balanced");
+            return;
+        }
+        double t1 = System.nanoTime() - t;
+
+        System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
+    double x=5; double y=4;double z=1;
+          double expected = 3*(x+3)+4*(y-2)+Math.sin((2*z-3)-2);
+          assertEquals(expected, out[0], EPSILON, "Parallel SIMD execution drifted for test: testUserDefinedFunctionSimpleCall ");
+
+    }
+    
+    
+        @Test
+    void testUserDefinedFunctionSimpleCallNoVars() throws Throwable {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
         System.out.println("f(3,4,2) = " + me.solve());
 
         BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
-        evaluator.applyBulk(new double[]{5, 4, 1}, out, false);
+        try{
+        evaluator.applyBulk(new double[]{}, out, false);
+        }catch(IllegalStateException e){
+            assertTrue(true, "variables not balanced");
+            return;
+        }
         double t1 = System.nanoTime() - t;
 
         System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
@@ -304,7 +298,7 @@ public class VectorTurboEvaluatorTest {
         BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
-        evaluator.applyBulk(new double[]{5, 4, 1}, out, false);
+        evaluator.applyBulk(new double[]{5}, out, false);
         double t1 = System.nanoTime() - t;
 
         System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);

@@ -2,8 +2,6 @@ package com.github.gbenroscience.parser.pro.turbo;
 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator;
-import com.github.gbenroscience.parser.pro.turbo.tools.utils.HardwareDetector;
-import java.util.Arrays;
 import org.openjdk.jmh.annotations.*;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
