@@ -1414,6 +1414,7 @@ public class MathExpression implements Savable, Solvable {
                 double[] temp = executionFrame.clone();
                 this.executionFrame = new double[registry.size()];
                 System.arraycopy(temp, 0, executionFrame, 0, temp.length);
+                this.executionFrame[slot] = value;
             }
         }
     }
@@ -1433,14 +1434,23 @@ public class MathExpression implements Savable, Solvable {
             this.executionFrame[slots[i]] = values[i];
         }
     }
-    //  parserNG.updateSlot(slots[i], xValues[i]);
-    // Or, for a single variable make (the most common benchmark case):
 
+    /**
+     * updateSlot(slots[i], xValues[i]); 
+     * 
+     *
+     *
+     */
     public void updateSlot(int slot, double value) {
         if (slot >= 0 && slot < this.executionFrame.length) {
             this.executionFrame[slot] = value;
         }
     }
+    
+    public int getSlotByName(String variableName){
+        return this.registry.getSlot(variableName);
+    }
+    
 
     public void setReturnType(TYPE returnType) {
         this.returnType = returnType;

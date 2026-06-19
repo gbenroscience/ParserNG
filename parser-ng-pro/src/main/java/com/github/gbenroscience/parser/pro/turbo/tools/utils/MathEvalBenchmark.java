@@ -109,7 +109,7 @@ public class MathEvalBenchmark {
     public void parserNG(Blackhole bh) {
         // Correct usage: Call the bulk processor ONCE per benchmark invocation
         // This measures the true speed of your vectorization logic 
-        vectorTurbo.applyBulk(flatInput, result, true, true);
+        vectorTurbo.applyBulk(flatInput, result, true);
          bh.consume(result); 
     }
 

@@ -24,7 +24,6 @@ public class VectorTurboEvaluatorBenchmark {
 
     @Param({"true", "false"})
     private boolean tiledExecution;
- 
 
     private double[] flatVariables;
     private double[][] variables;
@@ -50,16 +49,13 @@ public class VectorTurboEvaluatorBenchmark {
             variables[1][i] = rand.nextDouble() * 5.0;        // x2
             variables[2][i] = rand.nextDouble() * 2.0;        // x3
 
-          
         }
-        
-        
-         int dataSize = variables[0].length;
-        
-        for(int i=0;i<stride;i++){
-        System.arraycopy(variables[i], 0, flatVariables, i*dataSize, dataSize);
+
+        int dataSize = variables[0].length;
+
+        for (int i = 0; i < stride; i++) {
+            System.arraycopy(variables[i], 0, flatVariables, i * dataSize, dataSize);
         }
-        
 
         // Compile expressions using the Vector Engine
         MathExpression meLinear = new MathExpression("12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2");
@@ -102,10 +98,9 @@ public class VectorTurboEvaluatorBenchmark {
         bh.consume(checksum);
     }
      */
-
     @Benchmark
     public void benchmarkLinearPolynomialBulkFlatVars(org.openjdk.jmh.infra.Blackhole bh) {
-        linearExpr.applyBulk(flatVariables, outputBuffer, tiledExecution);
+        linearExpr.applyBulkParallel(flatVariables, outputBuffer);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
@@ -113,13 +108,13 @@ public class VectorTurboEvaluatorBenchmark {
         for (int i = 0; i < outputBuffer.length; i += 64) { // Sample memory lines to reduce benchmark overhead
             checksum += outputBuffer[i];
         }
-     
+
         bh.consume(checksum);
     }
 
     @Benchmark
     public void benchmarkGaussianDistributionBulkFlatVars(org.openjdk.jmh.infra.Blackhole bh) {
-        gaussianExpr.applyBulk(flatVariables, outputBuffer, tiledExecution);
+        gaussianExpr.applyBulkParallel(flatVariables, outputBuffer);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
@@ -127,14 +122,11 @@ public class VectorTurboEvaluatorBenchmark {
         for (int i = 0; i < outputBuffer.length; i += 64) { // Sample memory lines to reduce benchmark overhead
             checksum += outputBuffer[i];
         }
-      
+
         bh.consume(checksum);
     }
 
-    @TearDown(Level.Trial)
-    public void tearDown() throws InterruptedException {
-       
-    }
+ 
 
     /*
     @Benchmark

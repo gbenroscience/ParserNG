@@ -1,3 +1,4 @@
+//CURRENT CRASHING VERSION
 package com.github.gbenroscience.parser.pro.turbo.tools;
 
 import com.github.gbenroscience.parser.MathExpression;
@@ -5,8 +6,8 @@ import com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.parser.pro.turbo.tools.VectorTurboEvaluator.*;
 
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
+import java.util.function.DoubleUnaryOperator;
 import jdk.incubator.vector.*;
-
 
 /**
  * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
@@ -16,6 +17,8 @@ import jdk.incubator.vector.*;
 public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_256;
+    // private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
+
     private static final int VLEN = SPECIES.length();
 
     public SIMDVectorTurboEvaluator(MathExpression me) throws Throwable {
@@ -146,24 +149,22 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             applyBulkInternal(flatVars, numSamples, output, 0, numSamples, tiledExecution);
         }
 
-  
-
         @Override
-        public void applyBulk(double[][] variables, double[] output, boolean tiledExecution, boolean useWorkers) {
+        public void applyBulkParallel(double[][] variables, double[] output) {
             checkError(variables, output);
             if (variables == null || variables.length == 0 || output == null) {
                 return;
             }
             int numSamples = variables[0].length;
-            if (!useWorkers || numSamples < 2048) {
-                applyBulk(variables, output, tiledExecution);
+            if (numSamples < 2048) {
+                applyBulk(variables, output, false);
                 return;
             }
             double[] flatVars = getOrCreateFlattenBuffer(varCount * numSamples);
             for (int i = 0; i < varCount; i++) {
                 System.arraycopy(variables[i], 0, flatVars, i * numSamples, numSamples);
             }
-            dispatchToWorkerRing(flatVars, output, numSamples, tiledExecution);
+            dispatchToWorkerRing(flatVars, output, numSamples, true);
         }
 
         @Override
@@ -187,22 +188,20 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             applyBulkInternal(flatVariables, output.length, output, 0, output.length, tiledExecution);
         }
 
-       
-
         @Override
-        public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution, boolean useWorkers) {
-             checkError(flatVariables, output);
+        public void applyBulkParallel(double[] flatVariables, double[] output) {
+            checkError(flatVariables, output);
             int numSamples = output.length;
-            if (!useWorkers || numSamples < 2048) {
-                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, tiledExecution);
+            if (numSamples < 2048) {
+                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, false);
                 return;
             }
-            dispatchToWorkerRing(flatVariables, output, numSamples, tiledExecution);
+            dispatchToWorkerRing(flatVariables, output, numSamples, true);
         }
 
         @Override
         public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize, boolean tiledExecution) {
-             checkError(flatVariables, output);
+            checkError(flatVariables, output);
             int numSamples = output.length;
             for (int start = 0; start < numSamples; start += batchSize) {
                 int length = Math.min(batchSize, numSamples - start);
@@ -210,7 +209,6 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             }
         }
 
-        
         private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length, boolean tiled) {
             if (flatVariables == null || length <= 0) {
                 return;
@@ -633,23 +631,437 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String op) {
-            super.applyMatrixKernel(inputs, output,  op);
+            super.applyMatrixKernel(inputs, output, op);
         }
 
         @Override
         public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op) {
-            super.applyMatrixKernel(inputs, output,  op);
+            super.applyMatrixKernel(inputs, output, op);
         }
     }
 
-    private int resolveSlotIndex(int tokenIndex) {
-        if (slots != null) {
-            for (int k = 0; k < slots.length; k++) {
-                if (slots[k] == tokenIndex) {
-                    return k;
-                }
+
+
+/**
+ * High-performance vectorized math utilities for bulk array operations.
+ * Optimized for a math expression parser.
+ * * @author GBEMIRO (refined)
+ */
+    
+    
+    
+    
+    
+    public static final class TurboVectorMath {
+
+    private TurboVectorMath() {}
+
+
+    private static final double DEG_TO_RAD = Math.PI / 180.0;
+    private static final double RAD_TO_DEG = 180.0 / Math.PI;
+    private static final double GRAD_TO_RAD = Math.PI / 200.0;
+    private static final double RAD_TO_GRAD = 200.0 / Math.PI;
+
+    // ===================== Core Orchestration Helpers =====================
+    private static void process(int base, int n, double[] array,
+                                VectorOperators.Unary op,
+                                DoubleUnaryOperator scalarOp) {
+        int bound = SPECIES.loopBound(n);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, array, base + i);
+            v.lanewise(op).intoArray(array, base + i);
+        }
+        for (; i < n; i++) {
+            array[base + i] = scalarOp.applyAsDouble(array[base + i]);
+        }
+    }
+
+    private static void scaleInputAndApply(int base, int n, double[] array, double scale,
+                                           VectorOperators.Unary op,
+                                           DoubleUnaryOperator scalarOp) {
+        DoubleVector vScale = DoubleVector.broadcast(SPECIES, scale);
+        int bound = SPECIES.loopBound(n);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, array, base + i).mul(vScale);
+            v.lanewise(op).intoArray(array, base + i);
+        }
+        for (; i < n; i++) {
+            array[base + i] = scalarOp.applyAsDouble(array[base + i] * scale);
+        }
+    }
+
+    private static void applyAndScaleOutput(int base, int n, double[] array,
+                                            VectorOperators.Unary op,
+                                            DoubleUnaryOperator scalarOp,
+                                            double scale) {
+        DoubleVector vScale = DoubleVector.broadcast(SPECIES, scale);
+        int bound = SPECIES.loopBound(n);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, array, base + i);
+            v.lanewise(op).mul(vScale).intoArray(array, base + i);
+        }
+        for (; i < n; i++) {
+            array[base + i] = scalarOp.applyAsDouble(array[base + i]) * scale;
+        }
+    }
+
+    // ===================== Conditional Branching =====================
+    public static void if3(int base, int tileN, double[] s, int block) {
+        final int cond = base + block;
+        final int trueVal = base + 2 * block;
+        final int falseVal = base + 3 * block;
+        final int res = base;
+
+        int bound = SPECIES.loopBound(tileN);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector vc = DoubleVector.fromArray(SPECIES, s, cond + i);
+            DoubleVector vt = DoubleVector.fromArray(SPECIES, s, trueVal + i);
+            DoubleVector vf = DoubleVector.fromArray(SPECIES, s, falseVal + i);
+            VectorMask<Double> mask = vc.compare(VectorOperators.NE, 0.0)
+                                        .and(vc.compare(VectorOperators.EQ, vc));
+            vf.blend(vt, mask).intoArray(s, res + i);
+        }
+        for (; i < tileN; i++) {
+            double c = s[cond + i];
+            s[res + i] = (c != 0.0 && !Double.isNaN(c)) ? s[trueVal + i] : s[falseVal + i];
+        }
+    }
+
+    // ===================== Trigonometric =====================
+    public static void sin(int base, int n, double[] s)     { process(base, n, s, VectorOperators.SIN, Math::sin); }
+    public static void cos(int base, int n, double[] s)     { process(base, n, s, VectorOperators.COS, Math::cos); }
+    public static void tan(int base, int n, double[] s)     { process(base, n, s, VectorOperators.TAN, Math::tan); }
+
+    public static void sinDeg(int base, int n, double[] s)  { scaleInputAndApply(base, n, s, DEG_TO_RAD, VectorOperators.SIN, Math::sin); }
+    public static void cosDeg(int base, int n, double[] s)  { scaleInputAndApply(base, n, s, DEG_TO_RAD, VectorOperators.COS, Math::cos); }
+    public static void tanDeg(int base, int n, double[] s)  { scaleInputAndApply(base, n, s, DEG_TO_RAD, VectorOperators.TAN, Math::tan); }
+
+    public static void sinGrad(int base, int n, double[] s) { scaleInputAndApply(base, n, s, GRAD_TO_RAD, VectorOperators.SIN, Math::sin); }
+    public static void cosGrad(int base, int n, double[] s) { scaleInputAndApply(base, n, s, GRAD_TO_RAD, VectorOperators.COS, Math::cos); }
+    public static void tanGrad(int base, int n, double[] s) { scaleInputAndApply(base, n, s, GRAD_TO_RAD, VectorOperators.TAN, Math::tan); }
+
+    // ===================== Inverse Trigonometric =====================
+    public static void asinRad(int base, int n, double[] s) { process(base, n, s, VectorOperators.ASIN, Math::asin); }
+    public static void acosRad(int base, int n, double[] s) { process(base, n, s, VectorOperators.ACOS, Math::acos); }
+    public static void atanRad(int base, int n, double[] s) { process(base, n, s, VectorOperators.ATAN, Math::atan); }
+
+    public static void asinDeg(int base, int n, double[] s) { applyAndScaleOutput(base, n, s, VectorOperators.ASIN, Math::asin, RAD_TO_DEG); }
+    public static void acosDeg(int base, int n, double[] s) { applyAndScaleOutput(base, n, s, VectorOperators.ACOS, Math::acos, RAD_TO_DEG); }
+    public static void atanDeg(int base, int n, double[] s) { applyAndScaleOutput(base, n, s, VectorOperators.ATAN, Math::atan, RAD_TO_DEG); }
+
+    public static void asinGrad(int base, int n, double[] s) { applyAndScaleOutput(base, n, s, VectorOperators.ASIN, Math::asin, RAD_TO_GRAD); }
+    public static void acosGrad(int base, int n, double[] s) { applyAndScaleOutput(base, n, s, VectorOperators.ACOS, Math::acos, RAD_TO_GRAD); }
+    public static void atanGrad(int base, int n, double[] s) { applyAndScaleOutput(base, n, s, VectorOperators.ATAN, Math::atan, RAD_TO_GRAD); }
+
+    // ===================== Reciprocal Trig =====================
+    public static void sec(int base, int n, double[] s)     { processReciprocal(base, n, s, VectorOperators.COS, Math::cos); }
+    public static void csc(int base, int n, double[] s)     { processReciprocal(base, n, s, VectorOperators.SIN, Math::sin); }
+    public static void cot(int base, int n, double[] s)     { processReciprocal(base, n, s, VectorOperators.TAN, Math::tan); }
+
+    public static void secDeg(int base, int n, double[] s)  { scaleInputReciprocal(base, n, s, DEG_TO_RAD, VectorOperators.COS, Math::cos); }
+    public static void cscDeg(int base, int n, double[] s)  { scaleInputReciprocal(base, n, s, DEG_TO_RAD, VectorOperators.SIN, Math::sin); }
+    public static void cotDeg(int base, int n, double[] s)  { scaleInputReciprocal(base, n, s, DEG_TO_RAD, VectorOperators.TAN, Math::tan); }
+
+    // ===================== Inverse Reciprocal =====================
+    public static void asec(int base, int n, double[] s)    { processInverseReciprocal(base, n, s, VectorOperators.ACOS, Math::acos); }
+    public static void acsc(int base, int n, double[] s)    { processInverseReciprocal(base, n, s, VectorOperators.ASIN, Math::asin); }
+    
+    public static void acot(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector halfPi = DoubleVector.broadcast(SPECIES, Math.PI / 2.0);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            halfPi.sub(v.lanewise(VectorOperators.ATAN)).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = Math.PI / 2.0 - Math.atan(s[base + i]);
+        }
+    }
+
+    public static void asecDeg(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        DoubleVector vScale = DoubleVector.broadcast(SPECIES, RAD_TO_DEG);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            one.div(v).lanewise(VectorOperators.ACOS).mul(vScale).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = Math.acos(1.0 / s[base + i]) * RAD_TO_DEG;
+        }
+    }
+
+    public static void acscDeg(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        DoubleVector vScale = DoubleVector.broadcast(SPECIES, RAD_TO_DEG);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            one.div(v).lanewise(VectorOperators.ASIN).mul(vScale).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = Math.asin(1.0 / s[base + i]) * RAD_TO_DEG;
+        }
+    }
+
+    public static void asecGrad(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        DoubleVector vScale = DoubleVector.broadcast(SPECIES, RAD_TO_GRAD);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            one.div(v).lanewise(VectorOperators.ACOS).mul(vScale).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = Math.acos(1.0 / s[base + i]) * RAD_TO_GRAD;
+        }
+    }
+
+    public static void acscGrad(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        DoubleVector vScale = DoubleVector.broadcast(SPECIES, RAD_TO_GRAD);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            one.div(v).lanewise(VectorOperators.ASIN).mul(vScale).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = Math.asin(1.0 / s[base + i]) * RAD_TO_GRAD;
+        }
+    }
+
+    // ===================== Hyperbolic Operations =====================
+    public static void sinh(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector half = DoubleVector.broadcast(SPECIES, 0.5);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector x = DoubleVector.fromArray(SPECIES, s, base + i);
+            DoubleVector expX = x.lanewise(VectorOperators.EXP);
+            DoubleVector expMX = x.neg().lanewise(VectorOperators.EXP);
+            expX.sub(expMX).mul(half).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = Math.sinh(s[base + i]);
+        }
+    }
+
+    public static void cosh(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector half = DoubleVector.broadcast(SPECIES, 0.5);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector x = DoubleVector.fromArray(SPECIES, s, base + i);
+            DoubleVector expX = x.lanewise(VectorOperators.EXP);
+            DoubleVector expMX = x.neg().lanewise(VectorOperators.EXP);
+            expX.add(expMX).mul(half).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = Math.cosh(s[base + i]);
+        }
+    }
+
+    public static void tanh(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector x = DoubleVector.fromArray(SPECIES, s, base + i);
+            DoubleVector exp2x = x.add(x).lanewise(VectorOperators.EXP);
+            exp2x.sub(one).div(exp2x.add(one)).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = Math.tanh(s[base + i]);
+        }
+    }
+    
+    // ===================== Reciprocal Trig (Gradian) =====================
+    public static void secGrad(int base, int n, double[] s)  { scaleInputReciprocal(base, n, s, GRAD_TO_RAD, VectorOperators.COS, Math::cos); }
+    public static void cscGrad(int base, int n, double[] s)  { scaleInputReciprocal(base, n, s, GRAD_TO_RAD, VectorOperators.SIN, Math::sin); }
+    public static void cotGrad(int base, int n, double[] s)  { scaleInputReciprocal(base, n, s, GRAD_TO_RAD, VectorOperators.TAN, Math::tan); }
+
+    // ===================== Inverse Reciprocal (Deg/Grad) =====================
+    public static void acotDeg(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector halfPi = DoubleVector.broadcast(SPECIES, Math.PI / 2.0);
+        DoubleVector vScale = DoubleVector.broadcast(SPECIES, RAD_TO_DEG);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            halfPi.sub(v.lanewise(VectorOperators.ATAN)).mul(vScale).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = (Math.PI / 2.0 - Math.atan(s[base + i])) * RAD_TO_DEG;
+        }
+    }
+
+    public static void acotGrad(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector halfPi = DoubleVector.broadcast(SPECIES, Math.PI / 2.0);
+        DoubleVector vScale = DoubleVector.broadcast(SPECIES, RAD_TO_GRAD);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            halfPi.sub(v.lanewise(VectorOperators.ATAN)).mul(vScale).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = (Math.PI / 2.0 - Math.atan(s[base + i])) * RAD_TO_GRAD;
+        }
+    }
+
+    // ===================== Inverse Hyperbolic =====================
+    public static void asinh(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector x = DoubleVector.fromArray(SPECIES, s, base + i);
+            // ln(x + sqrt(x^2 + 1))
+            DoubleVector expr = x.add(x.mul(x).add(one).lanewise(VectorOperators.SQRT));
+            expr.lanewise(VectorOperators.LOG).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            double x = s[base + i];
+            s[base + i] = Math.log(x + Math.sqrt(x * x + 1.0));
+        }
+    }
+
+    public static void acosh(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector x = DoubleVector.fromArray(SPECIES, s, base + i);
+            // ln(x + sqrt(x^2 - 1))
+            DoubleVector expr = x.add(x.mul(x).sub(one).lanewise(VectorOperators.SQRT));
+            expr.lanewise(VectorOperators.LOG).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            double x = s[base + i];
+            if (x < 1.0) {
+                s[base + i] = Double.NaN;
+            } else {
+                s[base + i] = Math.log(x + Math.sqrt(x * x - 1.0));
             }
         }
-        return tokenIndex;
     }
+
+    public static void atanh(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        DoubleVector half = DoubleVector.broadcast(SPECIES, 0.5);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector x = DoubleVector.fromArray(SPECIES, s, base + i);
+            // 0.5 * ln((1 + x) / (1 - x))
+            DoubleVector div = one.add(x).div(one.sub(x));
+            div.lanewise(VectorOperators.LOG).mul(half).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            double x = s[base + i];
+            s[base + i] = 0.5 * Math.log((1.0 + x) / (1.0 - x));
+        }
+    }
+
+    // ===================== Power & Exponential =====================
+    public static void pow(int base, int n, double[] s, double exponent) {
+        DoubleVector vExp = DoubleVector.broadcast(SPECIES, exponent);
+        int bound = SPECIES.loopBound(n);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            v.lanewise(VectorOperators.POW, vExp).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = Math.pow(s[base + i], exponent);
+        }
+    }
+
+    public static void exp(int base, int n, double[] s)     { process(base, n, s, VectorOperators.EXP, Math::exp); }
+    public static void ln(int base, int n, double[] s)      { process(base, n, s, VectorOperators.LOG, Math::log); }
+    public static void lg(int base, int n, double[] s)      { process(base, n, s, VectorOperators.LOG10, Math::log10); }
+
+    // ===================== Stirling's Factorial Approximation =====================
+    public static void stirling(int base, int n, double[] s) {
+        int bound = SPECIES.loopBound(n);
+        DoubleVector pi2 = DoubleVector.broadcast(SPECIES, 2.0 * Math.PI);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            DoubleVector lnN = v.lanewise(VectorOperators.LOG);
+            DoubleVector term1 = v.mul(lnN).sub(v);
+            DoubleVector term2 = pi2.mul(v).lanewise(VectorOperators.LOG).mul(0.5);
+            DoubleVector term3 = one.div(v.mul(12.0));
+            DoubleVector result = term1.add(term2).add(term3).lanewise(VectorOperators.EXP);
+            result.intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            double x = s[base + i];
+            if (x <= 0) {
+                s[base + i] = Double.NaN;
+                continue;
+            }
+            double lnFact = x * Math.log(x) - x + 0.5 * Math.log(2 * Math.PI * x) + 1.0 / (12.0 * x);
+            s[base + i] = Math.exp(lnFact);
+        }
+    }
+
+    // ===================== Private Vector Engine Enforcers =====================
+    private static void processReciprocal(int base, int n, double[] s,
+                                          VectorOperators.Unary op,
+                                          DoubleUnaryOperator scalar) {
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        int bound = SPECIES.loopBound(n);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            one.div(v.lanewise(op)).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = 1.0 / scalar.applyAsDouble(s[base + i]);
+        }
+    }
+
+    private static void scaleInputReciprocal(int base, int n, double[] s, double scale,
+                                             VectorOperators.Unary op,
+                                             DoubleUnaryOperator scalar) {
+        DoubleVector vScale = DoubleVector.broadcast(SPECIES, scale);
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        int bound = SPECIES.loopBound(n);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i).mul(vScale);
+            one.div(v.lanewise(op)).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = 1.0 / scalar.applyAsDouble(s[base + i] * scale);
+        }
+    }
+
+    private static void processInverseReciprocal(int base, int n, double[] s,
+                                                 VectorOperators.Unary op,
+                                                 DoubleUnaryOperator scalar) {
+        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
+        int bound = SPECIES.loopBound(n);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+            one.div(v).lanewise(op).intoArray(s, base + i);
+        }
+        for (; i < n; i++) {
+            s[base + i] = scalar.applyAsDouble(1.0 / s[base + i]);
+        }
+    }
+}
+
 }

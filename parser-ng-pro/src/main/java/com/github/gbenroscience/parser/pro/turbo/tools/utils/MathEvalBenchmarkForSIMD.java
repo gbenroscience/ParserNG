@@ -104,7 +104,7 @@ public class MathEvalBenchmarkForSIMD {
     public void parserNG(Blackhole bh) {
         // Correct usage: Call the bulk processor ONCE per benchmark invocation
         // This measures the true speed of your vectorization logic 
-        simdVectorTurbo.applyBulk(flatInput, result, true, true);
+        simdVectorTurbo.applyBulkParallel(flatInput, result);
         bh.consume(result);
     }
 

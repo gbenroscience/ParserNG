@@ -2,11 +2,8 @@ package com.github.gbenroscience.parser.pro.turbo;
 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.pro.turbo.tools.SIMDVectorTurboEvaluator;
-import com.github.gbenroscience.parser.pro.turbo.tools.utils.HardwareDetector;
 import org.openjdk.jmh.annotations.*;
 import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
@@ -22,13 +19,12 @@ import org.openjdk.jmh.runner.options.TimeValue;
 @State(Scope.Thread)
 public class SIMDTurboEvaluatorBenchmark {
 
-    @Param({"512", "1024", "65536", "524288", "67108864"})
+    @Param({"65536", "524288", "67108864"})
     private int dataSize;
 
     @Param({"true", "false"})
     private boolean tiledExecution;
 
-    private static ExecutorService threadPool;
 
     private double[] flatVariables;
     private double[][] variables;
@@ -41,10 +37,7 @@ public class SIMDTurboEvaluatorBenchmark {
     @Setup(Level.Trial)
     public void setup() throws Throwable {
         Random rand = new Random(42);
-        int cores = HardwareDetector.detectPhysicalCores();
-        // Optional: cap to logical in case override lies
-        cores = Math.min(cores, Runtime.getRuntime().availableProcessors());
-        threadPool = Executors.newFixedThreadPool(cores);
+      
         // Structure of Arrays (SoA): 3 variables (x1, x2, x3), each of length dataSize
         int stride = 3;
         variables = new double[stride][dataSize];
@@ -135,19 +128,7 @@ public class SIMDTurboEvaluatorBenchmark {
         bh.consume(checksum);
     }
 
-    @TearDown(Level.Trial)
-    public void tearDown() throws InterruptedException {
-        if (threadPool != null) {
-            // Signal the threads to stop accepting new work and exit
-            threadPool.shutdown();
 
-            // Give them a moment to clean up gracefully
-            if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
-                // Force kill if they don't respond
-                threadPool.shutdownNow();
-            }
-        }
-    }
 
     /*
     @Benchmark

@@ -34,11 +34,8 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * @param variables      A 2D array of variable channels where each outer row represents an entire vector 
      * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn]]}.
      * @param output         The pre-allocated target array where the parallel calculations will be written.
-     * @param useBlocks If {@code true}, instructs internal worker threads to use cache-localized block offsets. 
-     * If {@code false}, workers sweep through their slice ranges sequentially without sub-tiling.
-     * @param useWorkers   Activates the processing thread framework driving core mathematical chunks.
      */
-    public void applyBulk(double[][] variables, double[] output, boolean useBlocks, boolean useWorkers);
+    public void applyBulkParallel(double[][] variables, double[] output);
 
     /**
      * Evaluates a 2D variable structure using an explicit, cache-bounded window chunk size 
@@ -74,11 +71,8 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * <b>CRITICAL:</b> Data must use a Grouped structure, e.g., 
      * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Do NOT pass interleaved data.
      * @param output         The pre-allocated target array where parallel workers will drop evaluated computations.
-     * @param useBlocks If {@code true}, distributes cache-bounded tile execution sets across independent workers. 
-     * If {@code false}, spawns parallel workers on straight sequential segment sections.
-     * @param useWorkers   Activates the processing thread framework driving core mathematical chunks.
      */
-    public void applyBulk(double[] flatVariables, double[] output, boolean useBlocks, boolean useWorkers);
+    public void applyBulkParallel(double[] flatVariables, double[] output);
 
     /**
      * <b>Warp Speed Path (Power Users):</b> Evaluates a pre-grouped flat array using custom-defined batch 
