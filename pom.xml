@@ -104,6 +104,14 @@
                         <goals>
                             <goal>sign</goal>
                         </goals>
+                        <configuration>
+                            <gpgArguments>
+                                <arg>--pinentry-mode</arg>
+                                <arg>loopback</arg>
+                                <arg>--batch</arg>
+                                <arg>--no-use-agent</arg>
+                            </gpgArguments>
+                        </configuration>
                     </execution>
                 </executions>
                 <configuration>
