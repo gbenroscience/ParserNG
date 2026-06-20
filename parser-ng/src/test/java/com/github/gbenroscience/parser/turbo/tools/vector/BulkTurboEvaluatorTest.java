@@ -1,26 +1,39 @@
-package com.github.gbenroscience.simd;
+/*
+ * Copyright 2026 GBEMIRO.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.github.gbenroscience.parser.turbo.tools.vector;
 
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.turbo.tools.vector.BulkTurboEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression;
+import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrixF;
 
 import java.util.Arrays;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
 import org.junit.jupiter.api.AfterAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import java.util.concurrent.ExecutorService;
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  *
  * @author GBEMIRO
  */
-public class VectorTurboEvaluatorTest {
-
+public class BulkTurboEvaluatorTest {
+    
     private static final double EPSILON = 1e-12;
     private static ExecutorService threadPool;
     private static boolean active = false;
@@ -40,10 +53,14 @@ public class VectorTurboEvaluatorTest {
         }
     }
 
+    private static BulkTurboEvaluator.BatchedVectorCompositeExpression getBatchedExpr(MathExpression me) throws Throwable{
+        return (BulkTurboEvaluator.BatchedVectorCompositeExpression) new BulkTurboEvaluator(me).compile();
+    }
+    
     @Test
     public void testMathematicalPrecisionVsNativeJavaFlat() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression evaluator = getBatchedExpr(me);
 
         logDetails(me, evaluator, !active);
 
@@ -88,7 +105,7 @@ public class VectorTurboEvaluatorTest {
     @Test
     public void testMathematicalPrecisionVsNativeJava() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
 
         logDetails(me, evaluator, !active);
 
@@ -121,7 +138,7 @@ public class VectorTurboEvaluatorTest {
     public void testBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
         me.setDRG(DRG_MODE.RAD);
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
 
         logDetails(me, evaluator, !active);
 
@@ -157,7 +174,7 @@ public class VectorTurboEvaluatorTest {
     public void testBulkBatchedExecution() throws Throwable {
         MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
         me.setDRG(DRG_MODE.RAD);
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
 
         logDetails(me, evaluator, !active);
 
@@ -193,7 +210,7 @@ public class VectorTurboEvaluatorTest {
     public void testApplyBulkWithMoreComplexExpression() throws Throwable {
         MathExpression me = new MathExpression("sin(z-x)+3*sin(5*x^2 + 4*y^2)");
         me.setDRG(DRG_MODE.RAD);
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
 
         logDetails(me, evaluator, !active);
 
@@ -256,7 +273,7 @@ public class VectorTurboEvaluatorTest {
     public void testThreadPooledParallelBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("sin(z-x)+3*sin(5*x^2 + 4*y^2)");
         me.setDRG(DRG_MODE.RAD);
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
 
         logDetails(me, evaluator, !active);
 
@@ -280,6 +297,9 @@ public class VectorTurboEvaluatorTest {
             System.arraycopy(inputs[i], 0, flatVars, i * sz, sz);
         }
 
+        System.out.println("inputs:\n" + Arrays.deepToString(inputs));
+        System.out.println("flatVars:\n" + Arrays.toString(flatVars));
+        System.out.println("slots:\n" + Arrays.toString(me.getSlotItems()));
 
         for (int i = 0; i < inputs[0].length; i++) {
             double z = inputs[me.getSlotByName("z")][i];
@@ -288,6 +308,7 @@ public class VectorTurboEvaluatorTest {
             outputVectorStd[i] = me.solveGeneric(z, x, y).scalar;
         }
 
+        System.out.println("outputVectorStd:\n" + Arrays.toString(outputVectorStd));
 
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
         evaluator.applyBulkParallel(flatVars, outputVector);
@@ -314,7 +335,7 @@ public class VectorTurboEvaluatorTest {
     @Test
     public void testSingleRuntime() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
 
         double t = System.nanoTime();
         double[] out = new double[1];
@@ -336,7 +357,7 @@ public class VectorTurboEvaluatorTest {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(x+3,y-2,2*z-3)");
         System.out.println("f(x+3,y-2,2*z-3) = " + me.solve());
 
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
         double t = System.nanoTime();
         double[] out = new double[1];
         try {
@@ -361,7 +382,7 @@ public class VectorTurboEvaluatorTest {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
         System.out.println("f(3,4,2) = " + me.solve());
 
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
         double t = System.nanoTime();
         double[] out = new double[1];
         try {
@@ -386,7 +407,7 @@ public class VectorTurboEvaluatorTest {
 
         MathExpression me = new MathExpression("3 + 2*x + f(2, 3*x + sin(4*x), 5)");
 
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
         double t = System.nanoTime();
         double[] out = new double[1];
         evaluator.applyBulk(new double[]{5}, out, false);
@@ -406,7 +427,7 @@ public class VectorTurboEvaluatorTest {
 
         MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
 
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
 
         int sz = 200;
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
@@ -437,7 +458,7 @@ public class VectorTurboEvaluatorTest {
 
         MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
 
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+         BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
 
         int sz = 200;
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
@@ -464,7 +485,7 @@ public class VectorTurboEvaluatorTest {
     }
 
 
-    void logDetails(MathExpression me, BatchedVectorCompositeExpression evaluator, boolean active) {
+    void logDetails(MathExpression me, BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator, boolean active) {
         if (!active) {
             return;
         }
@@ -480,5 +501,4 @@ public class VectorTurboEvaluatorTest {
                 + "tokens-len: " + tokens.length + "\n"
                 + " targetSlots: " + Arrays.toString(evaluator.getTargetSlots()));
     }
-
 }

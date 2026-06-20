@@ -38,8 +38,10 @@ public class SIMDTurboEvaluatorBenchmark {
     public void setup() throws Throwable {
         Random rand = new Random(42);
       
+        // Compile expressions using the Vector Engine
+        MathExpression meLinear = new MathExpression("12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2");
         // Structure of Arrays (SoA): 3 variables (x1, x2, x3), each of length dataSize
-        int stride = 3;
+        int stride = meLinear.getVariablesNames().length;
         variables = new double[stride][dataSize];
         flatVariables = new double[stride * dataSize];
         outputBuffer = new double[dataSize];
@@ -60,8 +62,6 @@ public class SIMDTurboEvaluatorBenchmark {
             }
         }
 
-        // Compile expressions using the Vector Engine
-        MathExpression meLinear = new MathExpression("12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2");
         linearExpr = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(meLinear).compile();
 
         //MathExpression meGaussian = new MathExpression("(1 / (x1 * sqrt(2 * 3.141592653589793))) * exp((-(x2 - x3)^2) / (2 * x1^2))");

@@ -6,6 +6,74 @@ By processing data pipelines natively inside hardware registers, ParserNG comple
 
 ---
 
+
+
+
+## Distinction - `SIMDVectorTurboEvaluator` vs `VectorTurboEvaluator`
+
+These 2 classes are responsible independently for bulk evaluations in ParserNG.
+
+### SIMDVectorTurboEvaluator
+
+The **`SIMDVectorTurboEvaluator`** is the hardware-accelerated bulk processing powerhouse of ParserNG. It is specifically built to leverage the cutting-edge **JDK 21 Vector API** (`jdk.incubator.vector`), allowing the JVM to compile mathematical evaluation pipelines directly into native SIMD (Single Instruction, Multiple Data) CPU instructions such as AVX or ARM NEON.
+
+Instead of processing array elements one by one, it binds operations across hardware vector lanes to process large chunks of data in a single CPU clock cycle.
+
+* **Performance Profile:** Unmatched throughput on large mathematical datasets, executing bulk computations significantly faster than lightweight runtime bytecode compilers like Janino.
+* **Environment Requirements:** Requires **Java 21+** and the explicit runtime configuration flag: `--add-modules jdk.incubator.vector`.
+* **Best Used For:** High-frequency, massive data streams, heavy numerical integration, spatial data grids, and large-scale bulk vector transformations where hardware acceleration is fully available.
+
+### VectorTurboEvaluator
+
+The **`VectorTurboEvaluator`** is the standard, highly portable bulk evaluation engine embedded directly within the core architecture of ParserNG. It processes mathematical expressions across data arrays using highly optimized sequential loops and zero-allocation memory profiles powered by our foundational interpretation algorithms.
+
+It achieves the absolute peak of pure interpreted execution speed without binding itself to specialized hardware architecture features.
+
+* **Performance Profile:** Extremely fast with zero warm-up time or compilation overhead, outperforming standard loop-based expression evaluators on small to medium-sized data batches.
+* **Environment Requirements:** Highly backward-compatible and portable. It runs anywhere the core library runs (**Java 8+**), requiring no special JVM incubator module flags or environment modifications.
+* **Best Used For:** Cross-platform systems (including Android and legacy enterprise backend servers), environments where adding specialized JVM flags is restricted, or applications handling small-to-medium dataset arrays where CPU-level SIMD orchestration overhead isn't justified.
+
+
+To use SIMDVectorTurboEvaluator(e.g. on modern servers(JDK 21+) and laptops(JDK21+)), add the 2 dependencies below to your application's `pom.xml`:
+```XML
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng</artifactId>
+    <version>2.0.0</version>
+</dependency>
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng-simd</artifactId>
+    <version>2.0.0</version>
+</dependency>
+```
+
+To use VectorTurboEvaluator(e.g. on Android and legacy systems supporting <JDK21), add to your application's `pom.xml`:
+```XML
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng</artifactId>
+    <version>2.0.0</version>
+</dependency>
+```
+
+They benchmark at same speed and allocation, and you can use workers to increase their throughput
+---
+
+
+
+### Comparison Matrix
+
+| Feature | `SIMDVectorTurboEvaluator` | `VectorTurboEvaluator` |
+| --- | --- | --- |
+| **Execution Layer** | Hardware CPU Vector Lanes (SIMD) | Highly Optimized Sequential CPU Loops |
+| **Minimum Java Version** | Java 21+ | Java 8+ |
+| **JVM Configuration** | Requires `--add-modules jdk.incubator.vector` | Zero configuration (Works out of the box) |
+| **Portability** | Limited to environments supporting JDK 21+ | Universal (Cross-platform, Android, Desktop) |
+| **Optimal Data Scale** | Massive datasets (Thousands to millions of data points) | Same |
+| **Warm-Up Overhead** | Negligible, but bound to vector lane size queries | Absolute zero |
+
+
 ## Key Features
 
 * **Hardware-Level SIMD Execution**: Automatically binds operations to modern CPU vector tracks (AVX-512, AVX2, or ARM Neon) via the Java Incubator Vector API.
@@ -83,12 +151,21 @@ import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression;
 
-MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
+MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");//Gaussian
+
+        int stride = meLinear.getVariablesNames().length
 BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
 int totalElements = 2000;
-double[][] inputs = new double[3][totalElements]; // x1, x2, x3 tracks
+double[][] inputs = new double[stride][totalElements]; // x1, x2, x3 tracks
 double[] outputVector = new double[totalElements];
+
+  for (int i = 0; i < dataSize; i++) {
+            // 1. Populate the 2D SoA layout for the standard evaluator
+            inputs[0][i] = 1.5 + rand.nextDouble() * 5.0;  // x1
+            inputs[1][i] = rand.nextDouble() * 5.0;        // x2
+            inputs[2][i] = rand.nextDouble() * 2.0;        // x3
+        }
 
 // Execute with hardware-aligned loop tiling enabled
 boolean tiledExecution = true;
@@ -96,7 +173,42 @@ evaluator.applyBulk(inputs, outputVector, tiledExecution);
 
 ```
 
-### 2. Flattened Column-Major Stride Layouts
+
+### 2. Flat Array Processing (`applyBulk`)
+
+Evaluate expressions across independent variables using standard data layouts:
+
+```java
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression;
+
+MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
+
+        int stride = meLinear.getVariablesNames().length
+BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+  double[]flatVariables = new double[stride * dataSize];
+
+int totalElements = 200000;
+double[] outputVector = new double[totalElements];
+
+  for (int i = 0; i < dataSize; i++) {
+            // 2. Calculate the flat interleaved base address for timestep 'i'
+            // For i=0, base=0. For i=1, base=3. For i=2, base=6...
+            int base = i * stride;
+            // 3. Populate the flat interleaved array perfectly
+            for (int k = 0; k < stride; k++) {
+                flatVariables[base + k] = 1.5 + rand.nextDouble() * 5.0;
+            }
+        }
+
+// Execute with hardware-aligned loop tiling enabled
+boolean tiledExecution = true;
+evaluator.applyBulk(flatVariables, outputVector, tiledExecution);
+
+```
+
+### 3. Flattened Column-Major Stride Layouts
 
 Eliminate spatial extraction jumps and optimize CPU L1/L2 data cache usage by linearizing your input parameters into a flat 1D segment buffer:
 
@@ -117,7 +229,7 @@ evaluator.applyBulk(flatInputs, outputVector, true);
 
 ```
 
-### 3. Chunk-Batched Layout Boundaries (`applyBulkBatched`)
+### 4. Chunk-Batched Layout Boundaries (`applyBulkBatched`)
 
 Enforce fixed matrix block chunk allocations to tightly align loop boundaries with specific target sizes:
 
@@ -127,7 +239,7 @@ evaluator.applyBulkBatched(flatInputs, outputVector, batchSize, true);
 
 ```
 
-### 4. High-Throughput Thread-Pooled Scaling (`applyBulkParallel`)
+### 5. High-Throughput Thread-Pooled Scaling (`applyBulkParallel`)
 
 Leverage an integrated multi-threaded background executor structure to divide large-scale workloads across multiple processor cores:
 
@@ -136,7 +248,7 @@ evaluator.applyBulkParallel(flatInputs, outputVector);
 
 ```
 
-### 5. Vectorized User-Defined Functions (UDF)
+### 6. Vectorized User-Defined Functions (UDF)
 
 Compute custom nested algebraic function assignments natively inside the evaluation pass:
 
@@ -151,6 +263,94 @@ evaluator.applyBulk(inputs, output, false);
 
 ```
 
+### Matrix operation (Gelu-200x200) (7.3ns per element on a single core-2.5GHz)
+```
+
+    @Test
+    void testGelu() throws Throwable {
+
+        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
+
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+
+        int sz = 200;
+        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in1);
+
+        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in2);
+
+        FlatMatrixF out = new FlatMatrixF(sz, sz);
+
+        double n = 10000;
+        double t = System.nanoTime();
+        for (int i = 0; i < n; i++) {
+            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "gelu");
+        }
+
+        double t1 = System.nanoTime() - t;
+
+        System.out.println("timed at = " + (t1/n) + "ns--- answer: ");
+        //System.out.println("timed at = " + (t1/n) + "ns--- answer: " + out);
+
+        assertTrue(true);
+
+    }
+```
+### Matrix operation (Swiglu-200x200) (13.3ns per element on a single core-2.5GHz)
+
+
+```
+     @Test
+    void testSwiglu() throws Throwable {
+
+        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
+
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+
+        int sz = 200;
+        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in1);
+
+        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in2);
+
+        FlatMatrixF out = new FlatMatrixF(sz, sz);
+
+        double n = 10000;
+        double t = System.nanoTime();
+        for (int i = 0; i < n; i++) {
+            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "swiglu");
+        }
+
+        double t1 = System.nanoTime() - t;
+
+        System.out.println("timed at = " + (t1/n) + "ns--- answer: ");
+        //System.out.println("timed at = " + (t1/n) + "ns--- answer: " + out);
+
+        assertTrue(true);
+
+    }
+```
+
+The supported matrix fuctions at the moment are:
+- matmul
+- matmul_bias_gelu
+- matmul_add_sin
+- softmax
+- relu
+- gelu
+- q8_quantize
+- q8_dequant
+- q8_absmax_quant
+- rope_split
+- accum_v
+- matmul_1xn_axpy
+- matmul_bias_relu
+- rms_norm
+- layer_norm
+- matmul_bias_silu
+- mha_attention
 ---
 
 ## Technical Configuration Requirements
