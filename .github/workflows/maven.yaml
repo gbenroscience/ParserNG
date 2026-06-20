@@ -29,12 +29,14 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      # Fixed: Added 'shell: bash' to guarantee your condition executes everywhere
       - name: Build ParserNG with Maven
+        shell: bash
         run: |
-          if [[ "${{ matrix.java-version }}" -ge 21 ]]; then
-            # Build everything (including SIMD) on Java 21+
+          if [ "${{ matrix.java-version }}" -ge 21 ]; then
+            echo "Detected Java 21+. Executing full hardware-accelerated SIMD suite..."
             mvn -B --update-snapshots clean install -Dgpg.skip
           else
-            # Skip SIMD module on Java 8/11/17 (requires Java 21+)
+            echo "Detected legacy Java baseline (< 21). Reactor isolating core engine..."
             mvn -B --update-snapshots clean install -Dgpg.skip -pl !parser-ng-simd
           fi
