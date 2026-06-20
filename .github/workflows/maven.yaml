@@ -10,28 +10,31 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        # We test across all three to ensure backward compatibility
         java-version: [ 8, 11, 17, 21, 25 ]
       fail-fast: false
 
     name: ${{ matrix.os }} - Java ${{ matrix.java-version }} - Maven
+
     steps:
       - name: Checkout ParserNG repo
-        uses: actions/checkout@v4 # Updated to v4
+        uses: actions/checkout@v4
 
       - name: Set up JDK ${{ matrix.java-version }}
-        uses: actions/setup-java@v4 # Updated to v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ matrix.java-version }}
-          distribution: 'temurin' # 'adopt' is legacy; 'temurin' is the modern standard
+          distribution: 'temurin'
           cache: maven
 
-      # Note: setup-java v4 handles Maven setup automatically. 
-      # You can usually remove stCarolas/setup-maven unless you need a very specific version.
-
       - name: Build ParserNG with Maven
-        run: mvn "-Dgpg.skip" "--batch-mode" "--update-snapshots" "clean" "install"
+        run: |
+          if [[ "${{ matrix.java-version }}" -ge 21 ]]; then
+            # Build everything (including SIMD) on Java 21+
+            mvn -B --update-snapshots clean install -Dgpg.skip
+          else
+            # Skip SIMD module on Java 8/11/17 (requires Java 21+)
+            mvn -B --update-snapshots clean install -Dgpg.skip -pl !parser-ng-simd
+          fi
