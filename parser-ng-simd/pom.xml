@@ -8,14 +8,18 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>2.0.1</version>
+        <version>2.0.2</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>parser-ng-simd</artifactId>
     <packaging>jar</packaging>
     <name>ParserNG SIMD Extension</name>
-    <description>Hardware-accelerated SIMD vector calculation pipelines for ParserNG</description>
+        <description>
+          Hardware-accelerated SIMD vector calculation pipelines for ParserNG
+          Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.(e.g. JNI) 
+          For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
+    </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
 
     <properties>
