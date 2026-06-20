@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd.turbo;
+package com.github.gbenroscience.simd;
 
 /**
  *

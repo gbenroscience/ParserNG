@@ -1,9 +1,5 @@
 package com.github.gbenroscience.simd.turbo.tools;
 
-import jdk.incubator.vector.FloatVector;
-import jdk.incubator.vector.VectorOperators;
-import jdk.incubator.vector.VectorSpecies;
-
 
 
 import java.util.*;
@@ -530,6 +526,13 @@ private static void matmulInPlaceScalar(FlatMatrixF A, FlatMatrixF B, FlatMatrix
     }
 }
 
+    public static void randomFill(FlatMatrixF A) {
+        ThreadLocalRandom ran = ThreadLocalRandom.current();
+        for (int i = 0; i < A.data.length; i++) {
+            A.data[i] = 1 + ran.nextFloat(101);
+        }
+    }//end method randomFill
+
     public static void swiGLU(FlatMatrixF gate, FlatMatrixF up, FlatMatrixF out) {
         if (gate!= out) System.arraycopy(gate.data, gate.offset, out.data, out.offset, gate.rows * gate.cols);
         out.siluInPlace();
@@ -608,6 +611,33 @@ public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF
     }
     return output;
 }
+
+  /**
+     *
+     * @return a string representation of the matrix in rows and columns.
+     */
+    @Override
+    public String toString() {
+        String output = "\n";
+        String appender = "";
+        for (int row = 0; row < rows; row++) {
+
+            for (int column = 0; column < cols; column++) {
+
+                if (column < cols) {
+                    appender += String.format("%7s%3s", data[row * cols + column], ",");
+                }
+                if (column == cols - 1) {
+                    appender = appender.substring(0, appender.length() - 1);
+                    appender += "          \n";
+                }
+                output += appender;
+                appender = "";
+            }
+        }
+
+        return output;
+    }//end method toString
 
 private static void mhaAttentionSingleThread(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF V,
                                              FlatMatrixF out, float scale) {

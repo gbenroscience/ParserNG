@@ -1,7 +1,9 @@
-package com.github.gbenroscience.simd.turbo;
+package com.github.gbenroscience.simd;
 
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.simd.turbo.tools.FlatMatrix;
+import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression;
 
@@ -219,15 +221,13 @@ public class VectorTurboEvaluatorTest {
         System.out.println("flatVars:\n" + Arrays.toString(flatVars));
         System.out.println("slots:\n" + Arrays.toString(me.getSlotItems()));
 
-    
-
         for (int i = 0; i < inputs[0].length; i++) {
             double z = inputs[me.getSlotByName("z")][i];
             double x = inputs[me.getSlotByName("x")][i];
             double y = inputs[me.getSlotByName("y")][i];
             outputVectorStd[i] = me.solveGeneric(z, x, y).scalar;
         }
-   
+
         System.out.println("outputVectorStd:\n" + Arrays.toString(outputVectorStd));
 
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
@@ -251,6 +251,7 @@ public class VectorTurboEvaluatorTest {
         }
 
     }
+
     @Test
     public void testThreadPooledParallelBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("sin(z-x)+3*sin(5*x^2 + 4*y^2)");
@@ -283,15 +284,13 @@ public class VectorTurboEvaluatorTest {
         System.out.println("flatVars:\n" + Arrays.toString(flatVars));
         System.out.println("slots:\n" + Arrays.toString(me.getSlotItems()));
 
-    
-
         for (int i = 0; i < inputs[0].length; i++) {
             double z = inputs[me.getSlotByName("z")][i];
             double x = inputs[me.getSlotByName("x")][i];
             double y = inputs[me.getSlotByName("y")][i];
             outputVectorStd[i] = me.solveGeneric(z, x, y).scalar;
         }
-   
+
         System.out.println("outputVectorStd:\n" + Arrays.toString(outputVectorStd));
 
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
@@ -403,6 +402,37 @@ public class VectorTurboEvaluatorTest {
 
         double expected = 3 + 2 * x + (3 * 2 + 4 * (3 * x + Math.sin(4 * x)) + Math.sin(5 - 2));
         assertEquals(expected, out[0], EPSILON, "Parallel SIMD execution drifted for test: testUserDefinedFunctionSimpleCall ");
+
+    }
+
+    @Test
+    void testGelu() throws Throwable {
+
+        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
+
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+
+        int sz = 200;
+        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in1);
+
+        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in2);
+
+        FlatMatrixF out = new FlatMatrixF(sz, sz);
+
+        double n = 10000;
+        double t = System.nanoTime();
+        for (int i = 0; i < n; i++) {
+            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "gelu");
+        }
+
+        double t1 = System.nanoTime() - t;
+
+        System.out.println("timed at = " + (t1/n) + "ns--- answer: ");
+        //System.out.println("timed at = " + (t1/n) + "ns--- answer: " + out);
+
+        assertTrue(true);
 
     }
 
