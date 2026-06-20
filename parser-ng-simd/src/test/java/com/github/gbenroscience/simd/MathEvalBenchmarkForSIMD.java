@@ -1,9 +1,10 @@
-package com.github.gbenroscience.simd.turbo.tools.utils;
+package com.github.gbenroscience.simd;
 
 /**
  *
  * @author GBEMIRO
  */
+import com.github.gbenroscience.simd.turbo.tools.utils.*;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator; 
 import org.openjdk.jmh.annotations.*;

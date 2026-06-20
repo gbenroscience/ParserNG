@@ -1,16 +1,22 @@
 # ParserNG
 
+### ParserNG 2.0.0 is out on maven-central! 
+Guess who the kid on the block is? Vector API bulk evaluator(SIMDVectorTurboEvaluator)and its compatibility partner, VectorTurboEvaluator.
+Both run bulk evaluations at roughly same speed(faster than Janino), and come with workers out of the box!
+`VectorTurboEvaluator` works because its code is mechanically sympathetic to the hardware running it,so auto-vectorization occurs.
 
-### 🚀 Parser 1.2.1 has been released on maven-central!
+
+
+### Parser 1.2.1 has been released on maven-central!
 Version 1.2.1 fixes bugs in Matrix Algebra in the standard mode.
 
 
-### 🚀 Parser 1.2.0 has been released on maven-central!
+### Parser 1.2.0 has been released on maven-central!
 Version 1.2.0 introduces pure Matrix algebra into ParserNG standard. Its great performance is not at par with what
 ParserNG Turbo can do( with MatrixTurboEvaluator), in terms of memory allocation optimization and matrix evaluation speed, but it ensures that
 Matrix Algebra is fully available alongside matrix functionality on ParserNG Standard also.
 
-### 🚀 Parser 1.1.5 has been released on maven-central!
+### Parser 1.1.5 has been released on maven-central!
 #### ParserNG Turbo: Zero-Allocation Optimization Pass
 We have completely refactored the runtime variable mapping layer inside `ScalarTurboEvaluator1` and `ScalarTurboEvaluator2`. 
 

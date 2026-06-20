@@ -29,6 +29,7 @@
             <artifactId>janino</artifactId>
             <version>3.1.12</version>
         </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-api</artifactId>
@@ -47,10 +48,12 @@
             <version>5.10.3</version>
             <scope>test</scope>
         </dependency>
+
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
             <artifactId>jmh-core</artifactId>
             <version>1.37</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
@@ -65,10 +68,9 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version> 
+                <version>3.13.0</version> 
                 <configuration>
-                    <source>21</source> 
-                    <target>21</target>
+                    <release>21</release>
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.openjdk.jmh</groupId>
@@ -93,6 +95,22 @@
             </plugin>
 
             <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <executable>java</executable>
+                    <arguments>
+                        <argument>--add-modules</argument>
+                        <argument>jdk.incubator.vector</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
+
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.5.2</version>
@@ -104,6 +122,7 @@
                         </goals>
                         <configuration>
                             <finalName>benchmarks</finalName>
+                            <includeDependencySources>false</includeDependencySources>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
@@ -122,22 +141,6 @@
                         </configuration>
                     </execution>
                 </executions>
-            </plugin>
-
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.2.0</version>
-                <configuration>
-                    <executable>java</executable>
-                    <arguments>
-                        <argument>--add-modules</argument>
-                        <argument>jdk.incubator.vector</argument>
-                        <argument>-classpath</argument>
-                        <classpath/>
-                        <argument>com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator</argument>
-                    </arguments>
-                </configuration>
             </plugin>
         </plugins>
     </build>

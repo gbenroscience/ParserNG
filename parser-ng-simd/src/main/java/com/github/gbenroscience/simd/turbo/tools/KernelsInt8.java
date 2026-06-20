@@ -1,8 +1,6 @@
 package com.github.gbenroscience.simd.turbo.tools;
 
 import com.github.gbenroscience.simd.turbo.tools.utils.Utils;
-import java.lang.foreign.MemorySegment;
-import java.nio.ByteOrder;
 import jdk.incubator.vector.ByteVector;
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.IntVector;

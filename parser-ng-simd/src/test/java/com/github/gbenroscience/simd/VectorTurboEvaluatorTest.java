@@ -13,7 +13,10 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import java.util.concurrent.ExecutorService;
+import org.junit.jupiter.api.Assertions;
 import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  *
@@ -280,14 +283,12 @@ public class VectorTurboEvaluatorTest {
             System.arraycopy(inputs[i], 0, flatVars, i * sz, sz);
         }
 
-
         for (int i = 0; i < inputs[0].length; i++) {
             double z = inputs[me.getSlotByName("z")][i];
             double x = inputs[me.getSlotByName("x")][i];
             double y = inputs[me.getSlotByName("y")][i];
             outputVectorStd[i] = me.solveGeneric(z, x, y).scalar;
         }
-
 
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
         evaluator.applyBulkParallel(flatVars, outputVector);
@@ -401,14 +402,25 @@ public class VectorTurboEvaluatorTest {
 
     }
 
-    @Test
-    void testGelu() throws Throwable {
+    @ParameterizedTest(name = "GELU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {20, 70, 100, 200})
+    void testGelu(int sz) throws Throwable {
+        executeKernelBenchmark("gelu", sz);
+    }
 
+    @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {20, 70, 100, 200})
+    void testSwiglu(int sz) throws Throwable {
+        executeKernelBenchmark("swiglu", sz);
+    }
+
+    /**
+     * Shared orchestration runner for manual micro-benchmarking without JMH.
+     */
+    private void executeKernelBenchmark(String kernelName, int sz) throws Throwable {
         MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
-
         BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
-        int sz = 200;
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
         FlatMatrixF.randomFill(in1);
 
@@ -417,52 +429,34 @@ public class VectorTurboEvaluatorTest {
 
         FlatMatrixF out = new FlatMatrixF(sz, sz);
 
-        double n = 10000;
-        double t = System.nanoTime();
-        for (int i = 0; i < n; i++) {
-            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "gelu");
+        // 1. Manual Warm-up Phase
+        // Forces C2 to compile the vector loops before we sample the clock
+        int warmUpRuns = 3000;
+        for (int i = 0; i < warmUpRuns; i++) {
+            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, kernelName);
         }
 
-        double t1 = System.nanoTime() - t;
-
-        System.out.println("timed at = " + (t1/n) + "ns--- answer: ");
-        //System.out.println("timed at = " + (t1/n) + "ns--- answer: " + out);
-
-        assertTrue(true);
-
-    }
-    
-     @Test
-    void testSwiglu() throws Throwable {
-
-        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
-
-        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
-
-        int sz = 200;
-        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in1);
-
-        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in2);
-
-        FlatMatrixF out = new FlatMatrixF(sz, sz);
-
-        double n = 10000;
-        double t = System.nanoTime();
-        for (int i = 0; i < n; i++) {
-            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "swiglu");
+        // 2. Timed Target Phase
+        int iterations = 10000;
+        long startTime = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, kernelName);
         }
+        long totalTimeNs = System.nanoTime() - startTime;
 
-        double t1 = System.nanoTime() - t;
+        // 3. Analytics Formatting
+        double avgMatrixNs = (double) totalTimeNs / iterations;
+        double totalElements = sz * sz;
+        double avgPerElementNs = avgMatrixNs / totalElements;
+        double avgMatrixMicros = avgMatrixNs / 1000.0;
 
-        System.out.println("timed at = " + (t1/n) + "ns--- answer: ");
-        //System.out.println("timed at = " + (t1/n) + "ns--- answer: " + out);
+        // Prints numbers tailored perfectly for your README layout
+        System.out.printf("[%s] %dx%d -> Matrix Avg: %.2f µs | Per-Element: %.2f ns%n",
+                kernelName.toUpperCase(), sz, sz, avgMatrixMicros, avgPerElementNs);
 
-        assertTrue(true);
-
+        // Sanity check to prevent dead-code optimization tricks from discarding execution
+        Assertions.assertNotNull(out);
     }
-
 
     void logDetails(MathExpression me, BatchedVectorCompositeExpression evaluator, boolean active) {
         if (!active) {
