@@ -38,21 +38,6 @@
         </configuration>
       </plugin>
       <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>exec-maven-plugin</artifactId>
-        <version>3.2.0</version>
-        <configuration>
-          <executable>java</executable>
-          <arguments>
-            <argument>--add-modules</argument>
-            <argument>jdk.incubator.vector</argument>
-            <argument>-classpath</argument>
-            <classpath />
-            <argument>com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator</argument>
-          </arguments>
-        </configuration>
-      </plugin>
-      <plugin>
         <artifactId>maven-shade-plugin</artifactId>
         <version>3.5.2</version>
         <executions>
@@ -157,4 +142,7 @@
       <scope>provided</scope>
     </dependency>
   </dependencies>
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+  </properties>
 </project>
