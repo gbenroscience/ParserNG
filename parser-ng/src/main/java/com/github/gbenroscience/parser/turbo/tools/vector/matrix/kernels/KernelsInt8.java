@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd.turbo.tools.matrix;
+package com.github.gbenroscience.parser.turbo.tools.vector.matrix.kernels;
 
 /**
  * High-Performance Pure Java Quantization and Low-Level Integer Kernels.

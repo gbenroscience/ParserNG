@@ -1,10 +1,13 @@
-package com.github.gbenroscience.simd.turbo.tools;
+package com.github.gbenroscience.parser.turbo.tools.vector;
 
+import com.github.gbenroscience.parser.turbo.tools.exceptions.KernelInterceptException;
+import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrixF;
+import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrix;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
-import com.github.gbenroscience.simd.turbo.tools.utils.HardwareDetector;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
+import com.github.gbenroscience.parser.turbo.tools.vector.matrix.kernels.KernelsFloat;
+import com.github.gbenroscience.parser.turbo.tools.vector.matrix.kernels.KernelsInt8;
 import java.lang.invoke.MethodHandle;
 import java.util.Arrays;
 import java.util.concurrent.locks.LockSupport;
@@ -19,9 +22,9 @@ import java.util.concurrent.locks.LockSupport;
  *
  * * @author GBEMIRO
  */
-public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
+public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
-    public class ThreadLocalBufferPool {
+    public static final class ThreadLocalBufferPool {
         // ThreadLocal cache to keep threads from colliding in multi-threaded environments
 
         private static final ThreadLocal<double[]> BUFFER_CACHE = new ThreadLocal<>();
@@ -173,7 +176,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     protected int instructionCount;
     protected KernelInterceptException interceptedKernel;
 
-    public VectorTurboEvaluator(MathExpression me) throws Throwable {
+    public BulkTurboEvaluator(MathExpression me) throws Throwable {
         super(me);
         this.postfix = me.getCachedPostfix();
         this.varCount = me.getVariablesNames().length;
@@ -192,259 +195,425 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         for (MathExpression.Token t : postfix) {
             switch (t.kind) {
-                case MathExpression.Token.NUMBER -> {
+                case MathExpression.Token.NUMBER:
                     opcodes[instructionCount] = OP_CONST;
                     literalConstants[instructionCount] = t.value;
                     instructionCount++;
-                }
-                case MathExpression.Token.VARIABLE -> {
+                    break;
+
+                case MathExpression.Token.VARIABLE:
                     opcodes[instructionCount] = OP_LOAD;
                     targetSlots[instructionCount] = resolveSlotIndex(t.frameIndex);
                     instructionCount++;
-                }
-                case MathExpression.Token.OPERATOR -> {
-                    opcodes[instructionCount] = switch (t.opChar) {
-                        case '+' ->
-                            OP_ADD;
-                        case '-' ->
-                            OP_SUB;
-                        case '*' ->
-                            OP_MUL;
-                        case '/' ->
-                            OP_DIV;
-                        case '^' ->
-                            OP_POW;
-                        case '%' ->
-                            OP_REM;
-                        case '>' ->
-                            OP_GT;
-                        case '<' ->
-                            OP_LT;
-                        default ->
+                    break;
+
+                case MathExpression.Token.OPERATOR:
+                    switch (t.opChar) {
+                        case '+':
+                            opcodes[instructionCount] = OP_ADD;
+                            break;
+                        case '-':
+                            opcodes[instructionCount] = OP_SUB;
+                            break;
+                        case '*':
+                            opcodes[instructionCount] = OP_MUL;
+                            break;
+                        case '/':
+                            opcodes[instructionCount] = OP_DIV;
+                            break;
+                        case '^':
+                            opcodes[instructionCount] = OP_POW;
+                            break;
+                        case '%':
+                            opcodes[instructionCount] = OP_REM;
+                            break;
+                        case '>':
+                            opcodes[instructionCount] = OP_GT;
+                            break;
+                        case '<':
+                            opcodes[instructionCount] = OP_LT;
+                            break;
+                        default:
                             throw new IllegalArgumentException("Unknown operator: " + t.opChar);
-                    };
+                    }
                     instructionCount++;
-                }
-                case MathExpression.Token.METHOD -> {
+                    break;
+
+                case MathExpression.Token.METHOD:
                     argumentCount[instructionCount] = t.arity;
                     String name = t.name.toLowerCase();
 
-                    opcodes[instructionCount] = switch (name) {
+                    switch (name) {
                         // Core Math Functions
-                        case "abs" ->
-                            OP_ABS;
-                        case "exp" ->
-                            OP_EXP;
-                        case "sqrt" ->
-                            OP_SQRT;
-                        case "cbrt" ->
-                            OP_CBRT;
-                        case "log", "ln" ->
-                            OP_LOG;
-                        case "log10", "lg" ->
-                            OP_LOG10;
-                        case "vma", "fma" ->
-                            OP_VMA;
-                        case "rem", "mod" ->
-                            OP_REM;
-                        case "if" ->
-                            OP_IF;
+                        case "abs":
+                            opcodes[instructionCount] = OP_ABS;
+                            break;
+                        case "exp":
+                            opcodes[instructionCount] = OP_EXP;
+                            break;
+                        case "sqrt":
+                            opcodes[instructionCount] = OP_SQRT;
+                            break;
+                        case "cbrt":
+                            opcodes[instructionCount] = OP_CBRT;
+                            break;
+                        case "log":
+                        case "ln":
+                            opcodes[instructionCount] = OP_LOG;
+                            break;
+                        case "log10":
+                        case "lg":
+                            opcodes[instructionCount] = OP_LOG10;
+                            break;
+                        case "vma":
+                        case "fma":
+                            opcodes[instructionCount] = OP_VMA;
+                            break;
+                        case "rem":
+                        case "mod":
+                            opcodes[instructionCount] = OP_REM;
+                            break;
+                        case "if":
+                            opcodes[instructionCount] = OP_IF;
+                            break;
 
                         // Relational Word Aliases
-                        case "gt" ->
-                            OP_GT;
-                        case "lt" ->
-                            OP_LT;
-                        case "eq" ->
-                            OP_EQ;
-                        case "ne" ->
-                            OP_NE;
-                        case "ge" ->
-                            OP_GE;
-                        case "le" ->
-                            OP_LE;
+                        case "gt":
+                            opcodes[instructionCount] = OP_GT;
+                            break;
+                        case "lt":
+                            opcodes[instructionCount] = OP_LT;
+                            break;
+                        case "eq":
+                            opcodes[instructionCount] = OP_EQ;
+                            break;
+                        case "ne":
+                            opcodes[instructionCount] = OP_NE;
+                            break;
+                        case "ge":
+                            opcodes[instructionCount] = OP_GE;
+                            break;
+                        case "le":
+                            opcodes[instructionCount] = OP_LE;
+                            break;
 
                         // Standard Trig (Radians)
-                        case "sin", "sin_rad" ->
-                            OP_SIN;
-                        case "cos", "cos_rad" ->
-                            OP_COS;
-                        case "tan", "tan_rad" ->
-                            OP_TAN;
+                        case "sin":
+                        case "sin_rad":
+                            opcodes[instructionCount] = OP_SIN;
+                            break;
+                        case "cos":
+                        case "cos_rad":
+                            opcodes[instructionCount] = OP_COS;
+                            break;
+                        case "tan":
+                        case "tan_rad":
+                            opcodes[instructionCount] = OP_TAN;
+                            break;
 
                         // Standard Trig (Degrees)
-                        case "sin_deg", "sind" ->
-                            OP_SIN_DEG;
-                        case "cos_deg", "cosd" ->
-                            OP_COS_DEG;
-                        case "tan_deg", "tand" ->
-                            OP_TAN_DEG;
+                        case "sin_deg":
+                        case "sind":
+                            opcodes[instructionCount] = OP_SIN_DEG;
+                            break;
+                        case "cos_deg":
+                        case "cosd":
+                            opcodes[instructionCount] = OP_COS_DEG;
+                            break;
+                        case "tan_deg":
+                        case "tand":
+                            opcodes[instructionCount] = OP_TAN_DEG;
+                            break;
 
                         // Standard Trig (Gradians)
-                        case "sin_grad", "sing" ->
-                            OP_SIN_GRAD;
-                        case "cos_grad", "cosg" ->
-                            OP_COS_GRAD;
-                        case "tan_grad", "tang" ->
-                            OP_TAN_GRAD;
+                        case "sin_grad":
+                        case "sing":
+                            opcodes[instructionCount] = OP_SIN_GRAD;
+                            break;
+                        case "cos_grad":
+                        case "cosg":
+                            opcodes[instructionCount] = OP_COS_GRAD;
+                            break;
+                        case "tan_grad":
+                        case "tang":
+                            opcodes[instructionCount] = OP_TAN_GRAD;
+                            break;
 
-                        // Inverse Trig (Radians) [e.g., "sin-¹"]
-                        case "sin-¹", "sin-¹_rad", "arcsin" ->
-                            OP_ASIN;
-                        case "cos-¹", "cos-¹_rad", "arccos" ->
-                            OP_ACOS;
-                        case "tan-¹", "tan-¹_rad", "arctan" ->
-                            OP_ATAN;
+                        // Inverse Trig (Radians)
+                        case "sin-¹":
+                        case "sin-¹_rad":
+                        case "arcsin":
+                            opcodes[instructionCount] = OP_ASIN;
+                            break;
+                        case "cos-¹":
+                        case "cos-¹_rad":
+                        case "arccos":
+                            opcodes[instructionCount] = OP_ACOS;
+                            break;
+                        case "tan-¹":
+                        case "tan-¹_rad":
+                        case "arctan":
+                            opcodes[instructionCount] = OP_ATAN;
+                            break;
 
                         // Inverse Trig (Degrees)
-                        case "sin-¹_deg", "arcsin_deg" ->
-                            OP_ASIN_DEG;
-                        case "cos-¹_deg", "arccos_deg" ->
-                            OP_ACOS_DEG;
-                        case "tan-¹_deg", "arctan_deg" ->
-                            OP_ATAN_DEG;
+                        case "sin-¹_deg":
+                        case "arcsin_deg":
+                            opcodes[instructionCount] = OP_ASIN_DEG;
+                            break;
+                        case "cos-¹_deg":
+                        case "arccos_deg":
+                            opcodes[instructionCount] = OP_ACOS_DEG;
+                            break;
+                        case "tan-¹_deg":
+                        case "arctan_deg":
+                            opcodes[instructionCount] = OP_ATAN_DEG;
+                            break;
 
                         // Inverse Trig (Gradians)
-                        case "sin-¹_grad", "arcsin_grad" ->
-                            OP_ASIN_GRAD;
-                        case "cos-¹_grad", "arccos_grad" ->
-                            OP_ACOS_GRAD;
-                        case "tan-¹_grad", "arctan_grad" ->
-                            OP_ATAN_GRAD;
+                        case "sin-¹_grad":
+                        case "arcsin_grad":
+                            opcodes[instructionCount] = OP_ASIN_GRAD;
+                            break;
+                        case "cos-¹_grad":
+                        case "arccos_grad":
+                            opcodes[instructionCount] = OP_ACOS_GRAD;
+                            break;
+                        case "tan-¹_grad":
+                        case "arctan_grad":
+                            opcodes[instructionCount] = OP_ATAN_GRAD;
+                            break;
 
                         // Inverse Trig Alt (Short Prefix "asin" Form) - Radians
-                        case "asin", "asin_rad" ->
-                            OP_ASIN_ALT;
-                        case "acos", "acos_rad" ->
-                            OP_ACOS_ALT;
-                        case "atan", "atan_rad" ->
-                            OP_ATAN_ALT;
+                        case "asin":
+                        case "asin_rad":
+                            opcodes[instructionCount] = OP_ASIN_ALT;
+                            break;
+                        case "acos":
+                        case "acos_rad":
+                            opcodes[instructionCount] = OP_ACOS_ALT;
+                            break;
+                        case "atan":
+                        case "atan_rad":
+                            opcodes[instructionCount] = OP_ATAN_ALT;
+                            break;
 
                         // Inverse Trig Alt (Short Prefix) - Degrees
-                        case "asin_deg", "asind" ->
-                            OP_ASIN_DEG_ALT;
-                        case "acos_deg", "acosd" ->
-                            OP_ACOS_DEG_ALT;
-                        case "atan_deg", "atand" ->
-                            OP_ATAN_DEG_ALT;
+                        case "asin_deg":
+                        case "asind":
+                            opcodes[instructionCount] = OP_ASIN_DEG_ALT;
+                            break;
+                        case "acos_deg":
+                        case "acosd":
+                            opcodes[instructionCount] = OP_ACOS_DEG_ALT;
+                            break;
+                        case "atan_deg":
+                        case "atand":
+                            opcodes[instructionCount] = OP_ATAN_DEG_ALT;
+                            break;
 
                         // Inverse Trig Alt (Short Prefix) - Gradians
-                        case "asin_grad", "asing" ->
-                            OP_ASIN_GRAD_ALT;
-                        case "acos_grad", "acosg" ->
-                            OP_ACOS_GRAD_ALT;
-                        case "atan_grad", "atang" ->
-                            OP_ATAN_GRAD_ALT;
+                        case "asin_grad":
+                        case "asing":
+                            opcodes[instructionCount] = OP_ASIN_GRAD_ALT;
+                            break;
+                        case "acos_grad":
+                        case "acosg":
+                            opcodes[instructionCount] = OP_ACOS_GRAD_ALT;
+                            break;
+                        case "atan_grad":
+                        case "atang":
+                            opcodes[instructionCount] = OP_ATAN_GRAD_ALT;
+                            break;
 
-                        // Reciprocal Trig (Secant, Cosecant, Cotangent)
-                        case "sec", "sec_rad" ->
-                            OP_SEC;
-                        case "sec_deg", "secd" ->
-                            OP_SEC_DEG;
-                        case "sec_grad" ->
-                            OP_SEC_GRAD;
-                        case "cosec", "csc", "csc_rad" ->
-                            OP_COSEC;
-                        case "cosec_deg", "cscd" ->
-                            OP_COSEC_DEG;
-                        case "cosec_grad" ->
-                            OP_COSEC_GRAD;
-                        case "cot", "cot_rad" ->
-                            OP_COT;
-                        case "cot_deg", "cotd" ->
-                            OP_COT_DEG;
-                        case "cot_grad" ->
-                            OP_COT_GRAD;
+                        // Reciprocal Trig
+                        case "sec":
+                        case "sec_rad":
+                            opcodes[instructionCount] = OP_SEC;
+                            break;
+                        case "sec_deg":
+                        case "secd":
+                            opcodes[instructionCount] = OP_SEC_DEG;
+                            break;
+                        case "sec_grad":
+                            opcodes[instructionCount] = OP_SEC_GRAD;
+                            break;
+                        case "cosec":
+                        case "csc":
+                        case "csc_rad":
+                            opcodes[instructionCount] = OP_COSEC;
+                            break;
+                        case "cosec_deg":
+                        case "cscd":
+                            opcodes[instructionCount] = OP_COSEC_DEG;
+                            break;
+                        case "cosec_grad":
+                            opcodes[instructionCount] = OP_COSEC_GRAD;
+                            break;
+                        case "cot":
+                        case "cot_rad":
+                            opcodes[instructionCount] = OP_COT;
+                            break;
+                        case "cot_deg":
+                        case "cotd":
+                            opcodes[instructionCount] = OP_COT_DEG;
+                            break;
+                        case "cot_grad":
+                            opcodes[instructionCount] = OP_COT_GRAD;
+                            break;
 
                         // Inverse Reciprocal Trig (Standard Form)
-                        case "sec-¹", "sec-¹_rad", "arcsec" ->
-                            OP_ARC_SEC;
-                        case "sec-¹_deg", "arcsec_deg" ->
-                            OP_ARC_SEC_DEG;
-                        case "sec-¹_grad", "arcsec_grad" ->
-                            OP_ARC_SEC_GRAD;
-                        case "csc-¹", "csc-¹_rad", "arccsc" ->
-                            OP_ARC_COSEC;
-                        case "csc-¹_deg", "arccsc_deg" ->
-                            OP_ARC_COSEC_DEG;
-                        case "csc-¹_grad", "arccsc_grad" ->
-                            OP_ARC_COSEC_GRAD;
-                        case "cot-¹", "cot-¹_rad", "arccot" ->
-                            OP_ARC_COT;
-                        case "cot-¹_deg", "arccot_deg" ->
-                            OP_ARC_COT_DEG;
-                        case "cot-¹_grad", "arccot_grad" ->
-                            OP_ARC_COT_GRAD;
+                        case "sec-¹":
+                        case "sec-¹_rad":
+                        case "arcsec":
+                            opcodes[instructionCount] = OP_ARC_SEC;
+                            break;
+                        case "sec-¹_deg":
+                        case "arcsec_deg":
+                            opcodes[instructionCount] = OP_ARC_SEC_DEG;
+                            break;
+                        case "sec-¹_grad":
+                        case "arcsec_grad":
+                            opcodes[instructionCount] = OP_ARC_SEC_GRAD;
+                            break;
+                        case "csc-¹":
+                        case "csc-¹_rad":
+                        case "arccsc":
+                            opcodes[instructionCount] = OP_ARC_COSEC;
+                            break;
+                        case "csc-¹_deg":
+                        case "arccsc_deg":
+                            opcodes[instructionCount] = OP_ARC_COSEC_DEG;
+                            break;
+                        case "csc-¹_grad":
+                        case "arccsc_grad":
+                            opcodes[instructionCount] = OP_ARC_COSEC_GRAD;
+                            break;
+                        case "cot-¹":
+                        case "cot-¹_rad":
+                        case "arccot":
+                            opcodes[instructionCount] = OP_ARC_COT;
+                            break;
+                        case "cot-¹_deg":
+                        case "arccot_deg":
+                            opcodes[instructionCount] = OP_ARC_COT_DEG;
+                            break;
+                        case "cot-¹_grad":
+                        case "arccot_grad":
+                            opcodes[instructionCount] = OP_ARC_COT_GRAD;
+                            break;
 
-                        // Inverse Trig Explicit Alt Chains (Opcodes 53 - 61)
-                        case "arc_sin_alt" ->
-                            OP_ARC_SIN_ALT;
-                        case "arc_sin_alt_deg" ->
-                            OP_ARC_SIN_ALT_DEG;
-                        case "arc_sin_alt_grad" ->
-                            OP_ARC_SIN_ALT_GRAD;
-                        case "arc_cos_alt" ->
-                            OP_ARC_COS_ALT;
-                        case "arc_cos_alt_deg" ->
-                            OP_ARC_COS_ALT_DEG;
-                        case "arc_cos_alt_grad" ->
-                            OP_ARC_COS_ALT_GRAD;
-                        case "arc_tan_alt" ->
-                            OP_ARC_TAN_ALT;
-                        case "arc_tan_alt_deg" ->
-                            OP_ARC_TAN_ALT_DEG;
-                        case "arc_tan_alt_grad" ->
-                            OP_ARC_TAN_ALT_GRAD;
+                        // Inverse Trig Explicit Alt Chains
+                        case "arc_sin_alt":
+                            opcodes[instructionCount] = OP_ARC_SIN_ALT;
+                            break;
+                        case "arc_sin_alt_deg":
+                            opcodes[instructionCount] = OP_ARC_SIN_ALT_DEG;
+                            break;
+                        case "arc_sin_alt_grad":
+                            opcodes[instructionCount] = OP_ARC_SIN_ALT_GRAD;
+                            break;
+                        case "arc_cos_alt":
+                            opcodes[instructionCount] = OP_ARC_COS_ALT;
+                            break;
+                        case "arc_cos_alt_deg":
+                            opcodes[instructionCount] = OP_ARC_COS_ALT_DEG;
+                            break;
+                        case "arc_cos_alt_grad":
+                            opcodes[instructionCount] = OP_ARC_COS_ALT_GRAD;
+                            break;
+                        case "arc_tan_alt":
+                            opcodes[instructionCount] = OP_ARC_TAN_ALT;
+                            break;
+                        case "arc_tan_alt_deg":
+                            opcodes[instructionCount] = OP_ARC_TAN_ALT_DEG;
+                            break;
+                        case "arc_tan_alt_grad":
+                            opcodes[instructionCount] = OP_ARC_TAN_ALT_GRAD;
+                            break;
 
-                        // Inverse Reciprocal Explicit Alt Chains (Opcodes 62 - 70)
-                        case "asec", "asec_rad", "arc_sec_alt" ->
-                            OP_ARC_SEC_ALT;
-                        case "asec_deg", "arc_sec_alt_deg" ->
-                            OP_ARC_SEC_ALT_DEG;
-                        case "asec_grad", "arc_sec_alt_grad" ->
-                            OP_ARC_SEC_ALT_GRAD;
-                        case "acsc", "acsc_rad", "arc_cosec_alt" ->
-                            OP_ARC_COSEC_ALT;
-                        case "acsc_deg", "arc_cosec_alt_deg" ->
-                            OP_ARC_COSEC_ALT_DEG;
-                        case "acsc_grad", "arc_cosec_alt_grad" ->
-                            OP_ARC_COSEC_ALT_GRAD;
-                        case "acot", "acot_rad", "arc_cot_alt" ->
-                            OP_ARC_COT_ALT;
-                        case "acot_deg", "arc_cot_alt_deg" ->
-                            OP_ARC_COT_ALT_DEG;
-                        case "acot_grad", "arc_cot_alt_grad" ->
-                            OP_ARC_COT_GRAD;
+                        // Inverse Reciprocal Explicit Alt Chains
+                        case "asec":
+                        case "asec_rad":
+                        case "arc_sec_alt":
+                            opcodes[instructionCount] = OP_ARC_SEC_ALT;
+                            break;
+                        case "asec_deg":
+                        case "arc_sec_alt_deg":
+                            opcodes[instructionCount] = OP_ARC_SEC_ALT_DEG;
+                            break;
+                        case "asec_grad":
+                        case "arc_sec_alt_grad":
+                            opcodes[instructionCount] = OP_ARC_SEC_ALT_GRAD;
+                            break;
+                        case "acsc":
+                        case "acsc_rad":
+                        case "arc_cosec_alt":
+                            opcodes[instructionCount] = OP_ARC_COSEC_ALT;
+                            break;
+                        case "acsc_deg":
+                        case "arc_cosec_alt_deg":
+                            opcodes[instructionCount] = OP_ARC_COSEC_ALT_DEG;
+                            break;
+                        case "acsc_grad":
+                        case "arc_cosec_alt_grad":
+                            opcodes[instructionCount] = OP_ARC_COSEC_ALT_GRAD;
+                            break;
+                        case "acot":
+                        case "acot_rad":
+                        case "arc_cot_alt":
+                            opcodes[instructionCount] = OP_ARC_COT_ALT;
+                            break;
+                        case "acot_deg":
+                        case "arc_cot_alt_deg":
+                            opcodes[instructionCount] = OP_ARC_COT_ALT_DEG;
+                            break;
+                        case "acot_grad":
+                        case "arc_cot_alt_grad":
+                            opcodes[instructionCount] = OP_ARC_COT_GRAD;
+                            break;
 
                         // Hyperbolic Functions
-                        case "sinh" ->
-                            OP_SINH;
-                        case "cosh" ->
-                            OP_COSH;
-                        case "tanh" ->
-                            OP_TANH;
+                        case "sinh":
+                            opcodes[instructionCount] = OP_SINH;
+                            break;
+                        case "cosh":
+                            opcodes[instructionCount] = OP_COSH;
+                            break;
+                        case "tanh":
+                            opcodes[instructionCount] = OP_TANH;
+                            break;
 
                         // Hyperbolic Inverses (Standard Form)
-                        case "sinh-¹", "arcsinh" ->
-                            OP_ASINH;
-                        case "cosh-¹", "arccosh" ->
-                            OP_ACOSH;
-                        case "tanh-¹", "arctanh" ->
-                            OP_ATANH;
+                        case "sinh-¹":
+                        case "arcsinh":
+                            opcodes[instructionCount] = OP_ASINH;
+                            break;
+                        case "cosh-¹":
+                        case "arccosh":
+                            opcodes[instructionCount] = OP_ACOSH;
+                            break;
+                        case "tanh-¹":
+                        case "arctanh":
+                            opcodes[instructionCount] = OP_ATANH;
+                            break;
 
                         // Hyperbolic Inverses (Alt Short Prefix Form)
-                        case "asinh" ->
-                            OP_ASINH_ALT;
-                        case "acosh" ->
-                            OP_ACOSH_ALT;
-                        case "atanh" ->
-                            OP_ATANH_ALT;
+                        case "asinh":
+                            opcodes[instructionCount] = OP_ASINH_ALT;
+                            break;
+                        case "acosh":
+                            opcodes[instructionCount] = OP_ACOSH_ALT;
+                            break;
+                        case "atanh":
+                            opcodes[instructionCount] = OP_ATANH_ALT;
+                            break;
 
-                        default ->
+                        default:
                             throw new IllegalArgumentException("Unknown function: " + t.name);
-                    };
+                    }
                     instructionCount++;
-                }
+                    break;
             }
         }
 
@@ -465,7 +634,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 literalConstants, instructionCount, varCount);
     }
 
-
     public class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
 
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
@@ -485,7 +653,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         protected static final int STATE_RUNNING = 1;
         protected static final int STATE_FINISHED = 2;
 
-
         protected int cores;
         protected WorkerThread[] workers;
 
@@ -501,7 +668,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * Allocates a perfectly flat, contiguous scratch block (64 nested stack
          * frames * 2048 block size)
          */
-        protected static final ThreadLocal<double[]> FLAT_SCRATCH_STACK = ThreadLocal.withInitial(()
+        protected final ThreadLocal<double[]> FLAT_SCRATCH_STACK = ThreadLocal.withInitial(()
                 -> new double[MAX_STACK_DEPTH * BLOCK_SIZE]
         );
 
@@ -516,7 +683,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         BatchedVectorCompositeExpression(MethodHandle handle, int[] ops, int[] targetSlots,
                 double[] consts, int count, int varCount) {
             this.scalarHandle = handle;
-            // DEFENSIVE: Make copies to isolate from VectorTurboEvaluator mutations
+            // DEFENSIVE: Make copies to isolate from BulkTurboEvaluator mutations
             this.opcodes = Arrays.copyOf(ops, ops.length);
             this.targetSlots = Arrays.copyOf(targetSlots, targetSlots.length);
             this.literalConstants = Arrays.copyOf(consts, consts.length);
@@ -557,7 +724,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         @Override
         public TurboExpressionEvaluator getCompiler() {
-            return VectorTurboEvaluator.this;
+            return BulkTurboEvaluator.this;
         }
 
         /**
@@ -605,21 +772,21 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         }
 
         protected void checkError(double[][] variables, double[] output) {
-             int numSamples = variables!=null && variables.length>0&&output!=null&&output.length>0 ? variables[0].length : -1;
+            int numSamples = variables != null && variables.length > 0 && output != null && output.length > 0 ? variables[0].length : -1;
             int stride = this.varCount;
             if (stride != variables.length || numSamples != output.length) {
-                throw new IllegalStateException(String.format("varCount mismatch[stride=%d, variables-count-from-input=%d] || array sizes not correct(elements-per-variable=%d vs output-array-size=%d)", stride,variables.length, numSamples,output.length));
+                throw new IllegalStateException(String.format("varCount mismatch[stride=%d, variables-count-from-input=%d] || array sizes not correct(elements-per-variable=%d vs output-array-size=%d)", stride, variables.length, numSamples, output.length));
             }
         }
 
         protected void checkError(double[] flatVariables, double[] output) {
-            int totalSamples = flatVariables!=null && flatVariables.length>0&&output!=null&&output.length>0 ? flatVariables.length : -1;
+            int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0 ? flatVariables.length : -1;
             int stride = this.varCount;
-            if (totalSamples != stride*output.length) {
-                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]", 
-                        totalSamples,stride*output.length));
+            if (totalSamples != stride * output.length) {
+                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]",
+                        totalSamples, stride * output.length));
             }
-  
+
         }
 
         //////////////////////////////////////////////////////////////////
@@ -645,14 +812,12 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, useBlocks);
         }
 
-    
         @Override
         public void applyBulkParallel(double[][] variables, double[] output) {
             checkError(variables, output);
 
             final int numSamples = variables[0].length;
             final int stride = this.varCount;
-          
 
             // Zero-allocation buffer retrieval from your thread-local pool
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
@@ -671,15 +836,14 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             // Coordinate via the EXACT SAME zero-alloc threading subsystem
             dispatchToWorkerRing(flatVariables, output, numSamples, true);
         }
-        
-   
 
         /**
-         *  Centralized coordination mechanism to eliminate code duplication
+         * Centralized coordination mechanism to eliminate code duplication
+         *
          * @param flatVariables
          * @param output
          * @param dataSize
-         * @param useBlocks 
+         * @param useBlocks
          */
         protected void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize, boolean useBlocks) {
             // 1. Publish parameters to volatile registers (No allocations)
@@ -748,7 +912,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          */
         private void applyBulkInternalWithBlocks(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
             // Top-level API boundary validations (executed once per pipeline request)
-        
 
             if (dataSize * this.varCount > flatVariables.length) {
                 throw new IllegalArgumentException("flatVariables too small: need " + (dataSize * varCount) + " got " + flatVariables.length);
@@ -863,7 +1026,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 final int opcode = opcodes[instIdx];
 
                 switch (opcode) {
-                    case OP_CONST -> {
+                    case OP_CONST: {
                         final double val = literalConstants[instIdx];
                         final int stackOffset = sp * BLOCK_SIZE;
                         sp++;
@@ -871,18 +1034,20 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[stackOffset + k] = val;
                         }
+                        break;
                     }
 
-                    case OP_LOAD -> {
+                    case OP_LOAD: {
                         final int slotIdx = targetSlots[instIdx];
                         final int stackOffset = sp * BLOCK_SIZE;
                         sp++;
                         final int flatOffset = (slotIdx * dataSize) + tileStart;
 
                         System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, n);
+                        break;
                     }
 
-                    case OP_ADD -> {
+                    case OP_ADD: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -893,9 +1058,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] + scratch[rOffset + k];
                         }
+                        break;
                     }
 
-                    case OP_SUB -> {
+                    case OP_SUB: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -906,9 +1072,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] - scratch[rOffset + k];
                         }
+                        break;
                     }
 
-                    case OP_MUL -> {
+                    case OP_MUL: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -919,9 +1086,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] * scratch[rOffset + k];
                         }
+                        break;
                     }
 
-                    case OP_DIV -> {
+                    case OP_DIV: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -932,9 +1100,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] / scratch[rOffset + k];
                         }
+                        break;
                     }
 
-                    case OP_POW -> {
+                    case OP_POW: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -945,9 +1114,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
                         }
+                        break;
                     }
 
-                    case OP_REM -> {
+                    case OP_REM: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -958,110 +1128,132 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] % scratch[rOffset + k];
                         }
+                        break;
                     }
 
                     // Unary ops - in-place, no sp shuffle
-                    case OP_SIN -> {
+                    case OP_SIN: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.sin(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_COS -> {
+                    case OP_COS: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.cos(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_TAN -> {
+                    case OP_TAN: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.tan(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT -> {
+                    case OP_ASIN:
+                    case OP_ASIN_ALT:
+                    case OP_ARC_SIN_ALT: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         MethodSack.asinRad(base, n, scratch);
+                        break;
                     }
 
-                    case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT -> {
+                    case OP_ACOS:
+                    case OP_ACOS_ALT:
+                    case OP_ARC_COS_ALT: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         MethodSack.acosRad(base, n, scratch);
+                        break;
                     }
 
-                    case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT -> {
+                    case OP_ATAN:
+                    case OP_ATAN_ALT:
+                    case OP_ARC_TAN_ALT: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         MethodSack.atanRad(base, n, scratch);
+                        break;
                     }
 
-                    case OP_SINH -> {
+                    case OP_SINH: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.sinh(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_COSH -> {
+                    case OP_COSH: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.cosh(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_TANH -> {
+                    case OP_TANH: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.tanh(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_ABS -> {
+                    case OP_ABS: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.abs(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_EXP -> {
+                    case OP_EXP: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.exp(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_SQRT -> {
+                    case OP_SQRT: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.sqrt(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_CBRT -> {
+                    case OP_CBRT: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.cbrt(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_LOG -> {
+                    case OP_LOG: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.log(scratch[base + k]);
                         }
+                        break;
                     }
 
-                    case OP_LOG10 -> {
+                    case OP_LOG10: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.log10(scratch[base + k]);
                         }
+                        break;
                     }
 
                     // Comparisons
-                    case OP_GT -> {
+                    case OP_GT: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -1071,9 +1263,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] > scratch[rOffset + k] ? 1.0 : 0.0;
                         }
+                        break;
                     }
 
-                    case OP_LT -> {
+                    case OP_LT: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -1083,9 +1276,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] < scratch[rOffset + k] ? 1.0 : 0.0;
                         }
+                        break;
                     }
 
-                    case OP_EQ -> {
+                    case OP_EQ: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -1095,9 +1289,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] == scratch[rOffset + k] ? 1.0 : 0.0;
                         }
+                        break;
                     }
 
-                    case OP_NE -> {
+                    case OP_NE: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -1107,9 +1302,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] != scratch[rOffset + k] ? 1.0 : 0.0;
                         }
+                        break;
                     }
 
-                    case OP_GE -> {
+                    case OP_GE: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -1119,9 +1315,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] >= scratch[rOffset + k] ? 1.0 : 0.0;
                         }
+                        break;
                     }
 
-                    case OP_LE -> {
+                    case OP_LE: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
                         final int lOffset = base;
@@ -1131,9 +1328,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] <= scratch[rOffset + k] ? 1.0 : 0.0;
                         }
+                        break;
                     }
 
-                    case OP_VMA -> {
+                    case OP_VMA: {
                         sp -= 3;
                         final int base = sp * BLOCK_SIZE;
                         final int aOffset = base;
@@ -1144,9 +1342,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[aOffset + k] * scratch[bOffset + k] + scratch[cOffset + k];
                         }
+                        break;
                     }
 
-                    case OP_IF -> {
+                    case OP_IF: {
                         sp -= 3;
                         final int base = sp * BLOCK_SIZE;
                         final int condOffset = base;
@@ -1157,85 +1356,143 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = (scratch[condOffset + k] != 0.0) ? scratch[trueOffset + k] : scratch[falseOffset + k];
                         }
+                        break;
                     }
 
                     // --- NEW DEGREE / GRADIAN TRIG VARIANTS ---
-                    case OP_SIN_DEG ->
+                    case OP_SIN_DEG:
                         MethodSack.sinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COS_DEG ->
+                        break;
+                    case OP_COS_DEG:
                         MethodSack.cosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_TAN_DEG ->
+                        break;
+                    case OP_TAN_DEG:
                         MethodSack.tanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_SIN_GRAD ->
+                        break;
+                    case OP_SIN_GRAD:
                         MethodSack.sinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COS_GRAD ->
+                        break;
+                    case OP_COS_GRAD:
                         MethodSack.cosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_TAN_GRAD ->
+                        break;
+                    case OP_TAN_GRAD:
                         MethodSack.tanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
 
                     // --- NEW INVERSE DEGREE / GRADIAN VARIANTS ---
-                    case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG ->
+                    case OP_ASIN_DEG:
+                    case OP_ASIN_DEG_ALT:
+                    case OP_ARC_SIN_ALT_DEG:
                         MethodSack.asinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG ->
+                        break;
+                    case OP_ACOS_DEG:
+                    case OP_ACOS_DEG_ALT:
+                    case OP_ARC_COS_ALT_DEG:
                         MethodSack.acosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG ->
+                        break;
+                    case OP_ATAN_DEG:
+                    case OP_ATAN_DEG_ALT:
+                    case OP_ARC_TAN_ALT_DEG:
                         MethodSack.atanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD ->
+                        break;
+                    case OP_ASIN_GRAD:
+                    case OP_ASIN_GRAD_ALT:
+                    case OP_ARC_SIN_ALT_GRAD:
                         MethodSack.asinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD ->
+                        break;
+                    case OP_ACOS_GRAD:
+                    case OP_ACOS_GRAD_ALT:
+                    case OP_ARC_COS_ALT_GRAD:
                         MethodSack.acosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD ->
+                        break;
+                    case OP_ATAN_GRAD:
+                    case OP_ATAN_GRAD_ALT:
+                    case OP_ARC_TAN_ALT_GRAD:
                         MethodSack.atanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
 
                     // --- NEW RECIPROCAL TRIG (SEC, CSC, COT) VARIANTS ---
-                    case OP_SEC ->
+                    case OP_SEC:
                         MethodSack.sec((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_SEC_DEG ->
+                        break;
+                    case OP_SEC_DEG:
                         MethodSack.secDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_SEC_GRAD ->
+                        break;
+                    case OP_SEC_GRAD:
                         MethodSack.secGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COSEC ->
+                        break;
+                    case OP_COSEC:
                         MethodSack.csc((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COSEC_DEG ->
+                        break;
+                    case OP_COSEC_DEG:
                         MethodSack.cscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COSEC_GRAD ->
+                        break;
+                    case OP_COSEC_GRAD:
                         MethodSack.cscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COT ->
+                        break;
+                    case OP_COT:
                         MethodSack.cot((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COT_DEG ->
+                        break;
+                    case OP_COT_DEG:
                         MethodSack.cotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COT_GRAD ->
+                        break;
+                    case OP_COT_GRAD:
                         MethodSack.cotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
 
                     // --- NEW INVERSE RECIPROCAL TRIG VARIANTS ---
-                    case OP_ARC_SEC, OP_ARC_SEC_ALT ->
+                    case OP_ARC_SEC:
+                    case OP_ARC_SEC_ALT:
                         MethodSack.asec((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG ->
+                        break;
+                    case OP_ARC_SEC_DEG:
+                    case OP_ARC_SEC_ALT_DEG:
                         MethodSack.asecDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD ->
+                        break;
+                    case OP_ARC_SEC_GRAD:
+                    case OP_ARC_SEC_ALT_GRAD:
                         MethodSack.asecGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COSEC, OP_ARC_COSEC_ALT ->
+                        break;
+                    case OP_ARC_COSEC:
+                    case OP_ARC_COSEC_ALT:
                         MethodSack.acsc((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG ->
+                        break;
+                    case OP_ARC_COSEC_DEG:
+                    case OP_ARC_COSEC_ALT_DEG:
                         MethodSack.acscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD ->
+                        break;
+                    case OP_ARC_COSEC_GRAD:
+                    case OP_ARC_COSEC_ALT_GRAD:
                         MethodSack.acscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COT, OP_ARC_COT_ALT ->
+                        break;
+                    case OP_ARC_COT:
+                    case OP_ARC_COT_ALT:
                         MethodSack.acot((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG ->
+                        break;
+                    case OP_ARC_COT_DEG:
+                    case OP_ARC_COT_ALT_DEG:
                         MethodSack.acotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD ->
+                        break;
+                    case OP_ARC_COT_GRAD:
+                    case OP_ARC_COT_ALT_GRAD:
                         MethodSack.acotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
 
                     // --- NEW HYPERBOLIC INVERSES ---
-                    case OP_ASINH, OP_ASINH_ALT ->
+                    case OP_ASINH:
+                    case OP_ASINH_ALT:
                         MethodSack.asinh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ACOSH, OP_ACOSH_ALT ->
+                        break;
+                    case OP_ACOSH:
+                    case OP_ACOSH_ALT:
                         MethodSack.acosh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ATANH, OP_ATANH_ALT ->
+                        break;
+                    case OP_ATANH:
+                    case OP_ATANH_ALT:
                         MethodSack.atanh((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
 
-                    default ->
+                    default:
                         throw new UnsupportedOperationException("Unknown opcode: " + opcode);
                 }
             }
@@ -1284,13 +1541,12 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             applyBulkInternal(flatVariables, length, output, 0, length, useBlocks);
         }
 
-   
-
         ///////////////////////////////////////////////////////////
         ///                    MATRIX KERNELS                   ///
         ///////////////////////////////////////////////////////////
         
-        @Override
+
+    @Override
         public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op) {
             String kernelToRun = (op != null) ? op : (interceptedKernel != null ? interceptedKernel.getKernelName() : null);
             if (kernelToRun == null) {
@@ -1298,52 +1554,76 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             switch (kernelToRun.toLowerCase()) {
-                case "matmul" ->
+                case "matmul":
                     FlatMatrixF.matmul(inputs[0], inputs[1], output);
-                case "add", "matadd", "add_mat" ->
+                    break;
+
+                case "add":
+                case "matadd":
+                case "add_mat":
                     FlatMatrixF.add(inputs[0], inputs[1], output);
-                case "matmul_bias_gelu", "matmul_add_bias_gelu" ->
+                    break;
+
+                case "matmul_bias_gelu":
+                case "matmul_add_bias_gelu":
                     FlatMatrixF.matmulAddBiasGelu(inputs[0], inputs[1], inputs[2], output);
-                case "matmul_add_sin" -> {
+                    break;
+
+                case "matmul_add_sin": {
                     float alpha = inputs[2].get(0, 0);
                     FlatMatrixF.matmulAddSin(inputs[0], inputs[1], output, alpha);
+                    break;
                 }
-                case "softmax", "softmax_in_place" -> {
+
+                case "softmax":
+                case "softmax_in_place": {
                     if (inputs[0] != output) {
                         System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
                     }
                     output.softmaxRowsInPlace();
+                    break;
                 }
-                case "relu", "relu_in_place" -> {
+
+                case "relu":
+                case "relu_in_place": {
                     if (inputs[0] != output) {
                         System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
                     }
                     output.reluInPlace();
+                    break;
                 }
-                case "gelu", "gelu_in_place" -> {
+
+                case "gelu":
+                case "gelu_in_place": {
                     if (inputs[0] != output) {
                         System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
                     }
                     output.geluInPlace();
+                    break;
                 }
+
                 // === New Q8 + Attention kernels ===
-                case "q8_quantize" -> {
+                case "q8_quantize": {
                     float[] src = inputs[0].data;
                     int srcOff = inputs[0].offset;
                     int len = inputs[0].rows * inputs[0].cols;
                     float scale = inputs[1].data[inputs[1].offset];
                     byte[] dst = output.asByteArray();
                     KernelsInt8.quantize_f32_to_i8(src, srcOff, len, dst, output.offset, scale);
+                    break;
                 }
-                case "q8_dequant" -> {
+
+                case "q8_dequant": {
                     byte[] src = inputs[0].asByteArray();
                     int srcOff = inputs[0].offset;
                     int len = inputs[0].rows * inputs[0].cols;
                     float scale = inputs[1].data[inputs[1].offset];
                     float[] dst = output.data;
                     KernelsInt8.dequant_i8_to_f32(src, srcOff, len, dst, output.offset, scale);
+                    break;
                 }
-                case "q8_absmax_quant" -> {
+
+                case "q8_absmax_quant": {
                     float[] src = inputs[0].data;
                     int srcOff = inputs[0].offset;
                     int len = inputs[0].rows * inputs[0].cols;
@@ -1355,8 +1635,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     byte[] dst = output.asByteArray();
                     KernelsInt8.quantize_f32_to_i8(src, srcOff, len, dst, output.offset, scale);
                     inputs[1].data[inputs[1].offset] = scale;
+                    break;
                 }
-                case "rope_split" -> {
+
+                case "rope_split": {
                     float[] buf = inputs[0].data;
                     float[] cos = inputs[1].data;
                     float[] sin = inputs[2].data;
@@ -1370,42 +1652,60 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     if (output != inputs[0]) {
                         System.arraycopy(buf, qOff, output.data, output.offset, (qHeads + kHeads) * head_dim);
                     }
+                    break;
                 }
-                case "accum_v" -> {
+
+                case "accum_v": {
                     float scale = (float) inputs[1].data[inputs[1].offset];
                     float[] src = inputs[0].data;
                     float[] dst = output.data;
                     int len = inputs[0].rows * inputs[0].cols;
                     KernelsFloat.accumulate_v_f32(dst, output.offset, src, inputs[0].offset, len, scale);
+                    break;
                 }
-                case "matmul_1xn_axpy" -> {
+
+                case "matmul_1xn_axpy": {
                     int K = (int) inputs[2].data[inputs[2].offset + 0];
                     int N = (int) inputs[2].data[inputs[2].offset + 1];
                     KernelsFloat.matmul_f32_1xN_axpy(
                             inputs[0].data, inputs[1].data, output.data, output.offset,
                             K, N, inputs[0].offset
                     );
+                    break;
                 }
-                case "matmul_bias_relu" ->
+
+                case "matmul_bias_relu":
                     FlatMatrixF.matmulAddBiasRelu(inputs[0], inputs[1], inputs[2], output);
-                case "rms_norm" -> {
+                    break;
+
+                case "rms_norm": {
                     float eps = (float) inputs[2].data[inputs[2].offset];
                     FlatMatrixF.rmsNorm(inputs[0], inputs[1], output, eps);
+                    break;
                 }
-                case "layer_norm" -> {
+
+                case "layer_norm": {
                     float eps = (float) inputs[3].data[inputs[3].offset];
                     FlatMatrixF.layerNorm(inputs[0], inputs[1], inputs[2], output, eps);
+                    break;
                 }
-                case "matmul_bias_silu" ->
+
+                case "matmul_bias_silu":
                     FlatMatrixF.matmulAddBiasSilu(inputs[0], inputs[1], inputs[2], output);
-                case "swiglu" -> {
+                    break;
+
+                case "swiglu": {
                     FlatMatrixF.swiGLU(inputs[0], inputs[1], output);
+                    break;
                 }
-                case "mha_attention" -> {
+
+                case "mha_attention": {
                     float scale = (float) inputs[3].data[inputs[3].offset];
                     FlatMatrixF.mhaAttention(inputs[0], inputs[1], inputs[2], output, scale);
+                    break;
                 }
-                default ->
+
+                default:
                     throw new UnsupportedOperationException("Unknown kernel: " + kernelToRun);
             }
         }
@@ -1752,57 +2052,92 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     }
 
     private boolean isMatrixKernel(String name, int arity) {
-        return switch (name.toLowerCase()) {
+        switch (name.toLowerCase()) {
             // BLAS
-            case "matmul", "gemm", "mm" ->
-                arity == 3;
-            case "gemv", "matvec" ->
-                arity == 2;
-            case "dot", "inner", "axpy" ->
-                arity == 3;
-            case "transpose", "t" ->
-                arity == 1;
+            case "matmul":
+            case "gemm":
+            case "mm":
+                return arity == 3;
+            case "gemv":
+            case "matvec":
+                return arity == 2;
+            case "dot":
+            case "inner":
+            case "axpy":
+                return arity == 3;
+            case "transpose":
+            case "t":
+                return arity == 1;
 
             // Elementwise + activations
-            case "add", "sub", "mul", "div", "pow" ->
-                arity == 2;
-            case "relu", "gelu", "sigmoid", "tanh", "silu", "swish", "mish" ->
-                arity == 1;
-            case "exp", "log", "sqrt", "rsqrt", "sin", "cos" ->
-                arity == 1;
-            case "leaky_relu", "elu", "clip", "clamp" ->
-                arity == 2;
-            case "abs", "neg", "square" ->
-                arity == 1;
+            case "add":
+            case "sub":
+            case "mul":
+            case "div":
+            case "pow":
+                return arity == 2;
+            case "relu":
+            case "gelu":
+            case "sigmoid":
+            case "tanh":
+            case "silu":
+            case "swish":
+            case "mish":
+                return arity == 1;
+            case "exp":
+            case "log":
+            case "sqrt":
+            case "rsqrt":
+            case "sin":
+            case "cos":
+                return arity == 1;
+            case "leaky_relu":
+            case "elu":
+            case "clip":
+            case "clamp":
+                return arity == 2;
+            case "abs":
+            case "neg":
+            case "square":
+                return arity == 1;
 
             // Reductions
-            case "sum", "mean", "prod", "max", "min" ->
-                arity == 1;
-            case "softmax", "log_softmax" ->
-                arity == 1;
-            case "layer_norm" ->
-                arity == 3;
-            case "rms_norm" ->
-                arity == 2;
+            case "sum":
+            case "mean":
+            case "prod":
+            case "max":
+            case "min":
+                return arity == 1;
+            case "softmax":
+            case "log_softmax":
+                return arity == 1;
+            case "layer_norm":
+                return arity == 3;
+            case "rms_norm":
+                return arity == 2;
 
             // Fused - big wins
-            case "fma" ->
-                arity == 3;
-            case "bias_add" ->
-                arity == 2;
-            case "linear", "matmul_bias" ->
-                arity == 3;
-            case "matmul_bias_relu", "matmul_bias_gelu" ->
-                arity == 3;
-            case "matmul_bias_add" ->
-                arity == 4;
+            case "fma":
+                return arity == 3;
+            case "bias_add":
+                return arity == 2;
+            case "linear":
+            case "matmul_bias":
+                return arity == 3;
+            case "matmul_bias_relu":
+            case "matmul_bias_gelu":
+                return arity == 3;
+            case "matmul_bias_add":
+                return arity == 4;
 
             // Loss
-            case "mse", "mae", "cross_entropy" ->
-                arity == 2;
+            case "mse":
+            case "mae":
+            case "cross_entropy":
+                return arity == 2;
 
-            default ->
-                false;
-        };
+            default:
+                return false;
+        }
     }
 }

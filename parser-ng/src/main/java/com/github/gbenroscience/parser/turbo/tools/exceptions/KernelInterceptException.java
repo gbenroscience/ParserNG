@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd.turbo.tools;
+package com.github.gbenroscience.parser.turbo.tools.exceptions;
 
  
 /**

@@ -1,7 +1,7 @@
-package com.github.gbenroscience.simd.turbo;
+package com.github.gbenroscience.parser.turbo.tools.vector;
 
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrix;
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
+import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrixF;
+import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrix;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression; 
 
 /**

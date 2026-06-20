@@ -14,6 +14,10 @@
     <artifactId>parser-ng-simd</artifactId>
     <packaging>jar</packaging>
 
+    <name>ParserNG SIMD Extension</name>
+    <description>Hardware-accelerated SIMD vector calculation pipelines for ParserNG</description>
+    <url>https://github.com/gbenroscience/ParserNG</url>
+
     <dependencies>
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
@@ -24,7 +28,6 @@
             <groupId>org.codehaus.janino</groupId>
             <artifactId>janino</artifactId>
             <version>3.1.12</version>
-            <type>jar</type>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -44,12 +47,10 @@
             <version>5.10.3</version>
             <scope>test</scope>
         </dependency>
-        <!-- JMH for reliable benchmarking -->
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
             <artifactId>jmh-core</artifactId>
             <version>1.37</version>
-            <type>jar</type>
         </dependency>
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
@@ -57,14 +58,44 @@
             <version>1.37</version>
             <scope>provided</scope>
         </dependency>
-       
     </dependencies>
+
     <build>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version> 
+                <configuration>
+                    <source>21</source> 
+                    <target>21</target>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.openjdk.jmh</groupId>
+                            <artifactId>jmh-generator-annprocess</artifactId>
+                            <version>1.37</version>
+                        </path>
+                    </annotationProcessorPaths>
+                    <compilerArgs>
+                        <arg>--add-modules</arg>
+                        <arg>jdk.incubator.vector</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <argLine>--add-modules jdk.incubator.vector</argLine>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.2.4</version>
+                <version>3.5.2</version>
                 <executions>
                     <execution>
                         <phase>package</phase>
@@ -92,49 +123,18 @@
                     </execution>
                 </executions>
             </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version> 
-                <configuration>
-                    <source>21</source> 
-                    <target>21</target>
-                    <annotationProcessorPaths>
-                        <!-- Register the JMH annotation processor -->
-                        <path>
-                            <groupId>org.openjdk.jmh</groupId>
-                            <artifactId>jmh-generator-annprocess</artifactId>
-                            <version>1.37</version>
-                        </path>
-                    </annotationProcessorPaths>
-                    <compilerArgs>
-                        <arg>--add-modules</arg>
-                        <arg>jdk.incubator.vector</arg>
-                    </compilerArgs>
-                </configuration>
-            </plugin>
-            <!--            To run  JUnit tests inside NetBeans without them crashing, add the next plugin-->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.2.5</version>
-                <configuration>
-                    <argLine>--add-modules jdk.incubator.vector</argLine>
-                </configuration>
-            </plugin>
+
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
-                <version>3.6.3</version>
+                <version>3.2.0</version>
                 <configuration>
                     <executable>java</executable>
                     <arguments>
                         <argument>--add-modules</argument>
                         <argument>jdk.incubator.vector</argument>
-            
                         <argument>-classpath</argument>
                         <classpath/>
-            
                         <argument>com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator</argument>
                     </arguments>
                 </configuration>

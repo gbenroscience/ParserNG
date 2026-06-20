@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd.turbo.tools.utils;
+package com.github.gbenroscience.parser.turbo.tools.vector;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
