@@ -331,6 +331,63 @@ public class BulkTurboEvaluatorTest {
         }
 
     }
+    
+    
+    @Test
+    public void testBulkExecutionAgain() throws Throwable {
+        MathExpression me = new MathExpression("sin(z-x)+3*sin(5*x^2 + 4*y^2)");
+        me.setDRG(DRG_MODE.RAD);
+        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+
+        logDetails(me, evaluator, !active);
+
+        int varCount = me.getVariablesNames().length;
+        int dataSize = 10000000;
+        double[][] inputs = new double[varCount][dataSize];
+        double[] flatVars = new double[varCount * dataSize];
+        double[] outputVector = new double[dataSize];
+        double[] outputVectorStd = new double[dataSize];
+        Random r = new Random(System.currentTimeMillis());
+        String t = String.valueOf(System.nanoTime());
+
+        for (int i = 0; i < dataSize; i++) {
+            for (int j = 0; j < varCount; j++) {
+                int idx = r.nextInt(t.length());
+                inputs[j][i] = Integer.parseInt(t.substring(idx, idx + 1));
+            }
+        }
+        for (int i = 0; i < inputs.length; i++) {
+            int sz = inputs[i].length;
+            System.arraycopy(inputs[i], 0, flatVars, i * sz, sz);
+        }
+
+        for (int i = 0; i < inputs[0].length; i++) {
+            double z = inputs[me.getSlotByName("z")][i];
+            double x = inputs[me.getSlotByName("x")][i];
+            double y = inputs[me.getSlotByName("y")][i];
+            outputVectorStd[i] = me.solveGeneric(z, x, y).scalar;
+        }
+
+
+        // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
+        evaluator.applyBulk(flatVars, outputVector, true);
+        // System.out.println("output: " + Arrays.toString(outputVector));
+
+
+        double[] expectedOut = new double[dataSize];
+        for (int i = 0; i < dataSize; i++) {
+            double z = inputs[0][i];
+            double x = inputs[1][i];
+            double y = inputs[2][i];
+            // Correct expected formula matching the active MathExpression
+            expectedOut[i] = Math.sin(z - x) + 3.0 * Math.sin(5.0 * x * x + 4 * y * y);
+        }
+
+        for (int i = 0; i < expectedOut.length; i++) {
+            assertEquals(expectedOut[i], outputVector[i], EPSILON, "Parallel SIMD execution drifted at index: " + i);
+        }
+
+    }
 
     @Test
     public void testSingleRuntime() throws Throwable {

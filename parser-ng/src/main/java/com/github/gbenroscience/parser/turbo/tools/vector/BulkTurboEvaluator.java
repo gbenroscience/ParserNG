@@ -171,7 +171,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
     protected int[] targetSlots;
     protected double[] literalConstants;
     protected int[] argumentCount;
-
+    protected int stackDepth;
     protected int varCount;
     protected int instructionCount;
     protected KernelInterceptException interceptedKernel;
@@ -181,6 +181,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
         this.postfix = me.getCachedPostfix();
         this.varCount = me.getVariablesNames().length;
         this.compiledScalarHandle = compileScalar(postfix);
+        stackDepth = me.getTreeStats().depth;
         compileToPrimitiveProgram();
     }
 
@@ -636,9 +637,14 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
     public class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
 
+        /**
+         * When the parallel processing methods are called, parallel processing
+         * will kick in at this value
+         */
+        protected static final int PARALLEL_OPS_THRESHOLD = 2048;
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
-        protected static final int BLOCK_SIZE = 256;
-        protected static final int MAX_STACK_DEPTH = 64;
+        protected static final int BLOCK_SIZE = 512;
+        private static final long L3_CACHE_TARGET_BYTES = 32 * 1024 * 1024; // 32 MB target boundary
 
         private final MethodHandle scalarHandle;
         private final int[] opcodes;
@@ -669,7 +675,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          * frames * 2048 block size)
          */
         protected final ThreadLocal<double[]> FLAT_SCRATCH_STACK = ThreadLocal.withInitial(()
-                -> new double[MAX_STACK_DEPTH * BLOCK_SIZE]
+                -> new double[BulkTurboEvaluator.this.stackDepth * BLOCK_SIZE]
         );
 
         public int[] getOpcodes() {
@@ -771,6 +777,13 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
+        protected boolean mustUseTiling(int dataSize) {
+            // Calculate total bytes this specific expression's scratch space will consume
+            long scratchBytes = (long) dataSize * BulkTurboEvaluator.this.stackDepth * Double.BYTES;
+            // Switch to tiling if scratch space alone blows past a conservative L3 cache allocation
+            return scratchBytes > L3_CACHE_TARGET_BYTES;
+        }
+
         protected void checkError(double[][] variables, double[] output) {
             int numSamples = variables != null && variables.length > 0 && output != null && output.length > 0 ? variables[0].length : -1;
             int stride = this.varCount;
@@ -789,10 +802,14 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
         }
 
+        public void cleanup() {
+            FLAT_SCRATCH_STACK.remove();
+        }
+
         //////////////////////////////////////////////////////////////////
         ///                                                            ///
-        ///          Uses double[][] Arrays For Convenience          ///
-        ///         Speed may drop by as much as 4ns                   ///
+        ///          Uses double[][] Arrays For Convenience            ///
+        ///            Speed may drop by as much as 4ns                ///
         ///                                                            ///
         //////////////////////////////////////////////////////////////////
         
@@ -828,7 +845,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             // Sequential bypass for small workloads
-            if (numSamples < 2048) {
+            if (numSamples < PARALLEL_OPS_THRESHOLD) {
                 applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, false);
                 return;
             }
@@ -900,7 +917,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
      
         
         
-      /**
+        /**
          * Core Column-Major Vectorized Loop Processor (Flat Memory
          * Architecture) Bypasses jagged array pointers to execute at maximum
          * hardware throughput.
@@ -910,24 +927,40 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          * @param dataSize The total number of elements per variable row (used
          * for stride offset).
          */
-        private void applyBulkInternalWithBlocks(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
-            // Top-level API boundary validations (executed once per pipeline request)
-
-            if (dataSize * this.varCount > flatVariables.length) {
-                throw new IllegalArgumentException("flatVariables too small: need " + (dataSize * varCount) + " got " + flatVariables.length);
+     
+         /**
+         * Core Column-Major Vectorized Loop Processor (Flat Memory
+         * Architecture) Bypasses jagged array pointers to execute at maximum
+         * hardware throughput.
+         *
+         * @param flatVariables Grouped/Contiguous array of variables e.g.
+         * [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back. concatenated.
+         * @param dataSize The total number of elements per variable row (used
+         * for stride offset).
+         */
+    
+            private void applyBulkInternalWithBlocks(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
+            // Keep this check: Guard against multi-threaded / batch slicing arithmetic bugs
+            if (startIdx + length > dataSize || startIdx + length > output.length) {
+                throw new IllegalArgumentException(String.format(
+                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
+                        startIdx, length, dataSize, output.length
+                ));
             }
 
-            final double[] scratch = FLAT_SCRATCH_STACK.get();
+            // Thread-local scratch space acquisition & sizing guard
+            double[] scratch = FLAT_SCRATCH_STACK.get();
+            final int requiredScratchSize = Math.min(BLOCK_SIZE, length);
+            if (scratch == null || scratch.length < requiredScratchSize) {
+                scratch = new double[requiredScratchSize];
+                FLAT_SCRATCH_STACK.set(scratch);
+            }
+
+            // Cache-aligned Loop Tiling
             final int endIdx = startIdx + length;
-            // 1. SHORT-CIRCUIT: Small datasets bypass tiling infrastructure entirely
-            if (length <= BLOCK_SIZE) {
-                evaluateTile(flatVariables, dataSize, output, startIdx, length, scratch);
-            } // 2. TILING STRATEGY: Process large datasets in cache-aligned blocks
-            else {
-                for (int tileStart = startIdx; tileStart < endIdx; tileStart += BLOCK_SIZE) {
-                    final int currentTileSize = Math.min(BLOCK_SIZE, endIdx - tileStart);
-                    evaluateTile(flatVariables, dataSize, output, tileStart, currentTileSize, scratch);
-                }
+            for (int tileStart = startIdx; tileStart < endIdx; tileStart += BLOCK_SIZE) {
+                final int currentTileSize = Math.min(BLOCK_SIZE, endIdx - tileStart);
+                evaluateTile(flatVariables, dataSize, output, tileStart, currentTileSize, scratch);
             }
         }
 
@@ -943,15 +976,24 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          */
         private void applyBulkInternalNoBlocks(double[] flatVariables, int dataSize, double[] output,
                 int startIdx) {
-            // Retrieve the completely flat contiguous scratch space for maximum CPU cache prefetching
-            final double[] scratch = FLAT_SCRATCH_STACK.get();
+            double[] scratch = FLAT_SCRATCH_STACK.get();
 
-            evaluateTile(flatVariables,
-                    dataSize,
-                    output,
-                    startIdx,
-                    dataSize,
-                    scratch);
+            // 1. Precise scale mapping without guesswork
+            long totalRequiredSize = (long) BulkTurboEvaluator.this.stackDepth * dataSize;
+            // 2. Clear fail-fast guard
+            if (totalRequiredSize > (Integer.MAX_VALUE - 8)) {
+                throw new UnsupportedOperationException("Dataset scale requires off-heap execution or loop tiling block models.");
+            }
+
+            int rss = (int) totalRequiredSize;
+
+            // 3. Allocate exactly what is needed, down to the exact slot
+            if (scratch == null || scratch.length < rss) {
+                scratch = new double[rss];
+                FLAT_SCRATCH_STACK.set(scratch);
+            }
+
+            evaluateTile(flatVariables, dataSize, output, startIdx, dataSize, scratch);
         }
 
         /**
@@ -997,7 +1039,11 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
             if (useBlocks) {
                 applyBulkInternalWithBlocks(flatVariables, dataSize, output, startIdx, length);
             } else {
-                applyBulkInternalNoBlocks(flatVariables, dataSize, output, startIdx);
+                if (mustUseTiling(dataSize)) {
+                    applyBulkInternalWithBlocks(flatVariables, dataSize, output, startIdx, length);
+                } else {
+                    applyBulkInternalNoBlocks(flatVariables, dataSize, output, startIdx);
+                }
             }
         }
 
@@ -1019,6 +1065,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                 int currentTileSize,
                 double[] scratch) {
 
+            final int BLOCK_SIZE = currentTileSize;
             final int n = currentTileSize; // hoist for C2 unroll
             int sp = 0;
 
@@ -1041,6 +1088,13 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         final int slotIdx = targetSlots[instIdx];
                         final int stackOffset = sp * BLOCK_SIZE;
                         sp++;
+
+                        // === SAFETY GUARD ===
+                        if (stackOffset + n > scratch.length) {
+                            throw new IllegalStateException(
+                                    String.format("Scratch buffer overflow! stackOffset=%d, n=%d, scratch.length=%d, BLOCK_SIZE=%d, sp=%d",
+                                            stackOffset, n, scratch.length, BLOCK_SIZE, sp));
+                        }
                         final int flatOffset = (slotIdx * dataSize) + tileStart;
 
                         System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, n);

@@ -1,6 +1,7 @@
 package com.github.gbenroscience.simd;
 
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.turbo.tools.vector.BulkTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import org.openjdk.jmh.annotations.*;
 import java.util.Random;
@@ -32,6 +33,7 @@ public class VectorTurboEvaluatorBenchmark {
     private VectorTurboEvaluator.BatchedVectorCompositeExpression linearExpr;
     private VectorTurboEvaluator.BatchedVectorCompositeExpression gaussianExpr;
     private VectorTurboEvaluator.BatchedVectorCompositeExpression conditionalExpr;
+    private VectorTurboEvaluator.BatchedVectorCompositeExpression trigExpr;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable {
@@ -64,6 +66,9 @@ public class VectorTurboEvaluatorBenchmark {
         //MathExpression meGaussian = new MathExpression("(1 / (x1 * sqrt(2 * 3.141592653589793))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
         MathExpression meGaussian = new MathExpression("0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))");
         gaussianExpr = (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(meGaussian).compile();
+        
+        MathExpression trigExp = new MathExpression("sin(z-x)+3*sin(5*x^2 + 4*y^2)");
+        this.trigExpr = (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(trigExp).compile();
 
         /*
         MathExpression meConditional = new MathExpression("if(x1 >= 2.5, sin(x1) % x2, x3 * vma(x1, x2, 1.5))");
@@ -71,10 +76,10 @@ public class VectorTurboEvaluatorBenchmark {
          */
     }
 
-    /*
+    
     @Benchmark
     public void benchmarkLinearPolynomialBulk(org.openjdk.jmh.infra.Blackhole bh) {
-        linearExpr.applyBulk(variables, outputBuffer);
+        linearExpr.applyBulk(variables, outputBuffer,tiledExecution);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
@@ -87,7 +92,7 @@ public class VectorTurboEvaluatorBenchmark {
 
     @Benchmark
     public void benchmarkGaussianDistributionBulk(org.openjdk.jmh.infra.Blackhole bh) {
-        gaussianExpr.applyBulk(variables, outputBuffer);
+        gaussianExpr.applyBulk(variables, outputBuffer,tiledExecution);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
@@ -97,7 +102,7 @@ public class VectorTurboEvaluatorBenchmark {
         }
         bh.consume(checksum);
     }
-     */
+     
     @Benchmark
     public void benchmarkLinearPolynomialBulkFlatVars(org.openjdk.jmh.infra.Blackhole bh) {
         linearExpr.applyBulkParallel(flatVariables, outputBuffer);
@@ -115,6 +120,20 @@ public class VectorTurboEvaluatorBenchmark {
     @Benchmark
     public void benchmarkGaussianDistributionBulkFlatVars(org.openjdk.jmh.infra.Blackhole bh) {
         gaussianExpr.applyBulkParallel(flatVariables, outputBuffer);
+
+        // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
+        // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
+        double checksum = 0.0;
+        for (int i = 0; i < outputBuffer.length; i += 64) { // Sample memory lines to reduce benchmark overhead
+            checksum += outputBuffer[i];
+        }
+
+        bh.consume(checksum);
+    }
+    
+        @Benchmark
+    public void benchmark(org.openjdk.jmh.infra.Blackhole bh) {
+        trigExpr.applyBulkParallel(flatVariables, outputBuffer);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.

@@ -170,6 +170,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     protected int[] argumentCount;
 
     protected int varCount;
+    protected int stackDepth;
     protected int instructionCount;
     protected KernelInterceptException interceptedKernel;
 
@@ -178,6 +179,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         this.postfix = me.getCachedPostfix();
         this.varCount = me.getVariablesNames().length;
         this.compiledScalarHandle = compileScalar(postfix);
+        stackDepth = me.getTreeStats().depth;
         compileToPrimitiveProgram();
     }
 
@@ -465,12 +467,16 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 literalConstants, instructionCount, varCount);
     }
 
-
     public class BatchedVectorCompositeExpression implements SIMDCompositeExpression {
 
+        /**
+         * When the parallel processing methods are called, parallel processing
+         * will kick in at this value
+         */
+        protected static final int PARALLEL_OPS_THRESHOLD = 2048;
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
         protected static final int BLOCK_SIZE = 256;
-        protected static final int MAX_STACK_DEPTH = 64;
+        private static final long L3_CACHE_TARGET_BYTES = 32 * 1024 * 1024; // 32 MB target boundary
 
         private final MethodHandle scalarHandle;
         private final int[] opcodes;
@@ -484,7 +490,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         protected static final int STATE_IDLE = 0;
         protected static final int STATE_RUNNING = 1;
         protected static final int STATE_FINISHED = 2;
-
 
         protected int cores;
         protected WorkerThread[] workers;
@@ -501,8 +506,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * Allocates a perfectly flat, contiguous scratch block (64 nested stack
          * frames * 2048 block size)
          */
-        protected static final ThreadLocal<double[]> FLAT_SCRATCH_STACK = ThreadLocal.withInitial(()
-                -> new double[MAX_STACK_DEPTH * BLOCK_SIZE]
+        protected final ThreadLocal<double[]> FLAT_SCRATCH_STACK = ThreadLocal.withInitial(()
+                -> new double[VectorTurboEvaluator.this.stackDepth * BLOCK_SIZE]
         );
 
         public int[] getOpcodes() {
@@ -604,22 +609,30 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
+        protected boolean mustUseTiling(int dataSize) {
+            // Calculate total bytes this specific expression's scratch space will consume
+            long scratchBytes = (long) dataSize * VectorTurboEvaluator.this.stackDepth * Double.BYTES;
+
+            // Switch to tiling if scratch space alone blows past a conservative L3 cache allocation
+            return scratchBytes > L3_CACHE_TARGET_BYTES;
+        }
+
         protected void checkError(double[][] variables, double[] output) {
-             int numSamples = variables!=null && variables.length>0&&output!=null&&output.length>0 ? variables[0].length : -1;
+            int numSamples = variables != null && variables.length > 0 && output != null && output.length > 0 ? variables[0].length : -1;
             int stride = this.varCount;
             if (stride != variables.length || numSamples != output.length) {
-                throw new IllegalStateException(String.format("varCount mismatch[stride=%d, variables-count-from-input=%d] || array sizes not correct(elements-per-variable=%d vs output-array-size=%d)", stride,variables.length, numSamples,output.length));
+                throw new IllegalStateException(String.format("varCount mismatch[stride=%d, variables-count-from-input=%d] || array sizes not correct(elements-per-variable=%d vs output-array-size=%d)", stride, variables.length, numSamples, output.length));
             }
         }
 
         protected void checkError(double[] flatVariables, double[] output) {
-            int totalSamples = flatVariables!=null && flatVariables.length>0&&output!=null&&output.length>0 ? flatVariables.length : -1;
+            int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0 ? flatVariables.length : -1;
             int stride = this.varCount;
-            if (totalSamples != stride*output.length) {
-                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]", 
-                        totalSamples,stride*output.length));
+            if (totalSamples != stride * output.length) {
+                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]",
+                        totalSamples, stride * output.length));
             }
-  
+
         }
 
         //////////////////////////////////////////////////////////////////
@@ -645,14 +658,12 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, useBlocks);
         }
 
-    
         @Override
         public void applyBulkParallel(double[][] variables, double[] output) {
             checkError(variables, output);
 
             final int numSamples = variables[0].length;
             final int stride = this.varCount;
-          
 
             // Zero-allocation buffer retrieval from your thread-local pool
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
@@ -663,7 +674,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             }
 
             // Sequential bypass for small workloads
-            if (numSamples < 2048) {
+            if (numSamples < PARALLEL_OPS_THRESHOLD) {
                 applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, false);
                 return;
             }
@@ -671,15 +682,14 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             // Coordinate via the EXACT SAME zero-alloc threading subsystem
             dispatchToWorkerRing(flatVariables, output, numSamples, true);
         }
-        
-   
 
         /**
-         *  Centralized coordination mechanism to eliminate code duplication
+         * Centralized coordination mechanism to eliminate code duplication
+         *
          * @param flatVariables
          * @param output
          * @param dataSize
-         * @param useBlocks 
+         * @param useBlocks
          */
         protected void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize, boolean useBlocks) {
             // 1. Publish parameters to volatile registers (No allocations)
@@ -736,7 +746,9 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
      
         
         
-      /**
+  
+     
+         /**
          * Core Column-Major Vectorized Loop Processor (Flat Memory
          * Architecture) Bypasses jagged array pointers to execute at maximum
          * hardware throughput.
@@ -746,25 +758,29 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * @param dataSize The total number of elements per variable row (used
          * for stride offset).
          */
-        private void applyBulkInternalWithBlocks(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
-            // Top-level API boundary validations (executed once per pipeline request)
-        
-
-            if (dataSize * this.varCount > flatVariables.length) {
-                throw new IllegalArgumentException("flatVariables too small: need " + (dataSize * varCount) + " got " + flatVariables.length);
+    
+            private void applyBulkInternalWithBlocks(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
+            // Keep this check: Guard against multi-threaded / batch slicing arithmetic bugs
+            if (startIdx + length > dataSize || startIdx + length > output.length) {
+                throw new IllegalArgumentException(String.format(
+                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
+                        startIdx, length, dataSize, output.length
+                ));
             }
 
-            final double[] scratch = FLAT_SCRATCH_STACK.get();
+            // Thread-local scratch space acquisition & sizing guard
+            double[] scratch = FLAT_SCRATCH_STACK.get();
+            final int requiredScratchSize = Math.min(BLOCK_SIZE, length);
+            if (scratch == null || scratch.length < requiredScratchSize) {
+                scratch = new double[requiredScratchSize];
+                FLAT_SCRATCH_STACK.set(scratch);
+            }
+
+            // Cache-aligned Loop Tiling
             final int endIdx = startIdx + length;
-            // 1. SHORT-CIRCUIT: Small datasets bypass tiling infrastructure entirely
-            if (length <= BLOCK_SIZE) {
-                evaluateTile(flatVariables, dataSize, output, startIdx, length, scratch);
-            } // 2. TILING STRATEGY: Process large datasets in cache-aligned blocks
-            else {
-                for (int tileStart = startIdx; tileStart < endIdx; tileStart += BLOCK_SIZE) {
-                    final int currentTileSize = Math.min(BLOCK_SIZE, endIdx - tileStart);
-                    evaluateTile(flatVariables, dataSize, output, tileStart, currentTileSize, scratch);
-                }
+            for (int tileStart = startIdx; tileStart < endIdx; tileStart += BLOCK_SIZE) {
+                final int currentTileSize = Math.min(BLOCK_SIZE, endIdx - tileStart);
+                evaluateTile(flatVariables, dataSize, output, tileStart, currentTileSize, scratch);
             }
         }
 
@@ -780,15 +796,24 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          */
         private void applyBulkInternalNoBlocks(double[] flatVariables, int dataSize, double[] output,
                 int startIdx) {
-            // Retrieve the completely flat contiguous scratch space for maximum CPU cache prefetching
-            final double[] scratch = FLAT_SCRATCH_STACK.get();
+            double[] scratch = FLAT_SCRATCH_STACK.get();
 
-            evaluateTile(flatVariables,
-                    dataSize,
-                    output,
-                    startIdx,
-                    dataSize,
-                    scratch);
+            // 1. Precise scale mapping without guesswork
+            long totalRequiredSize = (long) VectorTurboEvaluator.this.stackDepth * dataSize;
+            // 2. Clear fail-fast guard
+            if (totalRequiredSize > (Integer.MAX_VALUE - 8)) {
+                throw new UnsupportedOperationException("Dataset scale requires off-heap execution or loop tiling block models.");
+            }
+
+            int rss = (int) totalRequiredSize;
+
+            // 3. Allocate exactly what is needed, down to the exact slot
+            if (scratch == null || scratch.length < rss) {
+                scratch = new double[rss];
+                FLAT_SCRATCH_STACK.set(scratch);
+            }
+
+            evaluateTile(flatVariables, dataSize, output, startIdx, dataSize, scratch);
         }
 
         /**
@@ -797,9 +822,9 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * inherent to jagged multidimensional arrays (e.g., {@code double[][]})
          * to execute loops at maximum hardware throughput.
          * <p>
-         * Based on the {@code useBlocks} execution parameter, this method
-         * delegates to either a cache-conscious useBlocks implementation or a
-         * direct flat streaming evaluation strategy.
+         * Based on the {@code tiledExecution} execution parameter, this method
+         * delegates to either a cache-conscious tiledExecution implementation
+         * or a direct flat streaming evaluation strategy.
          * </p>
          *
          * @param flatVariables a contiguous, single-dimensional array
@@ -814,9 +839,9 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * processing slice begins
          * @param length the absolute number of elements to process within this
          * batch window
-         * @param useBlocks {@code true} if execution should be routed through a
-         * useBlocks memory pattern optimized for L1/L2 cache locality;
-         * {@code false} for flat, non-useBlocks bulk processing
+         * @param tiledExecution {@code true} if execution should be routed
+         * through a block memory pattern optimized for L1/L2 cache
+         * locality; {@code false} for flat, non-tiledExecution bulk processing
          *
          * If you are processing a total dataset of 1,000,000 elements (dataSize
          * = 1000000), but a specific thread or tile is only processing a chunk
@@ -830,11 +855,15 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * from each variable segment in the input, compute them, and write them
          * into indices 200,000 through 200,499 of the output array."
          */
-        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length, boolean useBlocks) {
-            if (useBlocks) {
+        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length, boolean tiledExecution) {
+            if (tiledExecution) {
                 applyBulkInternalWithBlocks(flatVariables, dataSize, output, startIdx, length);
             } else {
-                applyBulkInternalNoBlocks(flatVariables, dataSize, output, startIdx);
+                if (mustUseTiling(dataSize)) {
+                    applyBulkInternalWithBlocks(flatVariables, dataSize, output, startIdx, length);
+                } else {
+                    applyBulkInternalNoBlocks(flatVariables, dataSize, output, startIdx);
+                }
             }
         }
 
@@ -849,13 +878,9 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * @param scratch
          */
         //@jdk.internal.vm.annotation.ForceInline
-        private void evaluateTile(double[] flatVariables,
-                int dataSize,
-                double[] output,
-                int tileStart,
-                int currentTileSize,
-                double[] scratch) {
+        private void evaluateTile(double[] flatVariables, int dataSize, double[] output, int tileStart, int currentTileSize, double[] scratch) {
 
+            final int BLOCK_SIZE = currentTileSize;
             final int n = currentTileSize; // hoist for C2 unroll
             int sp = 0;
 
@@ -877,6 +902,13 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         final int slotIdx = targetSlots[instIdx];
                         final int stackOffset = sp * BLOCK_SIZE;
                         sp++;
+
+                        // === SAFETY GUARD ===
+                        if (stackOffset + n > scratch.length) {
+                            throw new IllegalStateException(
+                                    String.format("Scratch buffer overflow! stackOffset=%d, n=%d, scratch.length=%d, BLOCK_SIZE=%d, sp=%d",
+                                            stackOffset, n, scratch.length, BLOCK_SIZE, sp));
+                        }
                         final int flatOffset = (slotIdx * dataSize) + tileStart;
 
                         System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, n);
@@ -1252,7 +1284,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
             final int length = output.length;
 
-            if (length < 2048) {
+            if (length < PARALLEL_OPS_THRESHOLD) {
                 applyBulkInternal(flatVariables, length, output, 0, length, false);
                 return;
             }
@@ -1283,8 +1315,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             final int length = output.length; // This is the contract: output.length = elements to compute
             applyBulkInternal(flatVariables, length, output, 0, length, useBlocks);
         }
-
-   
 
         ///////////////////////////////////////////////////////////
         ///                    MATRIX KERNELS                   ///

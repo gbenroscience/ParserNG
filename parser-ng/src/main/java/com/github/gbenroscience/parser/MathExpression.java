@@ -706,6 +706,62 @@ public class MathExpression implements Savable, Solvable {
         log.copyFrom(errorLog);
     }
 
+    public int calculateExactStackDepth() {
+        int currentDepth = 0;
+        int maxDepth = 0;
+
+        if (cachedPostfix == null || cachedPostfix.length == 0) {
+            return 0;
+        }
+
+        for (MathExpression.Token inst : cachedPostfix) {
+            switch (inst.kind) {
+                case MathExpression.Token.VARIABLE:
+                case MathExpression.Token.NUMBER:
+                case MathExpression.Token.MATRIX:
+                case MathExpression.Token.FUNCTION_HANDLE:
+                case MathExpression.Token.FUNCTION_HANDLE_UNDEFINED:
+                    // When passed as a literal reference, they pop 0 and push 1 object pointer
+                    currentDepth++;
+                    break;
+                    
+                case MathExpression.Token.OPERATOR:
+                    
+                    // Operators can be binary (pops 2, pushes 1) or unary (pops 1, pushes 1).
+                    // Using getArgumentCount() handles both paths cleanly without token bifurcation.
+                    int opArgs = inst.arity;
+                    currentDepth = currentDepth - opArgs + 1;
+                    break;
+
+                case MathExpression.Token.FUNCTION:
+                case MathExpression.Token.METHOD:
+                    // Functions and method calls pop N arguments and push exactly 1 evaluation result
+                    int argCount = inst.getRawArgs().length;
+                    currentDepth = currentDepth - argCount + 1;
+                    break;
+
+                default:
+                    // Structural delimiters like LPAREN, RPAREN, or COMMA are eliminated 
+                    // during Shunting-Yard conversion and won't appear in a valid postfix stream.
+                    break;
+            }
+
+            // Track the highest watermark reached during the simulation.
+            // Note: Since operands are pushed first, maxDepth correctly captures the peak 
+            // structural depth right before an operation executes.
+            if (currentDepth > maxDepth) {
+                maxDepth = currentDepth;
+            }
+        }
+
+        // Validation guard: A well-formed mathematical expression 
+        // must leave exactly 1 final evaluation result on the execution stack track.
+        if (currentDepth != 1) {
+            throw new IllegalArgumentException("Malformed expression layout: tracking leaves dirty stack frame. End depth: " + currentDepth);
+        }
+
+        return maxDepth;
+    }
     private void initializing(String expression) {
         computeTreeDepth();
         setCorrectFunction(true);

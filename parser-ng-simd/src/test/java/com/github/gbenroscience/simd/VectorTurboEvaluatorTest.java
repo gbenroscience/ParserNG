@@ -2,7 +2,6 @@ package com.github.gbenroscience.simd;
 
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.turbo.tools.vector.BulkTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression;
