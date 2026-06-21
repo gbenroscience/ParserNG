@@ -1,7 +1,7 @@
-# ParserNG 2.0.0 🧮⚡ 
+# ParserNG 2.0.3 🧮⚡ 
 ### The Fastest, Interpreted(non-compiling) Math Engine for Java.
 
-## Vector API comes to ParserNG in v2.0.0, and Android is not left out
+## Vector API comes to ParserNG in v2.0.x, and Android is not left out
 - Beats Janino on Gaussian and Linear workloads on single core
 - Scales performance easily on multiple cores(within limits of hardware memory and cpu)
 

@@ -5,15 +5,14 @@ package com.github.gbenroscience.simd.turbo.tools;
 import java.util.*;
 import java.util.concurrent.*;
 import jdk.incubator.vector.*;
+import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 /**
  *
  * @author GBEMIRO
  */ 
 public final class FlatMatrixF {
 
-    private static final VectorSpecies<Float> F_SPECIES = FloatVector.SPECIES_PREFERRED;
-    private static final int VLEN = F_SPECIES.length();
-    private static final boolean HAS_VECTOR = VLEN > 1;
+    private static final boolean HAS_VECTOR = VF_LEN > 1;
 
     // GELU constants float
     private static final float GELU_C1 = 0.7978845608028654f;

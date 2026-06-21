@@ -1,13 +1,15 @@
-//CURRENT CRASHING VERSION
 package com.github.gbenroscience.simd.turbo.tools;
 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
+import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import java.util.function.DoubleUnaryOperator;
 import jdk.incubator.vector.*;
+
+
 
 /**
  * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
@@ -15,11 +17,6 @@ import jdk.incubator.vector.*;
  * scalar parser overhead and task object allocations on the hot path.
  */
 public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
-
-    private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_256;
-    // private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-
-    private static final int VLEN = SPECIES.length();
 
     public SIMDVectorTurboEvaluator(MathExpression me) throws Throwable {
         super(me);

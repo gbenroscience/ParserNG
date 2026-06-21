@@ -1,10 +1,7 @@
 package com.github.gbenroscience.simd.turbo.tools;
 
-import jdk.incubator.vector.ByteVector;
-import jdk.incubator.vector.FloatVector;
-import jdk.incubator.vector.VectorMask;
-import jdk.incubator.vector.VectorOperators;
-import jdk.incubator.vector.VectorSpecies;
+import jdk.incubator.vector.*;
+import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 /**
  *
@@ -12,8 +9,6 @@ import jdk.incubator.vector.VectorSpecies;
  */
 public final class KernelsFloat {
 
-    private static final VectorSpecies<Float> F_SPECIES = FloatVector.SPECIES_PREFERRED;
-    private static final int VLEN = F_SPECIES.length(); // 8 on AVX2, 16 on AVX-512
 
     private static final VectorSpecies<Byte> B_SPECIES = ByteVector.SPECIES_PREFERRED;
 

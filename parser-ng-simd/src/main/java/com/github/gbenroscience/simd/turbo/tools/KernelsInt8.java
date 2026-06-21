@@ -1,13 +1,8 @@
 package com.github.gbenroscience.simd.turbo.tools;
 
 import com.github.gbenroscience.simd.turbo.tools.utils.Utils;
-import jdk.incubator.vector.ByteVector;
-import jdk.incubator.vector.FloatVector;
-import jdk.incubator.vector.IntVector;
-import jdk.incubator.vector.ShortVector;
-import jdk.incubator.vector.VectorMask;
-import jdk.incubator.vector.VectorOperators;
-import jdk.incubator.vector.VectorSpecies;
+import jdk.incubator.vector.*;
+import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 /**
  *
@@ -27,10 +22,6 @@ import jdk.incubator.vector.VectorSpecies;
  */
 public final class KernelsInt8 {
 
-    private static final VectorSpecies<Byte> B_SPECIES = ByteVector.SPECIES_PREFERRED;
-    private static final VectorSpecies<Short> S_SPECIES = ShortVector.SPECIES_PREFERRED;
-    private static final VectorSpecies<Integer> I_SPECIES = IntVector.SPECIES_PREFERRED;
-    private static final VectorSpecies<Float> F_SPECIES = FloatVector.SPECIES_PREFERRED;
 
     // GGML Q8_0 block format: 2 bytes FP16 scale + 32 bytes INT8
     public static final int Q8_0_GROUP_SIZE = 32;

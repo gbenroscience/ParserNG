@@ -1,6 +1,7 @@
 package com.github.gbenroscience.simd.turbo.tools;
 
 import jdk.incubator.vector.*;
+import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 /**
  *
@@ -8,8 +9,6 @@ import jdk.incubator.vector.*;
  */
 public final class Kernels {
 
-    static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-    static final int VLEN = SPECIES.length();
 
     // GELU constants
     private static final double SQRT_2_OVER_PI = 0.7978845608028654; // sqrt(2/pi)

@@ -1,5 +1,6 @@
 package com.github.gbenroscience.simd.turbo.tools;
 
+import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 import jdk.incubator.vector.DoubleVector;
 
 /**
@@ -76,9 +77,9 @@ public final class LlamaLayer {
         );
 
         // 1c. Residual: x += attn_out
-        for (int i = 0; i < dim; i += Kernels.VLEN) {
-            DoubleVector xv = DoubleVector.fromArray(Kernels.SPECIES, x, i);
-            DoubleVector tv = DoubleVector.fromArray(Kernels.SPECIES, temp, i);
+        for (int i = 0; i < dim; i += VLEN) {
+            DoubleVector xv = DoubleVector.fromArray(SPECIES, x, i);
+            DoubleVector tv = DoubleVector.fromArray(SPECIES, temp, i);
             xv.add(tv).intoArray(x, i);
         }
 
@@ -103,9 +104,9 @@ public final class LlamaLayer {
         );
 
         // 2d. Residual: x += ffn_out
-        for (int i = 0; i < dim; i += Kernels.VLEN) {
-            DoubleVector xv = DoubleVector.fromArray(Kernels.SPECIES, x, i);
-            DoubleVector tv = DoubleVector.fromArray(Kernels.SPECIES, temp, i);
+        for (int i = 0; i < dim; i += VLEN) {
+            DoubleVector xv = DoubleVector.fromArray(SPECIES, x, i);
+            DoubleVector tv = DoubleVector.fromArray(SPECIES, temp, i);
             xv.add(tv).intoArray(x, i);
         }
     }

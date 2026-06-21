@@ -3,11 +3,10 @@ package com.github.gbenroscience.simd.turbo.tools;
 import java.util.*;
 import java.util.concurrent.*;
 import jdk.incubator.vector.*;
+import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 public class FlatMatrix {
 
-    private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-    private static final int VLEN = SPECIES.length();
     private static final boolean HAS_VECTOR = VLEN > 1;
 
     // GELU constants

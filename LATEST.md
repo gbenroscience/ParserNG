@@ -1,5 +1,8 @@
 # ParserNG
 
+### ParserNG 2.0.3 is out on maven-central! 
+More stable. Indexing bugs fixed in bulk processors
+
 ### ParserNG 2.0.0 is out on maven-central! 
 Guess who the kid on the block is? Vector API bulk evaluator(SIMDVectorTurboEvaluator)and its compatibility partner, VectorTurboEvaluator.
 Both run bulk evaluations at roughly same speed(faster than Janino), and come with workers out of the box!

@@ -1,6 +1,7 @@
 package com.github.gbenroscience.simd.turbo.tools;
 
 import jdk.incubator.vector.*;
+import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 /**
  *
@@ -8,11 +9,6 @@ import jdk.incubator.vector.*;
  */
 public final class LlamaLayerInt8 {
 
-    private static final VectorSpecies<Byte> B_SPECIES = ByteVector.SPECIES_PREFERRED;
-    private static final VectorSpecies<Integer> I_SPECIES = IntVector.SPECIES_PREFERRED;
-    private static final VectorSpecies<Float> F_SPECIES = FloatVector.SPECIES_PREFERRED;
-
-    private static final VectorSpecies<Short> S_SPECIES = ShortVector.SPECIES_PREFERRED;
 
     // Model config - same as FP32
     public static final class Config {
