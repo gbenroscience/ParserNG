@@ -417,7 +417,7 @@ public class VectorTurboEvaluatorTest {
      * Shared orchestration runner for manual micro-benchmarking without JMH.
      */
     private void executeKernelBenchmark(String kernelName, int sz) throws Throwable {
-        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
+        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
         BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
