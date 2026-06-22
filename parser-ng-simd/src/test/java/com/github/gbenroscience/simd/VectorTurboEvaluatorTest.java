@@ -402,13 +402,13 @@ public class VectorTurboEvaluatorTest {
     }
 
     @ParameterizedTest(name = "GELU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {20, 70, 100, 200})
+    @ValueSource(ints = {2,20, 70, 100, 200})
     void testGelu(int sz) throws Throwable {
         executeKernelBenchmark("gelu", sz);
     }
 
     @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {20, 70, 100, 200})
+    @ValueSource(ints = {2,20, 70, 100, 200})
     void testSwiglu(int sz) throws Throwable {
         executeKernelBenchmark("swiglu", sz);
     }
