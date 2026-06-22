@@ -90,7 +90,7 @@ public final class LlamaLayerInt8 {
         );
 
         // 1c. Residual: x += attn_out FP32
-        for (int i = 0; i < dim; i += F_SPECIES.length()) {
+        for (int i = 0; i < dim; i += VF_LEN) {
             FloatVector xv = FloatVector.fromArray(F_SPECIES, x_f32, i);
             FloatVector tv = FloatVector.fromArray(F_SPECIES, temp_f32, i);
             xv.add(tv).intoArray(x_f32, i);
@@ -118,7 +118,7 @@ public final class LlamaLayerInt8 {
         );
 
         // 2d. Residual: x += ffn_out
-        for (int i = 0; i < dim; i += F_SPECIES.length()) {
+        for (int i = 0; i < dim; i += VF_LEN) {
             FloatVector xv = FloatVector.fromArray(F_SPECIES, x_f32, i);
             FloatVector tv = FloatVector.fromArray(F_SPECIES, temp_f32, i);
             xv.add(tv).intoArray(x_f32, i);
@@ -210,7 +210,7 @@ public final class LlamaLayerInt8 {
             float dot = 0.0f;
             int d = 0;
             FloatVector acc = FloatVector.zero(F_SPECIES);
-            for (; d < F_SPECIES.loopBound(head_dim); d += F_SPECIES.length()) {
+            for (; d < F_SPECIES.loopBound(head_dim); d += VF_LEN) {
                 FloatVector qv = FloatVector.fromArray(F_SPECIES, q_f32, qOff + d);
                 FloatVector kv = FloatVector.fromArray(F_SPECIES, k_temp, d);
                 acc = acc.fma(qv, kv);

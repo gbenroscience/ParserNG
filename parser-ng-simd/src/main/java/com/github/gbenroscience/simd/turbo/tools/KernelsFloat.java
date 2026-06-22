@@ -9,9 +9,6 @@ import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
  */
 public final class KernelsFloat {
 
-
-    private static final VectorSpecies<Byte> B_SPECIES = ByteVector.SPECIES_PREFERRED;
-
     public static void apply_rope_f32_split(
             float[] q_f32_split, int qHeads,
             float[] k_f32_split, int kHeads,
@@ -47,7 +44,7 @@ public final class KernelsFloat {
             float[] cos_t, float[] sin_t, int csOff) {
 
         int i = 0;
-        int step = F_SPECIES.length();
+        int step = VF_LEN;
 
         for (; i < F_SPECIES.loopBound(halfDim); i += step) {
             FloatVector x0 = FloatVector.fromArray(F_SPECIES, buf, x0Off + i);
@@ -100,15 +97,13 @@ public final class KernelsFloat {
             float[] c, float[] a, float[] b, float[] bias,
             int M, int N, int K) {
 
-        final int VLEN = F_SPECIES.length();
-
         for (int m = 0; m < M; m++) {
             final int aRowOff = m * K;
             final int cRowOff = m * N;
 
             int n = 0;
             // Vectorized loop
-            for (; n < F_SPECIES.loopBound(N); n += VLEN) {
+            for (; n < F_SPECIES.loopBound(N); n += VF_LEN) {
                 FloatVector acc = bias == null
                         ? FloatVector.zero(F_SPECIES)
                         : FloatVector.fromArray(F_SPECIES, bias, n);
@@ -121,7 +116,7 @@ public final class KernelsFloat {
                 acc.intoArray(c, cRowOff + n);
             }
 
-            // Scalar tail for N % VLEN!= 0
+            // Scalar tail for N % VF_LEN!= 0
             for (; n < N; n++) {
                 float acc = bias == null ? 0.0f : bias[n];
                 for (int k = 0; k < K; k++) {
@@ -148,8 +143,6 @@ public final class KernelsFloat {
             float[] x, float[] gamma, float[] out,
             int batch, int features, float eps) {
 
-        final int VLEN = F_SPECIES.length();
-
         for (int b = 0; b < batch; b++) {
             final int off = b * features;
 
@@ -157,7 +150,7 @@ public final class KernelsFloat {
             float sumSq = 0.0f;
             int i = 0;
             FloatVector vSumSq = FloatVector.zero(F_SPECIES);
-            for (; i < F_SPECIES.loopBound(features); i += VLEN) {
+            for (; i < F_SPECIES.loopBound(features); i += VF_LEN) {
                 FloatVector xv = FloatVector.fromArray(F_SPECIES, x, off + i);
                 vSumSq = vSumSq.fma(xv, xv); // sum += x*x
             }
@@ -174,7 +167,7 @@ public final class KernelsFloat {
 
             // 3. out = x * gamma * rms
             i = 0;
-            for (; i < F_SPECIES.loopBound(features); i += VLEN) {
+            for (; i < F_SPECIES.loopBound(features); i += VF_LEN) {
                 FloatVector xv = FloatVector.fromArray(F_SPECIES, x, off + i);
                 FloatVector gv = FloatVector.fromArray(F_SPECIES, gamma, i);
                 xv.mul(vRms).mul(gv).intoArray(out, off + i);
@@ -295,7 +288,7 @@ public final class KernelsFloat {
             FloatVector av = FloatVector.broadcast(F_SPECIES, ak);
             int bRowOff = k * N;
             int n = 0;
-            for (; n <= N - 4 * F_SPECIES.length(); n += 4 * F_SPECIES.length()) {
+            for (; n <= N - 4 * VF_LEN; n += 4 * F_SPECIES.length()) {
                 FloatVector c0 = FloatVector.fromArray(F_SPECIES, out, cOff + n);
                 FloatVector c1 = FloatVector.fromArray(F_SPECIES, out, cOff + n + F_SPECIES.length());
                 FloatVector c2 = FloatVector.fromArray(F_SPECIES, out, cOff + n + 2 * F_SPECIES.length());
@@ -348,7 +341,7 @@ public final class KernelsFloat {
 
             int n = 0;
             // Unroll by 4 for ILP - hides FMA latency
-            for (; n <= N - 4 * F_SPECIES.length(); n += 4 * F_SPECIES.length()) {
+            for (; n <= N - 4 * VF_LEN; n += 4 * F_SPECIES.length()) {
                 FloatVector c0 = FloatVector.fromArray(F_SPECIES, c, cOff + n);
                 FloatVector c1 = FloatVector.fromArray(F_SPECIES, c, cOff + n + F_SPECIES.length());
                 FloatVector c2 = FloatVector.fromArray(F_SPECIES, c, cOff + n + 2 * F_SPECIES.length());
@@ -381,30 +374,41 @@ public final class KernelsFloat {
         FloatVector acc3 = FloatVector.zero(F_SPECIES);
 
         int i = 0;
-        for (; i <= len - 4 * F_SPECIES.length(); i += 4 * F_SPECIES.length()) {
+
+        // 1. Main 4-Way Unrolled Vector Loop
+        for (; i <= len - 4 * VF_LEN; i += 4 * VF_LEN) {
             FloatVector av0 = FloatVector.fromArray(F_SPECIES, a, aOff + i);
             FloatVector bv0 = FloatVector.fromArray(F_SPECIES, b, bOff + i);
             acc0 = acc0.fma(av0, bv0);
 
-            FloatVector av1 = FloatVector.fromArray(F_SPECIES, a, aOff + i + F_SPECIES.length());
-            FloatVector bv1 = FloatVector.fromArray(F_SPECIES, b, bOff + i + F_SPECIES.length());
+            FloatVector av1 = FloatVector.fromArray(F_SPECIES, a, aOff + i + VF_LEN);
+            FloatVector bv1 = FloatVector.fromArray(F_SPECIES, b, bOff + i + VF_LEN);
             acc1 = acc1.fma(av1, bv1);
 
-            FloatVector av2 = FloatVector.fromArray(F_SPECIES, a, aOff + i + 2 * F_SPECIES.length());
-            FloatVector bv2 = FloatVector.fromArray(F_SPECIES, b, bOff + i + 2 * F_SPECIES.length());
+            FloatVector av2 = FloatVector.fromArray(F_SPECIES, a, aOff + i + 2 * VF_LEN);
+            FloatVector bv2 = FloatVector.fromArray(F_SPECIES, b, bOff + i + 2 * VF_LEN);
             acc2 = acc2.fma(av2, bv2);
 
-            FloatVector av3 = FloatVector.fromArray(F_SPECIES, a, aOff + i + 3 * F_SPECIES.length());
-            FloatVector bv3 = FloatVector.fromArray(F_SPECIES, b, bOff + i + 3 * F_SPECIES.length());
+            FloatVector av3 = FloatVector.fromArray(F_SPECIES, a, aOff + i + 3 * VF_LEN);
+            FloatVector bv3 = FloatVector.fromArray(F_SPECIES, b, bOff + i + 3 * VF_LEN);
             acc3 = acc3.fma(av3, bv3);
         }
         FloatVector acc = acc0.add(acc1).add(acc2).add(acc3);
 
-        // Tail with mask
-        VectorMask<Float> mask = F_SPECIES.indexInRange(i, len);
-        FloatVector av = FloatVector.fromArray(F_SPECIES, a, aOff + i, mask);
-        FloatVector bv = FloatVector.fromArray(F_SPECIES, b, bOff + i, mask);
-        acc = acc.add(av.mul(bv));
+        // 2. Secondary Clean-Up Loop (Processes chunks of size >= VF_LEN remaining)
+        for (; i <= len - VF_LEN; i += VF_LEN) {
+            FloatVector av = FloatVector.fromArray(F_SPECIES, a, aOff + i);
+            FloatVector bv = FloatVector.fromArray(F_SPECIES, b, bOff + i);
+            acc = acc.fma(av, bv);
+        }
+
+        // 3. Final Masked Tail (Processes the final leftover fraction < VF_LEN)
+        if (i < len) {
+            VectorMask<Float> mask = F_SPECIES.indexInRange(i, len);
+            FloatVector av = FloatVector.fromArray(F_SPECIES, a, aOff + i, mask);
+            FloatVector bv = FloatVector.fromArray(F_SPECIES, b, bOff + i, mask);
+            acc = acc.fma(av, bv); // FMA is safe here; inactive lanes add 0
+        }
 
         return acc.reduceLanes(VectorOperators.ADD);
     }

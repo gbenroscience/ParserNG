@@ -42,11 +42,11 @@ public final class KernelsInt8 {
         int i = 0;
         FloatVector vInvScale = FloatVector.broadcast(F_SPECIES, invScale);
 
-        for (; i < F_SPECIES.loopBound(len); i += F_SPECIES.length()) {
+        for (; i < F_SPECIES.loopBound(len); i += VF_LEN) {
             FloatVector xv = FloatVector.fromArray(F_SPECIES, x, i);
             FloatVector qf = xv.mul(vInvScale);
 
-            for (int j = 0; j < F_SPECIES.length(); j++) {
+            for (int j = 0; j < VF_LEN; j++) {
                 float val = qf.lane(j);
                 int q = Math.round(val);
                 q = Math.max(-127, Math.min(127, q));
@@ -88,7 +88,7 @@ public final class KernelsInt8 {
     public static float absmax(float[] arr, int off, int len) {
         FloatVector vmax = FloatVector.zero(F_SPECIES);
         int i = 0;
-        for (; i < F_SPECIES.loopBound(len); i += F_SPECIES.length()) {
+        for (; i < F_SPECIES.loopBound(len); i += VF_LEN) {
             FloatVector v = FloatVector.fromArray(F_SPECIES, arr, off + i).abs();
             vmax = vmax.max(v);
         }
@@ -106,7 +106,7 @@ public final class KernelsInt8 {
         float max = 0.0f;
         int i = 0;
         FloatVector vMax = FloatVector.zero(F_SPECIES);
-        for (; i < F_SPECIES.loopBound(len); i += F_SPECIES.length()) {
+        for (; i < F_SPECIES.loopBound(len); i += VF_LEN) {
             FloatVector xv = FloatVector.fromArray(F_SPECIES, x, i).abs();
             vMax = vMax.max(xv);
         }
@@ -271,7 +271,7 @@ public final class KernelsInt8 {
             return;
         }
         var F_SPECIES = FloatVector.SPECIES_PREFERRED;
-        int step = F_SPECIES.length();
+        int step = VF_LEN;
         float invScale = 1.0f / scale;
 
         FloatVector vInvScale = FloatVector.broadcast(F_SPECIES, invScale);
@@ -317,8 +317,7 @@ public final class KernelsInt8 {
     }//VECTOR
 
     public static void dequant_i8_to_f32(byte[] src, int srcOff, int len, float[] dst, int dstOff, float scale) {
-        var F_SPECIES = FloatVector.SPECIES_PREFERRED;
-        int step = F_SPECIES.length(); // Stride step size matches float capacity (e.g., 8 lanes)
+        int step = VF_LEN; // Stride step size matches float capacity (e.g., 8 lanes)
 
         FloatVector vScale = FloatVector.broadcast(F_SPECIES, scale);
 
@@ -328,7 +327,7 @@ public final class KernelsInt8 {
             // Load exactly 'step' bytes from the array, widening them to 32-bit integer register values
             // bypassing ByteVector limits entirely by using the primitive ByteVector-to-IntVector conversion tricks.
             // On a 256-bit register, this reads 8 bytes and spreads them into 8 integer lanes instantly.
-            IntVector iv = IntVector.fromArray(IntVector.SPECIES_PREFERRED,
+            IntVector iv = IntVector.fromArray(I_SPECIES,
                     copyBytesToIntsReusable(src, srcOff + i, step), 0);
 
             // Convert to Float Vector and multiply by the dequantization scalar scale

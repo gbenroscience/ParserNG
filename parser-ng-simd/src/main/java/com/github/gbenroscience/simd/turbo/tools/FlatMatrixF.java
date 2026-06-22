@@ -24,7 +24,7 @@ public final class FlatMatrixF {
 
     // Block sizes for float - NR matches float lanes
     private static final int NC = 256, KC = 256, MR = 4;
-    private static final int NR = F_SPECIES.length(); // 8 for AVX2, 16 for AVX512
+    private static final int NR = VF_LEN; // 8 for AVX2, 16 for AVX512
 
     public final float[] data;
     public final int rows, cols;
@@ -76,7 +76,7 @@ public final class FlatMatrixF {
     }
 
     public boolean isContiguous() {
-        return rowStride == cols && offset % VLEN == 0;
+        return rowStride == cols && offset % VF_LEN == 0;
     }
 
     public byte[] asByteArray() {
@@ -234,7 +234,7 @@ public final class FlatMatrixF {
     public void geluInPlace() {
         int len = rows * cols, idx = 0;
         if (HAS_VECTOR && isContiguous()) {
-            for (; idx < F_SPECIES.loopBound(len); idx += VLEN) {
+            for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
                 var v = FloatVector.fromArray(F_SPECIES, data, offset + idx);
                 var x2 = v.mul(v);
                 var inner = v.add(x2.mul(v).mul(V_GELU_C2)).mul(V_GELU_C1);
@@ -253,7 +253,7 @@ public final class FlatMatrixF {
     public void siluInPlace() {
         int len = rows * cols, idx = 0;
         if (HAS_VECTOR && isContiguous()) {
-            for (; idx < F_SPECIES.loopBound(len); idx += VLEN) {
+            for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
                 var v = FloatVector.fromArray(F_SPECIES, data, offset + idx);
                 var sigmoid = V_ONE.div(V_ONE.add(v.neg().lanewise(VectorOperators.EXP)));
                 v.mul(sigmoid).intoArray(data, offset + idx);
@@ -269,7 +269,7 @@ public final class FlatMatrixF {
         int len = rows * cols, idx = 0;
         if (HAS_VECTOR && isContiguous()) {
             var zero = FloatVector.zero(F_SPECIES);
-            for (; idx < F_SPECIES.loopBound(len); idx += VLEN)
+            for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN)
                 FloatVector.fromArray(F_SPECIES, data, offset + idx).max(zero).intoArray(data, offset + idx);
         }
         for (; idx < len; idx++) data[offset + idx] = Math.max(0.0f, data[offset + idx]);
@@ -292,7 +292,7 @@ public final class FlatMatrixF {
         int i = 0;
         if (HAS_VECTOR) {
             var vmax = FloatVector.broadcast(F_SPECIES, max);
-            for (; i < F_SPECIES.loopBound(x.length); i += VLEN)
+            for (; i < F_SPECIES.loopBound(x.length); i += VF_LEN)
                 vmax = vmax.max(FloatVector.fromArray(F_SPECIES, x, i));
             max = vmax.reduceLanes(VectorOperators.MAX);
         }
@@ -303,7 +303,7 @@ public final class FlatMatrixF {
         if (HAS_VECTOR) {
             var vmax = FloatVector.broadcast(F_SPECIES, max);
             var vsum = FloatVector.zero(F_SPECIES);
-            for (; i < F_SPECIES.loopBound(x.length); i += VLEN) {
+            for (; i < F_SPECIES.loopBound(x.length); i += VF_LEN) {
                 var ev = FloatVector.fromArray(F_SPECIES, x, i).sub(vmax).lanewise(VectorOperators.EXP);
                 ev.intoArray(x, i);
                 vsum = vsum.add(ev);
@@ -319,7 +319,7 @@ public final class FlatMatrixF {
         i = 0;
         if (HAS_VECTOR) {
             var vinv = FloatVector.broadcast(F_SPECIES, invSum);
-            for (; i < F_SPECIES.loopBound(x.length); i += VLEN)
+            for (; i < F_SPECIES.loopBound(x.length); i += VF_LEN)
                 FloatVector.fromArray(F_SPECIES, x, i).mul(vinv).intoArray(x, i);
         }
         for (; i < x.length; i++) x[i] *= invSum;
@@ -331,7 +331,7 @@ public final class FlatMatrixF {
             throw new IllegalArgumentException("Shape mismatch");
         int i = 0;
         if (HAS_VECTOR && A.isContiguous() && B.isContiguous() && C.isContiguous()) {
-            for (; i < F_SPECIES.loopBound(n); i += VLEN) {
+            for (; i < F_SPECIES.loopBound(n); i += VF_LEN) {
                 var va = FloatVector.fromArray(F_SPECIES, A.data, A.offset + i);
                 var vb = FloatVector.fromArray(F_SPECIES, B.data, B.offset + i);
                 va.add(vb).intoArray(C.data, C.offset + i);
@@ -344,7 +344,7 @@ public final class FlatMatrixF {
         int n = A.rows * A.cols;
         int i = 0;
         if (HAS_VECTOR && A.isContiguous() && B.isContiguous() && C.isContiguous()) {
-            for (; i < F_SPECIES.loopBound(n); i += VLEN) {
+            for (; i < F_SPECIES.loopBound(n); i += VF_LEN) {
                 var va = FloatVector.fromArray(F_SPECIES, A.data, A.offset + i);
                 var vb = FloatVector.fromArray(F_SPECIES, B.data, B.offset + i);
                 va.mul(vb).intoArray(C.data, C.offset + i);
@@ -361,7 +361,7 @@ public final class FlatMatrixF {
         for (int i = 0; i < M; i++) {
             int j = 0;
             if (HAS_VECTOR && A.isContiguous() && B.isContiguous() && C.isContiguous() && bias.isContiguous()) {
-                for (; j < F_SPECIES.loopBound(N); j += VLEN) {
+                for (; j < F_SPECIES.loopBound(N); j += VF_LEN) {
                     var sum = FloatVector.fromArray(F_SPECIES, bias.data, bias.offset + j);
                     for (int k = 0; k < K; k++) {
                         var av = FloatVector.broadcast(F_SPECIES, A.get(i, k));
@@ -424,7 +424,7 @@ private static void matmulAddSinSimd(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C
         final int rowC = C.offset + i * C.rowStride;
 
         int j = 0;
-        for (; j < loopBoundN; j += VLEN) {
+        for (; j < loopBoundN; j += VF_LEN) {
             var acc = FloatVector.zero(F_SPECIES);
             for (int k = 0; k < K; k++) {
                 var aVec = FloatVector.broadcast(F_SPECIES, A.data[rowA + k]);
@@ -497,7 +497,7 @@ public static void matmulSimdBroadcast(FlatMatrixF A, FlatMatrixF B, FlatMatrixF
             var aVec = FloatVector.broadcast(F_SPECIES, A.data[rowA + k]);
             final int rowB = B.offset + k * B.rowStride;
             int j = 0;
-            for (; j < loopBoundN; j += VLEN) {
+            for (; j < loopBoundN; j += VF_LEN) {
                 var bVec = FloatVector.fromArray(F_SPECIES, B.data, rowB + j);
                 var cVec = FloatVector.fromArray(F_SPECIES, C.data, rowC + j);
                 aVec.fma(bVec, cVec).intoArray(C.data, rowC + j);
@@ -689,7 +689,7 @@ private static void qkT_row(FlatMatrixF Q, FlatMatrixF K, int i, float[] scores,
             var sum = FloatVector.zero(F_SPECIES);
             int qOff = Q.offset + i * Q.rowStride;
             int kOff = K.offset + j * K.rowStride;
-            for (; k < F_SPECIES.loopBound(d_k); k += VLEN) {
+            for (; k < F_SPECIES.loopBound(d_k); k += VF_LEN) {
                 var qv = FloatVector.fromArray(F_SPECIES, Q.data, qOff + k);
                 var kv = FloatVector.fromArray(F_SPECIES, K.data, kOff + k);
                 sum = qv.fma(kv, sum);
@@ -719,7 +719,7 @@ private static void weightedSum(float[] scores, FlatMatrixF V, FlatMatrixF out, 
             var vw = FloatVector.broadcast(F_SPECIES, w);
             int vOff = V.offset + j * V.rowStride;
             int oOff = out.offset + i * out.rowStride;
-            for (; k < F_SPECIES.loopBound(d_v); k += VLEN) {
+            for (; k < F_SPECIES.loopBound(d_v); k += VF_LEN) {
                 var vv = FloatVector.fromArray(F_SPECIES, V.data, vOff + k);
                 var vo = FloatVector.fromArray(F_SPECIES, out.data, oOff + k);
                 vw.fma(vv, vo).intoArray(out.data, oOff + k);
