@@ -1,4 +1,4 @@
-# ParserNG 2.0.3 🧮⚡ 
+# ParserNG 2.0.4 🧮⚡ 
 ### The Fastest, Interpreted(non-compiling) Math Engine for Java.
 
 ## Vector API comes to ParserNG in v2.0.x, and Android is not left out
@@ -31,11 +31,11 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![License](https://img.shields.io/github/license/gbenroscience/ParserNG?color=blue)](https://github.com/gbenroscience/ParserNG/blob/master/LICENSE)
 ![Java](https://img.shields.io/badge/Java-8%2B-orange)
-![Latest Version](https://img.shields.io/badge/version-2.0.0-success)
+![Latest Version](https://img.shields.io/badge/version-2.0.4-success)
 
-> **2.0.0** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
+> **2.0.4** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
 
-## ✨ Highlights (v2.0.0)
+## ✨ Highlights (v2.0.4)
 
 - **Speed champion** — rivals Janino in most benchmarks, and beats exp4J, com.expression.parser and Parsii in every benchmark (see [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md))
 - **Turbo Mode** — compile once, evaluate millions of times per second (Scalar + Matrix paths)

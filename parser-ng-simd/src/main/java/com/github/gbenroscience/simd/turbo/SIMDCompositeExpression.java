@@ -20,11 +20,8 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * @param variables      A 2D array of variable channels where each outer row represents an entire vector 
      * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn], [z1, z2... zn]]}.
      * @param output         The pre-allocated target array where the final evaluated results will be directly dumped.
-     * @param useBlocks If {@code true}, processes data in L1/L2 cache-bounded blocks to prevent memory thrashing on 
-     * large datasets. If {@code false}, executes a raw scalar sequential stream maximizing clock throughput 
-     * on low-element datasets.
      */
-    void applyBulk(double[][] variables, double[] output, boolean useBlocks);
+    void applyBulk(double[][] variables, double[] output);
 
 
     /**
@@ -45,10 +42,8 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * for a specific variable slot, e.g., {@code [[x1, x2... xn], [y1, y2... yn]]}.
      * @param output         The pre-allocated target array where the evaluated blocks will be written.
      * @param batchSize      The strict memory segment window slice size processed per individual cache loop pass.
-     * @param useBlocks If {@code true}, overlays internal sub-tiling structures on top of the batch slice boundaries. 
-     * If {@code false}, evaluates the raw batch length sequentially in a single pass.
      */
-    public void applyBulkBatched(double[][] variables, double[] output, int batchSize, boolean useBlocks);
+    public void applyBulkBatched(double[][] variables, double[] output, int batchSize);
 
     /**
      * <b>Warp Speed Path (Power Users):</b> Evaluates a single, raw, pre-grouped flat array at 
@@ -58,10 +53,8 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * <b>CRITICAL:</b> Data must use a Grouped structure, e.g., 
      * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Interleaved arrays will yield corrupted data.
      * @param output         The pre-allocated target array where the evaluated vector stream is directly copied.
-     * @param useBlocks If {@code true}, maps memory segments into cache-sized micro-tiles. If {@code false}, allows 
-     * the CPU prefetcher to step uninhibited sequentially through the flat segments.
      */
-    public void applyBulk(double[] flatVariables, double[] output, boolean useBlocks);
+    public void applyBulk(double[] flatVariables, double[] output);
 
     /**
      * <b>Warp Speed Path (Power Users):</b> Concurrently evaluates a pre-grouped flat array by cleanly dividing 
@@ -83,10 +76,8 @@ public interface SIMDCompositeExpression extends FastCompositeExpression {
      * {@code [x1, x2... xn, y1, y2... yn, z1, z2... zn]}. Do NOT pass interleaved data.
      * @param output         The pre-allocated target array where the evaluated blocks will be written.
      * @param batchSize      The localized processing block window length applied across individual memory loops.
-     * @param useBlocks If {@code true}, enforces inner tiling within the specified batch limits. If {@code false}, 
-     * trusts the user-provided batch size as the definitive sequential block length.
      */
-    public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize, boolean useBlocks);
+    public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize);
 
     /**
      * Fuses deep learning and high-performance neural network transformations directly over pre-allocated 

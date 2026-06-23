@@ -1,5 +1,7 @@
 package com.github.gbenroscience.simd;
 
+
+
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.*;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;

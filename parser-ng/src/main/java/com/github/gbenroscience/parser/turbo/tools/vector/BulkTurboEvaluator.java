@@ -643,7 +643,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          */
         protected static final int PARALLEL_OPS_THRESHOLD = 2048;
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
-        protected static final int BLOCK_SIZE = 512;
+        protected static final int BLOCK_SIZE = 1024;
         private static final long L3_CACHE_TARGET_BYTES = 32 * 1024 * 1024; // 32 MB target boundary
 
         private final MethodHandle scalarHandle;
@@ -767,7 +767,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     int end = Math.min(start + chunkSize, dataSize);
 
                     if (start < end) {
-                        applyBulkInternal(flatVars, dataSize, out, start, end - start, true);
+                        applyBulkInternal(flatVars, dataSize, out, start, end - start);
                     }
 
                     // Signal the master thread that this core is finished
@@ -814,7 +814,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
         //////////////////////////////////////////////////////////////////
         
         @Override
-        public void applyBulk(double[][] variables, double[] output, boolean useBlocks) {
+        public void applyBulk(double[][] variables, double[] output) {
             checkError(variables, output);
             int numSamples = variables[0].length;
             int stride = this.varCount;
@@ -826,7 +826,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                 System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
             }
             // FIX: Pass dataSize explicitly. Don't let applyBulk guess from flatVariables.length
-            applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, useBlocks);
+            applyBulkInternal(flatVariables, numSamples, output, 0, numSamples);
         }
 
         @Override
@@ -846,12 +846,12 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
             // Sequential bypass for small workloads
             if (numSamples < PARALLEL_OPS_THRESHOLD) {
-                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, false);
+                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples);
                 return;
             }
 
             // Coordinate via the EXACT SAME zero-alloc threading subsystem
-            dispatchToWorkerRing(flatVariables, output, numSamples, true);
+            dispatchToWorkerRing(flatVariables, output, numSamples);
         }
 
         /**
@@ -860,15 +860,13 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          * @param flatVariables
          * @param output
          * @param dataSize
-         * @param useBlocks
          */
-        protected void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize, boolean useBlocks) {
+        protected void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize) {
             // 1. Publish parameters to volatile registers (No allocations)
             this.masterThread = Thread.currentThread();
             this.currentFlatVars = flatVariables;
             this.currentOutput = output;
             this.currentDataSize = dataSize;
-            this.currentTiled = useBlocks;
 
             // 2. Wake up the pre-allocated worker threads via OS permits
             for (int i = 0; i < cores; i++) {
@@ -892,7 +890,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
         }
 
         @Override
-        public void applyBulkBatched(double[][] variables, double[] output, int batchSize, boolean useBlocks) {
+        public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
             checkError(variables, output);
             int dataSize = variables[0].length;
             int stride = this.varCount;
@@ -903,7 +901,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
             // FIX: Don't delegate to flat overload. Loop here.
             for (int start = 0; start < dataSize; start += batchSize) {
                 int length = Math.min(batchSize, dataSize - start);
-                applyBulkInternal(flatVariables, dataSize, output, start, length, useBlocks);
+                applyBulkInternal(flatVariables, dataSize, output, start, length);
             }
         }
 
@@ -916,85 +914,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
         
      
         
-        
-        /**
-         * Core Column-Major Vectorized Loop Processor (Flat Memory
-         * Architecture) Bypasses jagged array pointers to execute at maximum
-         * hardware throughput.
-         *
-         * @param flatVariables Grouped/Contiguous array of variables e.g.
-         * [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back. concatenated.
-         * @param dataSize The total number of elements per variable row (used
-         * for stride offset).
-         */
-     
-         /**
-         * Core Column-Major Vectorized Loop Processor (Flat Memory
-         * Architecture) Bypasses jagged array pointers to execute at maximum
-         * hardware throughput.
-         *
-         * @param flatVariables Grouped/Contiguous array of variables e.g.
-         * [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back. concatenated.
-         * @param dataSize The total number of elements per variable row (used
-         * for stride offset).
-         */
-    
-            private void applyBulkInternalWithBlocks(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
-            // Keep this check: Guard against multi-threaded / batch slicing arithmetic bugs
-            if (startIdx + length > dataSize || startIdx + length > output.length) {
-                throw new IllegalArgumentException(String.format(
-                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
-                        startIdx, length, dataSize, output.length
-                ));
-            }
 
-            // Thread-local scratch space acquisition & sizing guard
-            double[] scratch = FLAT_SCRATCH_STACK.get();
-            final int requiredScratchSize = Math.min(BLOCK_SIZE, length);
-            if (scratch == null || scratch.length < requiredScratchSize) {
-                scratch = new double[requiredScratchSize];
-                FLAT_SCRATCH_STACK.set(scratch);
-            }
-
-            // Cache-aligned Loop Tiling
-            final int endIdx = startIdx + length;
-            for (int tileStart = startIdx; tileStart < endIdx; tileStart += BLOCK_SIZE) {
-                final int currentTileSize = Math.min(BLOCK_SIZE, endIdx - tileStart);
-                evaluateTile(flatVariables, dataSize, output, tileStart, currentTileSize, scratch);
-            }
-        }
-
-        /**
-         * Core Column-Major Vectorized Loop Processor (Flat Memory
-         * Architecture) Bypasses jagged array pointers to execute at maximum
-         * hardware throughput.
-         *
-         * @param flatVariables Grouped/Contiguous array of variables e.g.
-         * [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back. concatenated.
-         * @param dataSize The total number of elements per variable row (used
-         * for stride offset).
-         */
-        private void applyBulkInternalNoBlocks(double[] flatVariables, int dataSize, double[] output,
-                int startIdx) {
-            double[] scratch = FLAT_SCRATCH_STACK.get();
-
-            // 1. Precise scale mapping without guesswork
-            long totalRequiredSize = (long) BulkTurboEvaluator.this.stackDepth * dataSize;
-            // 2. Clear fail-fast guard
-            if (totalRequiredSize > (Integer.MAX_VALUE - 8)) {
-                throw new UnsupportedOperationException("Dataset scale requires off-heap execution or loop tiling block models.");
-            }
-
-            int rss = (int) totalRequiredSize;
-
-            // 3. Allocate exactly what is needed, down to the exact slot
-            if (scratch == null || scratch.length < rss) {
-                scratch = new double[rss];
-                FLAT_SCRATCH_STACK.set(scratch);
-            }
-
-            evaluateTile(flatVariables, dataSize, output, startIdx, dataSize, scratch);
-        }
 
         /**
          * Core column-major vectorized loop processor utilizing a flat memory
@@ -1035,15 +955,28 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          * from each variable segment in the input, compute them, and write them
          * into indices 200,000 through 200,499 of the output array."
          */
-        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length, boolean useBlocks) {
-            if (useBlocks) {
-                applyBulkInternalWithBlocks(flatVariables, dataSize, output, startIdx, length);
-            } else {
-                if (mustUseTiling(dataSize)) {
-                    applyBulkInternalWithBlocks(flatVariables, dataSize, output, startIdx, length);
-                } else {
-                    applyBulkInternalNoBlocks(flatVariables, dataSize, output, startIdx);
-                }
+        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
+            // Keep this check: Guard against multi-threaded / batch slicing arithmetic bugs
+          /*  if (startIdx + length > dataSize || startIdx + length > output.length) {
+                throw new IllegalArgumentException(String.format(
+                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
+                        startIdx, length, dataSize, output.length
+                ));
+            }*/
+
+            // Thread-local scratch space acquisition & sizing guard
+            double[] scratch = FLAT_SCRATCH_STACK.get();
+            final int requiredScratchSize = Math.min(BLOCK_SIZE, length);
+            if (scratch == null || scratch.length < requiredScratchSize) {
+                scratch = new double[requiredScratchSize];
+                FLAT_SCRATCH_STACK.set(scratch);
+            }
+
+            // Cache-aligned Loop Tiling
+            final int endIdx = startIdx + length;
+            for (int tileStart = startIdx; tileStart < endIdx; tileStart += BLOCK_SIZE) {
+                final int currentTileSize = Math.min(BLOCK_SIZE, endIdx - tileStart);
+                evaluateTile(flatVariables, dataSize, output, tileStart, currentTileSize, scratch);
             }
         }
 
@@ -1065,7 +998,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                 int currentTileSize,
                 double[] scratch) {
 
-            final int BLOCK_SIZE = currentTileSize;
             final int n = currentTileSize; // hoist for C2 unroll
             int sp = 0;
 
@@ -1564,16 +1496,16 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
             final int length = output.length;
 
             if (length < 2048) {
-                applyBulkInternal(flatVariables, length, output, 0, length, false);
+                applyBulkInternal(flatVariables, length, output, 0, length);
                 return;
             }
 
             // Coordinate via the zero-alloc threading subsystem
-            dispatchToWorkerRing(flatVariables, output, length, true);
+            dispatchToWorkerRing(flatVariables, output, length);
         }
 
         @Override
-        public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize, boolean useBlocks) {
+        public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
             checkError(flatVariables, output);
             if (batchSize <= 0) {
                 return;
@@ -1584,15 +1516,15 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
             for (int start = 0; start < totalLength; start += batchSize) {
                 int length = Math.min(batchSize, totalLength - start);
-                applyBulkInternal(flatVariables, dataSize, output, start, length, useBlocks);
+                applyBulkInternal(flatVariables, dataSize, output, start, length);
             }
         }
 
         @Override
-        public void applyBulk(double[] flatVariables, double[] output, boolean useBlocks) {
+        public void applyBulk(double[] flatVariables, double[] output) {
             checkError(flatVariables, output);
             final int length = output.length; // This is the contract: output.length = elements to compute
-            applyBulkInternal(flatVariables, length, output, 0, length, useBlocks);
+            applyBulkInternal(flatVariables, length, output, 0, length);
         }
 
         ///////////////////////////////////////////////////////////

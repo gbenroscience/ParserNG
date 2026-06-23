@@ -1,5 +1,7 @@
 package com.github.gbenroscience.simd;
 
+
+
 /**
  *
  * @author GBEMIRO
@@ -11,6 +13,11 @@ import org.openjdk.jmh.annotations.*;
 import java.util.concurrent.TimeUnit;
 import java.util.Random;
 import org.openjdk.jmh.infra.Blackhole;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
+import org.openjdk.jmh.runner.options.TimeValue;
 
 /**
  * Use this to build in the parser-ng-pro directory mvn clean install -Dgpg.skip
@@ -37,10 +44,6 @@ import org.openjdk.jmh.infra.Blackhole;
 @State(Scope.Benchmark)
 public class MathEvalBenchmarkForSIMD {
 
-    public static interface JaninoMathFunction {
-
-        double apply(double[] v);
-    }
 
     @Param({"12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2", "0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))"})
     String expression;
@@ -52,14 +55,13 @@ public class MathEvalBenchmarkForSIMD {
     private int dataSize;
 
     private double[] flatInput;
-    private JaninoMathFunction fastEvaluator;
+    private MathEvalBenchmark.JaninoMathFunction fastEvaluator;
 
     SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVectorTurbo;
 
     private String[] expressionVars;
     private int varCount;
 
-    private double vars[];
 
     @Setup(Level.Trial)
     public void setup() {
@@ -67,7 +69,6 @@ public class MathEvalBenchmarkForSIMD {
         MathExpression me = new MathExpression(expression);
         expressionVars = me.getVariablesNames();
         varCount = expressionVars.length;
-        vars = new double[varCount];
 
         flatInput = new double[varCount * dataSize];
         result = new double[dataSize];
@@ -78,34 +79,39 @@ public class MathEvalBenchmarkForSIMD {
             flatInput[i] = r.nextDouble() * 10 - 5;
         }
 
-        setupJanino();
+        this.fastEvaluator = MathEvalBenchmark.setupJanino(expression, expressionVars);
 
         setupParserNG(me);
 
     }
-
+    
+    /*
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     public void janino(Blackhole bh) {
-        // We use the flat array flatInput and pass segments or the whole array 
-        // depending on your Janino interface. Assuming Janino takes a sliding window or full array:
-        for (int i = 0; i < dataSize; i++) {
-            // If Janino needs a specific variable buffer (vars):
-            int base = i * varCount;
-            System.arraycopy(flatInput, base, vars, 0, varCount);
-            bh.consume(fastEvaluator.apply(vars));
-        }
+        // Hoisting instance variables to local registers to eliminate field access overhead inside loop
+        final int limit = this.dataSize;
+        final int stride = this.varCount;
+        final double[] input = this.flatInput;
+        final double[] localVars = this.vars;
+        final MathEvalBenchmark.JaninoMathFunction evaluator = this.fastEvaluator;
 
+        for (int i = 0; i < limit; i++) {
+            for(int j=0;j<stride;j++){
+                localVars[j] = input[(j * limit) + i];
+            }
+            bh.consume(evaluator.apply(localVars));
+        }  
     }
-
+*/
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     public void parserNG(Blackhole bh) {
         // Correct usage: Call the bulk processor ONCE per benchmark invocation
         // This measures the true speed of your vectorization logic 
-        simdVectorTurbo.applyBulkParallel(flatInput, result);
+        simdVectorTurbo.applyBulk(flatInput, result);
         bh.consume(result);
     }
 
@@ -117,34 +123,24 @@ public class MathEvalBenchmarkForSIMD {
         }
     }
 
-    private void setupJanino() {
-        // Convert ParserNG syntax to Java syntax
-        String javaExpr = MathToJaninoConverter.convert(expression);
+   
+    
+        public static void main(String[] args) throws RunnerException {
+        OptionsBuilder opt = new OptionsBuilder();
+        opt.include(MathEvalBenchmarkForSIMD.class.getSimpleName()); // Always include baseline
+        // 4. Fluent, modern JMH Configuration
+        Options configurations = opt.mode(Mode.AverageTime)
+                .timeUnit(TimeUnit.NANOSECONDS)
+                .warmupIterations(5)
+                .warmupTime(TimeValue.milliseconds(200L))
+                .measurementIterations(5)
+                .measurementTime(TimeValue.milliseconds(500))
+                .forks(2)
+                .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
+                .jvmArgs("-Xms8g", "-Xmx8g", "-Dbenchmark.index=1")
+                .jvmArgsAppend("--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions")
+                .build();
 
-        // Use an index loop to cleanly target array tracking positions
-        for (int i = 0; i < expressionVars.length; i++) {
-            String varName = expressionVars[i];
-            // \b ensures we match exact variable tokens (e.g., matching "x1" but ignoring "x10")
-            String regex = "\\b" + java.util.regex.Pattern.quote(varName) + "\\b";
-            javaExpr = javaExpr.replaceAll(regex, "v[" + i + "]");
-        }
-
-        String classBody = String.format("""
-        @Override
-        public double apply(double[] v) {
-            return %s;
-        }
-        """, javaExpr);
-
-        try {
-            org.codehaus.janino.ClassBodyEvaluator cbe = new org.codehaus.janino.ClassBodyEvaluator();
-            cbe.setImplementedInterfaces(new Class[]{JaninoMathFunction.class});
-            cbe.cook(classBody);
-            this.fastEvaluator = (JaninoMathFunction) cbe.getClazz()
-                    .getDeclaredConstructor().newInstance();
-        } catch (Exception ex) {
-            // Rethrowing as RuntimeException prevents JMH from continuing silently with null states
-            throw new RuntimeException("Failed to compile Janino function body expressions", ex);
-        }
+        new Runner(configurations).run();
     }
 }

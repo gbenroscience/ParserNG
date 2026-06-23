@@ -38,7 +38,7 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
         SIMDVectorCompositeExpression() {
             super(compiledScalarHandle, opcodes, targetSlots,
-                    literalConstants, instructionCount, varCount);
+                    literalConstants, instructionCount, varCount); 
         }
 
         @Override
@@ -136,14 +136,14 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         }
 
         @Override
-        public void applyBulk(double[][] variables, double[] output, boolean tiledExecution) {
+        public void applyBulk(double[][] variables, double[] output) {
             checkError(variables, output);
             int numSamples = variables[0].length;
             double[] flatVars = getOrCreateFlattenBuffer(varCount * numSamples);
             for (int i = 0; i < varCount; i++) {
                 System.arraycopy(variables[i], 0, flatVars, i * numSamples, numSamples);
             }
-            applyBulkInternal(flatVars, numSamples, output, 0, numSamples, tiledExecution);
+            applyBulkInternal(flatVars, numSamples, output, 0, numSamples);
         }
 
         @Override
@@ -154,18 +154,18 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             }
             int numSamples = variables[0].length;
             if (numSamples < PARALLEL_OPS_THRESHOLD) {
-                applyBulk(variables, output, false);
+                applyBulk(variables, output);
                 return;
             }
             double[] flatVars = getOrCreateFlattenBuffer(varCount * numSamples);
             for (int i = 0; i < varCount; i++) {
                 System.arraycopy(variables[i], 0, flatVars, i * numSamples, numSamples);
             }
-            dispatchToWorkerRing(flatVars, output, numSamples, true);
+            dispatchToWorkerRing(flatVars, output, numSamples);
         }
 
         @Override
-        public void applyBulkBatched(double[][] variables, double[] output, int batchSize, boolean tiledExecution) {
+        public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
             checkError(variables, output);
             int numSamples = variables[0].length;
             double[] flatVars = getOrCreateFlattenBuffer(varCount * numSamples);
@@ -174,15 +174,15 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             }
             for (int start = 0; start < numSamples; start += batchSize) {
                 int length = Math.min(batchSize, numSamples - start);
-                applyBulkInternal(flatVars, numSamples, output, start, length, tiledExecution);
+                applyBulkInternal(flatVars, numSamples, output, start, length);
             }
         }
 
         // --- 1D Flat Contiguous Frameworks ---
         @Override
-        public void applyBulk(double[] flatVariables, double[] output, boolean tiledExecution) {
+        public void applyBulk(double[] flatVariables, double[] output) {
             checkError(flatVariables, output);
-            applyBulkInternal(flatVariables, output.length, output, 0, output.length, tiledExecution);
+            applyBulkInternal(flatVariables, output.length, output, 0, output.length);
         }
 
         @Override
@@ -190,93 +190,23 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             checkError(flatVariables, output);
             int numSamples = output.length;
             if (numSamples < PARALLEL_OPS_THRESHOLD) {
-                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples, false);
+                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples);
                 return;
             }
-            dispatchToWorkerRing(flatVariables, output, numSamples, true);
+            dispatchToWorkerRing(flatVariables, output, numSamples);
         }
 
         @Override
-        public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize, boolean tiledExecution) {
+        public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
             checkError(flatVariables, output);
             int numSamples = output.length;
             for (int start = 0; start < numSamples; start += batchSize) {
                 int length = Math.min(batchSize, numSamples - start);
-                applyBulkInternal(flatVariables, numSamples, output, start, length, tiledExecution);
+                applyBulkInternal(flatVariables, numSamples, output, start, length);
             }
         }
 
-        //////////////////////////////////////////////////
-        
-        
-     /**
-         * Core Column-Major Vectorized Loop Processor (Flat Memory
-         * Architecture) Bypasses jagged array pointers to execute at maximum
-         * hardware throughput.
-         *
-         * @param flatVariables Grouped/Contiguous array of variables e.g.
-         * [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back. concatenated.
-         * @param dataSize The total number of elements per variable row (used
-         * for stride offset).
-         */
-    
-            private void applyBulkInternalWithTiles(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
-            // Keep this check: Guard against multi-threaded / batch slicing arithmetic bugs
-            if (startIdx + length > dataSize || startIdx + length > output.length) {
-                throw new IllegalArgumentException(String.format(
-                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
-                        startIdx, length, dataSize, output.length
-                ));
-            }
-
-            // Thread-local scratch space acquisition & sizing guard
-            double[] scratch = FLAT_SCRATCH_STACK.get();
-            final int requiredScratchSize = Math.min(BLOCK_SIZE, length);
-            if (scratch == null || scratch.length < requiredScratchSize) {
-                scratch = new double[requiredScratchSize];
-                FLAT_SCRATCH_STACK.set(scratch);
-            }
-
-            // Cache-aligned Loop Tiling
-            final int endIdx = startIdx + length;
-            for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
-                final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
-                int relativeOffset = blockStart - startIdx;
-
-                evaluateBlock(flatVariables, dataSize, output, startIdx, currentBlockSize, scratch);
-            }
-        }
-
-        /**
-         * Core Column-Major Vectorized Loop Processor (Flat Memory
-         * Architecture) Bypasses jagged array pointers to execute at maximum
-         * hardware throughput.
-         *
-         * @param flatVariables Grouped/Contiguous array of variables e.g.
-         * [x1,x2..xn, y1,y2..yn, z1,z2..zn] back-to-back. concatenated.
-         * @param dataSize The total number of elements per variable row (used
-         * for stride offset).
-         */
-        private void applyBulkInternalNoTiles(double[] flatVariables, int dataSize, double[] output, int startIdx) {
-            double[] scratch = FLAT_SCRATCH_STACK.get();
-
-            // 1. Precise scale mapping without guesswork
-            long totalRequiredSize = (long) SIMDVectorTurboEvaluator.this.stackDepth * dataSize;
-            // 2. Clear fail-fast guard
-            if (totalRequiredSize > (Integer.MAX_VALUE - 8)) {
-                throw new UnsupportedOperationException("Dataset scale requires off-heap execution or loop tiling block models.");
-            }
-
-            int rss = (int) totalRequiredSize;
-
-            // 3. Allocate exactly what is needed, down to the exact slot
-            if (scratch == null || scratch.length < rss) {
-                scratch = new double[rss];
-                FLAT_SCRATCH_STACK.set(scratch);
-            }
-
-            evaluateBlock(flatVariables, dataSize, output, startIdx, dataSize, scratch);
-        }
+      
 
         /**
          * Core column-major vectorized loop processor utilizing a flat memory
@@ -301,7 +231,8 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
          * processing slice begins
          * @param length the absolute number of elements to process within this
          * batch window
-         * @param tiledExecution {@code true} if execution should be routed
+         * Tiles by default: If execution should be routed
+         * 
          * through a block memory pattern optimized for L1/L2 cache locality;
          * {@code false} for flat, non-tiledExecution bulk processing
          *
@@ -317,15 +248,28 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
          * from each variable segment in the input, compute them, and write them
          * into indices 200,000 through 200,499 of the output array."
          */
-        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length, boolean tiledExecution) {
-            if (tiledExecution) {
-                applyBulkInternalWithTiles(flatVariables, dataSize, output, startIdx, length);
-            } else {
-                if (mustUseTiling(dataSize)) {
-                    applyBulkInternalWithTiles(flatVariables, dataSize, output, startIdx, length);
-                } else {
-                    applyBulkInternalNoTiles(flatVariables, dataSize, output, startIdx);
-                }
+        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
+             if (startIdx + length > dataSize || startIdx + length > output.length) {
+                throw new IllegalArgumentException(String.format(
+                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
+                        startIdx, length, dataSize, output.length
+                ));
+            }
+
+            // Thread-local scratch space acquisition & sizing guard
+            double[] scratch = FLAT_SCRATCH_STACK.get();
+            final int requiredScratchSize = Math.min(BLOCK_SIZE, length);
+            if (scratch == null || scratch.length < requiredScratchSize) {
+                scratch = new double[requiredScratchSize];
+                FLAT_SCRATCH_STACK.set(scratch);
+            }
+
+            // Cache-aligned Loop Tiling
+            final int endIdx = startIdx + length;
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
+                final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
+
+                evaluateBlock(flatVariables, dataSize, output, startIdx, currentBlockSize, scratch);
             }
         }
 
@@ -342,7 +286,7 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                 int currentBlockSize,
                 double[] scratch) {
 
-            final int BLOCK_SIZE = currentBlockSize;
+            
             final int n = currentBlockSize; // Local alias for loop bounds
             int sp = 0;
 

@@ -75,35 +75,6 @@ Include both the core module and the SIMD engine extension in your `pom.xml`:
         <version>2.0.0</version>
     </dependency>
 </dependencies>
-
-```
-
-#### 2. Vector Evaluation Implementation
-
-Ensure your application launch configuration includes the relevant incubator modules before initializing the compiler engine.
-
-```java
-import com.github.gbenroscience.simd.VectorTurboEvaluator;
-
-public class ExecutionProfile {
-    public static void main(String[] args) {
-        // Initialize evaluator with mandatory environment configurations
-        VectorTurboEvaluator evaluator = new VectorTurboEvaluator(
-            "--enable-native-access=ALL-UNNAMED --add-modules=jdk.incubator.vector"
-        );
-
-        // Compile the target mathematical formula once
-        var vectorizedFunction = evaluator.compile("gelu(x)"); 
-
-        // Prepare dataset array
-        float[] inputData = new float[40000];
-        // ... populate inputData
-
-        // Execute hot path - tiles are automatically configured for your cache layout
-        float[] outputData = vectorizedFunction.eval(inputData); 
-    }
-}
-
 ```
 
 #### Supported Activation Kernels

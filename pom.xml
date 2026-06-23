@@ -6,15 +6,15 @@
 
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-parent</artifactId>
-    <version>2.0.3</version>
+    <version>2.0.5</version>
     <packaging>pom</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>
  
-      <description>
-          Parent infrastructure for ParserNG mathematical tools
-          Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies. 
-          For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
+    <description>
+        Parent infrastructure for ParserNG mathematical tools
+        Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies. 
+        For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
     </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
 

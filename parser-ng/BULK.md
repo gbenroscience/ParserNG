@@ -1,6 +1,6 @@
-# ParserNG 2.0.0
+# ParserNG 2.0.4
 
-An ultra-high-performance mathematical expression parsing and evaluation engine for Java. Version 2.0.0 introduces a breakthrough **Block Vectorization Engine** (`VectorTurboEvaluator`) and `SIMDVectorTurboEvaluator` powered by the Java **Vector API** (`jdk.incubator.vector`). 
+An ultra-high-performance mathematical expression parsing and evaluation engine for Java. Version 2.0.4 introduces a breakthrough **Block Vectorization Engine** (`VectorTurboEvaluator`) and `SIMDVectorTurboEvaluator` powered by the Java **Vector API** (`jdk.incubator.vector`). 
 
 By processing data pipelines natively inside hardware registers, ParserNG completely eliminates runtime allocation overhead and flattens interpreter branches. It outpaces dynamic bytecode compilation frameworks (like Janino) on massive datasets by leveraging bare-metal SIMD hardware capabilities.
 
@@ -39,12 +39,12 @@ To use SIMDVectorTurboEvaluator(e.g. on modern servers(JDK 21+) and laptops(JDK2
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>2.0.0</version>
+    <version>2.0.4</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>2.0.0</version>
+    <version>2.0.4</version>
 </dependency>
 ```
 
@@ -53,11 +53,11 @@ To use VectorTurboEvaluator(e.g. on Android and legacy systems supporting <JDK21
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>2.0.0</version>
+    <version>2.0.4</version>
 </dependency>
 ```
 
-They benchmark at same speed and allocation, and you can use workers to increase their throughput
+They benchmark at *almost* same speed and same allocation, and you can use workers to increase their throughput
 ---
 
 

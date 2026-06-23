@@ -85,7 +85,7 @@ public class BulkTurboEvaluatorTest {
         // System.out.println("flatInputs: "+Arrays.toString(flatInputs));
 
         // Test API Call #1: High-Performance Flat Bulk Execution
-        evaluator.applyBulk(flatInputs, outputVector, tiledExecution);
+        evaluator.applyBulk(flatInputs, outputVector);
         // System.out.println("output: "+Arrays.toString(outputVector));
         // System.out.println("outputVector: " + Arrays.toString(outputVector));
         // Verify mathematical equality against standard Java scalar paths
@@ -121,8 +121,8 @@ public class BulkTurboEvaluatorTest {
         }
 
         // Test API Call #1: Standard Bulk Execution
-        //evaluator.applyBulk(inputs, outputVector, tiledExecution);
-        evaluator.applyBulk(inputs, outputVector, tiledExecution);
+        //evaluator.applyBulk(inputs, outputVector);
+        evaluator.applyBulk(inputs, outputVector);
         // System.out.println("output: "+Arrays.toString(outputVector));
 
         for (int i = 0; i < totalElements; i++) {
@@ -152,7 +152,7 @@ public class BulkTurboEvaluatorTest {
             flatVars[i] = i;
         }
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(flatVars, outputVector, tiledExecution);
+        evaluator.applyBulk(flatVars, outputVector);
         //System.out.println("output: " + Arrays.toString(outputVector));
 
         double[] expectedOut = new double[dataSize];
@@ -188,7 +188,7 @@ public class BulkTurboEvaluatorTest {
             flatVars[i] = i;
         }
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulkBatched(flatVars, outputVector, 128, tiledExecution);
+        evaluator.applyBulkBatched(flatVars, outputVector, 128);
         //  System.out.println("output: " + Arrays.toString(outputVector));
 
         double[] expectedOut = new double[dataSize];
@@ -248,7 +248,7 @@ public class BulkTurboEvaluatorTest {
         System.out.println("outputVectorStd:\n" + Arrays.toString(outputVectorStd));
 
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(flatVars, outputVector, tiledExecution);
+        evaluator.applyBulk(flatVars, outputVector);
         // System.out.println("output: " + Arrays.toString(outputVector));
 
         System.out.println("outputVector:\n" + Arrays.toString(outputVector));
@@ -370,7 +370,7 @@ public class BulkTurboEvaluatorTest {
 
 
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(flatVars, outputVector, true);
+        evaluator.applyBulk(flatVars, outputVector);
         // System.out.println("output: " + Arrays.toString(outputVector));
 
 
@@ -396,7 +396,7 @@ public class BulkTurboEvaluatorTest {
 
         double t = System.nanoTime();
         double[] out = new double[1];
-        evaluator.applyBulk(new double[]{5, 4, 1}, out, false);
+        evaluator.applyBulk(new double[]{5, 4, 1}, out);
         double t1 = System.nanoTime() - t;
 
         System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
@@ -418,7 +418,7 @@ public class BulkTurboEvaluatorTest {
         double t = System.nanoTime();
         double[] out = new double[1];
         try {
-            evaluator.applyBulk(new double[]{5, 4, 1}, out, false);
+            evaluator.applyBulk(new double[]{5, 4, 1}, out);
         } catch (IllegalStateException e) {
             assertTrue(true, "variables not balanced");
             return;
@@ -443,7 +443,7 @@ public class BulkTurboEvaluatorTest {
         double t = System.nanoTime();
         double[] out = new double[1];
         try {
-            evaluator.applyBulk(new double[]{}, out, false);
+            evaluator.applyBulk(new double[]{}, out);
         } catch (IllegalStateException e) {
             assertTrue(true, "variables not balanced");
             return;
@@ -467,7 +467,7 @@ public class BulkTurboEvaluatorTest {
         BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
         double t = System.nanoTime();
         double[] out = new double[1];
-        evaluator.applyBulk(new double[]{5}, out, false);
+        evaluator.applyBulk(new double[]{5}, out);
         double t1 = System.nanoTime() - t;
 
         System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);

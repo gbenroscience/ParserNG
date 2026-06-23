@@ -23,7 +23,6 @@ public class SIMDTurboEvaluatorTest {
     private static final double EPSILON = 1e-12;
     private static ExecutorService threadPool;
     private static boolean active = false;
-    private static boolean tiledExecution = false;
 
     @BeforeAll
     public static void setupSuite() {
@@ -68,7 +67,7 @@ public class SIMDTurboEvaluatorTest {
         System.out.println("flatInputs: "+Arrays.toString(flatInputs));
 
         // Test API Call #1: High-Performance Flat Bulk Execution
-        evaluator.applyBulk(flatInputs, outputVector, tiledExecution);
+        evaluator.applyBulk(flatInputs, outputVector);
         System.out.println("output: "+Arrays.toString(outputVector));
         // System.out.println("outputVector: " + Arrays.toString(outputVector));
         // Verify mathematical equality against standard Java scalar paths
@@ -103,7 +102,7 @@ public class SIMDTurboEvaluatorTest {
         }
 
         // Test API Call #1: Standard Bulk Execution
-        evaluator.applyBulk(inputs, outputVector, tiledExecution);
+        evaluator.applyBulk(inputs, outputVector);
         System.out.println("output: "+Arrays.toString(outputVector));
 
         for (int i = 0; i < totalElements; i++) {
@@ -130,7 +129,7 @@ public class SIMDTurboEvaluatorTest {
             inputs[0][i] = i; // x
         }
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(inputs, outputVector, tiledExecution);
+        evaluator.applyBulk(inputs, outputVector);
         //  System.out.println("output: " + Arrays.toString(outputVector));
 
         for (int i = 0; i < dataSize; i++) {
@@ -148,7 +147,7 @@ public class SIMDTurboEvaluatorTest {
          SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
-        evaluator.applyBulk(new double[]{5, 4, 1}, out, false);
+        evaluator.applyBulk(new double[]{5, 4, 1}, out);
         double t1 = System.nanoTime() - t;
 
         System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
@@ -165,7 +164,7 @@ public class SIMDTurboEvaluatorTest {
         double t = System.nanoTime();
         double[] out = new double[1];
         try{
-        evaluator.applyBulk(new double[]{5,4,1}, out, false);
+        evaluator.applyBulk(new double[]{5,4,1}, out);
         }catch(IllegalStateException e){
             assertTrue(true, "variables not balanced");
             return;
@@ -189,7 +188,7 @@ public class SIMDTurboEvaluatorTest {
         double t = System.nanoTime();
         double[] out = new double[1];
         try{
-        evaluator.applyBulk(new double[]{}, out, false);
+        evaluator.applyBulk(new double[]{}, out);
         }catch(IllegalStateException e){
             assertTrue(true, "variables not balanced");
             return;
@@ -213,7 +212,7 @@ public class SIMDTurboEvaluatorTest {
          SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
-        evaluator.applyBulk(new double[]{5}, out, false);
+        evaluator.applyBulk(new double[]{5}, out);
         double t1 = System.nanoTime() - t;
 
         System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);

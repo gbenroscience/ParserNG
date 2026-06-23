@@ -1,15 +1,15 @@
 package com.github.gbenroscience.simd.turbo.tools;
 
-
-
+import com.github.gbenroscience.simd.turbo.tools.matrix.ParallelTiledEngine;
 import java.util.*;
 import java.util.concurrent.*;
 import jdk.incubator.vector.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
+
 /**
  *
  * @author GBEMIRO
- */ 
+ */
 public final class FlatMatrixF {
 
     private static final boolean HAS_VECTOR = VF_LEN > 1;
@@ -41,7 +41,7 @@ public final class FlatMatrixF {
     }
 
     public FlatMatrixF(int rows, int cols, float[] data) {
-        if (data.length!= rows * cols) {
+        if (data.length != rows * cols) {
             throw new IllegalArgumentException("Data length mismatch");
         }
         this.rows = rows;
@@ -75,12 +75,10 @@ public final class FlatMatrixF {
         data[offset + r * rowStride + c] = v;
     }
 
-    public boolean isContiguous() {
-        return rowStride == cols && offset % VF_LEN == 0;
-    }
-
     public byte[] asByteArray() {
-        if (byteData == null) byteData = new byte[rows * cols];
+        if (byteData == null) {
+            byteData = new byte[rows * cols];
+        }
         return byteData;
     }
 
@@ -121,16 +119,20 @@ public final class FlatMatrixF {
         for (int t = 0; t < nThreads; t++) {
             final int rStart = t * rowChunk;
             final int rEnd = Math.min(rStart + rowChunk, M);
-            if (rStart >= rEnd) break;
+            if (rStart >= rEnd) {
+                break;
+            }
             futures.add(executor.submit(() -> {
                 zeroMatrix(C, rStart, rEnd);
                 matmulBlockOuter(A, B, C, rStart, rEnd);
             }));
         }
         for (Future<?> f : futures) {
-            try { f.get(); }
-            catch (ExecutionException e) { throw new RuntimeException("Parallel matmul failed", e.getCause()); }
-            catch (InterruptedException e) {
+            try {
+                f.get();
+            } catch (ExecutionException e) {
+                throw new RuntimeException("Parallel matmul failed", e.getCause());
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("Interrupted during matmul", e);
             }
@@ -149,9 +151,11 @@ public final class FlatMatrixF {
             int len = (rowEnd - rowStart) * C.rowStride;
             Arrays.fill(C.data, start, start + len, 0.0f);
         } else {
-            for (int i = rowStart; i < rowEnd; i++)
-                for (int j = 0; j < C.cols; j++)
+            for (int i = rowStart; i < rowEnd; i++) {
+                for (int j = 0; j < C.cols; j++) {
                     C.set(i, j, 0.0f);
+                }
+            }
         }
     }
 
@@ -177,17 +181,20 @@ public final class FlatMatrixF {
         final int rows = i1 - i0;
         final int cols = j1 - j0;
 
-        if (rows!= MR || cols!= NR ||!A.isContiguous() ||!B.isContiguous() ||!C.isContiguous()) {
+        if (rows != MR || cols != NR || !A.isContiguous() || !B.isContiguous() || !C.isContiguous()) {
             scalarMicrokernel(A, B, C, i0, i1, j0, j1, k0, k1);
             return;
         }
 
         FloatVector[] acc = new FloatVector[MR];
         if (k0 == 0) {
-            for (int r = 0; r < MR; r++) acc[r] = FloatVector.zero(F_SPECIES);
+            for (int r = 0; r < MR; r++) {
+                acc[r] = FloatVector.zero(F_SPECIES);
+            }
         } else {
-            for (int r = 0; r < MR; r++)
+            for (int r = 0; r < MR; r++) {
                 acc[r] = FloatVector.fromArray(F_SPECIES, C.data, C.offset + (i0 + r) * C.rowStride + j0);
+            }
         }
 
         final int baseA0 = A.offset + i0 * A.rowStride;
@@ -204,8 +211,9 @@ public final class FlatMatrixF {
             acc[3] = acc[3].fma(FloatVector.broadcast(F_SPECIES, aData[baseA3 + k]), bvec);
         }
 
-        for (int r = 0; r < MR; r++)
+        for (int r = 0; r < MR; r++) {
             acc[r].intoArray(C.data, C.offset + (i0 + r) * C.rowStride + j0);
+        }
     }
 
     private static void scalarMicrokernel(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C,
@@ -214,20 +222,26 @@ public final class FlatMatrixF {
         final int cols = j1 - j0;
         float[] cvals = new float[rows * cols];
 
-        for (int r = 0; r < rows; r++)
-            for (int c = 0; c < cols; c++)
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
                 cvals[r * cols + c] = C.get(i0 + r, j0 + c);
+            }
+        }
 
-        for (int k = k0; k < k1; k++)
+        for (int k = k0; k < k1; k++) {
             for (int r = 0; r < rows; r++) {
                 float a = A.get(i0 + r, k);
-                for (int c = 0; c < cols; c++)
+                for (int c = 0; c < cols; c++) {
                     cvals[r * cols + c] += a * B.get(k, j0 + c);
+                }
             }
+        }
 
-        for (int r = 0; r < rows; r++)
-            for (int c = 0; c < cols; c++)
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
                 C.set(i0 + r, j0 + c, cvals[r * cols + c]);
+            }
+        }
     }
 
     // ====================== ELEMENTWISE ======================
@@ -250,6 +264,72 @@ public final class FlatMatrixF {
         }
     }
 
+    /**
+     * Resolves the flat array index for row-major layout with implicit unit
+     * column stride. Highly optimized for aggressive HotSpot JIT compiler
+     * inlining (< 35 bytes of bytecode).
+     */
+    public final int index(int r, int c) {
+        return this.offset + (r * this.rowStride) + c;
+    }
+
+    public void geluInPlace(ExecutorService pool, int availableCores) {
+        int len = this.rows * this.cols;
+
+        // Path A: Globally Contiguous & Vector Supported
+        if (HAS_VECTOR && this.isContiguous()) {
+            ParallelTiledEngine.geluInPlaceParallel(pool, availableCores, this.data, this.offset, len);
+        } else {
+            // Path B: Strided/Sub-matrix view fallback.
+            // Cache object fields into local registers to optimize loop invariant code motion (LCM)
+            final int rStride = this.rowStride;
+            final int off = this.offset;
+            final int width = this.cols;
+            final float[] d = this.data;
+
+            for (int r = 0; r < this.rows; r++) {
+                int startIdx = off + (r * rStride);
+                int endIdx = startIdx + width;
+
+                // Blazing fast sequential pointer loop over the row segment
+                for (int idx = startIdx; idx < endIdx; idx++) {
+                    float x = d[idx];
+
+                    // Pure deterministic minimax scalar approximation
+                    float inner = 0.79788456f * (x + 0.044715f * x * x * x);
+                    float x2 = inner * inner;
+                    float num = inner + x2 * inner * 0.1056f;
+                    float den = 1.0f + x2 * 0.4324f;
+                    float t = num / den;
+
+                    if (inner > 3.0f) {
+                        t = 1.0f;
+                    } else if (inner < -3.0f) {
+                        t = -1.0f;
+                    }
+
+                    d[idx] = 0.5f * x * (1.0f + t);
+                }
+            }
+        }
+    }
+
+    /**
+     * Checks if the matrix elements are structurally sequential from the
+     * starting offset to the end of the data block.
+     */
+    public final boolean isContiguous() {
+        return this.rowStride == this.cols;
+    }
+
+    /**
+     * Checks if the starting memory pointer aligns perfectly with the SIMD
+     * hardware register width to maximize native instruction efficiency.
+     */
+    public final boolean isVectorAligned() {
+        return (this.offset % VF_LEN) == 0;
+    }
+
     public void siluInPlace() {
         int len = rows * cols, idx = 0;
         if (HAS_VECTOR && isContiguous()) {
@@ -269,14 +349,19 @@ public final class FlatMatrixF {
         int len = rows * cols, idx = 0;
         if (HAS_VECTOR && isContiguous()) {
             var zero = FloatVector.zero(F_SPECIES);
-            for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN)
+            for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
                 FloatVector.fromArray(F_SPECIES, data, offset + idx).max(zero).intoArray(data, offset + idx);
+            }
         }
-        for (; idx < len; idx++) data[offset + idx] = Math.max(0.0f, data[offset + idx]);
+        for (; idx < len; idx++) {
+            data[offset + idx] = Math.max(0.0f, data[offset + idx]);
+        }
     }
 
     public void softmaxRowsInPlace() {
-        if (cols == 0) return;
+        if (cols == 0) {
+            return;
+        }
         float[] row = new float[cols];
         for (int i = 0; i < rows; i++) {
             int base = offset + i * rowStride;
@@ -287,16 +372,21 @@ public final class FlatMatrixF {
     }
 
     public static void softmaxInPlace(float[] x) {
-        if (x.length == 0) return;
+        if (x.length == 0) {
+            return;
+        }
         float max = Float.NEGATIVE_INFINITY;
         int i = 0;
         if (HAS_VECTOR) {
             var vmax = FloatVector.broadcast(F_SPECIES, max);
-            for (; i < F_SPECIES.loopBound(x.length); i += VF_LEN)
+            for (; i < F_SPECIES.loopBound(x.length); i += VF_LEN) {
                 vmax = vmax.max(FloatVector.fromArray(F_SPECIES, x, i));
+            }
             max = vmax.reduceLanes(VectorOperators.MAX);
         }
-        for (; i < x.length; i++) max = Math.max(max, x[i]);
+        for (; i < x.length; i++) {
+            max = Math.max(max, x[i]);
+        }
 
         float sum = 0.0f;
         i = 0;
@@ -319,25 +409,31 @@ public final class FlatMatrixF {
         i = 0;
         if (HAS_VECTOR) {
             var vinv = FloatVector.broadcast(F_SPECIES, invSum);
-            for (; i < F_SPECIES.loopBound(x.length); i += VF_LEN)
+            for (; i < F_SPECIES.loopBound(x.length); i += VF_LEN) {
                 FloatVector.fromArray(F_SPECIES, x, i).mul(vinv).intoArray(x, i);
+            }
         }
-        for (; i < x.length; i++) x[i] *= invSum;
+        for (; i < x.length; i++) {
+            x[i] *= invSum;
+        }
     }
 
     public static void add(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
         int n = A.rows * A.cols;
-        if (A.rows!= B.rows || A.cols!= B.cols || C.rows!= A.rows || C.cols!= A.cols)
+        if (A.rows != B.rows || A.cols != B.cols || C.rows != A.rows || C.cols != A.cols) {
             throw new IllegalArgumentException("Shape mismatch");
+        }
         int i = 0;
         if (HAS_VECTOR && A.isContiguous() && B.isContiguous() && C.isContiguous()) {
             for (; i < F_SPECIES.loopBound(n); i += VF_LEN) {
-                var va = FloatVector.fromArray(F_SPECIES, A.data, A.offset + i);
+                var va  = FloatVector.fromArray(F_SPECIES, A.data, A.offset + i);
                 var vb = FloatVector.fromArray(F_SPECIES, B.data, B.offset + i);
                 va.add(vb).intoArray(C.data, C.offset + i);
             }
         }
-        for (; i < n; i++) C.data[C.offset + i] = A.data[A.offset + i] + B.data[B.offset + i];
+        for (; i < n; i++) {
+            C.data[C.offset + i] = A.data[A.offset + i] + B.data[B.offset + i];
+        }
     }
 
     public static void mul(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
@@ -345,18 +441,22 @@ public final class FlatMatrixF {
         int i = 0;
         if (HAS_VECTOR && A.isContiguous() && B.isContiguous() && C.isContiguous()) {
             for (; i < F_SPECIES.loopBound(n); i += VF_LEN) {
-                var va = FloatVector.fromArray(F_SPECIES, A.data, A.offset + i);
+                var va  = FloatVector.fromArray(F_SPECIES, A.data, A.offset + i);
                 var vb = FloatVector.fromArray(F_SPECIES, B.data, B.offset + i);
                 va.mul(vb).intoArray(C.data, C.offset + i);
             }
         }
-        for (; i < n; i++) C.data[C.offset + i] = A.data[A.offset + i] * B.data[B.offset + i];
+        for (; i < n; i++) {
+            C.data[C.offset + i] = A.data[A.offset + i] * B.data[B.offset + i];
+        }
     }
 
     // ====================== FUSED KERNELS ======================
     public static void matmulAddBiasGelu(FlatMatrixF A, FlatMatrixF B, FlatMatrixF bias, FlatMatrixF C) {
         checkDims(A, B, C);
-        if (bias.rows!= 1 || bias.cols!= B.cols) throw new IllegalArgumentException("Bias must be 1xN");
+        if (bias.rows != 1 || bias.cols != B.cols) {
+            throw new IllegalArgumentException("Bias must be 1xN");
+        }
         final int M = A.rows, N = B.cols, K = A.cols;
         for (int i = 0; i < M; i++) {
             int j = 0;
@@ -376,7 +476,9 @@ public final class FlatMatrixF {
             }
             for (; j < N; j++) {
                 float sum = bias.get(0, j);
-                for (int k = 0; k < K; k++) sum += A.get(i, k) * B.get(k, j);
+                for (int k = 0; k < K; k++) {
+                    sum += A.get(i, k) * B.get(k, j);
+                }
                 float x3 = sum * sum * sum;
                 float t = (float) Math.tanh(GELU_C1 * (sum + GELU_C2 * x3));
                 C.set(i, j, 0.5f * sum * (1.0f + t));
@@ -395,135 +497,133 @@ public final class FlatMatrixF {
         add(out, bias, out);
         out.siluInPlace();
     }
-    
+
     // ====================== FUSED MATMUL + alpha * sin(C) ======================
-/**
- * FUSED MATMUL + alpha * sin(C)
- * C = A * B + alpha * sin(C)
- */
-public static void matmulAddSin(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C, float alpha) {
-    checkDims(A, B, C);
-    final int M = A.rows, N = B.cols, K = A.cols;
-    final long flops = 2L * M * K * N;
+    /**
+     * FUSED MATMUL + alpha * sin(C) C = A * B + alpha * sin(C)
+     */
+    public static void matmulAddSin(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C, float alpha) {
+        checkDims(A, B, C);
+        final int M = A.rows, N = B.cols, K = A.cols;
+        final long flops = 2L * M * K * N;
 
-    if (!HAS_VECTOR || flops < 16_384 ||
-       !A.isContiguous() ||!B.isContiguous() ||!C.isContiguous()) {
-        matmulAddSinScalar(A, B, C, alpha);
-        return;
-    }
-    matmulAddSinSimd(A, B, C, alpha);
-}
-
-private static void matmulAddSinSimd(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C, float alpha) {
-    final int M = A.rows, N = B.cols, K = A.cols;
-    final FloatVector vAlpha = FloatVector.broadcast(F_SPECIES, alpha);
-    final int loopBoundN = F_SPECIES.loopBound(N);
-
-    for (int i = 0; i < M; i++) {
-        final int rowA = A.offset + i * A.rowStride;
-        final int rowC = C.offset + i * C.rowStride;
-
-        int j = 0;
-        for (; j < loopBoundN; j += VF_LEN) {
-            var acc = FloatVector.zero(F_SPECIES);
-            for (int k = 0; k < K; k++) {
-                var aVec = FloatVector.broadcast(F_SPECIES, A.data[rowA + k]);
-                var bVec = FloatVector.fromArray(F_SPECIES, B.data, B.offset + k * B.rowStride + j);
-                acc = aVec.fma(bVec, acc);
-            }
-            // Read old C for sin, then compute new value
-            var cOld = FloatVector.fromArray(F_SPECIES, C.data, rowC + j);
-            var sinC = cOld.lanewise(VectorOperators.SIN);
-            acc.add(sinC.mul(vAlpha)).intoArray(C.data, rowC + j);
+        if (!HAS_VECTOR || flops < 16_384
+                || !A.isContiguous() || !B.isContiguous() || !C.isContiguous()) {
+            matmulAddSinScalar(A, B, C, alpha);
+            return;
         }
-
-        // Scalar tail
-        for (; j < N; j++) {
-            float sum = 0.0f;
-            for (int k = 0; k < K; k++) {
-                sum += A.data[rowA + k] * B.data[B.offset + k * B.rowStride + j];
-            }
-            final int idx = rowC + j;
-            C.data[idx] = sum + alpha * (float) Math.sin(C.data[idx]);
-        }
+        matmulAddSinSimd(A, B, C, alpha);
     }
-}
 
-private static void matmulAddSinScalar(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C, float alpha) {
-    final int M = A.rows, N = B.cols, K = A.cols;
-    for (int i = 0; i < M; i++) {
-        final int rowA = A.offset + i * A.rowStride;
-        final int rowC = C.offset + i * C.rowStride;
-        for (int j = 0; j < N; j++) {
-            float sum = 0.0f;
-            for (int k = 0; k < K; k++) {
-                sum += A.data[rowA + k] * B.data[B.offset + k * B.rowStride + j];
-            }
-            final int idx = rowC + j;
-            C.data[idx] = sum + alpha * (float) Math.sin(C.data[idx]);
-        }
-    }
-}
+    private static void matmulAddSinSimd(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C, float alpha) {
+        final int M = A.rows, N = B.cols, K = A.cols;
+        final FloatVector vAlpha = FloatVector.broadcast(F_SPECIES, alpha);
+        final int loopBoundN = F_SPECIES.loopBound(N);
 
-// ====================== MATMUL IN-PLACE C += A * B ======================
-/**
- * MATMUL IN-PLACE (C += A * B)
- * Caller must zero C if pure matmul is desired
- */
-public static void matmulInPlace(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
-    checkDims(A, B, C);
-    final int M = A.rows, N = B.cols, K = A.cols;
-    final long flops = 2L * M * K * N;
+        for (int i = 0; i < M; i++) {
+            final int rowA = A.offset + i * A.rowStride;
+            final int rowC = C.offset + i * C.rowStride;
 
-    if (!HAS_VECTOR || flops < 16_384 ||
-       !A.isContiguous() ||!B.isContiguous() ||!C.isContiguous()) {
-        matmulInPlaceScalar(A, B, C);
-        return;
-    }
-    matmulSimdBroadcast(A, B, C);
-}
-
-public static void matmulSimdBroadcast(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
-    checkDims(A, B, C);
-    final int M = A.rows, N = B.cols, K = A.cols;
-    final int loopBoundN = F_SPECIES.loopBound(N);
-
-    // Note: Does NOT zero C — caller is responsible
-    for (int i = 0; i < M; i++) {
-        final int rowA = A.offset + i * A.rowStride;
-        final int rowC = C.offset + i * C.rowStride;
-
-        for (int k = 0; k < K; k++) {
-            var aVec = FloatVector.broadcast(F_SPECIES, A.data[rowA + k]);
-            final int rowB = B.offset + k * B.rowStride;
             int j = 0;
             for (; j < loopBoundN; j += VF_LEN) {
-                var bVec = FloatVector.fromArray(F_SPECIES, B.data, rowB + j);
-                var cVec = FloatVector.fromArray(F_SPECIES, C.data, rowC + j);
-                aVec.fma(bVec, cVec).intoArray(C.data, rowC + j);
+                var acc = FloatVector.zero(F_SPECIES);
+                for (int k = 0; k < K; k++) {
+                    var aVec = FloatVector.broadcast(F_SPECIES, A.data[rowA + k]);
+                    var bVec = FloatVector.fromArray(F_SPECIES, B.data, B.offset + k * B.rowStride + j);
+                    acc = aVec.fma(bVec, acc);
+                }
+                // Read old C for sin, then compute new value
+                var cOld = FloatVector.fromArray(F_SPECIES, C.data, rowC + j);
+                var sinC = cOld.lanewise(VectorOperators.SIN);
+                acc.add(sinC.mul(vAlpha)).intoArray(C.data, rowC + j);
             }
+
             // Scalar tail
             for (; j < N; j++) {
-                C.data[rowC + j] += A.data[rowA + k] * B.data[rowB + j];
+                float sum = 0.0f;
+                for (int k = 0; k < K; k++) {
+                    sum += A.data[rowA + k] * B.data[B.offset + k * B.rowStride + j];
+                }
+                final int idx = rowC + j;
+                C.data[idx] = sum + alpha * (float) Math.sin(C.data[idx]);
             }
         }
     }
-}
 
-private static void matmulInPlaceScalar(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
-    final int M = A.rows, N = B.cols, K = A.cols;
-    for (int i = 0; i < M; i++) {
-        final int rowA = A.offset + i * A.rowStride;
-        final int rowC = C.offset + i * C.rowStride;
-        for (int k = 0; k < K; k++) {
-            float a = A.data[rowA + k];
-            final int rowB = B.offset + k * B.rowStride;
+    private static void matmulAddSinScalar(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C, float alpha) {
+        final int M = A.rows, N = B.cols, K = A.cols;
+        for (int i = 0; i < M; i++) {
+            final int rowA = A.offset + i * A.rowStride;
+            final int rowC = C.offset + i * C.rowStride;
             for (int j = 0; j < N; j++) {
-                C.data[rowC + j] += a * B.data[rowB + j];
+                float sum = 0.0f;
+                for (int k = 0; k < K; k++) {
+                    sum += A.data[rowA + k] * B.data[B.offset + k * B.rowStride + j];
+                }
+                final int idx = rowC + j;
+                C.data[idx] = sum + alpha * (float) Math.sin(C.data[idx]);
             }
         }
     }
-}
+
+// ====================== MATMUL IN-PLACE C += A * B ======================
+    /**
+     * MATMUL IN-PLACE (C += A * B) Caller must zero C if pure matmul is desired
+     */
+    public static void matmulInPlace(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
+        checkDims(A, B, C);
+        final int M = A.rows, N = B.cols, K = A.cols;
+        final long flops = 2L * M * K * N;
+
+        if (!HAS_VECTOR || flops < 16_384
+                || !A.isContiguous() || !B.isContiguous() || !C.isContiguous()) {
+            matmulInPlaceScalar(A, B, C);
+            return;
+        }
+        matmulSimdBroadcast(A, B, C);
+    }
+
+    public static void matmulSimdBroadcast(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
+        checkDims(A, B, C);
+        final int M = A.rows, N = B.cols, K = A.cols;
+        final int loopBoundN = F_SPECIES.loopBound(N);
+
+        // Note: Does NOT zero C — caller is responsible
+        for (int i = 0; i < M; i++) {
+            final int rowA = A.offset + i * A.rowStride;
+            final int rowC = C.offset + i * C.rowStride;
+
+            for (int k = 0; k < K; k++) {
+                var aVec = FloatVector.broadcast(F_SPECIES, A.data[rowA + k]);
+                final int rowB = B.offset + k * B.rowStride;
+                int j = 0;
+                for (; j < loopBoundN; j += VF_LEN) {
+                    var bVec = FloatVector.fromArray(F_SPECIES, B.data, rowB + j);
+                    var cVec = FloatVector.fromArray(F_SPECIES, C.data, rowC + j);
+                    aVec.fma(bVec, cVec).intoArray(C.data, rowC + j);
+                }
+                // Scalar tail
+                for (; j < N; j++) {
+                    C.data[rowC + j] += A.data[rowA + k] * B.data[rowB + j];
+                }
+            }
+        }
+    }
+
+    private static void matmulInPlaceScalar(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
+        final int M = A.rows, N = B.cols, K = A.cols;
+        for (int i = 0; i < M; i++) {
+            final int rowA = A.offset + i * A.rowStride;
+            final int rowC = C.offset + i * C.rowStride;
+            for (int k = 0; k < K; k++) {
+                float a = A.data[rowA + k];
+                final int rowB = B.offset + k * B.rowStride;
+                for (int j = 0; j < N; j++) {
+                    C.data[rowC + j] += a * B.data[rowB + j];
+                }
+            }
+        }
+    }
 
     public static void randomFill(FlatMatrixF A) {
         ThreadLocalRandom ran = ThreadLocalRandom.current();
@@ -533,7 +633,9 @@ private static void matmulInPlaceScalar(FlatMatrixF A, FlatMatrixF B, FlatMatrix
     }//end method randomFill
 
     public static void swiGLU(FlatMatrixF gate, FlatMatrixF up, FlatMatrixF out) {
-        if (gate!= out) System.arraycopy(gate.data, gate.offset, out.data, out.offset, gate.rows * gate.cols);
+        if (gate != out) {
+            System.arraycopy(gate.data, gate.offset, out.data, out.offset, gate.rows * gate.cols);
+        }
         out.siluInPlace();
         mul(out, up, out);
     }
@@ -546,14 +648,17 @@ private static void matmulInPlaceScalar(FlatMatrixF A, FlatMatrixF B, FlatMatrix
             sumSq += v * v;
         }
         float invRms = 1.0f / (float) Math.sqrt(sumSq / len + eps);
-        for (int i = 0; i < len; i++)
+        for (int i = 0; i < len; i++) {
             out.data[out.offset + i] = x.data[x.offset + i] * invRms * weight.data[weight.offset + i];
+        }
     }
 
     public static void layerNorm(FlatMatrixF x, FlatMatrixF gamma, FlatMatrixF beta, FlatMatrixF out, float eps) {
         int len = x.rows * x.cols;
         float mean = 0.0f;
-        for (int i = 0; i < len; i++) mean += x.data[x.offset + i];
+        for (int i = 0; i < len; i++) {
+            mean += x.data[x.offset + i];
+        }
         mean /= len;
         float var = 0.0f;
         for (int i = 0; i < len; i++) {
@@ -569,14 +674,18 @@ private static void matmulInPlaceScalar(FlatMatrixF A, FlatMatrixF B, FlatMatrix
     }
 
     private static void checkDims(FlatMatrixF A, FlatMatrixF B) {
-        if (A.cols!= B.rows) throw new IllegalArgumentException("A.cols!= B.rows: " + A.cols + "!= " + B.rows);
+        if (A.cols != B.rows) {
+            throw new IllegalArgumentException("A.cols!= B.rows: " + A.cols + "!= " + B.rows);
+        }
     }
 
     private static void checkDims(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
         checkDims(A, B);
-        if (C.rows!= A.rows || C.cols!= B.cols) throw new IllegalArgumentException("C dims mismatch");
+        if (C.rows != A.rows || C.cols != B.cols) {
+            throw new IllegalArgumentException("C dims mismatch");
+        }
     }
-    
+
     /////////////////////////////////////MHA-ATTENTION////////////////////////////////////
     ///
     ///
@@ -589,29 +698,29 @@ private static void matmulInPlaceScalar(FlatMatrixF A, FlatMatrixF B, FlatMatrix
  * scale should be 1.0f / sqrt(d_k)
  */
 public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF V,
-                                       FlatMatrixF output, float scale) {
-    return mhaAttention(Q, K, V, output, scale, null);
-}
-
-public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF V,
-                                       FlatMatrixF output, float scale, ExecutorService executor) {
-    final int seqLen = Q.rows;
-    final int d_k = Q.cols;
-    final int d_v = V.cols;
-
-    if (K.rows!= seqLen || V.rows!= seqLen || output.rows!= seqLen || output.cols!= d_v) {
-        throw new IllegalArgumentException("MHA shape mismatch");
+            FlatMatrixF output, float scale) {
+        return mhaAttention(Q, K, V, output, scale, null);
     }
 
-    if (executor == null || seqLen < 32) {
-        mhaAttentionSingleThread(Q, K, V, output, scale);
-    } else {
-        mhaAttentionParallel(Q, K, V, output, scale, executor);
-    }
-    return output;
-}
+    public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF V,
+            FlatMatrixF output, float scale, ExecutorService executor) {
+        final int seqLen = Q.rows;
+        final int d_k = Q.cols;
+        final int d_v = V.cols;
 
-  /**
+        if (K.rows != seqLen || V.rows != seqLen || output.rows != seqLen || output.cols != d_v) {
+            throw new IllegalArgumentException("MHA shape mismatch");
+        }
+
+        if (executor == null || seqLen < 32) {
+            mhaAttentionSingleThread(Q, K, V, output, scale);
+        } else {
+            mhaAttentionParallel(Q, K, V, output, scale, executor);
+        }
+        return output;
+    }
+
+    /**
      *
      * @return a string representation of the matrix in rows and columns.
      */
@@ -638,97 +747,105 @@ public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF
         return output;
     }//end method toString
 
-private static void mhaAttentionSingleThread(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF V,
-                                             FlatMatrixF out, float scale) {
-    final int seqLen = Q.rows;
-    float[] scores = new float[seqLen];
-    for (int i = 0; i < seqLen; i++) {
-        qkT_row(Q, K, i, scores, scale);
-        softmaxInPlace(scores);
-        weightedSum(scores, V, out, i);
-    }
-}
-
-private static void mhaAttentionParallel(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF V,
-                                         FlatMatrixF out, float scale, ExecutorService executor) {
-    final int seqLen = Q.rows;
-    final int nThreads = Math.min(Runtime.getRuntime().availableProcessors(), Math.max(1, seqLen / 8));
-    final int chunk = (seqLen + nThreads - 1) / nThreads;
-    List<Future<?>> futures = new ArrayList<>(nThreads);
-
-    for (int t = 0; t < nThreads; t++) {
-        final int start = t * chunk, end = Math.min(start + chunk, seqLen);
-        if (start >= end) break;
-        futures.add(executor.submit(() -> {
-            float[] scores = new float[seqLen];
-            for (int i = start; i < end; i++) {
-                qkT_row(Q, K, i, scores, scale);
-                softmaxInPlace(scores);
-                weightedSum(scores, V, out, i);
-            }
-        }));
-    }
-    for (Future<?> f : futures) {
-        try { f.get(); }
-        catch (ExecutionException e) { throw new RuntimeException("MHA failed", e.getCause()); }
-        catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Interrupted", e);
+    private static void mhaAttentionSingleThread(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF V,
+            FlatMatrixF out, float scale) {
+        final int seqLen = Q.rows;
+        float[] scores = new float[seqLen];
+        for (int i = 0; i < seqLen; i++) {
+            qkT_row(Q, K, i, scores, scale);
+            softmaxInPlace(scores);
+            weightedSum(scores, V, out, i);
         }
     }
-}
+
+    private static void mhaAttentionParallel(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF V,
+            FlatMatrixF out, float scale, ExecutorService executor) {
+        final int seqLen = Q.rows;
+        final int nThreads = Math.min(Runtime.getRuntime().availableProcessors(), Math.max(1, seqLen / 8));
+        final int chunk = (seqLen + nThreads - 1) / nThreads;
+        List<Future<?>> futures = new ArrayList<>(nThreads);
+
+        for (int t = 0; t < nThreads; t++) {
+            final int start = t * chunk, end = Math.min(start + chunk, seqLen);
+            if (start >= end) {
+                break;
+            }
+            futures.add(executor.submit(() -> {
+                float[] scores = new float[seqLen];
+                for (int i = start; i < end; i++) {
+                    qkT_row(Q, K, i, scores, scale);
+                    softmaxInPlace(scores);
+                    weightedSum(scores, V, out, i);
+                }
+            }));
+        }
+        for (Future<?> f : futures) {
+            try {
+                f.get();
+            } catch (ExecutionException e) {
+                throw new RuntimeException("MHA failed", e.getCause());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted", e);
+            }
+        }
+    }
 
 // Q[i] @ K^T * scale
-private static void qkT_row(FlatMatrixF Q, FlatMatrixF K, int i, float[] scores, float scale) {
-    final int d_k = Q.cols;
-    final int seqLen = K.rows;
-    for (int j = 0; j < seqLen; j++) {
-        float dot = 0.0f;
-        int k = 0;
-        if (HAS_VECTOR && Q.isContiguous() && K.isContiguous()) {
-            var sum = FloatVector.zero(F_SPECIES);
-            int qOff = Q.offset + i * Q.rowStride;
-            int kOff = K.offset + j * K.rowStride;
-            for (; k < F_SPECIES.loopBound(d_k); k += VF_LEN) {
-                var qv = FloatVector.fromArray(F_SPECIES, Q.data, qOff + k);
-                var kv = FloatVector.fromArray(F_SPECIES, K.data, kOff + k);
-                sum = qv.fma(kv, sum);
+    private static void qkT_row(FlatMatrixF Q, FlatMatrixF K, int i, float[] scores, float scale) {
+        final int d_k = Q.cols;
+        final int seqLen = K.rows;
+        for (int j = 0; j < seqLen; j++) {
+            float dot = 0.0f;
+            int k = 0;
+            if (HAS_VECTOR && Q.isContiguous() && K.isContiguous()) {
+                var sum = FloatVector.zero(F_SPECIES);
+                int qOff = Q.offset + i * Q.rowStride;
+                int kOff = K.offset + j * K.rowStride;
+                for (; k < F_SPECIES.loopBound(d_k); k += VF_LEN) {
+                    var qv = FloatVector.fromArray(F_SPECIES, Q.data, qOff + k);
+                    var kv = FloatVector.fromArray(F_SPECIES, K.data, kOff + k);
+                    sum = qv.fma(kv, sum);
+                }
+                dot = sum.reduceLanes(VectorOperators.ADD);
             }
-            dot = sum.reduceLanes(VectorOperators.ADD);
+            for (; k < d_k; k++) {
+                dot += Q.get(i, k) * K.get(j, k);
+            }
+            scores[j] = dot * scale;
         }
-        for (; k < d_k; k++) {
-            dot += Q.get(i, k) * K.get(j, k);
-        }
-        scores[j] = dot * scale;
     }
-}
 
 // output[i] = sum_j scores[j] * V[j]
-private static void weightedSum(float[] scores, FlatMatrixF V, FlatMatrixF out, int i) {
-    final int d_v = V.cols;
-    final int seqLen = V.rows;
+    private static void weightedSum(float[] scores, FlatMatrixF V, FlatMatrixF out, int i) {
+        final int d_v = V.cols;
+        final int seqLen = V.rows;
 
-    // Zero output row
-    Arrays.fill(out.data, out.offset + i * out.rowStride, out.offset + i * out.rowStride + d_v, 0.0f);
+        // Zero output row
+        Arrays.fill(out.data, out.offset + i * out.rowStride, out.offset + i * out.rowStride + d_v, 0.0f);
 
-    for (int j = 0; j < seqLen; j++) {
-        float w = scores[j];
-        if (w == 0.0f) continue;
-        int k = 0;
-        if (HAS_VECTOR && V.isContiguous() && out.isContiguous()) {
-            var vw = FloatVector.broadcast(F_SPECIES, w);
-            int vOff = V.offset + j * V.rowStride;
-            int oOff = out.offset + i * out.rowStride;
-            for (; k < F_SPECIES.loopBound(d_v); k += VF_LEN) {
-                var vv = FloatVector.fromArray(F_SPECIES, V.data, vOff + k);
-                var vo = FloatVector.fromArray(F_SPECIES, out.data, oOff + k);
-                vw.fma(vv, vo).intoArray(out.data, oOff + k);
+        for (int j = 0; j < seqLen; j++) {
+            float w = scores[j];
+            if (w == 0.0f) {
+                continue;
+            }
+            int k = 0;
+            if (HAS_VECTOR && V.isContiguous() && out.isContiguous()) {
+                var vw = FloatVector.broadcast(F_SPECIES, w);
+                int vOff = V.offset + j * V.rowStride;
+                int oOff = out.offset + i * out.rowStride;
+                for (; k < F_SPECIES.loopBound(d_v); k += VF_LEN) {
+                    var vv = FloatVector.fromArray(F_SPECIES, V.data, vOff + k);
+                    var vo = FloatVector.fromArray(F_SPECIES, out.data, oOff + k);
+                    vw.fma(vv, vo).intoArray(out.data, oOff + k);
+                }
+            }
+            for (; k < d_v; k++) {
+                out.set(i, k, out.get(i, k) + w * V.get(j, k));
             }
         }
-        for (; k < d_v; k++) {
-            out.set(i, k, out.get(i, k) + w * V.get(j, k));
-        }
     }
-}
+
+
 //////////////////////////////MHA-ATTENTION-DONE/////////////////////////////////////////////
 }
