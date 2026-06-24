@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.parser.ng.bench;
 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
@@ -12,13 +12,23 @@ import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.TimeValue;
 
+/**
+ * Run from PowerShell for benchmarking with cpu pinning
+ * cmd.exe /c start /affinity 0xFF /wait java -jar target/benchmarks.jar 'VectorTurboEvaluatorBenchmark'
+ * @author GBEMIRO
+ */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
-@Warmup(iterations = 3, time = 2)
-@Measurement(iterations = 5, time = 2)
-@Fork(1)
+@Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 10, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Fork(value = 3, jvmArgs = {
+    "-Xms5g", "-Xmx5g",
+    "-XX:+UseG1GC",
+    "-XX:-UseCompressedOops", // Avoids compressed oops artifacts
+    "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"    
+})
 @State(Scope.Thread)
-public class SIMDTurboEvaluatorBenchmark {
+public class SIMDVectorTurboEvaluatorBenchmark {
 
     @Param({"1000", "1000000", "67108864"})
     private int dataSize;
@@ -35,7 +45,7 @@ public class SIMDTurboEvaluatorBenchmark {
     private double[] outputBuffer;
 
     private SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression parserNG;
-    private MathEvalBenchmark.JaninoMathFunction fastEvaluator;
+    private VectorTurboBench.JaninoMathFunction fastEvaluator;
     
     private int varCount;
     private double[] vars;
@@ -69,7 +79,7 @@ public class SIMDTurboEvaluatorBenchmark {
         }
 
         parserNG = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
-        fastEvaluator = MathEvalBenchmark.setupJanino(expression, expressionVars);
+        fastEvaluator = VectorTurboBench.setupJanino(expression, expressionVars);
     }
 
     @Benchmark
@@ -84,7 +94,7 @@ public class SIMDTurboEvaluatorBenchmark {
         }
         bh.consume(checksum);
     }
-/*
+
     @Benchmark
     public void janino(Blackhole bh) {
         // Localizing fields to minimize register loading inside the benchmark loop
@@ -92,7 +102,7 @@ public class SIMDTurboEvaluatorBenchmark {
         final int stride = this.varCount;
         final double[][] src = this.variables;
         final double[] currentVars = this.vars;
-        final MathEvalBenchmark.JaninoMathFunction evaluator = this.fastEvaluator;
+        final VectorTurboBench.JaninoMathFunction evaluator = this.fastEvaluator;
 
         for (int i = 0; i < limit; i++) {
             // Correctly reconstruct cross-sections out of the SoA data layout
@@ -101,11 +111,11 @@ public class SIMDTurboEvaluatorBenchmark {
             }
             bh.consume(evaluator.apply(currentVars));
         }
-    }*/
+    }
 
     public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
-        opt.include(SIMDTurboEvaluatorBenchmark.class.getSimpleName());
+        opt.include(SIMDVectorTurboEvaluatorBenchmark.class.getSimpleName());
         
         Options configurations = opt.mode(Mode.AverageTime) // Keep uniform with class-level metrics
                 .timeUnit(TimeUnit.NANOSECONDS)

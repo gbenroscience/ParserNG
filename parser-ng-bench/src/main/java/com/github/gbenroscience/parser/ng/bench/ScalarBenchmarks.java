@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.parser.ng.bench;
 
 
 

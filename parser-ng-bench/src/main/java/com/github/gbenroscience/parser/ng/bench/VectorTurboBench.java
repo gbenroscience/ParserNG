@@ -1,7 +1,7 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.parser.ng.bench;
 
-import com.github.gbenroscience.simd.turbo.tools.utils.*;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.ng.bench.utils.MathToJaninoConverter;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import org.openjdk.jmh.annotations.*;
 import java.util.concurrent.TimeUnit;
@@ -15,17 +15,23 @@ import org.openjdk.jmh.runner.options.TimeValue;
 
 /**
  * Use this to build in the parser-ng-pro directory:
- * mvn clean install -Dgpg.skip
- * * Use this to run the benchmarks:
- * java -jar target/benchmarks.jar MathEvalBenchmark -prof perfasm
+mvn clean install -Dgpg.skip
+* Use this to run the benchmarks:
+java -jar target/benchmarks.jar VectorTurboBench -prof perfasm
  */
+
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
-@Warmup(iterations = 3, time = 2, timeUnit = TimeUnit.NANOSECONDS)
-@Measurement(iterations = 10, time = 2, timeUnit = TimeUnit.NANOSECONDS)
-@Fork(value = 1)
-@State(Scope.Thread) // CRITICAL: Prevents multi-threaded corruption of the shared 'vars' array
-public class MathEvalBenchmark {
+@Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 10, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Fork(value = 3, jvmArgs = {
+    "-Xms5g", "-Xmx5g",
+    "-XX:+UseG1GC",
+    "-XX:-UseCompressedOops", // Avoids compressed oops artifacts
+    "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"    
+})
+@State(Scope.Thread)
+public class VectorTurboBench {
 
     public static interface JaninoMathFunction {
         double apply(double[] v);
@@ -67,7 +73,7 @@ public class MathEvalBenchmark {
         this.fastEvaluator = setupJanino(expression, expressionVars);
         setupParserNG(me);
     }
-/*
+
     @Benchmark
     public void janino(Blackhole bh) {
         // Hoisting instance variables to local registers to eliminate field access overhead inside loop
@@ -84,11 +90,11 @@ public class MathEvalBenchmark {
             bh.consume(evaluator.apply(localVars));
         }  
     }
-*/
+
     @Benchmark
     public void parserNG(Blackhole bh) {
         // True measurement of high-performance vectorized vector logic execution
-        vectorTurbo.applyBulk(flatInput, result);
+        vectorTurbo.applyBulkParallel(flatInput, result);
         bh.consume(result); 
     }
 
@@ -132,18 +138,17 @@ public class MathEvalBenchmark {
     
     public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
-        opt.include(MathEvalBenchmark.class.getSimpleName());
+        opt.include(VectorTurboBench.class.getSimpleName());
         
-        Options configurations = opt.mode(Mode.AverageTime)
+       Options configurations = opt.mode(Mode.AverageTime)
                 .timeUnit(TimeUnit.NANOSECONDS)
-                .warmupIterations(3)
-                .warmupTime(TimeValue.seconds(5))
-                .measurementIterations(10)
-                .measurementTime(TimeValue.seconds(5))
-                .forks(1)
+                .warmupIterations(5)
+                .warmupTime(TimeValue.milliseconds(200L))
+                .measurementIterations(5)
+                .measurementTime(TimeValue.milliseconds(500))
+                .forks(2)
                 .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
-                // Unified JVM engineering switches to maximize vector performance pipelines cleanly
-                .jvmArgs("-Xms8g", "-Xmx8g", "-XX:+UseG1GC", "-XX:-UseCompressedOops", "-Dbenchmark.index=1")
+                .jvmArgs("-Xms8g", "-Xmx8g", "-Dbenchmark.index=1")
                 .jvmArgsAppend("--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions")
                 .build();
 

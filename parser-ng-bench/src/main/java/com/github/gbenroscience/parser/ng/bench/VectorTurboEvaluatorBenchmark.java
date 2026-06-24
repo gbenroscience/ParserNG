@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.parser.ng.bench;
 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
@@ -12,11 +12,21 @@ import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.TimeValue;
 
+/**
+ * Run from PowerShell for benchmarking with cpu pinning
+ * cmd.exe /c start /affinity 0xFF /wait java -jar target/benchmarks.jar 'VectorTurboEvaluatorBenchmark'
+ * @author GBEMIRO
+ */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
-@Warmup(iterations = 3, time = 2)
-@Measurement(iterations = 5, time = 2)
-@Fork(1)
+@Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 10, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Fork(value = 3, jvmArgs = {
+    "-Xms5g", "-Xmx5g",
+    "-XX:+UseG1GC",
+    "-XX:-UseCompressedOops", // Avoids compressed oops artifacts
+    "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"    
+})
 @State(Scope.Thread)
 public class VectorTurboEvaluatorBenchmark {
 
@@ -35,7 +45,7 @@ public class VectorTurboEvaluatorBenchmark {
     private double[] outputBuffer;
 
     private VectorTurboEvaluator.BatchedVectorCompositeExpression parserNG;
-    private MathEvalBenchmark.JaninoMathFunction fastEvaluator;
+    private VectorTurboBench.JaninoMathFunction fastEvaluator;
     
     private int varCount;
     private double[] vars;
@@ -69,18 +79,28 @@ public class VectorTurboEvaluatorBenchmark {
         }
 
         parserNG = (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
-        fastEvaluator = MathEvalBenchmark.setupJanino(expression, expressionVars);
+        fastEvaluator = VectorTurboBench.setupJanino(expression, expressionVars);
     }
-/*
+    
+       @Benchmark
+    public void parserNGDbl(Blackhole bh) {
+        VectorTurboEvaluator.BatchedVectorCompositeExpression png = parserNG;
+        final double[][] fv = this.variables;
+        double[] ob = this.outputBuffer;
+        png.applyBulk(fv, ob);
+        bh.consume(outputBuffer);
+    }
+
     @Benchmark
     public void parserNG(Blackhole bh) {
         VectorTurboEvaluator.BatchedVectorCompositeExpression png = parserNG;
         final double[] fv = this.flatVariables;
         double[] ob = this.outputBuffer;
-        png.applyBulkBatched(fv, ob, 32768);
+        png.applyBulk(fv, ob);
         bh.consume(outputBuffer);
     }
-*/
+
+    
     @Benchmark
     public void janino(Blackhole bh) {
         // Localizing fields to minimize register loading inside the benchmark loop
@@ -88,7 +108,7 @@ public class VectorTurboEvaluatorBenchmark {
         final int stride = this.varCount;
         final double[][] src = this.variables;
         final double[] currentVars = this.vars;
-        final MathEvalBenchmark.JaninoMathFunction evaluator = this.fastEvaluator;
+        final VectorTurboBench.JaninoMathFunction evaluator = this.fastEvaluator;
 
         for (int i = 0; i < limit; i++) {
             // Correctly reconstruct cross-sections out of the SoA data layout

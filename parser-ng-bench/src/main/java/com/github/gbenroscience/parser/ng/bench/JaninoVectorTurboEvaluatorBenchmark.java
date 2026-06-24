@@ -1,10 +1,8 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.parser.ng.bench;
 
 
 
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.*;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import java.lang.management.ManagementFactory;
 import org.openjdk.jmh.annotations.*;
 import java.util.Random;
@@ -17,32 +15,33 @@ import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.TimeValue;
 
-/*
-@BenchmarkMode(Mode.Throughput)
-@OutputTimeUnit(TimeUnit.SECONDS)
-@Warmup(iterations = 3, time = 2)
-@Measurement(iterations = 5, time = 2)
-@Fork(1)
+
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 10, time = 500, timeUnit = TimeUnit.MILLISECONDS)
+@Fork(value = 3, jvmArgs = {
+    "-Xms5g", "-Xmx5g",
+    "-XX:+UseG1GC",
+    "-XX:-UseCompressedOops", // Avoids compressed oops artifacts
+    "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"    
+})
 @State(Scope.Thread)
-*//*
 public class JaninoVectorTurboEvaluatorBenchmark {
 
     @Param({"1000", "50000", "500000", "50000000"})
     private int dataSize;
 
-    private static ExecutorService threadPool;
 
     private double[][] variables;
     private double[] outputBuffer;
 
     private JaninoVectorTurboEvaluator.JaninoBulkExpression linearExpr;
     private JaninoVectorTurboEvaluator.JaninoBulkExpression gaussianExpr;
-    private JaninoVectorTurboEvaluator.JaninoBulkExpression conditionalExpr;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable {
         Random rand = new Random(42);
-        threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
         // Structure of Arrays (SoA): 3 variables (x1, x2, x3), each of length dataSize
         variables = new double[3][dataSize];
         outputBuffer = new double[dataSize];
@@ -92,24 +91,20 @@ public class JaninoVectorTurboEvaluatorBenchmark {
         bh.consume(checksum);
     }
 
-// 
-//    @Benchmark
-//    public double[] benchmarkHardwareMaskConditionalBulk() {
-//        conditionalExpr.applyBulk(variables, outputBuffer);
-//        return outputBuffer;
-//    }
-// 
+
     public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
         opt.include(JaninoVectorTurboEvaluatorBenchmark.class.getSimpleName()); // Always include baseline
         // 4. Fluent, modern JMH Configuration
-        Options configurations = opt.mode(Mode.AverageTime)
+
+   
+        Options configurations = opt.mode(Mode.AverageTime) // Keep uniform with class-level metrics
                 .timeUnit(TimeUnit.NANOSECONDS)
-                .warmupIterations(5)
-                .warmupTime(TimeValue.milliseconds(200L))
+                .warmupIterations(3)
+                .warmupTime(TimeValue.seconds(2))
                 .measurementIterations(5)
-                .measurementTime(TimeValue.milliseconds(500))
-                .forks(2)
+                .measurementTime(TimeValue.seconds(2))
+                .forks(1)
                 .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
                 .jvmArgs("-Xms8g", "-Xmx8g", "-Dbenchmark.index=1")
                 .jvmArgsAppend("--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions")
@@ -118,4 +113,3 @@ public class JaninoVectorTurboEvaluatorBenchmark {
         new Runner(configurations).run();
     }
 }
-*/

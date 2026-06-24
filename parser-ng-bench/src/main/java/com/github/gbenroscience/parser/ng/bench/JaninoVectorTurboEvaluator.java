@@ -1,14 +1,11 @@
-package com.github.gbenroscience.simd;
-
-
+package com.github.gbenroscience.parser.ng.bench;
 
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.utils.MathToJaninoConverter;
+import com.github.gbenroscience.parser.ng.bench.utils.MathToJaninoConverter;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrix;
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
+import com.github.gbenroscience.parser.turbo.tools.vector.matrix.*;
 import org.codehaus.janino.ClassBodyEvaluator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -24,10 +21,27 @@ import java.util.concurrent.Future;
  */
 public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
+    public class ThreadLocalBufferPool {
+        // ThreadLocal cache to keep threads from colliding in multi-threaded environments
+
+        private static final ThreadLocal<double[]> BUFFER_CACHE = new ThreadLocal<>();
+
+        public static double[] getOrCreateBuffer(int totalSize) {
+            double[] buffer = BUFFER_CACHE.get();
+            if (buffer == null || buffer.length < totalSize) {
+                // Only allocates on the very first pass (or if data size scales up)
+                buffer = new double[totalSize];
+                BUFFER_CACHE.set(buffer);
+            }
+            return buffer;
+        }
+    }
+
     @FunctionalInterface
     public interface CompiledEvaluator {
-        double eval(double x1, double x2, double x3);
-        //double eval(double[] vars);
+        // double eval(double x1, double x2, double x3);
+
+        double eval(double[] vars);
     }
 
     private final CompiledEvaluator janinoCompiledEval;
@@ -52,7 +66,7 @@ public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
             String varName = expressionVars[i];
             // \b ensures we match exact variable tokens (e.g., matching "x1" but ignoring "x10")
             String regex = "\\b" + java.util.regex.Pattern.quote(varName) + "\\b";
-            javaExpr = javaExpr.replaceAll(regex, "x" + (i+1) + "");
+            javaExpr = javaExpr.replaceAll(regex, "v[" + (i) + "]");
         }
 
         // Generate a Janino class that evaluates the expression
@@ -72,72 +86,9 @@ public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
     }
 
-    private String getJavaOperator(char op) {
-        return switch (op) {
-            case '+' ->
-                "+";
-            case '-' ->
-                "-";
-            case '*' ->
-                "*";
-            case '/' ->
-                "/";
-            case '^' ->
-                "Math.pow";
-            case '%' ->
-                "%";
-            default ->
-                throw new IllegalArgumentException("Unknown operator: " + op);
-        };
-    }
-
-    private String getJavaFunction(String name, int arity) {
-        return switch (name) {
-            case "sin" ->
-                "Math.sin";
-            case "cos" ->
-                "Math.cos";
-            case "tan" ->
-                "Math.tan";
-            case "sqrt" ->
-                "Math.sqrt";
-            case "exp" ->
-                "Math.exp";
-            case "log", "ln" ->
-                "Math.log";
-            case "log10" ->
-                "Math.log10";
-            case "abs" ->
-                "Math.abs";
-            case "floor" ->
-                "Math.floor";
-            case "ceil" ->
-                "Math.ceil";
-            case "asin" ->
-                "Math.asin";
-            case "acos" ->
-                "Math.acos";
-            case "atan" ->
-                "Math.atan";
-            case "sinh" ->
-                "Math.sinh";
-            case "cosh" ->
-                "Math.cosh";
-            case "tanh" ->
-                "Math.tanh";
-            case "cbrt" ->
-                "Math.cbrt";
-            case "min" ->
-                "Math.min";
-            case "max" ->
-                "Math.max";
-            default ->
-                throw new IllegalArgumentException("Unknown function: " + name);
-        };
-    }
 
     private String generateJaninoClass(String expression) {
-/*
+        /*
         return String.format(
                 """
              @Override
@@ -145,11 +96,11 @@ public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     return %s;
                 } 
             """, expression);
-*/
-                return String.format(
+         */
+        return String.format(
                 """
              @Override
-                public double eval(double x1, double x2, double x3) {
+                public double eval(double[] v) {
                     return %s;
                 } 
             """, expression);
@@ -183,7 +134,7 @@ public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         @Override
         public double applyScalar(double[] variables) {
-            return evaluator.eval(variables[0],variables[1],variables[2]);
+            return evaluator.eval(variables);
         }
 
         @Override
@@ -202,11 +153,13 @@ public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
         }
 
         /**
-         * **TRUE ZERO-ALLOC with Janino**
-         *
+         * <b>TRUE ZERO-ALLOC with Janino</b>
          * Janino generates direct bytecode, so the JIT sees: - Pure arithmetic
          * operations - Math library calls (already JIT-friendly) - NO
          * MethodHandle overhead - Full vectorization support
+         *
+         * @param variables
+         * @param output
          */
         public void applyBulk(double[][] variables, double[] output) {
             applyBulkInternal(variables, output, 0, output.length);
@@ -223,23 +176,23 @@ public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
             final int nVars = variables.length;
             final int endIdx = startIdx + length;
-            final double[] frame = frameBuffer;
 
-           /* // **Pure scalar loop - JIT will vectorize this**
+            /* // **Pure scalar loop - JIT will vectorize this**
             for (int i = startIdx; i < endIdx; i++) {
                 for (int v = 0; v < nVars; v++) {
                     frame[v] = variables[v][i];
                 }
                 output[i] = evaluator.eval(frame);
             }
-*/
+             */
+            double[] vars = ThreadLocalBufferPool.getOrCreateBuffer(nVars);
+         
             // In applyBulkInternal, replace the loop with:
             for (int i = startIdx; i < endIdx; i++) {
-                output[i] = evaluator.eval(
-                        variables[0][i],
-                        variables[1][i],
-                        variables[2][i]
-                );
+                for (int j = 0; j < nVars; j++) {
+                    vars[j] = variables[j][i];
+                }
+                output[i] = evaluator.eval(vars);
             }
         }
 
@@ -295,8 +248,5 @@ public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
             throw new UnsupportedOperationException("Not supported");
         }
 
-        public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String op) {
-            throw new UnsupportedOperationException("Not supported");
-        }
     }
 }

@@ -6,42 +6,13 @@
     <version>2.0.4</version>
   </parent>
   <modelVersion>4.0.0</modelVersion>
-  <artifactId>parser-ng-simd</artifactId>
-  <name>ParserNG SIMD Extension</name>
-  <description>Hardware-accelerated SIMD vector calculation pipelines for ParserNG
-        Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.(e.g. JNI) 
-        For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034</description>
-  <url>https://github.com/gbenroscience/ParserNG</url>
+  <artifactId>parser-ng-bench</artifactId>
+  <version>2.0.4</version>
   <build>
     <plugins>
       <plugin>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.11.0</version>
-        <configuration>
-          <release>21</release>
-          <annotationProcessorPaths>
-            <path>
-              <groupId>org.openjdk.jmh</groupId>
-              <artifactId>jmh-generator-annprocess</artifactId>
-              <version>1.37</version>
-            </path>
-          </annotationProcessorPaths>
-          <compilerArgs>
-            <arg>--add-modules</arg>
-            <arg>jdk.incubator.vector</arg>
-          </compilerArgs>
-        </configuration>
-      </plugin>
-      <plugin>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.2.5</version>
-        <configuration>
-          <argLine>--add-modules jdk.incubator.vector</argLine>
-        </configuration>
-      </plugin>
-      <plugin>
         <artifactId>maven-shade-plugin</artifactId>
-        <version>3.5.2</version>
+        <version>3.5.0</version>
         <executions>
           <execution>
             <phase>package</phase>
@@ -50,7 +21,11 @@
             </goals>
             <configuration>
               <finalName>benchmarks</finalName>
-              <includeDependencySources>false</includeDependencySources>
+              <transformers>
+                <transformer>
+                  <mainClass>org.openjdk.jmh.Main</mainClass>
+                </transformer>
+              </transformers>
               <filters>
                 <filter>
                   <artifact>*:*</artifact>
@@ -61,14 +36,23 @@
                   </excludes>
                 </filter>
               </filters>
-              <transformers>
-                <transformer>
-                  <mainClass>org.openjdk.jmh.Main</mainClass>
-                </transformer>
-              </transformers>
             </configuration>
           </execution>
         </executions>
+      </plugin>
+      <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+        <configuration>
+          <release>24</release>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.openjdk.jmh</groupId>
+              <artifactId>jmh-generator-annprocess</artifactId>
+              <version>1.37</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
       </plugin>
     </plugins>
   </build>
@@ -90,18 +74,6 @@
         <exclusion>
           <artifactId>apiguardian-api</artifactId>
           <groupId>org.apiguardian</groupId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-    <dependency>
-      <groupId>org.codehaus.janino</groupId>
-      <artifactId>janino</artifactId>
-      <version>3.1.12</version>
-      <scope>test</scope>
-      <exclusions>
-        <exclusion>
-          <artifactId>commons-compiler</artifactId>
-          <groupId>org.codehaus.janino</groupId>
         </exclusion>
       </exclusions>
     </dependency>
@@ -135,12 +107,6 @@
     </dependency>
     <dependency>
       <groupId>org.openjdk.jmh</groupId>
-      <artifactId>jmh-core</artifactId>
-      <version>1.37</version>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.openjdk.jmh</groupId>
       <artifactId>jmh-generator-annprocess</artifactId>
       <version>1.37</version>
       <scope>provided</scope>
@@ -148,5 +114,6 @@
   </dependencies>
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
+    <exec.mainClass>com.github.gbenroscience.parser.ng.bench.ParserNgBench</exec.mainClass>
   </properties>
 </project>

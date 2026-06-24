@@ -6,7 +6,7 @@
 
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-parent</artifactId>
-    <version>2.0.5</version>
+    <version>2.0.4</version>
     <packaging>pom</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>
@@ -21,6 +21,7 @@
     <modules>
         <module>parser-ng</module>
         <module>parser-ng-simd</module>
+        <module>parser-ng-bench</module>
     </modules>
 
     <properties>

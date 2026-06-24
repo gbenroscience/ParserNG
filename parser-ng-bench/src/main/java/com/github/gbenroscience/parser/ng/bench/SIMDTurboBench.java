@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.parser.ng.bench;
 
 
 
@@ -6,7 +6,6 @@ package com.github.gbenroscience.simd;
  *
  * @author GBEMIRO
  */
-import com.github.gbenroscience.simd.turbo.tools.utils.*;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator; 
 import org.openjdk.jmh.annotations.*;
@@ -21,13 +20,13 @@ import org.openjdk.jmh.runner.options.TimeValue;
 
 /**
  * Use this to build in the parser-ng-pro directory mvn clean install -Dgpg.skip
- * Use this to run the benchmarks
- *
- * java -jar target/benchmarks.jar MathEvalBenchmarkForSIMD -prof perfasm
- *
- * java -jar target/benchmarks.jar MathEvalBenchmarkForSIMD -prof perfasm >
- * perf_output.txt # Now find your specific method's assembly grep -A 50
- * "parserNG" perf_output.txt
+Use this to run the benchmarks
+
+java -jar target/benchmarks.jar SIMDTurboBench -prof perfasm
+
+java -jar target/benchmarks.jar SIMDTurboBench -prof perfasm >
+perf_output.txt 
+Now find your specific method's assembly grep -A 50 "parserNG" perf_output.txt
  *
  * @author GBEMIRO
  */
@@ -41,8 +40,8 @@ import org.openjdk.jmh.runner.options.TimeValue;
     "-XX:-UseCompressedOops", // Avoids compressed oops artifacts
     "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"    
 })
-@State(Scope.Benchmark)
-public class MathEvalBenchmarkForSIMD {
+@State(Scope.Thread)
+public class SIMDTurboBench {
 
 
     @Param({"12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2", "0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))"})
@@ -55,7 +54,8 @@ public class MathEvalBenchmarkForSIMD {
     private int dataSize;
 
     private double[] flatInput;
-    private MathEvalBenchmark.JaninoMathFunction fastEvaluator;
+    private double[] vars;
+    private VectorTurboBench.JaninoMathFunction fastEvaluator;
 
     SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVectorTurbo;
 
@@ -69,6 +69,7 @@ public class MathEvalBenchmarkForSIMD {
         MathExpression me = new MathExpression(expression);
         expressionVars = me.getVariablesNames();
         varCount = expressionVars.length;
+        this.vars = new double[varCount];
 
         flatInput = new double[varCount * dataSize];
         result = new double[dataSize];
@@ -79,13 +80,13 @@ public class MathEvalBenchmarkForSIMD {
             flatInput[i] = r.nextDouble() * 10 - 5;
         }
 
-        this.fastEvaluator = MathEvalBenchmark.setupJanino(expression, expressionVars);
+        this.fastEvaluator = VectorTurboBench.setupJanino(expression, expressionVars);
 
         setupParserNG(me);
 
     }
     
-    /*
+    
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -95,7 +96,7 @@ public class MathEvalBenchmarkForSIMD {
         final int stride = this.varCount;
         final double[] input = this.flatInput;
         final double[] localVars = this.vars;
-        final MathEvalBenchmark.JaninoMathFunction evaluator = this.fastEvaluator;
+        final VectorTurboBench.JaninoMathFunction evaluator = this.fastEvaluator;
 
         for (int i = 0; i < limit; i++) {
             for(int j=0;j<stride;j++){
@@ -104,7 +105,7 @@ public class MathEvalBenchmarkForSIMD {
             bh.consume(evaluator.apply(localVars));
         }  
     }
-*/
+
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -119,7 +120,7 @@ public class MathEvalBenchmarkForSIMD {
         try {
             simdVectorTurbo = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
         } catch (Throwable ex) {
-            System.getLogger(MathEvalBenchmarkForSIMD.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+            System.getLogger(SIMDTurboBench.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }
     }
 
@@ -127,7 +128,7 @@ public class MathEvalBenchmarkForSIMD {
     
         public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
-        opt.include(MathEvalBenchmarkForSIMD.class.getSimpleName()); // Always include baseline
+        opt.include(SIMDTurboBench.class.getSimpleName()); // Always include baseline
         // 4. Fluent, modern JMH Configuration
         Options configurations = opt.mode(Mode.AverageTime)
                 .timeUnit(TimeUnit.NANOSECONDS)
