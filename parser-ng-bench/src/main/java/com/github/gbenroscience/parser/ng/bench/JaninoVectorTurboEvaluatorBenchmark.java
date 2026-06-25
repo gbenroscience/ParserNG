@@ -3,11 +3,8 @@ package com.github.gbenroscience.parser.ng.bench;
 
 
 import com.github.gbenroscience.parser.MathExpression;
-import java.lang.management.ManagementFactory;
 import org.openjdk.jmh.annotations.*;
 import java.util.Random;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;

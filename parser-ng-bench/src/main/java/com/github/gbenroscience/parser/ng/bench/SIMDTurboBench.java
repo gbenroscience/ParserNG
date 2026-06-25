@@ -81,8 +81,10 @@ public class SIMDTurboBench {
         }
 
         this.fastEvaluator = VectorTurboBench.setupJanino(expression, expressionVars);
+        
 
         setupParserNG(me);
+        simdVectorTurbo.validate(flatInput, result);
 
     }
     

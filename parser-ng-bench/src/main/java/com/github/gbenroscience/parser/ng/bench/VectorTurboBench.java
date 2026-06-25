@@ -94,7 +94,7 @@ public class VectorTurboBench {
     @Benchmark
     public void parserNG(Blackhole bh) {
         // True measurement of high-performance vectorized vector logic execution
-        vectorTurbo.applyBulkParallel(flatInput, result);
+        vectorTurbo.applyBulk(flatInput, result);
         bh.consume(result); 
     }
 

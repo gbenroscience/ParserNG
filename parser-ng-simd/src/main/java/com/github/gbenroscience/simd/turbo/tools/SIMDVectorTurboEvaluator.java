@@ -9,8 +9,6 @@ import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import java.util.function.DoubleUnaryOperator;
 import jdk.incubator.vector.*;
 
-
-
 /**
  * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
  * with a zero-allocation primitive stack interpreter. Completely eliminates the
@@ -38,7 +36,7 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
         SIMDVectorCompositeExpression() {
             super(compiledScalarHandle, opcodes, targetSlots,
-                    literalConstants, instructionCount, varCount); 
+                    literalConstants, instructionCount, varCount);
         }
 
         @Override
@@ -137,18 +135,13 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void applyBulk(double[][] variables, double[] output) {
-            checkError(variables, output);
             int numSamples = variables[0].length;
-            double[] flatVars = getOrCreateFlattenBuffer(varCount * numSamples);
-            for (int i = 0; i < varCount; i++) {
-                System.arraycopy(variables[i], 0, flatVars, i * numSamples, numSamples);
-            }
-            applyBulkInternal(flatVars, numSamples, output, 0, numSamples);
+
+            applyBulkInternal(variables, numSamples, output, 0, numSamples);
         }
 
         @Override
         public void applyBulkParallel(double[][] variables, double[] output) {
-            checkError(variables, output);
             if (variables == null || variables.length == 0 || output == null) {
                 return;
             }
@@ -157,37 +150,27 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                 applyBulk(variables, output);
                 return;
             }
-            double[] flatVars = getOrCreateFlattenBuffer(varCount * numSamples);
-            for (int i = 0; i < varCount; i++) {
-                System.arraycopy(variables[i], 0, flatVars, i * numSamples, numSamples);
-            }
-            dispatchToWorkerRing(flatVars, output, numSamples);
+
+            dispatchToWorkerRing(variables, output, numSamples);
         }
 
         @Override
         public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
-            checkError(variables, output);
             int numSamples = variables[0].length;
-            double[] flatVars = getOrCreateFlattenBuffer(varCount * numSamples);
-            for (int i = 0; i < varCount; i++) {
-                System.arraycopy(variables[i], 0, flatVars, i * numSamples, numSamples);
-            }
             for (int start = 0; start < numSamples; start += batchSize) {
                 int length = Math.min(batchSize, numSamples - start);
-                applyBulkInternal(flatVars, numSamples, output, start, length);
+                applyBulkInternal(variables, numSamples, output, start, length);
             }
         }
 
         // --- 1D Flat Contiguous Frameworks ---
         @Override
         public void applyBulk(double[] flatVariables, double[] output) {
-            checkError(flatVariables, output);
             applyBulkInternal(flatVariables, output.length, output, 0, output.length);
         }
 
         @Override
         public void applyBulkParallel(double[] flatVariables, double[] output) {
-            checkError(flatVariables, output);
             int numSamples = output.length;
             if (numSamples < PARALLEL_OPS_THRESHOLD) {
                 applyBulkInternal(flatVariables, numSamples, output, 0, numSamples);
@@ -198,15 +181,12 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
-            checkError(flatVariables, output);
             int numSamples = output.length;
             for (int start = 0; start < numSamples; start += batchSize) {
                 int length = Math.min(batchSize, numSamples - start);
                 applyBulkInternal(flatVariables, numSamples, output, start, length);
             }
         }
-
-      
 
         /**
          * Core column-major vectorized loop processor utilizing a flat memory
@@ -230,9 +210,8 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
          * @param startIdx the baseline index indicating where the batch
          * processing slice begins
          * @param length the absolute number of elements to process within this
-         * batch window
-         * Tiles by default: If execution should be routed
-         * 
+         * batch window Tiles by default: If execution should be routed
+         *
          * through a block memory pattern optimized for L1/L2 cache locality;
          * {@code false} for flat, non-tiledExecution bulk processing
          *
@@ -249,12 +228,12 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
          * into indices 200,000 through 200,499 of the output array."
          */
         private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
-             if (startIdx + length > dataSize || startIdx + length > output.length) {
+            /*if (startIdx + length > dataSize || startIdx + length > output.length) {
                 throw new IllegalArgumentException(String.format(
                         "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
                         startIdx, length, dataSize, output.length
                 ));
-            }
+            }*/
 
             // Thread-local scratch space acquisition & sizing guard
             double[] scratch = FLAT_SCRATCH_STACK.get();
@@ -273,6 +252,29 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             }
         }
 
+        private void applyBulkInternal(double[][] variables, int dataSize, double[] output, int startIdx, int length) {
+            /*   if (startIdx + length > dataSize || startIdx + length > output.length) {
+                throw new IllegalArgumentException(String.format(
+                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
+                        startIdx, length, dataSize, output.length
+                ));
+            }*/
+
+            // Thread-local scratch space acquisition & sizing guard
+            double[] scratch = FLAT_SCRATCH_STACK.get();
+            if (scratch == null || scratch.length < (SIMDVectorTurboEvaluator.this.stackDepth * BLOCK_SIZE)) {
+                scratch = new double[SIMDVectorTurboEvaluator.this.stackDepth * BLOCK_SIZE];
+                FLAT_SCRATCH_STACK.set(scratch);
+            }
+
+            // Cache-aligned Loop Tiling
+            final int endIdx = startIdx + length;
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
+                final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
+                evaluateBlock(variables, dataSize, output, startIdx, currentBlockSize, scratch);
+            }
+        }
+
         ////////////////////////////////////////////
         /**
          * Core interpretation stream. Leverages explicit AVX-bound Incubator
@@ -286,7 +288,6 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                 int currentBlockSize,
                 double[] scratch) {
 
-            
             final int n = currentBlockSize; // Local alias for loop bounds
             int sp = 0;
 
@@ -402,7 +403,416 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                         final int resOffset = sp * BLOCK_SIZE;
                         sp++;
                         for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = Math.pow(scratch[lOffset + k], scratch[rOffset + k]);
+                            scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+                    }
+
+                    case OP_REM -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] % scratch[rOffset + k];
+                        }
+                    }
+
+                    // Base Unary Operations (In-place scalar evaluation)
+                    case OP_SIN -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.sin(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_COS -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.cos(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_TAN -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.tan(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_SINH -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.sinh(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_COSH -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.cosh(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_TANH -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.tanh(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_ABS -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.abs(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_EXP -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.exp(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_SQRT -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.sqrt(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_CBRT -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.cbrt(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_LOG -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.log(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    case OP_LOG10 -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[srcOffset + k] = Math.log10(scratch[srcOffset + k]);
+                        }
+                    }
+
+                    // --- Inverse Radians (Routed to MethodSack for Alias Mapping) ---
+                    case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT -> {
+                        MethodSack.asinRad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    }
+
+                    case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT -> {
+                        MethodSack.acosRad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    }
+
+                    case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT -> {
+                        MethodSack.atanRad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    }
+
+                    // --- DEGREE / GRADIAN TRIG VARIANTS ---
+                    case OP_SIN_DEG ->
+                        MethodSack.sinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COS_DEG ->
+                        MethodSack.cosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_TAN_DEG ->
+                        MethodSack.tanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_SIN_GRAD ->
+                        MethodSack.sinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COS_GRAD ->
+                        MethodSack.cosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_TAN_GRAD ->
+                        MethodSack.tanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+
+                    // --- INVERSE DEGREE / GRADIAN VARIANTS ---
+                    case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG ->
+                        MethodSack.asinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG ->
+                        MethodSack.acosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG ->
+                        MethodSack.atanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD ->
+                        MethodSack.asinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD ->
+                        MethodSack.acosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD ->
+                        MethodSack.atanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+
+                    // --- RECIPROCAL TRIG (SEC, CSC, COT) VARIANTS ---
+                    case OP_SEC ->
+                        MethodSack.sec((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_SEC_DEG ->
+                        MethodSack.secDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_SEC_GRAD ->
+                        MethodSack.secGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COSEC ->
+                        MethodSack.csc((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COSEC_DEG ->
+                        MethodSack.cscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COSEC_GRAD ->
+                        MethodSack.cscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COT ->
+                        MethodSack.cot((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COT_DEG ->
+                        MethodSack.cotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_COT_GRAD ->
+                        MethodSack.cotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+
+                    // --- INVERSE RECIPROCAL TRIG VARIANTS ---
+                    case OP_ARC_SEC, OP_ARC_SEC_ALT ->
+                        MethodSack.asec((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG ->
+                        MethodSack.asecDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD ->
+                        MethodSack.asecGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COSEC, OP_ARC_COSEC_ALT ->
+                        MethodSack.acsc((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG ->
+                        MethodSack.acscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD ->
+                        MethodSack.acscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COT, OP_ARC_COT_ALT ->
+                        MethodSack.acot((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG ->
+                        MethodSack.acotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD ->
+                        MethodSack.acotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+
+                    // --- HYPERBOLIC INVERSES ---
+                    case OP_ASINH, OP_ASINH_ALT ->
+                        MethodSack.asinh((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ACOSH, OP_ACOSH_ALT ->
+                        MethodSack.acosh((sp - 1) * BLOCK_SIZE, n, scratch);
+                    case OP_ATANH, OP_ATANH_ALT ->
+                        MethodSack.atanh((sp - 1) * BLOCK_SIZE, n, scratch);
+
+                    // Conditional Comparisons
+                    case OP_GT -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] > scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_LT -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] < scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_EQ -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] == scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_NE -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] != scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_GE -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] >= scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_LE -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] <= scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                    }
+
+                    // Ternary Operations (Manual FMA & Logical Selection)
+                    case OP_VMA -> {
+                        final int cOffset = (--sp) * BLOCK_SIZE;
+                        final int bOffset = (--sp) * BLOCK_SIZE;
+                        final int aOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[aOffset + k] * scratch[bOffset + k] + scratch[cOffset + k];
+                        }
+                    }
+
+                    case OP_IF -> {
+                        final int falseOffset = (--sp) * BLOCK_SIZE;
+                        final int trueOffset = (--sp) * BLOCK_SIZE;
+                        final int condOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = (scratch[condOffset + k] != 0.0) ? scratch[trueOffset + k] : scratch[falseOffset + k];
+                        }
+                    }
+
+                    default ->
+                        throw new UnsupportedOperationException("Unknown opcode: " + opcode);
+                }
+            }
+
+            // Flush the final computation results out to the destination block segment
+            System.arraycopy(scratch, 0, output, blockStart, n);
+        }
+
+        private void evaluateBlock(double[][] _2DVariables,
+                int dataSize,
+                double[] output,
+                int blockStart,
+                int currentBlockSize,
+                double[] scratch) {
+
+            final int n = currentBlockSize; // Local alias for loop bounds
+            int sp = 0;
+
+            for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
+                final int opcode = opcodes[instIdx];
+
+                switch (opcode) {
+                    case OP_CONST -> {
+                        final double val = literalConstants[instIdx];
+                        final int stackOffset = sp * BLOCK_SIZE;
+                        sp++;
+
+                        int k = 0;
+                        int upperBound = SPECIES.loopBound(n);
+                        DoubleVector valVec = DoubleVector.broadcast(SPECIES, val);
+                        for (; k < upperBound; k += VLEN) {
+                            valVec.intoArray(scratch, stackOffset + k);
+                        }
+                        for (; k < n; k++) {
+                            scratch[stackOffset + k] = val;
+                        }
+                    }
+
+                    case OP_LOAD -> {
+                        final int slotIdx = targetSlots[instIdx];
+                        final int stackOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        /*if (stackOffset + n > scratch.length) {
+                            throw new IllegalStateException(
+                            String.format("Scratch buffer overflow! dataSize=%d, stackOffset=%d, n=%d, scratch.length=%d, BLOCK_SIZE=%d, sp=%d",
+                                            dataSize, stackOffset, n, scratch.length, BLOCK_SIZE, sp));
+                        }
+                        //final int flatOffset = (slotIdx * dataSize) + blockStart;
+                        //System.arraycopy(_2DVariables, flatOffset, scratch, stackOffset, n);
+                         */
+ /*Works
+                        for (int k = 0; k < n; k++) {
+                            scratch[stackOffset + k] = _2DVariables[slotIdx][blockStart + k];
+                        }*/
+                        System.arraycopy(_2DVariables[slotIdx], blockStart, scratch, stackOffset, n);
+                    }
+
+                    // Binary Operators
+                    case OP_ADD -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+
+                        int k = 0;
+                        int upperBound = SPECIES.loopBound(n);
+                        for (; k < upperBound; k += VLEN) {
+                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
+                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
+                            va.add(vb).intoArray(scratch, resOffset + k);
+                        }
+                        for (; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] + scratch[rOffset + k];
+                        }
+                    }
+
+                    case OP_SUB -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+
+                        int k = 0;
+                        int upperBound = SPECIES.loopBound(n);
+                        for (; k < upperBound; k += VLEN) {
+                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
+                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
+                            va.sub(vb).intoArray(scratch, resOffset + k);
+                        }
+                        for (; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] - scratch[rOffset + k];
+                        }
+                    }
+
+                    case OP_MUL -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+
+                        int k = 0;
+                        int upperBound = SPECIES.loopBound(n);
+                        for (; k < upperBound; k += VLEN) {
+                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
+                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
+                            va.mul(vb).intoArray(scratch, resOffset + k);
+                        }
+                        for (; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] * scratch[rOffset + k];
+                        }
+                    }
+
+                    case OP_DIV -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+
+                        int k = 0;
+                        int upperBound = SPECIES.loopBound(n);
+                        for (; k < upperBound; k += VLEN) {
+                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
+                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
+                            va.div(vb).intoArray(scratch, resOffset + k);
+                        }
+                        for (; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] / scratch[rOffset + k];
+                        }
+                    }
+
+                    case OP_POW -> {
+                        final int rOffset = (--sp) * BLOCK_SIZE;
+                        final int lOffset = (--sp) * BLOCK_SIZE;
+                        final int resOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
                         }
                     }
 

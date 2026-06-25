@@ -83,16 +83,35 @@ public class SIMDVectorTurboEvaluatorBenchmark {
     }
 
     @Benchmark
-    public void parserNG(Blackhole bh) {
-        parserNG.applyBulk(flatVariables, outputBuffer);
+    public void parserNG2D(Blackhole bh) {
+        
+        final double[][] src = this.variables;
+        final double[] out = this.outputBuffer;
+        parserNG.applyBulk(src, out);
 
         // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
         // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
-        double checksum = 0.0;
-        for (int i = 0; i < outputBuffer.length; i += 64) { // Sample memory lines to reduce benchmark overhead
-            checksum += outputBuffer[i];
-        }
-        bh.consume(checksum);
+       /* double checksum = 0.0;
+        for (int i = 0; i < out.length; i += 64) { // Sample memory lines to reduce benchmark overhead
+            checksum += out[i];
+        }*/
+        bh.consume(out);
+    }
+    
+        @Benchmark
+    public void parserNG(Blackhole bh) {
+        
+        final double[] src = this.flatVariables;
+        final double[] out = this.outputBuffer;
+        parserNG.applyBulk(src, out);
+
+        // FORCES THE JIT TO EXECUTE EVERY LOOP STEP:
+        // By calculating a hash sum across the output, the compiler cannot optimize away intermediate indices.
+    /* double checksum = 0.0;
+        for (int i = 0; i < out.length; i += 64) { // Sample memory lines to reduce benchmark overhead
+            checksum += out[i];
+        }*/
+        bh.consume(out);
     }
 
     @Benchmark

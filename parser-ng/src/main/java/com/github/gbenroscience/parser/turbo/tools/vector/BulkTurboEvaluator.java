@@ -641,10 +641,22 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          * When the parallel processing methods are called, parallel processing
          * will kick in at this value
          */
-        protected static final int PARALLEL_OPS_THRESHOLD = 2048;
+        protected static final int PARALLEL_OPS_THRESHOLD = 1024;
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
         protected static final int BLOCK_SIZE = 1024;
-        private static final long L3_CACHE_TARGET_BYTES = 32 * 1024 * 1024; // 32 MB target boundary
+        protected static final int BLOCK_SIZE_256 = 256;
+        protected static final int BLOCK_SIZE_512 = 512;
+        protected static final int BLOCK_SIZE_1024 = 1024;
+        protected static final int BLOCK_SIZE_2048 = 2048;
+        protected static final int BLOCK_SIZE_4096 = 4096;
+        protected static final int BLOCK_SIZE_8192 = 8192;
+        protected static final int BLOCK_SIZE_16384 = 16384;
+        protected static final int BLOCK_SIZE_32768 = 32768;
+        protected static final int BLOCK_SIZE_65536 = 65536;
+        protected static final int BLOCK_SIZE_131072 = 131072;
+        protected static final int BLOCK_SIZE_262144 = 262144;
+        protected static final int BLOCK_SIZE_524288 = 524288;
+        protected static final int BLOCK_SIZE_1048576 = 1048576;
 
         private final MethodHandle scalarHandle;
         private final int[] opcodes;
@@ -652,8 +664,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
         private final double[] literalConstants;
         private final int instructionCount;
         private int varCount;
-
-        ////NEW FIELDS
+        //NEW FIELDS
         // --- ZERO-ALLOCATION MULTI-THREADING SUBSYSTEM ---
         protected static final int STATE_IDLE = 0;
         protected static final int STATE_RUNNING = 1;
@@ -661,14 +672,12 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
         protected int cores;
         protected WorkerThread[] workers;
-
         // Volatile transfer registers (allows zero-heap overhead parameter passing)
         protected volatile Thread masterThread;
         protected volatile double[] currentFlatVars;
+        protected volatile double[][] current2DVars;
         protected volatile double[] currentOutput;
         protected volatile int currentDataSize;
-        protected volatile boolean currentTiled;
-
         /**
          * Zero-allocation thread pools for internal interpretation layers
          * Allocates a perfectly flat, contiguous scratch block (64 nested stack
@@ -689,13 +698,12 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
         BatchedVectorCompositeExpression(MethodHandle handle, int[] ops, int[] targetSlots,
                 double[] consts, int count, int varCount) {
             this.scalarHandle = handle;
-            // DEFENSIVE: Make copies to isolate from BulkTurboEvaluator mutations
+            // DEFENSIVE: Make copies to isolate from VectorTurboEvaluator mutations
             this.opcodes = Arrays.copyOf(ops, ops.length);
             this.targetSlots = Arrays.copyOf(targetSlots, targetSlots.length);
             this.literalConstants = Arrays.copyOf(consts, consts.length);
             this.instructionCount = count;
             this.varCount = varCount;
-
             // Initialize the dedicated worker threads ONCE when this expression is compiled/created
             int dcores = HardwareDetector.detectPhysicalCores();
             // Optional: cap to logical in case override lies
@@ -757,17 +765,19 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
                     // Volatile reads establish a memory barrier (Happens-Before guarantee)
                     double[] flatVars = currentFlatVars;
+                    double[][] _2DVars = current2DVars;
                     double[] out = currentOutput;
                     int dataSize = currentDataSize;
-                    boolean tiled = currentTiled;
-
                     // Execute your exact coarse-grained thread slicing logic
                     int chunkSize = (dataSize + cores - 1) / cores;
                     int start = workerId * chunkSize;
                     int end = Math.min(start + chunkSize, dataSize);
-
                     if (start < end) {
-                        applyBulkInternal(flatVars, dataSize, out, start, end - start);
+                        if (flatVars != null) {
+                            applyBulkInternal(flatVars, dataSize, out, start, end - start);
+                        } else {
+                            applyBulkInternal(_2DVars, dataSize, out, start, end - start);
+                        }
                     }
 
                     // Signal the master thread that this core is finished
@@ -777,68 +787,61 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
-        protected boolean mustUseTiling(int dataSize) {
-            // Calculate total bytes this specific expression's scratch space will consume
-            long scratchBytes = (long) dataSize * BulkTurboEvaluator.this.stackDepth * Double.BYTES;
-            // Switch to tiling if scratch space alone blows past a conservative L3 cache allocation
-            return scratchBytes > L3_CACHE_TARGET_BYTES;
-        }
+        public void validate(double[][] variables, double[] output) {
+            // 1. Fail fast, avoid String.format unless throwing
+            if (variables == null || output == null) {
+                throw new IllegalArgumentException("Null input");
+            }
 
-        protected void checkError(double[][] variables, double[] output) {
-            int numSamples = variables != null && variables.length > 0 && output != null && output.length > 0 ? variables[0].length : -1;
-            int stride = this.varCount;
-            if (stride != variables.length || numSamples != output.length) {
-                throw new IllegalStateException(String.format("varCount mismatch[stride=%d, variables-count-from-input=%d] || array sizes not correct(elements-per-variable=%d vs output-array-size=%d)", stride, variables.length, numSamples, output.length));
+            // 2. Cache values to local variables to avoid multiple array lookups
+            final int varLen = variables.length;
+            final int outLen = output.length;
+
+            if (varLen != this.varCount) {
+                throw new IllegalArgumentException("Stride mismatch");
+            }
+
+            // 3. Optional: Only check inner length if you really need absolute safety
+            // Only perform this if the performance impact of O(varCount) is acceptable.
+            for (int i = 0; i < varLen; i++) {
+                if (variables[i] == null || variables[i].length < outLen) {
+                    throw new IllegalArgumentException("Jagged array or size mismatch");
+                }
             }
         }
 
-        protected void checkError(double[] flatVariables, double[] output) {
-            int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0 ? flatVariables.length : -1;
+        public void validate(double[] flatVariables, double[] output) {
+            int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0
+                    ? flatVariables.length : -1;
             int stride = this.varCount;
             if (totalSamples != stride * output.length) {
                 throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]",
                         totalSamples, stride * output.length));
             }
-
-        }
-
-        public void cleanup() {
-            FLAT_SCRATCH_STACK.remove();
         }
 
         //////////////////////////////////////////////////////////////////
-        ///                                                            ///
-        ///          Uses double[][] Arrays For Convenience            ///
-        ///            Speed may drop by as much as 4ns                ///
-        ///                                                            ///
-        //////////////////////////////////////////////////////////////////
-        
-        @Override
+    ///                                                            ///
+    ///        Uses double[][] Arrays For Convenience              ///
+    ///         Speed may drop by as much as 4ns                   ///
+    ///                                                            ///
+    //////////////////////////////////////////////////////////////////
+    
+    @Override
         public void applyBulk(double[][] variables, double[] output) {
-            checkError(variables, output);
+            validate(variables, output);
             int numSamples = variables[0].length;
-            int stride = this.varCount;
-
-            // Rent buffer. Don't zero it. We overwrite all of it.
-            // 
-            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
-            for (int i = 0; i < stride; i++) {
-                System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
-            }
             // FIX: Pass dataSize explicitly. Don't let applyBulk guess from flatVariables.length
-            applyBulkInternal(flatVariables, numSamples, output, 0, numSamples);
+            applyBulkInternal(variables, numSamples, output, 0, numSamples);
         }
 
         @Override
         public void applyBulkParallel(double[][] variables, double[] output) {
-            checkError(variables, output);
-
+            validate(variables, output);
             final int numSamples = variables[0].length;
             final int stride = this.varCount;
-
             // Zero-allocation buffer retrieval from your thread-local pool
             double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * numSamples);
-
             // Flatten 2D array to 1D (sequential block transfers)
             for (int i = 0; i < stride; i++) {
                 System.arraycopy(variables[i], 0, flatVariables, i * numSamples, numSamples);
@@ -862,12 +865,13 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          * @param dataSize
          */
         protected void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize) {
+
             // 1. Publish parameters to volatile registers (No allocations)
             this.masterThread = Thread.currentThread();
             this.currentFlatVars = flatVariables;
+            this.current2DVars = null;
             this.currentOutput = output;
             this.currentDataSize = dataSize;
-
             // 2. Wake up the pre-allocated worker threads via OS permits
             for (int i = 0; i < cores; i++) {
                 workers[i].state = STATE_RUNNING;
@@ -889,81 +893,95 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
             this.currentOutput = null;
         }
 
+        protected void dispatchToWorkerRing(double[][] variables, double[] output, int dataSize) {
+            // 1. Publish parameters to volatile registers (No allocations)
+            this.masterThread = Thread.currentThread();
+            this.currentFlatVars = null;
+            this.current2DVars = variables;
+            this.currentOutput = output;
+            this.currentDataSize = dataSize;
+            // 2. Wake up the pre-allocated worker threads via OS permits
+            for (int i = 0; i < cores; i++) {
+                workers[i].state = STATE_RUNNING;
+                LockSupport.unpark(workers[i]);
+            }
+
+            // 3. Wait loop (0 bytes allocated on heap while sleeping)
+            for (int i = 0; i < cores; i++) {
+                WorkerThread worker = workers[i];
+                while (worker.state != STATE_FINISHED) {
+                    LockSupport.park();
+                }
+                worker.state = STATE_IDLE;
+            }
+
+            // 4. Memory leak protection (Comment out lines below IF benchmarking this specific class long-term)
+            this.masterThread = null;
+            this.current2DVars = null;
+            this.currentOutput = null;
+        }
+
         @Override
         public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
-            checkError(variables, output);
+            validate(variables, output);
             int dataSize = variables[0].length;
-            int stride = this.varCount;
-            double[] flatVariables = ThreadLocalBufferPool.getOrCreateBuffer(stride * dataSize);
-            for (int i = 0; i < stride; i++) {
-                System.arraycopy(variables[i], 0, flatVariables, i * dataSize, dataSize);
-            }
+
             // FIX: Don't delegate to flat overload. Loop here.
             for (int start = 0; start < dataSize; start += batchSize) {
                 int length = Math.min(batchSize, dataSize - start);
-                applyBulkInternal(flatVariables, dataSize, output, start, length);
+                applyBulkInternal(variables, dataSize, output, start, length);
             }
         }
 
         //////////////////////////////////////////////////////////////////////////////
-        ///                      double[][] Arrays ends                            ///
-        ///               Uses Flat interleaved Arrays for speed(0.8ns-1.8ns)      ///
-        ///                  [x1,x2..xn, y1,y2..yn, z1,z2..zn]                     ///
-        ///                                                                        ///                   
-        //////////////////////////////////////////////////////////////////////////////
-        
-     
-        
+    ///                      double[][] Arrays ends                            ///
+    ///           Uses Flat interleaved Arrays for speed(0.8ns-1.8ns)          ///
+    ///                  [x1,x2..xn, y1,y2..yn, z1,z2..zn]                     ///
+    ///                                                                        ///                   
+    //////////////////////////////////////////////////////////////////////////////
 
-
-        /**
-         * Core column-major vectorized loop processor utilizing a flat memory
-         * architecture. Bypasses pointer-chasing and allocation overhead
-         * inherent to jagged multidimensional arrays (e.g., {@code double[][]})
-         * to execute loops at maximum hardware throughput.
-         * <p>
-         * Based on the {@code useBlocks} execution parameter, this method
-         * delegates to either a cache-conscious useBlocks implementation or a
-         * direct flat streaming evaluation strategy.
-         * </p>
-         *
-         * @param flatVariables a contiguous, single-dimensional array
-         * containing concatenated variable tracks back-to-back (e.g.,
-         * {@code [x1, x2...xn, y1, y2...yn, z1, z2...zn]})
-         * @param dataSize the total number of elements per individual variable
-         * row, used as the stride offset to hop between distinct variable
-         * memory blocks
-         * @param output the target destination array where the resulting
-         * mathematical evaluations are written
-         * @param startIdx the baseline index indicating where the batch
-         * processing slice begins
-         * @param length the absolute number of elements to process within this
-         * batch window
-         * @param useBlocks {@code true} if execution should be routed through a
-         * useBlocks memory pattern optimized for L1/L2 cache locality;
-         * {@code false} for flat, non-useBlocks bulk processing
-         *
-         * If you are processing a total dataset of 1,000,000 elements (dataSize
-         * = 1000000), but a specific thread or tile is only processing a chunk
-         * of 500 elements starting at element 200,000:
-         *
-         * startIdx = 200000
-         *
-         * length = 500
-         *
-         * It tells the engine: "Grab 500 elements starting at offset 200,000
-         * from each variable segment in the input, compute them, and write them
-         * into indices 200,000 through 200,499 of the output array."
-         */
-        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
-            // Keep this check: Guard against multi-threaded / batch slicing arithmetic bugs
-          /*  if (startIdx + length > dataSize || startIdx + length > output.length) {
-                throw new IllegalArgumentException(String.format(
-                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
-                        startIdx, length, dataSize, output.length
-                ));
-            }*/
-
+    /**
+     * Core column-major vectorized loop processor utilizing a flat memory
+     * architecture.
+     * Bypasses pointer-chasing and allocation overhead
+     * inherent to jagged multidimensional arrays (e.g., {@code double[][]})
+     * to execute loops at maximum hardware throughput.
+     * <p>
+     * Based on the {@code tiledExecution} execution parameter, this method
+     * delegates to either a cache-conscious tiledExecution implementation
+     * or a direct flat streaming evaluation strategy.
+     * </p>
+     *
+     * @param flatVariables a contiguous, single-dimensional array
+     * containing concatenated variable tracks back-to-back (e.g.,
+     * {@code [x1, x2...xn, y1, y2...yn, z1, z2...zn]})
+     * @param dataSize the total number of elements per individual variable
+     * row, used as the stride offset to hop between distinct variable
+     * memory blocks
+     * @param output the target destination array where the resulting
+     * mathematical evaluations are written
+     * @param startIdx the baseline index indicating where the batch
+     * processing slice begins
+     * @param length the absolute number of elements to process within this
+     * batch window
+     * @param tiledExecution {@code true} if execution should be routed
+     * through a block memory pattern optimized for L1/L2 cache
+     * locality;
+     * {@code false} for flat, non-tiledExecution bulk processing
+     *
+     * If you are processing a total dataset of 1,000,000 elements (dataSize
+     * = 1000000), but a specific thread or tile is only processing a chunk
+     * of 500 elements starting at element 200,000:
+     *
+     * startIdx = 200000
+     *
+     * length = 500
+     *
+     * It tells the engine: "Grab 500 elements starting at offset 200,000
+     * from each variable segment in the input, compute them, and write them
+     * into indices 200,000 through 200,499 of the output array."
+     */
+    private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
             // Thread-local scratch space acquisition & sizing guard
             double[] scratch = FLAT_SCRATCH_STACK.get();
             final int requiredScratchSize = Math.min(BLOCK_SIZE, length);
@@ -980,6 +998,44 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
             }
         }
 
+        private void applyBulkInternal(double[][] variables, int dataSize, double[] output, int startIdx, int length) {
+            // Thread-local scratch space acquisition & sizing guard
+            double[] scratch = FLAT_SCRATCH_STACK.get();
+            if (scratch == null || scratch.length < (BulkTurboEvaluator.this.stackDepth * BLOCK_SIZE)) {
+                scratch = new double[BulkTurboEvaluator.this.stackDepth * BLOCK_SIZE];
+                FLAT_SCRATCH_STACK.set(scratch);
+            }
+
+            // Cache-aligned Loop Tiling
+            final int endIdx = startIdx + length;
+            for (int tileStart = startIdx; tileStart < endIdx; tileStart += BLOCK_SIZE) {
+                final int currentTileSize = Math.min(BLOCK_SIZE, endIdx - tileStart);
+                evaluateTile(variables, dataSize, output, tileStart, currentTileSize, scratch);
+            }
+        }
+
+        /**
+         * Dynamically selects an optimal block size power-of-2 constant
+         * branchlessly.
+         *
+         * @param dataSize The total length of the array/dataset to process.
+         * @return Exactly one of the predefined static final block size
+         * constants.
+         */
+        public final int chooseOptimalBlockSize(int dataSize) {
+            // Heuristic: Aim to split the dataset into roughly 8 tiles to balance
+            // loop amortization against CPU L1/L2 data cache residency.
+            // Stride = dataSize / 8. (Using unsigned shift to avoid sign-extend overhead)
+            int targetChunk = dataSize >>> 3;
+            // Find the highest power of 2 less than or equal to our target chunk.
+            // This instantly maps the variable size into a discrete power-of-2 bucket.
+            int powerOfTwo = Integer.highestOneBit(targetChunk);
+            // Clamp the value strictly within the boundaries [256, 1048576].
+            // Math.max and Math.min are C2 intrinsics that map directly to branchless
+            // hardware conditional moves (CMOV), leaving no room for branch mispredictions.
+            return Math.max(BLOCK_SIZE_256, Math.min(BLOCK_SIZE_1048576, powerOfTwo));
+        }
+
         /**
          *
          * @param flatVariables
@@ -991,19 +1047,13 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          * @param scratch
          */
         //@jdk.internal.vm.annotation.ForceInline
-        private void evaluateTile(double[] flatVariables,
-                int dataSize,
-                double[] output,
-                int tileStart,
-                int currentTileSize,
-                double[] scratch) {
+        private void evaluateTile(double[] flatVariables, int dataSize, double[] output, int tileStart, int currentTileSize, double[] scratch) {
 
-            final int n = currentTileSize; // hoist for C2 unroll
+            final int n = currentTileSize;
+            // hoist for C2 unroll
             int sp = 0;
-
             for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
                 final int opcode = opcodes[instIdx];
-
                 switch (opcode) {
                     case OP_CONST: {
                         final double val = literalConstants[instIdx];
@@ -1028,7 +1078,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                                             stackOffset, n, scratch.length, BLOCK_SIZE, sp));
                         }
                         final int flatOffset = (slotIdx * dataSize) + tileStart;
-
                         System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, n);
                         break;
                     }
@@ -1364,7 +1413,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     case OP_TAN_GRAD:
                         MethodSack.tanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
                         break;
-
                     // --- NEW INVERSE DEGREE / GRADIAN VARIANTS ---
                     case OP_ASIN_DEG:
                     case OP_ASIN_DEG_ALT:
@@ -1396,7 +1444,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     case OP_ARC_TAN_ALT_GRAD:
                         MethodSack.atanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
                         break;
-
                     // --- NEW RECIPROCAL TRIG (SEC, CSC, COT) VARIANTS ---
                     case OP_SEC:
                         MethodSack.sec((sp - 1) * BLOCK_SIZE, n, scratch);
@@ -1425,7 +1472,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     case OP_COT_GRAD:
                         MethodSack.cotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
                         break;
-
                     // --- NEW INVERSE RECIPROCAL TRIG VARIANTS ---
                     case OP_ARC_SEC:
                     case OP_ARC_SEC_ALT:
@@ -1463,7 +1509,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     case OP_ARC_COT_ALT_GRAD:
                         MethodSack.acotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
                         break;
-
                     // --- NEW HYPERBOLIC INVERSES ---
                     case OP_ASINH:
                     case OP_ASINH_ALT:
@@ -1477,7 +1522,505 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     case OP_ATANH_ALT:
                         MethodSack.atanh((sp - 1) * BLOCK_SIZE, n, scratch);
                         break;
+                    default:
+                        throw new UnsupportedOperationException("Unknown opcode: " + opcode);
+                }
+            }
 
+            System.arraycopy(scratch, 0, output, tileStart, n);
+        }
+
+        /**
+         *
+         * @param _2DVariables
+         * @param dataSize
+         * @param output
+         * @param startIdx
+         * @param tileStart
+         * @param currentTileSize
+         * @param scratch
+         */
+        //@jdk.internal.vm.annotation.ForceInline
+        private void evaluateTile(double[][] _2DVariables, int dataSize, double[] output, int tileStart, int currentTileSize, double[] scratch) {
+
+            final int n = currentTileSize;
+            // hoist for C2 unroll
+            int sp = 0;
+            for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
+                final int opcode = opcodes[instIdx];
+                switch (opcode) {
+                    case OP_CONST: {
+                        final double val = literalConstants[instIdx];
+                        final int stackOffset = sp * BLOCK_SIZE;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[stackOffset + k] = val;
+                        }
+                        break;
+                    }
+
+                    case OP_LOAD: {
+                        final int slotIdx = targetSlots[instIdx];
+                        final int stackOffset = sp * BLOCK_SIZE;
+                        sp++;
+                        /**
+                         * // === SAFETY GUARD === if (stackOffset + n >
+                         * scratch.length) { throw new IllegalStateException(
+                         * String.format("Scratch buffer overflow!
+                         * stackOffset=%d, n=%d, scratch.length=%d,
+                         * BLOCK_SIZE=%d, sp=%d", stackOffset, n,
+                         * scratch.length, BLOCK_SIZE, sp)); }
+                         *
+                         * //System.arraycopy(flatVariables, flatOffset,
+                         * scratch, stackOffset, n); for (int k = 0; k < n; k++)
+                         * { scratch[stackOffset + k] =
+                         * _2DVariables[slotIdx][tileStart + k]; }
+                         */
+                        System.arraycopy(_2DVariables[slotIdx], tileStart, scratch, stackOffset, n);
+                        break;
+                    }
+
+                    case OP_ADD: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] + scratch[rOffset + k];
+                        }
+                        break;
+                    }
+
+                    case OP_SUB: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] - scratch[rOffset + k];
+                        }
+                        break;
+                    }
+
+                    case OP_MUL: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] * scratch[rOffset + k];
+                        }
+                        break;
+                    }
+
+                    case OP_DIV: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] / scratch[rOffset + k];
+                        }
+                        break;
+                    }
+
+                    case OP_POW: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_REM: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] % scratch[rOffset + k];
+                        }
+                        break;
+                    }
+
+                    // Unary ops - in-place, no sp shuffle
+                    case OP_SIN: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.sin(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_COS: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.cos(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_TAN: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.tan(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_ASIN:
+                    case OP_ASIN_ALT:
+                    case OP_ARC_SIN_ALT: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        MethodSack.asinRad(base, n, scratch);
+                        break;
+                    }
+
+                    case OP_ACOS:
+                    case OP_ACOS_ALT:
+                    case OP_ARC_COS_ALT: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        MethodSack.acosRad(base, n, scratch);
+                        break;
+                    }
+
+                    case OP_ATAN:
+                    case OP_ATAN_ALT:
+                    case OP_ARC_TAN_ALT: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        MethodSack.atanRad(base, n, scratch);
+                        break;
+                    }
+
+                    case OP_SINH: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.sinh(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_COSH: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.cosh(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_TANH: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.tanh(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_ABS: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.abs(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_EXP: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.exp(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_SQRT: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.sqrt(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_CBRT: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.cbrt(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_LOG: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.log(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_LOG10: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.log10(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    // Comparisons
+                    case OP_GT: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] > scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                        break;
+                    }
+
+                    case OP_LT: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] < scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                        break;
+                    }
+
+                    case OP_EQ: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] == scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                        break;
+                    }
+
+                    case OP_NE: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] != scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                        break;
+                    }
+
+                    case OP_GE: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] >= scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                        break;
+                    }
+
+                    case OP_LE: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[lOffset + k] <= scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                        break;
+                    }
+
+                    case OP_VMA: {
+                        sp -= 3;
+                        final int base = sp * BLOCK_SIZE;
+                        final int aOffset = base;
+                        final int bOffset = base + BLOCK_SIZE;
+                        final int cOffset = base + (2 * BLOCK_SIZE);
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = scratch[aOffset + k] * scratch[bOffset + k] + scratch[cOffset + k];
+                        }
+                        break;
+                    }
+
+                    case OP_IF: {
+                        sp -= 3;
+                        final int base = sp * BLOCK_SIZE;
+                        final int condOffset = base;
+                        final int trueOffset = base + BLOCK_SIZE;
+                        final int falseOffset = base + (2 * BLOCK_SIZE);
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = (scratch[condOffset + k] != 0.0) ? scratch[trueOffset + k] : scratch[falseOffset + k];
+                        }
+                        break;
+                    }
+
+                    // --- NEW DEGREE / GRADIAN TRIG VARIANTS ---
+                    case OP_SIN_DEG:
+                        MethodSack.sinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_COS_DEG:
+                        MethodSack.cosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_TAN_DEG:
+                        MethodSack.tanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_SIN_GRAD:
+                        MethodSack.sinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_COS_GRAD:
+                        MethodSack.cosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_TAN_GRAD:
+                        MethodSack.tanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    // --- NEW INVERSE DEGREE / GRADIAN VARIANTS ---
+                    case OP_ASIN_DEG:
+                    case OP_ASIN_DEG_ALT:
+                    case OP_ARC_SIN_ALT_DEG:
+                        MethodSack.asinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ACOS_DEG:
+                    case OP_ACOS_DEG_ALT:
+                    case OP_ARC_COS_ALT_DEG:
+                        MethodSack.acosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ATAN_DEG:
+                    case OP_ATAN_DEG_ALT:
+                    case OP_ARC_TAN_ALT_DEG:
+                        MethodSack.atanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ASIN_GRAD:
+                    case OP_ASIN_GRAD_ALT:
+                    case OP_ARC_SIN_ALT_GRAD:
+                        MethodSack.asinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ACOS_GRAD:
+                    case OP_ACOS_GRAD_ALT:
+                    case OP_ARC_COS_ALT_GRAD:
+                        MethodSack.acosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ATAN_GRAD:
+                    case OP_ATAN_GRAD_ALT:
+                    case OP_ARC_TAN_ALT_GRAD:
+                        MethodSack.atanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    // --- NEW RECIPROCAL TRIG (SEC, CSC, COT) VARIANTS ---
+                    case OP_SEC:
+                        MethodSack.sec((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_SEC_DEG:
+                        MethodSack.secDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_SEC_GRAD:
+                        MethodSack.secGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_COSEC:
+                        MethodSack.csc((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_COSEC_DEG:
+                        MethodSack.cscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_COSEC_GRAD:
+                        MethodSack.cscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_COT:
+                        MethodSack.cot((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_COT_DEG:
+                        MethodSack.cotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_COT_GRAD:
+                        MethodSack.cotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    // --- NEW INVERSE RECIPROCAL TRIG VARIANTS ---
+                    case OP_ARC_SEC:
+                    case OP_ARC_SEC_ALT:
+                        MethodSack.asec((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ARC_SEC_DEG:
+                    case OP_ARC_SEC_ALT_DEG:
+                        MethodSack.asecDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ARC_SEC_GRAD:
+                    case OP_ARC_SEC_ALT_GRAD:
+                        MethodSack.asecGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ARC_COSEC:
+                    case OP_ARC_COSEC_ALT:
+                        MethodSack.acsc((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ARC_COSEC_DEG:
+                    case OP_ARC_COSEC_ALT_DEG:
+                        MethodSack.acscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ARC_COSEC_GRAD:
+                    case OP_ARC_COSEC_ALT_GRAD:
+                        MethodSack.acscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ARC_COT:
+                    case OP_ARC_COT_ALT:
+                        MethodSack.acot((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ARC_COT_DEG:
+                    case OP_ARC_COT_ALT_DEG:
+                        MethodSack.acotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ARC_COT_GRAD:
+                    case OP_ARC_COT_ALT_GRAD:
+                        MethodSack.acotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    // --- NEW HYPERBOLIC INVERSES ---
+                    case OP_ASINH:
+                    case OP_ASINH_ALT:
+                        MethodSack.asinh((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ACOSH:
+                    case OP_ACOSH_ALT:
+                        MethodSack.acosh((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
+                    case OP_ATANH:
+                    case OP_ATANH_ALT:
+                        MethodSack.atanh((sp - 1) * BLOCK_SIZE, n, scratch);
+                        break;
                     default:
                         throw new UnsupportedOperationException("Unknown opcode: " + opcode);
                 }
@@ -1491,11 +2034,10 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
          */
         @Override
         public void applyBulkParallel(double[] flatVariables, double[] output) {
-            checkError(flatVariables, output);
-
+            validate(flatVariables, output);
             final int length = output.length;
 
-            if (length < 2048) {
+            if (length < PARALLEL_OPS_THRESHOLD) {
                 applyBulkInternal(flatVariables, length, output, 0, length);
                 return;
             }
@@ -1506,13 +2048,15 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
         @Override
         public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
-            checkError(flatVariables, output);
+            validate(flatVariables, output);
             if (batchSize <= 0) {
                 return;
             }
 
-            final int totalLength = output.length; // FIX: use output.length
-            final int dataSize = totalLength;      // FIX: each var has totalLength elements
+            final int totalLength = output.length;
+            // FIX: use output.length
+            final int dataSize = totalLength;
+            // FIX: each var has totalLength elements
 
             for (int start = 0; start < totalLength; start += batchSize) {
                 int length = Math.min(batchSize, totalLength - start);
@@ -1522,18 +2066,18 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
         @Override
         public void applyBulk(double[] flatVariables, double[] output) {
-            checkError(flatVariables, output);
+            validate(flatVariables, output);
             final int length = output.length; // This is the contract: output.length = elements to compute
             applyBulkInternal(flatVariables, length, output, 0, length);
         }
 
         ///////////////////////////////////////////////////////////
-        ///                    MATRIX KERNELS                   ///
-        ///////////////////////////////////////////////////////////
-        
-
+    ///                    MATRIX KERNELS                   ///
+    ///////////////////////////////////////////////////////////
+    
     @Override
         public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op) {
+
             String kernelToRun = (op != null) ? op : (interceptedKernel != null ? interceptedKernel.getKernelName() : null);
             if (kernelToRun == null) {
                 throw new UnsupportedOperationException("No kernel");
@@ -1543,24 +2087,20 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                 case "matmul":
                     FlatMatrixF.matmul(inputs[0], inputs[1], output);
                     break;
-
                 case "add":
                 case "matadd":
                 case "add_mat":
                     FlatMatrixF.add(inputs[0], inputs[1], output);
                     break;
-
                 case "matmul_bias_gelu":
                 case "matmul_add_bias_gelu":
                     FlatMatrixF.matmulAddBiasGelu(inputs[0], inputs[1], inputs[2], output);
                     break;
-
                 case "matmul_add_sin": {
                     float alpha = inputs[2].get(0, 0);
                     FlatMatrixF.matmulAddSin(inputs[0], inputs[1], output, alpha);
                     break;
                 }
-
                 case "softmax":
                 case "softmax_in_place": {
                     if (inputs[0] != output) {
@@ -1569,7 +2109,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     output.softmaxRowsInPlace();
                     break;
                 }
-
                 case "relu":
                 case "relu_in_place": {
                     if (inputs[0] != output) {
@@ -1578,7 +2117,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     output.reluInPlace();
                     break;
                 }
-
                 case "gelu":
                 case "gelu_in_place": {
                     if (inputs[0] != output) {
@@ -1587,7 +2125,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     output.geluInPlace();
                     break;
                 }
-
                 // === New Q8 + Attention kernels ===
                 case "q8_quantize": {
                     float[] src = inputs[0].data;
@@ -1598,7 +2135,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     KernelsInt8.quantize_f32_to_i8(src, srcOff, len, dst, output.offset, scale);
                     break;
                 }
-
                 case "q8_dequant": {
                     byte[] src = inputs[0].asByteArray();
                     int srcOff = inputs[0].offset;
@@ -1608,7 +2144,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     KernelsInt8.dequant_i8_to_f32(src, srcOff, len, dst, output.offset, scale);
                     break;
                 }
-
                 case "q8_absmax_quant": {
                     float[] src = inputs[0].data;
                     int srcOff = inputs[0].offset;
@@ -1623,7 +2158,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     inputs[1].data[inputs[1].offset] = scale;
                     break;
                 }
-
                 case "rope_split": {
                     float[] buf = inputs[0].data;
                     float[] cos = inputs[1].data;
@@ -1640,7 +2174,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     }
                     break;
                 }
-
                 case "accum_v": {
                     float scale = (float) inputs[1].data[inputs[1].offset];
                     float[] src = inputs[0].data;
@@ -1649,7 +2182,6 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     KernelsFloat.accumulate_v_f32(dst, output.offset, src, inputs[0].offset, len, scale);
                     break;
                 }
-
                 case "matmul_1xn_axpy": {
                     int K = (int) inputs[2].data[inputs[2].offset + 0];
                     int N = (int) inputs[2].data[inputs[2].offset + 1];
@@ -1659,38 +2191,31 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                     );
                     break;
                 }
-
                 case "matmul_bias_relu":
                     FlatMatrixF.matmulAddBiasRelu(inputs[0], inputs[1], inputs[2], output);
                     break;
-
                 case "rms_norm": {
                     float eps = (float) inputs[2].data[inputs[2].offset];
                     FlatMatrixF.rmsNorm(inputs[0], inputs[1], output, eps);
                     break;
                 }
-
                 case "layer_norm": {
                     float eps = (float) inputs[3].data[inputs[3].offset];
                     FlatMatrixF.layerNorm(inputs[0], inputs[1], inputs[2], output, eps);
                     break;
                 }
-
                 case "matmul_bias_silu":
                     FlatMatrixF.matmulAddBiasSilu(inputs[0], inputs[1], inputs[2], output);
                     break;
-
                 case "swiglu": {
                     FlatMatrixF.swiGLU(inputs[0], inputs[1], output);
                     break;
                 }
-
                 case "mha_attention": {
                     float scale = (float) inputs[3].data[inputs[3].offset];
                     FlatMatrixF.mhaAttention(inputs[0], inputs[1], inputs[2], output, scale);
                     break;
                 }
-
                 default:
                     throw new UnsupportedOperationException("Unknown kernel: " + kernelToRun);
             }
