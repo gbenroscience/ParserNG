@@ -1,4 +1,5 @@
-This section is designed to help you squeeze every last nanosecond out of **ParserNG 1.0.3+**. Because the engine utilizes a JIT-native architecture via `MethodHandle` trees, its performance characteristics differ significantly from traditional interpreted parsers.
+This section is designed to help you squeeze every last nanosecond out of
+ **ParserNG 1.0.3+**. Because the engine utilizes a JIT-native architecture via `MethodHandle` trees, its performance characteristics differ significantly from traditional interpreted parsers.
 
 ---
 
@@ -32,7 +33,7 @@ By folding constants, you eliminate unnecessary mathematical calls (like `Math.s
 Because **Turbo Mode** builds a `MethodHandle` tree, the JVM's HotSpot compiler needs a small "warm-up" period to identify the expression as a "hot path" and inline the code.
 
 * **Cold Start:** ~500–1,000 ns per op.
-* **Warmed Up:** ~80–90 ns per op.
+* **Warmed Up:** ~10–90 ns per op.
 
 **Tip:** In production environments, run a few thousand "dummy" evaluations during application startup to ensure the JVM has fully optimized the execution tree before the first real request arrives.
 

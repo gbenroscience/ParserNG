@@ -1,5 +1,10 @@
 # ParserNG
 
+
+### ParserNG 2.0.5 is out on maven-central! 
+More stable. Cleaned up API.
+
+
 ### ParserNG 2.0.3 is out on maven-central! 
 More stable. Indexing bugs fixed in bulk processors
 

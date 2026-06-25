@@ -121,13 +121,7 @@
             <type>jar</type>
         </dependency>
 
-        <!-- JavaMEP / Expression Parser -->
-        <dependency>
-            <groupId>com.expression.parser</groupId>
-            <artifactId>com.expression.parser</artifactId>
-            <version>3.3.0</version>
-            <type>jar</type>
-        </dependency> 
+    
         <!-- JMH for reliable benchmarking -->
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
