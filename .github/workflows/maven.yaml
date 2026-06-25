@@ -15,9 +15,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         java-version: [ 8, 11, 17, 21, 25 ]
       fail-fast: false
-
     name: ${{ matrix.os }} - Java ${{ matrix.java-version }} - Maven
-
     steps:
       - name: Checkout ParserNG repo
         uses: actions/checkout@v4
@@ -29,14 +27,20 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # Fixed: Added 'shell: bash' to guarantee your condition executes everywhere
       - name: Build ParserNG with Maven
         shell: bash
         run: |
-          if [ "${{ matrix.java-version }}" -ge 21 ]; then
-            echo "Detected Java 21+. Executing full hardware-accelerated SIMD suite..."
+          echo "Building with Java ${{ matrix.java-version }}"
+
+          if [ "${{ matrix.java-version }}" -eq 25 ]; then
+            echo "Java 25 detected → Building all modules (including parser-ng-bench)"
             mvn -B --update-snapshots clean install -Dgpg.skip
+          
+          elif [ "${{ matrix.java-version }}" -ge 21 ]; then
+            echo "Java 21-24 detected → Building core + SIMD (excluding parser-ng-bench)"
+            mvn -B --update-snapshots clean install -Dgpg.skip -pl "!parser-ng-bench"
+          
           else
-            echo "Detected legacy Java baseline (< 21). Reactor isolating core engine..."
-            mvn -B --update-snapshots clean install -Dgpg.skip -pl !parser-ng-simd
+            echo "Legacy Java (< 21) detected → Building core engine only (excluding SIMD and bench)"
+            mvn -B --update-snapshots clean install -Dgpg.skip -pl "!parser-ng-simd,!parser-ng-bench"
           fi
