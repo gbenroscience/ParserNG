@@ -2,7 +2,7 @@
 
 An ultra-high-performance mathematical expression parsing and evaluation engine for Java. Version 2.0.0 introduces a breakthrough **Block Vectorization Engine** (`VectorTurboEvaluator`) and `SIMDVectorTurboEvaluator` powered by the Java **Vector API** (`jdk.incubator.vector`). 
 
-By processing data pipelines natively inside hardware registers, ParserNG completely eliminates runtime allocation overhead and flattens interpreter branches. It outpaces dynamic bytecode compilation frameworks (like Janino) on massive datasets by leveraging bare-metal SIMD hardware capabilities.
+By processing data pipelines natively inside hardware registers, ParserNG completely eliminates runtime allocation overhead and flattens interpreter branches. It matches dynamic bytecode compilation frameworks (like Janino) ns for ns on massive datasets by leveraging bare-metal SIMD hardware capabilities.
 
 ---
 
