@@ -1,6 +1,6 @@
 # parser-ng-simd
 
-### ParserNG 2.0.0
+### ParserNG 2.0.5
 
 High-performance, hardware-accelerated mathematical kernels for Java. **No JNI. No native binaries.** Powered entirely by the JDK Vector API and optimized for C2 loop fusion.
 
