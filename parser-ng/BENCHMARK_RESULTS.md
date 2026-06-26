@@ -5,9 +5,8 @@
 
 | Battleground | Expression Type | Janino (ns/op) | **ParserNG (Turbo)** | **ParserNG Advantage** |
 | :--- | :--- | :--- | :--- | :--- |
-| **Pure Arithmetic** | `x + y + z...` | 251.08 | **119.95** | **2.1x Faster** |
-| **Structural Scale** | `500+ Variables` | **CRASH** | **SUCCESS** | **Only Survivor** |
-| **Functional Heavy** | `20+ sin() calls` | 471.43 | **362.89** | **1.3x Faster** |
+| **Pure Arithmetic** | `(x1^2+x2^0.5)^4.2` | 42.02 | **48.00** | **1.1x Slower** |
+| **Functional Heavy** | `20+ sin() calls` | 324 | **315** | **1.02x Faster** |
 
 ---
 
@@ -32,20 +31,20 @@ The following data represents high-concurrency performance and memory allocation
 
 | Benchmark | Mode | Score (ns/op) | Error (±) |
 | :--- | :---: | :--- | :--- |
-| **ParserNG Turbo** | avgt | **89.093** | 0.951 |
-| Janino | avgt | 103.924 | 10.833 |
-| ParserNG (Standard) | avgt | 123.724 | 8.477 |
-| exp4j | avgt | 220.926 | 5.717 |
+| Janino | avgt | 41.501 | 5.372 |
+| **ParserNG Turbo** | avgt | **47.558** | 2.083 |
+| ParserNG (Standard) | avgt | 103 | 7.676 |
+| exp4j | avgt | 196.270 | 29.999 |
 
 #### **Scenario B: Complex Nested Logic**
 **Expression:** `((x^2 + 3*sin(x+5^3-1/4)) / (23/33 + cos(x^2))) * (exp(x) / 10) + (sin(3) + cos(4 - sin(2))) ^ (-2)`
 
 | Benchmark | Mode | Score (ns/op) | Error (±) |
 | :--- | :---: | :--- | :--- |
-| **ParserNG Turbo** | avgt | **85.399** | 0.933 |
-| Janino | avgt | 249.981 | 7.411 |
-| ParserNG (Standard) | avgt | 323.650 | 20.661 |
-| exp4j | avgt | 805.753 | 123.264 |
+| **ParserNG Turbo** | avgt | **58.714** | 5.435 |
+| Janino | avgt | 180.566 | 26.351 |
+| ParserNG (Standard) | avgt | 302.153 | 13.511 |
+| exp4j | avgt | 768.606 | 174.698 |
 
 ---
 
@@ -54,10 +53,8 @@ The following data represents high-concurrency performance and memory allocation
 
 | Benchmark | State | Score (ns/op) | Improvement |
 | :--- | :--- | :--- | :--- |
-| **ParserNG Turbo** | **With Folding** | **10.301** | **~12x Faster** |
-| ParserNG Turbo | Without Folding | 125.410 | Baseline |
-| ParserNG (Std) | **With Folding** | **53.081** | **~9x Faster** |
-| ParserNG (Std) | Without Folding | 477.226 | Baseline |
+| **ParserNG Turbo** | **With Folding** | **8.728** | **~12x Faster** |
+| ParserNG (Std) | **With Folding** | **19.081** | **~9x Faster** |
 
 ---
 
@@ -68,19 +65,19 @@ The following data represents high-concurrency performance and memory allocation
 
 | Benchmark | Speed (ns/op) | Alloc Rate (B/op) | GC Efficiency |
 | :--- | :--- | :--- | :--- |
-| **ParserNG Turbo** | **81.204** | **≈ 0.00** | **Garbage-Free** |
-| ParserNG (Standard) | 266.498 | ≈ 0.00 | **Garbage-Free** |
-| Janino | 117.085 | 48.000 | 10+ objects/sec |
-| exp4j | 493.703 | 400.001 | High Pressure |
+| Janino | 53.637 ±   7.636 | ≈ 0.00 | **Garbage-Free** |
+| **ParserNG Turbo** | **54.271 ±   4.716** | **≈ 0.00** | **Garbage-Free** |
+| ParserNG (Standard) | 234.741 ±  11.602 | ≈ 0.00 | **Garbage-Free** |
+| exp4j | 381.048 ±  61.771 | 376.005 | High Pressure |
 
 #### **Scenario: `sin(x^3+y^3)-4*(x-y)`**
 
 | Benchmark | Speed (ns/op) | Alloc Rate (B/op) | GC Efficiency |
 | :--- | :--- | :--- | :--- |
-| **ParserNG Turbo** | **123.120** | **≈ 0.00** | **Garbage-Free** |
-| ParserNG (Standard) | 188.011 | ≈ 0.00 | **Garbage-Free** |
-| Janino | 147.311 | 48.000 | Constant allocation |
-| exp4j | 366.531 | 320.001 | High Pressure |
+| Janino | 86.333 ±  7.444 | ≈ 0.00 | **Garbage-Free** |
+| **ParserNG Turbo** | **89.182 ±  3.564** | **≈ 0.00** | **Garbage-Free** |
+| ParserNG (Standard) | 158.803 ± 27.491 | ≈ 0.00 | **Garbage-Free** |
+| exp4j | 382.849 ± 49.707 | 801.301 | High Pressure |
 
 ---
 

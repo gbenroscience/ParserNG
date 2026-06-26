@@ -93,42 +93,13 @@ The following benchmark profile demonstrates evaluation throughput across massiv
 * **Topology Scaling**: `MathEvalBenchmarkForSIMD` utilizes 2 parallel execution worker threads.
 
 ```text
-Benchmark                                     (dataSize)                                                             (expression)  Mode  Cnt            Score           Error  Units
-MathEvalBenchmark.janino                          1000000                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30     10187544.823 ±   752281.235  ns/op
-MathEvalBenchmark.janino:asm                      1000000                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt                   NaN                ---
-MathEvalBenchmark.janino                          1000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30     24072886.735 ±  1402925.987  ns/op
-MathEvalBenchmark.janino:asm                      1000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt                   NaN                ---
-MathEvalBenchmark.janino                         67108864                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30    652196391.200 ± 27609006.557  ns/op
-MathEvalBenchmark.janino:asm                     67108864                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt                   NaN                ---
-MathEvalBenchmark.janino                         67108864  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30   1578542916.300 ± 40349710.413  ns/op
-MathEvalBenchmark.janino:asm                     67108864  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt                   NaN                ---
 
-MathEvalBenchmark.parserNG                        1000000                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30      9360288.977 ±   760429.699  ns/op
-MathEvalBenchmark.parserNG:asm                    1000000                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt                   NaN                ---
-MathEvalBenchmark.parserNG                        1000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30     19257762.340 ±  1065339.581  ns/op
-MathEvalBenchmark.parserNG:asm                    1000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt                   NaN                ---
-MathEvalBenchmark.parserNG                       67108864                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30    570989708.567 ± 19005754.577  ns/op
-MathEvalBenchmark.parserNG:asm                   67108864                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt                   NaN                ---
-MathEvalBenchmark.parserNG                       67108864  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30   1284552658.233 ± 69148183.122  ns/op
-MathEvalBenchmark.parserNG:asm                   67108864  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt                   NaN                ---
+Benchmark                      (dataSize)                                                     (expression)  Mode  Cnt          Score          Error  Units
+SIMDTurboBenchStrict.parserNG    20000000               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30  119332280.333 ±  6177102.571  ns/op
+SIMDTurboBenchStrict.parserNG    20000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30  340918896.667 ± 50455197.573  ns/op
 
-MathEvalBenchmarkForSIMD.janino                   1000000                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30      9856751.812 ±   535025.997  ns/op
-MathEvalBenchmarkForSIMD.janino:asm               1000000                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt                   NaN                ---
-MathEvalBenchmarkForSIMD.janino                   1000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30     29323096.988 ±  4035993.090  ns/op
-MathEvalBenchmarkForSIMD.janino:asm               1000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt                   NaN                ---
-MathEvalBenchmarkForSIMD.janino                  67108864                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30    838930604.167 ± 249394348.633  ns/op
-MathEvalBenchmarkForSIMD.janino:asm              67108864                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt                   NaN                ---
-MathEvalBenchmarkForSIMD.janino                  67108864  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30   1584398907.167 ± 40514372.979  ns/op
-MathEvalBenchmarkForSIMD.janino:asm              67108864  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt                   NaN                ---
-
-MathEvalBenchmarkForSIMD.parserNG                 1000000                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30      6346274.914 ±  1266473.757  ns/op
-MathEvalBenchmarkForSIMD.parserNG:asm             1000000                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt                   NaN                ---
-MathEvalBenchmarkForSIMD.parserNG                 1000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30     13538502.496 ±  3115835.887  ns/op
-MathEvalBenchmarkForSIMD.parserNG:asm             1000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt                   NaN                ---
-MathEvalBenchmarkForSIMD.parserNG                67108864                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30    371223062.917 ± 59975811.391  ns/op
-MathEvalBenchmarkForSIMD.parserNG:asm            67108864                               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt                   NaN                ---
-MathEvalBenchmarkForSIMD.parserNG                67108864  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30    749919491.967 ± 35895952.492  ns/op
-MathEvalBenchmarkForSIMD.parserNG:asm            67108864  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt                   NaN                ---
+SIMDTurboBenchStrict.janino    20000000               12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2  avgt   30  120395246.000 ± 1390845.402  ns/op
+SIMDTurboBenchStrict.janino    20000000  0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  avgt   30  386854016.667 ± 5069567.669  ns/op
 
 ```
 
@@ -167,9 +138,8 @@ double[] outputVector = new double[totalElements];
             inputs[2][i] = rand.nextDouble() * 2.0;        // x3
         }
 
-// Execute with hardware-aligned loop tiling enabled
-boolean tiledExecution = true;
-evaluator.applyBulk(inputs, outputVector, tiledExecution);
+
+evaluator.applyBulk(inputs, outputVector);
 
 ```
 
@@ -202,9 +172,8 @@ double[] outputVector = new double[totalElements];
             }
         }
 
-// Execute with hardware-aligned loop tiling enabled
-boolean tiledExecution = true;
-evaluator.applyBulk(flatVariables, outputVector, tiledExecution);
+
+evaluator.applyBulk(flatVariables, outputVector);
 
 ```
 
@@ -225,7 +194,7 @@ for (int i = 0; i < totalElements; i++) {
     flatInputs[(2 * totalElements) + i] = 0.5;             // x3 segment
 }
 
-evaluator.applyBulk(flatInputs, outputVector, true);
+evaluator.applyBulk(flatInputs, outputVector);
 
 ```
 
@@ -235,7 +204,7 @@ Enforce fixed matrix block chunk allocations to tightly align loop boundaries wi
 
 ```java
 int batchSize = 128;
-evaluator.applyBulkBatched(flatInputs, outputVector, batchSize, true);
+evaluator.applyBulkBatched(flatInputs, outputVector, batchSize);
 
 ```
 
@@ -259,11 +228,11 @@ BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) 
 double[] inputs = new double[]{5.0, 4.0, 1.0}; // x, y, z arrays
 double[] output = new double[1];
 
-evaluator.applyBulk(inputs, output, false);
+evaluator.applyBulk(inputs, output);
 
 ```
 
-### Matrix operation (Gelu-200x200) (7.3ns per element on a single core-2.5GHz)
+### Matrix operation (Gelu-200x200) (3.8ns per element on a single core-2.5GHz)
 ```
 
     @Test

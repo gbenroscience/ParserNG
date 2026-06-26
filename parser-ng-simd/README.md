@@ -14,10 +14,10 @@ High-performance, hardware-accelerated mathematical kernels for Java. **No JNI. 
 
 Executed on an Intel Core i5-1135G7 environment running a JDK 24 Early Access build.
 
-| Operation | Matrix: $70 \times 70$ | Matrix: $100 \times 100$ | Matrix: $200 \times 200$ | Performance vs Janino |
-| --- | --- | --- | --- | --- |
-| **GELU** | 10.7 ns/elt ($52.5\,\mu\text{s}$) | 7.46 ns/elt ($74.6\,\mu\text{s}$) | 7.30 ns/elt ($292\,\mu\text{s}$) | **2.3x – 3.4x Faster** |
-| **SwiGLU** | — | — | 13.30 ns/elt ($530\,\mu\text{s}$) | **3.0x – 4.0x Faster** |
+| Operation | Matrix: $70 \times 70$ | Matrix: $100 \times 100$ | Matrix: $200 \times 200$ |
+| --- | --- | --- | --- |
+| **GELU** | 10.7 ns/elt ($52.5\,\mu\text{s}$) | 7.46 ns/elt ($74.6\,\mu\text{s}$) | 7.30 ns/elt ($292\,\mu\text{s}$) |
+| **SwiGLU** | — | — | 13.30 ns/elt ($530\,\mu\text{s}$) |
 
 > 📊 **Note on Peak Efficiency:** An execution speed of `7.3 ns/element` for GELU translates to roughly 26 CPU cycles. This safely hits the theoretical throughput ceiling of what AVX2 combined with hardware `vdexp` intrinsics can process within a managed runtime.
 
@@ -26,9 +26,7 @@ Executed on an Intel Core i5-1135G7 environment running a JDK 24 Early Access bu
 | Library / Engine | GELU Execution Profile | Architectural Mechanism |
 | --- | --- | --- |
 | **parser-ng-simd** | **292 µs (7.3 ns/elt)** | **Pure Java Vector API (Direct SIMD)** |
-| Janino | ~1,000 µs (25.0 ns/elt) | Scalar Runtime Bytecode Compilation |
-| ND4J (CPU) | ~1,600 µs (40.0 ns/elt) | JNI Bridging + Native `libnd4j` |
-| Colt | ~2,000 µs (50.0 ns/elt) | Legacy Scalar Loops |
+
 
 *Data Scaling Boundary:* At extreme workloads (e.g., 67M+ records), computation throughput bounds shift toward physical DRAM bandwidth, where execution stabilizes at approximately `1.3x` faster than optimized scalar bytecode compilers.
 
