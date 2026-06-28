@@ -1785,7 +1785,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     if (inputs[0] != output) {
                         System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
                     }
-                    output.geluInPlace();
+                    //output.geluInPlace();
+                    output.geluInPlaceHighSpeed();
                 }
                 // === New Q8 + Attention kernels ===
                 case "q8_quantize" -> {

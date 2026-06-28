@@ -43,5 +43,10 @@ public final class VectorConfig {
     // Derived constants for quick inline compilation references
     public static final int VF_LEN = F_SPECIES.length();
     
+    
+    
+    
+    
+    
     private VectorConfig() {} // Non-instantiable
 }

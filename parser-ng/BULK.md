@@ -143,6 +143,35 @@ evaluator.applyBulk(inputs, outputVector);
 
 ```
 
+OR
+
+```java
+import com.github.gbenroscience.parser.MathExpression;
+
+import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
+import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
+import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
+
+MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");//Gaussian
+
+        int stride = meLinear.getVariablesNames().length
+SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+
+int totalElements = 2000;
+double[][] inputs = new double[stride][totalElements]; // x1, x2, x3 tracks
+double[] outputVector = new double[totalElements];
+
+  for (int i = 0; i < dataSize; i++) {
+            // 1. Populate the 2D SoA layout for the standard evaluator
+            inputs[0][i] = 1.5 + rand.nextDouble() * 5.0;  // x1
+            inputs[1][i] = rand.nextDouble() * 5.0;        // x2
+            inputs[2][i] = rand.nextDouble() * 2.0;        // x3
+        }
+
+
+evaluator.applyBulk(inputs, outputVector);
+
+```
 
 ### 2. Flat Array Processing (`applyBulk`)
 

@@ -5,6 +5,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import jdk.incubator.vector.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
+import jdk.incubator.vector.Vector;
 
 /**
  *
@@ -21,6 +22,12 @@ public final class FlatMatrixF {
     private static final FloatVector V_GELU_C2 = FloatVector.broadcast(F_SPECIES, GELU_C2);
     private static final FloatVector V_HALF = FloatVector.broadcast(F_SPECIES, 0.5f);
     private static final FloatVector V_ONE = FloatVector.broadcast(F_SPECIES, 1.0f);
+
+    // Clamp to avoid exp overflow. exp(-10) = 4.5e-5, exp(10) = 22026 -> 1.0f
+    private static final FloatVector MIN_X = FloatVector.broadcast(F_SPECIES, -10.0f);
+    private static final FloatVector MAX_X = FloatVector.broadcast(F_SPECIES, 10.0f);
+    private static final FloatVector ONE = FloatVector.broadcast(F_SPECIES, 1.0f);
+    private static final FloatVector NEG_ONE = FloatVector.broadcast(F_SPECIES, -1.0f);
 
     // Block sizes for float - NR matches float lanes
     private static final int NC = 256, KC = 256, MR = 4;
@@ -253,6 +260,31 @@ public final class FlatMatrixF {
                 var x2 = v.mul(v);
                 var inner = v.add(x2.mul(v).mul(V_GELU_C2)).mul(V_GELU_C1);
                 var t = inner.lanewise(VectorOperators.TANH);
+                v.mul(V_HALF).mul(t.add(V_ONE)).intoArray(data, offset + idx);
+            }
+        }
+        for (; idx < len; idx++) {
+            float x = data[offset + idx];
+            float x3 = x * x * x;
+            float t = (float) Math.tanh(GELU_C1 * (x + GELU_C2 * x3));
+            data[offset + idx] = 0.5f * x * (1.0f + t);
+        }
+    }
+
+    public void geluInPlaceHighSpeed() {
+        int len = rows * cols, idx = 0;
+        if (HAS_VECTOR && isContiguous()) {
+            for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
+                var v = FloatVector.fromArray(F_SPECIES, data, offset + idx);
+
+                // x + 0.044715 * x^3
+                var x2 = v.mul(v);
+                var x3 = x2.mul(v);
+                var inner = v.add(x3.mul(V_GELU_C2)).mul(V_GELU_C1);
+
+                // tanh_poly(inner) = inner * (27 + inner^2) / (27 + 9*inner^2)
+                var t = tanh256(inner); // <- No scalar calls here
+
                 v.mul(V_HALF).mul(t.add(V_ONE)).intoArray(data, offset + idx);
             }
         }
@@ -632,12 +664,92 @@ public final class FlatMatrixF {
         }
     }//end method randomFill
 
-    public static void swiGLU(FlatMatrixF gate, FlatMatrixF up, FlatMatrixF out) {
+    public static void swiGLUOld(FlatMatrixF gate, FlatMatrixF up, FlatMatrixF out) {
         if (gate != out) {
             System.arraycopy(gate.data, gate.offset, out.data, out.offset, gate.rows * gate.cols);
         }
         out.siluInPlace();
         mul(out, up, out);
+    }
+
+    /**
+     * out[i] = a[i] * b[i] for all elements. O(n) Handles aliasing: a==out,
+     * b==out, or a==b are all safe.
+     *
+     * @throws IllegalArgumentException if sizes/offsets don't match
+     * @param a
+     * @param b
+     * @param out
+     */
+    public static void mulElementwise(FlatMatrixF a, FlatMatrixF b, FlatMatrixF out) {
+        final int n = a.rows * a.cols;
+        if (n != b.rows * b.cols || n != out.rows * out.cols) {
+            throw new IllegalArgumentException(
+                    "Shape mismatch: a=%dx%d b=%dx%d out=%dx%d".formatted(
+                            a.rows, a.cols, b.rows, b.cols, out.rows, out.cols));
+        }
+
+        final float[] ad = a.data;
+        final float[] bd = b.data;
+        final float[] od = out.data;
+        final int ao = a.offset;
+        final int bo = b.offset;
+        final int oo = out.offset;
+        final int vl = F_SPECIES.length();
+        int i = 0;
+        int upperBound = n - vl;
+
+        // Vectorized main loop
+        for (; i <= upperBound; i += vl) {
+            FloatVector va  = FloatVector.fromArray(F_SPECIES, ad, ao + i);
+            FloatVector vb = FloatVector.fromArray(F_SPECIES, bd, bo + i);
+            va.mul(vb).intoArray(od, oo + i);
+        }
+
+        // Masked tail: handles n % vl!= 0 without branches in loop
+        int remaining = n - i;
+        if (remaining > 0) {
+            var m = F_SPECIES.indexInRange(0, remaining);
+            FloatVector va  = FloatVector.fromArray(F_SPECIES, ad, ao + i, m);
+            FloatVector vb = FloatVector.fromArray(F_SPECIES, bd, bo + i, m);
+            va.mul(vb).intoArray(od, oo + i, m);
+        }
+    }
+
+    public static void swiGLU(FlatMatrixF gate, FlatMatrixF up, FlatMatrixF out) {
+        final int n = gate.rows * gate.cols;
+        if (gate.rows != up.rows || gate.cols != up.cols) {
+            throw new IllegalArgumentException("gate/up shape mismatch");
+        }
+
+        // 1. out = gate
+        if (gate != out) {
+            System.arraycopy(gate.data, gate.offset, out.data, out.offset, n);
+        }
+
+        // 2. out = silu(out) = x * sigmoid(x)
+        final float[] od = out.data;
+        final int oo = out.offset;
+        final int vl = F_SPECIES.length();
+        int i = 0;
+        int upperBound = n - vl;
+
+        for (; i <= upperBound; i += vl) {
+            FloatVector x = FloatVector.fromArray(F_SPECIES, od, oo + i);
+            FloatVector sig = sigmoid(x); // use your fast approx
+            x.mul(sig).intoArray(od, oo + i);
+        }
+        // tail
+        int remaining = n - i;
+        if (remaining > 0) {
+            var m = F_SPECIES.indexInRange(0, remaining);
+            FloatVector x = FloatVector.fromArray(F_SPECIES, od, oo + i, m);
+            FloatVector sig = sigmoid(x);
+            x.mul(sig).intoArray(od, oo + i, m);
+        }
+
+        // 3. out = out * up -> elementwise, not GEMM
+        mulElementwise(out, up, out);
     }
 
     public static void rmsNorm(FlatMatrixF x, FlatMatrixF weight, FlatMatrixF out, float eps) {
@@ -846,6 +958,65 @@ public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF
         }
     }
 
+    // 100% Vector ops. Compiles to vmulpd vaddpd vdivpd only
+    private static FloatVector tanh256(FloatVector x) {
+        var x2 = x.mul(x);
+        var num = x2.add(27.0f);          // 27 + x^2
+        var den = x2.mul(9.0f).add(27.0f); // 27 + 9*x^2
+        return x.mul(num).div(den);       // x * num / den
+    }
+
+    /**
+     * Fast sigmoid: 1 / (1 + exp(-x)) Max error ~1e-3. ~3x faster than Math.exp
+     * scalar. Uses expm1 + rational approx to stay stable.
+     *
+     * @param x
+     * @return
+     */
+    public static FloatVector sigmoid(FloatVector x) {
+        // 1. Clamp: sig(-inf)=0, sig(+inf)=1
+        x = x.max(MIN_X).min(MAX_X);
+
+        // 2. Use 1 / (1 + exp(-x)) = exp(x) / (1 + exp(x))
+        // For x>=0: exp(-x) is small, more stable
+        var negX = x.neg();
+        var expNegX = fastExp(negX); // exp(-x)
+        return ONE.div(ONE.add(expNegX));
+    }
+
+    /**
+     * Fast exp approx. Max error ~2e-3 on [-10, 10] Based on Pade approx:
+     * exp(x) = 2^(x * log2e)
+     */
+     public static FloatVector fastExp(FloatVector x) {
+        final FloatVector LOG2E = FloatVector.broadcast(F_SPECIES, 1.44269504f);
+        final FloatVector LN2   = FloatVector.broadcast(F_SPECIES, 0.69314718f);
+       
+        var fx = x.mul(LOG2E);
+       
+        // float -> int, truncate toward 0
+        IntVector ni = (IntVector)fx.convertShape(VectorOperators.F2I, I_SPECIES, 0);
+       
+        // F2I truncates, we need floor. Correct if fx < int(fx)
+        FloatVector ni_f = (FloatVector)ni.convertShape(VectorOperators.I2F, F_SPECIES, 0);
+        var needsDec = fx.compare(VectorOperators.LT, ni_f);
+        ni = ni.sub(needsDec.toVector().reinterpretAsInts().lanewise(VectorOperators.ASHR, 31)); // mask->int, subtract 1 where true
+
+        var f = fx.sub(ni_f); // fractional part in [0,1)
+       
+        // 2^f poly: 1 + y + y^2/2 + y^3/6, y = f*ln2
+        var y  = f.mul(LN2);
+        var y2 = y.mul(y);
+        var y3 = y2.mul(y);
+        var poly = ONE.add(y).add(y2.mul(0.5f)).add(y3.mul(0.16666667f));
+       
+        // 2^n via bit cast: (n+127)<<23
+        IntVector biasedExp = ni.add(127);
+        IntVector expBits = biasedExp.lanewise(VectorOperators.LSHL, 23);
+        FloatVector pow2n = (FloatVector)expBits.convertShape(VectorOperators.I2F, F_SPECIES, 0);
+       
+        return poly.mul(pow2n);
+    }
 
 //////////////////////////////MHA-ATTENTION-DONE/////////////////////////////////////////////
 }

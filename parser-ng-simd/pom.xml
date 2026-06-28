@@ -101,7 +101,9 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
                 <configuration>
-                    <argLine>--add-modules jdk.incubator.vector</argLine>
+                    <argLine>
+                        --add-modules jdk.incubator.vector
+                    </argLine>
                 </configuration>
             </plugin>
 

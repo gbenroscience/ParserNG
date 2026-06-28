@@ -6,6 +6,10 @@ High-performance, hardware-accelerated mathematical kernels for Java. **No JNI. 
 
 `parser-ng-simd` provides an architectural extension for ParserNG, enabling zero-dependency, tile-based bulk evaluations via `jdk.incubator.vector`. It compiles mathematical expression trees into vectorized loops optimized for L1/L2 cache residency, achieving near-native throughput directly on the JVM without the configuration overhead of complex native toolchains (such as ND4J/`libnd4j`).
 
+For examples and more information:
+
+- [SIMD-EXAMPLES.md](../parser-ng/BULK.md) — what’s new in 2.0.5
+
 ---
 
 ### Performance Benchmarks
