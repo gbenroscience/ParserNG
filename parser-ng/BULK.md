@@ -261,7 +261,7 @@ evaluator.applyBulk(inputs, output);
 
 ```
 
-### Matrix operation (Gelu-200x200) (3.8ns per element on a single core-2.5GHz)
+### Matrix operation (Gelu-200x200) (2.67ns per element on a single core-2.5GHz)
 ```
 
     @Test
@@ -275,15 +275,12 @@ evaluator.applyBulk(inputs, output);
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
         FlatMatrixF.randomFill(in1);
 
-        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in2);
-
         FlatMatrixF out = new FlatMatrixF(sz, sz);
 
         double n = 10000;
         double t = System.nanoTime();
         for (int i = 0; i < n; i++) {
-            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "gelu");
+            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1}, out, "gelu");
         }
 
         double t1 = System.nanoTime() - t;
@@ -295,7 +292,7 @@ evaluator.applyBulk(inputs, output);
 
     }
 ```
-### Matrix operation (Swiglu-200x200) (13.3ns per element on a single core-2.5GHz)
+### Matrix operation (Swiglu-200x200) (1.82ns per element on a single core-2.5GHz)
 
 
 ```
