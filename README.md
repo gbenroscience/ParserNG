@@ -115,7 +115,7 @@ public void bulkRun() throws Throwable {
 
 ## 📦 Installation
 
-Add the following to your `pom.xml`:
+To use in your Adroid or pre-JDK21 environment, add the following to your `pom.xml`:
 
 ```xml
 <dependency>
@@ -123,7 +123,32 @@ Add the following to your `pom.xml`:
     <artifactId>parser-ng</artifactId>
     <version>2.0.6</version>
 </dependency>
+```
 
+To use in JDK21+ environments, do:
+
+
+```xml
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng</artifactId>
+    <version>2.0.6</version>
+</dependency>
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng-simd</artifactId>
+    <version>2.0.6</version>
+</dependency>
+```
+
+To run the SIMD/scalar fallback APIs for BULK evaluation, add:
+
+```xml
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng-bench</artifactId>
+    <version>2.0.6</version>
+</dependency>
 ```
 
 ---
