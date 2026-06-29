@@ -6,6 +6,17 @@
 
 Unlike compilers that introduce overhead via runtime bytecode generation (e.g., Janino), ParserNG achieves near-native speeds through **mechanical sympathy**, loop unrolling, and the **JDK Vector API**.
 
+## 🏢 Enterprise Support & Commercial Assurances
+ParserNG is used by top-tier global enterprises, including Fortune 500 financial institutions, telecom giants, and consulting firms. 
+If your organization relies on ParserNG for production-critical math parsing, we offer formal commercial channels to ensure compliance and stability:
+
+* **Priority SLAs:** 24/48-hour guaranteed turnaround on bug fixes, performance optimizations, and security queries.
+* **Direct Engineering Support:** Direct email access to the author for architectural advice and custom library extension.
+* **Supply Chain Security:** Direct validation of ParserNG's zero-dependency architecture for your internal compliance audits.
+
+
+👉 **Need Enterprise Support?** Contact the maintainer directly at `gbenroscience@gmail.com` or explore our **[GitHub Sponsors Corporate Tiers](https://buymeacoffee.com/gbenroscience/membership)**.
+
 ---
 
 ## 🚀 Performance & Throughput
@@ -58,7 +69,7 @@ for (double t = 0; t < 10_000_000; t += 0.001) {
 ## ⚡ Vectorized Processing: Under the Hood
 When using the SIMDVectorTurboEvaluator, ParserNG automatically maps your mathematical expressions to CPU-level SIMD (Single Instruction, Multiple Data) lanes. This allows the processor to compute multiple data points simultaneously within a single clock cycle, rather than iterating through them one by one.
 
-How it works
+### How it works
 The applyBulk method handles the complex orchestration of data alignment and lane masking for you:
 
 SIMD Lane Utilization: The engine packs your input arrays into registers (e.g., 256-bit or 512-bit), allowing it to process multiple double values per operation.
