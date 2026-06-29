@@ -15,7 +15,7 @@ If your organization relies on ParserNG for production-critical math parsing, we
 * **Supply Chain Security:** Direct validation of ParserNG's zero-dependency architecture for your internal compliance audits.
 
 
-👉 **Need Enterprise Support?** Contact the maintainer directly at `gbenroscience@gmail.com` or explore our **[GitHub Sponsors Corporate Tiers](https://buymeacoffee.com/gbenroscience)**.
+👉 **Need Enterprise Support?** Contact the maintainer directly at `gbenroscience@gmail.com` or explore our **[GitHub Sponsors Corporate Tiers](https://buymeacoffee.com/gbenroscience/membership)**.
 
 ---
 
