@@ -271,28 +271,84 @@ public final class FlatMatrixF {
         }
     }
 
-    public void geluInPlaceHighSpeed() {
-        int len = rows * cols, idx = 0;
-        if (HAS_VECTOR && isContiguous()) {
+    /**
+     * GeGLU in-place: output = inputs[0] ⊙ GELU(inputs[1])
+     *
+     * @param gate
+     */
+    public void gegluInPlaceOld(FlatMatrixF gate) {   // gate is inputs[1]
+        if (rows != gate.rows || cols != gate.cols) {
+            throw new IllegalArgumentException("Shape mismatch for GeGLU");
+        }
+
+        int len = rows * cols;
+        int idx = 0;
+
+        if (HAS_VECTOR && isContiguous() && gate.isContiguous()) {
             for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
-                var v = FloatVector.fromArray(F_SPECIES, data, offset + idx);
+                var value = FloatVector.fromArray(F_SPECIES, this.data, this.offset + idx);
+                var g = FloatVector.fromArray(F_SPECIES, gate.data, gate.offset + idx);
 
-                // x + 0.044715 * x^3
-                var x2 = v.mul(v);
-                var x3 = x2.mul(v);
-                var inner = v.add(x3.mul(V_GELU_C2)).mul(V_GELU_C1);
+                // GELU on gate
+                var g2 = g.mul(g);
+                var g3 = g2.mul(g);
+                var inner = g.add(g3.mul(V_GELU_C2)).mul(V_GELU_C1);
+                var t = inner.lanewise(VectorOperators.TANH);
+                var geluGate = g.mul(V_HALF).mul(t.add(V_ONE));
 
-                // tanh_poly(inner) = inner * (27 + inner^2) / (27 + 9*inner^2)
-                var t = tanh256(inner); // <- No scalar calls here
-
-                v.mul(V_HALF).mul(t.add(V_ONE)).intoArray(data, offset + idx);
+                // value * GELU(gate)
+                value.mul(geluGate).intoArray(this.data, this.offset + idx);
             }
         }
+
+        // Scalar fallback
         for (; idx < len; idx++) {
-            float x = data[offset + idx];
-            float x3 = x * x * x;
-            float t = (float) Math.tanh(GELU_C1 * (x + GELU_C2 * x3));
-            data[offset + idx] = 0.5f * x * (1.0f + t);
+            float value = this.data[this.offset + idx];
+            float g = gate.data[gate.offset + idx];
+
+            float g3 = g * g * g;
+            float t = (float) Math.tanh(GELU_C1 * (g + GELU_C2 * g3));
+            float geluGate = 0.5f * g * (1.0f + t);
+
+            this.data[this.offset + idx] = value * geluGate;
+        }
+    }
+
+    public void gegluInPlace(FlatMatrixF gate) {
+        if (rows != gate.rows || cols != gate.cols) {
+            throw new IllegalArgumentException("Shape mismatch for GeGLU");
+        }
+
+        int len = rows * cols;
+        int idx = 0;
+
+        if (HAS_VECTOR && isContiguous() && gate.isContiguous()) {
+            for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
+                var value = FloatVector.fromArray(F_SPECIES, this.data, this.offset + idx);
+                var g = FloatVector.fromArray(F_SPECIES, gate.data, gate.offset + idx);
+
+                // GELU(gate)
+                var g2 = g.mul(g);
+                var g3 = g2.mul(g);
+                var inner = g.add(g3.mul(V_GELU_C2)).mul(V_GELU_C1);
+                var t = inner.lanewise(VectorOperators.TANH);
+                var geluGate = g.mul(V_HALF).mul(t.add(V_ONE));
+
+                // value * GELU(gate)
+                value.mul(geluGate).intoArray(this.data, this.offset + idx);
+            }
+        }
+
+        // Scalar fallback
+        for (; idx < len; idx++) {
+            float value = this.data[this.offset + idx];
+            float g = gate.data[gate.offset + idx];
+
+            float g3 = g * g * g;
+            float t = (float) Math.tanh(GELU_C1 * (g + GELU_C2 * g3));
+            float geluGate = 0.5f * g * (1.0f + t);
+
+            this.data[this.offset + idx] = value * geluGate;
         }
     }
 
@@ -658,9 +714,13 @@ public final class FlatMatrixF {
     }
 
     public static void randomFill(FlatMatrixF A) {
+        randomFill(A, 101);
+    }//end method randomFill
+
+    public static void randomFill(FlatMatrixF A, int max) {
         ThreadLocalRandom ran = ThreadLocalRandom.current();
         for (int i = 0; i < A.data.length; i++) {
-            A.data[i] = 1 + ran.nextFloat(101);
+            A.data[i] = 1 + ran.nextFloat(max);
         }
     }//end method randomFill
 
@@ -1009,12 +1069,62 @@ public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF
         }
     }
 
-    // 100% Vector ops. Compiles to vmulpd vaddpd vdivpd only
-    private static FloatVector tanh256(FloatVector x) {
-        var x2 = x.mul(x);
-        var num = x2.add(27.0f);          // 27 + x^2
-        var den = x2.mul(9.0f).add(27.0f); // 27 + 9*x^2
-        return x.mul(num).div(den);       // x * num / den
+    /**
+     * Fast exp approx. Max error ~2e-3 on [-10, 10] Based on Pade approx:
+     * exp(x) = 2^(x * log2e)
+     *
+     * @param x
+     */
+    public static FloatVector fastExp(FloatVector x) {
+        // Clamp input to avoid float underflow/overflow bounds [-88.0f, 88.0f]
+        x = x.lanewise(VectorOperators.MAX, -88.0f)
+                .lanewise(VectorOperators.MIN, 88.0f);
+
+        final FloatVector LOG2E = FloatVector.broadcast(F_SPECIES, 1.44269504f);
+        final FloatVector LN2 = FloatVector.broadcast(F_SPECIES, 0.69314718f);
+        final FloatVector ONE = FloatVector.broadcast(F_SPECIES, 1.0f);
+
+        // x * log2(e)
+        var fx = x.mul(LOG2E);
+
+        // STEP 1: Perform manual floor via F2I truncation toward zero
+        IntVector ni = (IntVector) fx.convertShape(VectorOperators.F2I, I_SPECIES, 0);
+        FloatVector ni_f = (FloatVector) ni.convertShape(VectorOperators.I2F, F_SPECIES, 0);
+
+        // For negative values, truncation goes the wrong way. 
+        // If fx < ni_f, we must subtract 1 from the integer vector.
+        var needsDec = fx.compare(VectorOperators.LT, ni_f);
+        var oneInt = IntVector.broadcast(I_SPECIES, 1);
+
+        // CORRECT FIX: Cast the Float mask to an Integer mask matching I_SPECIES
+        VectorMask<Integer> intMask = needsDec.cast(I_SPECIES);
+        ni = ni.sub(oneInt, intMask);
+
+        // STEP 2: Recompute the corrected float representation of the floor
+        ni_f = (FloatVector) ni.convertShape(VectorOperators.I2F, F_SPECIES, 0);
+
+        // Fractional part is now guaranteed to be in [0, 1)
+        var f = fx.sub(ni_f);
+
+        // STEP 3: 4th-order Polynomial approximation for 2^f
+        var y = f.mul(LN2);
+        var y2 = y.mul(y);
+        var y3 = y2.mul(y);
+        var y4 = y3.mul(y);
+
+        var poly = ONE.add(y)
+                .add(y2.mul(0.5f))
+                .add(y3.mul(0.16666667f))
+                .add(y4.mul(0.041666668f));
+
+        // STEP 4: 2^ni via raw bit manipulation: (ni + 127) << 23
+        var biased = ni.add(127);
+        var bits = biased.lanewise(VectorOperators.LSHL, 23);
+
+        // Pure bit-cast from integer registers to float registers
+        FloatVector pow2n = bits.reinterpretAsFloats();
+
+        return poly.mul(pow2n);
     }
 
     /**
@@ -1025,48 +1135,9 @@ public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF
      * @return
      */
     public static FloatVector sigmoid(FloatVector x) {
-        // 1. Clamp: sig(-inf)=0, sig(+inf)=1
-        x = x.max(MIN_X).min(MAX_X);
-
-        // 2. Use 1 / (1 + exp(-x)) = exp(x) / (1 + exp(x))
-        // For x>=0: exp(-x) is small, more stable
+        final FloatVector ONE = FloatVector.broadcast(F_SPECIES, 1.0f);
         var negX = x.neg();
-        var expNegX = fastExp(negX); // exp(-x)
-        return ONE.div(ONE.add(expNegX));
-    }
-
-    /**
-     * Fast exp approx. Max error ~2e-3 on [-10, 10] Based on Pade approx:
-     * exp(x) = 2^(x * log2e)
-     */
-    public static FloatVector fastExp(FloatVector x) {
-        final FloatVector LOG2E = FloatVector.broadcast(F_SPECIES, 1.44269504f);
-        final FloatVector LN2 = FloatVector.broadcast(F_SPECIES, 0.69314718f);
-
-        var fx = x.mul(LOG2E);
-
-        // float -> int, truncate toward 0
-        IntVector ni = (IntVector) fx.convertShape(VectorOperators.F2I, I_SPECIES, 0);
-
-        // F2I truncates, we need floor. Correct if fx < int(fx)
-        FloatVector ni_f = (FloatVector) ni.convertShape(VectorOperators.I2F, F_SPECIES, 0);
-        var needsDec = fx.compare(VectorOperators.LT, ni_f);
-        ni = ni.sub(needsDec.toVector().reinterpretAsInts().lanewise(VectorOperators.ASHR, 31)); // mask->int, subtract 1 where true
-
-        var f = fx.sub(ni_f); // fractional part in [0,1)
-
-        // 2^f poly: 1 + y + y^2/2 + y^3/6, y = f*ln2
-        var y = f.mul(LN2);
-        var y2 = y.mul(y);
-        var y3 = y2.mul(y);
-        var poly = ONE.add(y).add(y2.mul(0.5f)).add(y3.mul(0.16666667f));
-
-        // 2^n via bit cast: (n+127)<<23
-        IntVector biasedExp = ni.add(127);
-        IntVector expBits = biasedExp.lanewise(VectorOperators.LSHL, 23);
-        FloatVector pow2n = (FloatVector) expBits.convertShape(VectorOperators.I2F, F_SPECIES, 0);
-
-        return poly.mul(pow2n);
+        return ONE.div(ONE.add(fastExp(negX)));
     }
 
 

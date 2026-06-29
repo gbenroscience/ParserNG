@@ -1,9 +1,5 @@
 package com.github.gbenroscience.parser.ng.bench;
 
-/**
- *
- * @author GBEMIRO
- */
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
 import org.openjdk.jmh.annotations.*;
@@ -20,45 +16,41 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.TimeValue;
 
 /**
- * Use this to build in the parser-ng-pro directory mvn clean install -Dgpg.skip
- * Use this to run the benchmarks
+ * Use this to build in the parser-ng-pro directory: mvn clean install -Dgpg.skip
+ * Use this to run the benchmarks:
  *
- * java -jar target/benchmarks.jar SIMDTurboBench -prof perfasm
- *
- * java -jar target/benchmarks.jar SIMDTurboBench -prof perfasm >
- * perf_output.txt Now find your specific method's assembly grep -A 50
- * "parserNG" perf_output.txt
+ * java -jar target/benchmarks.jar ActivationBench -prof perfasm
  *
  * @author GBEMIRO
  */
-@BenchmarkMode(Mode.AverageTime) // ns/op
+@BenchmarkMode(Mode.AverageTime) 
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
 @Fork(value = 3, jvmArgsAppend = {
     "-Xms4g", "-Xmx4g",
     "-XX:+UnlockDiagnosticVMOptions",
     "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"
-// "-XX:+PrintAssembly", "-XX:CompileCommand=print,*SIMDCompositeExpression.applyMatrixKernel" // uncomment if you have hsdis
 })
 @Warmup(iterations = 5, time = 2)
 @Measurement(iterations = 5, time = 2)
+@OperationsPerInvocation(ActivationBench.N) // Tells JMH to divide total time by N to output ns/element
 public class ActivationBench {
 
-    @Param({"512", "1024", "2048", "4096"})
-    public int sz;
-
+    // Must be a compile-time constant to be used in the annotation above.
+    // 1048576 elements represents a square matrix of 1024 x 1024.
+    public static final int N = 2048 * 2048; 
+    
+    private final int sz = (int) Math.sqrt(N);
     private SIMDCompositeExpression evaluator;
     private FlatMatrixF in1;
     private FlatMatrixF in2;
     private FlatMatrixF out;
-    private int N;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable {
         MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
         evaluator = (SIMDCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
 
-        N = sz * sz;
         in1 = new FlatMatrixF(sz, sz);
         in2 = new FlatMatrixF(sz, sz);
         out = new FlatMatrixF(sz, sz);
@@ -68,30 +60,23 @@ public class ActivationBench {
 
     @Setup(Level.Iteration) // C2 can't optimize across iterations
     public void dirtyInput() {
-        // JMH will call this before each measurement iteration
-        // This makes the input unprovable without timing it
+        // JMH calls this before each measurement iteration to make inputs unpredictable
         for (int j = 0; j < N; j++) {
             in1.data[j] = ThreadLocalRandom.current().nextFloat();
-            in2.data[j] = in1.data[j]*2.13f;
+            in2.data[j] = in1.data[j] * 2.13f;
         }
     }
 
     @Benchmark
     public void gelu(Blackhole bh) {
         evaluator.applyMatrixKernel(new FlatMatrixF[]{in1}, out, "gelu");
-        // Consume the whole output so C2 can't DCE
-        /*
-        for (int j = 0; j < N; j++) {
-            bh.consume(Float.floatToRawIntBits(out.data[j]));
-        }
-        */
-         bh.consume(out.data[0]);
+        bh.consume(out); // Completely safe, zero-overhead way to prevent Dead Code Elimination
     }
-        @Benchmark
+
+    @Benchmark
     public void swiglu(Blackhole bh) {
         evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "swiglu");
-        // Consume the whole output so C2 can't DCE
-               bh.consume(out.data[0]);
+        bh.consume(out); 
     }
 
     public static void main(String[] args) throws RunnerException {

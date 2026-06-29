@@ -1713,7 +1713,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          */
         @Override
         public void applyBulkParallel(double[] flatVariables, double[] output) {
-           
+
             final int length = output.length;
 
             if (length < PARALLEL_OPS_THRESHOLD) {
@@ -1785,8 +1785,22 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     if (inputs[0] != output) {
                         System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
                     }
-                    //output.geluInPlace();
-                    output.geluInPlaceHighSpeed();
+                    output.geluInPlace();
+                    //output.geluInPlaceHighSpeed();
+                }
+                case "geglu", "geglu_in_place" -> {
+                    if (inputs.length < 2) {
+                        throw new IllegalArgumentException("GeGLU requires 2 inputs");
+                    }
+
+                    // Copy first input to output if they are different
+                    if (inputs[0] != output) {
+                        System.arraycopy(inputs[0].data, inputs[0].offset,
+                                output.data, output.offset,
+                                output.rows * output.cols);
+                    }
+
+                    output.gegluInPlace(inputs[1]);   // <- gate
                 }
                 // === New Q8 + Attention kernels ===
                 case "q8_quantize" -> {
@@ -2222,7 +2236,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             // BLAS
             case "matmul", "gemm", "mm" ->
                 arity == 3;
-            case "gemv", "matvec" ->
+            case "gemv", "matvec","geglu" ->
                 arity == 2;
             case "dot", "inner", "axpy" ->
                 arity == 3;

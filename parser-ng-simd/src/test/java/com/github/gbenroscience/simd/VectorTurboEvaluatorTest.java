@@ -279,7 +279,7 @@ public class VectorTurboEvaluatorTest {
             int sz = inputs[i].length;
             System.arraycopy(inputs[i], 0, flatVars, i * sz, sz);
         }
-        
+
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
         evaluator.applyBulkParallel(flatVars, outputVector);
         // System.out.println("output: " + Arrays.toString(outputVector));
@@ -448,6 +448,69 @@ public class VectorTurboEvaluatorTest {
         Assertions.assertNotNull(out);
     }
 
+    @Test
+    public void testGeluCorrectNess() throws Throwable {
+        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+
+        int sz = 4;
+        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in1,101);
+
+        FlatMatrixF out = new FlatMatrixF(sz, sz);
+
+        evaluator.applyMatrixKernel(new FlatMatrixF[]{in1}, out, "gelu");
+        
+        System.out.println("gelu-in:--"+in1.toString());
+        System.out.println("gelu-out:--"+out.toString());
+
+        // 2. Timed Target Phase
+    }
+        @Test
+    public void testGeGluCorrectNess() throws Throwable {
+        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+
+        int sz = 4;
+        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in1,101);
+
+        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in2,101);
+
+        FlatMatrixF out = new FlatMatrixF(sz, sz);
+
+        evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "geglu");
+        
+        System.out.println("geglu-in1:--"+in1.toString());
+        System.out.println("geglu-in2:--"+in2.toString());
+        System.out.println("geglu-out:--"+out.toString());
+
+        // 2. Timed Target Phase
+    }
+
+        @Test
+    public void testSwiGluCorrectNess() throws Throwable {
+        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+
+        int sz = 4;
+        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in1,101);
+
+        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in2,101);
+
+        FlatMatrixF out = new FlatMatrixF(sz, sz);
+
+        evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "swiglu");
+        
+        System.out.println("swiglu-in1:--"+in1.toString());
+        System.out.println("swiglu-in2:--"+in2.toString());
+        System.out.println("swiglu-out:--"+out.toString());
+
+        // 2. Timed Target Phase
+    }
     void logDetails(MathExpression me, BatchedVectorCompositeExpression evaluator, boolean active) {
         if (!active) {
             return;
