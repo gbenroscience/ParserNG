@@ -901,7 +901,7 @@ is: true
 true
 ```
 
-See [jenkins-report-generic-chart-column](https://github.com/jenkinsci/report-generic-chart-column-plugin/ as real-world user of `ExpandingParser`
+See [jenkins-report-generic-chart-column](https://github.com/jenkinsci/report-generic-chart-column-plugin/) as real-world user of `ExpandingParser`
 
 
 

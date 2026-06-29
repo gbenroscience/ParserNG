@@ -252,31 +252,90 @@ public final class FlatMatrixF {
     }
 
     // ====================== ELEMENTWISE ======================
-    public void geluInPlace() {
-        int len = rows * cols, idx = 0;
+    /**
+     * Slower than Bert, but MORE accurate GELU in-place using the Sigmoid-based
+     * exact identity math. Matches standard Tanh approximation curves
+     * perfectly.
+     */
+    public void geluInPlaceSigmoid() {
+        int len = rows * cols;
+        int idx = 0;
+
         if (HAS_VECTOR && isContiguous()) {
+            // 2 * 0.79788456f = 1.59576912f
+            final FloatVector V_C1 = FloatVector.broadcast(F_SPECIES, 1.59576912f);
+            final FloatVector V_C2 = FloatVector.broadcast(F_SPECIES, 0.044715f);
+            final FloatVector V_ONE = FloatVector.broadcast(F_SPECIES, 1.0f);
+
             for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
-                var v = FloatVector.fromArray(F_SPECIES, data, offset + idx);
-                var x2 = v.mul(v);
-                var inner = v.add(x2.mul(v).mul(V_GELU_C2)).mul(V_GELU_C1);
-                var t = inner.lanewise(VectorOperators.TANH);
-                v.mul(V_HALF).mul(t.add(V_ONE)).intoArray(data, offset + idx);
+                var x = FloatVector.fromArray(F_SPECIES, this.data, this.offset + idx);
+
+                var x3 = x.mul(x).mul(x);
+                var z = x.add(x3.mul(V_C2)).mul(V_C1);
+
+                // Compute the denominator: 1 + e^(-z)
+                var denominator = V_ONE.add(fastExp(z.neg()));
+
+                // Divide x directly by the denominator to get x * sigmoid(z)
+                var result = x.div(denominator);
+
+                result.intoArray(this.data, this.offset + idx);
             }
         }
+
+        // Scalar fallback matching the exact Tanh/Sigmoid curve behavior
         for (; idx < len; idx++) {
-            float x = data[offset + idx];
+            float x = this.data[this.offset + idx];
             float x3 = x * x * x;
-            float t = (float) Math.tanh(GELU_C1 * (x + GELU_C2 * x3));
-            data[offset + idx] = 0.5f * x * (1.0f + t);
+            float t = (float) Math.tanh(0.79788456f * (x + 0.044715f * x3));
+            this.data[this.offset + idx] = 0.5f * x * (1.0f + t);
         }
     }
 
     /**
-     * GeGLU in-place: output = inputs[0] ⊙ GELU(inputs[1])
-     *
-     * @param gate
+     * Faster than sigmoid, but less accurate GELU in-place using the fast
+     * BERT/OpenAI 1.702 * x approximation. Eliminates cubic calculations
+     * entirely for maximum throughput.
      */
-    public void gegluInPlaceOld(FlatMatrixF gate) {   // gate is inputs[1]
+    public void geluInPlaceBert() {
+        int len = rows * cols;
+        int idx = 0;
+
+        if (HAS_VECTOR && isContiguous()) {
+            final FloatVector V_BERT_C = FloatVector.broadcast(F_SPECIES, 1.702f);
+            final FloatVector V_ONE = FloatVector.broadcast(F_SPECIES, 1.0f);
+
+            for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
+                var x = FloatVector.fromArray(F_SPECIES, this.data, this.offset + idx);
+
+                // z = 1.702 * x
+                var z = x.mul(V_BERT_C);
+
+                // sigmoid(z) = 1 / (1 + fastExp(-z))
+                var denominator = V_ONE.add(fastExp(z.neg()));
+
+                // x * sigmoid(z)
+                var result = x.div(denominator);
+                result.intoArray(this.data, this.offset + idx);
+            }
+        }
+
+        // Scalar fallback matching the exact 1.702 sigmoid calculation
+        for (; idx < len; idx++) {
+            float x = this.data[this.offset + idx];
+            float sigmoid = 1.0f / (1.0f + (float) Math.exp(-1.702f * x));
+            this.data[this.offset + idx] = x * sigmoid;
+        }
+    }
+
+    /**
+     * Slower than Bert, but MORE accurate GeGLU in-place using the
+     * Sigmoid-based exact identity math. Computes: output = value *
+     * GELU_sigmoid(gate)
+     *
+     * @param gate The gating matrix (inputs[1])
+     */
+    public void gegluInPlaceSigmoid(FlatMatrixF gate) {
         if (rows != gate.rows || cols != gate.cols) {
             throw new IllegalArgumentException("Shape mismatch for GeGLU");
         }
@@ -285,30 +344,83 @@ public final class FlatMatrixF {
         int idx = 0;
 
         if (HAS_VECTOR && isContiguous() && gate.isContiguous()) {
+            // 2 * 0.79788456f = 1.59576912f
+            final FloatVector V_C1 = FloatVector.broadcast(F_SPECIES, 1.59576912f);
+            final FloatVector V_C2 = FloatVector.broadcast(F_SPECIES, 0.044715f);
+            final FloatVector V_ONE = FloatVector.broadcast(F_SPECIES, 1.0f);
+
             for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
                 var value = FloatVector.fromArray(F_SPECIES, this.data, this.offset + idx);
                 var g = FloatVector.fromArray(F_SPECIES, gate.data, gate.offset + idx);
 
-                // GELU on gate
-                var g2 = g.mul(g);
-                var g3 = g2.mul(g);
-                var inner = g.add(g3.mul(V_GELU_C2)).mul(V_GELU_C1);
-                var t = inner.lanewise(VectorOperators.TANH);
-                var geluGate = g.mul(V_HALF).mul(t.add(V_ONE));
+                // z = 1.59576912 * (g + 0.044715 * g^3)
+                var g3 = g.mul(g).mul(g);
+                var z = g.add(g3.mul(V_C2)).mul(V_C1);
+
+                // GELU(gate) = g / (1 + fastExp(-z))
+                var denominator = V_ONE.add(fastExp(z.neg()));
+                var geluGate = g.div(denominator);
 
                 // value * GELU(gate)
                 value.mul(geluGate).intoArray(this.data, this.offset + idx);
             }
         }
 
-        // Scalar fallback
+        // Scalar fallback matching the exact Tanh/Sigmoid curve behavior
         for (; idx < len; idx++) {
             float value = this.data[this.offset + idx];
             float g = gate.data[gate.offset + idx];
 
             float g3 = g * g * g;
-            float t = (float) Math.tanh(GELU_C1 * (g + GELU_C2 * g3));
+            float t = (float) Math.tanh(0.79788456f * (g + 0.044715f * g3));
             float geluGate = 0.5f * g * (1.0f + t);
+
+            this.data[this.offset + idx] = value * geluGate;
+        }
+    }
+
+    /**
+     * Faster than sigmoid, but less accurate GeGLU in-place using the fast
+     * BERT/OpenAI 1.702 * g approximation. Computes: output = value *
+     * GELU_bert(gate)
+     *
+     * @param gate The gating matrix (inputs[1])
+     */
+    public void gegluInPlaceBert(FlatMatrixF gate) {
+        if (rows != gate.rows || cols != gate.cols) {
+            throw new IllegalArgumentException("Shape mismatch for GeGLU");
+        }
+
+        int len = rows * cols;
+        int idx = 0;
+
+        if (HAS_VECTOR && isContiguous() && gate.isContiguous()) {
+            final FloatVector V_BERT_C = FloatVector.broadcast(F_SPECIES, 1.702f);
+            final FloatVector V_ONE = FloatVector.broadcast(F_SPECIES, 1.0f);
+
+            for (; idx < F_SPECIES.loopBound(len); idx += VF_LEN) {
+                var value = FloatVector.fromArray(F_SPECIES, this.data, this.offset + idx);
+                var g = FloatVector.fromArray(F_SPECIES, gate.data, gate.offset + idx);
+
+                // z = 1.702 * g
+                var z = g.mul(V_BERT_C);
+
+                // GELU(gate) = g / (1 + fastExp(-z))
+                var denominator = V_ONE.add(fastExp(z.neg()));
+                var geluGate = g.div(denominator);
+
+                // value * GELU(gate)
+                value.mul(geluGate).intoArray(this.data, this.offset + idx);
+            }
+        }
+
+        // Scalar fallback matching the exact 1.702 sigmoid calculation
+        for (; idx < len; idx++) {
+            float value = this.data[this.offset + idx];
+            float g = gate.data[gate.offset + idx];
+
+            float sigmoid = 1.0f / (1.0f + (float) Math.exp(-1.702f * g));
+            float geluGate = g * sigmoid;
 
             this.data[this.offset + idx] = value * geluGate;
         }

@@ -148,6 +148,8 @@ Add the following to your `pom.xml`:
 * **Javadoc:** [Latest API Documentation](https://www.google.com/search?q=https://javadoc.io/doc/com.github.gbenroscience/parser-ng/2.0.5)
 
 
+[jenkins-report-generic-chart-column](https://github.com/jenkinsci/report-generic-chart-column-plugin/) by Jiri Vanek, makes use of `ExpandingParser`, and his contributions are appreciated.
+
 
 ## 📚 More Documentation
 

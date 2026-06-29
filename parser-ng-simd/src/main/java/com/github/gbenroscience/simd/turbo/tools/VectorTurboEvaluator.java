@@ -1785,8 +1785,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     if (inputs[0] != output) {
                         System.arraycopy(inputs[0].data, inputs[0].offset, output.data, output.offset, output.rows * output.cols);
                     }
-                    output.geluInPlace();
-                    //output.geluInPlaceHighSpeed();
+                    output.geluInPlaceSigmoid();
                 }
                 case "geglu", "geglu_in_place" -> {
                     if (inputs.length < 2) {
@@ -1800,7 +1799,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                                 output.rows * output.cols);
                     }
 
-                    output.gegluInPlace(inputs[1]);   // <- gate
+                    output.gegluInPlaceSigmoid(inputs[1]);   // <- gate
                 }
                 // === New Q8 + Attention kernels ===
                 case "q8_quantize" -> {
