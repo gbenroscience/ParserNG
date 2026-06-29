@@ -90,8 +90,10 @@ public void bulkRun() throws Throwable {
 
     // High-throughput vectorized execution
     evaluator.applyBulk(inputs, outputVector);
+
+   // Use evaluator.applyBulkParallel(inputs, outputVector); to automatically process using all your cores
     
-    // Result is now stored in outputVector, processed in parallel chunks
+    // Result is now stored in outputVector
 }
 
 ```
