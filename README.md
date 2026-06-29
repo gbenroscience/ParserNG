@@ -14,6 +14,11 @@ If your organization relies on ParserNG for production-critical math parsing, we
 * **Custom Integration:** Direct consulting from the author to build custom integrations or extensions.
 * **Compliance Packages:** Software Bill of Materials (SBOM), cryptographic release signing.
 
+* **Priority SLAs:** 24/48-hour guaranteed turnaround on bug fixes, performance optimizations, and security queries.
+* **Direct Engineering Support:** Direct email access to the author for architectural advice and custom library extension.
+* **Supply Chain Security:** Direct validation of ParserNG's zero-dependency architecture for your internal compliance audits.
+
+
 👉 **Need Enterprise Support?** Contact the maintainer directly at `gbenroscience@gmail.com` or explore our **[GitHub Sponsors Corporate Tiers](https://buymeacoffee.com/gbenroscience)**.
 
 ---
