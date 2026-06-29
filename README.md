@@ -69,7 +69,7 @@ for (double t = 0; t < 10_000_000; t += 0.001) {
 ## ⚡ Vectorized Processing: Under the Hood
 When using the SIMDVectorTurboEvaluator, ParserNG automatically maps your mathematical expressions to CPU-level SIMD (Single Instruction, Multiple Data) lanes. This allows the processor to compute multiple data points simultaneously within a single clock cycle, rather than iterating through them one by one.
 
-How it works
+### How it works
 The applyBulk method handles the complex orchestration of data alignment and lane masking for you:
 
 SIMD Lane Utilization: The engine packs your input arrays into registers (e.g., 256-bit or 512-bit), allowing it to process multiple double values per operation.
