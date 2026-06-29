@@ -716,7 +716,7 @@ public final class FlatMatrixF {
         }
     }
 
-    public static void swiGLU(FlatMatrixF gate, FlatMatrixF up, FlatMatrixF out) {
+    public static void swiGLU2point85ns(FlatMatrixF gate, FlatMatrixF up, FlatMatrixF out) {
         final int n = gate.rows * gate.cols;
         if (gate.rows != up.rows || gate.cols != up.cols) {
             throw new IllegalArgumentException("gate/up shape mismatch");
@@ -750,6 +750,57 @@ public final class FlatMatrixF {
 
         // 3. out = out * up -> elementwise, not GEMM
         mulElementwise(out, up, out);
+    }
+
+    public static void swiGLU(FlatMatrixF gate, FlatMatrixF up, FlatMatrixF out) {
+        final int n = gate.rows * gate.cols;
+
+        // 1. Comprehensive Shape Validation
+        if (gate.rows != up.rows || gate.cols != up.cols
+                || gate.rows != out.rows || gate.cols != out.cols) {
+            throw new IllegalArgumentException(
+                    "Shape mismatch: gate=%dx%d, up=%dx%d, out=%dx%d".formatted(
+                            gate.rows, gate.cols, up.rows, up.cols, out.rows, out.cols));
+        }
+
+        // 2. CRITICAL: Memory Layout Validation
+        // If your matrix class allows non-contiguous views (strides), a flat 1D loop will corrupt data.
+        if (!gate.isContiguous() || !up.isContiguous() || !out.isContiguous()) {
+            throw new IllegalArgumentException("Vectorized swiGLU requires contiguous matrices.");
+            // Alternatively, route to a fallback scalar method that respects row strides here.
+        }
+
+        final float[] gd = gate.data;
+        final float[] ud = up.data;
+        final float[] od = out.data;
+        final int go = gate.offset;
+        final int uo = up.offset;
+        final int oo = out.offset;
+
+        final int vl = F_SPECIES.length();
+        final int limit = F_SPECIES.loopBound(n); // Idiomatic way to get (n - (n % vl))
+        int i = 0;
+
+        // 3. Fused Loop: Read gate/up once, compute, write once
+        for (; i < limit; i += vl) {
+            FloatVector g = FloatVector.fromArray(F_SPECIES, gd, go + i);
+            FloatVector u = FloatVector.fromArray(F_SPECIES, ud, uo + i);
+
+            // Fused: SiLU(g) * u  => (g * sigmoid(g)) * u
+            FloatVector sig = sigmoid(g);
+            g.mul(sig).mul(u).intoArray(od, oo + i);
+        }
+
+        // 4. Masked tail
+        int remaining = n - i;
+        if (remaining > 0) {
+            var m = F_SPECIES.indexInRange(0, remaining);
+            FloatVector g = FloatVector.fromArray(F_SPECIES, gd, go + i, m);
+            FloatVector u = FloatVector.fromArray(F_SPECIES, ud, uo + i, m);
+
+            FloatVector sig = sigmoid(g);
+            g.mul(sig).mul(u).intoArray(od, oo + i, m);
+        }
     }
 
     public static void rmsNorm(FlatMatrixF x, FlatMatrixF weight, FlatMatrixF out, float eps) {
@@ -988,35 +1039,36 @@ public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF
      * Fast exp approx. Max error ~2e-3 on [-10, 10] Based on Pade approx:
      * exp(x) = 2^(x * log2e)
      */
-     public static FloatVector fastExp(FloatVector x) {
+    public static FloatVector fastExp(FloatVector x) {
         final FloatVector LOG2E = FloatVector.broadcast(F_SPECIES, 1.44269504f);
-        final FloatVector LN2   = FloatVector.broadcast(F_SPECIES, 0.69314718f);
-       
+        final FloatVector LN2 = FloatVector.broadcast(F_SPECIES, 0.69314718f);
+
         var fx = x.mul(LOG2E);
-       
+
         // float -> int, truncate toward 0
-        IntVector ni = (IntVector)fx.convertShape(VectorOperators.F2I, I_SPECIES, 0);
-       
+        IntVector ni = (IntVector) fx.convertShape(VectorOperators.F2I, I_SPECIES, 0);
+
         // F2I truncates, we need floor. Correct if fx < int(fx)
-        FloatVector ni_f = (FloatVector)ni.convertShape(VectorOperators.I2F, F_SPECIES, 0);
+        FloatVector ni_f = (FloatVector) ni.convertShape(VectorOperators.I2F, F_SPECIES, 0);
         var needsDec = fx.compare(VectorOperators.LT, ni_f);
         ni = ni.sub(needsDec.toVector().reinterpretAsInts().lanewise(VectorOperators.ASHR, 31)); // mask->int, subtract 1 where true
 
         var f = fx.sub(ni_f); // fractional part in [0,1)
-       
+
         // 2^f poly: 1 + y + y^2/2 + y^3/6, y = f*ln2
-        var y  = f.mul(LN2);
+        var y = f.mul(LN2);
         var y2 = y.mul(y);
         var y3 = y2.mul(y);
         var poly = ONE.add(y).add(y2.mul(0.5f)).add(y3.mul(0.16666667f));
-       
+
         // 2^n via bit cast: (n+127)<<23
         IntVector biasedExp = ni.add(127);
         IntVector expBits = biasedExp.lanewise(VectorOperators.LSHL, 23);
-        FloatVector pow2n = (FloatVector)expBits.convertShape(VectorOperators.I2F, F_SPECIES, 0);
-       
+        FloatVector pow2n = (FloatVector) expBits.convertShape(VectorOperators.I2F, F_SPECIES, 0);
+
         return poly.mul(pow2n);
     }
+
 
 //////////////////////////////MHA-ATTENTION-DONE/////////////////////////////////////////////
 }
