@@ -6,6 +6,16 @@
 
 Unlike compilers that introduce overhead via runtime bytecode generation (e.g., Janino), ParserNG achieves near-native speeds through **mechanical sympathy**, loop unrolling, and the **JDK Vector API**.
 
+## 🏢 Enterprise Support & Commercial Assurances
+ParserNG is used by top-tier global enterprises, including Fortune 500 financial institutions, telecom giants, and consulting firms. 
+If your organization relies on ParserNG for production-critical math parsing, we offer formal commercial channels to ensure compliance and stability:
+
+* **Priority SLAs:** 24/48-hour guaranteed turnaround on bug fixes, performance optimizations, and security audits.
+* **Custom DSL Design:** Direct consulting from the author to build custom mathematical grammars and high-throughput concurrent JVM pipelines.
+* **Compliance Packages:** Software Bill of Materials (SBOM), cryptographic release signing, and legal indemnity assurances.
+
+👉 **Need Enterprise Support?** Contact the maintainer directly at `gbenroscience@gmail.com` or explore our **[GitHub Sponsors Corporate Tiers](https://buymeacoffee.com/gbenroscience)**.
+
 ---
 
 ## 🚀 Performance & Throughput
