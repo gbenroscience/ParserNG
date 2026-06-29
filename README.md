@@ -10,10 +10,6 @@ Unlike compilers that introduce overhead via runtime bytecode generation (e.g., 
 ParserNG is used by top-tier global enterprises, including Fortune 500 financial institutions, telecom giants, and consulting firms. 
 If your organization relies on ParserNG for production-critical math parsing, we offer formal commercial channels to ensure compliance and stability:
 
-* **Priority SLAs:** 24/48-hour guaranteed turnaround on bug fixes, performance optimizations, and security audits.
-* **Custom Integration:** Direct consulting from the author to build custom integrations or extensions.
-* **Compliance Packages:** Software Bill of Materials (SBOM), cryptographic release signing.
-
 * **Priority SLAs:** 24/48-hour guaranteed turnaround on bug fixes, performance optimizations, and security queries.
 * **Direct Engineering Support:** Direct email access to the author for architectural advice and custom library extension.
 * **Supply Chain Security:** Direct validation of ParserNG's zero-dependency architecture for your internal compliance audits.
