@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>2.0.5</version>
+        <version>2.0.6</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     
@@ -17,7 +17,7 @@
     <name>ParserNG</name>
     <description>Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies. 
         ParserNG is the height of interpreted Math parsing in Java. It is the fastest of all interpreted Java math parsers.
-        Version 2.0.5 continues support of the full Vector bulk processing(faster than Janino), via the Vector API and mechanically sympathetic code
+        Version 2.0.6 features updates to GeLU and SwiGLU for correctness
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
     </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
