@@ -1,4 +1,4 @@
-# ParserNG 2.0.5 🧮⚡
+# ParserNG 2.0.6 🧮⚡
 
 ### High-Performance, Interpreted Math Engine for Java
 
@@ -121,7 +121,7 @@ Add the following to your `pom.xml`:
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>2.0.5</version>
+    <version>2.0.6</version>
 </dependency>
 
 ```
@@ -145,7 +145,7 @@ Add the following to your `pom.xml`:
 * **Benchmarks:** [BENCHMARK_RESULTS.md](https://www.google.com/search?q=BENCHMARK_RESULTS.md)
 * **Bulk Evaluation:** [Bulk Evaluation Guide](https://www.google.com/search?q=parser-ng/BULK.md)
 * **Graphing:** [GRAPHING.md](https://www.google.com/search?q=GRAPHING.md)
-* **Javadoc:** [Latest API Documentation](https://www.google.com/search?q=https://javadoc.io/doc/com.github.gbenroscience/parser-ng/2.0.5)
+* **Javadoc:** [Latest API Documentation](https://www.google.com/search?q=https://javadoc.io/doc/com.github.gbenroscience/parser-ng/2.0.6)
 
 
 [jenkins-report-generic-chart-column](https://github.com/jenkinsci/report-generic-chart-column-plugin/) by Jiri Vanek, makes use of `ExpandingParser`, and his contributions are appreciated.
@@ -155,9 +155,9 @@ Add the following to your `pom.xml`:
 
 - [BENCHMARK_RESULTS.md](parser-ng/BENCHMARK_RESULTS.md) — full speed comparisons
 - [GRAPHING.md](parser-ng/GRAPHING.md) — plotting on Swing / JavaFX / Android
-- [LATEST.md](LATEST.md) — what’s new in 2.0.5
-- [EXAMPLES.md](EXAMPLES.md) — what’s new in 2.0.5
-- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/2.0.5
+- [LATEST.md](LATEST.md) — what’s new in 2.0.6
+- [EXAMPLES.md](EXAMPLES.md) — what’s new in 2.0.6
+- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/2.0.6
 - [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md) — Original readme for pre-1.0 versions with a lot of, still valid, examples
 ---
 
