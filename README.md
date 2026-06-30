@@ -187,7 +187,8 @@ To run the SIMD/scalar fallback APIs for BULK evaluation, add:
 - [BENCHMARK_RESULTS.md](parser-ng/BENCHMARK_RESULTS.md) — full speed comparisons
 - [GRAPHING.md](parser-ng/GRAPHING.md) — plotting on Swing / JavaFX / Android
 - [LATEST.md](LATEST.md) — what’s new in 2.0.6
-- [EXAMPLES.md](EXAMPLES.md) — what’s new in 2.0.6
+- [EXAMPLES.md](EXAMPLES.md) — Some examples
+- [MORE.md](MORE.md) — Even more to know
 - Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/2.0.6
 - [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md) — Original readme for pre-1.0 versions with a lot of, still valid, examples
 ---
