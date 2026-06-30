@@ -1,33 +1,39 @@
 # ParserNG 2.0.6 🧮⚡
 
-### High-Performance, Interpreted Math Engine for Java
+### The Fastest Pure-Java Expression Engine + Vector Math Kernels
 
-**ParserNG** is a blazing-fast, zero-native-dependency, pure Java math expression parser and evaluator designed for high-throughput applications—ranging from real-time simulations to scientific computing and Android apps.
+**ParserNG** is a pure-Java expression evaluation engine designed for high-performance enterprise workloads, including complex mathematical pipelines and transformer activations. 
+By utilizing a high-speed interpreted model instead of risky bytecode generation, it achieves near-native throughput with zero JNI, simplifying your SBOM and compliance posture. 
+Built on the JDK Vector API and principles of mechanical sympathy, ParserNG is the secure, portable choice for modern JVM infrastructures.
 
-Unlike compilers that introduce overhead via runtime bytecode generation (e.g., Janino), ParserNG achieves near-native speeds through **mechanical sympathy**, loop unrolling, and the **JDK Vector API**.
+**Benchmarks:** `SwiGLU: 1.8ns/elem` | `GeLU: 2.1ns/elem` | `Expr: scalable(generally faster than Janino on single core)` | `JDK 21+ |(SIMD) & maintains compatiblility till JDK8`
 
-## 🏢 Enterprise Support & Commercial Assurances
-ParserNG is used by top-tier global enterprises, including Fortune 500 financial institutions, telecom giants, and consulting firms. 
-If your organization relies on ParserNG for production-critical math parsing, we offer formal commercial channels to ensure compliance and stability:
+---
 
-* **Priority SLAs:** 24/48-hour guaranteed turnaround on bug fixes, performance optimizations, and security queries.
-* **Direct Engineering Support:** Direct email access to the author for architectural advice and custom library extension.
-* **Supply Chain Security:** Direct validation of ParserNG's zero-dependency architecture for your internal compliance audits.
+### 🏢 Trusted in Production 
+**11,000+ Maven Central downloads** | **+250% growth in 90 days** | **618 organizations**
 
+**Enterprise Support & Commercial Assurances**
+Production teams choose ParserNG Enterprise for:
+* **Priority SLAs:** 24/48h turnaround on bugs, perf, and security 
+*  **Zero JNI**: Pure Java. No native crashes, easy SBOM, passes compliance.
+*  **Direct Engineering:** Architectural review + custom kernel work from the author
+*  **Vector API Speed**: SwiGLU `1.8ns/elem`, GeLU `2.1ns/elem` on JDK 21+.
+*  **Enterprise Ready**: Private Maven, Graal Native Image, AVX512 builds, CVE/SBOM reports.
 
-👉 **Need Enterprise Support?** Contact the maintainer directly at `gbenroscience@gmail.com` or explore our **[GitHub Sponsors Corporate Tiers](https://buymeacoffee.com/gbenroscience/membership)**.
+👉 **Contact:** `gbenroscience@gmail.com`  
+👉 **Sponsor / SMB:** [GitHub Sponsors Corporate Tiers](https://buymeacoffee.com/gbenroscience/membership)
+
 
 ---
 
 ## 🚀 Performance & Throughput
 
-* **Speed Champion:** Rivals and often outperforms established engines like Janino, exp4J, and Parsii across bulk data processing tasks.
+* **Speed Champion:** Rivals and often outperforms established engines like Janino, and Parsii across bulk data processing tasks.
 
+* **Throughput:** Standard mode delivers **3-10 million evaluations/sec**; Turbo mode reaches **10-90 million evaluations/sec**; Bulk Turbo: **Single core - up to 200million evaluations/sec, With workers - even more!**.
 
-* **Throughput:** Standard mode delivers **3-10 million evaluations/sec**; Turbo mode reaches **10-90 million evaluations/sec**.
-
-
-* **Turbo Mode:** A specialized compiled path for scalar and matrix operations that eliminates class-loading bottlenecks.
+* **Turbo Mode:** A specialized compiled path for scalar, matrix operations and bulk operations that eliminates class-loading bottlenecks.
 
 
 
@@ -115,7 +121,7 @@ public void bulkRun() throws Throwable {
 
 ## 📦 Installation
 
-To use in your Adroid or pre-JDK21 environment, add the following to your `pom.xml`:
+To use in your Android or pre-JDK21 environment, add the following to your `pom.xml`:
 
 ```xml
 <dependency>
