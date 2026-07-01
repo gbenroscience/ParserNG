@@ -1,6 +1,9 @@
 # ParserNG
 
 
+### ParserNG 2.0.6 is out on maven-central! 
+Very stable release. Lots of bug fixes in bulk gelu, swiglu etc
+
 ### ParserNG 2.0.5 is out on maven-central! 
 More stable. Cleaned up API.
 
