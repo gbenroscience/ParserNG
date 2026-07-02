@@ -1,5 +1,6 @@
 package com.github.gbenroscience.parser.turbo.tools.vector;
 
+import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.parser.turbo.tools.exceptions.KernelInterceptException;
 import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrixF;
 import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrix;
@@ -163,6 +164,14 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
     static final int OP_NE = 92;
     static final int OP_GE = 93;
     static final int OP_LE = 94;
+
+    static final int OP_GELU = 95;
+    static final int OP_GELU_FAST = 96;
+    static final int OP_GEGLU = 97;
+    static final int OP_SWIGLU = 98;
+    static final int OP_GEGLU_2 = 99;
+    static final int OP_SWIGLU_2 = 100;
+    static final int OP_ERF = 101;
 
     // Pre-allocated compilation state
     protected MathExpression.Token[] postfix;
@@ -609,6 +618,16 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         case "atanh":
                             opcodes[instructionCount] = OP_ATANH_ALT;
                             break;
+                        case "gelu":
+                            opcodes[instructionCount] = OP_GELU;
+                        case "gelu_fast":
+                            opcodes[instructionCount] = OP_GELU_FAST;
+                        case "swiglu":
+                            opcodes[instructionCount] = t.arity == 1 ? OP_SWIGLU : OP_SWIGLU_2;
+                        case "geglu":
+                            opcodes[instructionCount] = t.arity == 1 ? OP_GEGLU : OP_GEGLU_2;
+                        case "erf":
+                            opcodes[instructionCount] = OP_ERF;
 
                         default:
                             throw new IllegalArgumentException("Unknown function: " + t.name);
@@ -1152,6 +1171,34 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         break;
                     }
 
+                    case OP_SWIGLU_2: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = Maths.swiglu(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_GEGLU_2: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = Maths.geglu(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+                        break;
+                    }
+
                     case OP_REM: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
@@ -1259,6 +1306,45 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.sqrt(scratch[base + k]);
+                        }
+                        break;
+                    }
+                    case OP_GELU: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.gelu(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_GEGLU: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.geglu(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_SWIGLU: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.swiglu(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_GELU_FAST: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.fastGelu(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_ERF: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.erf(scratch[base + k]);
                         }
                         break;
                     }
@@ -1650,7 +1736,33 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         }
                         break;
                     }
+                    case OP_SWIGLU_2: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
 
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = Maths.swiglu(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_GEGLU_2: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = Maths.geglu(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+                        break;
+                    }
                     case OP_REM: {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
@@ -1762,6 +1874,45 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         break;
                     }
 
+                    case OP_GELU: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.gelu(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_GEGLU: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.geglu(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_SWIGLU: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.swiglu(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_GELU_FAST: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.fastGelu(scratch[base + k]);
+                        }
+                        break;
+                    }
+
+                    case OP_ERF: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.erf(scratch[base + k]);
+                        }
+                        break;
+                    }
                     case OP_CBRT: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {

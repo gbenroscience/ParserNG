@@ -1,11 +1,13 @@
 package com.github.gbenroscience.simd.turbo.tools;
 
+import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
+import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
 import java.util.function.DoubleUnaryOperator;
 import jdk.incubator.vector.*;
 
@@ -406,7 +408,73 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                             scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
                         }
                     }
+                    case OP_SWIGLU_2 -> {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
 
+                        final int loopBound = SPECIES.loopBound(n);
+                        int k = 0;
+
+                        // Hoist constants outside the hot loop
+                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+
+                        // 1. Vectorized main loop
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
+                            DoubleVector y = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
+
+                            // Calculate SwiGLU: (x * y) / (1.0 + exp(-x))
+                            DoubleVector expNegX = TurboVectorMath.fastVectorExp(x.neg()); // x.neg() simply flips the sign bit (fast)
+                            DoubleVector denom = expNegX.add(ONE);
+                            DoubleVector result = x.mul(y).div(denom);     // Fused mul + hardware div 
+
+                            result.intoArray(scratch, resOffset + k);
+                        }
+
+                        // 2. Scalar tail loop for any remaining elements
+                        for (; k < n; k++) {
+                            scratch[resOffset + k] = Maths.swiglu(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+                    }
+                    case OP_GEGLU_2 -> {
+                        sp -= 2; // Adjust stack pointer
+                        final int lOffset = sp * BLOCK_SIZE;
+                        final int rOffset = lOffset + BLOCK_SIZE;
+                        final int loopBound = SPECIES.loopBound(n);
+
+                        final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
+                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+                        final DoubleVector INV_SQRT_2 = DoubleVector.broadcast(SPECIES, 0.7071067811865476);
+
+                        int k = 0;
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            // Load two inputs simultaneously
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
+                            DoubleVector y = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
+
+                            // GeLU(y) = 0.5 * y * (1 + erf(y / sqrt(2)))
+                            // We reuse your high-precision vectorizedErf utility
+                            DoubleVector erfVal = TurboVectorMath.vectorizedErf(y.mul(INV_SQRT_2));
+                            DoubleVector geluY = y.mul(HALF).mul(erfVal.add(ONE));
+
+                            // Result = x * GeLU(y)
+                            DoubleVector result = x.mul(geluY);
+
+                            // Store back to lOffset (simulating stack push)
+                            result.intoArray(scratch, lOffset + k);
+                        }
+
+                        // Tail cleanup
+                        for (; k < n; k++) {
+                            scratch[lOffset + k] = Maths.geglu(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+
+                        sp++; // Finalize stack pointer adjustment
+                    }
                     case OP_REM -> {
                         final int rOffset = (--sp) * BLOCK_SIZE;
                         final int lOffset = (--sp) * BLOCK_SIZE;
@@ -480,7 +548,103 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                             scratch[srcOffset + k] = Math.sqrt(scratch[srcOffset + k]);
                         }
                     }
+                    case OP_SWIGLU -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
 
+                        final int loopBound = SPECIES.loopBound(n);
+                        int k = 0;
+
+                        // Hoist constant outside the hot loop
+                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+
+                        // 1. Vectorized main loop (In-place modification)
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
+
+                            // Calculate 1-arg SwiGLU (Swish/SiLU): x / (1.0 + exp(-x))
+                            DoubleVector expNegX = TurboVectorMath.fastVectorExp(x.neg());
+                            DoubleVector denom = expNegX.add(ONE);
+                            DoubleVector result = x.div(denom);
+
+                            // Write directly back to the same offset
+                            result.intoArray(scratch, base + k);
+                        }
+
+                        // 2. Scalar tail loop for remaining elements
+                        for (; k < n; k++) {
+                            scratch[base + k] = Maths.swiglu(scratch[base + k]);
+                        }
+                    }
+                    case OP_GELU, OP_GEGLU, OP_GELU_FAST -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        final int loopBound = SPECIES.loopBound(n);
+                        int k = 0;
+
+                        // Common constants
+                        final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
+                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+                        final DoubleVector TWO = DoubleVector.broadcast(SPECIES, 2.0);
+
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
+                            DoubleVector result;
+
+                            if (opcode == OP_GELU) {
+                                // GELU = 0.5 * x * (1 + erf(x / sqrt(2)))
+                                final DoubleVector INV_SQRT_2 = DoubleVector.broadcast(SPECIES, 0.7071067811865476);
+                                // Note: Reuse your vectorizedErf here
+                                result = x.mul(HALF).mul(TurboVectorMath.vectorizedErf(x.mul(INV_SQRT_2)).add(ONE));
+                            } else if (opcode == OP_GELU_FAST) {
+                                // FAST GELU = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+                                final DoubleVector SQRT_2_OVER_PI = DoubleVector.broadcast(SPECIES, 0.7978845608028654);
+                                final DoubleVector COEF = DoubleVector.broadcast(SPECIES, 0.044715);
+
+                                DoubleVector x3 = x.mul(x).mul(x);
+                                DoubleVector z = x3.mul(COEF).add(x).mul(SQRT_2_OVER_PI);
+
+                                // Using your optimized fastVectorExp for tanh calculation
+                                DoubleVector exp2z = TurboVectorMath.fastVectorExp(z.mul(TWO));
+                                DoubleVector tanhZ = exp2z.sub(ONE).div(exp2z.add(ONE));
+                                result = x.mul(HALF).mul(tanhZ.add(ONE));
+                            } else { // OP_GEGLU
+                                // Placeholder for GEGLU logic (Gated Error Linear Unit)
+                                result = x;
+                            }
+
+                            result.intoArray(scratch, base + k);
+                        }
+
+                        // Scalar fallback
+                        for (; k < n; k++) {
+                            if (opcode == OP_GELU) {
+                                scratch[base + k] = Maths.gelu(scratch[base + k]);
+                            } else if (opcode == OP_GELU_FAST) {
+                                scratch[base + k] = Maths.fastGelu(scratch[base + k]);
+                            } else {
+                                scratch[base + k] = Maths.geglu(scratch[base + k]);
+                            }
+                        }
+                    }
+                    case OP_ERF -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        final int loopBound = SPECIES.loopBound(n);
+                        int k = 0;
+
+                        // 1. Vectorized main loop
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
+
+                            // Use your optimized piecewise vectorizedErf
+                            DoubleVector result = TurboVectorMath.vectorizedErf(x);
+
+                            result.intoArray(scratch, base + k);
+                        }
+
+                        // 2. Scalar tail loop for remaining elements
+                        for (; k < n; k++) {
+                            scratch[base + k] = Maths.erf(scratch[base + k]);
+                        }
+                    }
                     case OP_CBRT -> {
                         final int srcOffset = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
@@ -815,7 +979,73 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                             scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
                         }
                     }
+                    case OP_SWIGLU_2 -> {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
 
+                        final int loopBound = SPECIES.loopBound(n);
+                        int k = 0;
+
+                        // Hoist constants outside the hot loop
+                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+
+                        // 1. Vectorized main loop
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
+                            DoubleVector y = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
+
+                            // Calculate SwiGLU: (x * y) / (1.0 + exp(-x))
+                            DoubleVector expNegX = TurboVectorMath.fastVectorExp(x.neg()); // x.neg() simply flips the sign bit (fast)
+                            DoubleVector denom = expNegX.add(ONE);
+                            DoubleVector result = x.mul(y).div(denom);     // Fused mul + hardware div 
+
+                            result.intoArray(scratch, resOffset + k);
+                        }
+
+                        // 2. Scalar tail loop for any remaining elements
+                        for (; k < n; k++) {
+                            scratch[resOffset + k] = Maths.swiglu(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+                    }
+                    case OP_GEGLU_2 -> {
+                        sp -= 2; // Adjust stack pointer
+                        final int lOffset = sp * BLOCK_SIZE;
+                        final int rOffset = lOffset + BLOCK_SIZE;
+                        final int loopBound = SPECIES.loopBound(n);
+
+                        final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
+                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+                        final DoubleVector INV_SQRT_2 = DoubleVector.broadcast(SPECIES, 0.7071067811865476);
+
+                        int k = 0;
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            // Load two inputs simultaneously
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
+                            DoubleVector y = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
+
+                            // GeLU(y) = 0.5 * y * (1 + erf(y / sqrt(2)))
+                            // We reuse your high-precision vectorizedErf utility
+                            DoubleVector erfVal = TurboVectorMath.vectorizedErf(y.mul(INV_SQRT_2));
+                            DoubleVector geluY = y.mul(HALF).mul(erfVal.add(ONE));
+
+                            // Result = x * GeLU(y)
+                            DoubleVector result = x.mul(geluY);
+
+                            // Store back to lOffset (simulating stack push)
+                            result.intoArray(scratch, lOffset + k);
+                        }
+
+                        // Tail cleanup
+                        for (; k < n; k++) {
+                            scratch[lOffset + k] = Maths.geglu(scratch[lOffset + k], scratch[rOffset + k]);
+                        }
+
+                        sp++; // Finalize stack pointer adjustment
+                    }
                     case OP_REM -> {
                         final int rOffset = (--sp) * BLOCK_SIZE;
                         final int lOffset = (--sp) * BLOCK_SIZE;
@@ -889,7 +1119,103 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                             scratch[srcOffset + k] = Math.sqrt(scratch[srcOffset + k]);
                         }
                     }
+                    case OP_SWIGLU -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
 
+                        final int loopBound = SPECIES.loopBound(n);
+                        int k = 0;
+
+                        // Hoist constant outside the hot loop
+                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+
+                        // 1. Vectorized main loop (In-place modification)
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
+
+                            // Calculate 1-arg SwiGLU (Swish/SiLU): x / (1.0 + exp(-x))
+                            DoubleVector expNegX = TurboVectorMath.fastVectorExp(x.neg());
+                            DoubleVector denom = expNegX.add(ONE);
+                            DoubleVector result = x.div(denom);
+
+                            // Write directly back to the same offset
+                            result.intoArray(scratch, base + k);
+                        }
+
+                        // 2. Scalar tail loop for remaining elements
+                        for (; k < n; k++) {
+                            scratch[base + k] = Maths.swiglu(scratch[base + k]);
+                        }
+                    }
+                    case OP_GELU, OP_GEGLU, OP_GELU_FAST -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        final int loopBound = SPECIES.loopBound(n);
+                        int k = 0;
+
+                        // Common constants
+                        final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
+                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+                        final DoubleVector TWO = DoubleVector.broadcast(SPECIES, 2.0);
+
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
+                            DoubleVector result;
+
+                            if (opcode == OP_GELU) {
+                                // GELU = 0.5 * x * (1 + erf(x / sqrt(2)))
+                                final DoubleVector INV_SQRT_2 = DoubleVector.broadcast(SPECIES, 0.7071067811865476);
+                                // Note: Reuse your vectorizedErf here
+                                result = x.mul(HALF).mul(TurboVectorMath.vectorizedErf(x.mul(INV_SQRT_2)).add(ONE));
+                            } else if (opcode == OP_GELU_FAST) {
+                                // FAST GELU = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+                                final DoubleVector SQRT_2_OVER_PI = DoubleVector.broadcast(SPECIES, 0.7978845608028654);
+                                final DoubleVector COEF = DoubleVector.broadcast(SPECIES, 0.044715);
+
+                                DoubleVector x3 = x.mul(x).mul(x);
+                                DoubleVector z = x3.mul(COEF).add(x).mul(SQRT_2_OVER_PI);
+
+                                // Using your optimized fastVectorExp for tanh calculation
+                                DoubleVector exp2z = TurboVectorMath.fastVectorExp(z.mul(TWO));
+                                DoubleVector tanhZ = exp2z.sub(ONE).div(exp2z.add(ONE));
+                                result = x.mul(HALF).mul(tanhZ.add(ONE));
+                            } else { // OP_GEGLU
+                                // Placeholder for GEGLU logic (Gated Error Linear Unit)
+                                result = x;
+                            }
+
+                            result.intoArray(scratch, base + k);
+                        }
+
+                        // Scalar fallback
+                        for (; k < n; k++) {
+                            if (opcode == OP_GELU) {
+                                scratch[base + k] = Maths.gelu(scratch[base + k]);
+                            } else if (opcode == OP_GELU_FAST) {
+                                scratch[base + k] = Maths.fastGelu(scratch[base + k]);
+                            } else {
+                                scratch[base + k] = Maths.geglu(scratch[base + k]);
+                            }
+                        }
+                    }
+                    case OP_ERF -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        final int loopBound = SPECIES.loopBound(n);
+                        int k = 0;
+
+                        // 1. Vectorized main loop
+                        for (; k < loopBound; k += SPECIES.length()) {
+                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
+
+                            // Use your optimized piecewise vectorizedErf
+                            DoubleVector result = TurboVectorMath.vectorizedErf(x);
+
+                            result.intoArray(scratch, base + k);
+                        }
+
+                        // 2. Scalar tail loop for remaining elements
+                        for (; k < n; k++) {
+                            scratch[base + k] = Maths.erf(scratch[base + k]);
+                        }
+                    }
                     case OP_CBRT -> {
                         final int srcOffset = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
@@ -1092,16 +1418,6 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             // Flush the final computation results out to the destination block segment
             System.arraycopy(scratch, 0, output, blockStart, n);
         }
-
-        @Override
-        public void applyMatrixKernel(FlatMatrix[] inputs, FlatMatrix output, String op) {
-            super.applyMatrixKernel(inputs, output, op);
-        }
-
-        @Override
-        public void applyMatrixKernel(FlatMatrixF[] inputs, FlatMatrixF output, String op) {
-            super.applyMatrixKernel(inputs, output, op);
-        }
     }
 
     /**
@@ -1133,6 +1449,90 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             for (; i < n; i++) {
                 array[base + i] = scalarOp.applyAsDouble(array[base + i]);
             }
+        }
+
+        /**
+         * High-performance vectorized exp() using Cody-Waite range reduction +
+         * 6th-degree minimax polynomial + direct bit manipulation for 2^k.
+         */
+        /**
+         * High-performance vectorized exp() using Cody-Waite range reduction +
+         * 6th-degree minimax polynomial + direct bit manipulation for 2^k.
+         */
+        /**
+         * High-performance vectorized exp() using magic-number rounding +
+         * 6th-degree minimax polynomial + fast bit manipulation for 2^k.
+         */
+        private static DoubleVector fastVectorExp(DoubleVector x) {
+            // 1. Clamp
+            x = x.lanewise(VectorOperators.MAX, -40.0)
+                    .lanewise(VectorOperators.MIN, 40.0);
+
+            // 2. Range reduction
+            DoubleVector invLn2 = DoubleVector.broadcast(SPECIES, 1.4426950408889634074);
+            DoubleVector ln2Hi = DoubleVector.broadcast(SPECIES, -0.6931471805599453);
+            DoubleVector ln2Lo = DoubleVector.broadcast(SPECIES, -2.8235290563031574E-13);
+
+            // Magic number rounding to nearest integer
+            DoubleVector magic = DoubleVector.broadcast(SPECIES, 4503599627370496.0); // 2^52
+            DoubleVector k = x.mul(invLn2).add(magic).sub(magic);
+
+            DoubleVector r = x.add(k.mul(ln2Hi)).add(k.mul(ln2Lo));
+
+            // 3. 6th-degree minimax polynomial (optimized coefficients)
+            DoubleVector p = r.mul(0.001398199650)
+                    .add(0.0088632903)
+                    .mul(r).add(0.04166666666)
+                    .mul(r).add(0.16666666666)
+                    .mul(r).add(0.5)
+                    .mul(r).add(1.0)
+                    .mul(r).add(1.0);
+
+            // 4. Fast 2^k via bit manipulation
+            LongVector kLong = (LongVector) k.convert(VectorOperators.D2L, 0);
+            LongVector exponent = kLong.add(1023).lanewise(VectorOperators.LSHL, 52);
+            DoubleVector twoK = (DoubleVector) exponent.convert(VectorOperators.REINTERPRET_L2D, 0);
+
+            return p.mul(twoK);
+        }
+
+        // Define these at the class level
+        private static final double THRESHOLD_LOW = 0.46875;
+        private static final double THRESHOLD_HIGH = 4.0;
+        private static final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+
+        private static DoubleVector vectorizedErf(DoubleVector x) {
+            DoubleVector absX = x.abs();
+
+            // 1. Masks for intervals
+            VectorMask<Double> maskLow = absX.compare(VectorOperators.LE, THRESHOLD_LOW);
+            VectorMask<Double> maskHigh = absX.compare(VectorOperators.LE, THRESHOLD_HIGH);
+
+            // 2. Interval 1 (Low)
+            DoubleVector xSq = absX.mul(absX);
+            DoubleVector p = xSq.mul(0.260194122534674).add(30.59022585250011).mul(xSq)
+                    .add(573.9507736045833).mul(xSq).add(2801.752391065013).mul(xSq).add(3204.677458505002);
+            DoubleVector q = xSq.add(159.0884090976454).mul(xSq).add(1422.080683811422).mul(xSq)
+                    .add(4423.613442045816).mul(xSq).add(3204.677458506958);
+
+            // Result for low interval with sign preserved
+            DoubleVector resLow = x.mul(p.div(q));
+
+            // 3. Intervals 2 & 3 (Medium/Large)
+            // We pass your required signatures: (vX, vAbsX, mask)
+            DoubleVector resMed = VectorizedCodyMath.evaluateMediumVector(x, absX, maskHigh);
+            DoubleVector resHigh = VectorizedCodyMath.evaluateLargeVector(x, absX, maskHigh.not());
+            DoubleVector erfcVal = resMed.blend(resHigh, maskHigh.not());
+
+            // erfc(absX) -> erf(absX) = 1 - erfc(absX)
+            DoubleVector resMidHigh = ONE.sub(erfcVal);
+
+            // 4. Apply sign ONCE at the end
+            VectorMask<Double> isNegative = x.compare(VectorOperators.LT, 0.0);
+            resMidHigh = resMidHigh.blend(resMidHigh.neg(), isNegative);
+
+            // 5. Final Blend
+            return resMidHigh.blend(resLow, maskLow);
         }
 
         private static void scaleInputAndApply(int base, int n, double[] array, double scale,

@@ -17,9 +17,9 @@ import org.openjdk.jmh.runner.options.TimeValue;
 
 /**
  * Use this to build in the parser-ng-pro directory: mvn clean install -Dgpg.skip
- * Use this to run the benchmarks:
- *
- * java -jar target/benchmarks.jar ActivationBench -prof perfasm
+Use this to run the benchmarks:
+
+java -jar target/benchmarks.jar ActivationBench -prof perfasm
  *
  * @author GBEMIRO
  */
@@ -37,8 +37,8 @@ import org.openjdk.jmh.runner.options.TimeValue;
 public class ActivationBench {
 
     // Must be a compile-time constant to be used in the annotation above.
-    // 1048576 elements represents a square matrix of 1024 x 1024.
-    public static final int N = 2048 * 2048; 
+    // 16,777,216 elements represents a square matrix of 4096 x 4096.
+    public static final int N = 4096 * 4096; 
     
     private final int sz = (int) Math.sqrt(N);
     private SIMDCompositeExpression evaluator;
@@ -78,7 +78,12 @@ public class ActivationBench {
         evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "swiglu");
         bh.consume(out); 
     }
-
+    
+    @Benchmark
+    public void geglu(Blackhole bh) {
+        evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "geglu");
+        bh.consume(out); 
+    }
     public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
         opt.include(ActivationBench.class.getSimpleName());
@@ -97,4 +102,6 @@ public class ActivationBench {
 
         new Runner(configurations).run();
     }
+    
+
 }

@@ -141,6 +141,11 @@ public class Declarations {
     public static final String FMA = "fma";// fma(A, B, C) -> A * B + C
     public static final String VMA = "vma";// vma(A, B, C) -> A * B + C
     public static final String IF = "if";//if(x > 0.5, x * 2, 0)
+    public static final String ERF = "erf";
+    public static final String GELU = "gelu";
+    public static final String FAST_GELU = "fast_gelu";
+    public static final String SWIGLU = "swiglu";
+    public static final String GEGLU = "geglu";
     public static final String HELP = "help";
 
     
@@ -294,6 +299,7 @@ public class Declarations {
             ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
             ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT,
             LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, SQRT, CBRT, INVERSE,
+            ERF, GELU, GEGLU, SWIGLU, FAST_GELU,
             SQUARE, CUBE, POW, FACT, COMBINATION, PERMUTATION, SUM, LIST_SUM, PROD,
             MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED,
             COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE,
@@ -440,6 +446,16 @@ public class Declarations {
             case POW:
                 return TYPE.NUMBER.toString();
             case FACT:
+                return TYPE.NUMBER.toString();
+            case ERF:
+                return TYPE.NUMBER.toString();
+            case GELU:
+                return TYPE.NUMBER.toString();
+            case GEGLU:
+                return TYPE.NUMBER.toString();
+            case SWIGLU:
+                return TYPE.NUMBER.toString();
+            case FAST_GELU:
                 return TYPE.NUMBER.toString();
             case PRINT:
                 return TYPE.VOID.toString();

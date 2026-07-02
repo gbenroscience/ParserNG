@@ -32,9 +32,13 @@ public class VariableManager {
         saveIfNotExists(Variable.e);
     }
 
+    public static void update() {
+     
+    }
+
     /**
-     * Parses commands used to insert and make Variables loaded into the
-     * VARIABLES attribute of objects of this class.
+     * Parses commands used to insert and make Variables loaded into the VARS
+     * attribute of objects of this class.
      */
     private CommandInterpreter commandParser;
 
@@ -144,7 +148,6 @@ public class VariableManager {
                     String value = new MathExpression(cmd.substring(indexOfEqual + 1)).solve();
                     Variable vv = new Variable(var, Double.parseDouble(value), false);
                     VARIABLES.put(vv.getName(), vv);
-                    update();
                     return vv;
 
                 } catch (Exception e) {//handle exceptions
@@ -168,14 +171,9 @@ public class VariableManager {
         } else {
             commandParser.setCommand(cmd);
         }
-        update();
-    }
-
-    /**
-     * Saves stored variables and updates the UI that renders the variables.
-     */
-    public static void update() {
-
+        if (commandParser.VARS != null) {
+            VARIABLES.putAll(commandParser.VARS);
+        }
     }
 
     /**
@@ -231,7 +229,6 @@ public class VariableManager {
      */
     public static void delete(String varName) {
         VARIABLES.remove(varName);
-        update();
     }//end method
 
     /**
@@ -245,7 +242,6 @@ public class VariableManager {
             var.setGlobal(true);
             var.setFrameIndex(-1);
             VARIABLES.put(var.getName(), var);
-            update();
         }
     }//end method
 
@@ -265,7 +261,6 @@ public class VariableManager {
             }
         }
 
-        update();
     }//end method
 
     /**
@@ -280,7 +275,6 @@ public class VariableManager {
                 it.remove();
             }
         }
-        update();
     }
 
     /**
@@ -295,8 +289,6 @@ public class VariableManager {
                 it.remove();
             }
         }
-
-        update();
     }
 
     /**
@@ -354,14 +346,14 @@ public class VariableManager {
      * insertion of the Variable objects, if the store doe not already contain
      * them,or updating Variable objects in the store with the incoming ones if
      * they have the same name. The behavior of the parser is such that it
-     * interpretes and executes the code on the fly. This means that it will
-     * stop inserting data in the VARIABLES only when it detects error in the
-     * code.
+     * interprets and executes the code on the fly. This means that it will stop
+     * inserting data in the VARIABLES only when it detects error in the code.
      *
      *
      */
     public final class CommandInterpreter {
 
+        final Map<String, Variable> VARS = new HashMap();
         private String command;
 
         /**
@@ -459,6 +451,10 @@ public class VariableManager {
             Variable v = VARIABLES.get(name);
             return v == null ? false : v.isConstant();
         }//end method
+
+        public final Map<String, Variable> getVARS() {
+            return VARS;
+        }
 
         /**
          *
@@ -561,8 +557,6 @@ public class VariableManager {
          */
         private Map<String, Variable> analyzeLine(String line) {
 
-            Map<String, Variable> VARIABLES = new HashMap<>();
-
             setValid(validateLine(line));
 
             if (isValid()) {
@@ -598,16 +592,16 @@ public class VariableManager {
                                         try {
                                             boolean variable = isVariable(scan.get(i));
                                             if (variable) {
-                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), Double.parseDouble(getValue(part2)), false));
+                                                VARS.put(scan.get(i), new Variable(scan.get(i), Double.parseDouble(getValue(part2)), false));
                                             }//end else if
                                             else if (!variable && !contains(scan.get(i))) {
                                                 boolean isFunction = FunctionManager.containsAlgebraicFunction(scan.get(i));
                                                 if (isFunction) {
                                                     FunctionManager.delete(scan.get(i));
                                                 }
-                                                VARIABLES.put(scan.get(i), new Variable(scan.get(i), Double.parseDouble(getValue(part2)), false));
+                                                VARS.put(scan.get(i), new Variable(scan.get(i), Double.parseDouble(getValue(part2)), false));
                                             }//end else if.
-                                        }//end try
+                                        }//end try//end try
                                         catch (Exception e) {
                                             e.printStackTrace();
                                             Utils.logError("Syntax Error!!!.\n");
@@ -630,7 +624,7 @@ public class VariableManager {
                                         boolean variable = isVariable(scan.get(0));
 
                                         if (variable) {
-                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), Double.parseDouble(getValue(part2)), false));
+                                            VARS.put(scan.get(0), new Variable(scan.get(0), Double.parseDouble(getValue(part2)), false));
                                         }//end else if
                                         else if (!variable && !contains(scan.get(0))) {
                                             boolean isFunction = FunctionManager.containsAlgebraicFunction(scan.get(0));
@@ -638,9 +632,9 @@ public class VariableManager {
                                                 FunctionManager.delete(scan.get(0));
                                             }
 
-                                            VARIABLES.put(scan.get(0), new Variable(scan.get(0), Double.parseDouble(getValue(part2)), false));
+                                            VARS.put(scan.get(0), new Variable(scan.get(0), Double.parseDouble(getValue(part2)), false));
                                         }//end else if.
-                                    }//end try
+                                    }//end try//end try
                                     catch (Exception e) {
                                         e.printStackTrace();
                                         Utils.logError("Syntax Error.11\n");
@@ -655,7 +649,7 @@ public class VariableManager {
 
                         }//end if
 
-                    }//end try
+                    }//end try//end try
                     catch (IndexOutOfBoundsException boundsException) {
                         Utils.logError("Syntax Error.\nPlease Consult The Help File.");
                         setValid(false);
@@ -669,7 +663,7 @@ public class VariableManager {
 
             }//end if
 
-            return VARIABLES;
+            return VARS;
         }//end method
 
         /**

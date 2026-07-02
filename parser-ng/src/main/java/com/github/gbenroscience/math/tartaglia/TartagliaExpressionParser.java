@@ -34,9 +34,9 @@ public class TartagliaExpressionParser {
         String RHS = expression.substring(1+expression.indexOf("="));
 
 
-        List<String> scanLHS = new MathScanner(LHS).scan();
+        List<String> scanLHS = new MathScanner(LHS, null).getScanner();
         Formula.simplify( scanLHS );
-        List<String> scanRHS = new MathScanner(RHS).scan();
+        List<String> scanRHS = new MathScanner(RHS, null).getScanner();
         Formula.simplify( scanRHS );
         scanLHS.add("=");
         scanLHS.addAll(scanRHS);
@@ -79,7 +79,7 @@ public class TartagliaExpressionParser {
                 if(!scanner.get(i).equals("+")&&!scanner.get(i).equals("-")&&!scanner.get(i).equals("=")&&
                         !scanner.get(i).equals(";")
                         &&!validNumber(scanner.get(i))&&!isVariableString(scanner.get(i))){
-                    MathScanner scan=new MathScanner(scanner.get(i));
+                    MathScanner scan=new MathScanner(scanner.get(i), null);
                      List<String> split=scan.splitStringAtFirstNumber(scanner.get(i));
                     if( validNumber( split.get(0) )&&isVariableString(split.get(1)) ){
                         scanner.remove(i);

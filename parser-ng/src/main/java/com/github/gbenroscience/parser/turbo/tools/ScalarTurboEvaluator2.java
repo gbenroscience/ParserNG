@@ -372,7 +372,13 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                 @Override
                 public MathExpression.EvalResult apply(double[] variables) {
                     try {
-                        Object result = finalGeneric.invokeExact(variables);
+                        Object result;
+                        if(variables != null && variables.length!=0){
+                            result = finalGeneric.invokeExact(variables);
+                        }else{
+                              result = finalGeneric.invokeExact();
+                        }
+                        
                         MathExpression.EvalResult res = new MathExpression.EvalResult();
                         if (result instanceof double[]) {
                             res.type = MathExpression.EvalResult.TYPE_VECTOR;

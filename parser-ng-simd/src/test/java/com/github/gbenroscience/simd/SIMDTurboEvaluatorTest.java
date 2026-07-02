@@ -226,24 +226,44 @@ public class SIMDTurboEvaluatorTest {
 
     }
 
- 
-
     @ParameterizedTest(name = "GELU Matrix Size: {0}x{0}")
     @ValueSource(ints = {20, 70, 100, 200})
     void testGelu(int sz) throws Throwable {
-        executeKernelBenchmark("gelu", sz);
+        executeKernelBenchmark("gelu", sz, 1);
     }
 
     @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
     @ValueSource(ints = {20, 70, 100, 200})
     void testSwiglu(int sz) throws Throwable {
-        executeKernelBenchmark("swiglu", sz);
+        executeKernelBenchmark("swiglu", sz, 2);
+    }
+
+    @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {20, 70, 100, 200})
+    void testGeglu(int sz) throws Throwable {
+        executeKernelBenchmark("geglu", sz, 2);
+    }
+    
+ @ParameterizedTest(name = "GeLU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {512, 1024})
+    void testGeluLarge(int sz) throws Throwable {
+        executeKernelBenchmark("gelu", sz, 1);
+    }
+        @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
+       @ValueSource(ints = {512, 1024})
+    void testGegluLarge(int sz) throws Throwable {
+        executeKernelBenchmark("geglu", sz, 2);
+    }
+        @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
+        @ValueSource(ints = {512, 1024})
+    void testSwigluLarge(int sz) throws Throwable {
+        executeKernelBenchmark("swiglu", sz, 2);
     }
 
     /**
      * Shared orchestration runner for manual micro-benchmarking without JMH.
      */
-    private void executeKernelBenchmark(String kernelName, int sz) throws Throwable {
+    private void executeKernelBenchmark(String kernelName, int sz, int arity) throws Throwable {
         MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
         SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
 
@@ -258,7 +278,7 @@ public class SIMDTurboEvaluatorTest {
         // 1. Manual Warm-up Phase
         // Forces C2 to compile the vector loops before we sample the clock
         int warmUpRuns = 3000;
-        FlatMatrixF[] inputs = new FlatMatrixF[]{in1, in2}; // Allocate once outside the timing track!
+        FlatMatrixF[] inputs = arity == 2 ? new FlatMatrixF[]{in1, in2} : new FlatMatrixF[]{in1}; // Allocate once outside the timing track!
         for (int i = 0; i < warmUpRuns; i++) {
             evaluator.applyMatrixKernel(inputs, out, kernelName);
         }
@@ -285,7 +305,6 @@ public class SIMDTurboEvaluatorTest {
         // Sanity check to prevent dead-code optimization tricks from discarding execution
         Assertions.assertNotNull(out);
     }
-
 
     void logDetails(MathExpression me, SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator, boolean active) {
         if (!active) {

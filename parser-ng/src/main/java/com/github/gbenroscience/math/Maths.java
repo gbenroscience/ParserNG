@@ -13,12 +13,23 @@ public class Maths {                       //3.14159265358979323846;
     public static BigDecimal PI
             = new BigDecimal("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651");
 
-    public static String PI() {
+    public static final String PI() {
         return "3.1415926535897932";
     }
 
+    private static final double P = 0.3275911;
+    private static final double A1 = 0.254829592;
+    private static final double A2 = -0.284496736;
+    private static final double A3 = 1.421413741;
+    private static final double A4 = -1.453152027;
+    private static final double A5 = 1.061405429;
+
     private static final double[] FACT_TABLE = new double[171];
     private static final double SQRT_2PI = Math.sqrt(2 * Math.PI);
+    
+    
+    
+    private static final double INV_SQRT_2 = 0.7071067811865475; // 1 / sqrt(2)
 
     static {
         FACT_TABLE[0] = 1.0;
@@ -169,8 +180,7 @@ public class Maths {                       //3.14159265358979323846;
     public static double antiLogToAnyBase(double num, double base) {
         return Math.pow(base, num);
     }
-    
-    
+
     public static double antiLog10(double num) {
         return Math.pow(10, num);
     }
@@ -1206,7 +1216,6 @@ public class Maths {                       //3.14159265358979323846;
         return atanh(1 / x);
     }
 
-    
     public static double sech(double x) {
         return 1.0 / Math.cosh(x);
     }
@@ -1217,8 +1226,8 @@ public class Maths {                       //3.14159265358979323846;
 
     public static double coth(double x) {
         return 1.0 / Math.tanh(x);
-    } 
-    
+    }
+
     /**
      * @param number The number
      * @param exponent The power. May be integer or floating point.
@@ -1331,7 +1340,6 @@ public class Maths {                       //3.14159265358979323846;
         return x * x * x;
     }
 
-
     /**
      * Developed by JIBOYE Oluwagbemiro Olaoluwa for the J2ME platform where no
      * proper method for calculating the natural logarithm of a number exists.
@@ -1421,6 +1429,79 @@ public class Maths {                       //3.14159265358979323846;
         }//end else if
 
     }//end method
+
+    public static double fastErf(double x) {
+        // Absolute value eliminates the negative branch completely
+        double absX = Math.abs(x);
+
+        double t = 1.0 / (1.0 + P * absX);
+
+        // Horner's scheme isolated for readability and ILP (Instruction-Level Parallelism)
+        double poly = (((((A5 * t + A4) * t + A3) * t + A2) * t + A1) * t);
+
+        double absErf = 1.0 - (poly * Math.exp(-absX * absX));
+
+        // Re-apply the original sign of x natively
+        return Math.copySign(absErf, x);
+    }
+
+    public static double erf(double x) {
+        return CodyMath.erf(x);
+    }
+    
+    
+    public static double erfc(double x) {
+        return CodyMath.erfc(x);
+    }
+
+    // Assumed to exist in your class:
+    // public static double erf(double x) { ... }
+    // public static double fastErf(double x) { ... }
+
+    /**
+     * Gaussian Error Linear Unit (GELU)
+     */
+    public static double gelu(double x) {
+        return 0.5 * x * (1.0 + erf(x * INV_SQRT_2));
+    }
+
+    /**
+     * Fast GELU utilizing your custom fastErf implementation
+     */
+    public static double fastGelu(double x) {
+        return 0.5 * x * (1.0 + fastErf(x * INV_SQRT_2));
+    }
+
+    /**
+     * Swish / SiLU Activation (Helper for SwiGLU)
+     */
+    public static double swish(double x) {
+        return x / (1.0 + Math.exp(-x));
+    }
+
+    // =========================================================================
+    // STANDARD BINARY FORMULATIONS (Two inputs: value path 'x', gate path 'y')
+    // =========================================================================
+
+    public static double geglu(double x, double y) {
+        return gelu(x) * y;
+    }
+
+    public static double swiglu(double x, double y) {
+        return swish(x) * y;
+    }
+
+    // =========================================================================
+    // UNARY FALLBACKS (Self-Gated variants if your arity is locked to 1)
+    // =========================================================================
+
+    public static double geglu(double x) {
+        return gelu(x) * x;
+    }
+
+    public static double swiglu(double x) {
+        return swish(x) * x;
+    }
 
     /**
      * We have code that computes the arctangent very accurately. The same

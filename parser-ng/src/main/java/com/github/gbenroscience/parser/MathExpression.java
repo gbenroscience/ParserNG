@@ -120,11 +120,7 @@ public class MathExpression implements Savable, Solvable {
     private FastCompositeExpression compiledTurbo = null;
     private boolean turboCompiled = false;
 
-    /**
-     * If set to true, MathExpression objects will automatically initialize
-     * undeclared variables to zero and store them.
-     */
-    private static boolean autoInitOn = true;
+
     /**
      * <b><i>
      * Set this attribute to true, if and only if the input into this system is
@@ -621,13 +617,11 @@ public class MathExpression implements Savable, Solvable {
                 int idxOfCloseBracForRot = Bracket.getComplementIndex(true, openBracIdx, code);
                 int eqIdx = code.indexOf("=", indexOfRot);
                 if (eqIdx != -1 && eqIdx < idxOfCloseBracForRot) {//rot(f,=,jjj,....) e.g equals index lies inside rot's bracket contents
-                    MathScanner sc = new MathScanner(code.substring(indexOfRot, idxOfCloseBracForRot + 1));
-                    sc.scan();
+                    MathScanner sc = new MathScanner(code.substring(indexOfRot, idxOfCloseBracForRot + 1), this);
                     errorLog.copyFrom(sc.errorLog);
                     sc.unmaskCommas();
                     code = processRotScenarios(sc.getScanner());
                 }
-
             }
             if (code.contains("=")) {
                 boolean success = Function.assignObject(code + ";", this);
@@ -689,14 +683,6 @@ public class MathExpression implements Savable, Solvable {
     public boolean isScannedAndOptimized() {
         return scanner != null && !scanner.isEmpty() && correctFunction && this != null;
     }//end method
-
-    public static void setAutoInitOn(boolean autoInitOn) {
-        MathExpression.autoInitOn = autoInitOn;
-    }
-
-    public static boolean isAutoInitOn() {
-        return autoInitOn;
-    }
 
     public FastCompositeExpression getCompiledTurbo() {
         return compiledTurbo;
@@ -770,24 +756,7 @@ public class MathExpression implements Savable, Solvable {
         whitespaceremover.add("");
         //Scanner operation
 
-        MathScanner opScanner = new MathScanner(expression);
-        opScanner.scan();
-        errorLog.copyFrom(opScanner.errorLog);
-        for (Variable v : opScanner.foundVariables) {
-            /**
-             * Do not use saveOrUpdate, so as not to overwrite the gains of
-             * assignment statements of same variables in same MathExpression.
-             * For example.. MathExpression m= new MathExpression("r=4;3*r");
-             * The assignment phase, runs first via
-             * Function.assignObject(assignmentStatement) and saves r as 4 in
-             * the registry of this MathExpression. The scanner satge detects
-             * `r` in the statement: 3*r, and sets r as a Variable to 0 and
-             * stores in MathScanner.foundVariables. If we use
-             * registry.saveOrUpdate(v), it will overwrite the value of r stored
-             * in the assignment pass.
-             */
-            registry.saveIfNotExists(v);
-        }
+        MathScanner opScanner = new MathScanner(expression, this);
 
         this.commaAlias = opScanner.commaAlias;
         scanner = opScanner.getScanner();
@@ -2005,7 +1974,7 @@ public class MathExpression implements Savable, Solvable {
                             errorLog.info(err);
                             throw new RuntimeException(err);
                         }
-
+             
                         int valuesOnStack = ptr + 1;
 
                         if (arity == 0) {
@@ -2254,10 +2223,7 @@ public class MathExpression implements Savable, Solvable {
                 return; // Hot path exit
             }
 
-            // =========================================================================
-            // 📂 MATRIX AND MIXED-TYPE RESOLUTION PATH
-            // Only paid when at least one operand is not a pure scalar node.
-            // =========================================================================
+
             Function leftFun = left.type == EvalResult.TYPE_STRING ? FunctionManager.lookUp(left.textRes) : null;
             Function rightFun = right.type == EvalResult.TYPE_STRING ? FunctionManager.lookUp(right.textRes) : null;
 
@@ -2318,7 +2284,7 @@ public class MathExpression implements Savable, Solvable {
                         left.wrap(fName);
                         left.matrix = m;
                     } else {
-                        throw new IllegalArgumentException("Unsupported types for '*': left=" + leftType + ", right=" + rightType);
+                        throw new IllegalArgumentException("Unsupported types for '*': left=" + leftType + ", right=" + rightType+", "+expression+", scanner: "+scanner);
                     }
                     break;
 
@@ -3663,7 +3629,8 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
             testExpression("sqrt(abs(-16))", 4.0, "Nested: sqrt(abs(-16))", 1e-10);
 
             // Test 6: Variable substitution
-            MathExpression me = new MathExpression("x=5;2*x+3");
+            MathExpression me = new MathExpression("x=5;2*x+3");System.out.println("sc->"+me.scanner);
+            me.registry.dumpVars();
             double result = Double.parseDouble(me.solve());
             testValue(result, 13.0, "Variable: x=5; 2*x+3", 1e-10);
 
@@ -3730,6 +3697,15 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
     public static void main(String... args) {
 
+        System.out.println("gelu(3): -->> " + new MathExpression("gelu(3)").solve());
+        System.out.println("swiglu(4): -->> " + new MathExpression("swiglu(4)").solve());
+        System.out.println("swiglu(4,9): -->> " + new MathExpression("swiglu(4,9)").solve());
+        System.out.println("x=2;y=4;swiglu(x,y): -->> " + new MathExpression("x=2;y=4;swiglu(x,y)").solve());
+        System.out.println("geglu(3): -->> " + new MathExpression("geglu(3)").solve());
+        System.out.println("geglu(3,8): -->> " + new MathExpression("geglu(3,8)").solve());
+        System.out.println("erf(2): -->> " + new MathExpression("erf(2)").solve());
+        System.out.println("actual-erf(2): -->> " + new MathExpression("(2.0/sqrt(PI))*intg(@(x)(exp(-1*x^2)),0,2)").solve());
+        System.out.println("fast_gelu(3): -->> " + new MathExpression("fast_gelu(3)").solve());
         Test.main(args);
         Test_Strength_Reduction.main(args);
         MathExpression mathy = new MathExpression("x=12;sin(x-2)+cos(x-2)");
@@ -3868,7 +3844,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
         System.out.println(new MathExpression("M=@(x)7*x^2;M(2)").solve());
         System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
-        MathExpression printer = new MathExpression("print(anon9,C)");
+        MathExpression printer = new MathExpression("print(anon9,anon2,C)");
         System.out.println("anon9: " + FunctionManager.lookUp("anon9"));
         MathExpression mee = new MathExpression("sum(2,3,sort(3,0,1,2))");
 

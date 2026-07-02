@@ -2,113 +2,97 @@
  * Copyright 2026 GBEMIRO.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
  */
 package com.github.gbenroscience.parser;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.function.Predicate;
 
+/**
+ * A highly optimized, customizable Lexical Analyzer (Scanner) for ParserNG.
+ * <p>
+ * This scanner breaks down mathematical expressions and source code strings into
+ * distinct tokens using a longest-match (Max Munch) prefix strategy. It supports
+ * static token dictionaries, dynamic identifier matching (via Predicates), and
+ * optional whitespace stripping.
+ *
+ * @author GBEMIRO
+ */
 public class Scanner {
 
     private final String input;
     private final boolean includeTokensInOutput;
+    private final boolean ignoreWhitespace;
     private final Map<Character, List<String>> tokensByFirstChar;
+    private final Predicate<String> dynamicTokenMatcher;
 
-    /**
-     * Standard Constructor
-     *
-     * @param input
-     * @param includeTokensInOutput
-     * @param splitterTokens
-     */
+    // =========================================================================
+    // LEGACY CONSTRUCTORS (100% Backward Compatible)
+    // =========================================================================
+
     public Scanner(String input, boolean includeTokensInOutput, String... splitterTokens) {
-        this(input, includeTokensInOutput, combine(splitterTokens));
+        this(new Builder(Objects.requireNonNull(input)).includeTokens(includeTokensInOutput).addTokens(splitterTokens));
     }
 
-    /**
-     * Constructor for two arrays/varargs
-     *
-     * @param input
-     * @param includeTokensInOutput
-     * @param moreTokens
-     * @param tokens
-     */
     public Scanner(String input, boolean includeTokensInOutput, String[] moreTokens, String... tokens) {
-        this(input, includeTokensInOutput, combine(moreTokens, tokens));
+        this(new Builder(Objects.requireNonNull(input)).includeTokens(includeTokensInOutput).addTokens(moreTokens).addTokens(tokens));
     }
 
-    /**
-     * Constructor for three arrays/varargs
-     *
-     * @param input
-     * @param includeTokensInOutput
-     * @param splitterTokens
-     * @param splitterTokens1
-     * @param splitterTokens2
-     */
     public Scanner(String input, boolean includeTokensInOutput, String[] splitterTokens, String[] splitterTokens1, String... splitterTokens2) {
-        this(input, includeTokensInOutput, combine(splitterTokens, splitterTokens1, splitterTokens2));
+        this(new Builder(Objects.requireNonNull(input)).includeTokens(includeTokensInOutput)
+                .addTokens(splitterTokens, splitterTokens1, splitterTokens2));
     }
 
-    // --- Private logic ---
-    /**
-     * Internal Master Constructor
-     */
-    private Scanner(String input, boolean includeTokensInOutput, List<String> allTokens) {
-        this.input = input;
-        this.includeTokensInOutput = includeTokensInOutput;
+    public Scanner(String input, boolean includeTokensInOutput, Predicate<String> dynamicTokenMatcher, String... splitterTokens) {
+        this(new Builder(Objects.requireNonNull(input)).includeTokens(includeTokensInOutput)
+                .withDynamicMatcher(dynamicTokenMatcher).addTokens(splitterTokens));
+    }
+
+    public Scanner(String input, boolean includeTokensInOutput, Predicate<String> dynamicTokenMatcher,
+                   String[] moreTokens, String... tokens) {
+        this(new Builder(Objects.requireNonNull(input)).includeTokens(includeTokensInOutput)
+                .withDynamicMatcher(dynamicTokenMatcher).addTokens(moreTokens).addTokens(tokens));
+    }
+
+    public Scanner(String input, boolean includeTokensInOutput, Predicate<String> dynamicTokenMatcher,
+                   String[] splitterTokens, String[] splitterTokens1, String... splitterTokens2) {
+        this(new Builder(Objects.requireNonNull(input)).includeTokens(includeTokensInOutput)
+                .withDynamicMatcher(dynamicTokenMatcher)
+                .addTokens(splitterTokens, splitterTokens1, splitterTokens2));
+    }
+
+    // =========================================================================
+    // CORE BUILDER INTEGRATION
+    // =========================================================================
+    private Scanner(Builder builder) {
+        this.input = builder.input;
+        this.includeTokensInOutput = builder.includeTokensInOutput;
+        this.ignoreWhitespace = builder.ignoreWhitespace;
+        this.dynamicTokenMatcher = builder.dynamicTokenMatcher;
 
         Map<Character, List<String>> map = new HashMap<>();
-        for (String token : allTokens) {
+        for (String token : builder.allTokens) {
             if (token != null && !token.isEmpty()) {
-                char first = token.charAt(0);
-                if (!map.containsKey(first)) {
-                    map.put(first, new ArrayList<String>());
-                }
-                map.get(first).add(token);
+                map.computeIfAbsent(token.charAt(0), k -> new ArrayList<>()).add(token);
             }
         }
 
-        // Sort each group once during initialization
-        Comparator<String> lengthDesc = new Comparator<String>() {
-            @Override
-            public int compare(String a, String b) {
-                return Integer.compare(b.length(), a.length());
-            }
-        };
-
+        // Longest match first
         for (List<String> list : map.values()) {
-            Collections.sort(list, lengthDesc);
+            list.sort((a, b) -> Integer.compare(b.length(), a.length()));
         }
 
         this.tokensByFirstChar = Collections.unmodifiableMap(map);
     }
 
-    private static List<String> combine(String[]... arrays) {
-        List<String> combined = new ArrayList<>();
-        for (String[] array : arrays) {
-            if (array != null) {
-                combined.addAll(Arrays.asList(array));
-            }
-        }
-        return combined;
-    }
+    // =========================================================================
+    // SCANNER LOGIC
+    // =========================================================================
 
+    /**
+     * Parses the input string into tokens and literals.
+     * @return A sequential List of parsed string segments.
+     */
     public List<String> scan() {
         List<String> output = new ArrayList<>();
         int cursor = 0;
@@ -117,104 +101,140 @@ public class Scanner {
 
         while (cursor < length) {
             char currentChar = input.charAt(cursor);
-            List<String> candidates = tokensByFirstChar.get(currentChar);
-            if (candidates == null) {
-                candidates = Collections.emptyList();
+
+            // 1. Whitespace Fast-Forwarding
+            if (ignoreWhitespace && Character.isWhitespace(currentChar)) {
+                flushLiteral(output, literalStart, cursor);
+
+                while (cursor < length && Character.isWhitespace(input.charAt(cursor))) {
+                    cursor++;
+                }
+
+                literalStart = cursor;
+                continue;
             }
 
+            // 2. Static Token Matching
+            List<String> candidates = tokensByFirstChar.getOrDefault(currentChar, Collections.emptyList());
             boolean matched = false;
+
             for (String token : candidates) {
                 int tokenLen = token.length();
-                int remaining = length - cursor;
-
-                if (tokenLen <= remaining
-                        && input.regionMatches(cursor, token, 0, tokenLen)) {
-
-                    // Add literal text before the token
-                    if (cursor > literalStart) {
-                        output.add(input.substring(literalStart, cursor));
-                    }
-
-                    // Add the token if requested
+                if (tokenLen <= length - cursor && input.regionMatches(cursor, token, 0, tokenLen)) {
+                    flushLiteral(output, literalStart, cursor);
                     if (includeTokensInOutput) {
                         output.add(token);
                     }
-
-                    // Advance past the token
                     cursor += tokenLen;
                     literalStart = cursor;
                     matched = true;
-                    break; // Longest match wins
+                    break;
                 }
             }
 
-            // No match → advance one char (becomes part of literal)
+            // 3. Dynamic Identifier Matching
+            if (!matched && Character.isJavaIdentifierStart(currentChar)) {
+                int end = cursor + 1;
+                while (end < length && Character.isJavaIdentifierPart(input.charAt(end))) {
+                    end++;
+                }
+                String potentialWord = input.substring(cursor, end);
+                if (dynamicTokenMatcher.test(potentialWord)) {
+                    flushLiteral(output, literalStart, cursor);
+                    output.add(potentialWord);
+                    cursor = end;
+                    literalStart = cursor;
+                    continue;
+                }
+            }
+
             if (!matched) {
                 cursor++;
             }
         }
 
-        // Add any trailing literal text
-        if (literalStart < length) {
-            output.add(input.substring(literalStart, length));
-        }
-
+        flushLiteral(output, literalStart, length);
         return output;
     }
 
-    public static void main(String[] args) {
-
-        String in
-                = "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+"
-                + "(28+32+11-9E12+sin(3.2E9/cos(-3))-sinsinh(5)+sinh(8)+zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm-zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm";
-        int N = 1000;
-        String[] tokens = new String[]{"sinh", "+", "-", ")", "(", "sin", "cos", "/", "zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm-zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm"};
-        CustomScanner cs = new CustomScanner(in, true, tokens);
-        Scanner sc = new Scanner(in, true, tokens);
-        long start = System.nanoTime();
-        List<String> csOut = null;
-        for (int i = 0; i < N; i++) {
-            csOut = cs.scan();
+    private void flushLiteral(List<String> output, int start, int end) {
+        if (end > start) {
+            String literal = input.substring(start, end);
+            if (!ignoreWhitespace || !literal.trim().isEmpty()) {
+                output.add(literal);
+            }
         }
-        long duration = (System.nanoTime() - start) / N;
-        System.out.println("Old Scanner parse in>>> " + (duration) + " ns");
-
-        System.out.println("Output>>>\n " + csOut);
-
-        start = System.nanoTime();
-        List<String> scOut = null;
-        for (int i = 0; i < N; i++) {
-            scOut = sc.scan();
-        }
-        duration = (System.nanoTime() - start) / N;
-        System.out.println("New Scanner parse in>>> " + (duration) + " ns");
-
-        System.out.println("Output>>>\n " + scOut);
-
     }
 
+    // =========================================================================
+    // BUILDER
+    // =========================================================================
+
+    public static class Builder {
+        private final String input;
+        private boolean includeTokensInOutput = true;
+        private boolean ignoreWhitespace = false;
+        private Predicate<String> dynamicTokenMatcher = s -> false;
+        private final List<String> allTokens = new ArrayList<>();
+
+        public Builder(String input) {
+            this.input = Objects.requireNonNull(input, "Input string cannot be null");
+        }
+
+        public Builder includeTokens(boolean include) {
+            this.includeTokensInOutput = include;
+            return this;
+        }
+
+        public Builder ignoreWhitespace(boolean ignore) {
+            this.ignoreWhitespace = ignore;
+            return this;
+        }
+
+        public Builder withDynamicMatcher(Predicate<String> matcher) {
+            this.dynamicTokenMatcher = matcher != null ? matcher : s -> false;
+            return this;
+        }
+
+        public Builder addTokens(String[]... tokenArrays) {
+            for (String[] array : tokenArrays) {
+                if (array != null) {
+                    this.allTokens.addAll(Arrays.asList(array));
+                }
+            }
+            return this;
+        }
+
+        public Scanner build() {
+            return new Scanner(this);
+        }
+    }
+    
+    // =========================================================================
+    // TESTING
+    // =========================================================================
+
+    public static void main(String[] args) {
+        // Test expression with spaces and valid/invalid identifiers
+        String testInput = "print( anon9 , _anon2 , $C )";
+        String[] standardTokens = {"print", "(", ")", ","};
+
+        // Matches 'anon' followed by digits OR starts with underscore
+        Predicate<String> dynamicRules = word -> 
+            (word.startsWith("anon") && word.substring(4).matches("\\d+")) || word.startsWith("_");
+
+        // 1. Using Legacy Constructor (Will keep spaces as literals)
+        Scanner scLegacy = new Scanner(testInput, true, dynamicRules, standardTokens);
+        System.out.println("Legacy Output: " + scLegacy.scan());
+        
+        // 2. Using the New Builder (Ignoring whitespace)
+        Scanner scBuilder = new Scanner.Builder(testInput)
+                .includeTokens(true)
+                .ignoreWhitespace(true)
+                .withDynamicMatcher(dynamicRules)
+                .addTokens(standardTokens)
+                .build();
+        
+        System.out.println("Builder Output: " + scBuilder.scan());
+    }
 }

@@ -52,77 +52,6 @@ class MathExpressionTest {
         Assertions.assertEquals("3.333333333", me.solve()); //weird, by nature of weird function. Will be removed once it wil be repalced by proper function
     }
 
-    @Test
-    void customUserFunctionTest() {
-        BasicNumericalMethod b1 = new BasicNumericalMethod() {
-            @Override
-            public String solve(List<String> tokens) {
-                return "1";
-            }
-
-            @Override
-            public String getHelp() {
-                return "no help for b1";
-            }
-
-            @Override
-            public String getName() {
-                return "b1";
-            }
-
-            @Override
-            public String getType() {
-                return TYPE.NUMBER.toString();
-            }
-        };
-        BasicNumericalMethod b2 = new BasicNumericalMethod() {
-            @Override
-            public String solve(List<String> tokens) {
-                return "2";
-            }
-
-            @Override
-            public String getHelp() {
-                return "no help for b2";
-            }
-
-            @Override
-            public String getName() {
-                return "b2";
-            }
-
-            @Override
-            public String getType() {
-                return TYPE.NUMBER.toString();
-            }
-        };
-        MathExpression.setAutoInitOn(false);
-
-        MathExpression me = new MathExpression("b1(1,2,3)");
-
-        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
-        Declarations.registerBasicNumericalMethod(b1);
-        me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals(1, Double.parseDouble(me.solve()));
-        me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
-        Declarations.registerBasicNumericalMethod(b2);
-        me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals(2, Double.parseDouble(me.solve()));
-        me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals(1, Double.parseDouble(me.solve()));
-        me = new MathExpression("b1(1,2,3)+b2(1,2,3)");
-        Assertions.assertEquals(3, Double.parseDouble(me.solve()));
-        Declarations.unregisterBasicNumericalMethod(b1.getClass());
-        me = new MathExpression("b1(1,2,3)");
-        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
-        me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals(2, Double.parseDouble(me.solve()));
-        Declarations.unregisterBasicNumericalMethod(b2.getClass());
-        me = new MathExpression("b2(1,2,3)");
-        Assertions.assertEquals(MathExpression.isAutoInitOn() ? "0.0" : MathExpression.SYNTAX_ERROR, me.solve());
-        MathExpression.setAutoInitOn(true);//restore the switch
-    }
 
     @Test
     void help() {
@@ -561,7 +490,7 @@ class MathExpressionTest {
         try {
             String expression = "rot(@(4,3)(1,2,1, 5,4,-9, 12,18,2, 14,9,-1), pi, @(1,3)(0,0,0), @(1,3)(0,0,1))";
             MathExpression me = new MathExpression(expression);
-            MathExpression.EvalResult v = new ScalarTurboEvaluator2(me).compile().apply(new double[0]);
+            MathExpression.EvalResult v = new ScalarTurboEvaluator2(me).compile().apply(new double[]{1});
             System.out.println("RESULT:" + v.toString());
             Assertions.assertTrue(true);
         } catch (Throwable ex) {

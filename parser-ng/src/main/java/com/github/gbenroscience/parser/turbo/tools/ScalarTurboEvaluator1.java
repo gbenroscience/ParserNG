@@ -42,7 +42,6 @@ import com.github.gbenroscience.parser.methods.MethodRegistry;
 import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.Utils;
-import com.github.gbenroscience.util.VariableManager;
 import com.github.gbenroscience.util.io.ByteArrayBuilder;
 import java.lang.invoke.*;
 import java.util.*;
@@ -125,6 +124,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             "acot_grad", "sec_rad", "fact", "acoth", "atanh",
             "log", "tan_grad", "tan-¹_grad", "coth-¹",
             "min", "log-¹", "cot-¹_grad", "sech-¹", "pow",
+            "gelu", "swiglu", "geglu", "fast_gelu", "erf",
             "csc_deg", "cos-¹_rad", "tan_rad", "max", "sin-¹_deg",
             "cot-¹_deg", "alog", "acsc_rad", "abs",
             "sin-¹_rad", "tan_deg", "lg", "sec_deg", "atan_deg",
@@ -162,7 +162,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         this.willFoldConstants = me.isWillFoldConstants();
         slots = me.getSlots();
         registry = me.getRegistry().clone();
-        me.copyErrorLogTo(errorLog); 
+        me.copyErrorLogTo(errorLog);
     }
 
 // In ExpressionSolver.getNextResult():
@@ -1014,8 +1014,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     res = (double) mh.invokeExact(vars);
                 } else if (returnType == MathExpression.EvalResult.class) {
                     MathExpression.EvalResult er = (MathExpression.EvalResult) mh.invokeExact(vars);
-                    res = (er.type == MathExpression.EvalResult.TYPE_VECTOR) ? er.vector : 
-                            (er.type == MathExpression.EvalResult.TYPE_MATRIX ? er.matrix.getFlatArray() : er.scalar);
+                    res = (er.type == MathExpression.EvalResult.TYPE_VECTOR) ? er.vector
+                            : (er.type == MathExpression.EvalResult.TYPE_MATRIX ? er.matrix.getFlatArray() : er.scalar);
                 } else {
                     // Fallback for types that aren't primitives
                     res = mh.invoke(vars);
@@ -2063,6 +2063,22 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             case "cube":
                 mh = LOOKUP.findStatic(ScalarTurboEvaluator1.class, "cube", MT_DOUBLE_D);
                 break;
+            case "erf":
+                mh = LOOKUP.findStatic(Maths.class, "erf", MT_DOUBLE_D);
+                break;
+            case "gelu":
+                mh = LOOKUP.findStatic(Maths.class, "gelu", MT_DOUBLE_D);
+                break;
+            case "fast_gelu":
+                mh = LOOKUP.findStatic(Maths.class, "fastGelu", MT_DOUBLE_D);
+                break;
+            case "swiglu":
+                mh = LOOKUP.findStatic(Maths.class, "swiglu", MT_DOUBLE_D);
+                break;
+            case "geglu":
+                mh = LOOKUP.findStatic(Maths.class, "geglu", MT_DOUBLE_D);
+                break;
+
             default:
                 throw new UnsupportedOperationException("No fast-path for: " + base);
         }
@@ -2156,6 +2172,10 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 return LOOKUP.findStatic(Math.class, "min", MT_DOUBLE_DD);
             case "max":
                 return LOOKUP.findStatic(Math.class, "max", MT_DOUBLE_DD);
+            case "geglu":
+                return LOOKUP.findStatic(Maths.class, "geglu", MT_DOUBLE_DD);
+            case "swiglu":
+                return LOOKUP.findStatic(Maths.class, "swiglu", MT_DOUBLE_DD);
             case "log":
                 // Fix: Binary log is usually log(x) / log(base)
                 // If your Maths library has a log(a, b) method, point to it here.

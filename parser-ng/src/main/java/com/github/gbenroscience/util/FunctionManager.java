@@ -7,6 +7,7 @@ package com.github.gbenroscience.util;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.STRING;
 import com.github.gbenroscience.parser.TYPE;
 import com.github.gbenroscience.parser.Variable;
 import com.github.gbenroscience.parser.turbo.QuickTime;
@@ -42,26 +43,29 @@ public class FunctionManager {
      * full name of the function which is a combination of the name of its
      * dependent variable and its independent variables enclosed in circular
      * parentheses. e.g in y = x^3, either y or y(x) may be supplied.
-     * @return true if a Function exists by the name supplied, but it is not a matrix
+     * @return true if a Function exists by the name supplied, but it is not a
+     * matrix
      */
     public static boolean containsAlgebraicFunction(String fName) {
         Function f = lookUp(fName);
         return f != null && f.getType() != TYPE.MATRIX;
     }//end method
-/**
- * 
- * @param fName
- * @return true if the function exists and it is matrix type
- */
+
+    /**
+     *
+     * @param fName
+     * @return true if the function exists and it is matrix type
+     */
     public static boolean containsMatrix(String fName) {
         Function f = lookUp(fName);
         return f != null && f.getType() == TYPE.MATRIX;
     }//end method
-/**
- * 
- * @param fName
- * @return true if the function exists and is either Matrix or Algebraic
- */
+
+    /**
+     *
+     * @param fName
+     * @return true if the function exists and is either Matrix or Algebraic
+     */
     public static boolean containsAny(String fName) {
         Function f = lookUp(fName);
         return f != null;
@@ -175,8 +179,8 @@ public class FunctionManager {
      */
     public static Function add(String expression) {
         try {
-            
-            Function f = new Function(expression); 
+
+            Function f = new Function(expression);
             String name = f.getName();
             FUNCTIONS.put(name, f);
             Function fn = FUNCTIONS.get(name);
@@ -308,6 +312,21 @@ public class FunctionManager {
             }//end for
         }
         return count;
+    }
+
+    public static final boolean isAnonymousFormat(String fName) {
+        if (fName == null || fName.length() < 5 || !fName.startsWith("anon")) {
+            return false;
+        }
+
+        for (int i = 4; i < fName.length(); i++) {
+            char c = fName.charAt(i);
+            if (c < '0' || c > '9') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

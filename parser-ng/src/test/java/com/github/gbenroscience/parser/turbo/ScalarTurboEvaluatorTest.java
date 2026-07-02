@@ -85,7 +85,7 @@ public class ScalarTurboEvaluatorTest {
         // Compile to turbo
         FastCompositeExpression compiled = interpreted.compileTurbo();
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
 
         Assertions.assertEquals(ev.scalar, evr.scalar);
@@ -104,7 +104,7 @@ public class ScalarTurboEvaluatorTest {
         // Compile to turbo
         FastCompositeExpression compiled = interpreted.compileTurbo();
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
 
         Assertions.assertEquals(ev.scalar, evr.scalar);
@@ -146,7 +146,7 @@ public class ScalarTurboEvaluatorTest {
         // Compile to turbo
         FastCompositeExpression compiled = sc.compile();//interpreted.compileTurbo();
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
         System.out.println("tur: " + evr);
 
@@ -189,7 +189,7 @@ public class ScalarTurboEvaluatorTest {
         // Compile to turbo
         FastCompositeExpression compiled = interpreted.compileTurbo();
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
         System.out.println("std: " + ev);
         System.out.println("tur: " + evr);
@@ -210,7 +210,7 @@ public class ScalarTurboEvaluatorTest {
         // Compile to turbo
         FastCompositeExpression compiled = interpreted.compileTurbo();
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
         System.out.println("tur: " + evr);
 
@@ -282,7 +282,7 @@ public class ScalarTurboEvaluatorTest {
         FastCompositeExpression compiled = interpreted.compileTurbo();
 
         double[] v = interpreted.solveGeneric().vector;
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         double[] v1 = compiled.apply(vars).vector;
 
         Assertions.assertArrayEquals(v, v1);
@@ -330,7 +330,12 @@ public class ScalarTurboEvaluatorTest {
         String expr = "x*sin(x)+2";
 
         MathExpression interpreted = new MathExpression(expr, false);
+        System.out.println("---------------------------------------------------");
+        interpreted.getRegistry().dumpVars();
+        System.out.println("scanner: "+interpreted.getScanner());
+        System.out.println("---------------------------------------------------");
         int xSlot = interpreted.getVariable("x").getFrameIndex();
+        interpreted.getErrorLog().print();
 
         double[] vars = new double[3];
         vars[xSlot] = 2.5;
@@ -392,7 +397,7 @@ public class ScalarTurboEvaluatorTest {
 
         MathExpression interpreted = new MathExpression(expr, false);
 
-        double[] vars = new double[0];
+        double[] vars = new double[1];
 
         double[] v = interpreted.solveGeneric().vector;
         TurboExpressionEvaluator tee = TurboEvaluatorFactory.getCompiler(interpreted);
@@ -403,12 +408,9 @@ public class ScalarTurboEvaluatorTest {
 
     @Test
     public void testTartaglia() throws Throwable {
-
         String expr = "t_root(@(x)3*x^3-4*x-18)";
-
         MathExpression interpreted = new MathExpression(expr, false);
-
-        double[] vars = new double[0];
+        double[] vars = new double[1];
 
         double[] v = interpreted.solveGeneric().vector;
         TurboExpressionEvaluator tee = TurboEvaluatorFactory.getCompiler(interpreted);

@@ -31,8 +31,7 @@ import static com.github.gbenroscience.parser.TYPE.MATRIX;
 import static com.github.gbenroscience.parser.TYPE.NUMBER;
 import static com.github.gbenroscience.parser.TYPE.VECTOR;
 import com.github.gbenroscience.util.ErrorLog;
-import java.util.function.Consumer;
-import java.util.function.UnaryOperator;
+import java.util.function.Predicate;
 
 /**
  *
@@ -65,13 +64,12 @@ public class MathScanner {
      * Contains the scanned expression
      */
     private List<String> scanner = new ArrayList<>();
-    List<Variable> foundVariables = new ArrayList<>();
 
     /**
      *
      * @param scannerInput the input of this Scanner object
      */
-    public MathScanner(String scannerInput) {
+    public MathScanner(String scannerInput, MathExpression me) {
 
         //±–
         /**
@@ -122,6 +120,8 @@ public class MathScanner {
 
         DataSetFormatter dsf = new DataSetFormatter(scannerInput);
         this.scannerInput = dsf.getFormattedDataSet();
+
+        scan(me);
 
     }
 
@@ -513,10 +513,20 @@ public class MathScanner {
      * Split the {@link MathScanner#scannerInput} String on the operators.
      */
     public void splitStringOnMethods_Variables_And_Operators() {
-        Scanner cs = new Scanner(scannerInput, true, VariableManager.VARIABLES.keySet().toArray(new String[0]), Method.getAllFunctions(), operators);
-
-        scanner = cs.scan();
-
+        
+             Predicate<String> dynamicRules = word -> 
+            (FunctionManager.isAnonymousFormat(word)) || word.startsWith("_");
+          Scanner csBuilder = new Scanner.Builder(scannerInput)
+                .includeTokens(true)
+                .ignoreWhitespace(false)
+                .withDynamicMatcher(dynamicRules)
+                .addTokens(VariableManager.VARIABLES.keySet().toArray(new String[0]))
+                .addTokens(Method.getAllFunctions())
+                .addTokens(operators)
+                .build();
+        
+        
+        scanner = csBuilder.scan();
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
 
@@ -647,7 +657,6 @@ public class MathScanner {
 // matrix_mul,(,@,(x),log(x,2),4,8)
                 int close = Bracket.getComplementIndex(true, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
-                //IF THINGS GO BAD, UNCOMMENT HERE---2 extractFunctionStringFromExpressionForMatrixMethods(list);
                 if (list.isEmpty()) {
                     parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
@@ -658,9 +667,7 @@ public class MathScanner {
 // root,(,@,(x),log(x,2),4,2,5)
                 int close = Bracket.getComplementIndex(true, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
-                // System.print.println("list: " + list);
-                //IF THINGS GO BAD, UNCOMMENT HERE---3  RootFinder.extractFunctionStringFromExpression(list);
-
+              
                 if (list.isEmpty()) {
                     parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
@@ -710,8 +717,10 @@ public class MathScanner {
      * varname(expr..). Rather, he/she must separate variables from parentheses
      * using the multiplication operator.
      *
+     * @param me
+     *
      */
-    public void validateInputAfterSplitOnMethodsAndOps() {
+    public void validateInputAfterSplitOnMethodsAndOps(MathExpression me) {
         for (int i = 0; i < scanner.size(); i++) {
             try {
 
@@ -740,13 +749,12 @@ public class MathScanner {
                     i++;
                 }//end if
                 else if ((isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))) && canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) {
-                    if (MathExpression.isAutoInitOn()) {
+                    System.out.println("tkn: " + scanner.get(i));
+                    if (me != null || VariableManager.lookUp(scanner.get(i)) != null) {
                         scanner.add(i + 1, "*");
                         i++;
                     } else {
-
                         parser_Result = ParserResult.UNDEFINED_ARG;
-
                         setRunnable(false);
                         errorLog.info(scanner.get(i) + " is an undefined variable. Set MathExpression.setAutoInitOn to true to use a variable without defining it");
                     }
@@ -798,7 +806,7 @@ public class MathScanner {
                     return false;
                 }
             }
-            if(isVariableString(token) && !Method.isDefinedMethod(token)){
+            if (isVariableString(token) && !Method.isDefinedMethod(token)) {
                 return false;
             }
         }
@@ -831,7 +839,7 @@ public class MathScanner {
                     int argStart = -1;//the start of the first argument
 
                     int argCount = 0;
-                    boolean allArgsAreVariableExpressions = true;
+                   boolean allArgsAreVariableExpressions = true;
                     boolean allArgsAreConstExpressions = true;
 
                     List<List<String>> argVectors = new ArrayList<>();
@@ -847,12 +855,12 @@ public class MathScanner {
                         } else if (cToken.equals(")")) {
                             if (j == closeBracOfFunctionCall) {
                                 //capture arg here
-                                List<String>l = new ArrayList<>(scanner.subList(argStart+1, j));
-                               /* for(int k=0;k<l.size();k++){
+                                List<String> l = new ArrayList<>(scanner.subList(argStart + 1, j));
+                                /* for(int k=0;k<l.size();k++){
                                     if(l.get(k).equals(commaAlias))
                                     l.set(k, ",");
                                 }*/
-                                argVectors.add(l); 
+                                argVectors.add(l);
                                 if (isConstExpr(argStart, j)) {
                                     allArgsAreVariableExpressions = false;
                                 } else {
@@ -862,12 +870,12 @@ public class MathScanner {
                             }
                         } else if (cToken.equals(commaAlias)) {
                             //capture arg here
-                              List<String>l = new ArrayList<>(scanner.subList(argStart+1, j));
-                                /*for(int k=0;k<l.size();k++){
+                            List<String> l = new ArrayList<>(scanner.subList(argStart + 1, j));
+                            /*for(int k=0;k<l.size();k++){
                                     if(l.get(k).equals(commaAlias))
                                     l.set(k, ",");
                                 }*/
-                                argVectors.add(l); 
+                            argVectors.add(l);
                             if (isConstExpr(argStart + 1, j)) {
                                 allArgsAreVariableExpressions = false;
                             } else {
@@ -881,7 +889,7 @@ public class MathScanner {
                     if (argCount != arity) {
                         throw new RuntimeException("Function(" + f.getName() + " requires `" + arity + "` parameters, but " + argCount + " parameters were supplied!");
                     }
-                     //   System.out.println("allArgsAreConstExpressions: " + allArgsAreConstExpressions+", for args----\n"+argVectors);
+                    //   System.out.println("allArgsAreConstExpressions: " + allArgsAreConstExpressions+", for args----\n"+argVectors);
                     //f(x,y,z)=sin(x)+cos(y-3*z)+5*z
                     if (allArgsAreConstExpressions) {
                         //g(x,y,z)=3*x+f(3,5,2) --- the f(3,5,2) portion will be treated as a function call with default values being assigned to x and y.
@@ -913,13 +921,13 @@ public class MathScanner {
                         //g(x,y,z)=3*x+f(3,5,2) --- the f(3,5,2) portion will be treated as a function call with default values being assigned to x and y.
 //                        System.out.println("textual-input: "+scannerInput);
 //                        System.out.println("fn: "+f.getMathExpression().getExpression());
-                        
+
                         List<String> scan = Function.transformScan(f, argVectors);
 //                        System.out.println("scanner before--\n" + scanner);
 //                        System.out.println("scan--\n" + scan);
                         scanner.subList(i, closeBracOfFunctionCall + 1).clear();
                         scanner.addAll(i, scan);
-                      //  System.out.println("scanner after--\n" + scanner);
+                        //  System.out.println("scanner after--\n" + scanner);
                     }
 
                 }
@@ -1111,10 +1119,10 @@ public class MathScanner {
      * error minor code to concatenate the - and the 2.873 and so on.
      *
      */
-    public List<String> scan() {
+    private final List<String> scan(MathExpression me) {
         VariableManager varMan = new VariableManager();
         splitStringOnMethods_Variables_And_Operators();
-        validateInputAfterSplitOnMethodsAndOps();
+        validateInputAfterSplitOnMethodsAndOps(me);
 
         /*
          * Re-build the negative numbers in a statistical
@@ -1198,28 +1206,62 @@ public class MathScanner {
                 parser_Result = ParserResult.STRANGE_INPUT;
                 setRunnable(false);
             }
-            if (MathExpression.isAutoInitOn()) {
-                String tk = scanner.get(i);
-                if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(tk)
-                        && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)) {
-                    varMan.parseCommand(tk + "=0.0;");
-                    foundVariables.add(new Variable(tk, 0));
-                }//end if
-                else if (i == 0 && sz == 1 && Variable.isVariableString(tk)) {
-                    if (!FunctionManager.containsAny(tk) && !varMan.contains(tk)) {
-                        varMan.parseCommand(tk + "=0.0;");
-                        foundVariables.add(new Variable(tk, 0));
+
+            String tk = scanner.get(i);
+            if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1))
+                    && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)) {
+
+                Variable v = VariableManager.lookUp(tk);
+                if (me != null) {
+                    /**
+                     * Do not use saveOrUpdate, so as not to overwrite the gains
+                     * of assignment statements of same variables in same
+                     * MathExpression. For example.. MathExpression m= new
+                     * MathExpression("r=4;3*r"); The assignment phase, runs
+                     * first via Function.assignObject(assignmentStatement) and
+                     * saves r as 4 in the registry of this MathExpression. The
+                     * scanner stage detects `r` in the statement: 3*r, and sets
+                     * r as a Variable to 0 and stores in
+                     * MathScanner.foundVariables. If we use
+                     * registry.saveOrUpdate(v), it will overwrite the value of
+                     * r stored in the assignment pass.
+                     */
+
+                    me.registry.saveIfNotExists(new Variable(tk, v == null ? 0 : v.getValue()));
+                } else {
+                    if (v == null) {
+                        VariableManager.VARIABLES.put(tk, new Variable(tk, v == null ? 0 : v.getValue()));
                     }
                 }
             }//end if
-            else {
+            else if(i==sz-1 && Variable.isVariableString(tk) && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)){
+                Variable v = VariableManager.lookUp(tk);
+                    if (me != null) {
+                        me.registry.saveIfNotExists(new Variable(tk, v == null ? 0 : v.getValue()));
+                    } else {
+                        if (v == null) {
+                            VariableManager.VARIABLES.put(tk, new Variable(tk, 0));
+                        }
+                    }
+            }
+            else if (i == 0 && sz == 1 && Variable.isVariableString(tk)) {
+                if (!FunctionManager.containsAny(tk)) {
+                    Variable v = VariableManager.lookUp(tk);
+                    if (me != null) {
+                        me.registry.saveIfNotExists(new Variable(tk, v == null ? 0 : v.getValue()));
+                    } else {
+                        if (v == null) {
+                            VariableManager.VARIABLES.put(tk, new Variable(tk, 0));
+                        }
+                    }
+                }
+            } else {
                 if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(scanner.get(i))
                         && !FunctionManager.containsAny(scanner.get(i))) {
                     errorLog.info(" Unknown Variable: " + scanner.get(i) + "\n Please Declare And Initialize This Variable Before Using It.\n"
                             + "Use The Command, \'variableName=value\' To Accomplish This.");
                     parser_Result = ParserResult.STRANGE_INPUT;
                     setRunnable(false);
-
                 }//end if
             }//end else
         }//end for loop
@@ -1236,6 +1278,9 @@ public class MathScanner {
 
         plusAndMinusStringHandler();
 
+        if (me != null) {
+            me.getErrorLog().copyFrom(errorLog);
+        }
         return scanner;
     }
 

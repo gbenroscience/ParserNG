@@ -313,6 +313,18 @@ public class MethodRegistry {
         registerMethod(Declarations.ARC_COTH, (ctx, arity, args) -> ctx.wrap(Maths.acoth(args[0].scalar)));
         registerMethod(Declarations.ARC_COTH_ALT, (ctx, arity, args) -> ctx.wrap(Maths.acoth(args[0].scalar)));
 
+        registerMethod(Declarations.ERF, (ctx, arity, args) -> ctx.wrap(Maths.erf(args[0].scalar)));
+        registerMethod(Declarations.GELU, (ctx, arity, args) -> ctx.wrap(Maths.gelu(args[0].scalar)));
+        registerMethod(Declarations.FAST_GELU, (ctx, arity, args) -> ctx.wrap(Maths.fastGelu(args[0].scalar)));
+
+// Dynamically split paths based on arity
+        registerMethod(Declarations.GEGLU, (ctx, arity, args) -> ctx.wrap(
+                arity == 2 ? Maths.geglu(args[0].scalar, args[1].scalar) : Maths.geglu(args[0].scalar)
+        ));
+
+        registerMethod(Declarations.SWIGLU, (ctx, arity, args) -> ctx.wrap(
+                arity == 2 ? Maths.swiglu(args[0].scalar, args[1].scalar) : Maths.swiglu(args[0].scalar)
+        ));
         registerMethod(Declarations.CUBE, (ctx, arity, args) -> {
             double x = args[0].scalar;
 

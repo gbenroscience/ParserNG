@@ -302,7 +302,8 @@ public class Method {
                 || isMatrixMethod(op) || isHardcodedStatsMethod(op)
                 || op.equals(POW) || op.equals(DIFFERENTIATION) || op.equals(ROTOR)
                 || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
-                || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION)
+                || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION) 
+                || op.equals(SWIGLU) ||op.equals(GEGLU)
                 || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || op.equals(PRINT));
     }//end method
 
