@@ -2063,6 +2063,7 @@ public class MathExpression implements Savable, Solvable {
             if (ptr < 0) {
                 EvalResult r = new EvalResult();
                 r.wrap(ParserResult.SYNTAX_ERROR);
+                errorLog.info(ParserResult.SYNTAX_ERROR.name());
                 return r;
             }
 

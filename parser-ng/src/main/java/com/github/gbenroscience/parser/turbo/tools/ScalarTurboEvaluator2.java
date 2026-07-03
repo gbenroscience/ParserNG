@@ -127,6 +127,9 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             BINARY_MAP.put("log", LOOKUP.findStatic(Maths.class, "logToAnyBase", MT_DOUBLE_DD));
             BINARY_MAP.put("alog", LOOKUP.findStatic(Maths.class, "antiLogToAnyBase", MT_DOUBLE_DD));
             BINARY_MAP.put("log-¹", LOOKUP.findStatic(Maths.class, "antiLogToAnyBase", MT_DOUBLE_DD));
+            
+            BINARY_MAP.put("swiglu", LOOKUP.findStatic(Maths.class, "swiglu", MT_DOUBLE_DD));
+            BINARY_MAP.put("geglu", LOOKUP.findStatic(Maths.class, "geglu", MT_DOUBLE_DD));
 
             // UNARY INTRINSICS
             UNARY_MAP.put("√", LOOKUP.findStatic(Math.class, "sqrt", MT_DOUBLE_D));
@@ -148,6 +151,13 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             MethodHandle log10 = LOOKUP.findStatic(Math.class, "log10", MT_DOUBLE_D);
             MethodHandle logE = LOOKUP.findStatic(Math.class, "log", MT_DOUBLE_D);
             MethodHandle alg = LOOKUP.findStatic(Maths.class, "antiLog10", MT_DOUBLE_D);
+            
+            
+            MethodHandle swiglu = LOOKUP.findStatic(Maths.class, "swiglu", MT_DOUBLE_D);
+            MethodHandle geglu = LOOKUP.findStatic(Maths.class, "geglu", MT_DOUBLE_D);
+            MethodHandle gelu = LOOKUP.findStatic(Maths.class, "gelu", MT_DOUBLE_D);
+            MethodHandle erf = LOOKUP.findStatic(Maths.class, "erf", MT_DOUBLE_D);
+            MethodHandle gelufast = LOOKUP.findStatic(Maths.class, "fastGelu", MT_DOUBLE_D);
 
             UNARY_MAP.put("exp", exp);
             UNARY_MAP.put("ln", logE);
@@ -156,6 +166,13 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             UNARY_MAP.put("alg", alg);
             UNARY_MAP.put("ln-¹", exp);
             UNARY_MAP.put("lg-¹", alg);
+            
+            
+            UNARY_MAP.put("swiglu", swiglu);
+            UNARY_MAP.put("geglu", geglu);
+            UNARY_MAP.put("gelu", gelu);
+            UNARY_MAP.put("fast_gelu", gelufast);
+            UNARY_MAP.put("erf", erf);
 
             Map<String, MethodHandle> baseTrig = new HashMap<>();
             baseTrig.put("sin", LOOKUP.findStatic(Math.class, "sin", MT_DOUBLE_D));
