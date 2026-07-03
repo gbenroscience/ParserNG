@@ -924,7 +924,14 @@ public final class FlatMatrixF {
         mulElementwise(out, up, out);
     }
 
-    public static void swiGLU(FlatMatrixF gate, FlatMatrixF up, FlatMatrixF out) {
+    // Flip the order here: 'up' (value path) comes first, matching 'x' in swiglu(x, y)
+    /**
+     * 
+     * @param up
+     * @param gate
+     * @param out 
+     */
+    public static void swiGLU(FlatMatrixF up, FlatMatrixF gate, FlatMatrixF out) {
         final int n = gate.rows * gate.cols;
 
         // 1. Comprehensive Shape Validation
@@ -935,11 +942,9 @@ public final class FlatMatrixF {
                             gate.rows, gate.cols, up.rows, up.cols, out.rows, out.cols));
         }
 
-        // 2. CRITICAL: Memory Layout Validation
-        // If your matrix class allows non-contiguous views (strides), a flat 1D loop will corrupt data.
+        // 2. Memory Layout Validation
         if (!gate.isContiguous() || !up.isContiguous() || !out.isContiguous()) {
             throw new IllegalArgumentException("Vectorized swiGLU requires contiguous matrices.");
-            // Alternatively, route to a fallback scalar method that respects row strides here.
         }
 
         final float[] gd = gate.data;
@@ -950,7 +955,7 @@ public final class FlatMatrixF {
         final int oo = out.offset;
 
         final int vl = F_SPECIES.length();
-        final int limit = F_SPECIES.loopBound(n); // Idiomatic way to get (n - (n % vl))
+        final int limit = F_SPECIES.loopBound(n);
         int i = 0;
 
         // 3. Fused Loop: Read gate/up once, compute, write once
@@ -958,9 +963,9 @@ public final class FlatMatrixF {
             FloatVector g = FloatVector.fromArray(F_SPECIES, gd, go + i);
             FloatVector u = FloatVector.fromArray(F_SPECIES, ud, uo + i);
 
-            // Fused: SiLU(g) * u  => (g * sigmoid(g)) * u
+            // Perfectly matches: value * swish(gate)
             FloatVector sig = sigmoid(g);
-            g.mul(sig).mul(u).intoArray(od, oo + i);
+            u.mul(g.mul(sig)).intoArray(od, oo + i);
         }
 
         // 4. Masked tail
@@ -971,7 +976,7 @@ public final class FlatMatrixF {
             FloatVector u = FloatVector.fromArray(F_SPECIES, ud, uo + i, m);
 
             FloatVector sig = sigmoid(g);
-            g.mul(sig).mul(u).intoArray(od, oo + i, m);
+            u.mul(g.mul(sig)).intoArray(od, oo + i, m);
         }
     }
 

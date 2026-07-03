@@ -32,6 +32,7 @@ import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
 import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.STRING;
 import com.github.gbenroscience.parser.TYPE;
 import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
 import static com.github.gbenroscience.parser.TYPE.MATRIX;
@@ -65,7 +66,21 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
     public static final MethodHandle VECTOR_2_GATEKEEPER_HANDLE;
 
     // 1. ThreadLocal workspace: persists across evaluations on the same thread
-    private static final ThreadLocal<double[]> WORKSPACE = ThreadLocal.withInitial(() -> new double[256]);
+    private static final class ThreadLocalBufferPool {
+        // ThreadLocal cache to keep threads from colliding in multi-threaded environments
+
+        private static final ThreadLocal<double[]> BUFFER_CACHE = new ThreadLocal<>();
+
+        public static double[] getOrCreateBuffer(int totalSize) {
+            double[] buffer = BUFFER_CACHE.get();
+            if (buffer == null || buffer.length < totalSize) {
+                // Only allocates on the very first pass (or if data size scales up)
+                buffer = new double[totalSize];
+                BUFFER_CACHE.set(buffer);
+            }
+            return buffer;
+        }
+    }
 
     static {
         try {
@@ -402,7 +417,6 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                     // Signature: (double[]) -> double (Reading straight from target index position)
                     MethodHandle arrayGetter = AndroidFriendlyMethodHandles.getDoubleArrayGetter();
-                    System.out.println("");
                     pushAndVerify(stack, MethodHandles.insertArguments(arrayGetter, 1, finalIndex));
                     break;
 
@@ -460,7 +474,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                 case MathExpression.Token.METHOD:
                     String name = t.name.toLowerCase();
-                    Function exec = null;
+
                     if (Method.isPureStatsMethod(name)) {
                         int arity = t.arity;
                         String[] rawArgs = t.getRawArgs();
@@ -701,6 +715,33 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             throw new RuntimeException(err);
                         }
 
+                    } else if (name.equals("swiglu") || name.equals("gelu") || name.equals("fast_gelu") || name.equals("geglu") || name.equals("erf")) {
+
+                        double[] dd = ThreadLocalBufferPool.getOrCreateBuffer(t.arity);
+                        for (int i = 0; i < t.arity; i++) {
+                            stack.pop();
+                        }
+                        String args[] = t.getRawArgs();
+
+                        if (args == null || args.length < 1 || args.length > 2) {
+                            String err = "Invalid input for `" + t.name + "`";
+                            errorLog.info(err);
+                            throw new RuntimeException(err);
+                        }
+
+                        if (t.arity == 1) {
+                            dd[0]=eval(args[0]);
+                        } else {
+                            dd[0]=eval(args[0]);
+                            dd[1]=eval(args[1]);
+                        }
+                        MethodHandle bridge = LOOKUP.findStatic(ScalarTurboEvaluator1.class, "executeLlamaActivationFunction",
+                                MethodType.methodType(double.class,
+                                        int.class, String.class, double[].class));
+                        MethodHandle currentHandle = MethodHandles.insertArguments(bridge, 0,
+                                t.arity, t.name, dd);
+                        currentHandle = MethodHandles.dropArguments(currentHandle, 0, double[].class);
+                        pushAndVerify(stack, currentHandle);
                     } else if (name.equals("rot")) {
                         for (int i = 0; i < t.arity; i++) {
                             stack.pop();
@@ -772,6 +813,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                                 // Order arguments matching your original working method signature
                                 // Assuming signature is: applyBinaryOpNoPermute(char op, MethodHandle left, MethodHandle right)
                                 // If passing 'fn' directly, adjust your method parameters accordingly!
+                                System.out.println("token: " + t.toJsonString());
                                 pushAndVerify(stack, applyBinaryOpNoPermute(t.opChar, left, right));
                             }
                         }
@@ -991,6 +1033,23 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
             }
         }
         return gatekeeper.invoke(name, data);
+    }
+
+    public double eval(String expr) {
+        if (STRING.isFullyDouble(expr)) {
+            return com.github.gbenroscience.parser.Number.fastParseDouble(expr);
+        } else if (Variable.isVariableString(expr)) {
+            return registry.lookUp(expr).getValue();
+        } else {
+            MathExpression me = new MathExpression(expr);
+            me.getRegistry().ingest(registry);
+            MathExpression.EvalResult ev = me.solveGeneric();
+            if (ev.getType() == TYPE.NUMBER) {
+                return ev.scalar;
+            } else {
+                throw new IllegalArgumentException("Invalid args passed to token.rawArgs: " + expr);
+            }
+        }
     }
 
     public static Object invokeComplexStats(MethodHandle gatekeeper, String name, Object[] parts, double[] vars) throws Throwable {
@@ -1592,6 +1651,34 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         solver.getAlgorithm().solve();
         double[] solns = solver.getAlgorithm().solutions;
         return solns;
+    }
+
+    static final double executeLlamaActivationFunction(int arity, String fName, double... args) {
+
+        switch (fName) {
+            case "swiglu":
+                if (arity == 1) {
+                    return Maths.swiglu(args[0]);
+                } else {
+                    return Maths.swiglu(args[0],args[1]);
+                }
+            case "geglu":
+                if (arity == 1) {
+                    return Maths.geglu(args[0]);
+                } else {
+                    return Maths.geglu(args[0],args[1]);
+                }
+            case "gelu":
+                return Maths.gelu(args[0]);
+            case "erf":
+                return Maths.erf(args[0]);
+            case "fast_gelu":
+                return Maths.fastGelu(args[0]);
+
+            default:
+                throw new AssertionError("Unknown method: `" + fName + "`");
+        }
+
     }
 
     static final MathExpression.EvalResult executeRotor(int arity, String[] args) {

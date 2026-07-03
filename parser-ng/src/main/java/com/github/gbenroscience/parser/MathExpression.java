@@ -120,7 +120,6 @@ public class MathExpression implements Savable, Solvable {
     private FastCompositeExpression compiledTurbo = null;
     private boolean turboCompiled = false;
 
-
     /**
      * <b><i>
      * Set this attribute to true, if and only if the input into this system is
@@ -710,9 +709,9 @@ public class MathExpression implements Savable, Solvable {
                     // When passed as a literal reference, they pop 0 and push 1 object pointer
                     currentDepth++;
                     break;
-                    
+
                 case MathExpression.Token.OPERATOR:
-                    
+
                     // Operators can be binary (pops 2, pushes 1) or unary (pops 1, pushes 1).
                     // Using getArgumentCount() handles both paths cleanly without token bifurcation.
                     int opArgs = inst.arity;
@@ -748,6 +747,7 @@ public class MathExpression implements Savable, Solvable {
 
         return maxDepth;
     }
+
     private void initializing(String expression) {
         computeTreeDepth();
         setCorrectFunction(true);
@@ -1461,8 +1461,8 @@ public class MathExpression implements Savable, Solvable {
     }
 
     /**
-     * updateSlot(slots[i], xValues[i]); 
-     * 
+     * updateSlot(slots[i], xValues[i]);
+     *
      *
      *
      */
@@ -1471,11 +1471,10 @@ public class MathExpression implements Savable, Solvable {
             this.executionFrame[slot] = value;
         }
     }
-    
-    public int getSlotByName(String variableName){
+
+    public int getSlotByName(String variableName) {
         return this.registry.getSlot(variableName);
     }
-    
 
     public void setReturnType(TYPE returnType) {
         this.returnType = returnType;
@@ -1974,7 +1973,7 @@ public class MathExpression implements Savable, Solvable {
                             errorLog.info(err);
                             throw new RuntimeException(err);
                         }
-             
+
                         int valuesOnStack = ptr + 1;
 
                         if (arity == 0) {
@@ -2224,7 +2223,6 @@ public class MathExpression implements Savable, Solvable {
                 return; // Hot path exit
             }
 
-
             Function leftFun = left.type == EvalResult.TYPE_STRING ? FunctionManager.lookUp(left.textRes) : null;
             Function rightFun = right.type == EvalResult.TYPE_STRING ? FunctionManager.lookUp(right.textRes) : null;
 
@@ -2285,7 +2283,7 @@ public class MathExpression implements Savable, Solvable {
                         left.wrap(fName);
                         left.matrix = m;
                     } else {
-                        throw new IllegalArgumentException("Unsupported types for '*': left=" + leftType + ", right=" + rightType+", "+expression+", scanner: "+scanner);
+                        throw new IllegalArgumentException("Unsupported types for '*': left=" + leftType + ", right=" + rightType + ", " + expression + ", scanner: " + scanner);
                     }
                     break;
 
@@ -3420,6 +3418,21 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
             }
             return vr;
         }
+
+        /**
+         *
+         * @param toIngest A registry to be copied into this one.
+         * @return
+         */
+        public VariableRegistry ingest(VariableRegistry toIngest) {
+            VariableRegistry vr = toIngest;
+            for (Map.Entry<String, Variable> entry : vr.variables.entrySet()) {
+                Variable v = entry.getValue().clone();
+                this.saveIfNotExists(v);
+            }
+            return vr;
+        }
+
     }
 
     /**
@@ -3630,7 +3643,8 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
             testExpression("sqrt(abs(-16))", 4.0, "Nested: sqrt(abs(-16))", 1e-10);
 
             // Test 6: Variable substitution
-            MathExpression me = new MathExpression("x=5;2*x+3");System.out.println("sc->"+me.scanner);
+            MathExpression me = new MathExpression("x=5;2*x+3");
+            System.out.println("sc->" + me.scanner);
             me.registry.dumpVars();
             double result = Double.parseDouble(me.solve());
             testValue(result, 13.0, "Variable: x=5; 2*x+3", 1e-10);

@@ -6,6 +6,7 @@ import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import com.github.gbenroscience.parser.turbo.tools.vector.matrix.*;
+import java.lang.invoke.MethodHandle;
 import org.codehaus.janino.ClassBodyEvaluator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -46,12 +47,18 @@ public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
     private final CompiledEvaluator janinoCompiledEval;
     private final double[] frameBuffer;
+    private MethodHandle scalarHandle;
 
     public JaninoVectorTurboEvaluator(MathExpression me) throws Exception {
         super(me);
         int maxVars = (me.getSlots() != null) ? me.getSlots().length : 128;
         this.frameBuffer = new double[Math.max(maxVars, 128)];
         this.janinoCompiledEval = compileWithJanino(me);
+        try {
+            this.scalarHandle = compileScalar(postfix);
+        } catch (Throwable ex) {
+            System.getLogger(JaninoVectorTurboEvaluator.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+        }
     }
 
     /**
@@ -192,7 +199,12 @@ public class JaninoVectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 for (int j = 0; j < nVars; j++) {
                     vars[j] = variables[j][i];
                 }
-                output[i] = evaluator.eval(vars);
+               // output[i] = evaluator.eval(vars);
+                try {
+                    output[i] = (double) scalarHandle.invokeExact(vars);
+                } catch (Throwable ex) {
+                    System.getLogger(JaninoVectorTurboEvaluator.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+                }
             }
         }
 

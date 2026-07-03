@@ -94,7 +94,7 @@ public class SIMDTurboEvaluatorTest {
         logDetails(me, evaluator, !active);
 
         // 17 datapoints to trigger both vector lane and tail scalar loop remainders
-        int totalElements = 17;
+        int totalElements = 1000017;
         double[][] inputs = new double[3][totalElements]; // 3 variables, 17 values each
         double[] outputVector = new double[totalElements];
 
@@ -106,7 +106,7 @@ public class SIMDTurboEvaluatorTest {
 
         // Test API Call #1: Standard Bulk Execution
         evaluator.applyBulk(inputs, outputVector);
-        System.out.println("output: " + Arrays.toString(outputVector));
+       // System.out.println("output: " + Arrays.toString(outputVector));
 
         for (int i = 0; i < totalElements; i++) {
             double x1 = inputs[0][i];
@@ -277,14 +277,14 @@ public class SIMDTurboEvaluatorTest {
 
         // 1. Manual Warm-up Phase
         // Forces C2 to compile the vector loops before we sample the clock
-        int warmUpRuns = 3000;
+        int warmUpRuns = 1000;
         FlatMatrixF[] inputs = arity == 2 ? new FlatMatrixF[]{in1, in2} : new FlatMatrixF[]{in1}; // Allocate once outside the timing track!
         for (int i = 0; i < warmUpRuns; i++) {
             evaluator.applyMatrixKernel(inputs, out, kernelName);
         }
 
         // 2. Timed Target Phase
-        int iterations = 10000;
+        int iterations = 4000;
 
         long startTime = System.nanoTime();
         for (int i = 0; i < iterations; i++) {

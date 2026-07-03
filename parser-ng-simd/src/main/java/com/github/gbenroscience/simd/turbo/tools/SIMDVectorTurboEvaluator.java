@@ -161,13 +161,6 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
          * into indices 200,000 through 200,499 of the output array."
          */
         private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
-            /*if (startIdx + length > dataSize || startIdx + length > output.length) {
-                throw new IllegalArgumentException(String.format(
-                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
-                        startIdx, length, dataSize, output.length
-                ));
-            }*/
-
             // Thread-local scratch space acquisition & sizing guard
             double[] scratch = FLAT_SCRATCH_STACK.get();
             final int requiredScratchSize = Math.min(BLOCK_SIZE, length);
@@ -180,18 +173,11 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             final int endIdx = startIdx + length;
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
                 final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
-
-                evaluateBlock(flatVariables, dataSize, output, startIdx, currentBlockSize, scratch);
+                evaluateBlock(flatVariables, dataSize, output, blockStart, currentBlockSize, scratch);
             }
         }
 
         private void applyBulkInternal(double[][] variables, int dataSize, double[] output, int startIdx, int length) {
-            /*   if (startIdx + length > dataSize || startIdx + length > output.length) {
-                throw new IllegalArgumentException(String.format(
-                        "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
-                        startIdx, length, dataSize, output.length
-                ));
-            }*/
 
             // Thread-local scratch space acquisition & sizing guard
             double[] scratch = FLAT_SCRATCH_STACK.get();
@@ -204,7 +190,7 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             final int endIdx = startIdx + length;
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
                 final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
-                evaluateBlock(variables, dataSize, output, startIdx, currentBlockSize, scratch);
+                evaluateBlock(variables, output, blockStart, currentBlockSize, scratch);
             }
         }
 
@@ -780,7 +766,6 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         }
 
         private void evaluateBlock(double[][] _2DVariables,
-                int dataSize,
                 double[] output,
                 int blockStart,
                 int currentBlockSize,
@@ -1037,19 +1022,58 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                         }
                     }
 
-                    case OP_EXP -> {
+                    /*  case OP_EXP -> {
                         final int srcOffset = (sp - 1) * BLOCK_SIZE;
+
                         for (int k = 0; k < n; k++) {
                             scratch[srcOffset + k] = Math.exp(scratch[srcOffset + k]);
+                        }
+                    }*/
+                    case OP_EXP -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+
+                        int k = 0;
+                        final int upperBound = SPECIES.loopBound(n);
+
+                        // Turbo SIMD Lane
+                        for (; k < upperBound; k += SPECIES.length()) {
+                            final int targetIdx = srcOffset + k;
+                            DoubleVector.fromArray(SPECIES, scratch, targetIdx)
+                                    .lanewise(VectorOperators.EXP)
+                                    .intoArray(scratch, targetIdx);
+                        }
+
+                        // Scalar Tail Cleanup
+                        for (; k < n; k++) {
+                            final int targetIdx = srcOffset + k;
+                            scratch[targetIdx] = Math.exp(scratch[targetIdx]);
                         }
                     }
 
                     case OP_SQRT -> {
                         final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.sqrt(scratch[srcOffset + k]);
-                        }
+                        VectorTranscendentals.evaluateNative(
+                                scratch, // src array
+                                srcOffset, // srcOffset
+                                scratch, // dest array (in-place)
+                                srcOffset, // destOffset
+                                n, // element count
+                                VectorOperators.SQRT // unary operator
+                        );
                     }
+
+                    case OP_CBRT -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        VectorTranscendentals.evaluateNative(
+                                scratch, // src array
+                                srcOffset, // srcOffset
+                                scratch, // dest array (in-place)
+                                srcOffset, // destOffset
+                                n, // element count
+                                VectorOperators.CBRT // unary operator
+                        );
+                    }
+
                     case OP_SWIGLU -> {
                         final int base = (sp - 1) * BLOCK_SIZE;
 
@@ -1141,16 +1165,9 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
                             result.intoArray(scratch, base + k);
                         }
-
                         // 2. Scalar tail loop for remaining elements
                         for (; k < n; k++) {
                             scratch[base + k] = Maths.erf(scratch[base + k]);
-                        }
-                    }
-                    case OP_CBRT -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.cbrt(scratch[srcOffset + k]);
                         }
                     }
 
@@ -1348,6 +1365,31 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
             // Flush the final computation results out to the destination block segment
             System.arraycopy(scratch, 0, output, blockStart, n);
+        }
+    }
+
+    public static final class VectorTranscendentals {
+
+        private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
+
+        public static void evaluateNative(double[] src, int srcOffset, double[] dest, int destOffset, int n, VectorOperators.Unary op) {
+            int vl = SPECIES.length();
+            int limit = SPECIES.loopBound(n);
+            int i = 0;
+
+            // Vector Loop
+            for (; i < limit; i += vl) {
+                DoubleVector va  = DoubleVector.fromArray(SPECIES, src, srcOffset + i);
+                va.lanewise(op).intoArray(dest, destOffset + i);
+            }
+
+            // Clean Masked Tail
+            int remaining = n - i;
+            if (remaining > 0) {
+                var mask = SPECIES.indexInRange(0, remaining);
+                DoubleVector va  = DoubleVector.fromArray(SPECIES, src, srcOffset + i, mask);
+                va.lanewise(op).intoArray(dest, destOffset + i, mask);
+            }
         }
     }
 

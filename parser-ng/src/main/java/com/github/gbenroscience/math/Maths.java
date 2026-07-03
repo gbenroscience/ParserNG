@@ -26,9 +26,7 @@ public class Maths {                       //3.14159265358979323846;
 
     private static final double[] FACT_TABLE = new double[171];
     private static final double SQRT_2PI = Math.sqrt(2 * Math.PI);
-    
-    
-    
+
     private static final double INV_SQRT_2 = 0.7071067811865475; // 1 / sqrt(2)
 
     static {
@@ -1448,8 +1446,7 @@ public class Maths {                       //3.14159265358979323846;
     public static double erf(double x) {
         return CodyMath.erf(x);
     }
-    
-    
+
     public static double erfc(double x) {
         return CodyMath.erfc(x);
     }
@@ -1457,7 +1454,6 @@ public class Maths {                       //3.14159265358979323846;
     // Assumed to exist in your class:
     // public static double erf(double x) { ... }
     // public static double fastErf(double x) { ... }
-
     /**
      * Gaussian Error Linear Unit (GELU)
      */
@@ -1482,19 +1478,17 @@ public class Maths {                       //3.14159265358979323846;
     // =========================================================================
     // STANDARD BINARY FORMULATIONS (Two inputs: value path 'x', gate path 'y')
     // =========================================================================
-
     public static double geglu(double x, double y) {
-        return gelu(x) * y;
+        return x * gelu(y); // Synchronized with: value * GELU(gate)
     }
 
     public static double swiglu(double x, double y) {
-        return swish(x) * y;
+        return x * swish(y);
     }
 
     // =========================================================================
     // UNARY FALLBACKS (Self-Gated variants if your arity is locked to 1)
     // =========================================================================
-
     public static double geglu(double x) {
         return gelu(x) * x;
     }

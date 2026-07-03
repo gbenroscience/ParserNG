@@ -112,7 +112,7 @@ public class STRING {
         return sb.toString();
     }
 
-    public static String repeating(String val, int count){
+    public static String repeating(String val, int count) {
         if (val == null) {
             return null;
         }
@@ -127,6 +127,7 @@ public class STRING {
     }
 //abcdabcde
 //  234567
+
     /**
      * isFullyDouble allows you to verify if an input string is in double number
      * format or not.
@@ -136,24 +137,42 @@ public class STRING {
      * double number
      */
     public static boolean isFullyDouble(String num) {
-        if (num == null || num.isEmpty()) {
+        if (num == null) {
             return false;
         }
 
-        int n = num.length();
-        // quick reject: cannot end with E/e or + or -
-        char last = num.charAt(n - 1);
+        int start = 0;
+        int end = num.length();
+
+        // Skip leading whitespace without allocating memory
+        while (start < end && Character.isWhitespace(num.charAt(start))) {
+            start++;
+        }
+
+        // Skip trailing whitespace without allocating memory
+        while (end > start && Character.isWhitespace(num.charAt(end - 1))) {
+            end--;
+        }
+
+        // If string was empty or only whitespace
+        if (start >= end) {
+            return false;
+        }
+
+        // --- Core Logic Restructured with Pointers ---
+        // Quick reject: cannot end with E/e or + or -
+        char last = num.charAt(end - 1);
         if (last == 'E' || last == 'e' || last == '+' || last == '-') {
             return false;
         }
 
-        boolean seenDigit = false;   // any digit seen (before or after point, before or after E)
-        boolean seenPoint = false;   // decimal point seen (only allowed before E)
-        boolean seenExp = false;     // exponent marker seen
-        boolean expSignSeen = false; // sign immediately after E seen
-        int signCount = 0;           // total signs encountered (leading and exponent sign)
+        boolean seenDigit = false;
+        boolean seenPoint = false;
+        boolean seenExp = false;
+        boolean expSignSeen = false;
+        int signCount = 0;
 
-        for (int i = 0; i < n; i++) {
+        for (int i = start; i < end; i++) {
             char c = num.charAt(i);
 
             if (Character.isDigit(c)) {
@@ -162,23 +181,20 @@ public class STRING {
             }
 
             if (c == '+' || c == '-') {
-                // Leading sign allowed at index 0
-                if (i == 0) {
+                // Leading sign allowed at the virtual start index
+                if (i == start) {
                     signCount++;
                     continue;
                 }
-                // Sign after exponent is allowed only immediately after E/e and only once
                 if (seenExp && !expSignSeen && num.charAt(i - 1) == 'E' || (seenExp && !expSignSeen && num.charAt(i - 1) == 'e')) {
                     expSignSeen = true;
                     signCount++;
                     continue;
                 }
-                // Any other sign placement is invalid
                 return false;
             }
 
             if (c == '.') {
-                // decimal point not allowed after exponent or more than once
                 if (seenPoint || seenExp) {
                     return false;
                 }
@@ -187,22 +203,18 @@ public class STRING {
             }
 
             if (c == 'E' || c == 'e') {
-                // E must come after at least one digit and only once
                 if (!seenDigit || seenExp) {
                     return false;
                 }
                 seenExp = true;
-                // reset digit tracking for exponent digits (must have at least one digit after E)
                 seenDigit = false;
                 expSignSeen = false;
                 continue;
             }
 
-            // any other character invalidates the string
             return false;
         }
 
-        // final check: ensure at least one digit was seen (and if E was present, digits after E exist)
         return seenDigit;
     }
 
@@ -1369,9 +1381,9 @@ public static boolean isDouble1(String a) {
 
     public static void main(String args[]) {//tester method for STRING methods
 
-        String num = "3.187";
+        String num = "3.1924";
         double start = System.nanoTime();
-        double N = 1000;
+        double N = 100000000;
         boolean s = false;
         for (int i = 0; i < N; i++) {
             s = isFullyDouble(num);
