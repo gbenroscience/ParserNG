@@ -89,7 +89,7 @@ public class SIMDTurboEvaluatorTest {
 
     @Test
     public void testMathematicalPrecisionVsNativeJava() throws Throwable {
-        MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
+        MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2.23))");
         SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
         logDetails(me, evaluator, !active);
 
@@ -112,7 +112,7 @@ public class SIMDTurboEvaluatorTest {
             double x1 = inputs[0][i];
             double x2 = inputs[1][i];
             double x3 = inputs[2][i];
-            double expected = (1.0 / (x1 * Math.sqrt(2.0 * 3.14159))) * Math.exp((-Math.pow((x2 - x3), 2.0)) / (2.0 * Math.pow(x1, 2.0)));
+            double expected = (1.0 / (x1 * Math.sqrt(2.0 * 3.14159))) * Math.exp((-Math.pow((x2 - x3), 2.0)) / (2.0 * Math.pow(x1, 2.23)));
             assertEquals(expected, outputVector[i], EPSILON, "SIMD standard path math drifted at index: " + i);
         }
     }
@@ -124,7 +124,7 @@ public class SIMDTurboEvaluatorTest {
         SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
         logDetails(me, evaluator, !active);
 
-        int dataSize = 100;
+        int dataSize = 250018;
         double[][] inputs = new double[1][dataSize]; // Only 1 variable 'x' is needed for this expression
         double[] outputVector = new double[dataSize];
 

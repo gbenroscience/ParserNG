@@ -8,8 +8,9 @@ import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
-import java.util.function.DoubleUnaryOperator;
 import jdk.incubator.vector.*;
+import java.util.function.DoubleUnaryOperator;
+import java.util.function.Function;
 
 /**
  * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
@@ -28,10 +29,8 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression {
+        // Pre-allocated ONCE during initialization/compilation
 
-        private final ThreadLocal<double[]> SINGLE_SCALAR_BUFFER = ThreadLocal.withInitial(()
-                -> new double[SIMDVectorTurboEvaluator.this.stackDepth]
-        );
         private final ThreadLocal<double[]> MATRIX_FLATTEN_BUFFER = ThreadLocal.withInitial(()
                 -> new double[0]
         );
@@ -317,14 +316,16 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                     }
 
                     case OP_POW -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
-                        }
+                        final int expOffset = (sp - 1) * BLOCK_SIZE;
+                        final int baseOffset = (sp - 2) * BLOCK_SIZE;
+
+                        // Keep the switch thin! Delegate out to highly optimized,
+                        // easily inlined method kernels to preserve Escape Analysis.
+                        VectorMath.executePowerBlended(scratch, baseOffset, expOffset, n);
+
+                        sp--;
                     }
+
                     case OP_SWIGLU_2 -> {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
@@ -404,45 +405,27 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
                     // Base Unary Operations (In-place scalar evaluation)
                     case OP_SIN -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.sin(scratch[srcOffset + k]);
-                        }
+                        VectorMath.sin((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_COS -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.cos(scratch[srcOffset + k]);
-                        }
+                        VectorMath.cos((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_TAN -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.tan(scratch[srcOffset + k]);
-                        }
+                        VectorMath.tan((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_SINH -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.sinh(scratch[srcOffset + k]);
-                        }
+                        VectorMath.sinh((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_COSH -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.cosh(scratch[srcOffset + k]);
-                        }
+                        VectorMath.cosh((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_TANH -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.tanh(scratch[srcOffset + k]);
-                        }
+                        VectorMath.tanh((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_ABS -> {
@@ -453,17 +436,31 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                     }
 
                     case OP_EXP -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.exp(scratch[srcOffset + k]);
-                        }
+                        VectorMath.exp((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_SQRT -> {
                         final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.sqrt(scratch[srcOffset + k]);
-                        }
+                        VectorTranscendentals.evaluateNative(
+                                scratch, // src array
+                                srcOffset, // srcOffset
+                                scratch, // dest array (in-place)
+                                srcOffset, // destOffset
+                                n, // element count
+                                VectorOperators.SQRT // unary operator
+                        );
+                    }
+
+                    case OP_CBRT -> {
+                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
+                        VectorTranscendentals.evaluateNative(
+                                scratch, // src array
+                                srcOffset, // srcOffset
+                                scratch, // dest array (in-place)
+                                srcOffset, // destOffset
+                                n, // element count
+                                VectorOperators.CBRT // unary operator
+                        );
                     }
                     case OP_SWIGLU -> {
                         final int base = (sp - 1) * BLOCK_SIZE;
@@ -562,25 +559,13 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                             scratch[base + k] = Maths.erf(scratch[base + k]);
                         }
                     }
-                    case OP_CBRT -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.cbrt(scratch[srcOffset + k]);
-                        }
-                    }
 
                     case OP_LOG -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.log(scratch[srcOffset + k]);
-                        }
+                        VectorMath.ln((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_LOG10 -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.log10(scratch[srcOffset + k]);
-                        }
+                        VectorMath.log10((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     // --- Inverse Radians (Routed to VectorMath for Alias Mapping) ---
@@ -907,41 +892,17 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                             scratch[resOffset + k] = scratch[lOffset + k] / scratch[rOffset + k];
                         }
                     }
-
-                    /*  case OP_POW -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = pow(scratch[lOffset + k], scratch[rOffset + k]);
-                        }
-                    }*/
                     case OP_POW -> {
                         final int expOffset = (sp - 1) * BLOCK_SIZE;
                         final int baseOffset = (sp - 2) * BLOCK_SIZE;
 
-                        if (VectorMath.isExponentUniform(scratch, expOffset, n)) {
-                            // Grab the single scalar representation from index 0 of the block
-                            double uniformExp = scratch[expOffset];
+                        // Keep the switch thin! Delegate out to highly optimized,
+                        // easily inlined method kernels to preserve Escape Analysis.
+                        VectorMath.executePowerBlended(scratch, baseOffset, expOffset, n);
 
-                            VectorMath.evaluateUniformExponent(
-                                    scratch, baseOffset,
-                                    uniformExp,
-                                    scratch, baseOffset, // In-place write to base slot
-                                    n
-                            );
-                        } else {
-                            // True lane-by-lane distinct exponents
-                            VectorMath.evaluateVariableExponent(
-                                    scratch, baseOffset,
-                                    scratch, expOffset,
-                                    scratch, baseOffset,
-                                    n
-                            );
-                        }
-                        sp--; // Pop exponent array off the evaluation stack
+                        sp--;
                     }
+
                     case OP_SWIGLU_2 -> {
                         sp -= 2;
                         final int base = sp * BLOCK_SIZE;
@@ -1021,45 +982,27 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
                     // Base Unary Operations (In-place scalar evaluation)
                     case OP_SIN -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.sin(scratch[srcOffset + k]);
-                        }
+                        VectorMath.sin((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_COS -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.cos(scratch[srcOffset + k]);
-                        }
+                        VectorMath.cos((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_TAN -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.tan(scratch[srcOffset + k]);
-                        }
+                        VectorMath.tan((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_SINH -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.sinh(scratch[srcOffset + k]);
-                        }
+                        VectorMath.sinh((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_COSH -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.cosh(scratch[srcOffset + k]);
-                        }
+                        VectorMath.cosh((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_TANH -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.tanh(scratch[srcOffset + k]);
-                        }
+                        VectorMath.tanh((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_ABS -> {
@@ -1077,24 +1020,7 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                         }
                     }*/
                     case OP_EXP -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-
-                        int k = 0;
-                        final int upperBound = SPECIES.loopBound(n);
-
-                        // Turbo SIMD Lane
-                        for (; k < upperBound; k += SPECIES.length()) {
-                            final int targetIdx = srcOffset + k;
-                            DoubleVector.fromArray(SPECIES, scratch, targetIdx)
-                                    .lanewise(VectorOperators.EXP)
-                                    .intoArray(scratch, targetIdx);
-                        }
-
-                        // Scalar Tail Cleanup
-                        for (; k < n; k++) {
-                            final int targetIdx = srcOffset + k;
-                            scratch[targetIdx] = Math.exp(scratch[targetIdx]);
-                        }
+                        VectorMath.exp((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_SQRT -> {
@@ -1219,17 +1145,11 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                     }
 
                     case OP_LOG -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.log(scratch[srcOffset + k]);
-                        }
+                        VectorMath.ln((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     case OP_LOG10 -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.log10(scratch[srcOffset + k]);
-                        }
+                        VectorMath.log10((sp - 1) * BLOCK_SIZE, n, scratch);
                     }
 
                     // --- Inverse Radians (Routed to VectorMath for Alias Mapping) ---
@@ -1437,21 +1357,15 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         }
     }
 
-    /**
-     * ParserNG Full Vectorized Trigonometry Engine with Degree/Grad Support JDK
-     * 21 Compatible
-     */
-    public static final class VectorMath {
+    public final class VectorMath {
 
         private VectorMath() {
         }
 
         private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-
-        // ================== Configuration ==================
         public static int VECTOR_THRESHOLD = 256;
 
-        // ================== Angle Conversion Constants ==================
+        // Angle conversions
         private static final double DEG_TO_RAD = Math.PI / 180.0;
         private static final double RAD_TO_DEG = 180.0 / Math.PI;
         private static final double GRAD_TO_RAD = Math.PI / 200.0;
@@ -1462,495 +1376,689 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         private static final DoubleVector V_GRAD_TO_RAD = DoubleVector.broadcast(SPECIES, GRAD_TO_RAD);
         private static final DoubleVector V_RAD_TO_GRAD = DoubleVector.broadcast(SPECIES, RAD_TO_GRAD);
 
-        // ================== Core Constants ==================
-        private static final double PI_HI = 3.141592653589793115997963468544185161590576171875;
-        private static final double PI_LO = 1.2246467991473532071737640903037683939601726055145E-16;
-        private static final double INV_PI = 1.0 / Math.PI;
-
-        private static final double SMALL_ANGLE_THRESHOLD = 1e-8;
-        private static final double LARGE_ANGLE_THRESHOLD = 1e10;
-
+        // Core constants
         private static final DoubleVector V_ONE = DoubleVector.broadcast(SPECIES, 1.0);
         private static final DoubleVector V_NEG_ONE = DoubleVector.broadcast(SPECIES, -1.0);
         private static final DoubleVector V_HALF = DoubleVector.broadcast(SPECIES, 0.5);
         private static final DoubleVector V_HALF_PI = DoubleVector.broadcast(SPECIES, Math.PI / 2.0);
         private static final DoubleVector V_NEG_HALF_PI = DoubleVector.broadcast(SPECIES, -Math.PI / 2.0);
-        private static final DoubleVector V_MAGIC = DoubleVector.broadcast(SPECIES, 1L << 52);
-        private static final DoubleVector V_SMALL = DoubleVector.broadcast(SPECIES, SMALL_ANGLE_THRESHOLD);
-        private static final DoubleVector V_LARGE = DoubleVector.broadcast(SPECIES, LARGE_ANGLE_THRESHOLD);
         private static final DoubleVector V_NAN = DoubleVector.broadcast(SPECIES, Double.NaN);
-
         private static final DoubleVector ZERO = DoubleVector.broadcast(SPECIES, 0.0);
 
         private static final double THRESHOLD_LOW = 0.46875;
         private static final double THRESHOLD_HIGH = 4.0;
 
-        private static final double[] SIN_COEFFS = {1.0, -0.16666666666666632, 0.008333333333332249, -0.0001984126982985795, 0.000002755731370707, -2.5050760253406863E-8, 1.5896909952115501E-10};
-        private static final double[] COS_COEFFS = {1.0, -0.5, 0.041666666666666664, -0.001388888888887411, 2.480158728947673E-5, -2.7557314351390663E-7, 2.0875723212981064E-9};
-
-        private static final DoubleVector[] SIN_VCOEFFS = toVectorCoeffs(SIN_COEFFS);
-        private static final DoubleVector[] COS_VCOEFFS = toVectorCoeffs(COS_COEFFS);
-
-        private static DoubleVector[] toVectorCoeffs(double[] c) {
-            DoubleVector[] v = new DoubleVector[c.length];
-            for (int i = 0; i < c.length; i++) {
-                v[i] = DoubleVector.broadcast(SPECIES, c[i]);
-            }
-            return v;
-        }
-
-        private static DoubleVector round(DoubleVector x) {
-            return x.add(V_MAGIC).sub(V_MAGIC);
-        }
-
         // ========================================================================
-        // Core Radian Kernels
-        // ========================================================================
-        private static DoubleVector coreSin(DoubleVector x) {
-            VectorMask<Double> small = x.abs().compare(VectorOperators.LT, V_SMALL);
-            if (small.allTrue()) {
-                return x;
-            }
-            x = x.lanewise(VectorOperators.MAX, V_LARGE.neg()).lanewise(VectorOperators.MIN, V_LARGE);
-            DoubleVector q = round(x.mul(INV_PI));
-            DoubleVector r = q.neg().lanewise(VectorOperators.FMA, PI_HI, x);
-            r = q.neg().lanewise(VectorOperators.FMA, PI_LO, r);
-            r = r.lanewise(VectorOperators.MAX, V_NEG_HALF_PI).lanewise(VectorOperators.MIN, V_HALF_PI);
-            VectorMask<Double> odd = q.compare(VectorOperators.NE, round(q));
-            DoubleVector sign = V_ONE.blend(V_NEG_ONE, odd);
-            DoubleVector r2 = r.mul(r);
-            DoubleVector y = SIN_VCOEFFS[SIN_VCOEFFS.length - 1];
-            for (int i = SIN_VCOEFFS.length - 2; i >= 0; i--) {
-                y = r2.lanewise(VectorOperators.FMA, y, SIN_VCOEFFS[i]);
-            }
-            return y.mul(r).mul(sign).blend(x, small);
-        }
-
-        private static DoubleVector coreCos(DoubleVector x) {
-            VectorMask<Double> small = x.abs().compare(VectorOperators.LT, V_SMALL);
-            if (small.allTrue()) {
-                return V_ONE;
-            }
-            x = x.lanewise(VectorOperators.MAX, V_LARGE.neg()).lanewise(VectorOperators.MIN, V_LARGE);
-            DoubleVector q = round(x.mul(INV_PI));
-            DoubleVector r = q.neg().lanewise(VectorOperators.FMA, PI_HI, x);
-            r = q.neg().lanewise(VectorOperators.FMA, PI_LO, r);
-            r = r.lanewise(VectorOperators.MAX, V_NEG_HALF_PI).lanewise(VectorOperators.MIN, V_HALF_PI);
-            VectorMask<Double> odd = q.add(1).compare(VectorOperators.NE, round(q.add(1)));
-            DoubleVector sign = V_ONE.blend(V_NEG_ONE, odd);
-            DoubleVector r2 = r.mul(r);
-            DoubleVector y = COS_VCOEFFS[COS_VCOEFFS.length - 1];
-            for (int i = COS_VCOEFFS.length - 2; i >= 0; i--) {
-                y = r2.lanewise(VectorOperators.FMA, y, COS_VCOEFFS[i]);
-            }
-            return y.mul(sign).blend(V_ONE, small);
-        }
-
-        private static DoubleVector coreSinh(DoubleVector x) {
-            DoubleVector expX = x.lanewise(VectorOperators.EXP);
-            return expX.sub(V_ONE.div(expX)).mul(V_HALF);
-        }
-
-        private static DoubleVector coreCosh(DoubleVector x) {
-            DoubleVector expX = x.lanewise(VectorOperators.EXP);
-            return expX.add(V_ONE.div(expX)).mul(V_HALF);
-        }
-
-        private static DoubleVector coreTanh(DoubleVector x) {
-            DoubleVector e2 = x.add(x).lanewise(VectorOperators.EXP);
-            DoubleVector t = e2.sub(V_ONE).div(e2.add(V_ONE));
-            VectorMask<Double> big = x.abs().compare(VectorOperators.GT, DoubleVector.broadcast(SPECIES, 20.0));
-            return t.blend(t.neg(), x.compare(VectorOperators.LT, 0.0)).blend(V_ONE, big);
-        }
-
-        private static DoubleVector coreAsinh(DoubleVector x) {
-            return x.add(x.mul(x).add(V_ONE).lanewise(VectorOperators.SQRT)).lanewise(VectorOperators.LOG);
-        }
-
-        private static DoubleVector coreAcosh(DoubleVector x) {
-            DoubleVector res = x.add(x.mul(x).sub(V_ONE).lanewise(VectorOperators.SQRT)).lanewise(VectorOperators.LOG);
-            return res.blend(V_NAN, x.compare(VectorOperators.LT, V_ONE));
-        }
-
-        private static DoubleVector coreAtanh(DoubleVector x) {
-            VectorMask<Double> invalid = x.abs().compare(VectorOperators.GE, V_ONE);
-            DoubleVector res = V_HALF.mul(V_ONE.add(x).div(V_ONE.sub(x)).lanewise(VectorOperators.LOG));
-            return res.blend(V_NAN, invalid);
-        }
-
-        private static DoubleVector coreAsech(DoubleVector x) {
-            DoubleVector y = V_ONE.div(x);
-            DoubleVector res = y.add(y.mul(y).sub(V_ONE).lanewise(VectorOperators.SQRT)).lanewise(VectorOperators.LOG);
-            return res.blend(V_NAN, x.abs().compare(VectorOperators.GT, V_ONE));
-        }
-
-        private static DoubleVector coreAsch(DoubleVector x) {
-            DoubleVector y = V_ONE.div(x);
-            return y.add(y.mul(y).add(V_ONE).lanewise(VectorOperators.SQRT)).lanewise(VectorOperators.LOG);
-        }
-
-        private static DoubleVector coreAcoth(DoubleVector x) {
-            DoubleVector y = V_ONE.div(x);
-            VectorMask<Double> invalid = y.abs().compare(VectorOperators.GE, V_ONE);
-            DoubleVector res = V_HALF.mul(V_ONE.add(y).div(V_ONE.sub(y)).lanewise(VectorOperators.LOG));
-            return res.blend(V_NAN, invalid);
-        }
-
-        // ========================================================================
-        // Public API (Mirroring MethodSack format)
+        // NO-LAMBDA DIRECT OPERATIONS
         // ========================================================================
         // Radian
         public static void sin(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreSin, Math::sin);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.SIN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.sin(s[base + i]);
+            }
         }
 
         public static void cos(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreCos, Math::cos);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.COS)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.cos(s[base + i]);
+            }
         }
 
         public static void tan(int base, int n, double[] s) {
-            process(base, n, s, x -> coreSin(x).div(coreCos(x)), Math::tan);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.TAN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.tan(s[base + i]);
+            }
         }
 
         // Degree
         public static void sinDeg(int base, int n, double[] s) {
-            process(base, n, s, x -> coreSin(x.mul(V_DEG_TO_RAD)), x -> Math.sin(Math.toRadians(x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.SIN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.sin(Math.toRadians(s[base + i]));
+            }
         }
 
         public static void cosDeg(int base, int n, double[] s) {
-            process(base, n, s, x -> coreCos(x.mul(V_DEG_TO_RAD)), x -> Math.cos(Math.toRadians(x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.COS)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.cos(Math.toRadians(s[base + i]));
+            }
         }
 
         public static void tanDeg(int base, int n, double[] s) {
-            process(base, n, s, x -> coreSin(x.mul(V_DEG_TO_RAD)).div(coreCos(x.mul(V_DEG_TO_RAD))), x -> Math.tan(Math.toRadians(x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.TAN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.tan(Math.toRadians(s[base + i]));
+            }
         }
 
         // Grad
         public static void sinGrad(int base, int n, double[] s) {
-            process(base, n, s, x -> coreSin(x.mul(V_GRAD_TO_RAD)), x -> Math.sin(x * GRAD_TO_RAD));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.SIN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.sin(s[base + i] * GRAD_TO_RAD);
+            }
         }
 
         public static void cosGrad(int base, int n, double[] s) {
-            process(base, n, s, x -> coreCos(x.mul(V_GRAD_TO_RAD)), x -> Math.cos(x * GRAD_TO_RAD));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.COS)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.cos(s[base + i] * GRAD_TO_RAD);
+            }
         }
 
         public static void tanGrad(int base, int n, double[] s) {
-            process(base, n, s, x -> coreSin(x.mul(V_GRAD_TO_RAD)).div(coreCos(x.mul(V_GRAD_TO_RAD))), x -> Math.tan(x * GRAD_TO_RAD));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.TAN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.tan(s[base + i] * GRAD_TO_RAD);
+            }
         }
 
         // ===================== Reciprocal Trigonometric =====================
         // Radian
         public static void sec(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(coreCos(x)), x -> 1.0 / Math.cos(x));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.COS))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = 1.0 / Math.cos(s[base + i]);
+            }
         }
 
         public static void csc(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(coreSin(x)), x -> 1.0 / Math.sin(x));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.SIN))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = 1.0 / Math.sin(s[base + i]);
+            }
         }
 
         public static void cot(int base, int n, double[] s) {
-            process(base, n, s, x -> coreCos(x).div(coreSin(x)), x -> 1.0 / Math.tan(x));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+                v.lanewise(VectorOperators.COS)
+                        .div(v.lanewise(VectorOperators.SIN))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = 1.0 / Math.tan(s[base + i]);
+            }
         }
 
         // Degree
         public static void secDeg(int base, int n, double[] s) {
-            process(base, n, s,
-                    x -> V_ONE.div(coreCos(x.mul(V_DEG_TO_RAD))),
-                    x -> 1.0 / Math.cos(Math.toRadians(x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.COS))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = 1.0 / Math.cos(Math.toRadians(s[base + i]));
+            }
         }
 
         public static void cscDeg(int base, int n, double[] s) {
-            process(base, n, s,
-                    x -> V_ONE.div(coreSin(x.mul(V_DEG_TO_RAD))),
-                    x -> 1.0 / Math.sin(Math.toRadians(x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.SIN))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = 1.0 / Math.sin(Math.toRadians(s[base + i]));
+            }
         }
 
         public static void cotDeg(int base, int n, double[] s) {
-            process(base, n, s,
-                    x -> coreCos(x.mul(V_DEG_TO_RAD)).div(coreSin(x.mul(V_DEG_TO_RAD))),
-                    x -> 1.0 / Math.tan(Math.toRadians(x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_DEG_TO_RAD);
+                v.lanewise(VectorOperators.COS)
+                        .div(v.lanewise(VectorOperators.SIN))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = 1.0 / Math.tan(Math.toRadians(s[base + i]));
+            }
         }
 
         // Grad
         public static void secGrad(int base, int n, double[] s) {
-            process(base, n, s,
-                    x -> V_ONE.div(coreCos(x.mul(V_GRAD_TO_RAD))),
-                    x -> 1.0 / Math.cos(x * GRAD_TO_RAD));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.COS))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = 1.0 / Math.cos(s[base + i] * GRAD_TO_RAD);
+            }
         }
 
         public static void cscGrad(int base, int n, double[] s) {
-            process(base, n, s,
-                    x -> V_ONE.div(coreSin(x.mul(V_GRAD_TO_RAD))),
-                    x -> 1.0 / Math.sin(x * GRAD_TO_RAD));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.SIN))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = 1.0 / Math.sin(s[base + i] * GRAD_TO_RAD);
+            }
         }
 
         public static void cotGrad(int base, int n, double[] s) {
-            process(base, n, s,
-                    x -> coreCos(x.mul(V_GRAD_TO_RAD)).div(coreSin(x.mul(V_GRAD_TO_RAD))),
-                    x -> 1.0 / Math.tan(x * GRAD_TO_RAD));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i)
+                        .mul(V_GRAD_TO_RAD);
+                v.lanewise(VectorOperators.COS)
+                        .div(v.lanewise(VectorOperators.SIN))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = 1.0 / Math.tan(s[base + i] * GRAD_TO_RAD);
+            }
         }
 
-        // Inverse Radian
+        // ===================== Inverse Trigonometric =====================
+        // Radian
         public static void asin(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.ASIN), Math::asin);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.ASIN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.asin(s[base + i]);
+            }
         }
 
         public static void acos(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.ACOS), Math::acos);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.ACOS)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.acos(s[base + i]);
+            }
         }
 
         public static void atan(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.ATAN), Math::atan);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.ATAN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.atan(s[base + i]);
+            }
         }
 
-        // Inverse Degree
+        // Degree
         public static void asinDeg(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.ASIN).mul(V_RAD_TO_DEG), x -> Math.toDegrees(Math.asin(x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.ASIN)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.toDegrees(Math.asin(s[base + i]));
+            }
         }
 
         public static void acosDeg(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.ACOS).mul(V_RAD_TO_DEG), x -> Math.toDegrees(Math.acos(x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.ACOS)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.toDegrees(Math.acos(s[base + i]));
+            }
         }
 
         public static void atanDeg(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.ATAN).mul(V_RAD_TO_DEG), x -> Math.toDegrees(Math.atan(x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.ATAN)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.toDegrees(Math.atan(s[base + i]));
+            }
         }
 
-        // Inverse Grad
+        // Grad
         public static void asinGrad(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.ASIN).mul(V_RAD_TO_GRAD), x -> Math.asin(x) * RAD_TO_GRAD);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.ASIN)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.asin(s[base + i]) * RAD_TO_GRAD;
+            }
         }
 
         public static void acosGrad(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.ACOS).mul(V_RAD_TO_GRAD), x -> Math.acos(x) * RAD_TO_GRAD);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.ACOS)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.acos(s[base + i]) * RAD_TO_GRAD;
+            }
         }
 
         public static void atanGrad(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.ATAN).mul(V_RAD_TO_GRAD), x -> Math.atan(x) * RAD_TO_GRAD);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.ATAN)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.atan(s[base + i]) * RAD_TO_GRAD;
+            }
         }
 
         // ===================== Inverse Reciprocal Trigonometric =====================
-        // Inverse Reciprocal Radian
+        // Radian
         public static void acsc(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(x).lanewise(VectorOperators.ASIN), x -> Math.asin(1.0 / x));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .lanewise(VectorOperators.ASIN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.asin(1.0 / s[base + i]);
+            }
         }
 
         public static void asec(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(x).lanewise(VectorOperators.ACOS), x -> Math.acos(1.0 / x));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .lanewise(VectorOperators.ACOS)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.acos(1.0 / s[base + i]);
+            }
         }
 
         public static void acot(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(x).lanewise(VectorOperators.ATAN), x -> Math.atan(1.0 / x));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .lanewise(VectorOperators.ATAN)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.atan(1.0 / s[base + i]);
+            }
         }
 
-        // Inverse Reciprocal Degree
+        // Degree
         public static void acscDeg(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(x).lanewise(VectorOperators.ASIN).mul(V_RAD_TO_DEG), x -> Math.toDegrees(Math.asin(1.0 / x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .lanewise(VectorOperators.ASIN)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.toDegrees(Math.asin(1.0 / s[base + i]));
+            }
         }
 
         public static void asecDeg(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(x).lanewise(VectorOperators.ACOS).mul(V_RAD_TO_DEG), x -> Math.toDegrees(Math.acos(1.0 / x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .lanewise(VectorOperators.ACOS)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.toDegrees(Math.acos(1.0 / s[base + i]));
+            }
         }
 
         public static void acotDeg(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(x).lanewise(VectorOperators.ATAN).mul(V_RAD_TO_DEG), x -> Math.toDegrees(Math.atan(1.0 / x)));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .lanewise(VectorOperators.ATAN)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.toDegrees(Math.atan(1.0 / s[base + i]));
+            }
         }
 
-        // Inverse Reciprocal Grad
+        // Grad
         public static void acscGrad(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(x).lanewise(VectorOperators.ASIN).mul(V_RAD_TO_GRAD), x -> Math.asin(1.0 / x) * RAD_TO_GRAD);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .lanewise(VectorOperators.ASIN)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.asin(1.0 / s[base + i]) * RAD_TO_GRAD;
+            }
         }
 
         public static void asecGrad(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(x).lanewise(VectorOperators.ACOS).mul(V_RAD_TO_GRAD), x -> Math.acos(1.0 / x) * RAD_TO_GRAD);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .lanewise(VectorOperators.ACOS)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.acos(1.0 / s[base + i]) * RAD_TO_GRAD;
+            }
         }
 
         public static void acotGrad(int base, int n, double[] s) {
-            process(base, n, s, x -> V_ONE.div(x).lanewise(VectorOperators.ATAN).mul(V_RAD_TO_GRAD), x -> Math.atan(1.0 / x) * RAD_TO_GRAD);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .lanewise(VectorOperators.ATAN)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.atan(1.0 / s[base + i]) * RAD_TO_GRAD;
+            }
         }
 
-        // Hyperbolic
+        // ===================== Hyperbolic =====================
         public static void sinh(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreSinh, Math::sinh);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.SINH)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.sinh(s[base + i]);
+            }
         }
 
         public static void cosh(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreCosh, Math::cosh);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.COSH)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.cosh(s[base + i]);
+            }
         }
 
         public static void tanh(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreTanh, Math::tanh);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.TANH)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.tanh(s[base + i]);
+            }
         }
 
-        // Inverse Hyperbolic
+        // ===================== Inverse Hyperbolic =====================
         public static void asinh(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreAsinh, Maths::asinh);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                vectorAsinhImpl(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.log(s[base + i] + Math.sqrt(s[base + i] * s[base + i] + 1.0));
+            }
         }
 
         public static void acosh(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreAcosh, Maths::acosh);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                vectorAcoshImpl(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                double x = s[base + i];
+                s[base + i] = x < 1.0 ? Double.NaN : Math.log(x + Math.sqrt(x * x - 1.0));
+            }
         }
 
         public static void atanh(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreAtanh, Maths::atanh);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                vectorAtanhImpl(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                double x = s[base + i];
+                s[base + i] = 0.5 * Math.log((1.0 + x) / (1.0 - x));
+            }
         }
 
         public static void asech(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreAsech, x -> Maths.acosh(1.0 / x));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                vectorAsechImpl(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                double x = s[base + i];
+                s[base + i] = (x <= 0.0 || x > 1.0) ? Double.NaN : Math.log((1.0 / x) + Math.sqrt((1.0 / (x * x)) - 1.0));
+            }
         }
 
         public static void acsch(int base, int n, double[] s) {
-            process(base, n, s, VectorMath::coreAsch, x -> Maths.asinh(1.0 / x));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                vectorAcschImpl(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                double x = s[base + i];
+                s[base + i] = x == 0.0 ? Double.NaN : Math.log((1.0 / x) + Math.sqrt((1.0 / (x * x)) + 1.0));
+            }
         }
 
         public static void acoth(int base, int n, double[] s) {
-            process(base, n, s, x -> {
-                DoubleVector y = V_ONE.div(x);
-                VectorMask<Double> invalid = y.abs().compare(VectorOperators.GE, V_ONE);
-                DoubleVector res = V_HALF.mul(V_ONE.add(y).div(V_ONE.sub(y)).lanewise(VectorOperators.LOG));
-                return res.blend(V_NAN, invalid);
-            }, x -> Maths.atanh(1.0 / x));
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                vectorAcothImpl(DoubleVector.fromArray(SPECIES, s, base + i))
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                double x = s[base + i];
+                s[base + i] = Math.abs(x) <= 1.0 ? Double.NaN : 0.5 * Math.log((1.0 + (1.0 / x)) / (1.0 - (1.0 / x)));
+            }
         }
 
         // ===================== Exponential and Logarithmic =====================
         public static void exp(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.EXP), Math::exp);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.EXP)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.exp(s[base + i]);
+            }
         }
 
         public static void ln(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.LOG), Math::log);
+            int i = 0;
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.LOG)
+                        .intoArray(s, base + i);
+            }
+            for (; i < n; i++) {
+                s[base + i] = Math.log(s[base + i]);
+            }
         }
 
         public static void log10(int base, int n, double[] s) {
-            process(base, n, s, x -> x.lanewise(VectorOperators.LOG10), Math::log10);
-        }
-        // ===================== Stirling's Factorial Approximation =====================
-
-        public static void stirling(int base, int n, double[] s) {
-            int vl = SPECIES.length();
-            int bound = SPECIES.loopBound(n);
-            DoubleVector pi2 = DoubleVector.broadcast(SPECIES, 2.0 * Math.PI);
-            DoubleVector nanVec = DoubleVector.broadcast(SPECIES, Double.NaN);
             int i = 0;
-
-            for (; i < bound; i += vl) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
-                DoubleVector lnN = v.lanewise(VectorOperators.LOG);
-                DoubleVector term1 = v.mul(lnN).sub(v);
-                DoubleVector term2 = pi2.mul(v).lanewise(VectorOperators.LOG).mul(0.5);
-                DoubleVector term3 = V_ONE.div(v.mul(12.0));
-                DoubleVector result = term1.add(term2).add(term3).lanewise(VectorOperators.EXP);
-
-                var invalidMask = v.compare(VectorOperators.LE, 0.0);
-                result.blend(nanVec, invalidMask).intoArray(s, base + i);
+            int limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, base + i)
+                        .lanewise(VectorOperators.LOG10)
+                        .intoArray(s, base + i);
             }
-
-            int remaining = n - i;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i, mask);
-                DoubleVector lnN = v.lanewise(VectorOperators.LOG);
-                DoubleVector term1 = v.mul(lnN).sub(v);
-                DoubleVector term2 = pi2.mul(v).lanewise(VectorOperators.LOG).mul(0.5);
-                DoubleVector term3 = V_ONE.div(v.mul(12.0));
-                DoubleVector result = term1.add(term2).add(term3).lanewise(VectorOperators.EXP);
-
-                var invalidMask = v.compare(VectorOperators.LE, 0.0);
-                result.blend(nanVec, invalidMask).intoArray(s, base + i, mask);
+            for (; i < n; i++) {
+                s[base + i] = Math.log10(s[base + i]);
             }
         }
 
-        // ===================== Core Mathematical Specialized Transcendentals =====================
-        /**
-         * High-performance vectorized exp() using magic-number rounding +
-         * 6th-degree minimax polynomial via FMA + fast bit manipulation for
-         * 2^k.
-         */
-        private static DoubleVector fastVectorExp(DoubleVector x) {
-            // Clamp to full IEEE 754 safe bounds for double precision
-            x = x.lanewise(VectorOperators.MAX, -745.13).lanewise(VectorOperators.MIN, 709.78);
-
-            DoubleVector invLn2 = DoubleVector.broadcast(SPECIES, 1.4426950408889634074);
-            DoubleVector ln2Hi = DoubleVector.broadcast(SPECIES, -0.6931471805599453);
-            DoubleVector ln2Lo = DoubleVector.broadcast(SPECIES, -2.8235290563031574E-13);
-
-            // Magic number rounding to nearest integer
-            DoubleVector magic = DoubleVector.broadcast(SPECIES, 4503599627370496.0); // 2^52
-            DoubleVector k = x.mul(invLn2).add(magic).sub(magic);
-            DoubleVector r = x.add(k.mul(ln2Hi)).add(k.mul(ln2Lo));
-
-            // 6th-degree minimax polynomial evaluated via structural FMA pipelines (Horner's scheme)
-            DoubleVector p = r.mul(0.001398199650).add(0.0088632903);
-            p = r.fma(p, DoubleVector.broadcast(SPECIES, 0.04166666666));
-            p = r.fma(p, DoubleVector.broadcast(SPECIES, 0.16666666666));
-            p = r.fma(p, DoubleVector.broadcast(SPECIES, 0.5));
-            p = r.fma(p, V_ONE);
-            p = r.fma(p, V_ONE);
-
-            // Fast 2^k bit manipulation
-            LongVector kLong = (LongVector) k.convert(VectorOperators.D2L, 0);
-            LongVector exponent = kLong.add(1023).lanewise(VectorOperators.LSHL, 52);
-            DoubleVector twoK = (DoubleVector) exponent.convert(VectorOperators.REINTERPRET_L2D, 0);
-
-            return p.mul(twoK);
-        }
-
-        private static DoubleVector vectorizedErf(DoubleVector x) {
-            DoubleVector absX = x.abs();
-
-            VectorMask<Double> maskLow = absX.compare(VectorOperators.LE, THRESHOLD_LOW);
-            VectorMask<Double> maskHigh = absX.compare(VectorOperators.LE, THRESHOLD_HIGH);
-
-            DoubleVector xSq = absX.mul(absX);
-            DoubleVector p = xSq.mul(0.260194122534674).add(30.59022585250011).mul(xSq)
-                    .add(573.9507736045833).mul(xSq).add(2801.752391065013).mul(xSq).add(3204.677458505002);
-            DoubleVector q = xSq.add(159.0884090976454).mul(xSq).add(1422.080683811422).mul(xSq)
-                    .add(4423.613442045816).mul(xSq).add(3204.677458506958);
-
-            DoubleVector resLow = x.mul(p.div(q));
-
-            DoubleVector resMed = VectorizedCodyMath.evaluateMediumVector(x, absX, maskHigh);
-            DoubleVector resHigh = VectorizedCodyMath.evaluateLargeVector(x, absX, maskHigh.not());
-            DoubleVector erfcVal = resMed.blend(resHigh, maskHigh.not());
-
-            DoubleVector resMidHigh = V_ONE.sub(erfcVal);
-            VectorMask<Double> isNegative = x.compare(VectorOperators.LT, 0.0);
-            resMidHigh = resMidHigh.blend(resMidHigh.neg(), isNegative);
-
-            return resMidHigh.blend(resLow, maskLow);
-        }
-
-        // ===================== Conditional Branching =====================
-        public static void if3(int base, int tileN, double[] s, int block) {
-            final int cond = base + block;
-            final int trueVal = base + 2 * block;
-            final int falseVal = base + 3 * block;
-            final int res = base;
-
-            int vl = SPECIES.length();
-            int bound = SPECIES.loopBound(tileN);
-            int i = 0;
-
-            for (; i < bound; i += vl) {
-                DoubleVector vc = DoubleVector.fromArray(SPECIES, s, cond + i);
-                DoubleVector vt = DoubleVector.fromArray(SPECIES, s, trueVal + i);
-                DoubleVector vf = DoubleVector.fromArray(SPECIES, s, falseVal + i);
-                VectorMask<Double> mask = vc.compare(VectorOperators.NE, 0.0).and(vc.compare(VectorOperators.EQ, vc));
-                vf.blend(vt, mask).intoArray(s, res + i);
-            }
-
-            int remaining = tileN - i;
-            if (remaining > 0) {
-                var maskTail = SPECIES.indexInRange(0, remaining);
-                DoubleVector vc = DoubleVector.fromArray(SPECIES, s, cond + i, maskTail);
-                DoubleVector vt = DoubleVector.fromArray(SPECIES, s, trueVal + i, maskTail);
-                DoubleVector vf = DoubleVector.fromArray(SPECIES, s, falseVal + i, maskTail);
-                VectorMask<Double> mask = vc.compare(VectorOperators.NE, 0.0).and(vc.compare(VectorOperators.EQ, vc));
-                vf.blend(vt, mask).intoArray(s, res + i, maskTail);
-            }
-        }
-
-        //POWER OPS BEGINS
         private static boolean isExponentUniform(double[] scratch, int offset, int n) {
             if (n <= 1) {
                 return true;
@@ -2001,6 +2109,134 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             }
             return true;
         }
+        
+          public static void evaluateVariableExponent(double[] base, int bOffset, double[] exp, int eOffset,
+                double[] dest, int dOffset, int n) {
+            if (n <= 0) {
+                return;
+            }
+
+            int i = 0;
+            final int limit = SPECIES.loopBound(n);
+
+            // === 1. Core Vector Loop: exp(y * ln(x)) ===
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector vBase = DoubleVector.fromArray(SPECIES, base, bOffset + i);
+                DoubleVector vExp = DoubleVector.fromArray(SPECIES, exp, eOffset + i);
+
+                // Execute algebraic transcendental transformation
+                DoubleVector log = vBase.lanewise(VectorOperators.LOG);
+                DoubleVector scaled = log.mul(vExp);
+                scaled.lanewise(VectorOperators.EXP).intoArray(dest, dOffset + i);
+            }
+
+            // === 2. Masked Tail Pass ===
+            int remaining = n - i;
+            if (remaining > 0) {
+                var mask = SPECIES.indexInRange(0, remaining);
+                DoubleVector vBase = DoubleVector.fromArray(SPECIES, base, bOffset + i, mask);
+                DoubleVector vExp = DoubleVector.fromArray(SPECIES, exp, eOffset + i, mask);
+
+                // Apply masks to intermediate operators to maintain lane isolation
+                DoubleVector log = vBase.lanewise(VectorOperators.LOG, mask);
+                DoubleVector scaled = log.mul(vExp, mask);
+                DoubleVector res = scaled.lanewise(VectorOperators.EXP, mask);
+
+                res.intoArray(dest, dOffset + i, mask);
+            }
+        }
+        public static void executePowerBlended(double[] scratch, int baseOffset, int expOffset, int n) {
+            if (n <= 0) {
+                return;
+            }
+
+            if (isExponentUniform(scratch, expOffset, n)) {
+                double uniformExp = scratch[expOffset];
+
+                if (uniformExp == 0.5) {
+                    VectorTranscendentals.evaluateNative(scratch, baseOffset, scratch, baseOffset, n, VectorOperators.SQRT);
+                    return;
+                }
+                if (uniformExp == 2.0) {
+                    computeSquare(scratch, baseOffset, scratch, baseOffset, n);
+                    return;
+                }
+                if (uniformExp == 3.0) {
+                    computeCube(scratch, baseOffset, scratch, baseOffset, n);
+                    return;
+                }
+                if (uniformExp == 4.0) {
+                    computeFourthPower(scratch, baseOffset, scratch, baseOffset, n);
+                    return;
+                }
+
+                // Isolated fallback for uniform constants
+                evaluateUniformExponent(scratch, baseOffset, uniformExp, scratch, baseOffset, n);
+            } else {
+                // Isolated fallback for variable exponents
+                evaluateVariableExponent(scratch, baseOffset, scratch, expOffset, scratch, baseOffset, n);
+            }
+        }
+
+// ==========================================
+// Isolated Fast-Path Micro-Methods (EA Safe)
+// ==========================================
+        private static void computeSquare(double[] src, int srcOff, double[] dest, int destOff, int n) {
+            int k = 0;
+            final int limit = SPECIES.loopBound(n);
+            final int vl = SPECIES.length();
+
+            for (; k < limit; k += vl) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k);
+                v.mul(v).intoArray(dest, destOff + k);
+            }
+
+            int remaining = n - k;
+            if (remaining > 0) {
+                var mask = SPECIES.indexInRange(0, remaining);
+                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k, mask);
+                v.mul(v).intoArray(dest, destOff + k, mask);
+            }
+        }
+
+        private static void computeCube(double[] src, int srcOff, double[] dest, int destOff, int n) {
+            int k = 0;
+            final int limit = SPECIES.loopBound(n);
+            final int vl = SPECIES.length();
+
+            for (; k < limit; k += vl) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k);
+                v.mul(v).mul(v).intoArray(dest, destOff + k);
+            }
+
+            int remaining = k - n; // Wait, original had n - k, let's keep it safe:
+            remaining = n - k;
+            if (remaining > 0) {
+                var mask = SPECIES.indexInRange(0, remaining);
+                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k, mask);
+                v.mul(v).mul(v).intoArray(dest, destOff + k, mask);
+            }
+        }
+
+        private static void computeFourthPower(double[] src, int srcOff, double[] dest, int destOff, int n) {
+            int k = 0;
+            final int limit = SPECIES.loopBound(n);
+            final int vl = SPECIES.length();
+
+            for (; k < limit; k += vl) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k);
+                DoubleVector sq = v.mul(v);
+                sq.mul(sq).intoArray(dest, destOff + k);
+            }
+
+            int remaining = n - k;
+            if (remaining > 0) {
+                var mask = SPECIES.indexInRange(0, remaining);
+                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k, mask);
+                DoubleVector sq = v.mul(v);
+                sq.mul(sq).intoArray(dest, destOff + k, mask);
+            }
+        }
 
         public static void evaluateUniformExponent(double[] base, int bOffset, double exp,
                 double[] dest, int dOffset, int n) {
@@ -2008,32 +2244,41 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                 return;
             }
 
-            final int vl = SPECIES.length();
-            final int limit = SPECIES.loopBound(n);
-            int i = 0;
-
-            // Special cases
-            if (exp == 2.0) {
-                for (; i < limit; i += vl) {
-                    DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                    v.mul(v).intoArray(dest, dOffset + i);
-                }
-            } else if (exp == 3.0) {
-                for (; i < limit; i += vl) {
-                    DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                    v.mul(v).mul(v).intoArray(dest, dOffset + i);
-                }
-            } else if (exp == 0.5) {
-                for (; i < limit; i += vl) {
-                    DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                    v.lanewise(VectorOperators.SQRT).intoArray(dest, dOffset + i);
-                }
-            } else if (exp == 1.0) {
+            if (exp == 1.0) {
                 if (base != dest || bOffset != dOffset) {
                     System.arraycopy(base, bOffset, dest, dOffset, n);
                 }
                 return;
-            } else if (exp == 0.0) {
+            }
+            if (exp == 2.0) {
+                computeSquare(base, bOffset, dest, dOffset, n);
+                return;
+            }
+            if (exp == 3.0) {
+                computeCube(base, bOffset, dest, dOffset, n);
+                return;
+            }
+            if (exp == 4.0) {
+                computeFourthPower(base, bOffset, dest, dOffset, n);
+                return;
+            }
+
+            if (exp == 0.5) {
+                VectorTranscendentals.evaluateNative(base, bOffset, dest, dOffset, n, VectorOperators.SQRT);
+                return;
+            }
+
+            // Delegate the highly complex log/exp routines to a separate compilation target
+            evaluateComplexUniformExponent(base, bOffset, exp, dest, dOffset, n);
+        }
+
+        private static void evaluateComplexUniformExponent(double[] base, int bOffset, double exp,
+                double[] dest, int dOffset, int n) {
+            final int vl = SPECIES.length();
+            final int limit = SPECIES.loopBound(n);
+            int i = 0;
+
+            if (exp == 0.0) {
                 for (; i < limit; i += vl) {
                     V_ONE.intoArray(dest, dOffset + i);
                 }
@@ -2043,81 +2288,215 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                     V_ONE.div(v).intoArray(dest, dOffset + i);
                 }
             } else {
-                // General case
-                DoubleVector vExp = DoubleVector.broadcast(SPECIES, exp);
-                for (; i < limit; i += vl) {
-                    DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                    v.lanewise(VectorOperators.POW, vExp).intoArray(dest, dOffset + i);
+                final DoubleVector vExp = DoubleVector.broadcast(SPECIES, exp);
+                if (exp % 1.0 == 0.0) {
+                    if (exp % 2.0 != 0.0) {
+                        // Scenario 1: Odd Integer (FIXED: targetIdx bug resolved)
+                        for (; i < limit; i += vl) {
+                            DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
+                            var isNegativeMask = v.compare(VectorOperators.LT, 0.0);
+                            DoubleVector log = v.abs().lanewise(VectorOperators.LOG);
+                            DoubleVector scaled = log.mul(vExp);
+                            DoubleVector resAbs = scaled.lanewise(VectorOperators.EXP);
+                            resAbs.blend(resAbs.neg(), isNegativeMask).intoArray(dest, dOffset + i);
+                        }
+                    } else {
+                        // Scenario 2: Even Integer
+                        for (; i < limit; i += vl) {
+                            DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
+                            DoubleVector log = v.abs().lanewise(VectorOperators.LOG);
+                            DoubleVector scaled = log.mul(vExp);
+                            scaled.lanewise(VectorOperators.EXP).intoArray(dest, dOffset + i);
+                        }
+                    }
+                } else {
+                    // Scenario 3: Non-Integer
+                    for (; i < limit; i += vl) {
+                        DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
+                        DoubleVector log = v.lanewise(VectorOperators.LOG);
+                        DoubleVector scaled = log.mul(vExp);
+                        scaled.lanewise(VectorOperators.EXP).intoArray(dest, dOffset + i);
+                    }
                 }
             }
 
-            // Tail
-            int remaining = n - i;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i, mask);
-                DoubleVector res = switch ((int) exp) {  // simplified
-                    case 2 ->
-                        v.mul(v);
-                    case 0 ->
-                        V_ONE; // etc.
-                    default ->
-                        v.lanewise(VectorOperators.POW, DoubleVector.broadcast(SPECIES, exp));
-                };
-                res.intoArray(dest, dOffset + i, mask);
-            }
-        }
-
-        public static void evaluateVariableExponent(double[] base, int bOffset, double[] exp, int eOffset,
-                double[] dest, int dOffset, int n) {
-            if (n <= 0) {
-                return;
-            }
-
-            int i = 0;
-            final int limit = SPECIES.loopBound(n);
-
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector vBase = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                DoubleVector vExp = DoubleVector.fromArray(SPECIES, exp, eOffset + i);
-                vBase.lanewise(VectorOperators.POW, vExp).intoArray(dest, dOffset + i);
-            }
-
-            int remaining = n - i;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector vBase = DoubleVector.fromArray(SPECIES, base, bOffset + i, mask);
-                DoubleVector vExp = DoubleVector.fromArray(SPECIES, exp, eOffset + i, mask);
-                vBase.lanewise(VectorOperators.POW, vExp).intoArray(dest, dOffset + i, mask);
-            }
-        }
-
-        //POWER OPS ENDS
-        // ========================================================================
-        // Process Method
-        // ========================================================================
-        private static void process(int base, int n, double[] s,
-                java.util.function.Function<DoubleVector, DoubleVector> vecFunc,
-                java.util.function.DoubleUnaryOperator scalarFunc) {
-            if (s == null || base < 0 || n < 0 || base + n > s.length) {
-                throw new IllegalArgumentException("Invalid input array or bounds");
-            }
-            if (n < VECTOR_THRESHOLD) {
-                for (int i = 0; i < n; i++) {
-                    s[base + i] = scalarFunc.applyAsDouble(s[base + i]);
-                }
-                return;
-            }
-            int i = 0;
-            final int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
-                vecFunc.apply(v).intoArray(s, base + i);
-            }
+            // Clean Scalar Tail Pass
             for (; i < n; i++) {
-                s[base + i] = scalarFunc.applyAsDouble(s[base + i]);
+                final double b = base[bOffset + i];
+                dest[dOffset + i] = (exp == 0.0) ? 1.0 : (exp == -1.0) ? 1.0 / b : Math.pow(b, exp);
             }
         }
+
+        // ========================================================================
+        // Specialized Mathematical Transcendentals
+        // ========================================================================
+        /**
+         * High-performance vectorized exp() using magic-number rounding +
+         * 6th-degree minimax polynomial via FMA + fast bit manipulation for
+         * 2^k.
+         */
+        private static DoubleVector fastVectorExp(DoubleVector x) {
+            x = x.lanewise(VectorOperators.MAX, -745.13).lanewise(VectorOperators.MIN, 709.78);
+
+            DoubleVector invLn2 = DoubleVector.broadcast(SPECIES, 1.4426950408889634074);
+            DoubleVector ln2Hi = DoubleVector.broadcast(SPECIES, -0.6931471805599453);
+            DoubleVector ln2Lo = DoubleVector.broadcast(SPECIES, -2.8235290563031574E-13);
+
+            DoubleVector magic = DoubleVector.broadcast(SPECIES, 4503599627370496.0); // 2^52
+            DoubleVector k = x.mul(invLn2).add(magic).sub(magic);
+            DoubleVector r = x.add(k.mul(ln2Hi)).add(k.mul(ln2Lo));
+
+            DoubleVector p = r.mul(0.001398199650).add(0.0088632903);
+            p = r.lanewise(VectorOperators.FMA, p, DoubleVector.broadcast(SPECIES, 0.04166666666));
+            p = r.lanewise(VectorOperators.FMA, p, DoubleVector.broadcast(SPECIES, 0.16666666666));
+            p = r.lanewise(VectorOperators.FMA, p, DoubleVector.broadcast(SPECIES, 0.5));
+            p = r.lanewise(VectorOperators.FMA, p, V_ONE);
+            p = r.lanewise(VectorOperators.FMA, p, V_ONE);
+
+            LongVector kLong = (LongVector) k.convert(VectorOperators.D2L, 0);
+            LongVector exponent = kLong.add(1023).lanewise(VectorOperators.LSHL, 52);
+            DoubleVector twoK = (DoubleVector) exponent.convert(VectorOperators.REINTERPRET_L2D, 0);
+
+            return p.mul(twoK);
+        }
+
+        private static DoubleVector vectorizedErf(DoubleVector x) {
+            DoubleVector absX = x.abs();
+
+            VectorMask<Double> maskLow = absX.compare(VectorOperators.LE, THRESHOLD_LOW);
+            VectorMask<Double> maskHigh = absX.compare(VectorOperators.LE, THRESHOLD_HIGH);
+
+            DoubleVector xSq = absX.mul(absX);
+            DoubleVector p = xSq.mul(0.260194122534674).add(30.59022585250011).mul(xSq)
+                    .add(573.9507736045833).mul(xSq).add(2801.752391065013).mul(xSq).add(3204.677458505002);
+            DoubleVector q = xSq.add(159.0884090976454).mul(xSq).add(1422.080683811422).mul(xSq)
+                    .add(4423.613442045816).mul(xSq).add(3204.677458506958);
+
+            DoubleVector resLow = x.mul(p.div(q));
+
+            // Note: Assumes VectorizedCodyMath is available in your classpath
+            DoubleVector resMed = VectorizedCodyMath.evaluateMediumVector(x, absX, maskHigh);
+            DoubleVector resHigh = VectorizedCodyMath.evaluateLargeVector(x, absX, maskHigh.not());
+            DoubleVector erfcVal = resMed.blend(resHigh, maskHigh.not());
+
+            DoubleVector resMidHigh = V_ONE.sub(erfcVal);
+            VectorMask<Double> isNegative = x.compare(VectorOperators.LT, 0.0);
+            resMidHigh = resMidHigh.blend(resMidHigh.neg(), isNegative);
+
+            return resMidHigh.blend(resLow, maskLow);
+        }
+
+        // ===================== Stirling's Factorial Approximation =====================
+        public static void stirling(int base, int n, double[] s) {
+            int vl = SPECIES.length();
+            int bound = SPECIES.loopBound(n);
+            DoubleVector pi2 = DoubleVector.broadcast(SPECIES, 2.0 * Math.PI);
+            DoubleVector nanVec = DoubleVector.broadcast(SPECIES, Double.NaN);
+            int i = 0;
+
+            for (; i < bound; i += vl) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
+                DoubleVector lnN = v.lanewise(VectorOperators.LOG);
+                DoubleVector term1 = v.mul(lnN).sub(v);
+                DoubleVector term2 = pi2.mul(v).lanewise(VectorOperators.LOG).mul(0.5);
+                DoubleVector term3 = V_ONE.div(v.mul(12.0));
+                DoubleVector result = term1.add(term2).add(term3).lanewise(VectorOperators.EXP);
+
+                var invalidMask = v.compare(VectorOperators.LE, 0.0);
+                result.blend(nanVec, invalidMask).intoArray(s, base + i);
+            }
+
+            int remaining = n - i;
+            if (remaining > 0) {
+                var mask = SPECIES.indexInRange(0, remaining);
+                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i, mask);
+                DoubleVector lnN = v.lanewise(VectorOperators.LOG);
+                DoubleVector term1 = v.mul(lnN).sub(v);
+                DoubleVector term2 = pi2.mul(v).lanewise(VectorOperators.LOG).mul(0.5);
+                DoubleVector term3 = V_ONE.div(v.mul(12.0));
+                DoubleVector result = term1.add(term2).add(term3).lanewise(VectorOperators.EXP);
+
+                var invalidMask = v.compare(VectorOperators.LE, 0.0);
+                result.blend(nanVec, invalidMask).intoArray(s, base + i, mask);
+            }
+        }
+
+        // ===================== Conditional Branching =====================
+        public static void if3(int base, int tileN, double[] s, int block) {
+            final int cond = base + block;
+            final int trueVal = base + 2 * block;
+            final int falseVal = base + 3 * block;
+            final int res = base;
+
+            int vl = SPECIES.length();
+            int bound = SPECIES.loopBound(tileN);
+            int i = 0;
+
+            for (; i < bound; i += vl) {
+                DoubleVector vc = DoubleVector.fromArray(SPECIES, s, cond + i);
+                DoubleVector vt = DoubleVector.fromArray(SPECIES, s, trueVal + i);
+                DoubleVector vf = DoubleVector.fromArray(SPECIES, s, falseVal + i);
+                VectorMask<Double> mask = vc.compare(VectorOperators.NE, 0.0).and(vc.compare(VectorOperators.EQ, vc));
+                vf.blend(vt, mask).intoArray(s, res + i);
+            }
+
+            int remaining = tileN - i;
+            if (remaining > 0) {
+                var maskTail = SPECIES.indexInRange(0, remaining);
+                DoubleVector vc = DoubleVector.fromArray(SPECIES, s, cond + i, maskTail);
+                DoubleVector vt = DoubleVector.fromArray(SPECIES, s, trueVal + i, maskTail);
+                DoubleVector vf = DoubleVector.fromArray(SPECIES, s, falseVal + i, maskTail);
+                VectorMask<Double> mask = vc.compare(VectorOperators.NE, 0.0).and(vc.compare(VectorOperators.EQ, vc));
+                vf.blend(vt, mask).intoArray(s, res + i, maskTail);
+            }
+        }
+
+        // ========================================================================
+        // Vectorized Inverse Hyperbolic Implementations
+        // ========================================================================
+        private static DoubleVector vectorAsinhImpl(DoubleVector x) {
+            return x.add(x.mul(x).add(V_ONE).lanewise(VectorOperators.SQRT))
+                    .lanewise(VectorOperators.LOG);
+        }
+
+        private static DoubleVector vectorAcoshImpl(DoubleVector x) {
+            VectorMask<Double> valid = x.compare(VectorOperators.GE, V_ONE);
+            DoubleVector result = x.add(x.mul(x).sub(V_ONE).lanewise(VectorOperators.SQRT))
+                    .lanewise(VectorOperators.LOG);
+            return result.blend(V_NAN, valid.not());
+        }
+
+        private static DoubleVector vectorAtanhImpl(DoubleVector x) {
+            VectorMask<Double> valid = x.abs().compare(VectorOperators.LT, V_ONE);
+            DoubleVector result = V_ONE.add(x).div(V_ONE.sub(x))
+                    .lanewise(VectorOperators.LOG)
+                    .mul(V_HALF);
+            return result.blend(V_NAN, valid.not());
+        }
+
+        private static DoubleVector vectorAsechImpl(DoubleVector x) {
+            VectorMask<Double> valid = x.compare(VectorOperators.GT, 0.0)
+                    .and(x.compare(VectorOperators.LE, V_ONE));
+            DoubleVector result = V_ONE.div(x).add(V_ONE.div(x.mul(x)).sub(V_ONE).lanewise(VectorOperators.SQRT))
+                    .lanewise(VectorOperators.LOG);
+            return result.blend(V_NAN, valid.not());
+        }
+
+        private static DoubleVector vectorAcschImpl(DoubleVector x) {
+            VectorMask<Double> valid = x.compare(VectorOperators.NE, 0.0);
+            DoubleVector result = V_ONE.div(x).add(V_ONE.div(x.mul(x)).add(V_ONE).lanewise(VectorOperators.SQRT))
+                    .lanewise(VectorOperators.LOG);
+            return result.blend(V_NAN, valid.not());
+        }
+
+        private static DoubleVector vectorAcothImpl(DoubleVector x) {
+            VectorMask<Double> valid = x.abs().compare(VectorOperators.GT, V_ONE);
+            DoubleVector result = V_ONE.add(V_ONE.div(x)).div(V_ONE.sub(V_ONE.div(x)))
+                    .lanewise(VectorOperators.LOG)
+                    .mul(V_HALF);
+            return result.blend(V_NAN, valid.not());
+        }
+
     }
 
     public static final class VectorTranscendentals {
@@ -2143,13 +2522,6 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                 va.lanewise(op).intoArray(dest, destOffset + i, mask);
             }
         }
-    }
-
-    public static final class VectorPowerEvaluator {
-
-        private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-        private static final DoubleVector V_ONE = DoubleVector.broadcast(SPECIES, 1.0);
-
     }
 
 }

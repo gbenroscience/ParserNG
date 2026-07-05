@@ -620,8 +620,8 @@ public class FunctionExpander {
             fec.build(new Function("@(x)sin(x)"), 1, 200);
             System.out.println("com.github.gbenroscience.math.numericalmethods.FnExpander.main()");
             System.out.println("f(" + 4 + ")=" + fec.evaluate(4));
-            System.out.println("intg()=" + fec.integrate());
             System.out.println("dfx(" + 4 + ")=" + fec.derivative(4));
+            System.out.println("intg()=" + fec.integrate());
 
         } catch (Throwable ex) {
             Logger.getLogger(FunctionExpander.class.getName()).log(Level.SEVERE, null, ex);

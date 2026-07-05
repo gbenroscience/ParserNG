@@ -141,6 +141,9 @@ public class ParserNgBench {
 
     private int varCount;
 
+    // 1. Add a single stable scenario index to your benchmark fields
+    private int benchmarkScenario = 0;
+
     //SoA dataSink layout for ParserNG
     private static double[][][] dataSink;
     // Pre-flattened Array of Structures [scenario][sampleIndex][variables]
@@ -191,14 +194,21 @@ public class ParserNgBench {
         }
     }
 
+    @Setup(Level.Iteration)
+    public void chooseIterationScenario() {
+        // Pick or rotate a matrix ONLY between iterations, never inside the hot loop
+        this.benchmarkScenario = ThreadLocalRandom.current().nextInt(5);
+    }
+
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     public void janinoSoA(Blackhole bh) {
         final int limit = dataSize;
         final int stride = varCount;
-        // Select one scenario (SoA matrix)
-        final double[][] input = dataSink[simpleCursor == dataSink.length ? 0 : simpleCursor++];
+
+        // Read from the static iteration-level scenario to ensure perfect JIT loop unrolling
+        final double[][] input = dataSink[benchmarkScenario];
         final double[] localVars = this.vars;
         final VectorTurboBench.JaninoMathFunction evaluator = this.fastEvaluator;
 
@@ -216,12 +226,11 @@ public class ParserNgBench {
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     public void janinoAoS(Blackhole bh) {
         final int limit = dataSize;
-        // Direct pointer to the row-sequential scenario matrix
-        final double[][] inputAoS = janinoDataSink[simpleCursor == janinoDataSink.length ? 0 : simpleCursor++];
+        // Read from a completely static scenario index
+        final double[][] inputAoS = janinoDataSink[benchmarkScenario];
         final VectorTurboBench.JaninoMathFunction evaluator = this.fastEvaluator;
 
         for (int i = 0; i < limit; i++) {
-            // Zero array-copying overhead. Linear, hardware-friendly memory streaming.
             bh.consume(evaluator.apply(inputAoS[i]));
         }
     }
@@ -230,11 +239,12 @@ public class ParserNgBench {
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     public void parserNG(Blackhole bh) {
-        final double[][] input = dataSink[simpleCursor == dataSink.length ? 0 : simpleCursor++];
-        final double[]res = result;
-        // Measure execution of the SoA-optimized kernel
-        simdVectorTurbo.applyBulk(input, res);
+        // Read from the same stable scenario index—zero cursor modifications inside!
+        final double[][] input = dataSink[benchmarkScenario];
+        final double[] res = result;
 
+        // Execute core computation kernel
+        simdVectorTurbo.applyBulk(input, res);
         bh.consume(res);
     }
 
@@ -364,7 +374,7 @@ public class ParserNgBench {
                     .forks(2)
                     .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
                     .jvmArgs("-Xms8g", "-Xmx8g", "-Dbenchmark.index=" + index)
-                    .jvmArgsAppend("--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions")
+                    .jvmArgsAppend("--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"/*, "-XX:+LogCompilation", "-XX:+PrintInlining"*/)
                     .build();
 
             new Runner(configurations).run();
