@@ -1167,19 +1167,20 @@ public class Maths {                       //3.14159265358979323846;
     }
 
     /**
-     * @param x The number.
-     * @return the arc sinh of the number.
+     * Inverse hyperbolic sine
      */
     public static double asinh(double x) {
-        return Math.log(x + Math.sqrt(x * x + 1));
+        return Math.log(x + Math.sqrt(x * x + 1.0));
     }
 
     /**
-     * @param x The number.
-     * @return the arc sinh of the number.
+     * Inverse hyperbolic cosine
      */
     public static double acosh(double x) {
-        return Math.log(x + Math.sqrt(x * x - 1));
+        if (x < 1.0) {
+            return Double.NaN;           // or throw exception, depending on policy
+        }
+        return Math.log(x + Math.sqrt(x * x - 1.0));
     }
 
     /**
@@ -1187,7 +1188,10 @@ public class Maths {                       //3.14159265358979323846;
      * @return the arc sinh of the number.
      */
     public static double atanh(double x) {
-        return 0.5 * Math.log((1 + x) / (1 - x));
+        if (Math.abs(x) >= 1.0) {
+            return Double.NaN;        // or throw ArithmeticException
+        }
+        return 0.5 * Math.log((1.0 + x) / (1.0 - x));
     }
 
     /**
