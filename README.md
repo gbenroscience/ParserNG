@@ -17,8 +17,10 @@ By adopting a hardware-aligned, fast-interpreted memory model instead of risky d
 
 Below are live renderings of a dynamic transcendental surface layer computed entirely within a secure Java runtime using the ParserNG Vector kernel. No JNI, no off-heap memory hacks, just pure mechanical sympathy.
 
-[![Watch the video](https://github.com/user-attachments/assets/d1e2e1f8-4fd2-4be3-a778-33d8360d949d)](https://github.com/user-attachments/assets/d1e2e1f8-4fd2-4be3-a778-33d8360d949d)
-[![Watch the video](https://github.com/user-attachments/assets/ab65fb89-6841-420d-b4e5-9ec7592b1e5a)](https://github.com/user-attachments/assets/ab65fb89-6841-420d-b4e5-9ec7592b1e5a)
+
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/d1e2e1f8-4fd2-4be3-a778-33d8360d949d" width="70%" poster="./assets/video_poster.png"> </video>
+</div>
 
 
 
