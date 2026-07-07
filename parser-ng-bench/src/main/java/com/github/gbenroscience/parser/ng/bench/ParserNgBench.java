@@ -136,7 +136,7 @@ public class ParserNgBench {
 
     private double[] vars;
     private VectorTurboBench.JaninoMathFunction fastEvaluator;
-
+  
     SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVectorTurbo;
 
     private int varCount;

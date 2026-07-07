@@ -1,6 +1,11 @@
 # ParserNG
 
 
+
+### ParserNG 2.0.7 is out on maven-central! 
+Full migration of all inbuilt functions and UDFs to the Vector API(not stats functions), leading to 2.0x to 20x speedup in bulk evaluations
+
+
 ### ParserNG 2.0.6 is out on maven-central! 
 Very stable release. Lots of bug fixes in bulk gelu, swiglu etc
 

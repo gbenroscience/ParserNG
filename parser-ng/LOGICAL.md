@@ -1,6 +1,6 @@
 ## Logical Calculus
 
-The logical expressions in math engine have theirs intentional limitations. Thus allmighty logical expression parser was added around individually evaluated Mathematical expressions which results can be later compared, and logically grouped.  The simplest way to evaluate an logical  expression in **ParserNG** is to use the <code>LogicalExpression</code> class.
+The logical expressions in math engine have their intentional limitations. The logical expression parser was added around individually evaluated Mathematical expressions whose results can be later compared, and logically grouped.  The simplest way to evaluate an logical  expression in **ParserNG** is to use the <code>LogicalExpression</code> class.
 <code>LogicalExpression</code> is the class responsible for basic comaprsions and logica  expression parsing and evaluation. It calls <code>MathExpression</code> to ech of its basic non-logical parts. The default <code>MathExpression</code> can be repalced by any custom implementation of <code>Solvable</code>, but it is only for highly specialized usages. Highlight, where MathExpression is using <code>()</code> for mathematical bracketing, LogicalExpression - as () can be part of underlying comapred mathematical expressiosn  uses <code>[]</code> brackets.<br>
 <br>
 In CLI, you can use -l/-L/--logic switch to work with LogicalExpression. Although it is fully compatible with MathExpression you may face unknown issue<br>
