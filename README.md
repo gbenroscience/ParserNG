@@ -14,14 +14,14 @@ By adopting a hardware-aligned, fast-interpreted memory model instead of risky d
 ---
 
 ### Pure-Java Real-Time Hardware Acceleration
-
+<!--
 Below are live renderings of a dynamic transcendental surface layer computed entirely within a secure Java runtime using the ParserNG Vector kernel. No JNI, no off-heap memory hacks, just pure mechanical sympathy.
 
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/d1e2e1f8-4fd2-4be3-a778-33d8360d949d" width="70%" poster="./assets/video_poster.png"> </video>
 </div>
-
+-->
 
 
 ## 🚀 What's New in Version 2.0.7
