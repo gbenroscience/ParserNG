@@ -300,7 +300,7 @@ public class Method {
     public static boolean isStatsMethod(String op) {
         return (isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || isBasicNumericalFunction(op)
                 || isMatrixMethod(op) || isHardcodedStatsMethod(op)
-                || op.equals(POW) || op.equals(DIFFERENTIATION) || op.equals(ROTOR)
+                || op.equals(POW) || op.equals(ATAN2) || op.equals(DIFFERENTIATION) || op.equals(AUTO_DIFF) || op.equals(ROTOR)
                 || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
                 || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION) 
                 || op.equals(SWIGLU) ||op.equals(GEGLU)
@@ -560,6 +560,12 @@ public class Method {
                 list.clear();
                 list.add(result);
                 return list;
+            } else if (name.equals(AUTO_DIFF) && sz == 3) {
+                Set set = new Set(list);
+                result = String.valueOf(set.autoDiff());
+                list.clear();
+                list.add(result);
+                return list;
             } else if (name.equals(INTEGRATION)) {
                 Set set = new Set(list);
                 result = String.valueOf(set.integrate());
@@ -633,6 +639,12 @@ public class Method {
             } else if (name.equals(POW) && sz == 2) {
                 Set set = new Set(list);
                 result = String.valueOf(set.power());
+                list.clear();
+                list.add(result);
+                return list;
+            }  else if (name.equals(ATAN2) && sz == 2) {
+                Set set = new Set(list);
+                result = String.valueOf(set.atan2());
                 list.clear();
                 list.add(result);
                 return list;

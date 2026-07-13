@@ -84,7 +84,14 @@ public class ActivationBench {
         evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "geglu");
         bh.consume(out); 
     }
-    public static void main(String[] args) throws RunnerException {
+    
+    
+       @Benchmark
+    public void matmul(Blackhole bh) {
+        evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "matmul");
+        bh.consume(out); 
+    }
+   public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
         opt.include(ActivationBench.class.getSimpleName());
 
@@ -96,12 +103,16 @@ public class ActivationBench {
                 .measurementTime(TimeValue.milliseconds(500))
                 .forks(2)
                 .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
+                // Add the HotSpot assembly and Linux perf profiler here
+                .addProfiler(org.openjdk.jmh.profile.LinuxPerfAsmProfiler.class)
                 .jvmArgs("-Xms8g", "-Xmx8g", "-Dbenchmark.index=1")
-                .jvmArgsAppend("--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions")
+                // Stripped out the raw -prof text from here
+                .jvmArgsAppend("--add-modules", "jdk.incubator.vector", 
+                               "-XX:+UnlockDiagnosticVMOptions", 
+                               "-XX:+PrintAssembly") 
                 .build();
 
         new Runner(configurations).run();
     }
-    
 
 }

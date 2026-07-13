@@ -19,6 +19,7 @@ import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffEvaluator;
 import com.github.gbenroscience.math.geom.Direction;
 import com.github.gbenroscience.math.geom.Line3D;
 import com.github.gbenroscience.math.geom.Point;
@@ -44,6 +45,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.InputMismatchException;
 
 /**
  *
@@ -340,6 +342,7 @@ public class MethodRegistry {
         registerMethod(Declarations.CBRT, (ctx, arity, args) -> ctx.wrap(Math.cbrt(args[0].scalar)));
         registerMethod(Declarations.SQRT, (ctx, arity, args) -> ctx.wrap(Math.sqrt(args[0].scalar)));
         registerMethod(Declarations.POW, (ctx, arity, args) -> ctx.wrap(Math.pow(args[0].scalar, args[1].scalar)));
+        registerMethod(Declarations.ATAN2, (ctx, arity, args) -> ctx.wrap(Math.atan2(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.EXP, (ctx, arity, args) -> ctx.wrap(Math.exp(args[0].scalar)));
 
         registerMethod(Declarations.LG, (ctx, arity, args) -> ctx.wrap(Math.log10(args[0].scalar)));
@@ -399,6 +402,36 @@ public class MethodRegistry {
                 }
                 default:
                     return ctx.wrap(Double.NaN);
+            }
+        });
+        registerMethod(Declarations.AUTO_DIFF, (ctx, arity, args) -> {
+            System.out.println("Derivatives Action");
+            System.out.println("args: " + Arrays.toString(args));
+            System.out.println("arity: " + arity);
+
+            int sz = args.length;
+
+            if (sz == 2) {
+                String fn = args[0].textRes;
+                Function f = FunctionManager.lookUp(fn);
+                if (f != null) {
+                    MathExpression.Token[] rpn = f.getMathExpression().getCachedPostfix();
+                    AutoDiffEvaluator ade = new AutoDiffEvaluator(rpn);
+                    String vars[] = f.getMathExpression().getVariablesNames();
+                    String var = vars != null && vars.length == 1 ? vars[0] : null;
+                    if (Variable.isVariableString(var)) {
+                        double val = args[1].scalar;
+                        double[]d = ade.evaluateRPN(var, val);
+                        return ctx.wrap(d[1]);
+                    } else {
+                        throw new InputMismatchException("The second arg must be a Variable name");
+                    }
+                } else {
+                    throw new InputMismatchException("The first arg must be a function");
+                }
+
+            } else {
+                throw new InputMismatchException("Invalid arguments passed to autoDiff function: required - autoDiff(function, variable, number)");
             }
         });
         registerMethod(Declarations.INTEGRATION, (ctx, arity, args) -> {

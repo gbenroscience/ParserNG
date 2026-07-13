@@ -11,6 +11,7 @@ import java.util.Deque;
 import java.util.InputMismatchException;
 import java.util.List;
 import com.github.gbenroscience.util.VariableManager;
+import java.util.Arrays;
 
 /**
  *
@@ -629,6 +630,11 @@ public class Bracket extends Operator {
     }
 
     public static void main(String... args) {
+        
+        MathExpression me = new MathExpression("4*x^3*sin(x^2)");
+        System.out.println("scanner: "+me.scanner);
+        System.out.println("rpn-tokens: "+Arrays.deepToString(me.getCachedPostfix()));
+        
 
         String s1 = "sin(1)+cos(1)+tan(1)+log(10)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));";
 

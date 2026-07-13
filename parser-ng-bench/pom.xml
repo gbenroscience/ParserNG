@@ -15,7 +15,7 @@
         <!-- This module requires Java 21+ because of Vector API -->
         <maven.compiler.release>21</maven.compiler.release>
     </properties>
-    <build>
+    <build> 
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -127,6 +127,7 @@
             <groupId>org.openjdk.jmh</groupId>
             <artifactId>jmh-core</artifactId>
             <version>1.37</version>
+            <scope>compile</scope>
             <type>jar</type>
         </dependency>
         <dependency>

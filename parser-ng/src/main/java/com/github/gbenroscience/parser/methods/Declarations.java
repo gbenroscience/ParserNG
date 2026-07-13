@@ -30,6 +30,7 @@ public class Declarations {
     public static final String ARC_SIN = "sin-¹";
     public static final String ARC_COS = "cos-¹";
     public static final String ARC_TAN = "tan-¹";
+    public static final String ATAN2 = "atan2";
     public static final String SEC = "sec";
     public static final String COSEC = "csc";
     public static final String COT = "cot";
@@ -102,6 +103,7 @@ public class Declarations {
     public static final String PLOT = "plot";
     public static final String PRINT = "print";
     public static final String DIFFERENTIATION = "diff";
+    public static final String AUTO_DIFF = "autodiff";
     public static final String INTEGRATION = "intg";
     public static final String DIFF_EQN = "diffeq"; 
     
@@ -300,10 +302,10 @@ public class Declarations {
             ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT,
             LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, SQRT, CBRT, INVERSE,
             ERF, GELU, GEGLU, SWIGLU, FAST_GELU,
-            SQUARE, CUBE, POW, FACT, COMBINATION, PERMUTATION, SUM, LIST_SUM, PROD,
+            SQUARE, CUBE, POW, ATAN2, FACT, COMBINATION, PERMUTATION, SUM, LIST_SUM, PROD,
             MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED,
             COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE,
-            STD_ERR, RANDOM, SORT, PLOT, PRINT, DIFFERENTIATION,
+            STD_ERR, RANDOM, SORT, PLOT, PRINT, DIFFERENTIATION,AUTO_DIFF,
             INTEGRATION,DIFF_EQN, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT,
             LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX,
             ECHELON_MATRIX, MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD,
@@ -358,6 +360,8 @@ public class Declarations {
             case ARC_COS:
                 return TYPE.NUMBER.toString();
             case ARC_TAN:
+                return TYPE.NUMBER.toString();
+            case ATAN2:
                 return TYPE.NUMBER.toString();
             case ARC_SINH:
                 return TYPE.NUMBER.toString();
@@ -498,6 +502,8 @@ public class Declarations {
             case PLOT:
                 return TYPE.VOID.toString();
             case DIFFERENTIATION:
+                return TYPE.NUMBER.toString();
+            case AUTO_DIFF:
                 return TYPE.NUMBER.toString();
             case INTEGRATION:
                 return TYPE.NUMBER.toString();

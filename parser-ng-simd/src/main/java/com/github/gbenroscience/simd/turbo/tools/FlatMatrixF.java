@@ -5,7 +5,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import jdk.incubator.vector.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
-import jdk.incubator.vector.Vector;
 
 /**
  *
@@ -30,6 +29,7 @@ public final class FlatMatrixF {
     private static final FloatVector NEG_ONE = FloatVector.broadcast(F_SPECIES, -1.0f);
 
     // Block sizes for float - NR matches float lanes
+    private static final int MC = 64;
     private static final int NC = 256, KC = 256, MR = 4;
     private static final int NR = VF_LEN; // 8 for AVX2, 16 for AVX512
 
@@ -38,6 +38,14 @@ public final class FlatMatrixF {
     public final int rowStride;
     public final int offset;
     private byte[] byteData; // lazy backing for Q8
+
+    // Reusable buffer for scalar fallback (small, per-thread)
+    private static final ThreadLocal<float[]> SCALAR_ROW_BUFFER
+            = ThreadLocal.withInitial(() -> new float[MR * NR]);
+
+// Reusable buffers
+    private static final ThreadLocal<FloatVector[]> ACC_BUFFER_TL
+            = ThreadLocal.withInitial(() -> new FloatVector[MR]);
 
     public FlatMatrixF(int rows, int cols) {
         this.rows = rows;
@@ -183,7 +191,7 @@ public final class FlatMatrixF {
         }
     }
 
-    private static void matmulMicrokernel(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C,
+    private static void matmulMicrokernelOld(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C,
             int i0, int i1, int j0, int j1, int k0, int k1) {
         final int rows = i1 - i0;
         final int cols = j1 - j0;
@@ -193,15 +201,17 @@ public final class FlatMatrixF {
             return;
         }
 
-        FloatVector[] acc = new FloatVector[MR];
+        // === NO ALLOCATION - fully unrolled ===
+        FloatVector acc0, acc1, acc2, acc3;
+
         if (k0 == 0) {
-            for (int r = 0; r < MR; r++) {
-                acc[r] = FloatVector.zero(F_SPECIES);
-            }
+            acc0 = acc1 = acc2 = acc3 = FloatVector.zero(F_SPECIES);
         } else {
-            for (int r = 0; r < MR; r++) {
-                acc[r] = FloatVector.fromArray(F_SPECIES, C.data, C.offset + (i0 + r) * C.rowStride + j0);
-            }
+            final int baseC = C.offset + i0 * C.rowStride + j0;
+            acc0 = FloatVector.fromArray(F_SPECIES, C.data, baseC);
+            acc1 = FloatVector.fromArray(F_SPECIES, C.data, baseC + C.rowStride);
+            acc2 = FloatVector.fromArray(F_SPECIES, C.data, baseC + 2 * C.rowStride);
+            acc3 = FloatVector.fromArray(F_SPECIES, C.data, baseC + 3 * C.rowStride);
         }
 
         final int baseA0 = A.offset + i0 * A.rowStride;
@@ -212,42 +222,74 @@ public final class FlatMatrixF {
 
         for (int k = k0; k < k1; k++) {
             var bvec = FloatVector.fromArray(F_SPECIES, B.data, B.offset + k * B.rowStride + j0);
-            acc[0] = acc[0].fma(FloatVector.broadcast(F_SPECIES, aData[baseA0 + k]), bvec);
-            acc[1] = acc[1].fma(FloatVector.broadcast(F_SPECIES, aData[baseA1 + k]), bvec);
-            acc[2] = acc[2].fma(FloatVector.broadcast(F_SPECIES, aData[baseA2 + k]), bvec);
-            acc[3] = acc[3].fma(FloatVector.broadcast(F_SPECIES, aData[baseA3 + k]), bvec);
+
+            float a0 = aData[baseA0 + k];
+            float a1 = aData[baseA1 + k];
+            float a2 = aData[baseA2 + k];
+            float a3 = aData[baseA3 + k];
+
+            acc0 = acc0.fma(FloatVector.broadcast(F_SPECIES, a0), bvec);
+            acc1 = acc1.fma(FloatVector.broadcast(F_SPECIES, a1), bvec);
+            acc2 = acc2.fma(FloatVector.broadcast(F_SPECIES, a2), bvec);
+            acc3 = acc3.fma(FloatVector.broadcast(F_SPECIES, a3), bvec);
         }
 
-        for (int r = 0; r < MR; r++) {
-            acc[r].intoArray(C.data, C.offset + (i0 + r) * C.rowStride + j0);
-        }
+        final int baseC = C.offset + i0 * C.rowStride + j0;
+        acc0.intoArray(C.data, baseC);
+        acc1.intoArray(C.data, baseC + C.rowStride);
+        acc2.intoArray(C.data, baseC + 2 * C.rowStride);
+        acc3.intoArray(C.data, baseC + 3 * C.rowStride);
     }
 
-    private static void scalarMicrokernel(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C,
+    private static void scalarMicrokernelOld(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C,
             int i0, int i1, int j0, int j1, int k0, int k1) {
+
         final int rows = i1 - i0;
         final int cols = j1 - j0;
-        float[] cvals = new float[rows * cols];
+        final int blockSize = rows * cols;
 
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                cvals[r * cols + c] = C.get(i0 + r, j0 + c);
-            }
+        // 1. Reusable thread-local buffer extraction
+        float[] cvals = SCALAR_ROW_BUFFER.get();
+        if (cvals.length < blockSize) {
+            cvals = new float[blockSize];
+            SCALAR_ROW_BUFFER.set(cvals);
         }
 
+        final int cBase = C.offset + i0 * C.rowStride + j0;
+        final float[] cData = C.data;
+        final float[] aData = A.data;
+        final float[] bData = B.data;
+
+        // ====================== LOAD ======================
+        // Unconditionally fast: individual rows are always continuous memory spans
+        int destIdx = 0;
+        for (int r = 0; r < rows; r++) {
+            System.arraycopy(cData, cBase + r * C.rowStride, cvals, destIdx, cols);
+            destIdx += cols;
+        }
+
+        // ====================== ACCUMULATE ======================
+        final int aOffsetBase = A.offset + i0 * A.rowStride;
+
         for (int k = k0; k < k1; k++) {
+            final int bRowOffset = B.offset + k * B.rowStride + j0;
+
             for (int r = 0; r < rows; r++) {
-                float a = A.get(i0 + r, k);
+                final float a = aData[aOffsetBase + r * A.rowStride + k];
+                final int cIdxBase = r * cols;
+
+                // Stride-1 execution layout -> Perfect target for HotSpot loop unrolling/SIMD
                 for (int c = 0; c < cols; c++) {
-                    cvals[r * cols + c] += a * B.get(k, j0 + c);
+                    cvals[cIdxBase + c] += a * bData[bRowOffset + c];
                 }
             }
         }
 
+        // ====================== STORE ======================
+        int srcIdx = 0;
         for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                C.set(i0 + r, j0 + c, cvals[r * cols + c]);
-            }
+            System.arraycopy(cvals, srcIdx, cData, cBase + r * C.rowStride, cols);
+            srcIdx += cols;
         }
     }
 
@@ -770,7 +812,7 @@ public final class FlatMatrixF {
     /**
      * MATMUL IN-PLACE (C += A * B) Caller must zero C if pure matmul is desired
      */
-    public static void matmulInPlace(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
+    public static void matmulInPlaceOld(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
         checkDims(A, B, C);
         final int M = A.rows, N = B.cols, K = A.cols;
         final long flops = 2L * M * K * N;
@@ -926,10 +968,10 @@ public final class FlatMatrixF {
 
     // Flip the order here: 'up' (value path) comes first, matching 'x' in swiglu(x, y)
     /**
-     * 
+     *
      * @param up
      * @param gate
-     * @param out 
+     * @param out
      */
     public static void swiGLU(FlatMatrixF up, FlatMatrixF gate, FlatMatrixF out) {
         final int n = gate.rows * gate.cols;
@@ -1258,5 +1300,182 @@ public static FlatMatrixF mhaAttention(FlatMatrixF Q, FlatMatrixF K, FlatMatrixF
     }
 
 
-//////////////////////////////MHA-ATTENTION-DONE/////////////////////////////////////////////
+    //////////////////////////////MHA-ATTENTION-DONE/////////////////////////////////////////////
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+  
+
+    /**
+     * MATMUL IN-PLACE: C += A * B
+     * Implements a cache-blocked microkernel architecture to maintain steady data throughput.
+     */
+    public static void matmulInPlace(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
+        checkDims(A, B, C);
+
+        // If data layouts are non-contiguous or dimensions are trivial, execute flat scalar path
+        if (A.rows < MR || B.cols < NR || !A.isContiguous() || !B.isContiguous() || !C.isContiguous()) {
+            matmulInPlaceScalarFallback(A, B, C);
+            return;
+        }
+        
+        final int KC = 128;
+
+        final int M = A.rows;
+        final int K = A.cols;
+        final int N = B.cols;
+
+        // 3-Tier Cache Blocking Macro Loops (NC -> KC -> MC)
+        for (int jc = 0; jc < N; jc += NC) {
+            int jEnd = Math.min(jc + NC, N);
+
+            for (int kc = 0; kc < K; kc += KC) {
+                int kEnd = Math.min(kc + KC, K);
+
+                for (int ic = 0; ic < M; ic += MC) {
+                    int iEnd = Math.min(ic + MC, M);
+
+                    // Execute register-blocked microkernels inside the cache tiles
+                    for (int i = ic; i < iEnd; i += MR) {
+                        int rBlock = Math.min(MR, iEnd - i);
+
+                        for (int j = jc; j < jEnd; j += NR) {
+                            int cBlock = Math.min(NR, jEnd - j);
+
+                            matmulMicrokernel(A, B, C, i, i + rBlock, j, j + cBlock, kc, kEnd);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Core Register-Hoisted Vector Microkernel
+     */
+    private static void matmulMicrokernel(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C,
+                                          int i0, int i1, int j0, int j1, int k0, int k1) {
+        final int rows = i1 - i0;
+        final int cols = j1 - j0;
+
+       
+        // Trap partial edge fragments and redirect to high-performance scalar fallback
+        if (rows != MR || cols != NR) {
+            scalarMicrokernel(A, B, C, i0, i1, j0, j1, k0, k1);
+            return;
+        }
+
+        // Hoist accumulation target directly into CPU SIMD registers
+        final int baseC = C.offset + i0 * C.rowStride + j0;
+        FloatVector acc0 = FloatVector.fromArray(F_SPECIES, C.data, baseC);
+        FloatVector acc1 = FloatVector.fromArray(F_SPECIES, C.data, baseC + C.rowStride);
+        FloatVector acc2 = FloatVector.fromArray(F_SPECIES, C.data, baseC + 2 * C.rowStride);
+        FloatVector acc3 = FloatVector.fromArray(F_SPECIES, C.data, baseC + 3 * C.rowStride);
+
+        final int baseA0 = A.offset + i0 * A.rowStride;
+        final int baseA1 = baseA0 + A.rowStride;
+        final int baseA2 = baseA1 + A.rowStride;
+        final int baseA3 = baseA2 + A.rowStride;
+        final float[] aData = A.data;
+        final float[] bData = B.data;
+
+        // Tight inner loop: Interleaves FMA operations completely within registers
+        for (int k = k0; k < k1; k++) {
+            var bVec = FloatVector.fromArray(F_SPECIES, bData, B.offset + k * B.rowStride + j0);
+
+            acc0 = acc0.fma(FloatVector.broadcast(F_SPECIES, aData[baseA0 + k]), bVec);
+            acc1 = acc1.fma(FloatVector.broadcast(F_SPECIES, aData[baseA1 + k]), bVec);
+            acc2 = acc2.fma(FloatVector.broadcast(F_SPECIES, aData[baseA2 + k]), bVec);
+            acc3 = acc3.fma(FloatVector.broadcast(F_SPECIES, aData[baseA3 + k]), bVec);
+        }
+
+        // Flush register states to main memory structure exactly once at completion
+        acc0.intoArray(C.data, baseC);
+        acc1.intoArray(C.data, baseC + C.rowStride);
+        acc2.intoArray(C.data, baseC + 2 * C.rowStride);
+        acc3.intoArray(C.data, baseC + 3 * C.rowStride);
+    }
+
+    /**
+     * Stride-1 Optimized Scalar Edge Fallback Block
+     */
+    private static void scalarMicrokernel(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C,
+                                          int i0, int i1, int j0, int j1, int k0, int k1) {
+        final int rows = i1 - i0;
+        final int cols = j1 - j0;
+        final int blockSize = rows * cols;
+
+       
+        float[] cvals = SCALAR_ROW_BUFFER.get();
+        if (cvals.length < blockSize) {
+            cvals = new float[blockSize];
+            SCALAR_ROW_BUFFER.set(cvals);
+        }
+
+        final int cBase = C.offset + i0 * C.rowStride + j0;
+        final float[] cData = C.data;
+        final float[] aData = A.data;
+        final float[] bData = B.data;
+
+        int destIdx = 0;
+        for (int r = 0; r < rows; r++) {
+            System.arraycopy(cData, cBase + r * C.rowStride, cvals, destIdx, cols);
+            destIdx += cols;
+        }
+
+        final int aOffsetBase = A.offset + i0 * A.rowStride;
+        for (int k = k0; k < k1; k++) {
+            final int bRowOffset = B.offset + k * B.rowStride + j0;
+            for (int r = 0; r < rows; r++) {
+                final float a = aData[aOffsetBase + r * A.rowStride + k];
+                final int cIdxBase = r * cols;
+
+                for (int c = 0; c < cols; c++) {
+                    cvals[cIdxBase + c] += a * bData[bRowOffset + c];
+                }
+            }
+        }
+
+        int srcIdx = 0;
+        for (int r = 0; r < rows; r++) {
+            System.arraycopy(cvals, srcIdx, cData, cBase + r * C.rowStride, cols);
+            srcIdx += cols;
+        }
+    }
+
+    /**
+     * General un-blocked matrix multiplier fallback for trivial tasks or unaligned layouts.
+     */
+    private static void matmulInPlaceScalarFallback(FlatMatrixF A, FlatMatrixF B, FlatMatrixF C) {
+        final int M = A.rows;
+        final int K = A.cols;
+        final int N = B.cols;
+
+        for (int i = 0; i < M; i++) {
+            for (int k = 0; k < K; k++) {
+                float aVal = A.get(i, k);
+                for (int j = 0; j < N; j++) {
+                    C.set(i, j, C.get(i, j) + aVal * B.get(k, j));
+                }
+            }
+        }
+    }    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 }

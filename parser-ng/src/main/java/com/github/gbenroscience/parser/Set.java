@@ -20,6 +20,7 @@ import com.github.gbenroscience.util.FunctionManager;
 
 import java.util.Arrays;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffEvaluator;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
 import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
@@ -51,7 +52,6 @@ public class Set {
     public Set(List<String> data) {
         this.data = data;
     }
- 
 
     /**
      *
@@ -607,6 +607,17 @@ public class Set {
     }
 
     /**
+     *
+     * @return Raises the number in index 0 to a power equal to the number in
+     * index 1.
+     */
+    public String atan2() {
+        double a = Double.parseDouble(data.get(0));
+        double b = Double.parseDouble(data.get(1));
+        return String.valueOf(Math.atan2(a, b));
+    }
+
+    /**
      * Finds the numerical derivative of a Function which has been pre-defined
      * in the Workspace.
      *
@@ -619,7 +630,7 @@ public class Set {
         switch (sz) {
             case 1: {
                 String anonFunc = data.get(0);
-                return Derivative.eval("diff(" + anonFunc + ",1)"); 
+                return Derivative.eval("diff(" + anonFunc + ",1)");
             }
             case 2: {
                 String anonFunc = data.get(0);
@@ -628,7 +639,7 @@ public class Set {
                 return Derivative.eval("diff(" + anonFunc + "," + value + ")");
                 /*  NumericalDerivative der = new NumericalDerivative(new Function(anonFunc), value );
                 return der.findDerivativeByPolynomialExpander();*/
-                  }
+            }
             case 3: {
                 String anonFunc = data.get(0);
                 double value = Double.parseDouble(data.get(1));
@@ -637,10 +648,41 @@ public class Set {
                 return der.findDerivativeByPolynomialExpander();
                  */
                 return Derivative.eval("diff(" + anonFunc + "," + value + "," + order + ")");
-              
+
             }
             default:
                 throw new InputMismatchException(" Parameter List " + data + " Is Invalid!");
+        }
+    }
+
+    public MathExpression.EvalResult autoDiff() {
+
+        int sz = data.size();
+        if (sz == 3) {
+            String fn = data.get(0);
+            Function f = FunctionManager.lookUp(fn);
+            if (f != null) {
+                MathExpression.Token[] rpn = f.getMathExpression().getCachedPostfix();
+                AutoDiffEvaluator ade = new AutoDiffEvaluator(rpn);
+                String var = data.get(1);
+                if (Variable.isVariableString(var)) {
+                    String val = data.get(2);
+                    if (Number.isNumber(val)) {
+                        double[]d = new double[2];
+                        ade.evaluateRPN(var, Number.fastParseDouble(val), d);
+                           return f.getMathExpression().getNextResult().wrap(d);
+                    } else {
+                        throw new InputMismatchException("The third arg must be a number");
+                    }
+                } else {
+                    throw new InputMismatchException("The second arg must be a Variable name");
+                }
+            } else {
+                throw new InputMismatchException("The first arg must be a function");
+            }
+
+        }else{
+             throw new InputMismatchException("Invalid arguments passed to autoDiff function: required - autoDiff(function, variable, number)");
         }
     }
 
@@ -710,7 +752,7 @@ public class Set {
     public double rootOfEquation() throws Exception {
         int sz = data.size();
         boolean has2NumberArguments = false;
- 
+
         if (Number.validNumber((String) data.get(sz - 1)) && !Number.validNumber((String) data.get(sz - 2))) {
             has2NumberArguments = true;
         }//end if
@@ -1080,7 +1122,7 @@ public class Set {
         throw new InputMismatchException("Bad args for matrix cofactors");
 
     }
- 
+
     private static final void printImpl(String data) {
         System.out.println("ParserNG> " + data);
     }
@@ -1134,7 +1176,7 @@ public class Set {
         throw new InputMismatchException("Bad args for printing");
 
     }
- 
+
     public Matrix eigenValues() {
 
         if (data.size() == 1) {
@@ -1276,14 +1318,14 @@ public class Set {
     public String evaluateUserDefinedFunction(String fName) throws ClassNotFoundException {
         int sz = data.size();
         Function func = FunctionManager.lookUp(fName);
-        if(func==null){
+        if (func == null) {
             return null;
         }
-        double[]vars = new double[func.getIndependentVariables().size()]; 
+        double[] vars = new double[func.getIndependentVariables().size()];
         for (int i = 0; i < sz; i++) {
             vars[i] = Number.fastParseDouble(data.get(i));
         }//end for loop
- 
+
         try {
             return func.evalArgs(vars);
         }//end try

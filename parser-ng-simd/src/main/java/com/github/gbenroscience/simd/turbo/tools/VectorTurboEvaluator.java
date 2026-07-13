@@ -549,6 +549,17 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             return targetSlots;
         }
 
+        private static int computeWorkers() {
+            int logicalCores = Runtime.getRuntime().availableProcessors();
+            int physicalCores = HardwareDetector.detectPhysicalCores();
+            if (physicalCores <= 0) {
+                physicalCores = logicalCores;
+            }
+
+            int dcores = Math.min(physicalCores, logicalCores);
+            return dcores;
+        }
+
         BatchedVectorCompositeExpression(MethodHandle handle, int[] ops, int[] targetSlots,
                 double[] consts, int count, int varCount) {
             this.scalarHandle = handle;
@@ -571,6 +582,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 workers[i].start();
             }
         }
+
+  
 
         @Override
         public double applyScalar(double[] variables) {
