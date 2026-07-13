@@ -227,7 +227,7 @@ public class Differentiable {
         else if( sz == 4 ){
             //pattern sin,(,var,)
             if(isMethodName(data.get(0))&&isOpeningBracket(data.get(1))&&isVariableString(data.get(2))&&isClosingBracket(data.get(3))){
-                derivedData.addAll(Methods.getMethodDifferential(data.get(0), data.get(2),d));
+                derivedData.addAll(Methods.getMethodDifferentialUnary(data.get(0), data.get(2),d));
             }//end if
         }//end else if
 
@@ -240,7 +240,7 @@ public class Differentiable {
                 derivedData.add("-1");
                 derivedData.add("*");
                 derivedData.add("(");
-                derivedData.addAll(Methods.getMethodDifferential(data.get(0), data.get(3),d));
+                derivedData.addAll(Methods.getMethodDifferentialUnary(data.get(0), data.get(3),d));
                 derivedData.add(")");
             }
 

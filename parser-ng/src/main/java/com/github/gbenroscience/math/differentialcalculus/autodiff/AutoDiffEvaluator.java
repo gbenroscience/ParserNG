@@ -26,23 +26,45 @@ import com.github.gbenroscience.parser.methods.Declarations;
 /**
  * GC-Free Forward Mode Automatic Differentiation Evaluator for Declarations.
  * Now supports a much wider range of Declarations built-in functions.
+ *
+ * <p><b>Thread-safety:</b> this class is intentionally <i>not</i> thread-safe.
+ * {@code valStack}/{@code derStack} are pre-sized once and reused across every
+ * call to {@link #evaluateRPN} to guarantee zero per-call heap allocation on
+ * the hot path -- that reuse is what makes it fast, but it also means two
+ * threads calling {@code evaluateRPN} concurrently on the <b>same instance</b>
+ * will corrupt each other's stack. Give each thread (or each pooled worker)
+ * its own {@code AutoDiffEvaluator} instance; do not share one across
+ * threads. The instance itself is safe to reuse sequentially, e.g. in a tight
+ * single-threaded loop evaluating many points -- that is the intended usage.
  */
 public class AutoDiffEvaluator {
 
     private final Token[] rpnTokens;
 
-    private static final int MAX_STACK = 1024;
-    private final double[] valStack = new double[MAX_STACK];
-    private final double[] derStack = new double[MAX_STACK];
+    // Sized once, in the constructor, to the smallest bound that can never
+    // overflow: RPN evaluation can never need more stack slots than there are
+    // tokens. This replaces a previous fixed MAX_STACK=1024 array, which both
+    // wasted ~16KB/instance for small expressions and threw an unguarded,
+    // unhelpful ArrayIndexOutOfBoundsException for anything larger. Sizing
+    // once here preserves the zero-allocation-per-call design.
+    private final double[] valStack;
+    private final double[] derStack;
 
     public AutoDiffEvaluator(Token[] rpnTokens) {
+        if (rpnTokens == null || rpnTokens.length == 0) {
+            throw new IllegalArgumentException("rpnTokens must not be null or empty");
+        }
         this.rpnTokens = formatTokens(rpnTokens);
+        this.valStack = new double[this.rpnTokens.length + 1];
+        this.derStack = new double[this.rpnTokens.length + 1];
     }
 
-    private static Token[] formatTokens(Token[] postfix) {
+   private static Token[] formatTokens(Token[] postfix) {
         Token[] rpn = new Token[postfix.length];
         for (int i = 0; i < postfix.length; i++) {
-            rpn[i] = postfix[i].clone();
+           Token t = postfix[i].clone(); 
+           t.name = (t.name != null && (t.name.endsWith("_rad") || t.name.endsWith("_grad") || t.name.endsWith("_deg"))) ? t.name.substring(0, t.name.lastIndexOf("_")) : t.name;
+            rpn[i] = t;
         }
         return rpn;
     }
@@ -70,8 +92,17 @@ public class AutoDiffEvaluator {
                 } else {
                     throw new UnsupportedOperationException("Unsupported arity for " + t.name);
                 }
+            } else {
+                throw new UnsupportedOperationException("Unrecognized token kind: " + t.kind
+                        + (t.name != null ? " (" + t.name + ")" : ""));
             }
         }
+
+        if (sp != 1) {
+            throw new IllegalStateException(
+                    "Malformed RPN expression: expected exactly one result on the stack, found " + sp);
+        }
+
         resultOut[0] = valStack[0];
         resultOut[1] = derStack[0];
     }
@@ -82,8 +113,35 @@ public class AutoDiffEvaluator {
         return resultOut;
     }
 
+    private static void requireOperands(int sp, int needed, String opName) {
+        if (sp < needed) {
+            throw new IllegalStateException(
+                    "Malformed RPN expression: '" + opName + "' requires " + needed
+                            + " operand(s) but only " + sp + " available on the stack");
+        }
+    }
+
+    /**
+     * Shared power-rule derivative, used identically by the binary '^'
+     * operator and the 2-arg pow(u,v) function. Previously duplicated
+     * verbatim in both call sites -- a maintenance hazard where a future fix
+     * to one copy could easily be forgotten in the other.
+     */
+    private static double powDerivative(double uVal, double uDer, double vVal, double vDer, double powResult) {
+        if (vDer == 0.0) {
+            // Constant exponent
+            return vVal * Math.pow(uVal, vVal - 1.0) * uDer;
+        }
+        // Variable exponent
+        if (uVal <= 0.0 && vVal != Math.floor(vVal)) {
+            throw new ArithmeticException("Non-real pow");
+        }
+        return powResult * (vDer * Math.log(uVal) + vVal * uDer / uVal);
+    }
+
     private int handleOperator(Token t, int sp) {
         if (t.arity == 2) {
+            requireOperands(sp, 2, String.valueOf(t.opChar));
             double bVal = valStack[--sp];
             double bDer = derStack[sp];
             double aVal = valStack[--sp];
@@ -111,16 +169,7 @@ public class AutoDiffEvaluator {
                     break;
                 case '^':
                     valStack[sp] = Math.pow(aVal, bVal);
-                    if (bDer == 0.0) {
-                        // Constant exponent
-                        derStack[sp] = bVal * Math.pow(aVal, bVal - 1.0) * aDer;
-                    } else {
-                        // Variable exponent
-                        if (aVal <= 0.0 && bVal != Math.floor(bVal)) {
-                            throw new ArithmeticException("Non-real pow");
-                        }
-                        derStack[sp] = valStack[sp] * (bDer * Math.log(aVal) + bVal * aDer / aVal);
-                    }
+                    derStack[sp] = powDerivative(aVal, aDer, bVal, bDer, valStack[sp]);
                     break;
                 default:
                     throw new UnsupportedOperationException("Operator not supported: " + t.opChar);
@@ -129,6 +178,7 @@ public class AutoDiffEvaluator {
         } else if (t.arity == 1) {
             // Unary minus
             if (t.opChar == '-') {
+                requireOperands(sp, 1, "unary -");
                 double val = valStack[--sp];
                 double der = derStack[sp];
                 valStack[sp] = -val;
@@ -142,6 +192,7 @@ public class AutoDiffEvaluator {
     }
 
     private int handleUnaryFunction(Token t, int sp) {
+        requireOperands(sp, 1, t.name);
         double argVal = valStack[--sp];
         double argDer = derStack[sp];
         double val, der;
@@ -348,6 +399,7 @@ public class AutoDiffEvaluator {
     }
 
     private int handleBinaryFunction(Token t, int sp) {
+        requireOperands(sp, 2, t.name);
         double vVal = valStack[--sp];
         double vDer = derStack[sp];
         double uVal = valStack[--sp];
@@ -356,16 +408,7 @@ public class AutoDiffEvaluator {
         switch (t.name) {
             case Declarations.POW:
                 valStack[sp] = Math.pow(uVal, vVal);
-                if (vDer == 0.0) {
-                    // Constant exponent
-                    derStack[sp] = vVal * Math.pow(uVal, vVal - 1.0) * uDer;
-                } else {
-                    // Variable exponent
-                    if (uVal <= 0.0 && vVal != Math.floor(vVal)) {
-                        throw new ArithmeticException("Non-real pow");
-                    }
-                    derStack[sp] = valStack[sp] * (vDer * Math.log(uVal) + vVal * uDer / uVal);
-                }
+                derStack[sp] = powDerivative(uVal, uDer, vVal, vDer, valStack[sp]);
                 break;
 
             case Declarations.LOG:
@@ -389,7 +432,7 @@ public class AutoDiffEvaluator {
             case "hypot":
                 valStack[sp] = Math.hypot(uVal, vVal);
                 derStack[sp] = (uVal * uDer + vVal * vDer) / valStack[sp];
-                break; // <-- Added the missing break statement here
+                break;
 
             default:
                 throw new UnsupportedOperationException("2-arg function not supported: " + t.name);
