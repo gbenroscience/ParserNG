@@ -34,7 +34,7 @@ import com.github.gbenroscience.parser.Function;
  * infinity. Would you like the Clenshaw-Curtis weight generator to ensure your
  * integration reaches full 16-digit precision?
  *
- *
+ * 
  *
  * @author GBEMIRO
  */
