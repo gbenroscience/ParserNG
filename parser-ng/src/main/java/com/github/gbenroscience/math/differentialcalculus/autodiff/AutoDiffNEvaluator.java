@@ -1,18 +1,3 @@
-/*
- * Copyright 2026 oluwagbemirojiboye.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.math.differentialcalculus.autodiff;
 
 import com.github.gbenroscience.parser.MathExpression;
@@ -20,23 +5,19 @@ import com.github.gbenroscience.parser.MathExpression.Token;
 import com.github.gbenroscience.parser.methods.Declarations;
 
 /**
- * GC-Free Forward Mode Automatic Differentiation Evaluator with native
- * higher-order derivatives. Uses truncated Taylor series coefficients c_k =
- * f^{(k)}(x) / k! for efficient propagation.
+ * Strictly GC-free + inherently thread-safe Forward Mode Automatic Differentiation Evaluator.
+ * 
+ * <p>All heavy arrays are pre-allocated per-thread to the exact maximum size required by this evaluator.
+ * No further allocations or resizes occur after the first evaluation on each thread.
  */
 public class AutoDiffNEvaluator {
 
     private final Token[] rpnTokens;
     private final int maxOrder;
-    private final double[][] valStack; // [stackPos][k] = k-th Taylor coefficient
-    
-    // Pre-allocated scratchpads to maintain strict GC-free behavior during evaluation
-    private final double[] scratch1;
-    private final double[] scratch2;
-    private final double[] scratch3;
-    private final double[] scratchArg;
-    private final double[] scratchU;
-    private final double[] scratchV;
+    private final int maxStackSize;
+
+    // Thread-local storage for heavy mutable arrays (allocated once per thread to exact max size)
+    private static final ThreadLocal<EvalState> THREAD_LOCAL_STATE = new ThreadLocal<>();
 
     public AutoDiffNEvaluator(Token[] rpnTokens) {
         this(rpnTokens, 1);
@@ -51,14 +32,7 @@ public class AutoDiffNEvaluator {
         }
         this.rpnTokens = formatTokens(rpnTokens);
         this.maxOrder = maxOrder;
-        this.valStack = new double[this.rpnTokens.length + 1][maxOrder + 1];
-        
-        this.scratch1 = new double[maxOrder + 1];
-        this.scratch2 = new double[maxOrder + 1];
-        this.scratch3 = new double[maxOrder + 1];
-        this.scratchArg = new double[maxOrder + 1];
-        this.scratchU = new double[maxOrder + 1];
-        this.scratchV = new double[maxOrder + 1];
+        this.maxStackSize = rpnTokens.length + 1; // fixed for this expression
     }
 
     private static Token[] formatTokens(Token[] postfix) {
@@ -77,33 +51,46 @@ public class AutoDiffNEvaluator {
         if (order > maxOrder) {
             throw new IllegalArgumentException("order > maxOrder");
         }
-        if (resultOut.length < order + 1) {
+        if (resultOut == null || resultOut.length < order + 1) {
             throw new IllegalArgumentException("resultOut too small");
         }
+
+        // Get or create thread-local state with exact pre-allocated sizes (GC-free after first use)
+        EvalState state = THREAD_LOCAL_STATE.get();
+        if (state == null || state.currentMaxStackSize < maxStackSize || state.currentMaxOrder < maxOrder) {
+            state = new EvalState(maxStackSize, maxOrder);
+            THREAD_LOCAL_STATE.set(state);
+        }
+
+        final double[][] valStack = state.valStack;
+        final double[] scratch1 = state.scratch1;
+        final double[] scratch2 = state.scratch2;
+        final double[] scratch3 = state.scratch3;
+        final double[] scratchArg = state.scratchArg;
+        final double[] scratchU = state.scratchU;
+        final double[] scratchV = state.scratchV;
 
         int sp = 0;
         for (Token t : rpnTokens) {
             if (t.kind == Token.NUMBER) {
-                valStack[sp][0] = t.value;
-                for (int k = 1; k <= order; k++) {
-                    valStack[sp][k] = 0.0;
-                }
-                sp++;
+                double[] jet = valStack[sp++];
+                jet[0] = t.value;
+                for (int k = 1; k <= order; k++) jet[k] = 0.0;
             } else if (t.kind == Token.VARIABLE) {
+                double[] jet = valStack[sp++];
                 boolean isWrt = t.name != null && t.name.equals(wrtVar);
-                valStack[sp][0] = isWrt ? evalPoint : (t.v != null ? t.v.getValue() : t.value);
-                valStack[sp][1] = isWrt ? 1.0 : 0.0;
-                for (int k = 2; k <= order; k++) {
-                    valStack[sp][k] = 0.0;
-                }
-                sp++;
+                jet[0] = isWrt ? evalPoint : (t.v != null ? t.v.getValue() : t.value);
+                jet[1] = isWrt ? 1.0 : 0.0;
+                for (int k = 2; k <= order; k++) jet[k] = 0.0;
             } else if (t.kind == Token.OPERATOR) {
-                sp = handleOperator(t, sp, order);
+                sp = handleOperator(t, sp, order, valStack, scratch1, scratch2, scratch3, scratchU, scratchV);
             } else if (t.kind == Token.METHOD || t.kind == Token.FUNCTION) {
                 if (t.arity == 1) {
-                    sp = handleUnaryFunction(t, sp, order);
+                    sp = handleUnaryFunction(t, sp, order, valStack,
+                            scratch1, scratch2, scratch3, scratchArg, scratchU, scratchV);
                 } else if (t.arity == 2) {
-                    sp = handleBinaryFunction(t, sp, order);
+                    sp = handleBinaryFunction(t, sp, order, valStack,
+                            scratch1, scratch2, scratch3, scratchU, scratchV);
                 } else {
                     throw new UnsupportedOperationException("Unsupported arity for " + t.name);
                 }
@@ -126,11 +113,34 @@ public class AutoDiffNEvaluator {
         return out;
     }
 
+    // ===================================================================
+    // Per-thread pre-allocated state (strictly GC-free after init)
+    // ===================================================================
+    private static final class EvalState {
+        final double[][] valStack;
+        final double[] scratch1, scratch2, scratch3, scratchArg, scratchU, scratchV;
+        final int currentMaxStackSize;
+        final int currentMaxOrder;
+
+        EvalState(int stackSize, int order) {
+            this.valStack = new double[stackSize][order + 1];
+            this.scratch1 = new double[order + 1];
+            this.scratch2 = new double[order + 1];
+            this.scratch3 = new double[order + 1];
+            this.scratchArg = new double[order + 1];
+            this.scratchU = new double[order + 1];
+            this.scratchV = new double[order + 1];
+            this.currentMaxStackSize = stackSize;
+            this.currentMaxOrder = order;
+        }
+    }
+
+    // ===================================================================
+    // Math helpers
+    // ===================================================================
     private static long factorial(int n) {
         long f = 1;
-        for (int i = 2; i <= n; i++) {
-            f *= i;
-        }
+        for (int i = 2; i <= n; i++) f *= i;
         return f;
     }
 
@@ -141,20 +151,16 @@ public class AutoDiffNEvaluator {
     }
 
     private void add(double[] a, double[] b, double[] out, int ord) {
-        for (int k = 0; k <= ord; k++) {
-            out[k] = a[k] + b[k];
-        }
+        for (int k = 0; k <= ord; k++) out[k] = a[k] + b[k];
     }
 
     private void sub(double[] a, double[] b, double[] out, int ord) {
-        for (int k = 0; k <= ord; k++) {
-            out[k] = a[k] - b[k];
-        }
+        for (int k = 0; k <= ord; k++) out[k] = a[k] - b[k];
     }
 
     private void mul(double[] a, double[] b, double[] out, int ord) {
         for (int k = 0; k <= ord; k++) {
-            double sum = 0;
+            double sum = 0.0;
             for (int i = 0; i <= k; i++) {
                 sum += a[i] * b[k - i];
             }
@@ -165,25 +171,19 @@ public class AutoDiffNEvaluator {
     private void recipJet(double[] b, double[] out, int ord) {
         out[0] = 1.0 / b[0];
         for (int k = 1; k <= ord; k++) {
-            double s = 0;
-            for (int i = 1; i <= k; i++) {
-                s += b[i] * out[k - i];
-            }
+            double s = 0.0;
+            for (int i = 1; i <= k; i++) s += b[i] * out[k - i];
             out[k] = -out[0] * s;
         }
     }
 
     private void lnJet(double[] u, double[] out, int ord) {
         double u0 = u[0];
-        if (u0 <= 0) {
-            throw new ArithmeticException("ln domain");
-        }
+        if (u0 <= 0) throw new ArithmeticException("ln domain");
         out[0] = Math.log(u0);
         for (int k = 1; k <= ord; k++) {
             double s = 0.0;
-            for (int j = 1; j < k; j++) {
-                s += j * out[j] * u[k - j];
-            }
+            for (int j = 1; j < k; j++) s += j * out[j] * u[k - j];
             out[k] = (u[k] - s / k) / u0;
         }
     }
@@ -192,28 +192,15 @@ public class AutoDiffNEvaluator {
         out[0] = Math.exp(w[0]);
         for (int k = 1; k <= ord; k++) {
             double s = 0.0;
-            for (int j = 1; j <= k; j++) {
-                s += j * w[j] * out[k - j];
-            }
+            for (int j = 1; j <= k; j++) s += j * w[j] * out[k - j];
             out[k] = s / k;
         }
     }
 
-    /**
-     * Integer power {@code u^n} (n &gt;= 0) via repeated Cauchy-product jet
-     * multiplication. Division-free, so it is valid for any real {@code u0},
-     * including zero -- unlike the ln/exp composition, which requires
-     * {@code u0 > 0}. O(n) multiplications; fine for the small integer
-     * exponents that dominate real expressions ({@code x^2}, {@code x^3},
-     * ...); not fast-exponentiation, so very large integer exponents are not
-     * optimally handled, but remain correct.
-     */
-    private void intPowJet(double[] u, int n, double[] out, int ord) {
+    private void intPowJet(double[] u, int n, double[] out, int ord, double[] scratch1) {
         if (n == 0) {
             out[0] = 1.0;
-            for (int k = 1; k <= ord; k++) {
-                out[k] = 0.0;
-            }
+            for (int k = 1; k <= ord; k++) out[k] = 0.0;
             return;
         }
         System.arraycopy(u, 0, out, 0, ord + 1);
@@ -223,19 +210,8 @@ public class AutoDiffNEvaluator {
         }
     }
 
-    /**
-     * {@code w = u^v}. If {@code v} is locally constant across every order
-     * (all jet coefficients beyond index 0 are exactly zero) and that
-     * constant is an integer, uses the division-free {@link #intPowJet}
-     * recurrence, which is valid for any real base -- including zero or
-     * negative bases, matching integer-power semantics for any real number.
-     * Negative integer exponents are handled as the reciprocal of the
-     * positive-integer power, and throw for a zero base (genuine pole).
-     * Otherwise (non-integer constant exponent, or an exponent that
-     * genuinely varies with x) falls back to composing
-     * {@code u^v = exp(v * ln(u))}, which requires {@code u0 > 0}.
-     */
-    private void powJet(double[] u, double[] v, double[] out, int ord) {
+    private void powJet(double[] u, double[] v, double[] out, int ord,
+                        double[] scratch1, double[] scratch2, double[] scratch3) {
         boolean vConstant = true;
         for (int k = 1; k <= ord; k++) {
             if (v[k] != 0.0) {
@@ -248,20 +224,16 @@ public class AutoDiffNEvaluator {
             if (!Double.isNaN(r) && !Double.isInfinite(r) && r == Math.floor(r)) {
                 int n = (int) r;
                 if (n >= 0) {
-                    intPowJet(u, n, out, ord);
+                    intPowJet(u, n, out, ord, scratch1);
                 } else {
-                    if (u[0] == 0.0) {
-                        throw new ArithmeticException("pow domain: zero base with negative exponent");
-                    }
-                    intPowJet(u, -n, scratch3, ord);
+                    if (u[0] == 0.0) throw new ArithmeticException("pow domain: zero base with negative exponent");
+                    intPowJet(u, -n, scratch3, ord, scratch1);
                     recipJet(scratch3, out, ord);
                 }
                 return;
             }
         }
-        if (u[0] <= 0.0) {
-            throw new ArithmeticException("pow domain: non-real result");
-        }
+        if (u[0] <= 0.0) throw new ArithmeticException("pow domain: non-real result");
         lnJet(u, scratch1, ord);
         mul(v, scratch1, scratch2, ord);
         expJet(scratch2, out, ord);
@@ -271,8 +243,7 @@ public class AutoDiffNEvaluator {
         sinOut[0] = Math.sin(u[0]);
         cosOut[0] = Math.cos(u[0]);
         for (int k = 1; k <= ord; k++) {
-            double sSum = 0;
-            double cSum = 0;
+            double sSum = 0.0, cSum = 0.0;
             for (int j = 1; j <= k; j++) {
                 sSum += j * u[j] * cosOut[k - j];
                 cSum += j * u[j] * sinOut[k - j];
@@ -286,8 +257,7 @@ public class AutoDiffNEvaluator {
         sinhOut[0] = Math.sinh(u[0]);
         coshOut[0] = Math.cosh(u[0]);
         for (int k = 1; k <= ord; k++) {
-            double sSum = 0;
-            double cSum = 0;
+            double sSum = 0.0, cSum = 0.0;
             for (int j = 1; j <= k; j++) {
                 sSum += j * u[j] * coshOut[k - j];
                 cSum += j * u[j] * sinhOut[k - j];
@@ -301,16 +271,11 @@ public class AutoDiffNEvaluator {
         out[0] = Math.tan(u[0]);
         pScratch[0] = out[0] * out[0];
         for (int k = 1; k <= ord; k++) {
-            double pk_1 = 0;
-            for (int i = 0; i <= k - 1; i++) {
-                pk_1 += out[i] * out[k - 1 - i];
-            }
+            double pk_1 = 0.0;
+            for (int i = 0; i <= k - 1; i++) pk_1 += out[i] * out[k - 1 - i];
             pScratch[k - 1] = pk_1;
-
-            double s = 0;
-            for (int j = 1; j < k; j++) {
-                s += j * u[j] * pScratch[k - j];
-            }
+            double s = 0.0;
+            for (int j = 1; j < k; j++) s += j * u[j] * pScratch[k - j];
             out[k] = u[k] * (1.0 + pScratch[0]) + s / k;
         }
     }
@@ -319,30 +284,21 @@ public class AutoDiffNEvaluator {
         out[0] = Math.tanh(u[0]);
         pScratch[0] = out[0] * out[0];
         for (int k = 1; k <= ord; k++) {
-            double pk_1 = 0;
-            for (int i = 0; i <= k - 1; i++) {
-                pk_1 += out[i] * out[k - 1 - i];
-            }
+            double pk_1 = 0.0;
+            for (int i = 0; i <= k - 1; i++) pk_1 += out[i] * out[k - 1 - i];
             pScratch[k - 1] = pk_1;
-
-            double s = 0;
-            for (int j = 1; j < k; j++) {
-                s += j * u[j] * pScratch[k - j];
-            }
+            double s = 0.0;
+            for (int j = 1; j < k; j++) s += j * u[j] * pScratch[k - j];
             out[k] = u[k] * (1.0 - pScratch[0]) - s / k;
         }
     }
 
     private void sqrtJet(double[] u, double[] out, int ord) {
-        if (u[0] < 0) {
-            throw new ArithmeticException("sqrt domain");
-        }
+        if (u[0] < 0) throw new ArithmeticException("sqrt domain");
         out[0] = Math.sqrt(u[0]);
         for (int k = 1; k <= ord; k++) {
-            double s = 0;
-            for (int j = 1; j < k; j++) {
-                s += j * out[j] * out[k - j];
-            }
+            double s = 0.0;
+            for (int j = 1; j < k; j++) s += j * out[j] * out[k - j];
             out[k] = (u[k] - 2.0 * s / k) / (2.0 * out[0]);
         }
     }
@@ -351,16 +307,11 @@ public class AutoDiffNEvaluator {
         out[0] = Math.cbrt(u[0]);
         pScratch[0] = out[0] * out[0];
         for (int k = 1; k <= ord; k++) {
-            double pk_1 = 0;
-            for (int i = 0; i <= k - 1; i++) {
-                pk_1 += out[i] * out[k - 1 - i];
-            }
+            double pk_1 = 0.0;
+            for (int i = 0; i <= k - 1; i++) pk_1 += out[i] * out[k - 1 - i];
             pScratch[k - 1] = pk_1;
-
-            double s = 0;
-            for (int l = 1; l < k; l++) {
-                s += l * out[l] * pScratch[k - l];
-            }
+            double s = 0.0;
+            for (int l = 1; l < k; l++) s += l * out[l] * pScratch[k - l];
             out[k] = (u[k] - 3.0 * s / k) / (3.0 * pScratch[0]);
         }
     }
@@ -369,15 +320,18 @@ public class AutoDiffNEvaluator {
         out[0] = Math.atan(u[0]);
         mul(u, u, pScratch, ord);
         for (int k = 1; k <= ord; k++) {
-            double s = 0;
-            for (int l = 1; l < k; l++) {
-                s += l * out[l] * pScratch[k - l];
-            }
+            double s = 0.0;
+            for (int l = 1; l < k; l++) s += l * out[l] * pScratch[k - l];
             out[k] = (u[k] - s / k) / (1.0 + pScratch[0]);
         }
     }
 
-    private int handleOperator(Token t, int sp, int ord) {
+    // ===================================================================
+    // Handlers
+    // ===================================================================
+    private int handleOperator(Token t, int sp, int ord, double[][] valStack,
+                               double[] scratch1, double[] scratch2, double[] scratch3,
+                               double[] scratchU, double[] scratchV) {
         if (t.arity == 2) {
             requireOperands(sp, 2, String.valueOf(t.opChar));
             double[] b = valStack[--sp];
@@ -388,24 +342,16 @@ public class AutoDiffNEvaluator {
             System.arraycopy(b, 0, scratchV, 0, ord + 1);
 
             switch (t.opChar) {
-                case '+':
-                    add(scratchU, scratchV, res, ord);
-                    break;
-                case '-':
-                    sub(scratchU, scratchV, res, ord);
-                    break;
-                case '*':
-                    mul(scratchU, scratchV, res, ord);
-                    break;
+                case '+': add(scratchU, scratchV, res, ord); break;
+                case '-': sub(scratchU, scratchV, res, ord); break;
+                case '*': mul(scratchU, scratchV, res, ord); break;
                 case '/':
-                    if (Math.abs(scratchV[0]) < 1e-300) {
-                        throw new ArithmeticException("Division by zero");
-                    }
+                    if (Math.abs(scratchV[0]) < 1e-300) throw new ArithmeticException("Division by zero");
                     recipJet(scratchV, scratch1, ord);
                     mul(scratchU, scratch1, res, ord);
                     break;
                 case '^':
-                    powJet(scratchU, scratchV, res, ord);
+                    powJet(scratchU, scratchV, res, ord, scratch1, scratch2, scratch3);
                     break;
                 default:
                     throw new UnsupportedOperationException("Operator " + t.opChar);
@@ -415,197 +361,155 @@ public class AutoDiffNEvaluator {
             requireOperands(sp, 1, "unary -");
             double[] arg = valStack[--sp];
             double[] res = valStack[sp];
-            for (int k = 0; k <= ord; k++) {
-                res[k] = -arg[k];
-            }
+            for (int k = 0; k <= ord; k++) res[k] = -arg[k];
             return sp + 1;
         }
         return sp;
     }
 
-    private int handleUnaryFunction(Token t, int sp, int ord) {
+    private int handleUnaryFunction(Token t, int sp, int ord, double[][] valStack,
+                                    double[] scratch1, double[] scratch2, double[] scratch3,
+                                    double[] scratchArg, double[] scratchU, double[] scratchV) {
         requireOperands(sp, 1, t.name);
         double[] arg = valStack[--sp];
         double[] res = valStack[sp];
-
-        // Defend against array aliasing by capturing the input state in scratch
         System.arraycopy(arg, 0, scratchArg, 0, ord + 1);
 
         switch (t.name) {
             case Declarations.SIN:
                 sinCosJet(scratchArg, res, scratch1, ord);
                 break;
-
             case Declarations.COS:
                 sinCosJet(scratchArg, scratch1, res, ord);
                 break;
-
             case Declarations.TAN:
                 tanJet(scratchArg, res, ord, scratch1);
                 break;
-
             case Declarations.ARC_SIN:
             case Declarations.ARC_SIN_ALT:
-                if (Math.abs(scratchArg[0]) > 1.0) {
-                    throw new ArithmeticException("asin domain");
-                }
+                if (Math.abs(scratchArg[0]) > 1.0) throw new ArithmeticException("asin domain");
                 res[0] = Math.asin(scratchArg[0]);
-                mul(scratchArg, scratchArg, scratch1, ord); 
+                mul(scratchArg, scratchArg, scratch1, ord);
                 scratch2[0] = 1.0 - scratch1[0];
-                for (int k = 1; k <= ord; k++) scratch2[k] = -scratch1[k]; 
-                sqrtJet(scratch2, scratch3, ord); 
+                for (int k = 1; k <= ord; k++) scratch2[k] = -scratch1[k];
+                sqrtJet(scratch2, scratch3, ord);
                 for (int k = 1; k <= ord; k++) {
-                    double s = 0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch3[k - l];
-                    }
+                    double s = 0.0;
+                    for (int l = 1; l < k; l++) s += l * res[l] * scratch3[k - l];
                     res[k] = (scratchArg[k] - s / k) / scratch3[0];
                 }
                 break;
-
             case Declarations.ARC_COS:
             case Declarations.ARC_COS_ALT:
-                if (Math.abs(scratchArg[0]) > 1.0) {
-                    throw new ArithmeticException("acos domain");
-                }
+                if (Math.abs(scratchArg[0]) > 1.0) throw new ArithmeticException("acos domain");
                 res[0] = Math.acos(scratchArg[0]);
-                mul(scratchArg, scratchArg, scratch1, ord); 
+                mul(scratchArg, scratchArg, scratch1, ord);
                 scratch2[0] = 1.0 - scratch1[0];
-                for (int k = 1; k <= ord; k++) scratch2[k] = -scratch1[k]; 
-                sqrtJet(scratch2, scratch3, ord); 
+                for (int k = 1; k <= ord; k++) scratch2[k] = -scratch1[k];
+                sqrtJet(scratch2, scratch3, ord);
                 for (int k = 1; k <= ord; k++) {
-                    double s = 0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch3[k - l];
-                    }
+                    double s = 0.0;
+                    for (int l = 1; l < k; l++) s += l * res[l] * scratch3[k - l];
                     res[k] = (-scratchArg[k] - s / k) / scratch3[0];
                 }
                 break;
-
             case Declarations.ARC_TAN:
             case Declarations.ARC_TAN_ALT:
                 atanJet(scratchArg, res, ord, scratch1);
                 break;
-
             case Declarations.SEC:
-                sinCosJet(scratchArg, scratch1, scratch2, ord); 
+                sinCosJet(scratchArg, scratch1, scratch2, ord);
                 recipJet(scratch2, res, ord);
                 break;
-
             case Declarations.COSEC:
-                sinCosJet(scratchArg, scratch1, scratch2, ord); 
+                sinCosJet(scratchArg, scratch1, scratch2, ord);
                 recipJet(scratch1, res, ord);
                 break;
-
             case Declarations.COT:
-                tanJet(scratchArg, scratch1, ord, scratch2); 
+                tanJet(scratchArg, scratch1, ord, scratch2);
                 recipJet(scratch1, res, ord);
                 break;
-
             case Declarations.SINH:
                 sinhCoshJet(scratchArg, res, scratch1, ord);
                 break;
-
             case Declarations.COSH:
                 sinhCoshJet(scratchArg, scratch1, res, ord);
                 break;
-
             case Declarations.TANH:
                 tanhJet(scratchArg, res, ord, scratch1);
                 break;
-
             case Declarations.ARC_SINH:
             case Declarations.ARC_SINH_ALT:
                 res[0] = Math.log(scratchArg[0] + Math.sqrt(scratchArg[0] * scratchArg[0] + 1));
-                mul(scratchArg, scratchArg, scratch1, ord); 
+                mul(scratchArg, scratchArg, scratch1, ord);
                 scratch2[0] = scratch1[0] + 1.0;
-                for (int k = 1; k <= ord; k++) scratch2[k] = scratch1[k]; 
-                sqrtJet(scratch2, scratch3, ord); 
+                for (int k = 1; k <= ord; k++) scratch2[k] = scratch1[k];
+                sqrtJet(scratch2, scratch3, ord);
                 for (int k = 1; k <= ord; k++) {
-                    double s = 0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch3[k - l];
-                    }
+                    double s = 0.0;
+                    for (int l = 1; l < k; l++) s += l * res[l] * scratch3[k - l];
                     res[k] = (scratchArg[k] - s / k) / scratch3[0];
                 }
                 break;
-
             case Declarations.ARC_COSH:
             case Declarations.ARC_COSH_ALT:
-                if (scratchArg[0] < 1.0) {
-                    throw new ArithmeticException("acosh domain");
-                }
+                if (scratchArg[0] < 1.0) throw new ArithmeticException("acosh domain");
                 res[0] = Math.log(scratchArg[0] + Math.sqrt(scratchArg[0] * scratchArg[0] - 1));
-                mul(scratchArg, scratchArg, scratch1, ord); 
+                mul(scratchArg, scratchArg, scratch1, ord);
                 scratch2[0] = scratch1[0] - 1.0;
-                for (int k = 1; k <= ord; k++) scratch2[k] = scratch1[k]; 
-                sqrtJet(scratch2, scratch3, ord); 
+                for (int k = 1; k <= ord; k++) scratch2[k] = scratch1[k];
+                sqrtJet(scratch2, scratch3, ord);
                 for (int k = 1; k <= ord; k++) {
-                    double s = 0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch3[k - l];
-                    }
+                    double s = 0.0;
+                    for (int l = 1; l < k; l++) s += l * res[l] * scratch3[k - l];
                     res[k] = (scratchArg[k] - s / k) / scratch3[0];
                 }
                 break;
-
             case Declarations.ARC_TANH:
             case Declarations.ARC_TANH_ALT:
-                if (Math.abs(scratchArg[0]) >= 1.0) {
-                    throw new ArithmeticException("atanh domain");
-                }
+                if (Math.abs(scratchArg[0]) >= 1.0) throw new ArithmeticException("atanh domain");
                 res[0] = 0.5 * Math.log((1 + scratchArg[0]) / (1 - scratchArg[0]));
-                mul(scratchArg, scratchArg, scratch1, ord); 
+                mul(scratchArg, scratchArg, scratch1, ord);
                 for (int k = 1; k <= ord; k++) {
-                    double s = 0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch1[k - l];
-                    }
+                    double s = 0.0;
+                    for (int l = 1; l < k; l++) s += l * res[l] * scratch1[k - l];
                     res[k] = (scratchArg[k] + s / k) / (1.0 - scratch1[0]);
                 }
                 break;
-
             case Declarations.SQRT:
                 sqrtJet(scratchArg, res, ord);
                 break;
-
             case Declarations.CBRT:
                 cbrtJet(scratchArg, res, ord, scratch1);
                 break;
-
             case Declarations.EXP:
                 expJet(scratchArg, res, ord);
                 break;
-
             case Declarations.LN:
                 lnJet(scratchArg, res, ord);
                 break;
-
-            case Declarations.LG: 
-                if (scratchArg[0] <= 0) {
-                    throw new ArithmeticException("log domain");
-                }
+            case Declarations.LG:
+                if (scratchArg[0] <= 0) throw new ArithmeticException("log domain");
                 lnJet(scratchArg, res, ord);
                 double ln10 = Math.log(10.0);
-                for (int k = 0; k <= ord; k++) {
-                    res[k] /= ln10;
-                }
+                for (int k = 0; k <= ord; k++) res[k] /= ln10;
                 break;
-
             case "abs":
                 res[0] = Math.abs(scratchArg[0]);
                 for (int k = 1; k <= ord; k++) {
-                    res[k] = (scratchArg[0] > 0) ? scratchArg[k] : (scratchArg[0] < 0) ? -scratchArg[k] : 0.0;
+                    res[k] = (scratchArg[0] > 0) ? scratchArg[k] :
+                             (scratchArg[0] < 0) ? -scratchArg[k] : 0.0;
                 }
                 break;
-
             default:
                 throw new UnsupportedOperationException("Higher-order AD not implemented for: " + t.name);
         }
         return sp + 1;
     }
 
-    private int handleBinaryFunction(Token t, int sp, int ord) {
+    private int handleBinaryFunction(Token t, int sp, int ord, double[][] valStack,
+                                     double[] scratch1, double[] scratch2, double[] scratch3,
+                                     double[] scratchU, double[] scratchV) {
         requireOperands(sp, 2, t.name);
         double[] v = valStack[--sp];
         double[] u = valStack[--sp];
@@ -616,46 +520,34 @@ public class AutoDiffNEvaluator {
 
         switch (t.name) {
             case Declarations.POW:
-                powJet(scratchU, scratchV, res, ord);
+                powJet(scratchU, scratchV, res, ord, scratch1, scratch2, scratch3);
                 break;
-                
             case "atan2":
                 res[0] = Math.atan2(scratchU[0], scratchV[0]);
-                mul(scratchU, scratchU, scratch1, ord); 
-                mul(scratchV, scratchV, scratch2, ord); 
-                add(scratch1, scratch2, scratch1, ord); // scratch1 = u^2 + v^2
-                if (scratch1[0] < 1e-300) {
-                    throw new ArithmeticException("atan2 at origin");
-                }
+                mul(scratchU, scratchU, scratch1, ord);
+                mul(scratchV, scratchV, scratch2, ord);
+                add(scratch1, scratch2, scratch1, ord);
+                if (scratch1[0] < 1e-300) throw new ArithmeticException("atan2 at origin");
                 for (int k = 1; k <= ord; k++) {
-                    double rhs = 0;
-                    for (int j = 1; j <= k; j++) {
-                        rhs += j * scratchU[j] * scratchV[k - j];
-                    }
-                    for (int j = 0; j < k; j++) {
-                        rhs -= (k - j) * scratchU[j] * scratchV[k - j];
-                    }
-                    double lhsSum = 0;
-                    for (int l = 1; l < k; l++) {
-                        lhsSum += l * res[l] * scratch1[k - l];
-                    }
+                    double rhs = 0.0;
+                    for (int j = 1; j <= k; j++) rhs += j * scratchU[j] * scratchV[k - j];
+                    for (int j = 0; j < k; j++) rhs -= (k - j) * scratchU[j] * scratchV[k - j];
+                    double lhsSum = 0.0;
+                    for (int l = 1; l < k; l++) lhsSum += l * res[l] * scratch1[k - l];
                     res[k] = (rhs - lhsSum) / (k * scratch1[0]);
                 }
                 break;
-                
             default:
                 throw new UnsupportedOperationException("2-arg not supported: " + t.name);
         }
         return sp + 1;
     }
 
-
-    private static final void test(String expr, String var, int order, int evalPoint) {
+    private static void test(String expr, String var, int order, double evalPoint) {
         MathExpression me = new MathExpression(expr);
         AutoDiffNEvaluator ad = new AutoDiffNEvaluator(me.getCachedPostfix(), 10);
-
         double[] out = ad.evaluateRPN(var, evalPoint, order);
-        System.out.println("f and derivatives up to order " + order + " at x = " + evalPoint);
+        System.out.println(expr+": and derivatives up to order " + order + " at x = " + evalPoint);
         for (int i = 0; i < out.length; i++) {
             System.out.printf("Order %d: %.18f%n", i, out[i]);
         }
@@ -670,14 +562,3 @@ public class AutoDiffNEvaluator {
         test("x^3", "x", 3, -1);  // regression check: integer power at negative base
     }
 }
-
-/**
- * 
- * cos(x)+sin(x)
- * cos(x)-sin(x)
- * -(sin(x)+cos(x))
- * sin(x)-cos(x)
- * cos(x)+sin(x)
- * 
- * 
- */
