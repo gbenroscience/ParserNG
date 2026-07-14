@@ -20,8 +20,8 @@ import com.github.gbenroscience.parser.Function;
 /**
  *
  *
- * How to use these in your Platform When you want the derivative of a badly
- * behaved function at a point : Map x to u using toChebyshev(x). Compute the
+ * How to use this. Want the derivative of a badly
+ * behaved function at a point?  map x to u using toChebyshev(x). Compute the
  * derivative of the Chebyshev series at (standard algorithm). Multiply that
  * result by map.derivativeFactor(u). When you want the integral: Sample f(x)
  *
@@ -29,7 +29,7 @@ import com.github.gbenroscience.parser.Function;
  * at mapped nodes. Multiply by map.dx_du(u). Sum using Clenshaw-Curtis weights.
  * Pro-Tip for Precision In the SemiInfiniteMap, as * , *
  *
- * . In your code, you should clamp to something like 0.9999999999 if you hit a
+ * .Clamp to something like 0.9999999999 if you hit a
  * NaN in the physical domain to prevent the platform from crashing on a hard
  * infinity. Would you like the Clenshaw-Curtis weight generator to ensure your
  * integration reaches full 16-digit precision?

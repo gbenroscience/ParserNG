@@ -199,7 +199,69 @@ public class AutoDiffNEvaluator {
         }
     }
 
+    /**
+     * Integer power {@code u^n} (n &gt;= 0) via repeated Cauchy-product jet
+     * multiplication. Division-free, so it is valid for any real {@code u0},
+     * including zero -- unlike the ln/exp composition, which requires
+     * {@code u0 > 0}. O(n) multiplications; fine for the small integer
+     * exponents that dominate real expressions ({@code x^2}, {@code x^3},
+     * ...); not fast-exponentiation, so very large integer exponents are not
+     * optimally handled, but remain correct.
+     */
+    private void intPowJet(double[] u, int n, double[] out, int ord) {
+        if (n == 0) {
+            out[0] = 1.0;
+            for (int k = 1; k <= ord; k++) {
+                out[k] = 0.0;
+            }
+            return;
+        }
+        System.arraycopy(u, 0, out, 0, ord + 1);
+        for (int p = 2; p <= n; p++) {
+            mul(out, u, scratch1, ord);
+            System.arraycopy(scratch1, 0, out, 0, ord + 1);
+        }
+    }
+
+    /**
+     * {@code w = u^v}. If {@code v} is locally constant across every order
+     * (all jet coefficients beyond index 0 are exactly zero) and that
+     * constant is an integer, uses the division-free {@link #intPowJet}
+     * recurrence, which is valid for any real base -- including zero or
+     * negative bases, matching integer-power semantics for any real number.
+     * Negative integer exponents are handled as the reciprocal of the
+     * positive-integer power, and throw for a zero base (genuine pole).
+     * Otherwise (non-integer constant exponent, or an exponent that
+     * genuinely varies with x) falls back to composing
+     * {@code u^v = exp(v * ln(u))}, which requires {@code u0 > 0}.
+     */
     private void powJet(double[] u, double[] v, double[] out, int ord) {
+        boolean vConstant = true;
+        for (int k = 1; k <= ord; k++) {
+            if (v[k] != 0.0) {
+                vConstant = false;
+                break;
+            }
+        }
+        if (vConstant) {
+            double r = v[0];
+            if (!Double.isNaN(r) && !Double.isInfinite(r) && r == Math.floor(r)) {
+                int n = (int) r;
+                if (n >= 0) {
+                    intPowJet(u, n, out, ord);
+                } else {
+                    if (u[0] == 0.0) {
+                        throw new ArithmeticException("pow domain: zero base with negative exponent");
+                    }
+                    intPowJet(u, -n, scratch3, ord);
+                    recipJet(scratch3, out, ord);
+                }
+                return;
+            }
+        }
+        if (u[0] <= 0.0) {
+            throw new ArithmeticException("pow domain: non-real result");
+        }
         lnJet(u, scratch1, ord);
         mul(v, scratch1, scratch2, ord);
         expJet(scratch2, out, ord);
@@ -604,7 +666,8 @@ public class AutoDiffNEvaluator {
         test("sin(x)", "x", 5, 2);
         test("sin(x)-cos(x)", "x", 5, 2);
         test("x^x", "x", 3, 2);
-
+        test("x^2", "x", 2, 0);   // regression check: integer power at u0 == 0
+        test("x^3", "x", 3, -1);  // regression check: integer power at negative base
     }
 }
 
