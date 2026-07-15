@@ -520,7 +520,7 @@ F(x) = sin(x)/2x; intg(F(x),0,2,iterations)
                     }
                 }
 
-                if (sum == Double.POSITIVE_INFINITY || sum == Double.NEGATIVE_INFINITY || sum == Double.NaN) {
+                if (sum == Double.POSITIVE_INFINITY || sum == Double.NEGATIVE_INFINITY || Double.isNaN(sum)) {
                     System.out.println("FALLING BACK TO NUMERICAL_INTEGRATOR");
                     return new NumericalIntegrator(xLower, xUpper).integrate(function);
                 }

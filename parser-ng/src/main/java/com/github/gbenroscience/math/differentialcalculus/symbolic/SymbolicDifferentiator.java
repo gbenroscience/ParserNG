@@ -34,6 +34,12 @@ public class SymbolicDifferentiator {
         }
         this.rpnTokens = formatTokens(rpnTokens);
     }
+   public SymbolicDifferentiator(MathExpression me) {
+        if (me == null || me.getCachedPostfix() == null || me.getCachedPostfix().length == 0) {
+            throw new IllegalArgumentException("rpnTokens must not be null or empty");
+        }
+        this.rpnTokens = formatTokens(me.getCachedPostfix());
+    }
 
     private static Token[] formatTokens(Token[] postfix) {
         Token[] rpn = new Token[postfix.length];
@@ -148,9 +154,8 @@ public class SymbolicDifferentiator {
             chain[i] = valAndDer[1];
             if (i == order) {
                 break;
-            }
-            Token[] nextRpn = new MathExpression(valAndDer[1]).getCachedPostfix();
-            current = new SymbolicDifferentiator(nextRpn);
+            } 
+            current = new SymbolicDifferentiator(new MathExpression(valAndDer[1]));
             valAndDer = current.differentiate(wrtVar);
         }
 
@@ -612,7 +617,7 @@ public class SymbolicDifferentiator {
     public static void main(String[] args) {
         String expr = "x^3+3*x^2-5*x-8*atan2(2*x, 3)";
         MathExpression me = new MathExpression(expr);
-        SymbolicDifferentiator sd = new SymbolicDifferentiator(me.getCachedPostfix());
+        SymbolicDifferentiator sd = new SymbolicDifferentiator(me);
         String[] result = sd.differentiate("x");
         System.out.println("Function: " + expr);
         System.out.println("f(x)  = " + result[0]);

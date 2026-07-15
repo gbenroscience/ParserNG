@@ -25,9 +25,9 @@ import java.util.logging.Logger;
 
 /**
  * Clean, high-performance adaptive Gauss-Kronrod (GK15) Definite Integrator.
- * 
- * Corrected: Now uses independent node sets for Gauss (G7) and Kronrod (K15)
- * to ensure valid error estimation.
+ *
+ * Corrected: Now uses independent node sets for Gauss (G7) and Kronrod (K15) to
+ * ensure valid error estimation.
  */
 public class GKTurboEngineIntegrator {
 
@@ -63,17 +63,22 @@ public class GKTurboEngineIntegrator {
     // Exceptions & Domain Types
     // ------------------------------------------------------------------
     public static class TaylorIntegrationException extends RuntimeException {
+
         private static final long serialVersionUID = 1L;
-        public TaylorIntegrationException(String message) { super(message); }
+
+        public TaylorIntegrationException(String message) {
+            super(message);
+        }
     }
 
     public static final class NonIntegrableSingularityException extends TaylorIntegrationException {
+
         private static final long serialVersionUID = 1L;
         public final double location;
         public final double panelWidth;
 
         NonIntegrableSingularityException(double location, double panelWidth, String reason, Throwable cause) {
-            super(String.format("Non-integrable singularity near x=%.15g (panel width %.3e): %s.", 
+            super(String.format("Non-integrable singularity near x=%.15g (panel width %.3e): %s.",
                     location, panelWidth, reason, cause));
             this.location = location;
             this.panelWidth = panelWidth;
@@ -81,6 +86,7 @@ public class GKTurboEngineIntegrator {
     }
 
     public static final class Singularity {
+
         public final double location;
         public final double width;
         public final String reason;
@@ -93,12 +99,13 @@ public class GKTurboEngineIntegrator {
     }
 
     public static final class IntegrationResult {
+
         public final double value;
         public final double errorEstimate;
         public final int panelCount;
         public final int maxDepthReached;
         public final List<Singularity> singularities;
-        private final double originalWidth;
+        final double originalWidth;
 
         IntegrationResult(double value, double errorEstimate, int panelCount, int maxDepthReached, List<Singularity> singularities, double originalWidth) {
             this.value = value;
@@ -111,16 +118,22 @@ public class GKTurboEngineIntegrator {
     }
 
     public interface ProgressListener {
-        ProgressListener NO_OP = (panels, depth) -> {};
+
+        ProgressListener NO_OP = (panels, depth) -> {
+        };
+
         void onProgress(int panelsProcessed, int currentMaxDepth);
     }
 
     // ------------------------------------------------------------------
     // Builder
     // ------------------------------------------------------------------
-    public static Builder builder() { return new Builder(); }
+    public static Builder builder() {
+        return new Builder();
+    }
 
     public static final class Builder {
+
         private String rawExpression = null;
         private double absTol = 1e-12;
         private double relTol = 1e-12;
@@ -129,12 +142,35 @@ public class GKTurboEngineIntegrator {
         private ProgressListener progressListener = ProgressListener.NO_OP;
         private double minPanelWidthFactor = 1e-13;
 
-        public Builder absoluteTolerance(double absTol) { this.absTol = absTol; return this; }
-        public Builder relativeTolerance(double relTol) { this.relTol = relTol; return this; }
-        public Builder maxDepth(int maxDepth) { this.maxDepth = maxDepth; return this; }
-        public Builder strictSingularities(boolean strict) { this.strictSingularities = strict; return this; }
-        public Builder progressListener(ProgressListener listener) { this.progressListener = listener; return this; }
-        public Builder minPanelWidthFactor(double factor) { this.minPanelWidthFactor = factor; return this; }
+        public Builder absoluteTolerance(double absTol) {
+            this.absTol = absTol;
+            return this;
+        }
+
+        public Builder relativeTolerance(double relTol) {
+            this.relTol = relTol;
+            return this;
+        }
+
+        public Builder maxDepth(int maxDepth) {
+            this.maxDepth = maxDepth;
+            return this;
+        }
+
+        public Builder strictSingularities(boolean strict) {
+            this.strictSingularities = strict;
+            return this;
+        }
+
+        public Builder progressListener(ProgressListener listener) {
+            this.progressListener = listener;
+            return this;
+        }
+
+        public Builder minPanelWidthFactor(double factor) {
+            this.minPanelWidthFactor = factor;
+            return this;
+        }
 
         public GKTurboEngineIntegrator build(String expr, String wrtVar) {
             this.rawExpression = expr;
@@ -156,9 +192,9 @@ public class GKTurboEngineIntegrator {
     private final double minWidthFactor;
 
     private GKTurboEngineIntegrator(String rawExpression, String wrtVar,
-                                    double absTol, double relTol, int maxDepth,
-                                    boolean strictSingularities, ProgressListener progressListener,
-                                    double minWidthFactor) {
+            double absTol, double relTol, int maxDepth,
+            boolean strictSingularities, ProgressListener progressListener,
+            double minWidthFactor) {
         this.rawExpression = rawExpression;
         this.wrtVar = wrtVar;
         this.absTol = absTol;
@@ -170,8 +206,12 @@ public class GKTurboEngineIntegrator {
     }
 
     public IntegrationResult integrate(double a, double b) {
-        if (!Double.isFinite(a) || !Double.isFinite(b)) throw new IllegalArgumentException("bounds must be finite");
-        if (a == b) return new IntegrationResult(0.0, 0.0, 0, 0, Collections.emptyList(), 0.0);
+        if (!Double.isFinite(a) || !Double.isFinite(b)) {
+            throw new IllegalArgumentException("bounds must be finite");
+        }
+        if (a == b) {
+            return new IntegrationResult(0.0, 0.0, 0, 0, Collections.emptyList(), 0.0);
+        }
         return new IntegrationSession().run(a, b);
     }
 
@@ -179,10 +219,11 @@ public class GKTurboEngineIntegrator {
     // Session State
     // ------------------------------------------------------------------
     private class IntegrationSession {
+
         private final MathExpression me;
         private final List<Singularity> singularities = new ArrayList<>();
         private final int varSlot;
-        
+
         // Stacks
         private double[] stackA, stackB, stackTol;
         private int[] stackDepth;
@@ -195,14 +236,18 @@ public class GKTurboEngineIntegrator {
             this.me = new MathExpression(rawExpression);
             this.varSlot = this.me.getSlotByName(wrtVar);
             int cap = maxDepth + 4;
-            this.stackA = new double[cap]; this.stackB = new double[cap];
-            this.stackTol = new double[cap]; this.stackDepth = new int[cap];
+            this.stackA = new double[cap];
+            this.stackB = new double[cap];
+            this.stackTol = new double[cap];
+            this.stackDepth = new int[cap];
         }
 
-        private double eval(double x) { 
+        private double eval(double x) {
             me.updateSlot(varSlot, x);
             double val = me.solveGeneric().scalar;
-            if (!Double.isFinite(val)) throw new ArithmeticException("Non-finite: " + val);
+            if (!Double.isFinite(val)) {
+                throw new ArithmeticException("Non-finite: " + val);
+            }
             return val;
         }
 
@@ -214,53 +259,59 @@ public class GKTurboEngineIntegrator {
                 stackTol = Arrays.copyOf(stackTol, newCap);
                 stackDepth = Arrays.copyOf(stackDepth, newCap);
             }
-            stackA[stackSize] = a; stackB[stackSize] = b;
-            stackTol[stackSize] = tol; stackDepth[stackSize] = depth;
+            stackA[stackSize] = a;
+            stackB[stackSize] = b;
+            stackTol[stackSize] = tol;
+            stackDepth[stackSize] = depth;
             stackSize++;
         }
 
-    public IntegrationResult run(double a, double b) {
-    boolean negate = b < a;
-    double lo = negate ? b : a; double hi = negate ? a : b;
-    double width0 = hi - lo;
-    double minWidth = Math.max(width0 * minWidthFactor, Double.MIN_NORMAL);
-    
-    // Pass the absolute tolerance into the stack
-    stackPush(lo, hi, absTol, 0);
+        public IntegrationResult run(double a, double b) {
+            boolean negate = b < a;
+            double lo = negate ? b : a;
+            double hi = negate ? a : b;
+            double width0 = hi - lo;
+            double minWidth = Math.max(width0 * minWidthFactor, Double.MIN_NORMAL);
 
-    double sum = 0.0, errAccum = 0.0;
-    int panelCount = 0, maxDepthSeen = 0, safety = 0;
+            // Pass the absolute tolerance into the stack
+            stackPush(lo, hi, absTol, 0);
 
-    while (stackSize > 0) {
-        if (++safety > 100_000) throw new TaylorIntegrationException("Circuit breaker");
-        stackSize--;
-        double pa = stackA[stackSize], pb = stackB[stackSize];
-        double pTol = stackTol[stackSize];
-        int pDepth = stackDepth[stackSize];
-        maxDepthSeen = Math.max(maxDepthSeen, pDepth);
+            double sum = 0.0, errAccum = 0.0;
+            int panelCount = 0, maxDepthSeen = 0, safety = 0;
 
-        try {
-            evaluateGKPanel(pa, pb);
-        } catch (Exception e) {
-            // ... (keep existing error handling)
+            while (stackSize > 0) {
+                if (++safety > 100_000) {
+                    throw new TaylorIntegrationException("Circuit breaker");
+                }
+                stackSize--;
+                double pa = stackA[stackSize], pb = stackB[stackSize];
+                double pTol = stackTol[stackSize];
+                int pDepth = stackDepth[stackSize];
+                maxDepthSeen = Math.max(maxDepthSeen, pDepth);
+
+                try {
+                    evaluateGKPanel(pa, pb);
+                } catch (Exception e) {
+                    // ... (keep existing error handling)
+                }
+
+                // --- UPDATED CONVERGENCE CRITERIA ---
+                // Combine absTol and relTol based on the current segment's estimate
+                double effectiveTol = pTol + (relTol * Math.abs(lastGKResult));
+
+                if (lastGKErrEst <= effectiveTol || (pb - pa) <= minWidth || pDepth >= maxDepth) {
+                    sum += lastGKResult;
+                    errAccum += lastGKErrEst;
+                    panelCount++;
+                } else {
+                    double m = 0.5 * (pa + pb);
+                    stackPush(pa, m, pTol * 0.5, pDepth + 1);
+                    stackPush(m, pb, pTol * 0.5, pDepth + 1);
+                }
+            }
+            return new IntegrationResult(negate ? -sum : sum, errAccum, panelCount, maxDepthSeen, singularities, width0);
         }
 
-        // --- UPDATED CONVERGENCE CRITERIA ---
-        // Combine absTol and relTol based on the current segment's estimate
-        double effectiveTol = pTol + (relTol * Math.abs(lastGKResult));
-        
-        if (lastGKErrEst <= effectiveTol || (pb - pa) <= minWidth || pDepth >= maxDepth) {
-            sum += lastGKResult;
-            errAccum += lastGKErrEst;
-            panelCount++;
-        } else {
-            double m = 0.5 * (pa + pb);
-            stackPush(pa, m, pTol * 0.5, pDepth + 1);
-            stackPush(m, pb, pTol * 0.5, pDepth + 1);
-        }
-    }
-    return new IntegrationResult(negate ? -sum : sum, errAccum, panelCount, maxDepthSeen, singularities, width0);
-}
         private void evaluateGKPanel(double a, double b) {
             double m = 0.5 * (a + b);
             double h = 0.5 * (b - a);
@@ -284,8 +335,10 @@ public class GKTurboEngineIntegrator {
         }
 
         private void recordSingularityOrThrow(double pa, double pb, String reason, Throwable cause) {
-            if (strictSingularities) throw new NonIntegrableSingularityException(0.5*(pa+pb), pb-pa, reason, cause);
-            singularities.add(new Singularity(0.5*(pa+pb), pb-pa, reason));
+            if (strictSingularities) {
+                throw new NonIntegrableSingularityException(0.5 * (pa + pb), pb - pa, reason, cause);
+            }
+            singularities.add(new Singularity(0.5 * (pa + pb), pb - pa, reason));
         }
     }
 
@@ -302,15 +355,30 @@ public class GKTurboEngineIntegrator {
             IntegrationResult result = integrator.integrate(0, Math.PI);
             System.out.printf("Computed: %.16f (Error: %.5e, Panels: %d)%n", result.value, Math.abs(result.value - 2.0), result.panelCount);
             System.out.println(">> TEST 1 STATUS: " + (result.panelCount == 1 ? "SUCCESS" : "FAILED (Unexpected split)"));
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
         // Test 2: Polynomial x^2 on [0, 1]
         try {
             System.out.println("\n--- Test 2: Polynomial x^2 on [0, 1] ---");
             GKTurboEngineIntegrator integrator = GKTurboEngineIntegrator.builder().build("x^2", "x");
             IntegrationResult result = integrator.integrate(0, 1.0);
-            System.out.printf("Computed: %.16f (Error: %.5e, Panels: %d)%n", result.value, Math.abs(result.value - (1.0/3.0)), result.panelCount);
+            System.out.printf("Computed: %.16f (Error: %.5e, Panels: %d)%n", result.value, Math.abs(result.value - (1.0 / 3.0)), result.panelCount);
             System.out.println(">> TEST 2 STATUS: " + (result.panelCount == 1 ? "SUCCESS" : "FAILED"));
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        try {
+            System.out.println("\n--- Test 2: sqrt(x) on [0, 1] ---");
+            GKTurboEngineIntegrator integrator = GKTurboEngineIntegrator.builder().build("sqrt(x)", "x");
+            IntegrationResult result = integrator.integrate(0, 1.0);
+            System.out.printf("Computed: %.16f (Error: %.5e, Panels: %d)%n", result.value, Math.abs(result.value - (2.0 / 3.0)), result.panelCount);
+            System.out.println(">> TEST 2 STATUS: " + (result.panelCount == 1 ? "SUCCESS" : "FAILED"));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
     }
 }

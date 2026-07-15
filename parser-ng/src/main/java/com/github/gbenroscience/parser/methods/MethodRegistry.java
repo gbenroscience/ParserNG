@@ -19,6 +19,7 @@ import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
 import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffEvaluator;
 import com.github.gbenroscience.math.geom.Direction;
 import com.github.gbenroscience.math.geom.Line3D;
@@ -415,8 +416,7 @@ public class MethodRegistry {
                 String fn = args[0].textRes;
                 Function f = FunctionManager.lookUp(fn);
                 if (f != null) {
-                    MathExpression.Token[] rpn = f.getMathExpression().getCachedPostfix();
-                    AutoDiffEvaluator ade = new AutoDiffEvaluator(rpn);
+                    AutoDiffEvaluator ade = new AutoDiffEvaluator(f.getMathExpression());
                     String vars[] = f.getMathExpression().getVariablesNames();
                     String var = vars != null && vars.length == 1 ? vars[0] : null;
                     if (Variable.isVariableString(var)) {

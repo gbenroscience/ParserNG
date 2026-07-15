@@ -5,13 +5,14 @@
 
 package com.github.gbenroscience.math.numericalmethods;
 
+import com.github.gbenroscience.math.differentialcalculus.Derivative;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.Variable;
 import java.util.InputMismatchException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
 import com.github.gbenroscience.util.FunctionManager;
 
 /**
@@ -227,6 +228,8 @@ public class NumericalDerivative {
         try {
             MathExpression.EvalResult expr = Derivative.eval( "diff(F,"+evalPoint+",1)");
             System.out.println("Absolute derivative: "+expr.toString());
+            MathExpression.EvalResult expr1 = DerivativeOld.eval( "diff(F,"+evalPoint+",1)");
+            System.out.println("Absolute derivative - the old way: "+expr1.toString());
         } catch (Exception ex) {
             Logger.getLogger(NumericalDerivative.class.getName()).log(Level.SEVERE, null, ex);
         }

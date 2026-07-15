@@ -2,7 +2,7 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package com.github.gbenroscience.math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus.symbolic.old;
 
 import java.util.ArrayList;
 import java.util.logging.Level;

@@ -50,11 +50,11 @@ public class AutoDiffEvaluator {
     private final double[] valStack;
     private final double[] derStack;
 
-    public AutoDiffEvaluator(Token[] rpnTokens) {
-        if (rpnTokens == null || rpnTokens.length == 0) {
+    public AutoDiffEvaluator(MathExpression me) { 
+        if (me == null || me.getCachedPostfix() == null || me.getCachedPostfix().length == 0) {
             throw new IllegalArgumentException("rpnTokens must not be null or empty");
         }
-        this.rpnTokens = formatTokens(rpnTokens);
+        this.rpnTokens = formatTokens(me.getCachedPostfix());
         this.valStack = new double[this.rpnTokens.length + 1];
         this.derStack = new double[this.rpnTokens.length + 1];
     }
@@ -444,7 +444,7 @@ public class AutoDiffEvaluator {
     public static void main(String[] args) {
         String expr = "x^3+3*x^2-5*x-8*atan2(2*x, 3)";
         MathExpression me = new MathExpression(expr);
-        AutoDiffEvaluator ad = new AutoDiffEvaluator(me.getCachedPostfix());
+        AutoDiffEvaluator ad = new AutoDiffEvaluator(me);
 
         // Evaluate at x = 2.0
         double x = 2.0;

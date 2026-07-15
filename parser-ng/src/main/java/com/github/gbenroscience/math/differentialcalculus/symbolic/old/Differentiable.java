@@ -2,7 +2,7 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package com.github.gbenroscience.math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus.symbolic.old;
 
 import java.util.ArrayList;
 import static com.github.gbenroscience.parser.Number.*;
@@ -167,7 +167,7 @@ public class Differentiable {
      * @return the List containing the tokens of the derivative.
      */
     @SuppressWarnings("unused")
-    public ArrayList<String> differentiate(Derivative d){
+    public ArrayList<String> differentiate(DerivativeOld d){
         ArrayList<String>derivedData = new ArrayList<>();
         handleStrangeFormats:{
             //turn (,-,var,) to (,-1,*,var,)

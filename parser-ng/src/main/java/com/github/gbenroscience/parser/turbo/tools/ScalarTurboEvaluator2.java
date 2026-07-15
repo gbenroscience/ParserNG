@@ -18,8 +18,10 @@ package com.github.gbenroscience.parser.turbo.tools;
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
 import com.github.gbenroscience.math.numericalmethods.NumericalIntegrator;
 import com.github.gbenroscience.math.numericalmethods.TurboRootFinder;
+import com.github.gbenroscience.math.numericalmethods.taylors.ffx.Integrator;
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
 import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
 import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
@@ -773,7 +775,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             case 2:
                 if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
                     order = Integer.parseInt(args[1]);
-                    solution = Derivative.eval("diff(" + targetExpr + "," + order + ")");
+                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + order + ")");
                 } else {
                     solution = Derivative.eval("diff(" + targetExpr + "," + args[1] + ")");
                 }
@@ -793,6 +795,9 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             return createConstantHandle(solution.scalar);
         } else if (solution.getType() == TYPE.STRING) {
             MethodHandle constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
+            return constant;
+        } else if (solution.getType() == TYPE.VECTOR) {
+            MethodHandle constant = MethodHandles.constant(double.class, solution.vector[solution.vector.length-1]);
             return constant;
         } else {
             throw new RuntimeException("Invalid expression passed to `diff` method: " + FunctionManager.lookUp(targetExpr));
@@ -836,7 +841,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         MethodHandle derivHandle = null;
         try {
             // Use fNameOrExpr to avoid the internal NPE in Parser.getFunction()
-            MathExpression.EvalResult diffRes = Derivative.eval("diff(" + fNameOrExpr + ",1)");
+            MathExpression.EvalResult diffRes = DerivativeOld.eval("diff(" + fNameOrExpr + ",1)");
 
             if (diffRes != null && diffRes.textRes != null) {
                 String derivString = diffRes.textRes;
@@ -1152,11 +1157,19 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
         boolean shouldSwap = lower > upper;
         if (shouldSwap) {
+            Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
+            return intg.integrate(upper, lower);
+            /*
             NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, upper, lower, vars, slots);
             return numericalIntegrator.integrate(f);
-        } else {
+            */
+        } else { 
+            Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
+            return intg.integrate(lower, upper);
+            /*
             NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
             return numericalIntegrator.integrate(f);
+            */
         }
     }
 

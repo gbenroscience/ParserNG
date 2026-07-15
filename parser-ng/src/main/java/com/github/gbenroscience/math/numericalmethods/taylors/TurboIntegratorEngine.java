@@ -26,24 +26,25 @@ import java.util.List;
 import java.util.logging.Logger;
 
 /**
- * Composite definite integrator built directly on top of {@link AutoDiffNEvaluator}.
+ * Composite definite integrator built directly on top of
+ * {@link AutoDiffNEvaluator1}.
  *
  * <h2>Mathematical basis</h2>
  * For a panel [a, b], expand f as a Taylor series about the panel's own
- * midpoint m = (a+b)/2 and integrate the series term by term. With
- * h = (b-a)/2 and t = x - m:
+ * midpoint m = (a+b)/2 and integrate the series term by term. With h = (b-a)/2
+ * and t = x - m:
  *
  * <pre>
  *   int_{a}^{b} f(x) dx = int_{-h}^{h} f(m + t) dt
  *                       = sum_{i=0}^{infinity}  f^(i)(m) * ( h^(i+1) - (-h)^(i+1) ) / (i+1)!
  * </pre>
  *
- * which is exactly the series in the reference image
- * ( sum_{i=0}^{infinity} f^(i)(x1) . dx^(i+1) / (i+1)! ), just anchored at
- * the panel midpoint instead of its left edge. For odd i, (i+1) is even, so
- * (-h)^(i+1) = h^(i+1) and the term cancels exactly -- every odd-order
- * derivative drops out for free, so a Taylor order of N carries the
- * truncation accuracy of order N+1 at no extra cost. Only even i survive:
+ * which is exactly the series in the reference image ( sum_{i=0}^{infinity}
+ * f^(i)(x1) . dx^(i+1) / (i+1)! ), just anchored at the panel midpoint instead
+ * of its left edge. For odd i, (i+1) is even, so (-h)^(i+1) = h^(i+1) and the
+ * term cancels exactly -- every odd-order derivative drops out for free, so a
+ * Taylor order of N carries the truncation accuracy of order N+1 at no extra
+ * cost. Only even i survive:
  *
  * <pre>
  *   int_{a}^{b} f(x) dx = sum_{i even}  2 * f^(i)(m) * h^(i+1) / (i+1)!
@@ -51,78 +52,74 @@ import java.util.logging.Logger;
  *
  * <h2>Scope: this is a finite-interval, local-Taylor quadrature</h2>
  * This class deliberately does <b>not</b> attempt semi-infinite or infinite
- * domains. Doing that well needs a fundamentally different local rule
- * (e.g. tanh-sinh / double-exponential quadrature); bolting an infinite-domain
- * substitution onto a local Taylor-series panel rule just relocates the
- * problem to a Jacobian that blows up at the mapped endpoint, which this
- * integrator would then have no better a tool for than the singularity
- * handling described below. {@link #integrate(double, double)} rejects
- * non-finite bounds outright rather than silently producing a number from a
- * mismatched technique.
+ * domains. Doing that well needs a fundamentally different local rule (e.g.
+ * tanh-sinh / double-exponential quadrature); bolting an infinite-domain
+ * substitution onto a local Taylor-series panel rule just relocates the problem
+ * to a Jacobian that blows up at the mapped endpoint, which this integrator
+ * would then have no better a tool for than the singularity handling described
+ * below. {@link #integrate(double, double)} rejects non-finite bounds outright
+ * rather than silently producing a number from a mismatched technique.
  *
  * <h2>Singularity policy: strict by default</h2>
- * Two situations can happen inside a panel, and they are handled differently
- * on purpose:
+ * Two situations can happen inside a panel, and they are handled differently on
+ * purpose:
  * <ul>
- *   <li><b>The function is genuinely undefined</b> (division by zero, a log
- *       domain error, etc: an {@link ArithmeticException} from the AD
- *       evaluator). If this persists down to the minimum panel width, the
- *       integral may not even converge there (e.g. a true pole). By default
- *       ({@code strictSingularities = true}) this throws
- *       {@link NonIntegrableSingularityException} rather than silently
- *       dropping that panel's contribution -- the way a fixed epsilon-width
- *       pole excision would. Call {@link Builder#strictSingularities(boolean)}
- *       with {@code false} to opt into the lenient behavior instead: the
- *       panel is flagged as a {@link Singularity} and its contribution is
- *       omitted, and integration continues.</li>
- *   <li><b>The function is perfectly well-defined but the local Taylor series
- *       does not converge on this panel</b> (h exceeds the local radius of
- *       convergence -- common right next to, but not exactly at, a
- *       singularity, e.g. near x=0 for {@code sqrt(x)}). Dropping this
- *       contribution to zero would bias the result for no good reason, since
- *       f is computable here. Instead the integrator falls back to a plain
- *       Simpson's-rule estimate on that one small panel, which needs only
- *       three function values and no series convergence at all. This is
- *       still recorded as a {@link Singularity} for transparency (the caller
- *       can see exactly where the accuracy guarantee was downgraded), but it
- *       does not stop integration and does not throw.</li>
+ * <li><b>The function is genuinely undefined</b> (division by zero, a log
+ * domain error, etc: an {@link ArithmeticException} from the AD evaluator). If
+ * this persists down to the minimum panel width, the integral may not even
+ * converge there (e.g. a true pole). By default
+ * ({@code strictSingularities = true}) this throws
+ * {@link NonIntegrableSingularityException} rather than silently dropping that
+ * panel's contribution -- the way a fixed epsilon-width pole excision would.
+ * Call {@link Builder#strictSingularities(boolean)} with {@code false} to opt
+ * into the lenient behavior instead: the panel is flagged as a
+ * {@link Singularity} and its contribution is omitted, and integration
+ * continues.</li>
+ * <li><b>The function is perfectly well-defined but the local Taylor series
+ * does not converge on this panel</b> (h exceeds the local radius of
+ * convergence -- common right next to, but not exactly at, a singularity, e.g.
+ * near x=0 for {@code sqrt(x)}). Dropping this contribution to zero would bias
+ * the result for no good reason, since f is computable here. Instead the
+ * integrator falls back to a plain Simpson's-rule estimate on that one small
+ * panel, which needs only three function values and no series convergence at
+ * all. This is still recorded as a {@link Singularity} for transparency (the
+ * caller can see exactly where the accuracy guarantee was downgraded), but it
+ * does not stop integration and does not throw.</li>
  * </ul>
  *
  * <h2>Other production hardening</h2>
  * <ul>
- *   <li><b>No silent factorial overflow.</b> Factorials are stored as
- *       {@code double}, not {@code long}: {@code long} factorials silently
- *       wrap around ~21! with no warning, which would make every division
- *       past that order silently wrong. {@code order} is capped at
- *       {@link #MAX_ORDER} (163! stays comfortably inside double range;
- *       171! would overflow to {@code Infinity}).</li>
- *   <li><b>No NaN/Infinity poisoning the running sum.</b> A panel outcome is
- *       only ever added to the total if it is finite. Anything else is
- *       routed through the singularity/fallback policy above instead of
- *       being summed as-is.</li>
- *   <li><b>Fail-fast on malformed input.</b> {@link IllegalStateException}
- *       (malformed RPN) and {@link UnsupportedOperationException} (an
- *       operator the AD evaluator doesn't implement) are programming/config
- *       errors, not recoverable numerical situations -- they are
- *       deliberately <i>not</i> caught here and propagate immediately rather
- *       than triggering endless bisection against an error that will never
- *       go away.</li>
- *   <li><b>Integer powers of h computed iteratively</b>, not via
- *       {@code Math.pow}, which is both faster and avoids extra
- *       transcendental rounding noise feeding into a sum that is supposed to
- *       be accurate to many digits.</li>
+ * <li><b>No silent factorial overflow.</b> Factorials are stored as
+ * {@code double}, not {@code long}: {@code long} factorials silently wrap
+ * around ~21! with no warning, which would make every division past that order
+ * silently wrong. {@code order} is capped at {@link #MAX_ORDER} (163! stays
+ * comfortably inside double range; 171! would overflow to
+ * {@code Infinity}).</li>
+ * <li><b>No NaN/Infinity poisoning the running sum.</b> A panel outcome is only
+ * ever added to the total if it is finite. Anything else is routed through the
+ * singularity/fallback policy above instead of being summed as-is.</li>
+ * <li><b>Fail-fast on malformed input.</b> {@link IllegalStateException}
+ * (malformed RPN) and {@link UnsupportedOperationException} (an operator the AD
+ * evaluator doesn't implement) are programming/config errors, not recoverable
+ * numerical situations -- they are deliberately <i>not</i> caught here and
+ * propagate immediately rather than triggering endless bisection against an
+ * error that will never go away.</li>
+ * <li><b>Integer powers of h computed iteratively</b>, not via
+ * {@code Math.pow}, which is both faster and avoids extra transcendental
+ * rounding noise feeding into a sum that is supposed to be accurate to many
+ * digits.</li>
  * </ul>
  *
  * <h2>Zero-allocation steady state</h2>
- * As in the earlier revision: the panel worklist is four fixed-size
- * primitive arrays sized {@code maxDepth + 4} (provably sufficient -- an
- * explicit stack that pops one node and, on split, pushes exactly two
- * children holds at most one pending sibling per tree level, bounding stack
- * size by tree height, not panel count); {@code evaluatePanel} writes into
- * instance fields instead of returning a boxed outcome; {@code deriv},
- * {@code factorial}, and the Simpson-fallback scratch buffer are allocated
- * once in the constructor. {@link Singularity} objects remain the one
- * deliberate exception, since they only occur on the rare diagnostic path.
+ * As in the earlier revision: the panel worklist is four fixed-size primitive
+ * arrays sized {@code maxDepth + 4} (provably sufficient -- an explicit stack
+ * that pops one node and, on split, pushes exactly two children holds at most
+ * one pending sibling per tree level, bounding stack size by tree height, not
+ * panel count); {@code evaluatePanel} writes into instance fields instead of
+ * returning a boxed outcome; {@code deriv}, {@code factorial}, and the
+ * Simpson-fallback scratch buffer are allocated once in the constructor.
+ * {@link Singularity} objects remain the one deliberate exception, since they
+ * only occur on the rare diagnostic path.
  *
  * <h2>Thread-safety</h2>
  * A single instance is stateful and reused across panels; it is not
@@ -133,15 +130,20 @@ public class TurboIntegratorEngine {
 
     private static final Logger LOG = Logger.getLogger(TurboIntegratorEngine.class.getName());
 
-    /** Largest allowed Taylor order: keeps factorial(order+3) comfortably inside double range. */
+    /**
+     * Largest allowed Taylor order: keeps factorial(order+3) comfortably inside
+     * double range.
+     */
     public static final int MAX_ORDER = 160;
 
     // ------------------------------------------------------------------
     // Exceptions
     // ------------------------------------------------------------------
-
-    /** Base type for integration failures that are not programming errors. */
+    /**
+     * Base type for integration failures that are not programming errors.
+     */
     public static class TaylorIntegrationException extends RuntimeException {
+
         private static final long serialVersionUID = 1L;
 
         public TaylorIntegrationException(String message) {
@@ -162,15 +164,16 @@ public class TurboIntegratorEngine {
      * (non-principal-value) integral simply does not converge.
      */
     public static final class NonIntegrableSingularityException extends TaylorIntegrationException {
+
         private static final long serialVersionUID = 1L;
         public final double location;
         public final double panelWidth;
 
-        NonIntegrableSingularityException(double location, double panelWidth, String reason, Throwable cause) {
+        public NonIntegrableSingularityException(double location, double panelWidth, String reason, Throwable cause) {
             super(String.format(
                     "Non-integrable singularity near x=%.15g (panel width %.3e): %s. "
-                            + "If a principal-value-style partial result is acceptable, build with "
-                            + "strictSingularities(false) instead.",
+                    + "If a principal-value-style partial result is acceptable, build with "
+                    + "strictSingularities(false) instead.",
                     location, panelWidth, reason), cause);
             this.location = location;
             this.panelWidth = panelWidth;
@@ -180,14 +183,17 @@ public class TurboIntegratorEngine {
     // ------------------------------------------------------------------
     // Public diagnostics types
     // ------------------------------------------------------------------
-
-    /** A panel flagged during integration: either omitted (lenient mode) or resolved via fallback. */
+    /**
+     * A panel flagged during integration: either omitted (lenient mode) or
+     * resolved via fallback.
+     */
     public static final class Singularity {
+
         public final double location;
         public final double width;
         public final String reason;
 
-        Singularity(double location, double width, String reason) {
+        public Singularity(double location, double width, String reason) {
             this.location = location;
             this.width = width;
             this.reason = reason;
@@ -199,8 +205,12 @@ public class TurboIntegratorEngine {
         }
     }
 
-    /** Immutable snapshot returned by the allocating {@link #integrateResult} convenience API. */
+    /**
+     * Immutable snapshot returned by the allocating {@link #integrateResult}
+     * convenience API.
+     */
     public static final class Result {
+
         public final double value;
         public final double estimatedError;
         public final int panelCount;
@@ -227,13 +237,15 @@ public class TurboIntegratorEngine {
     // ------------------------------------------------------------------
     // Builder
     // ------------------------------------------------------------------
-
     public static Builder builder() {
         return new Builder();
     }
 
-    /** Fluent construction; the recommended way to configure a new integrator. */
+    /**
+     * Fluent construction; the recommended way to configure a new integrator.
+     */
     public static final class Builder {
+
         private int order = 8;
         private double absTol = 1e-10;
         private double relTol = 1e-10;
@@ -260,26 +272,28 @@ public class TurboIntegratorEngine {
             return this;
         }
 
-        /** Default true: unresolvable singularities throw rather than silently truncating the result. */
+        /**
+         * Default true: unresolvable singularities throw rather than silently
+         * truncating the result.
+         */
         public Builder strictSingularities(boolean strict) {
             this.strictSingularities = strict;
             return this;
         }
 
-        public TurboIntegratorEngine build(Token[] rpnTokens, String wrtVar) {
-            return new TurboIntegratorEngine(rpnTokens, wrtVar, order, absTol, relTol, maxDepth, strictSingularities);
+        public TurboIntegratorEngine build(MathExpression me, String wrtVar) {
+            return new TurboIntegratorEngine(me, wrtVar, order, absTol, relTol, maxDepth, strictSingularities);
         }
 
         public TurboIntegratorEngine build(String expr, String wrtVar) {
             MathExpression me = new MathExpression(expr);
-            return build(me.getCachedPostfix(), wrtVar);
+            return build(me, wrtVar);
         }
     }
 
     // ------------------------------------------------------------------
     // Configuration
     // ------------------------------------------------------------------
-
     private final AutoDiffNEvaluator ad;
     private final String wrtVar;
     private final int order;
@@ -308,13 +322,16 @@ public class TurboIntegratorEngine {
     private int lastMaxDepthReached;
     private final List<Singularity> singularities;
 
-    public TurboIntegratorEngine(Token[] rpnTokens, String wrtVar, int order,
-                                  double absTol, double relTol, int maxDepth) {
-        this(rpnTokens, wrtVar, order, absTol, relTol, maxDepth, true);
+    public TurboIntegratorEngine(MathExpression me, String wrtVar, int order,
+            double absTol, double relTol, int maxDepth) {
+        this(me, wrtVar, order, absTol, relTol, maxDepth, true);
     }
 
-    public TurboIntegratorEngine(Token[] rpnTokens, String wrtVar, int order,
-                                  double absTol, double relTol, int maxDepth, boolean strictSingularities) {
+    public TurboIntegratorEngine(MathExpression me, String wrtVar, int order,
+            double absTol, double relTol, int maxDepth, boolean strictSingularities) {
+        if (me == null || me.getCachedPostfix() == null || me.getCachedPostfix().length == 0) {
+            throw new IllegalArgumentException("rpnTokens must not be null or empty");
+        }
         if (order < 2 || (order % 2) != 0) {
             throw new IllegalArgumentException("order must be a positive even number (midpoint expansion cancels odd terms)");
         }
@@ -333,7 +350,7 @@ public class TurboIntegratorEngine {
 
         this.order = order;
         this.adOrder = order + 2;
-        this.ad = new AutoDiffNEvaluator(rpnTokens, adOrder);
+        this.ad = new AutoDiffNEvaluator(me, adOrder);
         this.wrtVar = wrtVar;
         this.absTol = absTol;
         this.relTol = relTol;
@@ -360,21 +377,20 @@ public class TurboIntegratorEngine {
     }
 
     public static TurboIntegratorEngine forExpression(String expr, String wrtVar, int order,
-                                                        double absTol, double relTol, int maxDepth) {
+            double absTol, double relTol, int maxDepth) {
         return forExpression(expr, wrtVar, order, absTol, relTol, maxDepth, true);
     }
 
     public static TurboIntegratorEngine forExpression(String expr, String wrtVar, int order,
-                                                        double absTol, double relTol, int maxDepth,
-                                                        boolean strictSingularities) {
+            double absTol, double relTol, int maxDepth,
+            boolean strictSingularities) {
         MathExpression me = new MathExpression(expr);
-        return new TurboIntegratorEngine(me.getCachedPostfix(), wrtVar, order, absTol, relTol, maxDepth, strictSingularities);
+        return new TurboIntegratorEngine(me, wrtVar, order, absTol, relTol, maxDepth, strictSingularities);
     }
 
     // ------------------------------------------------------------------
     // Fixed-capacity primitive stack helpers
     // ------------------------------------------------------------------
-
     private void stackPush(double a, double b, double tol, int depth) {
         if (stackSize == stackA.length) {
             growStack(); // defensive; should be unreachable, see class javadoc
@@ -397,22 +413,21 @@ public class TurboIntegratorEngine {
     // ------------------------------------------------------------------
     // Integration
     // ------------------------------------------------------------------
-
     /**
      * Integrates f from a to b, splitting panels adaptively.
      *
-     * @throws IllegalArgumentException          if a or b is not finite, or a == b is not intended
-     *                                            (a == b is allowed and simply returns 0)
-     * @throws NonIntegrableSingularityException in strict mode (the default), if some panel's
-     *                                            contribution could not be safely resolved
+     * @throws IllegalArgumentException if a or b is not finite, or a == b is
+     * not intended (a == b is allowed and simply returns 0)
+     * @throws NonIntegrableSingularityException in strict mode (the default),
+     * if some panel's contribution could not be safely resolved
      */
     public double integrate(double a, double b) {
         if (!Double.isFinite(a) || !Double.isFinite(b)) {
             throw new IllegalArgumentException(
                     "bounds must be finite (got [" + a + ", " + b + "]); this integrator uses a local "
-                            + "Taylor expansion and does not support infinite domains -- apply your own "
-                            + "variable substitution first, or use a quadrature rule designed for "
-                            + "semi-infinite/infinite intervals (e.g. tanh-sinh)");
+                    + "Taylor expansion and does not support infinite domains -- apply your own "
+                    + "variable substitution first, or use a quadrature rule designed for "
+                    + "semi-infinite/infinite intervals (e.g. tanh-sinh)");
         }
 
         singularities.clear();
@@ -517,7 +532,7 @@ public class TurboIntegratorEngine {
                         (widthExhausted
                                 ? "minimum panel width reached without series convergence"
                                 : "maximum recursion depth reached without series convergence")
-                                + " -- resolved with a Simpson fallback instead of the Taylor series"));
+                        + " -- resolved with a Simpson fallback instead of the Taylor series"));
                 LOG.fine(() -> String.format(
                         "Taylor series did not converge on [%.15g, %.15g]; used Simpson fallback", pa, pb));
             } else {
@@ -534,26 +549,44 @@ public class TurboIntegratorEngine {
         return negate ? -sum : sum;
     }
 
-    /** Allocating convenience overload: same computation, packaged as one immutable {@link Result}. */
+    /**
+     * Allocating convenience overload: same computation, packaged as one
+     * immutable {@link Result}.
+     */
     public Result integrateResult(double a, double b) {
         double value = integrate(a, b);
         return new Result(value, lastErrorEstimate, lastPanelCount, lastMaxDepthReached,
                 new ArrayList<>(singularities));
     }
 
-    public double getLastErrorEstimate() { return lastErrorEstimate; }
-    public int getLastPanelCount() { return lastPanelCount; }
-    public int getLastMaxDepth() { return lastMaxDepthReached; }
-    public boolean isStrictSingularities() { return strictSingularities; }
+    public double getLastErrorEstimate() {
+        return lastErrorEstimate;
+    }
 
-    /** Live view of the flags recorded during the most recent {@link #integrate} call. */
+    public int getLastPanelCount() {
+        return lastPanelCount;
+    }
+
+    public int getLastMaxDepth() {
+        return lastMaxDepthReached;
+    }
+
+    public boolean isStrictSingularities() {
+        return strictSingularities;
+    }
+
+    /**
+     * Live view of the flags recorded during the most recent {@link #integrate}
+     * call.
+     */
     public List<Singularity> getSingularities() {
         return Collections.unmodifiableList(singularities);
     }
 
     /**
-     * Either throws (strict mode) or logs + records a {@link Singularity} and returns normally
-     * (lenient mode), leaving the panel's contribution omitted from the sum.
+     * Either throws (strict mode) or logs + records a {@link Singularity} and
+     * returns normally (lenient mode), leaving the panel's contribution omitted
+     * from the sum.
      */
     private void recordSingularityOrThrow(double pa, double pb, String reason, Throwable cause) {
         double location = 0.5 * (pa + pb);
@@ -563,7 +596,7 @@ public class TurboIntegratorEngine {
         }
         LOG.warning(String.format(
                 "Unresolvable singularity near x=%.15g (panel width %.3e): %s -- lenient mode: "
-                        + "this panel's contribution is omitted from the result",
+                + "this panel's contribution is omitted from the result",
                 location, width, reason));
         singularities.add(new Singularity(location, width, reason));
     }
@@ -572,11 +605,11 @@ public class TurboIntegratorEngine {
      * Expands f about the panel midpoint and integrates its Taylor series
      * term-by-term, writing the outcome into {@link #lastValue},
      * {@link #lastErrEst}, {@link #lastConverging} (no object allocation).
-     * Odd-order terms vanish identically by symmetry. The two probe
-     * derivatives beyond {@code order} (fetched via {@code adOrder}) give a
-     * genuine next-term error estimate and feed the ratio/divergence test.
-     * Integer powers of h are advanced iteratively (h *= h^2 each step)
-     * rather than via {@code Math.pow}.
+     * Odd-order terms vanish identically by symmetry. The two probe derivatives
+     * beyond {@code order} (fetched via {@code adOrder}) give a genuine
+     * next-term error estimate and feed the ratio/divergence test. Integer
+     * powers of h are advanced iteratively (h *= h^2 each step) rather than via
+     * {@code Math.pow}.
      */
     private void evaluatePanel(double a, double b) {
         double m = 0.5 * (a + b);
@@ -614,9 +647,10 @@ public class TurboIntegratorEngine {
     }
 
     /**
-     * Low-order, always-safe fallback for a panel whose Taylor series didn't converge but whose
-     * function value is well-defined. Reuses deriv[0] (f at the panel midpoint, just computed by
-     * the evaluatePanel call that preceded this one) plus two fresh order-0 edge samples.
+     * Low-order, always-safe fallback for a panel whose Taylor series didn't
+     * converge but whose function value is well-defined. Reuses deriv[0] (f at
+     * the panel midpoint, just computed by the evaluatePanel call that preceded
+     * this one) plus two fresh order-0 edge samples.
      */
     private double simpsonFallback(double a, double b) {
         double fm = deriv[0];
@@ -627,20 +661,35 @@ public class TurboIntegratorEngine {
         return (b - a) / 6.0 * (fa + 4.0 * fm + fb);
     }
 
-    /** Rough magnitude scale of f over [a,b], used to turn relTol into an absolute budget. No allocation. */
+    /**
+     * Rough magnitude scale of f over [a,b], used to turn relTol into an
+     * absolute budget. No allocation.
+     */
     private double estimateScale(double a, double b) {
         double m = 0.5 * (a + b);
         double total = 0.0;
         int count = 0;
 
-        if (sampleAbs(a) == 1) { total += Math.abs(edgeBuf[0]); count++; }
-        if (sampleAbs(m) == 1) { total += Math.abs(edgeBuf[0]); count++; }
-        if (sampleAbs(b) == 1) { total += Math.abs(edgeBuf[0]); count++; }
+        if (sampleAbs(a) == 1) {
+            total += Math.abs(edgeBuf[0]);
+            count++;
+        }
+        if (sampleAbs(m) == 1) {
+            total += Math.abs(edgeBuf[0]);
+            count++;
+        }
+        if (sampleAbs(b) == 1) {
+            total += Math.abs(edgeBuf[0]);
+            count++;
+        }
 
         return count > 0 ? total / count : 1.0;
     }
 
-    /** Evaluates f(x) (order 0) into edgeBuf[0]; returns 1 on success, 0 if x hit a domain error. */
+    /**
+     * Evaluates f(x) (order 0) into edgeBuf[0]; returns 1 on success, 0 if x
+     * hit a domain error.
+     */
     private int sampleAbs(double x) {
         try {
             ad.evaluateRPN(wrtVar, x, 0, edgeBuf);
@@ -653,7 +702,6 @@ public class TurboIntegratorEngine {
     // ------------------------------------------------------------------
     // Self-tests (verified closed-form references, not just printed output)
     // ------------------------------------------------------------------
-
     private static int passCount = 0;
     private static int failCount = 0;
 
@@ -662,7 +710,11 @@ public class TurboIntegratorEngine {
         boolean ok = err <= tol;
         System.out.printf("[%s] %-40s actual=%.15g expected=%.15g err=%.3e (tol=%.1e)%n",
                 ok ? "PASS" : "FAIL", label, actual, expected, err, tol);
-        if (ok) passCount++; else failCount++;
+        if (ok) {
+            passCount++;
+        } else {
+            failCount++;
+        }
     }
 
     public static void main(String[] args) {
@@ -671,6 +723,9 @@ public class TurboIntegratorEngine {
 
         TurboIntegratorEngine x2 = forExpression("x^2", "x", 8, 1e-10, 1e-10, 40);
         expect("x^2 on [0,1]", x2.integrate(0, 1), 1.0 / 3.0, 1e-12);
+
+        TurboIntegratorEngine gauss = forExpression("exp(-x^2)", "x", 8, 1e-10, 1e-10, 40);
+        expect("exp(-x^2) on [-3,3]", gauss.integrate(-3, 3), Math.sqrt(Math.PI), 1e-10);
 
         TurboIntegratorEngine invX = forExpression("1/x", "x", 8, 1e-10, 1e-10, 40);
         expect("1/x on [1,2]", invX.integrate(1, 2), Math.log(2), 1e-9);
@@ -702,7 +757,11 @@ public class TurboIntegratorEngine {
         boolean lenientOk = Double.isFinite(lenientResult) && !poleLenient.getSingularities().isEmpty();
         System.out.printf("[%s] 1/(x-0.5) through pole (lenient) returned %.6g flagged with %d flag(s)%n",
                 lenientOk ? "PASS" : "FAIL", lenientResult, poleLenient.getSingularities().size());
-        if (lenientOk) passCount++; else failCount++;
+        if (lenientOk) {
+            passCount++;
+        } else {
+            failCount++;
+        }
 
         // Reject non-finite bounds rather than pretending to support them.
         try {

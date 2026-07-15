@@ -2,14 +2,14 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package com.github.gbenroscience.math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus.symbolic.old;
 
 import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Scanner;
 import com.github.gbenroscience.parser.Operator;
 import com.github.gbenroscience.parser.Variable;
 import static com.github.gbenroscience.parser.Operator.*;
-import static com.github.gbenroscience.math.differentialcalculus.Methods.*;
+import static com.github.gbenroscience.math.differentialcalculus.symbolic.old.Methods.*;
 import com.github.gbenroscience.parser.STRING;
 import static com.github.gbenroscience.parser.Variable.*;
 import java.util.ArrayList;

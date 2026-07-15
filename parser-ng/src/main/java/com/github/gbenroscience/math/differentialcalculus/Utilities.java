@@ -4,6 +4,7 @@
  */
 package com.github.gbenroscience.math.differentialcalculus;
 
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeScanner;
 import com.github.gbenroscience.parser.Bracket;
 import static com.github.gbenroscience.parser.Bracket.*;
 

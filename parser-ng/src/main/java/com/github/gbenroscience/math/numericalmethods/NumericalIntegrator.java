@@ -701,7 +701,7 @@ public class NumericalIntegrator {
             testIntegral("@(x)sin(x)", 0, Math.PI, 2.0);
             testIntegral("@(x)ln(x)", 0.001, 1.0, -0.992);
             testIntegral("@(x)1/sqrt(x)", 0.001, 1.0, 1.937);
-            testIntegral("@(x)1/(x-0.5)", 0.1, 0.49, Double.NEGATIVE_INFINITY);
+            testIntegral("@(x)1/(x-0.5)", 0.1, 0.49, -3.6888794541139363);
             testIntegral("@(x)(1/(x*sin(x)+3*x*cos(x)))", 0.5, 1.8, 0.7356995195194);
         } catch (TimeoutException e) {
             System.err.println("TIMEOUT: " + e.getMessage());

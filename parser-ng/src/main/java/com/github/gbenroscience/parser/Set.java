@@ -14,12 +14,13 @@ import java.util.InputMismatchException;
 import java.util.NoSuchElementException;
 import java.util.Random;
 import com.github.gbenroscience.math.Maths;
+import com.github.gbenroscience.math.differentialcalculus.Derivative;
 import com.github.gbenroscience.math.numericalmethods.NumericalIntegral;
 import com.github.gbenroscience.parser.methods.ext.Utils;
 import com.github.gbenroscience.util.FunctionManager;
 
 import java.util.Arrays;
-import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
 import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffEvaluator;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
@@ -661,9 +662,8 @@ public class Set {
         if (sz == 3) {
             String fn = data.get(0);
             Function f = FunctionManager.lookUp(fn);
-            if (f != null) {
-                MathExpression.Token[] rpn = f.getMathExpression().getCachedPostfix();
-                AutoDiffEvaluator ade = new AutoDiffEvaluator(rpn);
+            if (f != null) { 
+                AutoDiffEvaluator ade = new AutoDiffEvaluator(f.getMathExpression());
                 String var = data.get(1);
                 if (Variable.isVariableString(var)) {
                     String val = data.get(2);

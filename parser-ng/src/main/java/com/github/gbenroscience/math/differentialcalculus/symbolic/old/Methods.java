@@ -3,8 +3,11 @@
  * To change this template, choose Tools | Templates
  * and open the template in the editor.
  */
-package com.github.gbenroscience.math.differentialcalculus;
+package com.github.gbenroscience.math.differentialcalculus.symbolic.old;
 
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeScanner;
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.Differentiable;
 import static com.github.gbenroscience.math.differentialcalculus.Utilities.getText;
 import static com.github.gbenroscience.math.differentialcalculus.Utilities.print;
 
@@ -57,7 +60,7 @@ public class Methods {
      * @param d The invoking Derivative object.
      * @return the differential coefficient.
      */
-    public static ArrayList<String> getMethodDifferentialUnary(String method, String var, Derivative d) {
+    public static ArrayList<String> getMethodDifferentialUnary(String method, String var, DerivativeOld d) {
         String der = "";
         String append = var.equals(d.baseVariable) ? "" : "*diff("
                 + var + ")";
@@ -143,7 +146,7 @@ public class Methods {
                 Differentiable diff = d.builder.getManager().lookUp(var);
                 String expr = getText(d.translateToBaseTerms(diff));
                 print("Expression: " + expr + ", var = " + var);
-                Derivative drv = new Derivative(expr);
+                DerivativeOld drv = new DerivativeOld(expr);
                 drv.baseVariable = d.baseVariable;
 
                 der = drv.differentiate();
@@ -167,7 +170,7 @@ public class Methods {
         }
     }// end method
 
-    public static ArrayList<String> getMethodDifferentialBinary(String method, String a, String b, Derivative d) {
+    public static ArrayList<String> getMethodDifferentialBinary(String method, String a, String b, DerivativeOld d) {
         String der = "";
         String append = a.equals(d.baseVariable) ? "" : "*diff("
                 + a + ")";
@@ -185,7 +188,7 @@ public class Methods {
                 Differentiable diff = d.builder.getManager().lookUp(a);
                 String expr = getText(d.translateToBaseTerms(diff));
                 print("Expression: " + expr + ", var = " + a);
-                Derivative drv = new Derivative(expr);
+                DerivativeOld drv = new DerivativeOld(expr);
                 drv.baseVariable = d.baseVariable;
 
                 der = drv.differentiate();

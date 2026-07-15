@@ -17,7 +17,7 @@ package com.github.gbenroscience.parser.turbo.tools;
 
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
 import com.github.gbenroscience.math.differentialcalculus.equations.DifferentialEquations;
 import com.github.gbenroscience.math.geom.Direction;
 import com.github.gbenroscience.math.geom.Line3D;
@@ -26,6 +26,7 @@ import com.github.gbenroscience.math.geom.ROTOR;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.math.numericalmethods.NumericalIntegrator;
 import com.github.gbenroscience.math.numericalmethods.TurboRootFinder;
+import com.github.gbenroscience.math.numericalmethods.taylors.ffx.Integrator;
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
 import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
 import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
@@ -549,7 +550,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         MethodHandle derivHandle = null;
                         try {
                             String diffExpr = "diff(" + fNameOrExpr + ",1)";
-                            String derivString = Derivative.eval(diffExpr).textRes;
+                            String derivString = DerivativeOld.eval(diffExpr).textRes;
                             derivHandle = compileScalar(FunctionManager.lookUp(derivString).getMathExpression().getCachedPostfix());
                         } catch (Exception e) {
                             errorLog.error(e);
@@ -648,17 +649,17 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             case 1:
                                 targetExpr = args[0];
                                 order = 1;
-                                solution = Derivative.eval("diff(" + targetExpr + "," + order + ")");
+                                solution = DerivativeOld.eval("diff(" + targetExpr + "," + order + ")");
                                 break;
                             case 2:
                                 targetExpr = args[0];
                                 if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
                                     order = Integer.parseInt(args[1]);
-                                    solution = Derivative.eval("diff(" + targetExpr + "," + order + ")");
+                                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + order + ")");
                                 } else if (Variable.isVariableString(args[1])) {
                                     returnHandle = args[1];
                                     FunctionManager.lockDown(returnHandle, args);
-                                    solution = Derivative.eval("diff(" + targetExpr + "," + returnHandle + ")");
+                                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + returnHandle + ")");
                                 }
                                 break;
                             case 3:
@@ -671,11 +672,11 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                                 if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
                                     evalPoint = Integer.parseInt(args[1]);
-                                    solution = Derivative.eval("diff(" + targetExpr + "," + evalPoint + "," + order + ")");
+                                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + evalPoint + "," + order + ")");
                                 } else if (Variable.isVariableString(args[1])) {
                                     returnHandle = args[1];
                                     FunctionManager.lockDown(returnHandle, args);
-                                    solution = Derivative.eval("diff(" + targetExpr + "," + returnHandle + "," + order + ")");
+                                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + returnHandle + "," + order + ")");
                                 }
                                 break;
 
@@ -730,10 +731,10 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         }
 
                         if (t.arity == 1) {
-                            dd[0]=eval(args[0]);
+                            dd[0] = eval(args[0]);
                         } else {
-                            dd[0]=eval(args[0]);
-                            dd[1]=eval(args[1]);
+                            dd[0] = eval(args[0]);
+                            dd[1] = eval(args[1]);
                         }
                         MethodHandle bridge = LOOKUP.findStatic(ScalarTurboEvaluator1.class, "executeLlamaActivationFunction",
                                 MethodType.methodType(double.class,
@@ -1333,11 +1334,18 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         );
         boolean shouldSwap = lower > upper;
         if (shouldSwap) {
+            Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
+            return intg.integrate(upper, lower);
+            /*
             NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, upper, lower, vars, slots);
             return numericalIntegrator.integrate(f);
+            */
         } else {
+            Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
+            return intg.integrate(lower, upper);
+            /*
             NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
-            return numericalIntegrator.integrate(f);
+            return numericalIntegrator.integrate(f);*/
         }
 
     }
@@ -1660,13 +1668,13 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 if (arity == 1) {
                     return Maths.swiglu(args[0]);
                 } else {
-                    return Maths.swiglu(args[0],args[1]);
+                    return Maths.swiglu(args[0], args[1]);
                 }
             case "geglu":
                 if (arity == 1) {
                     return Maths.geglu(args[0]);
                 } else {
-                    return Maths.geglu(args[0],args[1]);
+                    return Maths.geglu(args[0], args[1]);
                 }
             case "gelu":
                 return Maths.gelu(args[0]);

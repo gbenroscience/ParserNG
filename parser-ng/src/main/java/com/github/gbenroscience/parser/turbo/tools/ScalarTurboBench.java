@@ -33,7 +33,7 @@ import java.util.logging.Logger;
 public class ScalarTurboBench {
 
     private static final int N = 1000000;
-    private static boolean useWidening = true;
+    private static boolean useWidening = false;
 
     public static void main(String[] args) throws Throwable {
         String rpt = STRING.repeating("=", 80);
@@ -158,7 +158,7 @@ public class ScalarTurboBench {
         // Compile to turbo
         FastCompositeExpression compiled = get(interpreted, useWidening);
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         time = System.nanoTime();
         MathExpression.EvalResult evr = compiled.apply(vars);
         double turboDur = System.nanoTime() - time;
@@ -185,7 +185,7 @@ public class ScalarTurboBench {
         // Compile to turbo
         FastCompositeExpression compiled = get(interpreted, useWidening);
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         time = System.nanoTime();
         MathExpression.EvalResult evr = compiled.apply(vars);
         double turboDur = System.nanoTime() - time;
@@ -213,7 +213,7 @@ public class ScalarTurboBench {
         // Compile to turbo
         FastCompositeExpression compiled = get(interpreted, useWidening);
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
 
         System.out.printf("Expression: %s%n", evr.scalar);
@@ -260,7 +260,7 @@ public class ScalarTurboBench {
         // Compile to turbo
         FastCompositeExpression compiled = get(interpreted, useWidening);
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
         System.out.println("turbo: " + evr);
     }
@@ -429,7 +429,7 @@ public class ScalarTurboBench {
         // Compile to turbo
         FastCompositeExpression compiled = get(interpreted, useWidening);
         // Warm up turbo JIT
-        double[] vars = new double[0];
+        double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
         // Benchmark turbo
         start = System.nanoTime();
@@ -845,7 +845,7 @@ public class ScalarTurboBench {
 
         MathExpression interpreted = new MathExpression(expr, false);
 
-        double[] vars = new double[0];
+        double[] vars = new double[1];
 
         double[] v = interpreted.solveGeneric().vector;
         FastCompositeExpression compiled = get(interpreted, useWidening);

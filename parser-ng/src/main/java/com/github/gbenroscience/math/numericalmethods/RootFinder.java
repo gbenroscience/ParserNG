@@ -4,6 +4,7 @@
  */
 package com.github.gbenroscience.math.numericalmethods;
 
+import com.github.gbenroscience.math.differentialcalculus.Derivative;
 import com.github.gbenroscience.parser.Number;
 import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Variable;
@@ -16,7 +17,7 @@ import com.github.gbenroscience.util.FunctionManager;
 import static java.lang.Math.*;
 import java.util.Arrays;
 import java.util.List;
-import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
 import com.github.gbenroscience.util.VariableManager;
 import java.util.logging.Level;
 import java.util.logging.Logger;
