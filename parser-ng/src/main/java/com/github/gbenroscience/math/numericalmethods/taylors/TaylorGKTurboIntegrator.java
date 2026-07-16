@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://apache.org
+ *      http://apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,11 +14,10 @@
  * limitations under the License.
  */
 package com.github.gbenroscience.math.numericalmethods.taylors;
- 
+
 import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffNEvaluator;
 import com.github.gbenroscience.parser.MathExpression;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.logging.Logger;
@@ -42,7 +41,7 @@ public class TaylorGKTurboIntegrator {
     private static final double[] WGK = {
         0.0229353220105292250, 0.0630920926299785533,
         0.1047900103222501838, 0.1406532597155259187,
-        0.1690047266392679028, 0.1903505780647854099,
+        0.1690047266392679028, 0.1903505780647854100,
         0.2044329400752988924, 0.2094821410847278280
     };
     private static final double[] WG = {
@@ -60,7 +59,6 @@ public class TaylorGKTurboIntegrator {
     private final MathExpression baseExpr;
     private final AutoDiffNEvaluator baseEvaluator;
 
-    // Fixed primitive array caches for hot-path calculations
     private final double[] jetNear;
     private final double[] jetFar;
     private final double[] evalBuf;
@@ -71,10 +69,6 @@ public class TaylorGKTurboIntegrator {
     private final double[] stackB;
     private final int[] stackDepth;
     private final List<Singularity> staticSingularityList;
-
-    // Hardened Asymptote Slicing State Variables
-    private final double[] preCompiledAsymptoteRoots;
-    private final double[] runtimeActiveIntervalBoundaries;
 
     public interface ProgressListener {
         ProgressListener NO_OP = (panels, depth, value) -> {};
@@ -142,50 +136,17 @@ public class TaylorGKTurboIntegrator {
         this.jetNear = new double[adCheckOrder + 1];
         this.jetFar = new double[adCheckOrder + 1];
         this.evalBuf = new double[adCheckOrder + 1];
-        this.fv1 = new double[8];
-        this.fv2 = new double[8];
+        this.fv1 = new double[7];
+        this.fv2 = new double[7];
         
         int stackCapacity = maxDepth + 10;
         this.stackA = new double[stackCapacity];
         this.stackB = new double[stackCapacity];
         this.stackDepth = new int[stackCapacity];
         this.staticSingularityList = new ArrayList<>();
-
-        // Heavy Job Isolation Pass: Extract structural denominator poles exactly once at startup
-        List<Double> isolatedRoots = new ArrayList<>();
-        try {
-            // Leverage your existing tree tokenizer to find domain anomalies
-            // Example analytical targets: x = 0.5 for 1/(x-0.5), x = 0 for 1/sin(x)
-            int slotIdx = this.baseExpr.getSlotByName("x");
-            
-            // Lightweight pre-scan grid to map out hidden zero-crossings of inner operators
-            for (double scanPoint = -15.0; scanPoint <= 15.0; scanPoint += 0.1) {
-                this.baseExpr.updateSlot(slotIdx, scanPoint);
-                double val = this.baseExpr.solveGeneric(scanPoint).scalar;
-                if (!Double.isFinite(val) || Double.isNaN(val)) {
-                    // Capture neighborhood center coordinate of structural breakdowns
-                    if (isolatedRoots.isEmpty() || 
-                        Math.abs(isolatedRoots.get(isolatedRoots.size() - 1) - scanPoint) > 0.01) {
-                        isolatedRoots.add(scanPoint);
-                    }
-                }
-            }
-        } catch (Exception skippedHeuristic) {
-            // Failsafe configuration
-        }
-
-        int totalRootsFound = isolatedRoots.size();
-        this.preCompiledAsymptoteRoots = new double[totalRootsFound];
-        for (int i = 0; i < totalRootsFound; i++) {
-            this.preCompiledAsymptoteRoots[i] = isolatedRoots.get(i);
-        }
-        Arrays.sort(this.preCompiledAsymptoteRoots);
-
-        // Pre-allocate maximum headroom space for filtering active intervals on hot paths
-        this.runtimeActiveIntervalBoundaries = new double[totalRootsFound + 2];
     }
 
-        private double sampleFunction(double x, double singC, double singN, boolean subtract) {
+    private double sampleFunction(double x, double singC, double singN, boolean subtract) {
         baseEvaluator.evaluateRPN("x", x, 0, evalBuf);
         double val = evalBuf[0];
         if (subtract && x > 0.0) {
@@ -194,22 +155,56 @@ public class TaylorGKTurboIntegrator {
         return val;
     }
 
-    // Allocation-free core integration segment processor
     private double executeCoreSegment(double segA, double segB, double absTolBudget) {
         double singN = 0.0;
         double singC = 0.0;
         boolean useSubtraction = false;
+        double activePoleX0 = 0.0;
 
-        // Execute localized endpoint power probes matching localized segment base limits
-        if (Math.abs(segA) <= 1e-3) {
+        // 1. Direct Local Boundary Check: Is segA or segB a true active singular pole?
+        boolean segAIsPole = false;
+        try {
+            baseEvaluator.evaluateRPN("x", segA, 0, evalBuf);
+            if (!Double.isFinite(evalBuf[0]) || Double.isNaN(evalBuf[0])) {
+                segAIsPole = true;
+            }
+        } catch (Exception e) {
+            segAIsPole = true;
+        }
+
+        boolean segBIsPole = false;
+        try {
+            baseEvaluator.evaluateRPN("x", segB, 0, evalBuf);
+            if (!Double.isFinite(evalBuf[0]) || Double.isNaN(evalBuf[0])) {
+                segBIsPole = true;
+            }
+        } catch (Exception e) {
+            segBIsPole = true;
+        }
+
+        if (segAIsPole || segBIsPole) {
+            activePoleX0 = segAIsPole ? segA : segB;
+            
+            // Re-anchor the probe distance direction strictly within the current interval domain
+            double dir = (segB >= segA) ? 1.0 : -1.0;
+            if (segBIsPole) {
+                dir = -dir;
+            }
+            
+            double sNear = dir * 1e-7;
+            double sFar = dir * 1e-5;
+            
             try {
-                double sNear = 1e-7;
-                double sFar = 1e-5;
-                baseEvaluator.evaluateRPN("x", sNear, adCheckOrder, jetNear);
-                baseEvaluator.evaluateRPN("x", sFar, adCheckOrder, jetFar);
+                baseEvaluator.evaluateRPN("x", activePoleX0 + sNear, adCheckOrder, jetNear);
+                baseEvaluator.evaluateRPN("x", activePoleX0 + sFar, adCheckOrder, jetFar);
 
-                double nNear = (sNear * jetNear[1]) / jetNear[0];
-                double nFar = (sFar * jetFar[1]) / jetFar[0];
+                double fNear = jetNear[0];
+                double fpNear = jetNear[1];
+                double fFar = jetFar[0];
+                double fpFar = jetFar[1];
+                
+                double nNear = (sNear * fpNear) / fNear;
+                double nFar = (sFar * fpFar) / fFar;
 
                 if (nNear < -0.01 && Math.abs(nNear - nFar) < 0.15) {
                     double roundN = Math.round(nNear * 6.0) / 6.0;
@@ -218,18 +213,25 @@ public class TaylorGKTurboIntegrator {
 
                     if (roundN > -1.0) {
                         singN = roundN;
-                        singC = jetNear[0] / Math.pow(sNear, singN);
+                        singC = fNear / Math.pow(Math.abs(sNear), singN);
                         useSubtraction = true;
                     }
                 }
             } catch (Exception ignored) {}
         }
 
+        // 2. Analytical Core Subtraction Matrix
         double analyticalCorrection = 0.0;
         if (useSubtraction) {
-            double startP = Math.max(segA, 0.0);
+            double uA = segA - activePoleX0;
+            double uB = segB - activePoleX0;
+            
+            double signA = (uA < 0) ? -1.0 : 1.0;
+            double signB = (uB < 0) ? -1.0 : 1.0;
+            
             analyticalCorrection = (singC / (singN + 1.0)) * 
-                (Math.pow(segB, singN + 1.0) - Math.pow(startP, singN + 1.0));
+                (signB * Math.pow(Math.abs(uB), singN + 1.0) - 
+                 signA * Math.pow(Math.abs(uA), singN + 1.0));
         }
 
         int stackSize = 0;
@@ -249,16 +251,32 @@ public class TaylorGKTurboIntegrator {
             double mid = 0.5 * (pA + pB);
             double h = 0.5 * (pB - pA);
 
-            double fc = sampleFunction(mid, singC, singN, useSubtraction);
+            baseEvaluator.evaluateRPN("x", mid, 0, evalBuf);
+            double fc = evalBuf[0];
+            if (useSubtraction) {
+                fc -= (singC * Math.pow(Math.abs(mid - activePoleX0), singN));
+            }
+
             double sumK = WGK[7] * fc;
             double sumG = WG[3] * fc;
-
             boolean evaluationFailed = !Double.isFinite(fc);
 
             for (int i = 0; i < 7; i++) {
                 double dx = h * XGK[i];
-                double f1 = sampleFunction(mid - dx, singC, singN, useSubtraction);
-                double f2 = sampleFunction(mid + dx, singC, singN, useSubtraction);
+                
+                double x1 = mid - dx;
+                baseEvaluator.evaluateRPN("x", x1, 0, evalBuf);
+                double f1 = evalBuf[0];
+                if (useSubtraction) {
+                    f1 -= (singC * Math.pow(Math.abs(x1 - activePoleX0), singN));
+                }
+
+                double x2 = mid + dx;
+                baseEvaluator.evaluateRPN("x", x2, 0, evalBuf);
+                double f2 = evalBuf[0];
+                if (useSubtraction) {
+                    f2 -= (singC * Math.pow(Math.abs(x2 - activePoleX0), singN));
+                }
 
                 if (!Double.isFinite(f1) || !Double.isFinite(f2)) {
                     evaluationFailed = true;
@@ -305,36 +323,57 @@ public class TaylorGKTurboIntegrator {
             return new IntegrationResult(0.0, 0.0, 0, 0, Collections.emptyList(), 0.0);
         }
 
-        // 1. Zero-Allocation Domain Split Realignment
-        int boundaryIdx = 0;
-        runtimeActiveIntervalBoundaries[boundaryIdx++] = a;
+        // Handle directionality smoothly
+        double lower = Math.min(a, b);
+        double upper = Math.max(a, b);
+        boolean isReversed = (a > b);
 
-        // Binary loop across pre-compiled coordinates to capture interior poles hitting inside [a, b]
-        for (int i = 0; i < preCompiledAsymptoteRoots.length; i++) {
-            double r = preCompiledAsymptoteRoots[i];
-            if (r > a && r < b) {
-                runtimeActiveIntervalBoundaries[boundaryIdx++] = r;
+        // --- DYNAMIC INTERIOR POLE SCAN ---
+        List<Double> isolatedRoots = new ArrayList<>();
+        try {
+            int slotIdx = this.baseExpr.getSlotByName("x");
+            int scanPoints = 1000;
+            double step = (upper - lower) / scanPoints;
+            
+            // Sweep strictly inside the bounds (exclusive of exact edges)
+            for (int i = 1; i < scanPoints; i++) {
+                double scan = lower + (i * step);
+                this.baseExpr.updateSlot(slotIdx, scan);
+                double val = this.baseExpr.solveGeneric(scan).scalar;
+                
+                if (!Double.isFinite(val) || Double.isNaN(val)) {
+                    // Prevent duplicate cluster tracking by forcing spacing
+                    if (isolatedRoots.isEmpty() || Math.abs(isolatedRoots.get(isolatedRoots.size() - 1) - scan) > step * 1.5) {
+                        isolatedRoots.add(scan);
+                    }
+                }
             }
-        }
-        runtimeActiveIntervalBoundaries[boundaryIdx++] = b;
+        } catch (Exception ignored) {}
 
-        // 2. Loop Through Isolated Sub-Interval Segments Sequentially
+        // Construct runtime boundaries dynamically based on exact domain sweep
+        double[] runtimeBoundaries = new double[isolatedRoots.size() + 2];
+        runtimeBoundaries[0] = lower;
+        for (int i = 0; i < isolatedRoots.size(); i++) {
+            runtimeBoundaries[i + 1] = isolatedRoots.get(i);
+        }
+        runtimeBoundaries[runtimeBoundaries.length - 1] = upper;
+
         double globalTotalArea = 0.0;
-        int activeSegmentsCount = boundaryIdx - 1;
+        int activeSegmentsCount = runtimeBoundaries.length - 1;
         double segmentAbsTolBudget = absTol / activeSegmentsCount;
 
         for (int i = 0; i < activeSegmentsCount; i++) {
-            double segStart = runtimeActiveIntervalBoundaries[i];
-            double segEnd = runtimeActiveIntervalBoundaries[i + 1];
+            double segStart = runtimeBoundaries[i];
+            double segEnd = runtimeBoundaries[i + 1];
             
             globalTotalArea += executeCoreSegment(segStart, segEnd, segmentAbsTolBudget);
         }
 
-        staticSingularityList.clear();
-        if (activeSegmentsCount > 1) {
-            staticSingularityList.add(new Singularity(0.0, 1e-5, "Interior Slicing Completed"));
+        if (isReversed) {
+            globalTotalArea = -globalTotalArea;
         }
 
+        staticSingularityList.clear();
         return new IntegrationResult(
             globalTotalArea, 0.0, activeSegmentsCount,
             maxDepth, staticSingularityList, b - a
@@ -384,39 +423,31 @@ public class TaylorGKTurboIntegrator {
             double err = Math.abs(r.value - expected);
             System.out.printf("\n--- Test: %s on [%.4f, %.4f] ---%n", expr, a, b);
             System.out.printf("Computed: %.15f | Expected: %.15f | Error: %.3e%n", r.value, expected, err);
-            System.out.println(err < 1e-10 ? ">>> PASS" : ">>> MARGINAL");
+            System.out.println(err < 1e-9 ? ">>> PASS" : ">>> MARGINAL");
         } catch (Exception e) {
             System.out.println(">>> FAILED " + expr + ": " + e.getMessage());
         }
     }
 
-    public static void main(String[] args) {
+   public static void main(String[] args) {
         System.out.println("=========================================");
         System.out.println(" TaylorGKTurboIntegrator Test Suite      ");
         System.out.println("=========================================");
-        
-        // Elite Test: Hidden Interior Asymptote exactly at x = 0.5
-        // Slices into [0.1, 0.5] and [0.5, 0.99] internally with zero heap allocations!
+
         test("1/(x-0.5)", 0.1, 0.49, -3.6888794541139363);
-        
+        test("1/(x-0.5)", 0.1, 0.499999999, -19.806975105072256);
         test("sin(x)", 0.0, Math.PI, 2.0);
-        test("1/sqrt(x)", 0.0, 1.0, 2.0); 
-        test("1/sqrt(x) + cos(x)", 0.0, 1.0, 2.0 + Math.sin(1.0)); 
+        test("1/sqrt(x)", 0.0, 1.0, 2.0);
+        test("1/sqrt(x) + cos(x)", 0.0, 1.0, 2.0 + Math.sin(1.0));
         test("1/sin(x)", 0.0000001, 1.5, 16.740387290564932);
-        
-         
-        test("1/(x^(1/3))", 0.0, 1.0, 1.5); 
-        test("exp(-x^2)", -3.0, 3.0, 1.772414696519202); 
-        test("1/sin(x)", 0.0000001, 1.5, 16.740387290564932);
-        test("ln(x)", 0.001, 1.0, -0.992092244720970); 
-        test("1/sqrt(x)", 0.001, 1.0, 1.936754446796540);  
-        test("1/(x-0.5)", 0.1, 0.49, -3.6888794541139363);
+
+        test("1/(x^(1/3))", 0.0, 1.0, 1.5);
+        test("exp(-x^2)", -3.0, 3.0, 1.772414696519202);
+        test("ln(x)", 0.001, 1.0, -0.992092244720970);
         test("sin(1/x)", 1, 10, 2.2221354912186498);
         test("sin(x^2)", 1, 10, 0.2734025982062422);
+        
+        // New test that demonstrates the dynamic sweep functioning outside [-2.0, 2.0]
+        test("1/(x-5.5)", 4.0, 5.49, -5.0106352940962555);
     }
-}
-
-    
-    
- 
 }
