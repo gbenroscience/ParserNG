@@ -146,48 +146,67 @@ public class TaylorGKTurboIntegrator {
         this.staticSingularityList = new ArrayList<>();
     }
 
-    private double sampleFunction(double x, double singC, double singN, boolean subtract) {
-        baseEvaluator.evaluateRPN("x", x, 0, evalBuf);
-        double val = evalBuf[0];
-        if (subtract && x > 0.0) {
-            val -= (singC * Math.pow(x, singN));
+    /**
+     * Executes a Newton-Raphson step sequence on 1/f(x) to auto-snap mathematically exact poles.
+     */
+    private double findNearbyPole(double x) {
+        double current = x;
+        boolean converged = false;
+        for (int i = 0; i < 10; i++) {
+            try {
+                baseEvaluator.evaluateRPN("x", current, 1, evalBuf);
+                double f = evalBuf[0];
+                double fp = evalBuf[1];
+                if (!Double.isFinite(f) || Double.isNaN(f)) return current; 
+                
+                if (Math.abs(f) < 100.0) return Double.NaN; 
+                
+                double dx = f / fp;
+                if (!Double.isFinite(dx) || Math.abs(dx) > 1e-2) return Double.NaN; 
+                
+                if (Math.abs(dx) < 1e-12) {
+                    converged = true;
+                    break;
+                }
+                current += dx;
+            } catch (Exception e) {
+                return current; 
+            }
         }
-        return val;
+        
+        if (converged) {
+            try {
+                baseEvaluator.evaluateRPN("x", current, 0, evalBuf);
+                if (!Double.isFinite(evalBuf[0]) || Math.abs(evalBuf[0]) > 1e7) {
+                    return current;
+                }
+            } catch (Exception ignored) {}
+        }
+        return Double.NaN;
     }
 
     private double executeCoreSegment(double segA, double segB, double absTolBudget) {
         double singN = 0.0;
         double singC = 0.0;
         boolean useSubtraction = false;
-        double activePoleX0 = 0.0;
+        double activePoleX0 = Double.NaN;
 
-        // 1. Direct Local Boundary Check: Is segA or segB a true active singular pole?
-        boolean segAIsPole = false;
-        try {
-            baseEvaluator.evaluateRPN("x", segA, 0, evalBuf);
-            if (!Double.isFinite(evalBuf[0]) || Double.isNaN(evalBuf[0])) {
-                segAIsPole = true;
-            }
-        } catch (Exception e) {
-            segAIsPole = true;
-        }
+        // 1. Direct Local Boundary Check & Auto-Snap
+        double poleA = findNearbyPole(segA);
+        double poleB = findNearbyPole(segB);
 
-        boolean segBIsPole = false;
-        try {
-            baseEvaluator.evaluateRPN("x", segB, 0, evalBuf);
-            if (!Double.isFinite(evalBuf[0]) || Double.isNaN(evalBuf[0])) {
-                segBIsPole = true;
-            }
-        } catch (Exception e) {
-            segBIsPole = true;
-        }
+        boolean segAIsPole = !Double.isNaN(poleA);
+        boolean segBIsPole = !Double.isNaN(poleB);
 
         if (segAIsPole || segBIsPole) {
-            activePoleX0 = segAIsPole ? segA : segB;
+            activePoleX0 = segAIsPole ? poleA : poleB;
+            if (segAIsPole && segBIsPole) {
+                activePoleX0 = (Math.abs(poleA - segA) < Math.abs(poleB - segB)) ? poleA : poleB;
+            }
             
-            // Re-anchor the probe distance direction strictly within the current interval domain
+            // Re-anchor the probe distance direction strictly within the segment
             double dir = (segB >= segA) ? 1.0 : -1.0;
-            if (segBIsPole) {
+            if (activePoleX0 == poleB) {
                 dir = -dir;
             }
             
@@ -211,7 +230,7 @@ public class TaylorGKTurboIntegrator {
                     if (Math.abs(nNear - (-0.5)) < 0.05) roundN = -0.5;
                     if (Math.abs(nNear - (-1.0)) < 0.05) roundN = -1.0;
 
-                    if (roundN > -1.0) {
+                    if (roundN > -2.0) {
                         singN = roundN;
                         singC = fNear / Math.pow(Math.abs(sNear), singN);
                         useSubtraction = true;
@@ -229,9 +248,19 @@ public class TaylorGKTurboIntegrator {
             double signA = (uA < 0) ? -1.0 : 1.0;
             double signB = (uB < 0) ? -1.0 : 1.0;
             
-            analyticalCorrection = (singC / (singN + 1.0)) * 
-                (signB * Math.pow(Math.abs(uB), singN + 1.0) - 
-                 signA * Math.pow(Math.abs(uA), singN + 1.0));
+            if (uA == 0.0) signA = 1.0; 
+            if (uB == 0.0) signB = 1.0;
+
+            if (Math.abs(singN - (-1.0)) < 1e-4) {
+                analyticalCorrection = singC * (
+                    signB * Math.log(Math.abs(uB)) - 
+                    signA * Math.log(Math.abs(uA))
+                );
+            } else {
+                analyticalCorrection = (singC / (singN + 1.0)) * 
+                    (signB * Math.pow(Math.abs(uB), singN + 1.0) - 
+                     signA * Math.pow(Math.abs(uA), singN + 1.0));
+            }
         }
 
         int stackSize = 0;
@@ -323,34 +352,41 @@ public class TaylorGKTurboIntegrator {
             return new IntegrationResult(0.0, 0.0, 0, 0, Collections.emptyList(), 0.0);
         }
 
-        // Handle directionality smoothly
         double lower = Math.min(a, b);
         double upper = Math.max(a, b);
         boolean isReversed = (a > b);
 
-        // --- DYNAMIC INTERIOR POLE SCAN ---
         List<Double> isolatedRoots = new ArrayList<>();
         try {
             int slotIdx = this.baseExpr.getSlotByName("x");
             int scanPoints = 1000;
             double step = (upper - lower) / scanPoints;
             
-            // Sweep strictly inside the bounds (exclusive of exact edges)
             for (int i = 1; i < scanPoints; i++) {
                 double scan = lower + (i * step);
                 this.baseExpr.updateSlot(slotIdx, scan);
                 double val = this.baseExpr.solveGeneric(scan).scalar;
                 
-                if (!Double.isFinite(val) || Double.isNaN(val)) {
-                    // Prevent duplicate cluster tracking by forcing spacing
-                    if (isolatedRoots.isEmpty() || Math.abs(isolatedRoots.get(isolatedRoots.size() - 1) - scan) > step * 1.5) {
-                        isolatedRoots.add(scan);
+                // If the evaluation is massive, use the Newton-Raphson scanner to find the exact pole
+                if (!Double.isFinite(val) || Math.abs(val) > 1000.0) {
+                    double exactPole = findNearbyPole(scan);
+                    if (!Double.isNaN(exactPole)) {
+                        boolean exists = false;
+                        for (Double existing : isolatedRoots) {
+                            if (Math.abs(existing - exactPole) < 1e-5) {
+                                exists = true;
+                                break;
+                            }
+                        }
+                        // Only split the domain if the pole exists strictly inside the user's bounds
+                        if (!exists && exactPole > lower && exactPole < upper) {
+                            isolatedRoots.add(exactPole);
+                        }
                     }
                 }
             }
         } catch (Exception ignored) {}
 
-        // Construct runtime boundaries dynamically based on exact domain sweep
         double[] runtimeBoundaries = new double[isolatedRoots.size() + 2];
         runtimeBoundaries[0] = lower;
         for (int i = 0; i < isolatedRoots.size(); i++) {
@@ -435,7 +471,8 @@ public class TaylorGKTurboIntegrator {
         System.out.println("=========================================");
 
         test("1/(x-0.5)", 0.1, 0.49, -3.6888794541139363);
-        test("1/(x-0.5)", 0.1, 0.499999999, -19.806975105072256);
+        test("1/(x-0.5)", 0.1, 0.499999999, -19.806975105072254);
+        test("1/(x-0.3)", 0.1, 0.2999997, -13.41004544985610972);
         test("sin(x)", 0.0, Math.PI, 2.0);
         test("1/sqrt(x)", 0.0, 1.0, 2.0);
         test("1/sqrt(x) + cos(x)", 0.0, 1.0, 2.0 + Math.sin(1.0));
@@ -444,10 +481,9 @@ public class TaylorGKTurboIntegrator {
         test("1/(x^(1/3))", 0.0, 1.0, 1.5);
         test("exp(-x^2)", -3.0, 3.0, 1.772414696519202);
         test("ln(x)", 0.001, 1.0, -0.992092244720970);
-        test("sin(1/x)", 1, 10, 2.2221354912186498);
-        test("sin(x^2)", 1, 10, 0.2734025982062422);
+        test("sin(1/x)", 1, 10, 2.222135491218650);
+        test("sin(x^2)", 1, 10, 0.273402598206242);
         
-        // New test that demonstrates the dynamic sweep functioning outside [-2.0, 2.0]
         test("1/(x-5.5)", 4.0, 5.49, -5.0106352940962555);
     }
 }
