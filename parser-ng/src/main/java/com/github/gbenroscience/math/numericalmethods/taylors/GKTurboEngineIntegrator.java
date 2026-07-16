@@ -379,6 +379,44 @@ public class GKTurboEngineIntegrator {
         } catch (Exception e) {
             e.printStackTrace();
         }
+        try {
+            System.out.println("\n--- Test 2: 1/sin(x) on [0.1, 1.2] ---");
+            GKTurboEngineIntegrator integrator = GKTurboEngineIntegrator.builder().build("1/sin(x)", "x");
+            IntegrationResult result = integrator.integrate(0.1, 1.2);
+            System.out.printf("Computed: %.16f (Error: %.5e, Panels: %d)%n", result.value, Math.abs(result.value - (2.615301084603671)), result.panelCount);
+            System.out.println(">> TEST 2 STATUS: " + (result.panelCount == 1 ? "SUCCESS" : "FAILED"));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
+        try {
+            System.out.println("\n--- Test k: Smooth Function sin(x^2) on [1, 10] ---");
+            GKTurboEngineIntegrator integrator = GKTurboEngineIntegrator.builder().build("sin(x^2)", "x");
+            IntegrationResult result = integrator.integrate(1, 10);
+            System.out.printf("Computed: %.16f (Error: %.5e, Panels: %d)%n", result.value, Math.abs(result.value - 0.27340259820624224035), result.panelCount);
+            System.out.println(">> TEST 1 STATUS: " + (result.panelCount == 1 ? "SUCCESS" : "FAILED (Unexpected split)"));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        try {
+            System.out.println("\n--- Test l: Smooth Function sin(1/x) on [1, 10] ---");
+            GKTurboEngineIntegrator integrator = GKTurboEngineIntegrator.builder().build("sin(1/x)", "x");
+            IntegrationResult result = integrator.integrate(1, 10);
+            System.out.printf("Computed: %.16f (Error: %.5e, Panels: %d)%n", result.value, Math.abs(result.value - 2.22213549121864979008), result.panelCount);
+            System.out.println(">> TEST 1 STATUS: " + (result.panelCount == 1 ? "SUCCESS" : "FAILED (Unexpected split)"));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        try {
+            System.out.println("\n--- Test l: Smooth Function 1/sin(x) on [0.0000001, 1.5] ---");
+            GKTurboEngineIntegrator integrator = GKTurboEngineIntegrator.builder().build("1/sin(x)", "x");
+            IntegrationResult result = integrator.integrate(0.0000001, 1.5);
+            System.out.printf("Computed: %.16f (Error: %.5e, Panels: %d)%n", result.value, Math.abs(result.value - 16.740387290564932014), result.panelCount);
+            System.out.println(">> TEST 1 STATUS: " + (result.panelCount == 1 ? "SUCCESS" : "FAILED (Unexpected split)"));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }

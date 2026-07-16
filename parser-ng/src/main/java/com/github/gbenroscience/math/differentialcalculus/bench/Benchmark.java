@@ -16,7 +16,7 @@
 package com.github.gbenroscience.math.differentialcalculus.bench;
 
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
-import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffNEvaluator;
+import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffNEvaluatorOld;
 import com.github.gbenroscience.parser.MathExpression;
 
 /**
@@ -31,17 +31,17 @@ public class Benchmark {
         MathExpression.EvalResult ev = new MathExpression.EvalResult();
 
         double evalPoint = 4;
-        int orderOfDiff = 5;
+        int orderOfDiff = 18;
         double[] resultOut = Derivative.ThreadLocalBufferPool.getOrCreateBuffer(orderOfDiff + 1);
-        AutoDiffNEvaluator adne = new AutoDiffNEvaluator(new MathExpression(expr), 20);
-        double N = 10000900;
+        AutoDiffNEvaluatorOld adne = new AutoDiffNEvaluatorOld(new MathExpression(expr), 20);
+        double N = 10_000_000;
         double t = System.nanoTime();
         for (int i = 0; i < N; i++) {
             adne.evaluateRPN("x", evalPoint, orderOfDiff, resultOut);
             ev.wrap(resultOut);
         }
         t = (System.nanoTime() - t) / N;
-        System.out.println("res = " + ev + ", " + t + "ns");
+        System.out.println("res = " + ev + ", \n" + t + "ns");
 
     }
 

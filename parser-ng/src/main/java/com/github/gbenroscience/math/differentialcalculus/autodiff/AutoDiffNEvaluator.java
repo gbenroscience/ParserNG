@@ -6,24 +6,102 @@ import com.github.gbenroscience.parser.methods.Declarations;
 
 /**
  * Strictly GC-free + inherently thread-safe Forward Mode Automatic
- * Differentiation Evaluator.
+ * Differentiation Evaluator, opcode-flattened.
+ *
+ * <h2>Opcode flattening</h2>
+ * The per-token dispatch that used to walk an array of heap-allocated
+ * {@link Token} objects and branch on {@code kind}/{@code name}/{@code opChar}
+ * (a {@code switch} on {@code String} for every function call, every
+ * evaluation, every token) is precomputed once at construction into a dense
+ * {@code byte[] opcodes} array -- the thing actually walked once per token per
+ * evaluation -- so the hot loop is a tight, cache-friendly, branch- predictable
+ * {@code switch(byte)} over a primitive array instead of pointer-chasing
+ * through objects and hashing strings. {@code Token[]} is still retained, but
+ * touched only for the one thing that genuinely can't be precomputed into a
+ * primitive: a non-differentiation-variable's dynamic binding
+ * ({@code Token.v}), which can change value between calls.
+ *
+ * <h2>Aliasing-safe copy elision</h2> {@code res} for every operator is the
+ * *same array object* as its first operand (a consequence of how the jet stack
+ * pops-then-reuses a slot), so every helper that builds {@code res[k]} from a
+ * convolution over lower indices of its own inputs (mul, div, pow, log, atan2)
+ * still needs its operand defensively copied before {@code res} is overwritten
+ * -- verified by tracing an actual corruption case in the repeated-squaring
+ * loop of {@link #intPowJet} if that copy were skipped. Where {@code res[k]}
+ * depends only on index-{@code k} reads that already happened (add, sub, unary
+ * negate), no copy is needed at all, and none is done. Where only one of two
+ * operands is ever written through {@code res}'s aliasing (true for every
+ * binary op here, since {@code res} only ever aliases the *first* popped
+ * operand), only that one operand is copied, not both.
  *
  * <p>
  * All heavy arrays are pre-allocated per-thread to the exact maximum size
  * required by this evaluator. No further allocations or resizes occur after the
  * first evaluation on each thread.
  */
-public class AutoDiffNEvaluator {
+public class AutoDiffNEvaluator implements Cloneable {
 
-    private final Token[] rpnTokens;
+    @Override
+    protected AutoDiffNEvaluator clone() throws CloneNotSupportedException {
+        return new AutoDiffNEvaluator(formatTokens(this.rpnTokens), opcodes.clone(), constants.clone(), maxOrder, maxStackSize);
+    }
+
+    // ------------------------------------------------------------------
+    // Opcodes
+    // ------------------------------------------------------------------
+    private static final int OP_NUMBER = 0;
+    private static final int OP_VARIABLE = 1;
+    private static final int OP_ADD = 2;
+    private static final int OP_SUB = 3;
+    private static final int OP_MUL = 4;
+    private static final int OP_DIV = 5;
+    private static final int OP_POW = 6;
+    private static final int OP_NEG = 7;
+    private static final int OP_SIN = 8;
+    private static final int OP_COS = 9;
+    private static final int OP_TAN = 10;
+    private static final int OP_ASIN = 11;
+    private static final int OP_ACOS = 12;
+    private static final int OP_ATAN = 13;
+    private static final int OP_SEC = 14;
+    private static final int OP_COSEC = 15;
+    private static final int OP_COT = 16;
+    private static final int OP_SINH = 17;
+    private static final int OP_COSH = 18;
+    private static final int OP_TANH = 19;
+    private static final int OP_ASINH = 20;
+    private static final int OP_ACOSH = 21;
+    private static final int OP_ATANH = 22;
+    private static final int OP_SQRT = 23;
+    private static final int OP_CBRT = 24;
+    private static final int OP_EXP = 25;
+    private static final int OP_LN = 26;
+    private static final int OP_LG = 27;
+    private static final int OP_ABS = 28;
+    private static final int OP_ATAN2 = 29;
+    private static final int OP_LOG_BASE = 30;
+
+    private final Token[] rpnTokens;   // retained only for Token.v / Token.name lookups -- see class javadoc
+    private final byte[] opcodes;      // the dense instruction stream actually walked every evaluation
+    private final double[] constants;  // NUMBER values, and non-wrt VARIABLE fallback values
     private final int maxOrder;
     private final int maxStackSize;
 
-    // Thread-local storage for heavy mutable arrays (allocated once per thread to exact max size)
+    // Thread-local storage for heavy mutable arrays (allocated once per thread to exact max size).
+    // Static and therefore potentially shared across different AutoDiffN instances on the
+    // same thread -- see EvalState.cachedForInstance for why that matters for the wrtVar-slot cache.
     private static final ThreadLocal<EvalState> THREAD_LOCAL_STATE = new ThreadLocal<>();
 
     public AutoDiffNEvaluator(MathExpression me) {
         this(me, 1);
+    }
+
+    private AutoDiffNEvaluator(Token[] rpnTokens, byte[] opcodes, double[] constants, int maxOrder, int maxStackSize) {
+        this.rpnTokens = rpnTokens;
+        this.opcodes = opcodes;
+        this.constants = constants;
+        this.maxOrder = maxOrder;
+        this.maxStackSize = maxStackSize;
     }
 
     public AutoDiffNEvaluator(MathExpression me, int maxOrder) {
@@ -35,7 +113,16 @@ public class AutoDiffNEvaluator {
         }
         this.rpnTokens = formatTokens(me.getCachedPostfix());
         this.maxOrder = maxOrder;
-        this.maxStackSize = rpnTokens.length + 1; // fixed for this expression
+        this.maxStackSize = rpnTokens.length + 1;
+
+        int n = rpnTokens.length;
+        this.opcodes = new byte[n];
+        this.constants = new double[n];
+        for (int i = 0; i < n; i++) {
+            Token t = rpnTokens[i];
+            opcodes[i] = (byte) opcodeFor(t);
+            constants[i] = t.value;
+        }
     }
 
     public int getMaxOrder() {
@@ -55,13 +142,111 @@ public class AutoDiffNEvaluator {
     }
 
     /**
+     * One-time (construction only) translation of a Token's kind/name/opChar
+     * into a flat opcode.
+     */
+    private static int opcodeFor(Token t) {
+        if (t.kind == Token.NUMBER) {
+            return OP_NUMBER;
+        }
+        if (t.kind == Token.VARIABLE) {
+            return OP_VARIABLE;
+        }
+        if (t.kind == Token.OPERATOR) {
+            if (t.arity == 2) {
+                switch (t.opChar) {
+                    case '+':
+                        return OP_ADD;
+                    case '-':
+                        return OP_SUB;
+                    case '*':
+                        return OP_MUL;
+                    case '/':
+                        return OP_DIV;
+                    case '^':
+                        return OP_POW;
+                    default:
+                        throw new UnsupportedOperationException("Operator " + t.opChar);
+                }
+            } else if (t.arity == 1 && t.opChar == '-') {
+                return OP_NEG;
+            }
+            throw new UnsupportedOperationException("Unary operator not supported: " + t.opChar);
+        }
+        if (t.kind == Token.METHOD || t.kind == Token.FUNCTION) {
+            if (t.arity == 1) {
+                switch (t.name) {
+                    case Declarations.SIN:
+                        return OP_SIN;
+                    case Declarations.COS:
+                        return OP_COS;
+                    case Declarations.TAN:
+                        return OP_TAN;
+                    case Declarations.ARC_SIN:
+                    case Declarations.ARC_SIN_ALT:
+                        return OP_ASIN;
+                    case Declarations.ARC_COS:
+                    case Declarations.ARC_COS_ALT:
+                        return OP_ACOS;
+                    case Declarations.ARC_TAN:
+                    case Declarations.ARC_TAN_ALT:
+                        return OP_ATAN;
+                    case Declarations.SEC:
+                        return OP_SEC;
+                    case Declarations.COSEC:
+                        return OP_COSEC;
+                    case Declarations.COT:
+                        return OP_COT;
+                    case Declarations.SINH:
+                        return OP_SINH;
+                    case Declarations.COSH:
+                        return OP_COSH;
+                    case Declarations.TANH:
+                        return OP_TANH;
+                    case Declarations.ARC_SINH:
+                    case Declarations.ARC_SINH_ALT:
+                        return OP_ASINH;
+                    case Declarations.ARC_COSH:
+                    case Declarations.ARC_COSH_ALT:
+                        return OP_ACOSH;
+                    case Declarations.ARC_TANH:
+                    case Declarations.ARC_TANH_ALT:
+                        return OP_ATANH;
+                    case Declarations.SQRT:
+                        return OP_SQRT;
+                    case Declarations.CBRT:
+                        return OP_CBRT;
+                    case Declarations.EXP:
+                        return OP_EXP;
+                    case Declarations.LN:
+                        return OP_LN;
+                    case Declarations.LG:
+                        return OP_LG;
+                    case "abs":
+                        return OP_ABS;
+                    default:
+                        throw new UnsupportedOperationException("Higher-order AD not implemented for: " + t.name);
+                }
+            } else if (t.arity == 2) {
+                switch (t.name) {
+                    case Declarations.POW:
+                        return OP_POW; // same math as the '^' operator
+                    case Declarations.LOG:
+                        return OP_LOG_BASE;
+                    case Declarations.ATAN2:
+                        return OP_ATAN2;
+                    default:
+                        throw new UnsupportedOperationException("2-arg not supported: " + t.name);
+                }
+            }
+            throw new UnsupportedOperationException("Unsupported arity for " + t.name);
+        }
+        throw new UnsupportedOperationException("Unrecognized token kind: " + t.kind);
+    }
+
+    /**
      * Fills {@code resultOut[0..order]} with the ordinary derivatives
      * {@code f(x), f'(x), ..., f^(order)(x)}.
-     *
-     * @param wrtVar
-     * @param evalPoint
-     * @param order
-     * @param resultOut
      */
     public void evaluateRPN(String wrtVar, double evalPoint, int order, double[] resultOut) {
         if (order > maxOrder) {
@@ -78,13 +263,6 @@ public class AutoDiffNEvaluator {
         }
     }
 
-    /**
-     *
-     * @param wrtVar
-     * @param evalPoint
-     * @param order
-     * @return
-     */
     public double[] evaluateRPN(String wrtVar, double evalPoint, int order) {
         double[] out = new double[order + 1];
         evaluateRPN(wrtVar, evalPoint, order, out);
@@ -93,15 +271,7 @@ public class AutoDiffNEvaluator {
 
     /**
      * Fills {@code resultOut[0..order]} with the normalized Taylor coefficients
-     * {@code c_k = f^(k)(evalPoint)/k!} -- the natural input for Taylor-series
-     * quadrature (see TaylorSeriesIntegrator / GKTurboIntegratorEngine's
-     * cross-check), where each term of such a series is exactly
-     * {@code c_k * deltaX^(k+1) / (k+1)}. This skips the factorial multiply
-     * that {@link #evaluateRPN} applies to recover ordinary derivatives, which
-     * both saves work and avoids the precision loss / overflow risk of forming
-     * f^(k)(x) directly at high order: raw derivatives can be astronomically
-     * large (k! growth) even when the normalized coefficients themselves stay
-     * well-scaled for a convergent series.
+     * {@code c_k = f^(k)(evalPoint)/k!}.
      */
     public void taylorCoefficients(String wrtVar, double evalPoint, int order, double[] resultOut) {
         if (order > maxOrder) {
@@ -122,18 +292,27 @@ public class AutoDiffNEvaluator {
     }
 
     /**
-     * Shared RPN walk: gets/creates this thread's {@link EvalState}, drives the
-     * jet stack to a single result slot holding the normalized Taylor
-     * coefficients, and returns that state so the caller can read
-     * {@code state.valStack[0][0..order]} directly (no copy here, so
-     * {@link #evaluateRPN} and {@link #taylorCoefficients} each do exactly one
-     * arraycopy, not two).
+     * Shared opcode walk: gets/creates this thread's {@link EvalState},
+     * refreshes its wrt-variable-slot cache only if it's stale for this
+     * instance/wrtVar combination (see {@link EvalState#cachedForInstance}),
+     * drives the jet stack to a single result slot holding the normalized
+     * Taylor coefficients, and returns that state.
      */
     private EvalState computeJet(String wrtVar, double evalPoint, int order) {
         EvalState state = THREAD_LOCAL_STATE.get();
         if (state == null || state.currentMaxStackSize < maxStackSize || state.currentMaxOrder < maxOrder) {
             state = new EvalState(maxStackSize, maxOrder);
             THREAD_LOCAL_STATE.set(state);
+        }
+
+        // Fast path: same instance and the exact same wrtVar String object as last time (true on
+        // essentially every call in a tight evaluation loop, since callers typically pass the same
+        // interned/reused String) -- a single reference comparison, no String.equals at all.
+        boolean stale = state.cachedForInstance != this
+                || (state.cachedWrtVar != wrtVar
+                && (state.cachedWrtVar == null || !state.cachedWrtVar.equals(wrtVar)));
+        if (stale) {
+            refreshWrtSlots(state, wrtVar);
         }
 
         final double[][] valStack = state.valStack;
@@ -143,35 +322,403 @@ public class AutoDiffNEvaluator {
         final double[] scratchArg = state.scratchArg;
         final double[] scratchU = state.scratchU;
         final double[] scratchV = state.scratchV;
+        final boolean[] isWrtSlot = state.isWrtSlot;
 
         int sp = 0;
-        for (Token t : rpnTokens) {
-            if (t.kind == Token.NUMBER) {
-                double[] jet = valStack[sp++];
-                jet[0] = t.value;
-                for (int k = 1; k <= order; k++) {
-                    jet[k] = 0.0;
+        final int n = opcodes.length;
+        for (int i = 0; i < n; i++) {
+            switch (opcodes[i]) {
+                case OP_NUMBER: {
+                    double[] jet = valStack[sp++];
+                    jet[0] = constants[i];
+                    for (int k = 1; k <= order; k++) {
+                        jet[k] = 0.0;
+                    }
+                    break;
                 }
-            } else if (t.kind == Token.VARIABLE) {
-                double[] jet = valStack[sp++];
-                boolean isWrt = t.name != null && t.name.equals(wrtVar);
-                jet[0] = isWrt ? evalPoint : (t.v != null ? t.v.getValue() : t.value);
-                jet[1] = isWrt ? 1.0 : 0.0;
-                for (int k = 2; k <= order; k++) {
-                    jet[k] = 0.0;
+                case OP_VARIABLE: {
+                    double[] jet = valStack[sp++];
+                    if (isWrtSlot[i]) {
+                        jet[0] = evalPoint;
+                        jet[1] = 1.0;
+                    } else {
+                        Token tok = rpnTokens[i];
+                        jet[0] = tok.v != null ? tok.v.getValue() : constants[i];
+                        jet[1] = 0.0;
+                    }
+                    for (int k = 2; k <= order; k++) {
+                        jet[k] = 0.0;
+                    }
+                    break;
                 }
-            } else if (t.kind == Token.OPERATOR) {
-                sp = handleOperator(t, sp, order, valStack, scratch1, scratch2, scratch3, scratchU, scratchV);
-            } else if (t.kind == Token.METHOD || t.kind == Token.FUNCTION) {
-                if (t.arity == 1) {
-                    sp = handleUnaryFunction(t, sp, order, valStack,
-                            scratch1, scratch2, scratch3, scratchArg, scratchU, scratchV);
-                } else if (t.arity == 2) {
-                    sp = handleBinaryFunction(t, sp, order, valStack,
-                            scratch1, scratch2, scratch3, scratchU, scratchV);
-                } else {
-                    throw new UnsupportedOperationException("Unsupported arity for " + t.name);
+                case OP_ADD: {
+                    double[] b = valStack[--sp];
+                    double[] a = valStack[--sp];
+                    double[] res = valStack[sp];
+                    for (int k = 0; k <= order; k++) {
+                        res[k] = a[k] + b[k];
+                    }
+                    sp++;
+                    break;
                 }
+                case OP_SUB: {
+                    double[] b = valStack[--sp];
+                    double[] a = valStack[--sp];
+                    double[] res = valStack[sp];
+                    for (int k = 0; k <= order; k++) {
+                        res[k] = a[k] - b[k];
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_MUL: {
+                    double[] b = valStack[--sp];
+                    double[] a = valStack[--sp];
+                    double[] res = valStack[sp];
+                    // res aliases a's memory; b is never written to, so only a needs protecting.
+                    System.arraycopy(a, 0, scratchU, 0, order + 1);
+                    mul(scratchU, b, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_DIV: {
+                    double[] b = valStack[--sp];
+                    double[] a = valStack[--sp];
+                    double[] res = valStack[sp];
+                    if (Math.abs(b[0]) < 1e-300) {
+                        throw new ArithmeticException("Division by zero");
+                    }
+                    System.arraycopy(a, 0, scratchU, 0, order + 1);
+                    recipJet(b, scratch1, order);
+                    mul(scratchU, scratch1, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_POW: {
+                    double[] b = valStack[--sp];
+                    double[] a = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(a, 0, scratchU, 0, order + 1);
+                    powJet(scratchU, b, res, order, scratch1, scratch2, scratch3);
+                    sp++;
+                    break;
+                }
+                case OP_NEG: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    for (int k = 0; k <= order; k++) {
+                        res[k] = -arg[k];
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_SIN: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    sinCosJet(scratchArg, res, scratch1, order);
+                    sp++;
+                    break;
+                }
+                case OP_COS: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    sinCosJet(scratchArg, scratch1, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_TAN: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    tanJet(scratchArg, res, order, scratch1);
+                    sp++;
+                    break;
+                }
+                case OP_ASIN: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    if (Math.abs(scratchArg[0]) > 1.0) {
+                        throw new ArithmeticException("asin domain");
+                    }
+                    res[0] = Math.asin(scratchArg[0]);
+                    mul(scratchArg, scratchArg, scratch1, order);
+                    scratch2[0] = 1.0 - scratch1[0];
+                    for (int k = 1; k <= order; k++) {
+                        scratch2[k] = -scratch1[k];
+                    }
+                    sqrtJet(scratch2, scratch3, order);
+                    for (int k = 1; k <= order; k++) {
+                        double s = 0.0;
+                        for (int l = 1; l < k; l++) {
+                            s += l * res[l] * scratch3[k - l];
+                        }
+                        res[k] = (scratchArg[k] - s / k) / scratch3[0];
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_ACOS: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    if (Math.abs(scratchArg[0]) > 1.0) {
+                        throw new ArithmeticException("acos domain");
+                    }
+                    res[0] = Math.acos(scratchArg[0]);
+                    mul(scratchArg, scratchArg, scratch1, order);
+                    scratch2[0] = 1.0 - scratch1[0];
+                    for (int k = 1; k <= order; k++) {
+                        scratch2[k] = -scratch1[k];
+                    }
+                    sqrtJet(scratch2, scratch3, order);
+                    for (int k = 1; k <= order; k++) {
+                        double s = 0.0;
+                        for (int l = 1; l < k; l++) {
+                            s += l * res[l] * scratch3[k - l];
+                        }
+                        res[k] = (-scratchArg[k] - s / k) / scratch3[0];
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_ATAN: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    atanJet(scratchArg, res, order, scratch1);
+                    sp++;
+                    break;
+                }
+                case OP_SEC: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    sinCosJet(scratchArg, scratch1, scratch2, order);
+                    recipJet(scratch2, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_COSEC: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    sinCosJet(scratchArg, scratch1, scratch2, order);
+                    recipJet(scratch1, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_COT: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    tanJet(scratchArg, scratch1, order, scratch2);
+                    recipJet(scratch1, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_SINH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    sinhCoshJet(scratchArg, res, scratch1, order);
+                    sp++;
+                    break;
+                }
+                case OP_COSH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    sinhCoshJet(scratchArg, scratch1, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_TANH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    tanhJet(scratchArg, res, order, scratch1);
+                    sp++;
+                    break;
+                }
+                case OP_ASINH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    res[0] = Math.log(scratchArg[0] + Math.sqrt(scratchArg[0] * scratchArg[0] + 1));
+                    mul(scratchArg, scratchArg, scratch1, order);
+                    scratch2[0] = scratch1[0] + 1.0;
+                    for (int k = 1; k <= order; k++) {
+                        scratch2[k] = scratch1[k];
+                    }
+                    sqrtJet(scratch2, scratch3, order);
+                    for (int k = 1; k <= order; k++) {
+                        double s = 0.0;
+                        for (int l = 1; l < k; l++) {
+                            s += l * res[l] * scratch3[k - l];
+                        }
+                        res[k] = (scratchArg[k] - s / k) / scratch3[0];
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_ACOSH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    if (scratchArg[0] < 1.0) {
+                        throw new ArithmeticException("acosh domain");
+                    }
+                    res[0] = Math.log(scratchArg[0] + Math.sqrt(scratchArg[0] * scratchArg[0] - 1));
+                    mul(scratchArg, scratchArg, scratch1, order);
+                    scratch2[0] = scratch1[0] - 1.0;
+                    for (int k = 1; k <= order; k++) {
+                        scratch2[k] = scratch1[k];
+                    }
+                    sqrtJet(scratch2, scratch3, order);
+                    for (int k = 1; k <= order; k++) {
+                        double s = 0.0;
+                        for (int l = 1; l < k; l++) {
+                            s += l * res[l] * scratch3[k - l];
+                        }
+                        res[k] = (scratchArg[k] - s / k) / scratch3[0];
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_ATANH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    if (Math.abs(scratchArg[0]) >= 1.0) {
+                        throw new ArithmeticException("atanh domain");
+                    }
+                    res[0] = 0.5 * Math.log((1 + scratchArg[0]) / (1 - scratchArg[0]));
+                    mul(scratchArg, scratchArg, scratch1, order);
+                    for (int k = 1; k <= order; k++) {
+                        double s = 0.0;
+                        for (int l = 1; l < k; l++) {
+                            s += l * res[l] * scratch1[k - l];
+                        }
+                        res[k] = (scratchArg[k] + s / k) / (1.0 - scratch1[0]);
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_SQRT: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    sqrtJet(scratchArg, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_CBRT: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    cbrtJet(scratchArg, res, order, scratch1);
+                    sp++;
+                    break;
+                }
+                case OP_EXP: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    expJet(scratchArg, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_LN: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    lnJet(scratchArg, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_LG: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    if (scratchArg[0] <= 0) {
+                        throw new ArithmeticException("log domain");
+                    }
+                    lnJet(scratchArg, res, order);
+                    double ln10 = Math.log(10.0);
+                    for (int k = 0; k <= order; k++) {
+                        res[k] /= ln10;
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_ABS: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    res[0] = Math.abs(scratchArg[0]);
+                    for (int k = 1; k <= order; k++) {
+                        res[k] = (scratchArg[0] > 0) ? scratchArg[k]
+                                : (scratchArg[0] < 0) ? -scratchArg[k] : 0.0;
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_ATAN2: {
+                    double[] v = valStack[--sp];
+                    double[] u = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(u, 0, scratchU, 0, order + 1);
+                    System.arraycopy(v, 0, scratchV, 0, order + 1);
+                    res[0] = Math.atan2(scratchU[0], scratchV[0]);
+                    mul(scratchU, scratchU, scratch1, order);
+                    mul(scratchV, scratchV, scratch2, order);
+                    add(scratch1, scratch2, scratch1, order);
+                    if (scratch1[0] < 1e-300) {
+                        throw new ArithmeticException("atan2 at origin");
+                    }
+                    for (int k = 1; k <= order; k++) {
+                        double rhs = 0.0;
+                        for (int j = 1; j <= k; j++) {
+                            rhs += j * scratchU[j] * scratchV[k - j];
+                        }
+                        for (int j = 0; j < k; j++) {
+                            rhs -= (k - j) * scratchU[j] * scratchV[k - j];
+                        }
+                        double lhsSum = 0.0;
+                        for (int l = 1; l < k; l++) {
+                            lhsSum += l * res[l] * scratch1[k - l];
+                        }
+                        res[k] = (rhs - lhsSum) / (k * scratch1[0]);
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_LOG_BASE: {
+                    // log_v(u) = ln(u)/ln(v). Newly implemented -- the original fell through
+                    // this case doing nothing, silently corrupting the evaluation stack.
+                    double[] v = valStack[--sp];
+                    double[] u = valStack[--sp];
+                    double[] res = valStack[sp];
+                    if (u[0] <= 0.0) {
+                        throw new ArithmeticException("log domain");
+                    }
+                    if (v[0] <= 0.0 || v[0] == 1.0) {
+                        throw new ArithmeticException("log base domain");
+                    }
+                    System.arraycopy(u, 0, scratchU, 0, order + 1);
+                    System.arraycopy(v, 0, scratchV, 0, order + 1);
+                    lnJet(scratchU, scratch1, order);
+                    lnJet(scratchV, scratch2, order);
+                    recipJet(scratch2, scratch3, order);
+                    mul(scratch1, scratch3, res, order);
+                    sp++;
+                    break;
+                }
+                default:
+                    throw new UnsupportedOperationException("Unrecognized opcode: " + opcodes[i]);
             }
         }
 
@@ -180,6 +727,27 @@ public class AutoDiffNEvaluator {
         }
 
         return state;
+    }
+
+    /**
+     * Rebuilds {@code state.isWrtSlot} for this instance/wrtVar combination.
+     * {@code THREAD_LOCAL_STATE} is static, so a thread's cached state can be
+     * reused across different {@link AutoDiffNEvaluator} instances -- without
+     * the instance-identity check this would silently serve one expression's
+     * variable-slot map to a different expression's opcode layout.
+     */
+    private void refreshWrtSlots(EvalState state, String wrtVar) {
+        if (state.isWrtSlot == null || state.isWrtSlot.length < opcodes.length) {
+            state.isWrtSlot = new boolean[opcodes.length];
+        }
+        for (int i = 0; i < opcodes.length; i++) {
+            if (opcodes[i] == OP_VARIABLE) {
+                Token tok = rpnTokens[i];
+                state.isWrtSlot[i] = tok.name != null && tok.name.equals(wrtVar);
+            }
+        }
+        state.cachedForInstance = this;
+        state.cachedWrtVar = wrtVar;
     }
 
     // ===================================================================
@@ -191,6 +759,10 @@ public class AutoDiffNEvaluator {
         final double[] scratch1, scratch2, scratch3, scratchArg, scratchU, scratchV;
         final int currentMaxStackSize;
         final int currentMaxOrder;
+
+        Object cachedForInstance;
+        String cachedWrtVar;
+        boolean[] isWrtSlot;
 
         EvalState(int stackSize, int order) {
             this.valStack = new double[stackSize][order + 1];
@@ -206,7 +778,8 @@ public class AutoDiffNEvaluator {
     }
 
     // ===================================================================
-    // Math helpers
+    // Math helpers (unchanged from the pre-flattening version -- these are
+    // the actual math, already exercised, and not touched by this rewrite)
     // ===================================================================
     private static long factorial(int n) {
         long f = 1;
@@ -216,21 +789,9 @@ public class AutoDiffNEvaluator {
         return f;
     }
 
-    private static void requireOperands(int sp, int needed, String name) {
-        if (sp < needed) {
-            throw new IllegalStateException(name + " requires " + needed + " operands");
-        }
-    }
-
     private void add(double[] a, double[] b, double[] out, int ord) {
         for (int k = 0; k <= ord; k++) {
             out[k] = a[k] + b[k];
-        }
-    }
-
-    private void sub(double[] a, double[] b, double[] out, int ord) {
-        for (int k = 0; k <= ord; k++) {
-            out[k] = a[k] - b[k];
         }
     }
 
@@ -435,275 +996,13 @@ public class AutoDiffNEvaluator {
     }
 
     // ===================================================================
-    // Handlers
+    // Self-tests / benchmark
     // ===================================================================
-    private int handleOperator(Token t, int sp, int ord, double[][] valStack,
-            double[] scratch1, double[] scratch2, double[] scratch3,
-            double[] scratchU, double[] scratchV) {
-        if (t.arity == 2) {
-            requireOperands(sp, 2, String.valueOf(t.opChar));
-            double[] b = valStack[--sp];
-            double[] a = valStack[--sp];
-            double[] res = valStack[sp];
-
-            System.arraycopy(a, 0, scratchU, 0, ord + 1);
-            System.arraycopy(b, 0, scratchV, 0, ord + 1);
-
-            switch (t.opChar) {
-                case '+':
-                    add(scratchU, scratchV, res, ord);
-                    break;
-                case '-':
-                    sub(scratchU, scratchV, res, ord);
-                    break;
-                case '*':
-                    mul(scratchU, scratchV, res, ord);
-                    break;
-                case '/':
-                    if (Math.abs(scratchV[0]) < 1e-300) {
-                        throw new ArithmeticException("Division by zero");
-                    }
-                    recipJet(scratchV, scratch1, ord);
-                    mul(scratchU, scratch1, res, ord);
-                    break;
-                case '^':
-                    powJet(scratchU, scratchV, res, ord, scratch1, scratch2, scratch3);
-                    break;
-                default:
-                    throw new UnsupportedOperationException("Operator " + t.opChar);
-            }
-            return sp + 1;
-        } else if (t.arity == 1 && t.opChar == '-') {
-            requireOperands(sp, 1, "unary -");
-            double[] arg = valStack[--sp];
-            double[] res = valStack[sp];
-            for (int k = 0; k <= ord; k++) {
-                res[k] = -arg[k];
-            }
-            return sp + 1;
-        }
-        return sp;
-    }
-
-    private int handleUnaryFunction(Token t, int sp, int ord, double[][] valStack,
-            double[] scratch1, double[] scratch2, double[] scratch3,
-            double[] scratchArg, double[] scratchU, double[] scratchV) {
-        requireOperands(sp, 1, t.name);
-        double[] arg = valStack[--sp];
-        double[] res = valStack[sp];
-        System.arraycopy(arg, 0, scratchArg, 0, ord + 1);
-
-        switch (t.name) {
-            case Declarations.SIN:
-                sinCosJet(scratchArg, res, scratch1, ord);
-                break;
-            case Declarations.COS:
-                sinCosJet(scratchArg, scratch1, res, ord);
-                break;
-            case Declarations.TAN:
-                tanJet(scratchArg, res, ord, scratch1);
-                break;
-            case Declarations.ARC_SIN:
-            case Declarations.ARC_SIN_ALT:
-                if (Math.abs(scratchArg[0]) > 1.0) {
-                    throw new ArithmeticException("asin domain");
-                }
-                res[0] = Math.asin(scratchArg[0]);
-                mul(scratchArg, scratchArg, scratch1, ord);
-                scratch2[0] = 1.0 - scratch1[0];
-                for (int k = 1; k <= ord; k++) {
-                    scratch2[k] = -scratch1[k];
-                }
-                sqrtJet(scratch2, scratch3, ord);
-                for (int k = 1; k <= ord; k++) {
-                    double s = 0.0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch3[k - l];
-                    }
-                    res[k] = (scratchArg[k] - s / k) / scratch3[0];
-                }
-                break;
-            case Declarations.ARC_COS:
-            case Declarations.ARC_COS_ALT:
-                if (Math.abs(scratchArg[0]) > 1.0) {
-                    throw new ArithmeticException("acos domain");
-                }
-                res[0] = Math.acos(scratchArg[0]);
-                mul(scratchArg, scratchArg, scratch1, ord);
-                scratch2[0] = 1.0 - scratch1[0];
-                for (int k = 1; k <= ord; k++) {
-                    scratch2[k] = -scratch1[k];
-                }
-                sqrtJet(scratch2, scratch3, ord);
-                for (int k = 1; k <= ord; k++) {
-                    double s = 0.0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch3[k - l];
-                    }
-                    res[k] = (-scratchArg[k] - s / k) / scratch3[0];
-                }
-                break;
-            case Declarations.ARC_TAN:
-            case Declarations.ARC_TAN_ALT:
-                atanJet(scratchArg, res, ord, scratch1);
-                break;
-            case Declarations.SEC:
-                sinCosJet(scratchArg, scratch1, scratch2, ord);
-                recipJet(scratch2, res, ord);
-                break;
-            case Declarations.COSEC:
-                sinCosJet(scratchArg, scratch1, scratch2, ord);
-                recipJet(scratch1, res, ord);
-                break;
-            case Declarations.COT:
-                tanJet(scratchArg, scratch1, ord, scratch2);
-                recipJet(scratch1, res, ord);
-                break;
-            case Declarations.SINH:
-                sinhCoshJet(scratchArg, res, scratch1, ord);
-                break;
-            case Declarations.COSH:
-                sinhCoshJet(scratchArg, scratch1, res, ord);
-                break;
-            case Declarations.TANH:
-                tanhJet(scratchArg, res, ord, scratch1);
-                break;
-            case Declarations.ARC_SINH:
-            case Declarations.ARC_SINH_ALT:
-                res[0] = Math.log(scratchArg[0] + Math.sqrt(scratchArg[0] * scratchArg[0] + 1));
-                mul(scratchArg, scratchArg, scratch1, ord);
-                scratch2[0] = scratch1[0] + 1.0;
-                for (int k = 1; k <= ord; k++) {
-                    scratch2[k] = scratch1[k];
-                }
-                sqrtJet(scratch2, scratch3, ord);
-                for (int k = 1; k <= ord; k++) {
-                    double s = 0.0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch3[k - l];
-                    }
-                    res[k] = (scratchArg[k] - s / k) / scratch3[0];
-                }
-                break;
-            case Declarations.ARC_COSH:
-            case Declarations.ARC_COSH_ALT:
-                if (scratchArg[0] < 1.0) {
-                    throw new ArithmeticException("acosh domain");
-                }
-                res[0] = Math.log(scratchArg[0] + Math.sqrt(scratchArg[0] * scratchArg[0] - 1));
-                mul(scratchArg, scratchArg, scratch1, ord);
-                scratch2[0] = scratch1[0] - 1.0;
-                for (int k = 1; k <= ord; k++) {
-                    scratch2[k] = scratch1[k];
-                }
-                sqrtJet(scratch2, scratch3, ord);
-                for (int k = 1; k <= ord; k++) {
-                    double s = 0.0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch3[k - l];
-                    }
-                    res[k] = (scratchArg[k] - s / k) / scratch3[0];
-                }
-                break;
-            case Declarations.ARC_TANH:
-            case Declarations.ARC_TANH_ALT:
-                if (Math.abs(scratchArg[0]) >= 1.0) {
-                    throw new ArithmeticException("atanh domain");
-                }
-                res[0] = 0.5 * Math.log((1 + scratchArg[0]) / (1 - scratchArg[0]));
-                mul(scratchArg, scratchArg, scratch1, ord);
-                for (int k = 1; k <= ord; k++) {
-                    double s = 0.0;
-                    for (int l = 1; l < k; l++) {
-                        s += l * res[l] * scratch1[k - l];
-                    }
-                    res[k] = (scratchArg[k] + s / k) / (1.0 - scratch1[0]);
-                }
-                break;
-            case Declarations.SQRT:
-                sqrtJet(scratchArg, res, ord);
-                break;
-            case Declarations.CBRT:
-                cbrtJet(scratchArg, res, ord, scratch1);
-                break;
-            case Declarations.EXP:
-                expJet(scratchArg, res, ord);
-                break;
-            case Declarations.LN:
-                lnJet(scratchArg, res, ord);
-                break;
-            case Declarations.LG:
-                if (scratchArg[0] <= 0) {
-                    throw new ArithmeticException("log domain");
-                }
-                lnJet(scratchArg, res, ord);
-                double ln10 = Math.log(10.0);
-                for (int k = 0; k <= ord; k++) {
-                    res[k] /= ln10;
-                }
-                break;
-            case "abs":
-                res[0] = Math.abs(scratchArg[0]);
-                for (int k = 1; k <= ord; k++) {
-                    res[k] = (scratchArg[0] > 0) ? scratchArg[k]
-                            : (scratchArg[0] < 0) ? -scratchArg[k] : 0.0;
-                }
-                break;
-            default:
-                throw new UnsupportedOperationException("Higher-order AD not implemented for: " + t.name);
-        }
-        return sp + 1;
-    }
-
-    private int handleBinaryFunction(Token t, int sp, int ord, double[][] valStack,
-            double[] scratch1, double[] scratch2, double[] scratch3,
-            double[] scratchU, double[] scratchV) {
-        requireOperands(sp, 2, t.name);
-        double[] v = valStack[--sp];
-        double[] u = valStack[--sp];
-        double[] res = valStack[sp];
-
-        System.arraycopy(u, 0, scratchU, 0, ord + 1);
-        System.arraycopy(v, 0, scratchV, 0, ord + 1);
-
-        switch (t.name) {
-            case Declarations.POW:
-                powJet(scratchU, scratchV, res, ord, scratch1, scratch2, scratch3);
-                break;
-            case "atan2":
-                res[0] = Math.atan2(scratchU[0], scratchV[0]);
-                mul(scratchU, scratchU, scratch1, ord);
-                mul(scratchV, scratchV, scratch2, ord);
-                add(scratch1, scratch2, scratch1, ord);
-                if (scratch1[0] < 1e-300) {
-                    throw new ArithmeticException("atan2 at origin");
-                }
-                for (int k = 1; k <= ord; k++) {
-                    double rhs = 0.0;
-                    for (int j = 1; j <= k; j++) {
-                        rhs += j * scratchU[j] * scratchV[k - j];
-                    }
-                    for (int j = 0; j < k; j++) {
-                        rhs -= (k - j) * scratchU[j] * scratchV[k - j];
-                    }
-                    double lhsSum = 0.0;
-                    for (int l = 1; l < k; l++) {
-                        lhsSum += l * res[l] * scratch1[k - l];
-                    }
-                    res[k] = (rhs - lhsSum) / (k * scratch1[0]);
-                }
-                break;
-            default:
-                throw new UnsupportedOperationException("2-arg not supported: " + t.name);
-        }
-        return sp + 1;
-    }
-
     private static void test(String expr, String var, int order, double evalPoint) {
         MathExpression me = new MathExpression(expr);
         AutoDiffNEvaluator ad = new AutoDiffNEvaluator(me, 10);
         double[] out = ad.evaluateRPN(var, evalPoint, order);
-        System.out.println(expr + ": and derivatives up to order " + order + " at x = " + evalPoint);
+        System.out.println(expr + ": derivatives up to order " + order + " at x = " + evalPoint);
         for (int i = 0; i < out.length; i++) {
             System.out.printf("Order %d: %.18f%n", i, out[i]);
         }
@@ -716,5 +1015,27 @@ public class AutoDiffNEvaluator {
         test("x^x", "x", 3, 2);
         test("x^2", "x", 2, 0);
         test("x^3", "x", 3, -1);
+        test("log(x,2)", "x", 3, 8); // exercises the newly-implemented binary log
+
+        String expr = "x^2*cos(x)-2*x*sin(x)-2*cos(x)";
+        double evalPoint = 4;
+        int orderOfDiff = 18;
+        double[] resultOut = new double[orderOfDiff + 1];
+        AutoDiffNEvaluator adne = new AutoDiffNEvaluator(new MathExpression(expr), 20);
+        double N = 10_000_000;
+        double t = System.nanoTime();
+        for (int i = 0; i < N; i++) {
+            adne.evaluateRPN("x", evalPoint, orderOfDiff, resultOut);
+        }
+        t = (System.nanoTime() - t) / N;
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < resultOut.length; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(resultOut[i]);
+        }
+        sb.append("]");
+        System.out.println("res = " + sb + ", \n" + t + "ns");
     }
 }
