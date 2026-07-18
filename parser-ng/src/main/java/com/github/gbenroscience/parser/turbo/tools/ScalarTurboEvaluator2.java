@@ -129,7 +129,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             BINARY_MAP.put("log", LOOKUP.findStatic(Maths.class, "logToAnyBase", MT_DOUBLE_DD));
             BINARY_MAP.put("alog", LOOKUP.findStatic(Maths.class, "antiLogToAnyBase", MT_DOUBLE_DD));
             BINARY_MAP.put("log-¹", LOOKUP.findStatic(Maths.class, "antiLogToAnyBase", MT_DOUBLE_DD));
-            
+
             BINARY_MAP.put("swiglu", LOOKUP.findStatic(Maths.class, "swiglu", MT_DOUBLE_DD));
             BINARY_MAP.put("geglu", LOOKUP.findStatic(Maths.class, "geglu", MT_DOUBLE_DD));
 
@@ -153,8 +153,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             MethodHandle log10 = LOOKUP.findStatic(Math.class, "log10", MT_DOUBLE_D);
             MethodHandle logE = LOOKUP.findStatic(Math.class, "log", MT_DOUBLE_D);
             MethodHandle alg = LOOKUP.findStatic(Maths.class, "antiLog10", MT_DOUBLE_D);
-            
-            
+
             MethodHandle swiglu = LOOKUP.findStatic(Maths.class, "swiglu", MT_DOUBLE_D);
             MethodHandle geglu = LOOKUP.findStatic(Maths.class, "geglu", MT_DOUBLE_D);
             MethodHandle gelu = LOOKUP.findStatic(Maths.class, "gelu", MT_DOUBLE_D);
@@ -168,8 +167,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             UNARY_MAP.put("alg", alg);
             UNARY_MAP.put("ln-¹", exp);
             UNARY_MAP.put("lg-¹", alg);
-            
-            
+
             UNARY_MAP.put("swiglu", swiglu);
             UNARY_MAP.put("geglu", geglu);
             UNARY_MAP.put("gelu", gelu);
@@ -392,12 +390,12 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                 public MathExpression.EvalResult apply(double[] variables) {
                     try {
                         Object result;
-                        if(variables != null && variables.length!=0){
+                        if (variables != null && variables.length != 0) {
                             result = finalGeneric.invokeExact(variables);
-                        }else{
-                              result = finalGeneric.invokeExact();
+                        } else {
+                            result = finalGeneric.invokeExact();
                         }
-                        
+
                         MathExpression.EvalResult res = new MathExpression.EvalResult();
                         if (result instanceof double[]) {
                             res.type = MathExpression.EvalResult.TYPE_VECTOR;
@@ -522,7 +520,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                         applyBinaryWide(t, stack, foldConstants, varCount, pTypes, mask);
                     }
                     break;
- 
+
                 case MathExpression.Token.METHOD:
                     Function userFunc = FunctionManager.getFunction(t.name);
 
@@ -797,7 +795,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             MethodHandle constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
             return constant;
         } else if (solution.getType() == TYPE.VECTOR) {
-            MethodHandle constant = MethodHandles.constant(double.class, solution.vector[solution.vector.length-1]);
+            MethodHandle constant = MethodHandles.constant(double.class, solution.vector[solution.vector.length - 1]);
             return constant;
         } else {
             throw new RuntimeException("Invalid expression passed to `diff` method: " + FunctionManager.lookUp(targetExpr));
@@ -1157,19 +1155,21 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
         boolean shouldSwap = lower > upper;
         if (shouldSwap) {
-            Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
-            return intg.integrate(upper, lower);
-            /*
+
             NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, upper, lower, vars, slots);
             return numericalIntegrator.integrate(f);
-            */
-        } else { 
+            /* 
             Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
-            return intg.integrate(lower, upper);
-            /*
+            return intg.integrate(upper, lower);
+             */
+        } else {
+
             NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
             return numericalIntegrator.integrate(f);
-            */
+            /* 
+            Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
+            return intg.integrate(lower, upper);
+             */
         }
     }
 

@@ -86,6 +86,8 @@ public class AutoDiffNEvaluator implements Cloneable {
     private final double[] constants;  // NUMBER values, and non-wrt VARIABLE fallback values
     private final int maxOrder;
     private final int maxStackSize;
+    
+    public final MathExpression targetExpr;
 
     // Thread-local storage for heavy mutable arrays (allocated once per thread to exact max size).
     // Static and therefore potentially shared across different AutoDiffN instances on the
@@ -97,6 +99,8 @@ public class AutoDiffNEvaluator implements Cloneable {
     }
 
     private AutoDiffNEvaluator(Token[] rpnTokens, byte[] opcodes, double[] constants, int maxOrder, int maxStackSize) {
+        
+        this.targetExpr = null;
         this.rpnTokens = rpnTokens;
         this.opcodes = opcodes;
         this.constants = constants;
@@ -111,6 +115,7 @@ public class AutoDiffNEvaluator implements Cloneable {
         if (maxOrder < 0) {
             throw new IllegalArgumentException("maxOrder >= 0 required");
         }
+        this.targetExpr = me;
         this.rpnTokens = formatTokens(me.getCachedPostfix());
         this.maxOrder = maxOrder;
         this.maxStackSize = rpnTokens.length + 1;

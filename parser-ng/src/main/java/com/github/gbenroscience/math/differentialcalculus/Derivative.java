@@ -21,7 +21,7 @@ import com.github.gbenroscience.util.FunctionManager;
  */
 public class Derivative {
 
-    public static final int MAX_ORDER = 30;
+    public static final int MAX_ORDER = 300;
     // ThreadLocal cache to keep threads from colliding in multi-threaded environments
     public static final class ThreadLocalBufferPool {
         // ThreadLocal cache to keep threads from colliding in multi-threaded environments

@@ -17,7 +17,7 @@ package com.github.gbenroscience.parser.turbo.tools;
 
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
+import com.github.gbenroscience.math.differentialcalculus.Derivative;
 import com.github.gbenroscience.math.differentialcalculus.equations.DifferentialEquations;
 import com.github.gbenroscience.math.geom.Direction;
 import com.github.gbenroscience.math.geom.Line3D;
@@ -550,7 +550,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         MethodHandle derivHandle = null;
                         try {
                             String diffExpr = "diff(" + fNameOrExpr + ",1)";
-                            String derivString = DerivativeOld.eval(diffExpr).textRes;
+                            String derivString = Derivative.eval(diffExpr).textRes;
                             derivHandle = compileScalar(FunctionManager.lookUp(derivString).getMathExpression().getCachedPostfix());
                         } catch (Exception e) {
                             errorLog.error(e);
@@ -622,7 +622,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
                         pushAndVerify(stack, MethodHandles.dropArguments(finalIntgHandle, 0, double[].class));
                         break;
-                    } else if (name.equals("diff")) {
+                    } else if (name.equals(Declarations.DIFFERENTIATION)) {
                         for (int i = 0; i < t.arity; i++) {
                             stack.pop();
                         }
@@ -636,7 +636,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             throw new RuntimeException("Invalid input. Expression did not pass token compiler phase");
                         }
                         if (args.length > 3) {
-                            throw new RuntimeException("Invalid input. Argument count for general root is invalid. Expected: <=3 Found " + args.length);
+                            throw new RuntimeException("Invalid input. Argument count for diff is invalid. Expected: <=3 Found " + args.length);
                         }
 
                         String returnHandle = null;
@@ -649,34 +649,34 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             case 1:
                                 targetExpr = args[0];
                                 order = 1;
-                                solution = DerivativeOld.eval("diff(" + targetExpr + "," + order + ")");
+                                solution = Derivative.eval("diff(" + targetExpr + "," + order + ")");
                                 break;
                             case 2:
                                 targetExpr = args[0];
                                 if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
                                     order = Integer.parseInt(args[1]);
-                                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + order + ")");
+                                    solution = Derivative.eval("diff(" + targetExpr + "," + order + ")");
                                 } else if (Variable.isVariableString(args[1])) {
                                     returnHandle = args[1];
                                     FunctionManager.lockDown(returnHandle, args);
-                                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + returnHandle + ")");
+                                    solution = Derivative.eval("diff(" + targetExpr + "," + returnHandle + ")");
                                 }
                                 break;
                             case 3:
                                 targetExpr = args[0];
                                 if (com.github.gbenroscience.parser.Number.isNumber(args[2])) {
                                     order = Integer.parseInt(args[2]);
-                                } else if (Variable.isVariableString(args[1])) {
+                                } else if (Variable.isVariableString(args[2])) {
                                     throw new RuntimeException("The 3rd argument of the diff command is the order of differentiation! It must be a whole number!");
                                 }
 
                                 if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
                                     evalPoint = Integer.parseInt(args[1]);
-                                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + evalPoint + "," + order + ")");
+                                    solution = Derivative.eval("diff(" + targetExpr + "," + evalPoint + "," + order + ")");
                                 } else if (Variable.isVariableString(args[1])) {
                                     returnHandle = args[1];
                                     FunctionManager.lockDown(returnHandle, args);
-                                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + returnHandle + "," + order + ")");
+                                    solution = Derivative.eval("diff(" + targetExpr + "," + returnHandle + "," + order + ")");
                                 }
                                 break;
 
@@ -698,6 +698,78 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             MethodHandle compiledDeriv = compileScalar(solutionExpr.getCachedPostfix());
                             stack.push(ensurePrimitive(compiledDeriv));
                              */
+                        } else {
+                            String err = "Invalid expression passed to `diff` method: " + targetExpr;
+                            errorLog.info(err);
+                            throw new RuntimeException(err);
+                        }
+                        break;
+                    }else if (name.equals(Declarations.AUTO_DIFF)) {
+                        for (int i = 0; i < t.arity; i++) {
+                            stack.pop();
+                        }
+
+                        String[] args = t.getRawArgs();
+
+                        if (args == null || args.length == 0) {
+                            throw new IllegalArgumentException("Method 'diff' requires arguments.");
+                        }
+                        if (args.length != t.arity) {
+                            throw new RuntimeException("Invalid input. Expression did not pass token compiler phase");
+                        }
+                        if (args.length > 3) {
+                            throw new RuntimeException("Invalid input. Argument count for automatic differentiation is invalid. Expected: <=3 Found " + args.length);
+                        }
+ 
+                        double evalPoint = -1;
+                        int order = -1;
+                        String targetExpr = args[0];
+
+                        MathExpression.EvalResult solution = null;
+                        switch (args.length) {
+                            case 1://first arg is fn handle, default order will be 1 and default evalPoint will be set to 0
+                                targetExpr = args[0];
+                                order = 1;
+                                solution = Derivative.eval("diff(" + targetExpr + ", 0, " + order + ")");
+                                break;
+                            case 2://first arg is fn handle, and second argument will be the evalPoint and default order will be 1 
+                                targetExpr = args[0];
+                                if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
+                                    order = Integer.parseInt(args[1]);
+                                    solution = Derivative.eval("diff(" + targetExpr + "," + order + ")");
+                                } else if (Variable.isVariableString(args[1])) {
+                                     throw new RuntimeException("`autodiff` cannot take args = " + args[1] + " at position 2");
+                        }
+                                break;
+                            case 3://first arg is fn handle, and second argument will be the evalPoint and third argument will be the order 
+                                targetExpr = args[0];
+                                if (com.github.gbenroscience.parser.Number.isNumber(args[2])) {
+                                    order = Integer.parseInt(args[2]);
+                                } else if (Variable.isVariableString(args[2])) {
+                                    throw new RuntimeException("The 3rd argument of the diff command is the order of differentiation! It must be a whole number!");
+                                }
+
+                                if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
+                                    evalPoint = Integer.parseInt(args[1]);
+                                    solution = Derivative.eval("diff(" + targetExpr + "," + evalPoint + "," + order + ")");
+                                } else if (Variable.isVariableString(args[1])) {
+                                      throw new RuntimeException("The 2nd argument of the diff command is the point of evaluation! It must be a number!");
+                                 }
+                                break;
+
+                            default:
+                                throw new AssertionError();
+                        }
+
+                        if (solution.getType() == TYPE.NUMBER) {
+                            // Outcome A: Evaluated at a static point, returns a hard number.
+                            constant = MethodHandles.constant(double.class, solution.scalar);
+                            pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
+                        } else if (solution.getType() == TYPE.STRING || solution.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
+                            // Outcome B: Symbolic Derivative! (e.g., "cos(x)")
+                            // We compile the new algebraic string directly into the current MethodHandle tree!
+                            constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
+                            pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class));
                         } else {
                             String err = "Invalid expression passed to `diff` method: " + targetExpr;
                             errorLog.info(err);
@@ -1334,18 +1406,19 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         );
         boolean shouldSwap = lower > upper;
         if (shouldSwap) {
-            Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
-            return intg.integrate(upper, lower);
-            /*
             NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, upper, lower, vars, slots);
             return numericalIntegrator.integrate(f);
-            */
+            /*
+                        Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
+            return intg.integrate(upper, lower);
+             */
         } else {
+            NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
+            return numericalIntegrator.integrate(f);
+            /* 
             Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
             return intg.integrate(lower, upper);
-            /*
-            NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
-            return numericalIntegrator.integrate(f);*/
+             */
         }
 
     }

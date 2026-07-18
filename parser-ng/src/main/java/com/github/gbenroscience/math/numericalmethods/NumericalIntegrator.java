@@ -698,7 +698,7 @@ public class NumericalIntegrator {
 
     public static void main(String[] args) {
         try {
-            testIntegral("@(x)1/sin(x)", 0.01, 0.02, 10.96357404176882243085);
+            testIntegral("@(x)1/sin(x)", 0.01, 0.02, 0.69317118029579089912);
             testIntegral("@(x)sin(x)", 0, Math.PI, 2.0);
             testIntegral("@(x)ln(x)", 0.001, 1.0, -0.992);
             testIntegral("@(x)1/sqrt(x)", 0.001, 1.0, 1.937);

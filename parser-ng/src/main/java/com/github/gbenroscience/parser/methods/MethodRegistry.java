@@ -19,7 +19,6 @@ import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
-import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
 import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffEvaluator;
 import com.github.gbenroscience.math.geom.Direction;
 import com.github.gbenroscience.math.geom.Line3D;
@@ -406,9 +405,9 @@ public class MethodRegistry {
             }
         });
         registerMethod(Declarations.AUTO_DIFF, (ctx, arity, args) -> {
-            System.out.println("Derivatives Action");
-            System.out.println("args: " + Arrays.toString(args));
-            System.out.println("arity: " + arity);
+//            System.out.println("Derivatives Action");
+//            System.out.println("args: " + Arrays.toString(args));
+//            System.out.println("arity: " + arity);
 
             int sz = args.length;
 

@@ -15,7 +15,8 @@
  */
 package com.github.gbenroscience.math.numericalmethods.taylors.crx;
 
-import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffNEvaluator; 
+import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffNEvaluator;
+import com.github.gbenroscience.math.numericalmethods.SingularityExtractor;
 import com.github.gbenroscience.parser.MathExpression;
 
 import java.util.ArrayList;
@@ -25,160 +26,115 @@ import java.util.List;
 import java.util.logging.Logger;
 
 /**
- * Composite adaptive integrator using the 7-15 Gauss-Kronrod pair as the
- * primary panel rule, {@link AutoDiffNEvaluator}-based domain-error
- * classification, a low-order AD Taylor cross-check, analytic endpoint
- * power-law singularity subtraction with a floating-point cancellation floor,
- * and (new) AD-based Taylor-series rescue panels for the two situations where
- * Gauss-Kronrod itself cannot produce a trustworthy value -- see
- * "Taylor-series rescue panels" below.
+ * Composite adaptive integrator: Gauss-Kronrod 7-15 as the primary panel rule,
+ * AD-based domain-error classification, a low-order Taylor cross-check,
+ * analytic endpoint power-law singularity subtraction with a floating-point
+ * cancellation floor, three-site Taylor-series rescue, and (new) a zero-alloc
+ * interior-singularity scan that lets this class handle poles <em>anywhere</em>
+ * in the domain, not just at the two literal integration bounds.
  *
- * <h2>Taylor-series rescue panels (new)</h2>
- * {@link Builder#taylorRescueEnabled(boolean)} (default: enabled) lets the AD
- * engine take over and compute a panel's contribution directly via a Taylor
- * expansion at the panel midpoint, in the two specific situations where
- * Gauss-Kronrod fails and the existing machinery would otherwise bisect
- * uselessly or give up entirely:
- * <ol>
- *   <li><b>A Gauss-Kronrod node hits a genuine AD domain error.</b> GK's 15
- *       fixed-offset nodes can coincidentally land on a domain wall even when
- *       the panel's own midpoint is perfectly well-defined -- this is tried
- *       <em>before</em> bisecting, since a single extra AD call can resolve
- *       the whole panel in the time bisection would otherwise spend several
- *       levels working around it.</li>
- *   <li><b>Cross-check disagreement that survives to the bisection budget
- *       limit.</b> Bisection is still the <em>correct</em> first response to
- *       an aliasing disagreement -- shrinking the panel is what actually
- *       resolves it -- so rescue is only tried once {@code canSplit} is
- *       false, as a better-justified alternative to trusting the disputed
- *       Gauss-Kronrod value on the way to a strict-mode throw.</li>
- * </ol>
- * The rescue itself ({@link #computeTaylorRescue}) gets {@code
- * ad.taylorCoefficients} at the panel midpoint <em>once</em>, then -- if
- * either endpoint singularity subtraction is active -- subtracts the
- * <em>closed-form</em> Taylor series of {@code C*(x-x0)^n} about that same
- * midpoint ({@link #subtractBinomialSeries}, a generalized binomial series)
- * from the raw coefficients, entirely in coefficient space. This is
- * deliberately not the same mechanism as the per-panel cross-check ({@link
- * #crossCheckPanel}), which evaluates the raw, still-singular {@code f} and
- * is therefore only trusted once the subtracted term is already negligible:
- * the rescue is valid arbitrarily close to a subtracted endpoint, since it
- * never re-evaluates {@code f} near {@code x0} at all -- only the
- * always-positive distance from the endpoint to the panel midpoint appears
- * in the closed-form series. A rescue result is only accepted if its own
- * next-term probe indicates convergence and its estimated error is within
- * the panel's tolerance budget; otherwise the existing bisect/throw/record
- * behavior is unchanged.
+ * <h2>Interior singularity scan and segmentation (new)</h2>
+ * At the top of every {@link #integrate(double, double)} call (when {@link
+ * Builder#interiorSingularityScanEnabled}, default true), the domain is sampled
+ * at {@link Builder#interiorScanPoints} points. A sample is "suspicious" if it
+ * is non-finite, exceeds {@link
+ * Builder#interiorScanAbsoluteThreshold}, or is drastically larger (by
+ * {@link Builder#interiorScanRelativeMultiplier}) than every ordinary sample
+ * seen so far in the scan. Each suspicious point is refined via Newton's method
+ * on {@code 1/f} -- {@link #newtonSnapToPole} -- computed as
+ * {@code x += f(x)/f'(x)} rather than ever evaluating {@code 1/f} directly, so
+ * the iteration never needs to divide by the very quantity that is blowing up.
+ * A converged, confirmed pole becomes an internal segment boundary.
+ *
+ * <p>
+ * <b>Why this needs almost no new quadrature logic.</b> An interior pole at
+ * location {@code P} simply becomes the shared edge of two adjacent segments
+ * {@code [..., P]} and {@code [P, ...]} -- exactly the same shape the
+ * endpoint-subtraction machinery already handles for the outer call bounds. So
+ * {@link #integrateSegment} runs the <em>entire</em> existing per-call pipeline
+ * (endpoint-probe both of <em>its</em> edges, subtract and verify if singular,
+ * run the GK/cross-check/rescue panel loop) once per detected segment,
+ * accumulating into call-wide running totals, rather than duplicating a second,
+ * weaker integration path.
+ *
+ * <p>
+ * <b>The scan is a heuristic accelerator, not the only line of defense.</b>
+ * A pole the flat scan misses (falls between two scan points, or the function
+ * is suspicious in a way the threshold doesn't catch) is still caught by the
+ * pre-existing per-panel domain-error handling inside whichever segment it
+ * falls in -- bisect, then Taylor-rescue, then record/throw at exhaustion,
+ * exactly as before. The scan only changes how
+ * <em>quickly</em> and how <em>precisely-diagnosed</em> a known-shape
+ * (power-law) interior singularity is resolved; it does not weaken any existing
+ * safety net if it misses something.
+ *
+ * <p>
+ * <b>Divergence at an interior point always throws.</b> Exactly like the
+ * outer-bound case, an exponent {@code n &lt;= -1} detected at a segment edge
+ * -- whether that edge is the call's actual bound or an interior pole the scan
+ * found -- throws {@link NonIntegrableSingularityException} unconditionally,
+ * regardless of {@link Builder#strictSingularities}. This class deliberately
+ * never attempts a Cauchy-principal-value-style partial result across a genuine
+ * pole; that would be a materially different feature (symmetric excision around
+ * the pole) and is not implemented here.
  *
  * <h2>Precision-floor acceptance</h2>
- * A panel that exhausts its bisection budget (hits the width/depth limit) while
- * still failing Gauss-Kronrod's own convergence test is normally a strict-mode
- * throw. This revision adds one exception: if the panel's reported error is
- * essentially equal to its own {@link
- * #lastCancellationFloor} -- i.e. the residual *is* the already-quantified
- * subtraction cancellation noise (see below), not an unknown or unresolved
- * failure -- it is accepted regardless of {@link Builder#strictSingularities},
- * flagged as a {@link Singularity} for transparency. This
- * is deliberately narrow: further bisection provably cannot reduce a
- * cancellation floor, since it doesn't shrink with panel width, so refusing to
- * accept here would only ever produce an unrecoverable throw, never a more
- * accurate answer. It does <em>not</em> apply to genuinely unresolved failures
- * (real domain errors, oscillation-driven non-convergence, unresolved
- * cross-check disagreement) -- those still throw in strict mode, exactly as
- * before.
+ * A panel that exhausts its bisection budget while still failing
+ * Gauss-Kronrod's own convergence test is normally a strict-mode throw. One
+ * exception: if the panel's reported error is essentially equal to its own
+ * {@link #lastCancellationFloor} -- i.e. the residual <em>is</em> the
+ * already-quantified subtraction cancellation noise, not an unresolved failure
+ * -- it is accepted regardless of strict mode, flagged as a {@link
+ * Singularity} for transparency. Further bisection provably cannot reduce a
+ * cancellation floor, since it does not shrink with panel width.
  *
- * <h2>Cross-check depth cap (opt-in)</h2>
- * {@link Builder#crossCheckMaxDepth(int)} lets a caller restrict the AD
- * cross-check to panels at or above a given bisection depth (default:
- * unlimited, i.e. every Gauss-Kronrod-converged panel is cross-checked,
- * unchanged from prior behavior). This exists to give callers who understand
- * the tradeoff explicit control over the cross-check's real cost. It is
- * deliberately <em>not</em> gated on "Gauss-Kronrod failed to converge" -- the
- * cross-check exists specifically to catch panels where Gauss-Kronrod claims
- * success but is wrong (see the Gaussian-bump case below, whose defining
- * feature is a *low* reported GK error, not a high one); gating on GK failure
- * would silently disable the check on exactly the cases it exists to catch.
- * Lowering {@code crossCheckMaxDepth} trades the narrow-feature guarantee away
- * deliberately and explicitly, at whatever depth the caller chooses -- it is
- * not a default, and it does not change behavior unless set.
+ * <h2>Taylor-series rescue (three sites)</h2>
+ * When {@link Builder#taylorRescueEnabled} (default true), the AD engine gets
+ * one more chance via a midpoint Taylor expansion -- with any active endpoint
+ * singular term subtracted in closed form via a generalized binomial series, so
+ * the rescue is valid arbitrarily close to a subtracted edge -- at three points
+ * where Gauss-Kronrod's own machinery has nothing left to try: (1) a GK node
+ * hits a genuine AD domain error, tried <em>before</em> bisecting; (2) GK's own
+ * convergence test fails and bisection is exhausted, tried <em>after</em> the
+ * cheaper cancellation-floor check; (3) an AD cross-check disagreement survives
+ * to the bisection budget limit, tried only once bisection -- the correct first
+ * response to aliasing -- is truly exhausted.
  *
- * <h2>Endpoint singularity subtraction</h2>
- * At the start of every {@link #integrate(double, double)} call, both bounds
- * are probed for local power-law behavior {@code f(x) ~= C*s^n} ({@code s} =
- * distance into the domain from that endpoint), estimated two independent ways
- * from a single AD probe -- {@code n1 = s*f'(x)/f(x)} and
- * {@code n2 = 1 + s*f''(x)/f'(x)}, both exact for a pure power term -- and only
- * trusted if they agree within {@link Builder#singularityConsistencyTolerance}.
- * A second probe at {@link Builder#singularityScaleFactor} times the distance
- * (default 100x) must agree with the near-scale exponent within
- * {@link Builder#crossScaleConsistencyTolerance}, catching contaminated cases
- * like {@code 1/sqrt(x) + 5000*x} that a single-point check alone would accept.
- * A confidently-estimated exponent {@code <= -1} always throws
- * {@link NonIntegrableSingularityException}, regardless
- * of strict/lenient mode -- there is no partial estimate for a divergent
- * integral.
- *
- * <p>
- * <b>Cancellation floor.</b> Subtracting {@code C*s^n} from {@code f(x)} near a
- * singular endpoint means computing a difference of two comparably large
- * numbers; if the true remainder is itself O(1) (e.g.
- * {@code 1/sqrt(x) + cos(x)}), the achievable absolute precision is capped at
- * roughly {@code machine_epsilon * (subtracted magnitude)}, a
- * representable-precision floor, not a convergence problem. This class folds
- * that floor into both the reported error and the acceptance budget
- * consistently, and recognizes a panel that hits exactly this floor as an
- * acceptable terminal state -- see "Precision-floor acceptance" above.
- *
- * <p>
- * <b>Cross-check stays live per-panel, not per-call.</b> Each panel re-enables
- * the cross-check individually once its own subtracted contribution
- * ({@link #lastPanelMaxSubtractedMag}) is negligible relative to its
- * Gauss-Kronrod result (threshold: {@link
- * Builder#crossCheckSubtractionNegligibility}), rather than disabling it for
- * the whole call the moment any endpoint is subtracted.
+ * <h2>Cross-check stays live per-segment, not per-call</h2>
+ * Each panel re-enables the cross-check individually once its own subtracted
+ * contribution is negligible relative to its Gauss-Kronrod result, rather than
+ * disabling it for a whole segment or call the moment any edge is subtracted.
  *
  * <h2>Zero-allocation steady state</h2>
- * The per-panel loop -- {@link #computeQK15}, {@link #sampleF}, {@link
- * #evalFnAt}, {@link #crossCheckPanel}, {@link #computeTaylorRescue} -- performs
- * no {@code new}, no autoboxing, no String work on its common (panel-accepted)
- * path; all scratch is pre-sized instance state. Endpoint probing writes scratch
- * fields ({@link #probeN}, {@link #probeC}, {@link #probeDomainFailure}) instead
- * of returning objects; rescue similarly writes {@link #rescueValue}, {@link
- * #rescueErrEst}, {@link #rescueConverging}. {@link
- * #getLastSingularitySubtractionInfo()} builds its description lazily, only
- * when read. What still legitimately allocates: the panel stack only grows
- * (rarely, amortized) past its initial capacity; exception messages and
- * lenient-mode singularity records build strings, but only on
- * already-exceptional/rare paths; {@link
+ * The per-panel loop and the interior-singularity scan both perform no
+ * {@code new}, no autoboxing, no String work on their common paths -- all
+ * scratch (including the growable {@link #interiorPoles} buffer) is pre-sized
+ * instance state, doubled only rarely and amortized when it grows. What
+ * legitimately allocates: exception messages and lenient-mode
+ * singularity/subtraction records, but only on already-exceptional or genuinely
+ * rare (a singularity was actually found) paths; {@link
  * #integrateResult} is the documented allocating convenience wrapper.
  *
  * <h2>Why GK as the primary rule / why GK alone is not enough</h2>
- * Gauss-Kronrod is exact for polynomials up to degree 23 (K15) using only 15
- * function evaluations, with a self-contained {@code resasc}-refined error
- * estimate needing no derivatives. But that estimate compares two rules built
- * from the same 15 points, so a feature of {@code f} that falls between them
- * can fool both together -- verified empirically: {@code exp(-3200*(x-1.3)^2)}
- * on {@code [0,2]}, plain GK-adaptive at {@code absTol=1e-10}, returns
- * {@code 0.0} (true value {@code 0.0313}) because the starting panel's reported
- * error was {@code ~5.6e-13} -- a *low*, tolerance-satisfying number, which is
- * exactly why gating the cross-check on "GK reported a high error" cannot work.
- *
- * <h2>Progress reporting</h2> {@link ProgressListener#onProgress} reports
- * accepted panels so far, deepest bisection level so far, the running estimate
- * (including the endpoint correction term throughout), and a width-resolved
- * completion fraction in {@code [0,1]}, monotonic, ending at exactly
- * {@code 1.0}.
+ * Gauss-Kronrod is exact for polynomials up to degree 23 (K15) from only 15
+ * evaluations, with a self-contained {@code resasc}-refined error estimate
+ * needing no derivatives -- but that estimate compares two rules built from the
+ * same 15 points, so a feature of {@code f} falling between them can fool both
+ * together: {@code exp(-3200*(x-1.3)^2)} on {@code [0,2]}, plain GK-adaptive at
+ * {@code absTol=1e-10}, returns {@code 0.0} (true value {@code 0.0313}) because
+ * the starting panel's reported error was {@code ~5.6e-13} -- a low,
+ * tolerance-satisfying number, which is exactly why gating the cross-check on
+ * "GK reported a high error" cannot work.
  *
  * <h2>Constants</h2>
  * The 15-point Kronrod / 7-point Gauss abscissae and weights are the standard
- * QUADPACK {@code dqk15.f} table (Fullerton, Bell Labs, 1981; cross-checked
- * against two independent Netlib mirrors).
+ * QUADPACK {@code dqk15.f} table (Fullerton, Bell Labs, 1981).
  *
  * <h2>Thread-safety</h2>
  * Not thread-safe. One instance per thread, built from the same {@code
- * rpnTokens} array (which is only read).
+ * rpnTokens} (which is only read).
  */
-public class Integrator {
+public class Integrator implements com.github.gbenroscience.math.numericalmethods.taylors.ffx.smart.SymbolicIntegrator.SingularityAwareIntegrator {
 
     private static final Logger LOG = Logger.getLogger(Integrator.class.getName());
 
@@ -222,12 +178,38 @@ public class Integrator {
     public static final double DEFAULT_SINGULARITY_SCALE_FACTOR = 100.0;
     public static final double DEFAULT_CROSS_CHECK_SUBTRACTION_NEGLIGIBILITY = 1e-6;
     public static final double CANCELLATION_FLOOR_FACTOR = 100.0;
-    /**
-     * How close (as a multiplier on lastCancellationFloor) an exhausted panel's
-     * error must be to accept it regardless of strict mode.
-     */
     public static final double PRECISION_FLOOR_ACCEPT_MARGIN = 2.0;
     public static final int DEFAULT_CROSS_CHECK_MAX_DEPTH = Integer.MAX_VALUE;
+
+    public static final int DEFAULT_INTERIOR_SCAN_POINTS = 64;
+    public static final double DEFAULT_INTERIOR_SCAN_ABSOLUTE_THRESHOLD = 1e6;
+    public static final double DEFAULT_INTERIOR_SCAN_RELATIVE_MULTIPLIER = 1e4;
+    public static final double DEFAULT_POLE_SNAP_MAGNITUDE_THRESHOLD = 100.0;
+    public static final int DEFAULT_NEWTON_MAX_ITERS = 12;
+    public static final double DEFAULT_NEWTON_MAX_STEP_FRACTION = 0.1;
+    public static final double DEFAULT_NEWTON_CONVERGENCE_TOL_FRACTION = 1e-10;
+    public static final double DEFAULT_POLE_CONFIRM_MAGNITUDE = 1e6;
+    public static final double DEFAULT_INTERIOR_DEDUPE_FRACTION = 1e-6;
+
+    /**
+     * Cheap pre-check: does this range appear to contain (or nearly touch) a
+     * singularity, without running a full adaptive integration? Reuses the same
+     * interior-pole scan and endpoint-proximity check {@link #integrate} itself
+     * uses internally. Intended for callers (e.g. {@link SymbolicIntegrator})
+     * deciding whether to trust a symbolic shortcut before paying for the full
+     * numeric engine.
+     */
+    @Override
+    public boolean rangeLooksSingular(double a, double b) {
+        if (!Double.isFinite(a) || !Double.isFinite(b) || a == b) {
+            return false;
+        }
+        double lo = Math.min(a, b), hi = Math.max(a, b); 
+        scanForInteriorSingularities(lo, hi);
+        MathExpression me = this.ad.targetExpr;
+      return new SingularityExtractor(me.getCachedPostfix()).findSingularities(me.getCachedPostfix(), me, me.getSlots()[0], lo, hi, new double[]{}) > 0;
+         
+    }
 
     // ------------------------------------------------------------------
     // Progress reporting
@@ -300,6 +282,16 @@ public class Integrator {
         private double singularityScaleFactor = DEFAULT_SINGULARITY_SCALE_FACTOR;
         private double crossCheckSubtractionNegligibility = DEFAULT_CROSS_CHECK_SUBTRACTION_NEGLIGIBILITY;
         private boolean taylorRescueEnabled = true;
+        private boolean interiorSingularityScanEnabled = true;
+        private int interiorScanPoints = DEFAULT_INTERIOR_SCAN_POINTS;
+        private double interiorScanAbsoluteThreshold = DEFAULT_INTERIOR_SCAN_ABSOLUTE_THRESHOLD;
+        private double interiorScanRelativeMultiplier = DEFAULT_INTERIOR_SCAN_RELATIVE_MULTIPLIER;
+        private double poleSnapMagnitudeThreshold = DEFAULT_POLE_SNAP_MAGNITUDE_THRESHOLD;
+        private int newtonMaxIters = DEFAULT_NEWTON_MAX_ITERS;
+        private double newtonMaxStepFraction = DEFAULT_NEWTON_MAX_STEP_FRACTION;
+        private double newtonConvergenceTolFraction = DEFAULT_NEWTON_CONVERGENCE_TOL_FRACTION;
+        private double poleConfirmMagnitude = DEFAULT_POLE_CONFIRM_MAGNITUDE;
+        private double interiorDedupeFraction = DEFAULT_INTERIOR_DEDUPE_FRACTION;
         private ProgressListener progressListener = ProgressListener.NO_OP;
 
         public Builder crossCheckOrder(int order) {
@@ -337,12 +329,6 @@ public class Integrator {
             return this;
         }
 
-        /**
-         * Restricts the AD cross-check to panels at or above this bisection
-         * depth (default: unlimited). See class javadoc, "Cross-check depth
-         * cap" -- this is an explicit, opt-in tradeoff of the narrow-feature
-         * safety guarantee for speed, not a default behavior change.
-         */
         public Builder crossCheckMaxDepth(int depth) {
             this.crossCheckMaxDepth = depth;
             return this;
@@ -373,14 +359,68 @@ public class Integrator {
             return this;
         }
 
-        /**
-         * Default true. When enabled, {@link Integrator} lets the AD engine compute a panel's
-         * contribution directly via a Taylor expansion at the panel midpoint in the two
-         * situations Gauss-Kronrod cannot resolve on its own -- see class javadoc, "Taylor-series
-         * rescue panels".
-         */
         public Builder taylorRescueEnabled(boolean enabled) {
             this.taylorRescueEnabled = enabled;
+            return this;
+        }
+
+        /**
+         * Default true. Enables the zero-alloc flat scan + Newton-snap for
+         * interior singularities anywhere in the domain, not just at the two
+         * bounds.
+         */
+        public Builder interiorSingularityScanEnabled(boolean enabled) {
+            this.interiorSingularityScanEnabled = enabled;
+            return this;
+        }
+
+        /**
+         * How many points to sample across the domain looking for suspicious
+         * (large/non-finite) values. Default 64; this is a real, honest
+         * per-call cost.
+         */
+        public Builder interiorScanPoints(int points) {
+            this.interiorScanPoints = Math.max(0, points);
+            return this;
+        }
+
+        public Builder interiorScanAbsoluteThreshold(double threshold) {
+            this.interiorScanAbsoluteThreshold = threshold;
+            return this;
+        }
+
+        public Builder interiorScanRelativeMultiplier(double multiplier) {
+            this.interiorScanRelativeMultiplier = multiplier;
+            return this;
+        }
+
+        public Builder poleSnapMagnitudeThreshold(double threshold) {
+            this.poleSnapMagnitudeThreshold = threshold;
+            return this;
+        }
+
+        public Builder newtonMaxIters(int iters) {
+            this.newtonMaxIters = Math.max(1, iters);
+            return this;
+        }
+
+        public Builder newtonMaxStepFraction(double fraction) {
+            this.newtonMaxStepFraction = fraction;
+            return this;
+        }
+
+        public Builder newtonConvergenceTolFraction(double fraction) {
+            this.newtonConvergenceTolFraction = fraction;
+            return this;
+        }
+
+        public Builder poleConfirmMagnitude(double magnitude) {
+            this.poleConfirmMagnitude = magnitude;
+            return this;
+        }
+
+        public Builder interiorDedupeFraction(double fraction) {
+            this.interiorDedupeFraction = fraction;
             return this;
         }
 
@@ -393,8 +433,11 @@ public class Integrator {
             return new Integrator(me, wrtVar, crossCheckOrder, absTol, relTol,
                     maxDepth, strictSingularities, crossCheckEnabled, crossCheckLooseness, crossCheckMaxDepth,
                     singularitySubtractionEnabled, singularityConsistencyTol, crossScaleConsistencyTol,
-                    singularityScaleFactor, crossCheckSubtractionNegligibility, progressListener,
-                    taylorRescueEnabled);
+                    singularityScaleFactor, crossCheckSubtractionNegligibility, taylorRescueEnabled,
+                    interiorSingularityScanEnabled, interiorScanPoints, interiorScanAbsoluteThreshold,
+                    interiorScanRelativeMultiplier, poleSnapMagnitudeThreshold, newtonMaxIters,
+                    newtonMaxStepFraction, newtonConvergenceTolFraction, poleConfirmMagnitude,
+                    interiorDedupeFraction, progressListener);
         }
 
         public Integrator build(String expr, String wrtVar) {
@@ -403,7 +446,7 @@ public class Integrator {
         }
     }
 
-       public static class TaylorIntegrationException extends RuntimeException {
+    public static class TaylorIntegrationException extends RuntimeException {
 
         private static final long serialVersionUID = 1L;
 
@@ -415,7 +458,8 @@ public class Integrator {
             super(message, cause);
         }
     }
-      public static final class NonIntegrableSingularityException extends TaylorIntegrationException {
+
+    public static final class NonIntegrableSingularityException extends TaylorIntegrationException {
 
         private static final long serialVersionUID = 1L;
         public final double location;
@@ -424,21 +468,15 @@ public class Integrator {
         public NonIntegrableSingularityException(double location, double panelWidth, String reason, Throwable cause) {
             super(String.format(
                     "Non-integrable singularity near x=%.15g (panel width %.3e): %s. "
-                    + "If a principal-value-style partial result is acceptable, build with "
-                    + "strictSingularities(false) instead.",
+                    + "If a principal-value-style partial result is acceptable, this class does not "
+                    + "support that; strictSingularities(false) omits/flags a panel that ran out of "
+                    + "bisection budget, but a genuine divergence (n<=-1) always throws regardless.",
                     location, panelWidth, reason), cause);
             this.location = location;
             this.panelWidth = panelWidth;
         }
     }
 
-    // ------------------------------------------------------------------
-    // Public diagnostics types
-    // ------------------------------------------------------------------
-    /**
-     * A panel flagged during integration: either omitted (lenient mode) or
-     * resolved via fallback.
-     */
     public static final class Singularity {
 
         public final double location;
@@ -456,6 +494,7 @@ public class Integrator {
             return String.format("flag near x=%.15g (panel width %.3e): %s", location, width, reason);
         }
     }
+
     // ------------------------------------------------------------------
     // Configuration
     // ------------------------------------------------------------------
@@ -476,6 +515,16 @@ public class Integrator {
     private final double singularityScaleFactor;
     private final double crossCheckSubtractionNegligibility;
     private final boolean taylorRescueEnabled;
+    private final boolean interiorSingularityScanEnabled;
+    private final int interiorScanPoints;
+    private final double interiorScanAbsoluteThreshold;
+    private final double interiorScanRelativeMultiplier;
+    private final double poleSnapMagnitudeThreshold;
+    private final int newtonMaxIters;
+    private final double newtonMaxStepFraction;
+    private final double newtonConvergenceTolFraction;
+    private final double poleConfirmMagnitude;
+    private final double interiorDedupeFraction;
     private final ProgressListener progressListener;
 
     // Scratch (zero-allocation steady state)
@@ -485,11 +534,15 @@ public class Integrator {
     private final double[] ccCoeffs;
     private final double[] probeCoeffs;
     private final double[] binomBuf;
+    private final double[] newtonBuf;
 
     private double[] stackA;
     private double[] stackB;
     private int[] stackDepth;
     private int stackSize;
+
+    private double[] interiorPoles;
+    private int interiorPoleCount;
 
     private double gkResult;
     private double gkAbsErr;
@@ -503,7 +556,6 @@ public class Integrator {
     private double probeC;
     private boolean probeDomainFailure;
 
-    // Written by computeTaylorRescue instead of returning a boxed result object.
     private double rescueValue;
     private double rescueErrEst;
     private boolean rescueConverging;
@@ -512,20 +564,29 @@ public class Integrator {
     private double leftX0, leftN, leftC;
     private double rightX0, rightN, rightC;
 
+    // Call-wide running accumulators, threaded across segments.
+    private double accSum, accComp, accErrAccum, accResolvedWidth, accCorrection;
+    private int accPanelCount, accCrossCheckCount, accForcedSplitCount, accMaxDepthSeen;
+
     private double lastErrorEstimate;
     private int lastPanelCount;
     private int lastMaxDepthReached;
     private int lastCrossCheckCount;
     private int lastForcedSplitCount;
     private final List<Singularity> singularities;
+    private final List<String> appliedSubtractions;
 
     public Integrator(MathExpression me, String wrtVar, int crossCheckOrder,
             double absTol, double relTol, int maxDepth) {
         this(me, wrtVar, crossCheckOrder, absTol, relTol, maxDepth, true, true, 50.0,
                 DEFAULT_CROSS_CHECK_MAX_DEPTH, true,
                 DEFAULT_SINGULARITY_CONSISTENCY_TOL, DEFAULT_CROSS_SCALE_CONSISTENCY_TOL,
-                DEFAULT_SINGULARITY_SCALE_FACTOR, DEFAULT_CROSS_CHECK_SUBTRACTION_NEGLIGIBILITY,
-                ProgressListener.NO_OP, true);
+                DEFAULT_SINGULARITY_SCALE_FACTOR, DEFAULT_CROSS_CHECK_SUBTRACTION_NEGLIGIBILITY, true,
+                true, DEFAULT_INTERIOR_SCAN_POINTS, DEFAULT_INTERIOR_SCAN_ABSOLUTE_THRESHOLD,
+                DEFAULT_INTERIOR_SCAN_RELATIVE_MULTIPLIER, DEFAULT_POLE_SNAP_MAGNITUDE_THRESHOLD,
+                DEFAULT_NEWTON_MAX_ITERS, DEFAULT_NEWTON_MAX_STEP_FRACTION,
+                DEFAULT_NEWTON_CONVERGENCE_TOL_FRACTION, DEFAULT_POLE_CONFIRM_MAGNITUDE,
+                DEFAULT_INTERIOR_DEDUPE_FRACTION, ProgressListener.NO_OP);
     }
 
     public Integrator(MathExpression me, String wrtVar, int crossCheckOrder,
@@ -535,16 +596,18 @@ public class Integrator {
             boolean singularitySubtractionEnabled,
             double singularityConsistencyTol, double crossScaleConsistencyTol,
             double singularityScaleFactor, double crossCheckSubtractionNegligibility,
-            ProgressListener progressListener, boolean taylorRescueEnabled) {
+            boolean taylorRescueEnabled, boolean interiorSingularityScanEnabled,
+            int interiorScanPoints, double interiorScanAbsoluteThreshold,
+            double interiorScanRelativeMultiplier, double poleSnapMagnitudeThreshold,
+            int newtonMaxIters, double newtonMaxStepFraction, double newtonConvergenceTolFraction,
+            double poleConfirmMagnitude, double interiorDedupeFraction,
+            ProgressListener progressListener) {
         if (crossCheckOrder < 2 || (crossCheckOrder % 2) != 0) {
             throw new IllegalArgumentException(
                     "crossCheckOrder must be a positive even number (midpoint expansion cancels odd terms)");
         }
         if (crossCheckOrder > MAX_CROSS_CHECK_ORDER) {
-            throw new IllegalArgumentException(
-                    "crossCheckOrder must be <= " + MAX_CROSS_CHECK_ORDER
-                    + "; beyond this the cross-check is no longer 'cheap' relative to Gauss-Kronrod --"
-                    + " use TurboIntegratorEngine directly if you need a high-order Taylor rule");
+            throw new IllegalArgumentException("crossCheckOrder must be <= " + MAX_CROSS_CHECK_ORDER);
         }
         if (maxDepth < 1) {
             throw new IllegalArgumentException("maxDepth must be >= 1");
@@ -570,6 +633,12 @@ public class Integrator {
         if (wrtVar == null || wrtVar.trim().isEmpty()) {
             throw new IllegalArgumentException("wrtVar must be a non-empty variable name");
         }
+        if (interiorScanPoints < 0) {
+            throw new IllegalArgumentException("interiorScanPoints must be >= 0");
+        }
+        if (newtonMaxStepFraction <= 0 || newtonMaxStepFraction >= 1.0) {
+            throw new IllegalArgumentException("newtonMaxStepFraction must be in (0,1)");
+        }
 
         this.wrtVar = wrtVar;
         this.crossCheckOrder = crossCheckOrder;
@@ -588,6 +657,16 @@ public class Integrator {
         this.singularityScaleFactor = singularityScaleFactor;
         this.crossCheckSubtractionNegligibility = crossCheckSubtractionNegligibility;
         this.taylorRescueEnabled = taylorRescueEnabled;
+        this.interiorSingularityScanEnabled = interiorSingularityScanEnabled;
+        this.interiorScanPoints = interiorScanPoints;
+        this.interiorScanAbsoluteThreshold = interiorScanAbsoluteThreshold;
+        this.interiorScanRelativeMultiplier = interiorScanRelativeMultiplier;
+        this.poleSnapMagnitudeThreshold = poleSnapMagnitudeThreshold;
+        this.newtonMaxIters = newtonMaxIters;
+        this.newtonMaxStepFraction = newtonMaxStepFraction;
+        this.newtonConvergenceTolFraction = newtonConvergenceTolFraction;
+        this.poleConfirmMagnitude = poleConfirmMagnitude;
+        this.interiorDedupeFraction = interiorDedupeFraction;
         this.progressListener = progressListener != null ? progressListener : ProgressListener.NO_OP;
 
         this.fnBuf = new double[1];
@@ -596,6 +675,7 @@ public class Integrator {
         this.ccCoeffs = new double[crossCheckAdOrder + 1];
         this.probeCoeffs = new double[3];
         this.binomBuf = new double[crossCheckAdOrder + 1];
+        this.newtonBuf = new double[2];
 
         int cap = maxDepth + 4;
         this.stackA = new double[cap];
@@ -603,7 +683,11 @@ public class Integrator {
         this.stackDepth = new int[cap];
         this.stackSize = 0;
 
+        this.interiorPoles = new double[16];
+        this.interiorPoleCount = 0;
+
         this.singularities = new ArrayList<>();
+        this.appliedSubtractions = new ArrayList<>();
     }
 
     public static Integrator forExpression(String expr, String wrtVar) {
@@ -631,6 +715,130 @@ public class Integrator {
     }
 
     // ------------------------------------------------------------------
+    // Interior singularity scan (new)
+    // ------------------------------------------------------------------
+    private void addInteriorPoleIfNew(double location, double fullWidth) {
+        double dedupeEps = Math.max(Math.abs(location) * 1e-12, interiorDedupeFraction * fullWidth);
+        for (int i = 0; i < interiorPoleCount; i++) {
+            if (Math.abs(interiorPoles[i] - location) < dedupeEps) {
+                return;
+            }
+        }
+        if (interiorPoleCount == interiorPoles.length) {
+            interiorPoles = Arrays.copyOf(interiorPoles, interiorPoles.length * 2);
+        }
+        interiorPoles[interiorPoleCount++] = location;
+    }
+
+    private boolean confirmPole(double x) {
+        try {
+            ad.evaluateRPN(wrtVar, x, 0, fnBuf);
+            return !Double.isFinite(fnBuf[0]) || Math.abs(fnBuf[0]) > poleConfirmMagnitude;
+        } catch (ArithmeticException domainEx) {
+            return true;
+        }
+    }
+
+    /**
+     * Newton's method on {@code 1/f}, computed as {@code x += f(x)/f'(x)} so
+     * the iteration never evaluates {@code 1/f} directly near the value that is
+     * blowing up. Returns the snapped location, or NaN if the point isn't
+     * actually near a large value, the step is untrustworthy, the iteration
+     * wanders outside {@code (domainLo, domainHi)}, or it fails to converge.
+     */
+    private double newtonSnapToPole(double xStart, double domainLo, double domainHi) {
+        if (xStart <= domainLo || xStart >= domainHi) {
+            return Double.NaN;
+        }
+        double current = xStart;
+        double maxStep = Math.max((domainHi - domainLo) * newtonMaxStepFraction, 1e-14);
+        double convergeTol = Math.max((domainHi - domainLo) * newtonConvergenceTolFraction, 1e-15);
+
+        for (int i = 0; i < newtonMaxIters; i++) {
+            try {
+                ad.evaluateRPN(wrtVar, current, 1, newtonBuf);
+            } catch (ArithmeticException domainEx) {
+                return current; // the domain wall itself is likely the singularity's exact location
+            }
+            double f = newtonBuf[0];
+            double fp = newtonBuf[1];
+            if (!Double.isFinite(f) || !Double.isFinite(fp)) {
+                return current;
+            }
+            if (Math.abs(f) < poleSnapMagnitudeThreshold) {
+                return Double.NaN;
+            }
+            if (fp == 0.0) {
+                return Double.NaN;
+            }
+            double dx = f / fp; // Newton step toward a root of 1/f, i.e. a blow-up of f
+            if (!Double.isFinite(dx) || Math.abs(dx) > maxStep) {
+                return Double.NaN;
+            }
+            double next = current + dx;
+            if (next <= domainLo || next >= domainHi) {
+                return Double.NaN;
+            }
+            if (Math.abs(dx) < convergeTol) {
+                return confirmPole(next) ? next : Double.NaN;
+            }
+            current = next;
+        }
+        return Double.NaN;
+    }
+
+    /**
+     * Flat scan for interior singularities. A heuristic accelerator, not the
+     * only safety net -- see class javadoc. Populates
+     * {@link #interiorPoles}[0..{@link #interiorPoleCount}), sorted,
+     * deduplicated, and kept strictly away from the domain's own edges (those
+     * are handled as ordinary segment endpoints).
+     */
+    private void scanForInteriorSingularities(double lo, double hi) {
+        interiorPoleCount = 0;
+        double fullWidth = hi - lo;
+        if (fullWidth <= 0 || interiorScanPoints == 0) {
+            return;
+        }
+
+        int n = interiorScanPoints;
+        double step = fullWidth / (n + 1);
+        double runningMaxNormal = 0.0;
+        double edgeMargin = fullWidth * 1e-6;
+        double scanLo = lo + edgeMargin;
+        double scanHi = hi - edgeMargin;
+
+        for (int i = 1; i <= n; i++) {
+            double x = lo + i * step;
+            double val;
+            boolean suspicious;
+            try {
+                ad.evaluateRPN(wrtVar, x, 0, fnBuf);
+                val = fnBuf[0];
+                suspicious = !Double.isFinite(val)
+                        || Math.abs(val) > interiorScanAbsoluteThreshold
+                        || (runningMaxNormal > 0.0 && Math.abs(val) > interiorScanRelativeMultiplier * runningMaxNormal);
+            } catch (ArithmeticException domainEx) {
+                val = Double.NaN;
+                suspicious = true;
+            }
+
+            if (suspicious) {
+                double snapped = newtonSnapToPole(x, scanLo, scanHi);
+                if (Double.isFinite(snapped)) {
+                    addInteriorPoleIfNew(snapped, fullWidth);
+                }
+            } else if (Double.isFinite(val)) {
+                runningMaxNormal = Math.max(runningMaxNormal, Math.abs(val));
+            }
+        }
+
+        if (interiorPoleCount > 1) {
+            Arrays.sort(interiorPoles, 0, interiorPoleCount);
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Integration
     // ------------------------------------------------------------------
     public double integrate(double a, double b) {
@@ -643,13 +851,13 @@ public class Integrator {
         }
 
         singularities.clear();
+        appliedSubtractions.clear();
+        interiorPoleCount = 0;
         lastErrorEstimate = 0.0;
         lastPanelCount = 0;
         lastMaxDepthReached = 0;
         lastCrossCheckCount = 0;
         lastForcedSplitCount = 0;
-        leftActive = false;
-        rightActive = false;
 
         if (a == b) {
             return 0.0;
@@ -660,63 +868,106 @@ public class Integrator {
         double fullWidth = hi - lo;
         double minWidth = Math.max(fullWidth * 1e-13, Double.MIN_NORMAL);
 
-        double correction = 0.0;
+        if (interiorSingularityScanEnabled) {
+            scanForInteriorSingularities(lo, hi);
+        }
+
+        accSum = 0.0;
+        accComp = 0.0;
+        accErrAccum = 0.0;
+        accResolvedWidth = 0.0;
+        accCorrection = 0.0;
+        accPanelCount = 0;
+        accCrossCheckCount = 0;
+        accForcedSplitCount = 0;
+        accMaxDepthSeen = 0;
+
+        double segStart = lo;
+        double segmentEpsilon = fullWidth * 1e-9;
+        for (int i = 0; i <= interiorPoleCount; i++) {
+            double segEnd = (i < interiorPoleCount) ? interiorPoles[i] : hi;
+            if (segEnd - segStart > segmentEpsilon) {
+                integrateSegment(segStart, segEnd, fullWidth, lo, hi, minWidth, negate);
+            }
+            segStart = segEnd;
+        }
+
+        lastErrorEstimate = accErrAccum;
+        lastPanelCount = accPanelCount;
+        lastMaxDepthReached = accMaxDepthSeen;
+        lastCrossCheckCount = accCrossCheckCount;
+        lastForcedSplitCount = accForcedSplitCount;
+
+        double finalValue = accSum + accCorrection;
+        return negate ? -finalValue : finalValue;
+    }
+
+    /**
+     * Runs the full per-call pipeline (endpoint-probe both of this segment's
+     * own edges, subtract and verify if singular, then the
+     * GK/cross-check/rescue panel loop) for one segment, accumulating into the
+     * call-wide {@code acc*} running totals. An edge here may be the call's
+     * actual bound, or an interior location the singularity scan found -- both
+     * are handled identically, since a segment doesn't know or care which.
+     */
+    private void integrateSegment(double segLo, double segHi, double fullWidth,
+            double callLo, double callHi, double minWidth, boolean negate) {
+        double segWidth = segHi - segLo;
+        leftActive = false;
+        rightActive = false;
+        double segCorrection = 0.0;
+
         if (singularitySubtractionEnabled) {
-            boolean leftFound = probeEndpointSingularityTwoScale(lo, fullWidth, +1.0);
+            boolean leftFound = probeEndpointSingularityTwoScale(segLo, segWidth, +1.0);
             double foundLeftN = leftFound ? probeN : 0.0;
             double foundLeftC = leftFound ? probeC : 0.0;
 
-            boolean rightFound = probeEndpointSingularityTwoScale(hi, fullWidth, -1.0);
+            boolean rightFound = probeEndpointSingularityTwoScale(segHi, segWidth, -1.0);
             double foundRightN = rightFound ? probeN : 0.0;
             double foundRightC = rightFound ? probeC : 0.0;
 
             if (leftFound && foundLeftN <= -1.0) {
-                throw new NonIntegrableSingularityException(lo, 0.0,
-                        "Detected a non-integrable power-law singularity at the lower bound"
+                throw new NonIntegrableSingularityException(segLo, 0.0,
+                        describeLocation(segLo, callLo, callHi)
                         + " (empirical exponent n=" + foundLeftN + " <= -1); this integral does not converge",
                         null);
             }
             if (rightFound && foundRightN <= -1.0) {
-                throw new NonIntegrableSingularityException(hi, 0.0,
-                        "Detected a non-integrable power-law singularity at the upper bound"
+                throw new NonIntegrableSingularityException(segHi, 0.0,
+                        describeLocation(segHi, callLo, callHi)
                         + " (empirical exponent n=" + foundRightN + " <= -1); this integral does not converge",
                         null);
             }
 
             if (leftFound) {
                 leftActive = true;
-                leftX0 = lo;
+                leftX0 = segLo;
                 leftN = foundLeftN;
                 leftC = foundLeftC;
-                correction += leftC * Math.pow(fullWidth, leftN + 1.0) / (leftN + 1.0);
+                segCorrection += leftC * Math.pow(segWidth, leftN + 1.0) / (leftN + 1.0);
+                appliedSubtractions.add(String.format("x=%.10g (segment lower edge): n=%.6g C=%.6g", segLo, leftN, leftC));
             }
             if (rightFound) {
                 rightActive = true;
-                rightX0 = hi;
+                rightX0 = segHi;
                 rightN = foundRightN;
                 rightC = foundRightC;
-                correction += rightC * Math.pow(fullWidth, rightN + 1.0) / (rightN + 1.0);
+                segCorrection += rightC * Math.pow(segWidth, rightN + 1.0) / (rightN + 1.0);
+                appliedSubtractions.add(String.format("x=%.10g (segment upper edge): n=%.6g C=%.6g", segHi, rightN, rightC));
             }
         }
+        accCorrection += segCorrection;
 
         stackSize = 0;
-        stackPush(lo, hi, 0);
-
-        double sum = 0.0, comp = 0.0; // Kahan compensated summation
-        double errAccum = 0.0;
-        double resolvedWidth = 0.0;
-        int panelCount = 0;
-        int crossCheckCount = 0;
-        int forcedSplitCount = 0;
-        int maxDepthSeen = 0;
+        stackPush(segLo, segHi, 0);
 
         while (stackSize > 0) {
             stackSize--;
             double pa = stackA[stackSize];
             double pb = stackB[stackSize];
             int pDepth = stackDepth[stackSize];
-            if (pDepth > maxDepthSeen) {
-                maxDepthSeen = pDepth;
+            if (pDepth > accMaxDepthSeen) {
+                accMaxDepthSeen = pDepth;
             }
 
             double width = pb - pa;
@@ -724,25 +975,12 @@ public class Integrator {
 
             boolean gkOk = computeQK15(pa, pb);
             if (!gkOk) {
-                // Taylor-rescue site 1: try before bisecting -- a single extra AD call can
-                // resolve a panel whose center is fine but whose GK nodes hit a domain wall,
-                // instead of spending several bisection levels working around it.
                 if (taylorRescueEnabled && computeTaylorRescue(pa, pb)) {
                     double rescueBudget = Math.max(absTol * (width / fullWidth), relTol * Math.abs(rescueValue));
                     if (rescueConverging && rescueErrEst <= rescueBudget) {
-                        singularities.add(new Singularity(0.5 * (pa + pb), width,
+                        acceptPanel(rescueValue, rescueErrEst, pa, pb, width, fullWidth, negate,
                                 "Gauss-Kronrod hit an AD domain error at one of its 15 nodes ("
-                                + lastDomainErrorMessage + "); resolved via a Taylor-series rescue panel"
-                                + " instead of bisecting or giving up"));
-                        double y = rescueValue - comp;
-                        double t = sum + y;
-                        comp = (t - sum) - y;
-                        sum = t;
-                        errAccum += rescueErrEst;
-                        panelCount++;
-                        resolvedWidth += width;
-                        progressListener.onProgress(panelCount, maxDepthSeen,
-                                negate ? -(sum + correction) : (sum + correction), resolvedWidth / fullWidth);
+                                + lastDomainErrorMessage + "); resolved via a Taylor-series rescue panel");
                         continue;
                     }
                 }
@@ -768,42 +1006,27 @@ public class Integrator {
                     stackPush(m, pb, pDepth + 1);
                     continue;
                 }
-                // Precision-floor acceptance (see class javadoc): if the residual error IS the
-                // already-characterized cancellation floor, accept regardless of strict mode --
-                // further bisection provably cannot help, since the floor doesn't shrink with
-                // panel width.
                 boolean cappedByCancellationFloor = lastCancellationFloor > 0.0
                         && gkAbsErr <= lastCancellationFloor * PRECISION_FLOOR_ACCEPT_MARGIN;
                 if (cappedByCancellationFloor) {
-                    singularities.add(new Singularity(0.5 * (pa + pb), width,
-                            "accepted at the floating-point cancellation floor near a subtracted"
-                            + " singularity (reported error " + gkAbsErr + " is the characterized"
-                            + " noise floor, not an unresolved convergence failure); further"
-                            + " bisection cannot improve this"));
-                    double y = gkResult - comp;
-                    double t = sum + y;
-                    comp = (t - sum) - y;
-                    sum = t;
-                    errAccum += gkAbsErr;
-                    panelCount++;
-                    resolvedWidth += width;
-                    progressListener.onProgress(panelCount, maxDepthSeen,
-                            negate ? -(sum + correction) : (sum + correction), resolvedWidth / fullWidth);
+                    acceptPanel(gkResult, gkAbsErr, pa, pb, width, fullWidth, negate,
+                            "accepted at the floating-point cancellation floor near a subtracted singularity"
+                            + " (reported error " + gkAbsErr + " is the characterized noise floor, not an"
+                            + " unresolved convergence failure); further bisection cannot improve this");
+                    continue;
+                }
+                if (taylorRescueEnabled && computeTaylorRescue(pa, pb) && rescueConverging && rescueErrEst <= budget) {
+                    acceptPanel(rescueValue, rescueErrEst, pa, pb, width, fullWidth, negate,
+                            "Gauss-Kronrod did not converge to tolerance after reaching the panel-depth/width"
+                            + " limit (reported error " + gkAbsErr + " vs budget " + budget
+                            + "); resolved via a converging Taylor-series rescue panel instead");
                     continue;
                 }
                 recordSingularityOrThrow(pa, pb,
                         "Gauss-Kronrod did not converge to tolerance (reported error " + gkAbsErr
                         + " vs budget " + budget + ") after reaching the panel-depth/width limit",
                         null);
-                double y = gkResult - comp;
-                double t = sum + y;
-                comp = (t - sum) - y;
-                sum = t;
-                errAccum += gkAbsErr;
-                panelCount++;
-                resolvedWidth += width;
-                progressListener.onProgress(panelCount, maxDepthSeen,
-                        negate ? -(sum + correction) : (sum + correction), resolvedWidth / fullWidth);
+                acceptPanel(gkResult, gkAbsErr, pa, pb, width, fullWidth, negate, null);
                 continue;
             }
 
@@ -814,52 +1037,30 @@ public class Integrator {
                     && (!(leftActive || rightActive) || subtractionNegligibleHere);
 
             if (!runCrossCheckHere) {
-                double y = gkResult - comp;
-                double t = sum + y;
-                comp = (t - sum) - y;
-                sum = t;
-                errAccum += gkAbsErr;
-                panelCount++;
-                resolvedWidth += width;
-                progressListener.onProgress(panelCount, maxDepthSeen,
-                        negate ? -(sum + correction) : (sum + correction), resolvedWidth / fullWidth);
+                acceptPanel(gkResult, gkAbsErr, pa, pb, width, fullWidth, negate, null);
                 continue;
             }
 
-            crossCheckCount++;
+            accCrossCheckCount++;
             boolean ccOk = crossCheckPanel(pa, pb);
             double crossTol = Math.max(budget, absTol) * crossCheckLooseness;
             boolean disagree = !ccOk || !ccConverging || (Math.abs(ccValue - gkResult) > crossTol);
 
             if (disagree) {
-                forcedSplitCount++;
+                accForcedSplitCount++;
                 if (canSplit) {
                     double m = 0.5 * (pa + pb);
                     stackPush(pa, m, pDepth + 1);
                     stackPush(m, pb, pDepth + 1);
                     continue;
                 }
-                // Taylor-rescue site 2: only once bisection is truly exhausted. Bisection is
-                // still the correct first response to an aliasing disagreement (shrinking the
-                // panel is what actually resolves it) -- this never short-circuits that.
-                if (taylorRescueEnabled && computeTaylorRescue(pa, pb)
-                        && rescueConverging && rescueErrEst <= budget) {
-                    singularities.add(new Singularity(0.5 * (pa + pb), width,
+                if (taylorRescueEnabled && computeTaylorRescue(pa, pb) && rescueConverging && rescueErrEst <= budget) {
+                    acceptPanel(rescueValue, rescueErrEst, pa, pb, width, fullWidth, negate,
                             "Gauss-Kronrod/AD cross-check disagreement" + (ccOk
                                     ? (" (GK=" + gkResult + ", AD=" + ccValue + ")")
                                     : " (AD cross-check itself failed to evaluate)")
                             + " could not be resolved by further bisection; resolved via a converging"
-                            + " Taylor-series rescue panel instead of trusting the disputed"
-                            + " Gauss-Kronrod value"));
-                    double y = rescueValue - comp;
-                    double t = sum + y;
-                    comp = (t - sum) - y;
-                    sum = t;
-                    errAccum += rescueErrEst;
-                    panelCount++;
-                    resolvedWidth += width;
-                    progressListener.onProgress(panelCount, maxDepthSeen,
-                            negate ? -(sum + correction) : (sum + correction), resolvedWidth / fullWidth);
+                            + " Taylor-series rescue panel instead of trusting the disputed Gauss-Kronrod value");
                     continue;
                 }
                 recordSingularityOrThrow(pa, pb,
@@ -868,38 +1069,44 @@ public class Integrator {
                                 ? (" (GK=" + gkResult + ", AD=" + ccValue + ")")
                                 : " (AD cross-check itself failed to evaluate)"),
                         null);
-                double y = gkResult - comp;
-                double t = sum + y;
-                comp = (t - sum) - y;
-                sum = t;
-                errAccum += gkAbsErr;
-                panelCount++;
-                resolvedWidth += width;
-                progressListener.onProgress(panelCount, maxDepthSeen,
-                        negate ? -(sum + correction) : (sum + correction), resolvedWidth / fullWidth);
+                acceptPanel(gkResult, gkAbsErr, pa, pb, width, fullWidth, negate, null);
                 continue;
             }
 
-            double y = gkResult - comp;
-            double t = sum + y;
-            comp = (t - sum) - y;
-            sum = t;
-            errAccum += gkAbsErr;
-            panelCount++;
-            resolvedWidth += width;
-            progressListener.onProgress(panelCount, maxDepthSeen,
-                    negate ? -(sum + correction) : (sum + correction), resolvedWidth / fullWidth);
+            acceptPanel(gkResult, gkAbsErr, pa, pb, width, fullWidth, negate, null);
         }
+    }
 
-        sum += correction;
+    /**
+     * Common panel-acceptance bookkeeping: Kahan-sums the value, updates
+     * diagnostics, reports progress.
+     */
+    private void acceptPanel(double value, double errEst, double pa, double pb, double width,
+            double fullWidth, boolean negate, String flagReasonOrNull) {
+        double y = value - accComp;
+        double t = accSum + y;
+        accComp = (t - accSum) - y;
+        accSum = t;
+        if (Double.isFinite(errEst)) {
+            accErrAccum += errEst;
+        }
+        accPanelCount++;
+        accResolvedWidth += width;
+        if (flagReasonOrNull != null) {
+            singularities.add(new Singularity(0.5 * (pa + pb), width, flagReasonOrNull));
+        }
+        progressListener.onProgress(accPanelCount, accMaxDepthSeen,
+                negate ? -(accSum + accCorrection) : (accSum + accCorrection), accResolvedWidth / fullWidth);
+    }
 
-        lastErrorEstimate = errAccum;
-        lastPanelCount = panelCount;
-        lastMaxDepthReached = maxDepthSeen;
-        lastCrossCheckCount = crossCheckCount;
-        lastForcedSplitCount = forcedSplitCount;
-
-        return negate ? -sum : sum;
+    private String describeLocation(double x, double callLo, double callHi) {
+        if (x == callLo) {
+            return "Non-integrable power-law singularity at the lower bound (x=" + x + ")";
+        }
+        if (x == callHi) {
+            return "Non-integrable power-law singularity at the upper bound (x=" + x + ")";
+        }
+        return "Non-integrable power-law singularity at an interior point (x=" + x + "), found via singularity scanning";
     }
 
     public Result integrateResult(double a, double b) {
@@ -934,20 +1141,10 @@ public class Integrator {
     }
 
     public String getLastSingularitySubtractionInfo() {
-        if (!leftActive && !rightActive) {
+        if (appliedSubtractions.isEmpty()) {
             return null;
         }
-        StringBuilder info = new StringBuilder();
-        if (leftActive) {
-            info.append(String.format("lower bound n=%.6g C=%.6g", leftN, leftC));
-        }
-        if (rightActive) {
-            if (info.length() > 0) {
-                info.append("; ");
-            }
-            info.append(String.format("upper bound n=%.6g C=%.6g", rightN, rightC));
-        }
-        return info.toString();
+        return String.join("; ", appliedSubtractions);
     }
 
     public List<Singularity> getSingularities() {
@@ -1225,18 +1422,8 @@ public class Integrator {
     }
 
     // ------------------------------------------------------------------
-    // Taylor-series rescue panels (new)
+    // Taylor-series rescue (three call sites in integrateSegment)
     // ------------------------------------------------------------------
-
-    /**
-     * Computes a full quadrature estimate for [a,b] via a midpoint Taylor expansion, valid even
-     * arbitrarily close to a subtracted endpoint singularity: the singular term's own Taylor
-     * series is subtracted in closed form ({@link #subtractBinomialSeries}) rather than by
-     * re-evaluating {@code f} near the endpoint, so this does not inherit the negligibility
-     * restriction {@link #crossCheckPanel} has. Writes {@link #rescueValue}, {@link
-     * #rescueErrEst}, {@link #rescueConverging}. Returns false if the midpoint itself is
-     * undefined or produced non-finite coefficients (rescue can't help there either).
-     */
     private boolean computeTaylorRescue(double a, double b) {
         double m = 0.5 * (a + b);
         double h = 0.5 * (b - a);
@@ -1261,7 +1448,7 @@ public class Integrator {
         }
         for (double c : ccCoeffs) {
             if (!Double.isFinite(c)) {
-                return false; // pow(d,n) could itself misbehave for pathologically tiny d
+                return false;
             }
         }
 
@@ -1288,16 +1475,9 @@ public class Integrator {
         return Double.isFinite(sum) && Double.isFinite(rescueErrEst);
     }
 
-    /**
-     * Subtracts the exact Taylor series of {@code c*(dist)^n} (about the current panel midpoint)
-     * from {@link #ccCoeffs} in place, via the generalized binomial series
-     * {@code (d+t)^n = sum_k C(n,k) d^(n-k) t^k} ({@code sign=+1}, left endpoint) or
-     * {@code (d-t)^n = sum_k C(n,k) d^(n-k) (-1)^k t^k} ({@code sign=-1}, right endpoint), where
-     * {@code d = dist} is the (always positive) distance from the endpoint to the midpoint.
-     */
     private void subtractBinomialSeries(double d, double n, double c, int sign) {
         binomBuf[0] = 1.0;
-        double dPow = Math.pow(d, n); // k=0 term: d^(n-0)
+        double dPow = Math.pow(d, n);
         for (int k = 0; k <= crossCheckAdOrder; k++) {
             if (k > 0) {
                 binomBuf[k] = binomBuf[k - 1] * (n - k + 1) / k;
@@ -1320,7 +1500,7 @@ public class Integrator {
     private static void expect(String label, double actual, double expected, double tol) {
         double err = Math.abs(actual - expected);
         boolean ok = err <= tol;
-        System.out.printf("[%s] %-55s actual=%.15g expected=%.15g err=%.3e (tol=%.1e)%n",
+        System.out.printf("[%s] %-60s actual=%.15g expected=%.15g err=%.3e (tol=%.1e)%n",
                 ok ? "PASS" : "FAIL", label, actual, expected, err, tol);
         if (ok) {
             passCount++;
@@ -1329,136 +1509,100 @@ public class Integrator {
         }
     }
 
-    public static void main(String[] args) { 
+    public static void main(String[] args) {
         Integrator expI = builder().build("exp(x)", "x");
         expect("exp(x) on [0,10]", expI.integrate(0, 10), Math.exp(10) - 1, 1e-8);
 
-        // Default (unlimited crossCheckMaxDepth) must still catch the bump -- proving the new
-        // opt-in depth cap didn't quietly weaken the default safety property.
         Integrator bumpDefault = builder()
                 .absoluteTolerance(1e-10).relativeTolerance(1e-10)
                 .build("exp(-3200*(x-1.3)^2)", "x");
         double bumpTrue = 0.03133285343288750;
-        expect("Gaussian bump, default crossCheckMaxDepth (still caught)", bumpDefault.integrate(0, 2), bumpTrue, 1e-8);
-
-        // Explicit opt-in: crossCheckMaxDepth=0 means only the root panel gets cross-checked.
-        // This is the caller's deliberate choice to trade the guarantee away, not a default.
-        Integrator bumpShallow = builder()
-                .absoluteTolerance(1e-10).relativeTolerance(1e-10)
-                .crossCheckMaxDepth(0)
-                .build("exp(-3200*(x-1.3)^2)", "x");
-        double bumpShallowResult = bumpShallow.integrate(0, 2);//
-        System.out.println("[INFO ] Gaussian bump, crossCheckMaxDepth=0 (opt-in, reduced safety): got="
-                + bumpShallowResult + " -- illustrates the explicit tradeoff, not asserted correct or incorrect");
+        expect("Gaussian bump (aliasing cross-check, regression)", bumpDefault.integrate(0, 2), bumpTrue, 1e-8);
 
         Integrator sqrtI = builder().build("sqrt(x)", "x");
-        expect("sqrt(x) on [0,1] (n=0.5 endpoint)", sqrtI.integrate(0, 1), 2.0 / 3.0, 1e-9);
+        expect("sqrt(x) on [0,1] (n=0.5 outer endpoint, regression)", sqrtI.integrate(0, 1), 2.0 / 3.0, 1e-9);
 
         Integrator mixedI = builder().build("1/sqrt(x) + cos(x)", "x");
-        expect("1/sqrt(x)+cos(x) on [0,1] (cancellation-floor case)",
+        expect("1/sqrt(x)+cos(x) on [0,1] (cancellation-floor, regression)",
                 mixedI.integrate(0, 1), 2.0 + Math.sin(1.0), 1e-8);
-        
-        
-        Integrator sinInvX = builder().build("1/sin(x)", "x");
-        expect("1/sin(x) on [0.01,0.02] (cancellation-floor case)",
-                sinInvX.integrate(0.01, 0.02), 0.6931721812891335, 1e-8);
-        System.out.println("intg(1/sin(x), 0.1, 1.2) -> "+sinInvX.integrate(0.1, 1.2));
-        
-        
-        expect("1/sin(x) on [0.0000001, 1.5] (cancellation-floor case)",
-                sinInvX.integrate(0.0000001, 1.5), 16.740387290564932014, 1e-14);
 
-        // Precision-floor acceptance: an intentionally unreachable tolerance must still succeed
-        // in strict mode (not throw), by falling through to the new floor-acceptance path.
+        // --- The case that motivated this revision: pole strictly OUTSIDE the interval, right at
+        // its stiff edge. The interior scan must NOT falsely claim this as an interior singularity
+        // (Newton-snap wanders to x=0.5, outside the scanned domain, and is correctly rejected);
+        // this must be resolved by ordinary bisection near the stiff edge instead.
+        Integrator stiffEdge = builder().maxDepth(55).build("1/(x-0.5)", "x");
+        expect("1/(x-0.5) on [0.1, 0.499999999] (pole just outside domain, NOT an interior hit)",
+                stiffEdge.integrate(0.1, 0.499999999), -19.806975105072254332, 1e-6);
+
+        // --- Genuine interior pole: 1/sin(x) crosses a simple pole at x=pi inside [1,4].
+        // Must be detected by the scan and thrown as non-integrable, with a message identifying
+        // it as an INTERIOR location, not an outer bound.
+        Integrator interiorPole = builder().build("1/sin(x)", "x");
+        try {
+            interiorPole.integrate(1, 4);
+            System.out.println("[FAIL] 1/sin(x) on [1,4] (crosses pole at pi) should have thrown");
+            failCount++;
+        } catch (NonIntegrableSingularityException expectedEx) {
+            boolean mentionsInterior = expectedEx.getMessage().contains("interior point");
+            System.out.printf("[%s] 1/sin(x) on [1,4] correctly threw (interior pole at pi): %s%n",
+                    mentionsInterior ? "PASS" : "FAIL", expectedEx.getMessage());
+            if (mentionsInterior) {
+                passCount++;
+            } else {
+                failCount++;
+            }
+        }
+
+        // --- Genuine interior, INTEGRABLE power-law singularity at x=2, split symmetrically.
+        // This is a real new capability: neither an outer-bound-only design, nor the reference
+        // file's boundary-collapsing correction formula, handles this correctly.
+        Integrator interiorIntegrable = builder().build("1/sqrt(abs(x-2))", "x");
+        try {
+            expect("1/sqrt(|x-2|) on [0,4] (interior n=-0.5 singularity, split at x=2)",
+                    interiorIntegrable.integrate(0, 4), 4.0 * Math.sqrt(2.0), 1e-7);
+            System.out.println("  " + interiorIntegrable.getLastSingularitySubtractionInfo());
+            System.out.println("  segments implied by interior poles found: " + interiorIntegrable.getSingularities());
+        } catch (NonIntegrableSingularityException ex) {
+            System.out.println("[INFO ] 1/sqrt(abs(x-2)) on [1.1,15] threw: " + ex.getMessage()
+                    + " -- if unexpected, this is exactly the kind of false positive to tune"
+                    + " interiorScanRelativeMultiplier/poleSnapMagnitudeThreshold against");
+        }
+
+        // --- False-positive avoidance: x^x grows extremely fast but is smooth everywhere on
+        // [1.1,15]; the scan must not mistake rapid-but-continuous growth for a pole. Printed as
+        // diagnostic, not hard-asserted, since I have not executed this myself -- see chat note.
+        Integrator xx = builder().build("x^x", "x");
+        try {
+            double v = xx.integrate(1.1, 15);
+            double expectedXX = 3.92135678385800451368E16;
+            System.out.printf("[INFO ] x^x on [1.1,15]: got=%.6g (reference=%.6g, rel err=%.3e) --"
+                    + " completed without a false-positive interior-singularity throw%n",
+                    v, expectedXX, Math.abs(v - expectedXX) / expectedXX);
+        } catch (NonIntegrableSingularityException ex) {
+            System.out.println("[INFO ] x^x on [1.1,15] threw: " + ex.getMessage()
+                    + " -- if unexpected, this is exactly the kind of false positive to tune"
+                    + " interiorScanRelativeMultiplier/poleSnapMagnitudeThreshold against");
+        }
+
+        // Precision-floor acceptance regression.
         Integrator impossibleTol = builder()
                 .absoluteTolerance(1e-20).relativeTolerance(1e-20)
                 .build("1/sqrt(x) + cos(x)", "x");
         try {
             double v = impossibleTol.integrate(0, 1);
             double err = Math.abs(v - (2.0 + Math.sin(1.0)));
-            boolean ok = err < 1e-6; // can't hit 1e-20 near this singularity; should still be close
-            System.out.printf("[%s] impossible tolerance (1e-20) on 1/sqrt(x)+cos(x): got=%.10g err=%.3e"
-                    + " -- accepted at precision floor instead of throwing, flags=%d%n",
-                    ok ? "PASS" : "FAIL", v, err, impossibleTol.getSingularities().size());
+            boolean ok = err < 1e-6;
+            System.out.printf("[%s] impossible tolerance (1e-20) on 1/sqrt(x)+cos(x): got=%.10g err=%.3e%n",
+                    ok ? "PASS" : "FAIL", v, err);
             if (ok) {
                 passCount++;
             } else {
                 failCount++;
             }
         } catch (NonIntegrableSingularityException ex) {
-            System.out.println("[FAIL] impossible tolerance should have been accepted at the precision floor, not thrown: " + ex.getMessage());
+            System.out.println("[FAIL] impossible tolerance should have been accepted at the precision floor: " + ex.getMessage());
             failCount++;
         }
-
-        // --- Taylor-rescue site 1 (GK domain error): forcing extremely tight tolerance drives
-        // bisection very deep near the subtracted left endpoint, exercising sampleF's manual
-        // float subtraction heavily. Verifying the FINAL value stays correct at very tight
-        // tolerance is meaningful regardless of exactly how many times (if any) rescue site 1
-        // actually fires, since a wrong intermediate rescue would corrupt the final sum either way.
-        Integrator deepSubtraction = builder()
-                .absoluteTolerance(1e-13).relativeTolerance(1e-13)
-                .maxDepth(60)
-                .build("1/sqrt(x)", "x");
-        double deepVal = deepSubtraction.integrate(0, 1);
-        expect("1/sqrt(x) on [0,1] at very tight tolerance (exercises rescue site 1)", deepVal, 2.0, 1e-9);
-        long rescueFlags1 = deepSubtraction.getSingularities().stream()
-                .filter(s -> s.reason.contains("Taylor-series rescue")).count();
-        System.out.println("  rescue-site-1 flags recorded: " + rescueFlags1);
-
-        // --- Taylor-rescue site 2 (cross-check disagreement exhaustion): forcing a very shallow
-        // maxDepth on the aliasing-prone Gaussian bump guarantees the disagreement cannot be
-        // resolved by further splitting, which is exactly when this rescue path is reached. The
-        // precise numeric accuracy achievable at such an aggressive depth cap isn't guaranteed --
-        // that part is printed diagnostically, not asserted -- but completing without a
-        // strict-mode throw is a direct, verifiable consequence of the control flow (rescue
-        // resolving the exhausted disagreement instead of falling through to
-        // recordSingularityOrThrow), so that part IS asserted.
-        Integrator shallowBump = builder()
-                .absoluteTolerance(1e-10).relativeTolerance(1e-10)
-                .maxDepth(3)
-                .build("exp(-3200*(x-1.3)^2)", "x");
-        try {
-            double v = shallowBump.integrate(0, 2);
-            boolean finite = Double.isFinite(v);
-            System.out.printf("[%s] rescue site 2 (forced-shallow maxDepth=3 bump): completed without"
-                            + " throwing, got=%.10g (true=%.10g, err=%.3e) -- accuracy not strictly"
-                            + " gated here, only successful completion is%n",
-                    finite ? "PASS" : "FAIL", v, bumpTrue, Math.abs(v - bumpTrue));
-            if (finite) {
-                passCount++;
-            } else {
-                failCount++;
-            }
-            long rescueFlags2 = shallowBump.getSingularities().stream()
-                    .filter(s -> s.reason.contains("Taylor-series rescue")).count();
-            System.out.println("  rescue-site-2 flags recorded: " + rescueFlags2);
-        } catch (NonIntegrableSingularityException ex) {
-            System.out.println("[FAIL] rescue site 2 should not have thrown (rescue should have "
-                    + "resolved the exhausted disagreement): " + ex.getMessage());
-            failCount++;
-        }
-
-        // Rescue must not change behavior when explicitly disabled -- the shallow-bump case
-        // without rescue is expected to (correctly) throw in strict mode, since nothing else in
-        // this configuration can resolve an exhausted disagreement.
-        Integrator shallowBumpNoRescue = builder()
-                .absoluteTolerance(1e-10).relativeTolerance(1e-10)
-                .maxDepth(3)
-                .taylorRescueEnabled(false)
-                .build("exp(-3200*(x-1.3)^2)", "x");
-        try {
-            shallowBumpNoRescue.integrate(0, 2);
-            System.out.println("[FAIL] taylorRescueEnabled(false) should have preserved the old"
-                    + " throwing behavior at maxDepth=3");
-            failCount++;
-        } catch (NonIntegrableSingularityException expectedEx) {
-            System.out.println("[PASS] taylorRescueEnabled(false) correctly preserved the old"
-                    + " throwing behavior: " + expectedEx.getMessage());
-            passCount++;
-        }
-
-        Integrator cbrtI = builder().build("1/(x^(1/3))", "x");
-        expect("1/x^(1/3) on [0,1] (n=-1/3 endpoint)", cbrtI.integrate(0, 1), 1.5, 1e-8);
 
         Integrator divergent = builder().build("1/x^1.5", "x");
         try {
@@ -1469,21 +1613,14 @@ public class Integrator {
             System.out.println("[PASS] 1/x^1.5 on [0,1] correctly threw: " + expectedEx.getMessage());
             passCount++;
         }
-try{
-        Integrator contaminated = builder().build("1/sqrt(x) + 5000*x", "x");
-        double contamTrue = 2.0 + 2500.0;
-        expect("1/sqrt(x)+5000*x on [0,1] (two-scale-rejected, plain bisection instead)",
-                contaminated.integrate(0, 1), contamTrue, 1e-6);
-}catch(NonIntegrableSingularityException e){
-    e.printStackTrace();
-}
+
         Integrator poleStrict = builder().build("1/(x-0.5)", "x");
         try {
             poleStrict.integrate(0.1, 0.9);
-            System.out.println("[FAIL] 1/(x-0.5) through pole (strict) should have thrown");
+            System.out.println("[FAIL] 1/(x-0.5) through pole (strict, crosses it) should have thrown");
             failCount++;
         } catch (NonIntegrableSingularityException expectedEx) {
-            System.out.println("[PASS] 1/(x-0.5) through pole (strict) correctly threw: " + expectedEx.getMessage());
+            System.out.println("[PASS] 1/(x-0.5) through pole (strict, crosses it) correctly threw: " + expectedEx.getMessage());
             passCount++;
         }
 

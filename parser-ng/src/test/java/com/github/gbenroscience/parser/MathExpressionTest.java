@@ -871,6 +871,20 @@ class MathExpressionTest {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
+    
+        @Test
+    void autoDiffTest() {
+        try {
+            MathExpression me = new MathExpression("autodiff(@(x)3*x^2,3);");
+            FastCompositeExpression fce = new ScalarTurboEvaluator1(me).compile();
+            System.out.println("scanner: " + me.getScanner());
+            double m = fce.applyScalar(new double[1]);
+            System.out.println("ans:\n" + m);
+            Assertions.assertTrue(18 == m);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
 
     public static void main(String[] args) {
         new MathExpressionTest().matrixTestAlgebraAssignments();

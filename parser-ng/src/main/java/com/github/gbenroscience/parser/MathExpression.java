@@ -1846,7 +1846,7 @@ public class MathExpression implements Savable, Solvable {
     }
 
     // Helper for isOperator (your custom ops)
-    private boolean isOperator(String s) {
+    public static final boolean isOperator(String s) {
         if (s.length() == 1) {
             char c = s.charAt(0);
             return "+-*/%^√!²³ČР".indexOf(c) != -1;
