@@ -14,14 +14,14 @@ By adopting a hardware-aligned, fast-interpreted memory model instead of risky d
 ---
 
 ### Pure-Java Real-Time Hardware Acceleration
-
+<!--
 Below are live renderings of a dynamic transcendental surface layer computed entirely within a secure Java runtime using the ParserNG Vector kernel. No JNI, no off-heap memory hacks, just pure mechanical sympathy.
 
 
 <div align="center">
   <video src="https://github.com/user-attachments/assets/d1e2e1f8-4fd2-4be3-a778-33d8360d949d" width="70%" poster="./assets/video_poster.png"> </video>
 </div>
-
+-->
 
 
 ## 🚀 What's New in Version 2.0.7
@@ -30,7 +30,7 @@ Version 2.0.7 marks a complete architectural milestone, featuring the total migr
 
 * **The Vector Breakthrough:** Guarantees a **2x to 20x throughput explosion** for complex expressions containing intense transcendental operations.
 * **Core Efficiency Saturation:** Single-core throughput per worker thread has been optimized so aggressively that computation speeds approach physical hardware memory bandwidth limits—making horizontal scaling bottlenecks trivial.
-* **Enterprise Horizontal Scaling:** For high-scale parallel clustered JAR deployments (optimized for Linux environments), contact the author directly for specialized builds of **ParserNG Enterprise**.
+* **Enterprise Horizontal Scaling:** For high-scale parallel clustered JAR deployments (optimized for Linux environments), contact the author(`gbenroscience@gmail.com`) directly for specialized builds of **ParserNG Enterprise**.
 
 ---
 
