@@ -1,5 +1,6 @@
 package com.github.gbenroscience.math.differentialcalculus.autodiff;
 
+import com.github.gbenroscience.math.differentialcalculus.Derivative;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathExpression.Token;
 import com.github.gbenroscience.parser.methods.Declarations;
@@ -95,7 +96,7 @@ public class AutoDiffNEvaluator implements Cloneable {
     private static final ThreadLocal<EvalState> THREAD_LOCAL_STATE = new ThreadLocal<>();
 
     public AutoDiffNEvaluator(MathExpression me) {
-        this(me, 1);
+        this(me, Derivative.MAX_ORDER);
     }
 
     private AutoDiffNEvaluator(Token[] rpnTokens, byte[] opcodes, double[] constants, int maxOrder, int maxStackSize) {

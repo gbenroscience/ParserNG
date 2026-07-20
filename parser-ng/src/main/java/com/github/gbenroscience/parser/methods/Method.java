@@ -300,7 +300,7 @@ public class Method {
     public static boolean isStatsMethod(String op) {
         return (isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || isBasicNumericalFunction(op)
                 || isMatrixMethod(op) || isHardcodedStatsMethod(op)
-                || op.equals(POW) || op.equals(ATAN2) || op.equals(DIFFERENTIATION) || op.equals(AUTO_DIFF) || op.equals(ROTOR)
+                || op.equals(POW) || op.equals(ATAN2) || op.equals(DIFFERENTIATION) || op.equals(AUTO_DIFF) || op.equals(AUTO_DIFF_N) || op.equals(ROTOR)
                 || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
                 || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION) 
                 || op.equals(SWIGLU) ||op.equals(GEGLU)
@@ -560,7 +560,13 @@ public class Method {
                 list.clear();
                 list.add(result);
                 return list;
-            } else if (name.equals(AUTO_DIFF) && sz == 3) {
+            } else if (name.equals(AUTO_DIFF)) {
+                Set set = new Set(list);
+                result = String.valueOf(set.autoDiff());
+                list.clear();
+                list.add(result);
+                return list;
+            } else if (name.equals(AUTO_DIFF_N)) {
                 Set set = new Set(list);
                 result = String.valueOf(set.autoDiff());
                 list.clear();

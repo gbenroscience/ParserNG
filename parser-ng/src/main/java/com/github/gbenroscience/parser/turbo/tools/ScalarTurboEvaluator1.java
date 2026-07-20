@@ -688,6 +688,10 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             // Outcome A: Evaluated at a static point, returns a hard number.
                             constant = MethodHandles.constant(double.class, solution.scalar);
                             pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
+                        } else if (solution.getType() == TYPE.VECTOR) {
+                            // Outcome A: Evaluated at a static point, returns a hard number.
+                            constant = MethodHandles.constant(double.class, solution.vector[solution.vector.length - 1]);
+                            pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
                         } else if (solution.getType() == TYPE.STRING || solution.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
                             // Outcome B: Symbolic Derivative! (e.g., "cos(x)")
                             // We compile the new algebraic string directly into the current MethodHandle tree!
@@ -699,12 +703,12 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             stack.push(ensurePrimitive(compiledDeriv));
                              */
                         } else {
-                            String err = "Invalid expression passed to `diff` method: " + targetExpr;
+                            String err = "Invalid expression passed to `diff` method: " + targetExpr + ", type = " + solution.getTypeName();
                             errorLog.info(err);
                             throw new RuntimeException(err);
                         }
                         break;
-                    }else if (name.equals(Declarations.AUTO_DIFF)) {
+                    } else if (name.startsWith(Declarations.AUTO_DIFF)) {
                         for (int i = 0; i < t.arity; i++) {
                             stack.pop();
                         }
@@ -720,26 +724,23 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         if (args.length > 3) {
                             throw new RuntimeException("Invalid input. Argument count for automatic differentiation is invalid. Expected: <=3 Found " + args.length);
                         }
- 
+
                         double evalPoint = -1;
                         int order = -1;
                         String targetExpr = args[0];
-
+//for auto-diff - arg1 = function handle, arg2 = evalPoint(must exist) arg3 = order(mayExist)
                         MathExpression.EvalResult solution = null;
                         switch (args.length) {
                             case 1://first arg is fn handle, default order will be 1 and default evalPoint will be set to 0
-                                targetExpr = args[0];
-                                order = 1;
-                                solution = Derivative.eval("diff(" + targetExpr + ", 0, " + order + ")");
-                                break;
+                                throw new RuntimeException("`autodiff` cannot take single argument");
                             case 2://first arg is fn handle, and second argument will be the evalPoint and default order will be 1 
                                 targetExpr = args[0];
                                 if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
-                                    order = Integer.parseInt(args[1]);
-                                    solution = Derivative.eval("diff(" + targetExpr + "," + order + ")");
+                                    evalPoint = com.github.gbenroscience.parser.Number.fastParseDouble(args[1]);
+                                    solution = Derivative.eval("diff(" + targetExpr + "," + evalPoint + ", 1)");
                                 } else if (Variable.isVariableString(args[1])) {
-                                     throw new RuntimeException("`autodiff` cannot take args = " + args[1] + " at position 2");
-                        }
+                                    throw new RuntimeException("`autodiff` cannot take args = " + args[1] + " at position 2");
+                                }
                                 break;
                             case 3://first arg is fn handle, and second argument will be the evalPoint and third argument will be the order 
                                 targetExpr = args[0];
@@ -748,13 +749,13 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                                 } else if (Variable.isVariableString(args[2])) {
                                     throw new RuntimeException("The 3rd argument of the diff command is the order of differentiation! It must be a whole number!");
                                 }
-
                                 if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
-                                    evalPoint = Integer.parseInt(args[1]);
+                                    evalPoint = com.github.gbenroscience.parser.Number.fastParseDouble(args[1]);
                                     solution = Derivative.eval("diff(" + targetExpr + "," + evalPoint + "," + order + ")");
                                 } else if (Variable.isVariableString(args[1])) {
-                                      throw new RuntimeException("The 2nd argument of the diff command is the point of evaluation! It must be a number!");
-                                 }
+                                    throw new RuntimeException("The 2nd argument of the diff command is the point of evaluation! It must be a number!");
+                                }
+
                                 break;
 
                             default:
@@ -765,6 +766,16 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             // Outcome A: Evaluated at a static point, returns a hard number.
                             constant = MethodHandles.constant(double.class, solution.scalar);
                             pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
+                        } else if (solution.getType() == TYPE.VECTOR) {
+                            if (name.equals(Declarations.AUTO_DIFF)) {
+                                constant = MethodHandles.constant(double.class, solution.vector[solution.vector.length-1]);//return all derivatives from the evaluated function to the nth derivative
+                                pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
+
+                            } else {//Declarations.AUTO_DIFF_N
+                                constant = MethodHandles.constant(double[].class, solution.vector);//return all derivatives from the evaluated function to the nth derivative
+                                pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
+
+                            }
                         } else if (solution.getType() == TYPE.STRING || solution.getType() == TYPE.ALGEBRAIC_EXPRESSION) {
                             // Outcome B: Symbolic Derivative! (e.g., "cos(x)")
                             // We compile the new algebraic string directly into the current MethodHandle tree!

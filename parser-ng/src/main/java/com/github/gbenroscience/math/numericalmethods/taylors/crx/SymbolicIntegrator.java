@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 package com.github.gbenroscience.math.numericalmethods.taylors.crx;
- 
+
+import com.github.gbenroscience.math.numericalmethods.NumericalIntegrator;
+import static com.github.gbenroscience.math.numericalmethods.NumericalIntegrator.testIntegral;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathExpression.Token;
 
@@ -22,6 +24,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -75,19 +79,74 @@ import java.util.logging.Logger;
  * deferring it there.
  *
  * <h2>The rule book, concretely</h2>
- * Constant / power / sum / difference / constant-multiple rules; a table of
- * ~25 elementary antiderivatives generalized to any affine argument
- * ({@code integral(h(ax+b)) = H(ax+b)/a}); the logarithmic-derivative rule
- * ({@code integral(f'/f) = ln|f|}, which generically covers {@code tan},
- * {@code cot}, and any derivative-over-function form); a genuine
- * u-substitution search that recursively re-invokes the whole engine on the
- * transformed sub-problem; integration by parts with LIATE-priority factor
- * selection and the classic self-referential "solve for I" technique (for
- * {@code integral(e^x*sin(x))}-shaped problems); and a complete-the-square,
- * partial-fraction-free solver for rational functions with linear or
- * quadratic denominators (numerator of any degree, via polynomial long
- * division first). See {@link SymbolicEngine}'s static initializer for the
- * exact ordered rule list.
+ * Constant / power / sum / difference / constant-multiple / constant-
+ * denominator rules; a table of ~25 elementary antiderivatives generalized
+ * to any affine argument ({@code integral(h(ax+b)) = H(ax+b)/a}); the
+ * logarithmic-derivative rule ({@code integral(f'/f) = ln|f|}, which
+ * generically covers {@code tan}, {@code cot}, and any derivative-over-
+ * function form); a genuine u-substitution search that recursively
+ * re-invokes the whole engine on the transformed sub-problem; integration
+ * by parts with LIATE-priority factor selection and the classic self-
+ * referential "solve for I" technique (for {@code integral(e^x*sin(x))}-
+ * shaped problems); and a complete-the-square, partial-fraction-free
+ * solver for rational functions with linear or quadratic denominators
+ * (numerator of any degree, via polynomial long division first). See
+ * {@link SymbolicEngine}'s static initializer for the exact ordered rule
+ * list.
+ *
+ * <h2>Revision: general versatility fixes, not point patches</h2>
+ * Two originally-failing cases ({@code 2*x*cos(x^2)}, u-substitution;
+ * {@code exp(x)*sin(x)}, self-referential by-parts) traced back to four
+ * distinct, generally-applicable gaps rather than anything specific to
+ * those two expressions:
+ * <ol>
+ *   <li><b>Nested-constant extraction.</b> {@code ruleConstantMultiple}
+ *       only looked at a {@code MUL} node's two immediate children, so a
+ *       constant buried one level deeper in a left-associated chain like
+ *       {@code (2*x)*cos(x^2)} was never found. Now uses {@link
+ *       #flattenMul}/{@link #rebuildMul} to gather every multiplicative
+ *       factor regardless of nesting, partition constant from
+ *       variable-dependent factors, and recurse on the product of the
+ *       latter -- this also transitively strengthens u-substitution and
+ *       by-parts, since both rely on the same recursive {@code integrate}
+ *       call after a constant is pulled out.</li>
+ *   <li><b>Division-side factor cancellation.</b> {@code simplify}'s
+ *       {@code DIV} case previously only folded exact whole-operand
+ *       matches; it had no notion of canceling a shared factor buried
+ *       inside a product on each side (e.g. {@code x*cos(x^2) / (2*x)}
+ *       never became {@code cos(x^2)/2}). This blocked u-substitution from
+ *       ever recognizing that a candidate substitution actually eliminated
+ *       the original variable. Fixed via the same flatten/rebuild
+ *       machinery, applied to both operands of a division.</li>
+ *   <li><b>Negation-aware cancellation.</b> {@code flattenMul} treats
+ *       {@code -X} as the factor {@code -1} times {@code X}'s own factors,
+ *       so e.g. {@code -sin(x)/sin(x)} now correctly cancels to the literal
+ *       constant {@code -1} -- needed for the self-referential by-parts
+ *       "solve for I" algebra to recognize its own closure at all.</li>
+ *   <li><b>Self-reference search order.</b> {@code tryByParts} previously
+ *       attempted the generic recursive {@code integrate} call on the
+ *       by-parts remainder <i>before</i> the explicit self-referential
+ *       check -- meaning that recursive call could reset context (a fresh
+ *       {@code originalIntegrand}, a reset {@code partsDepth}) before the
+ *       self-reference pattern was ever tried with the correct original
+ *       problem in view. The self-referential check now runs first, with
+ *       the generic recursive attempt as the fallback -- verified this
+ *       reordering doesn't change behavior for an ordinary (non-self-
+ *       referential) case like {@code x*sin(x)}, since {@code
+ *       trySelfReferential} bails out immediately and cheaply whenever the
+ *       by-parts remainder isn't itself a product of two var-dependent
+ *       factors.</li>
+ * </ol>
+ * A fifth, smaller gap found in the same pass: there was no rule at all for
+ * {@code f(x)/constant} (dividing by a plain number) -- {@code
+ * ruleLogDerivative} and {@code ruleRationalLinearOrQuadratic} both
+ * explicitly require the denominator to depend on the variable in a
+ * specific way, so a bare constant denominator matched neither. Added
+ * {@code ruleConstantDenominator} to close that gap. {@code deepEquals}
+ * was also made commutative for {@code ADD}/{@code MUL} ({@code a*b}
+ * and {@code b*a} now recognized as equal), which strengthens every
+ * cancellation/dedup/matching operation built on top of it throughout the
+ * engine, not just the two cases that motivated this revision.
  */
 public final class SymbolicIntegrator {
 
@@ -257,10 +316,7 @@ public final class SymbolicIntegrator {
                         // Structural no-ops in this postfix stream. AutoDiffNEvaluator's own
                         // evaluateRPN loop is an if/else-if chain with NO final else branch --
                         // meaning it silently skips any token kind it doesn't explicitly handle,
-                        // including these. This parser must tolerate them identically, or every
-                        // expression containing a function call (whose argument keeps its
-                        // parentheses in this token stream, unlike a purely minimal RPN) fails to
-                        // parse at all -- exactly the bug this fixes.
+                        // including these. This parser must tolerate them identically.
                         break;
                     default:
                         throw new UnsupportedSymbolicOperationException(
@@ -323,22 +379,32 @@ public final class SymbolicIntegrator {
             return false;
         }
 
+        /** Commutative for ADD/MUL: a+b==b+a and a*b==b*a are both recognized. Strengthens every
+         *  cancellation/dedup/matching operation built on this throughout the engine. */
         public boolean deepEquals(Expr a, Expr b) {
             if (a.kind != b.kind) return false;
             switch (a.kind) {
                 case CONST: return a.constVal == b.constVal;
                 case VAR: return a.varName.equals(b.varName);
-                case FUNC:
+                case FUNC: {
                     if (!a.funcName.equals(b.funcName) || a.children.length != b.children.length) return false;
-                    break;
-                default:
-                    break;
+                    for (int i = 0; i < a.children.length; i++) {
+                        if (!deepEquals(a.children[i], b.children[i])) return false;
+                    }
+                    return true;
+                }
+                case ADD:
+                case MUL:
+                    return (deepEquals(a.children[0], b.children[0]) && deepEquals(a.children[1], b.children[1]))
+                            || (deepEquals(a.children[0], b.children[1]) && deepEquals(a.children[1], b.children[0]));
+                default: {
+                    if (a.children.length != b.children.length) return false;
+                    for (int i = 0; i < a.children.length; i++) {
+                        if (!deepEquals(a.children[i], b.children[i])) return false;
+                    }
+                    return true;
+                }
             }
-            if (a.children.length != b.children.length) return false;
-            for (int i = 0; i < a.children.length; i++) {
-                if (!deepEquals(a.children[i], b.children[i])) return false;
-            }
-            return true;
         }
 
         /** Replaces every structurally-matching occurrence of {@code target} in {@code e} with {@code replacement}. */
@@ -362,6 +428,33 @@ public final class SymbolicIntegrator {
                 case FUNC: return Expr.func(e.funcName, newChildren);
                 default: return e;
             }
+        }
+
+        /**
+         * Flattens a MUL-chain (of any nesting/associativity) into its multiplicative factors.
+         * {@code NEG(x)} is unwrapped as the factor {@code -1} followed by {@code x}'s own
+         * factors -- this is what lets e.g. {@code -sin(x)/sin(x)} cancel down to the literal
+         * constant {@code -1} rather than being left as an unrecognized {@code NEG(sin(x))/sin(x)}.
+         */
+        void flattenMul(Expr e, List<Expr> out) {
+            if (e.kind == Expr.Kind.MUL) {
+                flattenMul(e.children[0], out);
+                flattenMul(e.children[1], out);
+            } else if (e.kind == Expr.Kind.NEG) {
+                out.add(Expr.constant(-1));
+                flattenMul(e.children[0], out);
+            } else {
+                out.add(e);
+            }
+        }
+
+        Expr rebuildMul(List<Expr> factors) {
+            if (factors.isEmpty()) return Expr.constant(1);
+            Expr result = factors.get(0);
+            for (int i = 1; i < factors.size(); i++) {
+                result = Expr.mul(result, factors.get(i));
+            }
+            return result;
         }
 
         // -------------------- simplification --------------------
@@ -401,6 +494,32 @@ public final class SymbolicIntegrator {
                     if (b.kind == Expr.Kind.CONST && b.constVal == 1.0) return a;
                     if (a.kind == Expr.Kind.CONST && a.constVal == 0.0) return Expr.constant(0);
                     if (deepEquals(a, b)) return Expr.constant(1);
+
+                    // Factor cancellation: flatten both sides into multiplicative factors and
+                    // remove structurally-matching pairs (one from each side), regardless of
+                    // nesting or which side a constant lives on. Fixes cases like
+                    // x*cos(x^2)/(2*x) -> cos(x^2)/2, and -sin(x)/sin(x) -> -1 (via NEG unwrapping
+                    // in flattenMul). Recurses (guaranteed to terminate: strictly fewer factors
+                    // each time) so further folding after cancellation is picked up automatically.
+                    List<Expr> numFactors = new ArrayList<>();
+                    flattenMul(a, numFactors);
+                    List<Expr> denFactors = new ArrayList<>();
+                    flattenMul(b, denFactors);
+                    boolean cancelled = false;
+                    for (int i = denFactors.size() - 1; i >= 0; i--) {
+                        Expr df = denFactors.get(i);
+                        for (int j = 0; j < numFactors.size(); j++) {
+                            if (deepEquals(numFactors.get(j), df)) {
+                                numFactors.remove(j);
+                                denFactors.remove(i);
+                                cancelled = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (cancelled) {
+                        return simplify(Expr.div(rebuildMul(numFactors), rebuildMul(denFactors)));
+                    }
                     return Expr.div(a, b);
                 }
                 case NEG: {
@@ -867,6 +986,7 @@ public final class SymbolicIntegrator {
             rules.add(this::ruleDifference);
             rules.add(this::ruleNegate);
             rules.add(this::ruleConstantMultiple);
+            rules.add(this::ruleConstantDenominator);
             rules.add(this::rulePowerOfAffine);
             rules.add(this::ruleLinearArgumentTable);
             rules.add(this::ruleLogDerivative);
@@ -911,18 +1031,41 @@ public final class SymbolicIntegrator {
             return ia == null ? null : Expr.neg(ia);
         }
 
+        /**
+         * Pulls every constant factor out of a MUL chain of ANY nesting/associativity (via {@link
+         * #flattenMul}) -- not just the two immediate children of the top node -- and recurses on
+         * the product of the variable-dependent factors. This is what lets {@code (2*x)*cos(x^2)}
+         * (left-associated, constant buried one level deep) find its constant at all.
+         */
         private Expr ruleConstantMultiple(Expr e, String var, SymbolicEngine eng, int depth) {
             if (e.kind != Expr.Kind.MUL) return null;
+            List<Expr> factors = new ArrayList<>();
+            flattenMul(e, factors);
+            List<Expr> constFactors = new ArrayList<>();
+            List<Expr> varFactors = new ArrayList<>();
+            for (Expr f : factors) {
+                if (containsVar(f, var)) varFactors.add(f); else constFactors.add(f);
+            }
+            if (constFactors.isEmpty() || varFactors.isEmpty()) return null;
+            Expr constProduct = rebuildMul(constFactors);
+            Expr varProduct = rebuildMul(varFactors);
+            Expr integratedVarPart = integrate(varProduct, var, depth + 1);
+            if (integratedVarPart == null) return null;
+            return Expr.mul(constProduct, integratedVarPart);
+        }
+
+        /**
+         * integral(f(x)/k) = integral(f(x))/k for a var-free denominator k. A previously-missing
+         * rule: neither {@link #ruleLogDerivative} nor {@link #ruleRationalLinearOrQuadratic}
+         * matches a plain constant denominator (both require it to depend on the variable in a
+         * specific way), so {@code cos(x)/2} had no rule at all before this.
+         */
+        private Expr ruleConstantDenominator(Expr e, String var, SymbolicEngine eng, int depth) {
+            if (e.kind != Expr.Kind.DIV) return null;
             Expr a = e.children[0], b = e.children[1];
-            if (!containsVar(a, var)) {
-                Expr ib = integrate(b, var, depth + 1);
-                return ib == null ? null : Expr.mul(a, ib);
-            }
-            if (!containsVar(b, var)) {
-                Expr ia = integrate(a, var, depth + 1);
-                return ia == null ? null : Expr.mul(b, ia);
-            }
-            return null;
+            if (containsVar(b, var)) return null;
+            Expr ia = integrate(a, var, depth + 1);
+            return ia == null ? null : Expr.div(ia, b);
         }
 
         private Expr rulePowerOfAffine(Expr e, String var, SymbolicEngine eng, int depth) {
@@ -1144,14 +1287,21 @@ public final class SymbolicIntegrator {
                 Expr boundary = simplify(Expr.mul(u, V));
                 Expr remainder = simplify(Expr.mul(V, du));
 
-                Expr direct = integrate(remainder, var, depth + 1);
-                if (direct != null) {
-                    return Expr.sub(boundary, direct);
-                }
-
+                // Self-referential check runs FIRST (fixed ordering): trying the generic recursive
+                // integrate() call before this let it reset context (a fresh originalIntegrand, a
+                // reset partsDepth) via its own internal by-parts attempt, so the self-reference
+                // pattern for e.g. integral(e^x*sin(x)) was never reliably reached with the correct
+                // original problem in view. trySelfReferential bails immediately and cheaply when
+                // the remainder isn't itself a MUL of two var-dependent factors, so this reordering
+                // costs nothing on an ordinary (non-self-referential) case like x*sin(x).
                 if (partsDepth < MAX_BY_PARTS_DEPTH) {
                     Expr selfRef = trySelfReferential(originalIntegrand, remainder, boundary, var, depth, partsDepth + 1);
                     if (selfRef != null) return selfRef;
+                }
+
+                Expr direct = integrate(remainder, var, depth + 1);
+                if (direct != null) {
+                    return Expr.sub(boundary, direct);
                 }
             }
             return null;
@@ -1249,8 +1399,7 @@ public final class SymbolicIntegrator {
         String parseFailure = null;
         if (config.symbolicEnabled) {
             try {
-                
-        Token[] tokens = formatTokens(me.getCachedPostfix());
+                Token[] tokens = formatTokens(me.getCachedPostfix());
                 parsed = engine.parseToExpr(tokens, wrtVar);
             } catch (RuntimeException parseIssue) {
                 parseFailure = "symbolic parsing failed at construction (every call on this instance will "
@@ -1275,6 +1424,7 @@ public final class SymbolicIntegrator {
         }
         return rpn;
     }
+
     /** Exposes the engine so callers can register additional rules before integrating -- see class javadoc, "expandable". */
     public SymbolicEngine getEngine() {
         return engine;
@@ -1403,11 +1553,20 @@ public final class SymbolicIntegrator {
         expect("tan(x) on [0,1] (log-derivative rule)", vTan, -Math.log(Math.cos(1)), 1e-8, true, tanI.wasLastResultSymbolic(), tanI.getLastSymbolicFailureReason());
         System.out.println("  F = " + tanI.getLastAntiderivativeDescription());
 
-        // u-substitution: integral(2x*cos(x^2)) = sin(x^2)
+        // u-substitution: integral(2x*cos(x^2)) = sin(x^2) -- FIXED: previously failed because the
+        // constant "2" was buried inside a left-associated (2*x)*cos(x^2) and never got pulled out.
         SymbolicIntegrator usub = make("2*x*cos(x^2)");
         double vUsub = usub.integrate(0, 1.5);
-        expect("2x*cos(x^2) on [0,1.5] (u-substitution)", vUsub, Math.sin(1.5 * 1.5), 1e-7, true, usub.wasLastResultSymbolic(), usub.getLastSymbolicFailureReason());
+        expect("2x*cos(x^2) on [0,1.5] (u-substitution, nested constant)", vUsub, Math.sin(1.5 * 1.5), 1e-7, true, usub.wasLastResultSymbolic(), usub.getLastSymbolicFailureReason());
         System.out.println("  F = " + usub.getLastAntiderivativeDescription());
+
+        // A second, independent u-substitution case exercising the same nested-constant fix from a
+        // different angle (constant multiplies the WHOLE product, not just one factor).
+        SymbolicIntegrator usub2 = make("6*x^2*sin(x^3)");
+        double vUsub2 = usub2.integrate(0, 1.2);
+        double expUsub2 = -2.0 * (Math.cos(Math.pow(1.2, 3)) - Math.cos(0));
+        expect("6x^2*sin(x^3) on [0,1.2] (u-substitution, degree-3 inner)", vUsub2, expUsub2, 1e-6, true, usub2.wasLastResultSymbolic(), usub2.getLastSymbolicFailureReason());
+        System.out.println("  F = " + usub2.getLastAntiderivativeDescription());
 
         // Integration by parts (single application): integral(x*sin(x)) = sin(x) - x*cos(x)
         SymbolicIntegrator parts1 = make("x*sin(x)");
@@ -1416,13 +1575,30 @@ public final class SymbolicIntegrator {
         expect("x*sin(x) on [0,2] (integration by parts)", vParts1, expParts1, 1e-7, true, parts1.wasLastResultSymbolic(), parts1.getLastSymbolicFailureReason());
         System.out.println("  F = " + parts1.getLastAntiderivativeDescription());
 
-        // Self-referential by parts: integral(e^x*sin(x))
+        // Self-referential by parts: integral(e^x*sin(x)) -- FIXED: needed factor cancellation
+        // (including NEG-as-(-1) unwrapping) to recognize -e^x*sin(x)/(e^x*sin(x)) == -1, and the
+        // reordered self-reference check to actually reach that recognition.
         SymbolicIntegrator partsSelf = make("exp(x)*sin(x)");
         double vPartsSelf = partsSelf.integrate(0, 1);
         java.util.function.DoubleUnaryOperator F = x -> 0.5 * Math.exp(x) * (Math.sin(x) - Math.cos(x));
         double expPartsSelf = F.applyAsDouble(1) - F.applyAsDouble(0);
         expect("e^x*sin(x) on [0,1] (self-referential by parts)", vPartsSelf, expPartsSelf, 1e-6, true, partsSelf.wasLastResultSymbolic(), partsSelf.getLastSymbolicFailureReason());
         System.out.println("  F = " + partsSelf.getLastAntiderivativeDescription());
+
+        // A second self-referential case with the roles of sin/cos swapped, for real evidence this
+        // isn't a fix specific to one expression's exact shape.
+        SymbolicIntegrator partsSelf2 = make("exp(x)*cos(x)");
+        double vPartsSelf2 = partsSelf2.integrate(0, 1);
+        java.util.function.DoubleUnaryOperator F2 = x -> 0.5 * Math.exp(x) * (Math.sin(x) + Math.cos(x));
+        double expPartsSelf2 = F2.applyAsDouble(1) - F2.applyAsDouble(0);
+        expect("e^x*cos(x) on [0,1] (self-referential by parts, swapped)", vPartsSelf2, expPartsSelf2, 1e-6, true, partsSelf2.wasLastResultSymbolic(), partsSelf2.getLastSymbolicFailureReason());
+        System.out.println("  F = " + partsSelf2.getLastAntiderivativeDescription());
+
+        // The previously-missing rule: f(x)/constant.
+        SymbolicIntegrator constDenom = make("cos(x)/2");
+        double vConstDenom = constDenom.integrate(0, 1);
+        expect("cos(x)/2 on [0,1] (constant-denominator rule)", vConstDenom, Math.sin(1) / 2.0, 1e-9, true, constDenom.wasLastResultSymbolic(), constDenom.getLastSymbolicFailureReason());
+        System.out.println("  F = " + constDenom.getLastAntiderivativeDescription());
 
         // Rational function, linear denominator, numerator degree >= denominator degree (needs division)
         SymbolicIntegrator ratLin = make("(x^2+1)/(x-3)");
@@ -1470,7 +1646,42 @@ public final class SymbolicIntegrator {
             System.out.println("[PASS] 1/sin(x) on [1,4] correctly threw via numeric fallback: " + expectedEx.getMessage());
             passCount++;
         }
+        
+      SymbolicIntegrator quad = make("1/(x^2+3*x+1)");
+        double quadRes = quad.integrate(1.1, 3);
+        System.out.printf("[INFO ] 1/(x^2+3*x+1) on [1.1,3] (generally non-elementary): got=%.10g path=%s -- expected NUMERIC%n",
+                quadRes, quad.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
 
+        
+        
+// Scenario 1: Highly Oscillatory Wave Decay
+          SymbolicIntegrator hot1 = make("sin(50 * x^2) * exp(-x)");
+        double hot1Res = hot1.integrate(1.1, 3);
+        System.out.printf("[INFO ] sin(50 * x^2) * exp(-x) on [1.1,3] (generally non-elementary): expected=%.10g, got=%.10g path=%s -- expected NUMERIC%n",
+               0.0135728867375, hot1Res, hot1.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
+
+        
+         
+        
+        System.out.println("\n=== DEPLOYING WILD TEST CASCADE ===");
+ 
+// Scenario 2: Severe Logarithmic Barrier Proximity
+          SymbolicIntegrator hot2 = make("1 / (x * (ln(x) - 0.5)^2)");
+        double hot2Res = hot2.integrate(0.0000001, 1.0);
+        System.out.printf("[INFO ] 1 / (x * (ln(x) - 0.5)^2) on [0.0000001, 1.0] (generally non-elementary): expected=%.10g, got=%.10g path=%s -- expected NUMERIC%n",
+               0.463378546175, hot2Res, hot2.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
+
+
+
+// Scenario 3: Sharp Quantum Step Profile
+          SymbolicIntegrator hot3 = make("x^3 / (exp(200 * (x - 1)) + 1)");
+        double hot3Res = hot3.integrate(0.0, 2.0);
+        System.out.printf("[INFO ] x^3 / (exp(200 * (x - 1)) + 1) on [0.0, 2.0] (generally non-elementary): expected=%.10g, got=%.10g path=%s -- expected NUMERIC%n",
+              0.25000214159, hot3Res, hot3.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
+ 
+         
+       
+        
         System.out.println();
         System.out.println(passCount + " passed, " + failCount + " failed");
         if (failCount > 0) {

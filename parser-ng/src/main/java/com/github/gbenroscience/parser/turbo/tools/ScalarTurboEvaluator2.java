@@ -18,10 +18,8 @@ package com.github.gbenroscience.parser.turbo.tools;
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
-import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
 import com.github.gbenroscience.math.numericalmethods.NumericalIntegrator;
 import com.github.gbenroscience.math.numericalmethods.TurboRootFinder;
-import com.github.gbenroscience.math.numericalmethods.taylors.ffx.Integrator;
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
 import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
 import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
@@ -38,11 +36,11 @@ import com.github.gbenroscience.parser.methods.MethodRegistry;
 import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.Utils;
-import com.github.gbenroscience.util.VariableManager;
 
 import java.lang.invoke.*;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
 
 /**
  * Turbo compiler optimized for PURE SCALAR expressions. Uses widening
@@ -269,26 +267,12 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         return willFoldConstants;
     }
 
-    public static Object invokeRegistryMethod(int methodId, double[] argsValues) {
-        MathExpression.EvalResult[] wrappers = WRAPPER_CACHE.get();
+    public static Object invokeRegistryMethod(int methodId, MathExpression.EvalResult[] argsValues) {
+        System.out.println("argsValues: "+Arrays.toString(argsValues));
         int arity = argsValues.length;
 
-        if (arity > wrappers.length) {
-            int newSize = Math.max(arity, wrappers.length * 2);
-            MathExpression.EvalResult[] newWrappers = new MathExpression.EvalResult[newSize];
-            System.arraycopy(wrappers, 0, newWrappers, 0, wrappers.length);
-            for (int i = wrappers.length; i < newSize; i++) {
-                newWrappers[i] = new MathExpression.EvalResult();
-            }
-            wrappers = newWrappers;
-            WRAPPER_CACHE.set(wrappers);
-        }
-
-        for (int i = 0; i < arity; i++) {
-            wrappers[i].wrap(argsValues[i]);
-        }
         MathExpression.EvalResult resultContainer = new MathExpression.EvalResult();
-        MethodRegistry.getAction(methodId).calc(resultContainer, arity, wrappers);
+        MethodRegistry.getAction(methodId).calc(resultContainer, arity, argsValues);
 
         if (resultContainer.getType() == TYPE.NUMBER) {
             return resultContainer.scalar;
@@ -580,17 +564,19 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                         }
                         break;
                     }
-                    String name = t.name.toLowerCase();
+                    String name = t.name;
 
                     if (name.equals(Declarations.QUADRATIC) || name.equals(Declarations.TARTAGLIA_ROOTS)
-                            || name.equals(Declarations.GENERAL_ROOT) || name.equals(Declarations.DIFFERENTIATION) || name.equals(Declarations.INTEGRATION)
+                            || name.equals(Declarations.GENERAL_ROOT) || name.equals(Declarations.DIFFERENTIATION)
+                            || name.startsWith(Declarations.AUTO_DIFF)
+                            || name.equals(Declarations.INTEGRATION)
                             || name.equals(Declarations.DIFF_EQN)
                             || name.equals(Declarations.PRINT) || name.equals(Declarations.ROTOR)) {
                         MethodHandle legacy = compileComplexFunction(t);
-
+                   
                         if (legacy.type().parameterCount() == 0) {
                             if (varCount > 0) {
-                                legacy = MethodHandles.dropArguments(legacy, 0, pTypes); // <-- FIX HERE
+                                legacy = MethodHandles.dropArguments(legacy, 0, pTypes);
                             }
                             stack.push(legacy);
                         } else {
@@ -659,7 +645,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                         stack.push(combined);
                     } // Inside compileScalarWide -> case FUNCTION/METHOD:
                     else {
-                        name = t.name.toLowerCase();
+                        name = t.name;
                         MethodHandle legacy = compileComplexFunction(t);
                         stack.push(adaptToWideSignature(legacy, t.arity, stack, pTypes));
                     }
@@ -773,7 +759,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             case 2:
                 if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
                     order = Integer.parseInt(args[1]);
-                    solution = DerivativeOld.eval("diff(" + targetExpr + "," + order + ")");
+                    solution = Derivative.eval("diff(" + targetExpr + "," + order + ")");
                 } else {
                     solution = Derivative.eval("diff(" + targetExpr + "," + args[1] + ")");
                 }
@@ -796,6 +782,67 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             return constant;
         } else if (solution.getType() == TYPE.VECTOR) {
             MethodHandle constant = MethodHandles.constant(double.class, solution.vector[solution.vector.length - 1]);
+            return constant;
+        } else {
+            throw new RuntimeException("Invalid expression passed to `diff` method: " + FunctionManager.lookUp(targetExpr));
+        }
+    }
+
+    private static MethodHandle compileAutoDerivativeHandle(MathExpression.Token t) throws Throwable {
+        String[] args = t.getRawArgs();
+        if (args == null || args.length == 0) {
+            throw new IllegalArgumentException("Method 'autodiff' requires arguments.");
+        }
+
+        String targetExpr = args[0];
+        int order = 1;
+        double evalPoint = -1;
+        MathExpression.EvalResult solution = null;
+
+        switch (args.length) {
+            case 1://first arg is fn handle, default order will be 1 and default evalPoint will be set to 0
+                throw new RuntimeException("`autodiff` cannot take single argument");
+            case 2://first arg is fn handle, and second argument will be the evalPoint and default order will be 1 
+                targetExpr = args[0];
+                if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
+                    evalPoint = com.github.gbenroscience.parser.Number.fastParseDouble(args[1]);
+                    solution = Derivative.eval("diff(" + targetExpr + "," + evalPoint + ", 1)");
+                } else if (Variable.isVariableString(args[1])) {
+                    throw new RuntimeException("`autodiff` cannot take args = " + args[1] + " at position 2");
+                }
+                break;
+            case 3://first arg is fn handle, and second argument will be the evalPoint and third argument will be the order 
+                targetExpr = args[0];
+                if (com.github.gbenroscience.parser.Number.isNumber(args[2])) {
+                    order = Integer.parseInt(args[2]);
+                } else if (Variable.isVariableString(args[2])) {
+                    throw new RuntimeException("The 3rd argument of the diff command is the order of differentiation! It must be a whole number!");
+                }
+                if (com.github.gbenroscience.parser.Number.isNumber(args[1])) {
+                    evalPoint = com.github.gbenroscience.parser.Number.fastParseDouble(args[1]);
+                    solution = Derivative.eval("diff(" + targetExpr + "," + evalPoint + "," + order + ")");
+                } else if (Variable.isVariableString(args[1])) {
+                    throw new RuntimeException("The 2nd argument of the diff command is the point of evaluation! It must be a number!");
+                }
+
+                break;
+
+            default:
+                throw new AssertionError();
+        }
+
+        if (solution.getType() == TYPE.NUMBER) {
+            return createConstantHandle(solution.scalar);
+        } else if (solution.getType() == TYPE.VECTOR) {
+            if (t.name.equals(Declarations.AUTO_DIFF)) {
+                return createConstantHandle(solution.vector[solution.vector.length - 1]);
+            } else if (t.name.equals(Declarations.AUTO_DIFF_N)) {//Declarations.AUTO_DIFF_N
+                MethodHandle c = MethodHandles.constant(double[].class, solution.vector);
+                return MethodHandles.dropArguments(c, 0, double[].class);
+            }
+            throw new RuntimeException("Invalid expression passed to `autodiff` OR `autodiffN` method: " + FunctionManager.lookUp(targetExpr));
+        } else if (solution.getType() == TYPE.STRING) {
+            MethodHandle constant = MethodHandles.constant(MathExpression.EvalResult.class, solution);
             return constant;
         } else {
             throw new RuntimeException("Invalid expression passed to `diff` method: " + FunctionManager.lookUp(targetExpr));
@@ -839,7 +886,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         MethodHandle derivHandle = null;
         try {
             // Use fNameOrExpr to avoid the internal NPE in Parser.getFunction()
-            MathExpression.EvalResult diffRes = DerivativeOld.eval("diff(" + fNameOrExpr + ",1)");
+            MathExpression.EvalResult diffRes = Derivative.eval("diff(" + fNameOrExpr + ",1)");
 
             if (diffRes != null && diffRes.textRes != null) {
                 String derivString = diffRes.textRes;
@@ -870,11 +917,15 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
     }
 
     private MethodHandle compileComplexFunction(MathExpression.Token t) throws Throwable {
-        String name = t.name.toLowerCase();
-
+        String name = t.name;
+        
         switch (name) {
             case Declarations.DIFFERENTIATION:
                 return compileDerivativeHandle(t);
+            case Declarations.AUTO_DIFF:
+                return compileAutoDerivativeHandle(t);
+            case Declarations.AUTO_DIFF_N:
+                return compileAutoDerivativeHandle(t);
             case Declarations.INTEGRATION:
                 return compileIntegrationHandle(t);
             case Declarations.GENERAL_ROOT:
@@ -935,6 +986,24 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         return grads * (Math.PI / 200.0);
     }
 
+    public static MathExpression.EvalResult[] collectToEvalResultArray(Object... args) {
+        MathExpression.EvalResult[] arr = new MathExpression.EvalResult[args.length];
+        for (int i = 0; i < args.length; i++) {
+            MathExpression.EvalResult r = new MathExpression.EvalResult();
+            if (args[i] instanceof Number) {
+                r.type = MathExpression.EvalResult.TYPE_SCALAR;
+                r.scalar = ((Number) args[i]).doubleValue();
+            } else if (args[i] instanceof double[]) {
+                r.type = MathExpression.EvalResult.TYPE_VECTOR;
+                r.vector = (double[]) args[i];
+            } else if (args[i] instanceof MathExpression.EvalResult) {
+                r = (MathExpression.EvalResult) args[i];
+            }
+            arr[i] = r;
+        }
+        return arr;
+    }
+
     private static MethodHandle adaptToWideSignature(MethodHandle target, int arity, Deque<MethodHandle> stack, Class<?>[] wideTypes) throws Throwable {
         MethodHandle[] argFilters = new MethodHandle[arity];
         for (int i = arity - 1; i >= 0; i--) {
@@ -956,10 +1025,17 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             return target;
         }
 
-        if (target.type().parameterCount() == 1 && target.type().parameterType(0) == double[].class) {
-            MethodHandle collector = LOOKUP.findStatic(ScalarTurboEvaluator2.class, "collectToArray", MethodType.methodType(double[].class, double[].class))
-                    .asCollector(double[].class, arity);
-            target = MethodHandles.collectArguments(target, 0, collector);
+        if (target.type().parameterCount() == 1) {
+            Class<?> pType = target.type().parameterType(0);
+            if (pType == double[].class) {
+                MethodHandle collector = LOOKUP.findStatic(ScalarTurboEvaluator2.class, "collectToArray", MethodType.methodType(double[].class, double[].class))
+                        .asCollector(double[].class, arity);
+                target = MethodHandles.collectArguments(target, 0, collector);
+            } else if (pType == MathExpression.EvalResult[].class) {
+                MethodHandle collector = LOOKUP.findStatic(ScalarTurboEvaluator2.class, "collectToEvalResultArray", MethodType.methodType(MathExpression.EvalResult[].class, Object[].class))
+                        .asCollector(Object[].class, arity);
+                target = MethodHandles.collectArguments(target, 0, collector);
+            }
         }
 
         MethodHandle widened = target;
@@ -967,6 +1043,13 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             if (argFilters[i].type().parameterCount() == 0 && wideTypes.length > 0) {
                 argFilters[i] = liftConstant((double) argFilters[i].invokeExact(), wideTypes.length);
             }
+
+            // --- THE FIX: Dynamically adapt the handle to autobox primitives into Objects ---
+            MethodType currentType = widened.type();
+            MethodType targetType = currentType.changeParameterType(i, argFilters[i].type().returnType());
+            widened = widened.asType(targetType);
+            // ------------------------------------------------------------------------------
+
             widened = MethodHandles.collectArguments(widened, i, argFilters[i]);
         }
 
@@ -1113,9 +1196,9 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
     private static MethodHandle buildLegacyRegistryHandle(MathExpression.Token t) throws Throwable {
         int methodId = MethodRegistry.getMethodID(t.name);
         MethodHandle bridge = LOOKUP.findStatic(ScalarTurboEvaluator2.class, "invokeRegistryMethod",
-                MethodType.methodType(Object.class, int.class, double[].class));
+                MethodType.methodType(Object.class, int.class, MathExpression.EvalResult[].class));
         MethodHandle bound = MethodHandles.insertArguments(bridge, 0, methodId);
-        return bound.asType(bound.type().changeReturnType(double.class));
+        return bound.asType(bound.type().changeReturnType(MathExpression.EvalResult.class));
     }
 
     public static double extractFirstScalar(Object result) {
@@ -1232,7 +1315,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
     }
 
     private static MethodHandle buildLegacyStatsHandle(MathExpression.Token t) throws Throwable {
-        String name = t.name.toLowerCase();
+        String name = t.name;
         boolean isVector = name.equals(Declarations.MODE) || name.equals(Declarations.SORT);
         MethodHandle computation = isVector
                 ? LOOKUP.findStatic(ScalarTurboEvaluator2.class, "executeVectorReturningStatsMethod", MethodType.methodType(double[].class, double[].class, String.class))

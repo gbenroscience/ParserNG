@@ -70,8 +70,7 @@ public class Derivative {
                     AutoDiffNEvaluator adne = new AutoDiffNEvaluator(p.getFunction().getMathExpression(),MAX_ORDER);
                     adne.evaluateRPN(baseVariable, evalPoint, orderOfDiff, resultOut); 
                     return p.getFunction().getMathExpression().getNextResult().wrap(resultOut);
-                } else {
-
+                } else { 
                     SymbolicDifferentiator sd = new SymbolicDifferentiator(rpnTokens);
                     expr = sd.nthDerivative(baseVariable, orderOfDiff);
                     String funcExpr = (p.getReturnHandle() == null ? "@(" : p.getReturnHandle() + "=@(") + baseVariable + ")" + expr;
@@ -221,6 +220,8 @@ public class Derivative {
      * @param args
      */
     public static void main(String args[]) {
+        MathExpression mm = new MathExpression("autodiff(@(x)3*x^2,2,2)");
+        System.out.println("autodiff-> 3x^2 at x=2 = "+mm.solve());
         String f = "10*x^5";
 
         f = "diff(@(x)10*x^5,3)";

@@ -20,6 +20,7 @@ import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
 import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffEvaluator;
+import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffNEvaluator;
 import com.github.gbenroscience.math.geom.Direction;
 import com.github.gbenroscience.math.geom.Line3D;
 import com.github.gbenroscience.math.geom.Point;
@@ -67,7 +68,7 @@ public class MethodRegistry {
          * @param args The args passed to the function
          * @return
          */
-        MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult[] args);
+        MathExpression.EvalResult calc(MathExpression.EvalResult nextResult, int arity, MathExpression.EvalResult... args);
     }
 
     private static final Map<String, Integer> methodIds = new HashMap<>();
@@ -397,8 +398,12 @@ public class MethodRegistry {
                 return der.findDerivativeByPolynomialExpander();
                      */
                     MathExpression.EvalResult ev = Derivative.eval("diff(" + anonFunc + "," + (args[1].textRes != null ? args[1].textRes : args[1].scalar) + "," + args[2] + ")");
-                    return ctx.wrap(ev);
-
+                    
+                    if(ev.type == MathExpression.EvalResult.TYPE_VECTOR)
+                    return ctx.wrap(ev.vector[ev.vector.length-1]);
+                    else
+                    return ctx.wrap(ev.textRes);
+                        
                 }
                 default:
                     return ctx.wrap(Double.NaN);
@@ -429,10 +434,76 @@ public class MethodRegistry {
                     throw new InputMismatchException("The first arg must be a function");
                 }
 
+            }else if (sz == 3) {
+                String fn = args[0].textRes;
+                Function f = FunctionManager.lookUp(fn);
+                if (f != null) {
+                    AutoDiffNEvaluator ade = new AutoDiffNEvaluator(f.getMathExpression());
+                    String var = f.getIndependentVariables().get(0).getName();
+                    int order = (int) args[2].scalar;
+                    if (Variable.isVariableString(var)) {
+                        double val = args[1].scalar;
+                        double[]d = ade.evaluateRPN(var, val, order);
+                        return ctx.wrap(d[d.length-1]);
+                    } else {
+                        throw new InputMismatchException("The second arg must be a Variable name");
+                    }
+                } else {
+                    throw new InputMismatchException("The first arg must be a function");
+                }
+
             } else {
-                throw new InputMismatchException("Invalid arguments passed to autoDiff function: required - autoDiff(function, variable, number)");
+                throw new InputMismatchException("Invalid arguments passed to autoDiff function: required - autoDiff(function, number, order)");
             }
         });
+         registerMethod(Declarations.AUTO_DIFF_N, (ctx, arity, args) -> {
+//            System.out.println("Derivatives Action");
+//            System.out.println("args: " + Arrays.toString(args));
+//            System.out.println("arity: " + arity);
+
+            int sz = args.length;
+
+            if (sz == 2) {
+                String fn = args[0].textRes;
+                Function f = FunctionManager.lookUp(fn);
+                if (f != null) {
+                    AutoDiffEvaluator ade = new AutoDiffEvaluator(f.getMathExpression());
+                    String vars[] = f.getMathExpression().getVariablesNames();
+                    String var = vars != null && vars.length == 1 ? vars[0] : null;
+                    if (Variable.isVariableString(var)) {
+                        double val = args[1].scalar;
+                        double[]d = ade.evaluateRPN(var, val);
+                        return ctx.wrap(d);
+                    } else {
+                        throw new InputMismatchException("The second arg must be a Variable name");
+                    }
+                } else {
+                    throw new InputMismatchException("The first arg must be a function");
+                }
+
+            }else if (sz == 3) {
+                String fn = args[0].textRes;
+                Function f = FunctionManager.lookUp(fn);
+                if (f != null) {
+                    AutoDiffNEvaluator ade = new AutoDiffNEvaluator(f.getMathExpression());
+                    String var = f.getIndependentVariables().get(0).getName();
+                    int order = (int) args[2].scalar;
+                    if (Variable.isVariableString(var)) {
+                        double val = args[1].scalar;
+                        double[]d = ade.evaluateRPN(var, val, order);
+                        return ctx.wrap(d);
+                    } else {
+                        throw new InputMismatchException("The second arg must be a Variable name");
+                    }
+                } else {
+                    throw new InputMismatchException("The first arg must be a function");
+                }
+
+            } else {
+                throw new InputMismatchException("Invalid arguments passed to autoDiff function: required - autoDiff(function, number, order)");
+            }
+        });
+       
         registerMethod(Declarations.INTEGRATION, (ctx, arity, args) -> {
             boolean hasIterations = args.length == 4;//[F, 2.0, 3.0, 10000] ---rotates any function in 3D including points and planes and generic functions
             boolean hasNoIterations = args.length == 3;//[F, 2.0, 3.0]

@@ -680,7 +680,7 @@ public class NumericalIntegrator {
     }
 
     // ============= TESTS =============
-    private static void testIntegral(String exprStr, double a, double b, double expected) throws TimeoutException {
+    public static void testIntegral(String exprStr, double a, double b, double expected) throws TimeoutException {
         long start = System.nanoTime();
         NumericalIntegrator ic = new NumericalIntegrator(a,b);
         double result = ic.integrate(new Function(exprStr));

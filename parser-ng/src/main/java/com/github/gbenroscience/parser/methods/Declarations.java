@@ -44,7 +44,6 @@ public class Declarations {
     public static final String ARC_COSEC_ALT = "acsc";
     public static final String ARC_COT_ALT = "acot";
 
-  
     public static final String SINH = "sinh";
     public static final String COSH = "cosh";
     public static final String TANH = "tanh";
@@ -104,9 +103,10 @@ public class Declarations {
     public static final String PRINT = "print";
     public static final String DIFFERENTIATION = "diff";
     public static final String AUTO_DIFF = "autodiff";
+    public static final String AUTO_DIFF_N = "autodiffN";
     public static final String INTEGRATION = "intg";
-    public static final String DIFF_EQN = "diffeq"; 
-    
+    public static final String DIFF_EQN = "diffeq";
+
     public static final String QUADRATIC = "quadratic";
     public static final String TARTAGLIA_ROOTS = "t_root";
     public static final String GENERAL_ROOT = "root";
@@ -136,8 +136,8 @@ public class Declarations {
     public static final String MATRIX_ADJOINT = "adjoint";
     public static final String MATRIX_EIGENVEC = "eigvec";
     public static final String MATRIX_EIGENVALUES = "eigvalues";
-    public static final String MATRIX_EIGENPOLY = "eigpoly"; 
-    public static final String SUB_MATRIX = "sub_mat"; 
+    public static final String MATRIX_EIGENPOLY = "eigpoly";
+    public static final String SUB_MATRIX = "sub_mat";
     public static final String RANDOM_MATRIX = "rnd_mat";
     public static final String MATRIX_MINOR = "matrix_minor";
     public static final String FMA = "fma";// fma(A, B, C) -> A * B + C
@@ -150,44 +150,43 @@ public class Declarations {
     public static final String GEGLU = "geglu";
     public static final String HELP = "help";
 
-    
-      public static final String getTrigFuncDRGVariant(String methodName, DRG_MODE drg) {
+    public static final String getTrigFuncDRGVariant(String methodName, DRG_MODE drg) {
         String mode = drg == DRG_MODE.DEG ? "_deg" : (drg == DRG_MODE.RAD ? "_rad" : "_grad");
         switch (methodName) {
             case SIN:
                 return SIN + mode;
             case COS:
-                   return COS + mode;
+                return COS + mode;
             case TAN:
-                   return TAN + mode;
+                return TAN + mode;
             case ARC_SIN:
-                   return ARC_SIN + mode;
+                return ARC_SIN + mode;
             case ARC_COS:
-                   return ARC_COS + mode;
+                return ARC_COS + mode;
             case ARC_TAN:
-                   return ARC_TAN + mode;
+                return ARC_TAN + mode;
             case SEC:
-                   return SEC + mode;
+                return SEC + mode;
             case COSEC:
-                   return COSEC + mode;
+                return COSEC + mode;
             case COT:
-                   return COT + mode;
+                return COT + mode;
             case ARC_SEC:
-                   return ARC_SEC + mode;
+                return ARC_SEC + mode;
             case ARC_COSEC:
-                   return ARC_COSEC + mode;
+                return ARC_COSEC + mode;
             case ARC_COT:
-                   return ARC_COT + mode;
+                return ARC_COT + mode;
             case ARC_SIN_ALT:
-                   return ARC_SIN_ALT + mode;
+                return ARC_SIN_ALT + mode;
             case ARC_COS_ALT:
-                   return ARC_COS_ALT + mode;
+                return ARC_COS_ALT + mode;
             case ARC_TAN_ALT:
-                   return ARC_TAN_ALT + mode;
+                return ARC_TAN_ALT + mode;
             case ARC_SEC_ALT:
-                   return ARC_SEC_ALT + mode;
+                return ARC_SEC_ALT + mode;
             case ARC_COSEC_ALT:
-                   return ARC_COSEC_ALT + mode;
+                return ARC_COSEC_ALT + mode;
             case ARC_COT_ALT:
                 return ARC_COT_ALT + mode;
             default:
@@ -285,13 +284,15 @@ public class Declarations {
     public static String[] getInbuiltMethods() {
         return createInBuiltMethods();
     }
-/**
- * 
- * @return an array containing all builtin methods, basic numeral methods, but not user defined functions
- */
+
+    /**
+     *
+     * @return an array containing all builtin methods, basic numeral methods,
+     * but not user defined functions
+     */
     public static String[] createInBuiltMethods() {
         List<String> stats = Arrays.asList(getStatsMethods());
- 
+
         String[] functionConstants = {
             SIN, COS, TAN, SINH, COSH, TANH, ARC_SIN, ARC_COS, ARC_TAN,
             ARC_SINH, ARC_COSH, ARC_TANH, SEC, COSEC, COT, SECH, COSECH,
@@ -305,17 +306,17 @@ public class Declarations {
             SQUARE, CUBE, POW, ATAN2, FACT, COMBINATION, PERMUTATION, SUM, LIST_SUM, PROD,
             MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED,
             COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE,
-            STD_ERR, RANDOM, SORT, PLOT, PRINT, DIFFERENTIATION,AUTO_DIFF,
-            INTEGRATION,DIFF_EQN, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT,
+            STD_ERR, RANDOM, SORT, PLOT, PRINT, DIFFERENTIATION, AUTO_DIFF, AUTO_DIFF_N,
+            INTEGRATION, DIFF_EQN, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT,
             LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX,
             ECHELON_MATRIX, MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD,
             MATRIX_SUBTRACT, MATRIX_POWER, MATRIX_TRANSPOSE, MATRIX_EDIT,
-            MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC, MATRIX_EIGENVALUES,SUB_MATRIX,RANDOM_MATRIX,MATRIX_MINOR,
+            MATRIX_COFACTORS, MATRIX_ADJOINT, MATRIX_EIGENVEC, MATRIX_EIGENVALUES, SUB_MATRIX, RANDOM_MATRIX, MATRIX_MINOR,
             MATRIX_EIGENPOLY, HELP, NOW, NANOS, ROTOR
         };
 
         List<String> rest = Arrays.asList(functionConstants);
- 
+
         List<String> r = new ArrayList<>(stats.size() + rest.size());
         r.addAll(stats);
         r.addAll(rest);
@@ -505,6 +506,9 @@ public class Declarations {
                 return TYPE.NUMBER.toString();
             case AUTO_DIFF:
                 return TYPE.NUMBER.toString();
+            case AUTO_DIFF_N:
+                return TYPE.VECTOR.toString(); 
+                
             case INTEGRATION:
                 return TYPE.NUMBER.toString();
             case DIFF_EQN:
@@ -569,10 +573,9 @@ public class Declarations {
      * @return all the statistical methods used by the parser.
      */
     static String[] getStatsMethods() {
-        return new String[]{LIST_SUM, PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR, 
+        return new String[]{LIST_SUM, PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR,
             RANDOM, SORT, NANOS, NOW};
     }
-    
 
     public static boolean isBasicNumericalFunction(String op) {
         for (BasicNumericalMethod basicNumericalMethod : Declarations.getBasicNumericalMethods()) {
