@@ -9,8 +9,7 @@ import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
 import jdk.incubator.vector.*;
-import java.util.function.DoubleUnaryOperator;
-import java.util.function.Function;
+import java.util.stream.IntStream;
 
 /**
  * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
@@ -29,15 +28,19 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression {
-        // Pre-allocated ONCE during initialization/compilation
 
-        private final ThreadLocal<double[]> MATRIX_FLATTEN_BUFFER = ThreadLocal.withInitial(()
-                -> new double[0]
-        );
+        // Pre-allocated ONCE during initialization/compilation
+        private final int NUM_WORKERS;
 
         SIMDVectorCompositeExpression() {
             super(compiledScalarHandle, opcodes, targetSlots,
                     literalConstants, instructionCount, varCount);
+
+            if (numWorkers <= 2) {
+                this.NUM_WORKERS = numWorkers;
+            } else {
+                this.NUM_WORKERS = numWorkers - 1;
+            }
         }
 
         @Override
@@ -55,14 +58,33 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             return SIMDVectorTurboEvaluator.this;
         }
 
-        // --- 2D Matrix Channels ---
-        private double[] getOrCreateFlattenBuffer(int totalSize) {
-            double[] buf = MATRIX_FLATTEN_BUFFER.get();
-            if (buf == null || buf.length < totalSize) {
-                buf = new double[totalSize];
-                MATRIX_FLATTEN_BUFFER.set(buf);
-            }
-            return buf;
+        // --- JDK 21+ ForkJoinPool Dispatchers ---
+        @Override
+        protected void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize) {
+            int numCores = NUM_WORKERS;
+            int chunkSize = (dataSize + numCores - 1) / numCores;
+
+            IntStream.range(0, numCores).parallel().forEach(workerId -> {
+                int start = workerId * chunkSize;
+                int end = Math.min(start + chunkSize, dataSize);
+                if (start < end) {
+                    applyBulkInternal(flatVariables, dataSize, output, start, end - start);
+                }
+            });
+        }
+
+        @Override
+        protected void dispatchToWorkerRing(double[][] variables, double[] output, int dataSize) {
+            int numCores = NUM_WORKERS;
+            int chunkSize = (dataSize + numCores - 1) / numCores;
+
+            IntStream.range(0, numCores).parallel().forEach(workerId -> {
+                int start = workerId * chunkSize;
+                int end = Math.min(start + chunkSize, dataSize);
+                if (start < end) {
+                    applyBulkInternal(variables, dataSize, output, start, end - start);
+                }
+            });
         }
 
         @Override
@@ -2109,8 +2131,8 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             }
             return true;
         }
-        
-          public static void evaluateVariableExponent(double[] base, int bOffset, double[] exp, int eOffset,
+
+        public static void evaluateVariableExponent(double[] base, int bOffset, double[] exp, int eOffset,
                 double[] dest, int dOffset, int n) {
             if (n <= 0) {
                 return;
@@ -2145,6 +2167,7 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                 res.intoArray(dest, dOffset + i, mask);
             }
         }
+
         public static void executePowerBlended(double[] scratch, int baseOffset, int expOffset, int n) {
             if (n <= 0) {
                 return;

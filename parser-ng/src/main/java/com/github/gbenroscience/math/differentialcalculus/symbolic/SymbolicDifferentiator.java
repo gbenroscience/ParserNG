@@ -5,6 +5,7 @@ import com.github.gbenroscience.parser.MathExpression.Token;
 import com.github.gbenroscience.parser.methods.Declarations;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -625,8 +626,6 @@ public class SymbolicDifferentiator {
 
         // nth-derivative example: d^3/dx^3 of the same function
         String[] chain = sd.differentiateNTimes("x", 3);
-        for (int i = 0; i < chain.length; i++) {
-            System.out.println("f" + "'".repeat(i) + "(x) = " + chain[i]);
-        }
+        System.out.println("Derivatives: "+Arrays.toString(chain));
     }
 }

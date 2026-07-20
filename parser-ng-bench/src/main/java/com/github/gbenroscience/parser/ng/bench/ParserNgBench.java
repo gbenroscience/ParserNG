@@ -12,18 +12,20 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */
-package com.github.gbenroscience.parser.ng.bench;
+ */ 
 
+package com.github.gbenroscience.parser.ng.bench;
 /**
  *
  * @author GBEMIRO
  */
-import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.MathExpression; 
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
+import com.github.gbenroscience.simd.turbo.tools.utils.MathToJaninoConverter;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import org.codehaus.janino.ClassBodyEvaluator;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -39,6 +41,10 @@ import org.openjdk.jmh.annotations.Threads;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Phaser;
+import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
@@ -46,7 +52,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.runner.options.TimeValue;
 
 /**
- * JMH Benchmark comparing ParserNG, Exp4J, and JavaMEP. Focus: repeated
+ * JMH Benchmark comparing ParserNG, Janino on bulk evaluations Focus: repeated
  * evaluation of the same pre-compiled expression.
  */
 @State(Scope.Benchmark)
@@ -62,6 +68,22 @@ import org.openjdk.jmh.runner.options.TimeValue;
 })
 @Threads(1)
 public class ParserNgBench {
+
+    public static interface JaninoMathFunction {
+
+        double apply(double[] v);
+    }
+
+    private ExecutorService janinoParallelExecutor;
+    private Phaser barrier;
+
+    // Thread-confined variable cache lines
+    private double[] workerLocalVars;
+    private double[] masterLocalVars;
+
+    // Zero-allocation side-effect sinks to prevent JIT dead-code elimination
+    private double[] workerResultSink;
+    private double[] masterResultSink;
 
     // Pre-compiled instances (initialized in @Setup)
     protected MathExpression parserNG;
@@ -110,8 +132,9 @@ public class ParserNgBench {
         "x1*exp(-(x2/(1-((x3-x4)/x3))))",
         "(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)^2)/(2*x1^2))",
         "12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2",
-        "0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))"
-    };
+        "0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))",
+        "(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)-2)/(2*x1-2))",
+        "(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)",};
 
     static int index = 23;
 
@@ -135,9 +158,9 @@ public class ParserNgBench {
     private int dataSize;
 
     private double[] vars;
-    private VectorTurboBench.JaninoMathFunction fastEvaluator;
-  
-    SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVectorTurbo;
+    private JaninoMathFunction fastEvaluator;
+ 
+    SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVec;
 
     private int varCount;
 
@@ -182,15 +205,45 @@ public class ParserNgBench {
             System.out.println("Repopulated both SoA and AoS data layouts successfully.");
         }
 
-        this.fastEvaluator = VectorTurboBench.setupJanino(expression, expressionVars);
+        // Exactly 2 permanent parties: 1 Master JMH thread + 1 Dedicated Background Worker
+        this.barrier = new Phaser(2);
+
+        // Pinned state blocks to isolate L1 data caches
+        this.workerLocalVars = new double[varCount];
+        this.masterLocalVars = new double[varCount];
+
+        // Result sinks sized exactly to the split data constraints
+        final int mid = dataSize / 2;
+        this.workerResultSink = new double[mid];
+        this.masterResultSink = new double[dataSize - mid];
+
+        this.janinoParallelExecutor = Executors.newFixedThreadPool(1, v -> {
+            Thread t = new Thread(v, "Janino-Parallel-Worker");
+            t.setDaemon(true);
+            return t;
+        });
+
+        this.fastEvaluator = setupJanino(expression, expressionVars);
 
         setupParserNG(me);
 
         // Validation against the SoA structure
-        for (int i = 0; i < dataSink.length; i++) {
-            // Ensure your validate method is updated to handle double[][] 
-            // instead of a single flat array
-            simdVectorTurbo.validate(dataSink[i], result);
+        for (int i = 0; i < dataSink.length; i++) { 
+            simdVec.validate(dataSink[i], result);
+        }
+    }
+
+    @TearDown(Level.Trial)
+    public void tearDown() {
+        if (janinoParallelExecutor != null) {
+            janinoParallelExecutor.shutdown();
+            try {
+                if (!janinoParallelExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    janinoParallelExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -210,7 +263,7 @@ public class ParserNgBench {
         // Read from the static iteration-level scenario to ensure perfect JIT loop unrolling
         final double[][] input = dataSink[benchmarkScenario];
         final double[] localVars = this.vars;
-        final VectorTurboBench.JaninoMathFunction evaluator = this.fastEvaluator;
+        final JaninoMathFunction evaluator = this.fastEvaluator;
 
         for (int i = 0; i < limit; i++) {
             // Linear access: read each variable for the current sample 'i'
@@ -228,31 +281,136 @@ public class ParserNgBench {
         final int limit = dataSize;
         // Read from a completely static scenario index
         final double[][] inputAoS = janinoDataSink[benchmarkScenario];
-        final VectorTurboBench.JaninoMathFunction evaluator = this.fastEvaluator;
+        final JaninoMathFunction evaluator = this.fastEvaluator;
 
         for (int i = 0; i < limit; i++) {
             bh.consume(evaluator.apply(inputAoS[i]));
         }
     }
 
+    
+    @Benchmark
+    public void janinoAoSParallel(Blackhole bh) {
+        final double[][] inputAoS = janinoDataSink[benchmarkScenario];
+        final JaninoMathFunction evaluator = this.fastEvaluator;
+        final int limit = dataSize;
+        final int mid = limit / 2;
+        
+        final double[] wSink = this.workerResultSink;
+        final double[] mSink = this.masterResultSink;
+
+        // Dispatch chunk 1 to background loop
+        janinoParallelExecutor.execute(() -> {
+            try {
+                for (int i = 0; i < mid; i++) {
+                    wSink[i] = evaluator.apply(inputAoS[i]);
+                }
+            } finally {
+                // Static arrival: decrements unarrived, waits if necessary, auto-resets phase
+                barrier.arriveAndAwaitAdvance();
+            }
+        });
+
+        // Master thread evaluates chunk 2 concurrently
+        for (int i = mid; i < limit; i++) {
+            mSink[i - mid] = evaluator.apply(inputAoS[i]);
+        }
+
+        // Master synchronization arrival barrier
+        barrier.arriveAndAwaitAdvance();
+
+        // Safe consumption on the native JMH harness thread post-barrier
+        for (int i = 0; i < mid; i++) {
+            bh.consume(wSink[i]);
+        }
+        for (int i = 0; i < mSink.length; i++) {
+            bh.consume(mSink[i]);
+        }
+    }
+
+    @Benchmark
+    public void janinoSoAParallel(Blackhole bh) {
+        final double[][] input = dataSink[benchmarkScenario];
+        final int stride = varCount;
+        final int limit = dataSize;
+        final int mid = limit / 2;
+        
+        // Pin configurations to isolated array handles
+        final double[] lvWorker = this.workerLocalVars;
+        final double[] lvMaster = this.masterLocalVars;
+        final double[] wSink = this.workerResultSink;
+        final double[] mSink = this.masterResultSink;
+        
+        final JaninoMathFunction evaluator = this.fastEvaluator;
+
+        janinoParallelExecutor.execute(() -> {
+            try {
+                for (int i = 0; i < mid; i++) {
+                    for (int j = 0; j < stride; j++) {
+                        lvWorker[j] = input[j][i];
+                    }
+                    wSink[i] = evaluator.apply(lvWorker);
+                }
+            } finally {
+                barrier.arriveAndAwaitAdvance();
+            }
+        });
+
+        // Master Thread Processing Segment
+        for (int i = mid; i < limit; i++) {
+            for (int j = 0; j < stride; j++) {
+                lvMaster[j] = input[j][i];
+            }
+            mSink[i - mid] = evaluator.apply(lvMaster);
+        }
+
+        // Structural Thread Rendezvous Barrier
+        barrier.arriveAndAwaitAdvance();
+
+        // Linearized single-threaded Blackhole consumption phase
+        for (int i = 0; i < mid; i++) {
+            bh.consume(wSink[i]);
+        }
+        for (int i = 0; i < mSink.length; i++) {
+            bh.consume(mSink[i]);
+        }
+    }
+  
+
+
+
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public void parserNG(Blackhole bh) {
+    public void simdVec(Blackhole bh) {
         // Read from the same stable scenario index—zero cursor modifications inside!
         final double[][] input = dataSink[benchmarkScenario];
         final double[] res = result;
 
         // Execute core computation kernel
-        simdVectorTurbo.applyBulk(input, res);
+        simdVec.applyBulk(input, res);
+        bh.consume(res);
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.AverageTime)
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    public void simdVecParallel(Blackhole bh) {
+        // Read from the same stable scenario index—zero cursor modifications inside!
+        final double[][] input = dataSink[benchmarkScenario];
+        final double[] res = result;
+
+        // Execute core computation kernel
+        simdVec.applyBulkParallel(input, res);
         bh.consume(res);
     }
 
     private void setupParserNG(MathExpression me) {
         try {
-            simdVectorTurbo = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+             //simdVec = SIMDVectorTurboEvaluator.getEvaluator(me, 2);
+               simdVec = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me.copy()).compile();
         } catch (Throwable ex) {
-            System.getLogger(SIMDTurboBenchStrict.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+            System.getLogger(ParserNgBench.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }
     }
 
@@ -261,7 +419,8 @@ public class ParserNgBench {
     }
 
     /**
-     * Varying workloads for duel!
+     * Varying workloads for duel! Expression 34 triggers gc on the SIMD
+     * evaluators
      */
     public static final String EXPRESSIONS_MAP
             = """
@@ -307,7 +466,9 @@ public class ParserNgBench {
             39====x1*exp(-(x2/(1-((x3-x4)/x3)))) 
             40====(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)^2)/(2*x1^2))
             41====12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2
-            42====0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))  
+            42====0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))
+            43====(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)-2)/(2*x1-2))
+            44====(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)  
             """;
 
     public static final StringBuilder EXPR_MAP = new StringBuilder();
@@ -316,6 +477,32 @@ public class ParserNgBench {
         int i = 0;
         for (String e : EXPRESSIONS) {
             EXPR_MAP.append(i++).append("====").append(e).append("\n");
+        }
+    }
+
+    public static JaninoMathFunction setupJanino(String expression, String[] expressionVars) {
+        String javaExpr = MathToJaninoConverter.convert(expression);
+
+        for (int i = 0; i < expressionVars.length; i++) {
+            String varName = expressionVars[i];
+            String regex = "\\b" + java.util.regex.Pattern.quote(varName) + "\\b";
+            javaExpr = javaExpr.replaceAll(regex, "v[" + i + "]");
+        }
+
+        String classBody = String.format("""
+        @Override
+        public double apply(double[] v) {
+            return %s;
+        }
+        """, javaExpr);
+
+        try {
+            ClassBodyEvaluator cbe = new ClassBodyEvaluator();
+            cbe.setImplementedInterfaces(new Class[]{JaninoMathFunction.class});
+            cbe.cook(classBody);
+            return (JaninoMathFunction) cbe.getClazz().getDeclaredConstructor().newInstance();
+        } catch (Exception ex) {
+            throw new RuntimeException("Failed to compile Janino function body expressions", ex);
         }
     }
 
@@ -359,6 +546,7 @@ public class ParserNgBench {
         // 3. Parse and Configure JMH Options
         try {
             OptionsBuilder opt = new OptionsBuilder();
+  
             opt.include(ParserNgBench.class.getSimpleName());
 
             System.out.println("\n⚔️  MATCH MATCHUP: Janino vs ParserNG");

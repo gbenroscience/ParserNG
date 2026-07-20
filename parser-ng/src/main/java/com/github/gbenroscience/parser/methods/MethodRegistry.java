@@ -402,8 +402,7 @@ public class MethodRegistry {
                     if(ev.type == MathExpression.EvalResult.TYPE_VECTOR)
                     return ctx.wrap(ev.vector[ev.vector.length-1]);
                     else
-                    return ctx.wrap(ev.textRes);
-                        
+                    return ctx.wrap(ev.textRes); 
                 }
                 default:
                     return ctx.wrap(Double.NaN);

@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,6 +32,40 @@ import java.util.logging.Logger;
  * IntegrationRule}), and subjects any candidate to three independent safety
  * gates before ever trusting it -- falling back transparently to a pluggable
  * {@link NumericIntegrator} otherwise.
+ *
+ * <h2>Algebraic cancellation (new in this revision)</h2>
+ * Two real gaps were found by tracing actual failures by hand rather than
+ * guessing:
+ * <ul>
+ * <li><b>{@code 2*x*cos(x^2)}</b> (u-substitution): the correct step
+ * {@code e/g'(x) = (2x*cos(x^2))/(2x) -> cos(x^2)} never reduced, because
+ * {@link #simplify} had no rule for "denominator is an exact factor of the
+ * numerator" -- only whole-fraction identity. Fixed by
+ * {@link SymbolicEngine#tryCancelFactor}, a narrow, purely structural
+ * cancellation (not general polynomial GCD): if the denominator matches the
+ * whole numerator or one factor of a product numerator (searched recursively
+ * through nested products), cancel it.</li>
+ * <li><b>{@code exp(x)*sin(x)}</b> (self-referential integration by parts): the
+ * classic closure ({@code remainder} after two applications of by-parts equals
+ * {@code -1} times the original integrand) was reachable, but two things
+ * blocked it: (a) {@link
+ *       SymbolicEngine#tryByParts} tried a full, unconstrained recursive
+ * {@link SymbolicEngine#integrate} on the remainder <em>before</em>
+ * the cheap self-referential check, so the search chased its own tail through
+ * further {@code sin}/{@code cos}/{@code exp} products and burned the
+ * recursion-depth budget rather than ever reaching the closed form; (b)
+ * {@code exp(x)*(-sin(x))} does not structurally reduce to
+ * {@code -1 * (exp(x)*sin(x))} without a "pull the negative out of a product"
+ * simplification rule, which {@link #simplify} also lacked. Fixed by trying the
+ * self-referential closure <em>first</em> (matches the textbook technique:
+ * apply by-parts exactly twice, solve algebraically) and by pulling {@code NEG}
+ * out of {@code MUL}/{@code DIV} in {@link #simplify}.</li>
+ * </ul> {@link SymbolicEngine#deepEquals} was also made commutative-aware for
+ * {@code MUL}/{@code ADD} (e.g. {@code cos(x)*exp(x)} and {@code exp(x)*cos(x)}
+ * are the same value on different trees) -- not strictly required by either
+ * trace above given how the specific terms happened to land, but a correct,
+ * low-risk hardening against the same class of matching failure showing up in
+ * some other term ordering.
  *
  * <h2>Three safety gates, not one</h2>
  * An earlier revision of this idea relied on a single gate (differentiate the
@@ -95,6 +129,13 @@ import java.util.logging.Logger;
  * the integration variable. Multi-parameter symbolic calculus is a materially
  * larger feature the numeric engine already handles fully via its own
  * variable-slot mechanism, so nothing is lost by deferring it there.
+ *
+ * <h2>Token normalization (DRG variants)</h2> {@link #formatTokens} strips
+ * {@code _rad}/{@code _grad}/{@code _deg} suffixes that the parser attaches to
+ * trig function names before this engine ever sees them -- without this,
+ * {@code "sin"} would arrive as {@code "sin_rad"} (or the grad/deg variant) and
+ * match nothing in any rule or table below, silently forcing every trig-bearing
+ * expression to the numeric fallback.
  */
 public final class SymbolicIntegrator {
 
@@ -417,6 +458,12 @@ public final class SymbolicIntegrator {
             return false;
         }
 
+        /**
+         * Structural equality, commutative-aware for {@code ADD}/{@code MUL}
+         * (e.g. {@code cos(x)*exp(x)} and {@code exp(x)*cos(x)} are the same
+         * value on different trees). Both orientations are checked before
+         * declaring a mismatch.
+         */
         public boolean deepEquals(Expr a, Expr b) {
             if (a.kind != b.kind) {
                 return false;
@@ -430,7 +477,16 @@ public final class SymbolicIntegrator {
                     if (!a.funcName.equals(b.funcName) || a.children.length != b.children.length) {
                         return false;
                     }
-                    break;
+                    for (int i = 0; i < a.children.length; i++) {
+                        if (!deepEquals(a.children[i], b.children[i])) {
+                            return false;
+                        }
+                    }
+                    return true;
+                case ADD:
+                case MUL:
+                    return (deepEquals(a.children[0], b.children[0]) && deepEquals(a.children[1], b.children[1]))
+                            || (deepEquals(a.children[0], b.children[1]) && deepEquals(a.children[1], b.children[0]));
                 default:
                     break;
             }
@@ -537,6 +593,16 @@ public final class SymbolicIntegrator {
                     if (b.kind == Expr.Kind.CONST && b.constVal == 1.0) {
                         return a;
                     }
+                    // Pull a negation out of a product: a*(-b) = -(a*b). Needed so that e.g.
+                    // exp(x)*(-sin(x)) reduces to a form directly comparable (via deepEquals,
+                    // inside a division, to fold to a literal constant ratio) against the
+                    // original integrand exp(x)*sin(x) in the self-referential by-parts check.
+                    if (a.kind == Expr.Kind.NEG) {
+                        return simplify(Expr.neg(Expr.mul(a.children[0], b)));
+                    }
+                    if (b.kind == Expr.Kind.NEG) {
+                        return simplify(Expr.neg(Expr.mul(a, b.children[0])));
+                    }
                     return Expr.mul(a, b);
                 }
                 case DIV: {
@@ -550,8 +616,25 @@ public final class SymbolicIntegrator {
                     if (a.kind == Expr.Kind.CONST && a.constVal == 0.0) {
                         return Expr.constant(0);
                     }
+                    // Same NEG-pulling identity as MUL, applied to division: (-a)/b = -(a/b),
+                    // a/(-b) = -(a/b).
+                    if (a.kind == Expr.Kind.NEG) {
+                        return simplify(Expr.neg(Expr.div(a.children[0], b)));
+                    }
+                    if (b.kind == Expr.Kind.NEG) {
+                        return simplify(Expr.neg(Expr.div(a, b.children[0])));
+                    }
                     if (deepEquals(a, b)) {
                         return Expr.constant(1);
+                    }
+                    // Structural (not general polynomial-GCD) cancellation: denominator matches
+                    // the whole numerator or one factor of a product numerator. This is exactly
+                    // what u-substitution's e/g'(x) step needs -- e.g.
+                    // (2x*cos(x^2))/(2x) -> cos(x^2) -- and what lets the self-referential
+                    // by-parts ratio check recognize exp(x)*(-sin(x)) / (exp(x)*sin(x)) = -1.
+                    Expr cancelled = tryCancelFactor(a, b);
+                    if (cancelled != null) {
+                        return cancelled;
                     }
                     return Expr.div(a, b);
                 }
@@ -596,6 +679,40 @@ public final class SymbolicIntegrator {
                 default:
                     return e;
             }
+        }
+
+        /**
+         * If {@code denom} matches {@code numerator} exactly, or matches one
+         * whole multiplicative factor of {@code numerator} (searched
+         * recursively through nested products), returns the remaining factor(s)
+         * with that factor removed; otherwise null. Narrow and purely
+         * structural -- not general polynomial GCD -- but it is exactly what
+         * u-substitution's {@code e/g'(x)} step and the integration-by-parts
+         * self-referential ratio check both need. See class javadoc, "Algebraic
+         * cancellation".
+         */
+        private Expr tryCancelFactor(Expr numerator, Expr denom) {
+            if (deepEquals(numerator, denom)) {
+                return Expr.constant(1);
+            }
+            if (numerator.kind == Expr.Kind.MUL) {
+                Expr a = numerator.children[0], b = numerator.children[1];
+                if (deepEquals(a, denom)) {
+                    return b;
+                }
+                if (deepEquals(b, denom)) {
+                    return a;
+                }
+                Expr ra = tryCancelFactor(a, denom);
+                if (ra != null) {
+                    return simplify(Expr.mul(ra, b));
+                }
+                Expr rb = tryCancelFactor(b, denom);
+                if (rb != null) {
+                    return simplify(Expr.mul(a, rb));
+                }
+            }
+            return null;
         }
 
         private Double tryFoldUnary(String name, double x) {
@@ -1549,16 +1666,22 @@ public final class SymbolicIntegrator {
                 Expr boundary = simplify(Expr.mul(u, V));
                 Expr remainder = simplify(Expr.mul(V, du));
 
-                Expr direct = integrate(remainder, var, depth + 1);
-                if (direct != null) {
-                    return Expr.sub(boundary, direct);
-                }
-
+                // Try the cheap, exact self-referential closure FIRST (matches the textbook
+                // technique -- apply by-parts exactly twice, solve algebraically). An earlier
+                // revision tried the full unconstrained recursive integrate() on `remainder`
+                // first, which for e.g. exp(x)*sin(x) chases its own tail through further
+                // sin/cos/exp products and burns the recursion-depth budget without ever
+                // reaching this closed form. See class javadoc.
                 if (partsDepth < MAX_BY_PARTS_DEPTH) {
                     Expr selfRef = trySelfReferential(originalIntegrand, remainder, boundary, var, depth, partsDepth + 1);
                     if (selfRef != null) {
                         return selfRef;
                     }
+                }
+
+                Expr direct = integrate(remainder, var, depth + 1);
+                if (direct != null) {
+                    return Expr.sub(boundary, direct);
                 }
             }
             return null;
@@ -1941,7 +2064,7 @@ public final class SymbolicIntegrator {
 
         SymbolicIntegrator usub = make("2*x*cos(x^2)");
         double vUsub = usub.integrate(0, 1.5);
-        expect("2x*cos(x^2) on [0,1.5] (u-substitution)", vUsub, Math.sin(1.5 * 1.5), 1e-7, true, usub.wasLastResultSymbolic(), usub.getLastSymbolicFailureReason());
+        expect("2x*cos(x^2) on [0,1.5] (u-substitution, factor cancellation)", vUsub, Math.sin(1.5 * 1.5), 1e-7, true, usub.wasLastResultSymbolic(), usub.getLastSymbolicFailureReason());
         System.out.println("  F = " + usub.getLastAntiderivativeDescription());
 
         SymbolicIntegrator parts1 = make("x*sin(x)");
@@ -1954,7 +2077,7 @@ public final class SymbolicIntegrator {
         double vPartsSelf = partsSelf.integrate(0, 1);
         java.util.function.DoubleUnaryOperator F = x -> 0.5 * Math.exp(x) * (Math.sin(x) - Math.cos(x));
         double expPartsSelf = F.applyAsDouble(1) - F.applyAsDouble(0);
-        expect("e^x*sin(x) on [0,1] (self-referential by parts)", vPartsSelf, expPartsSelf, 1e-6, true, partsSelf.wasLastResultSymbolic(), partsSelf.getLastSymbolicFailureReason());
+        expect("e^x*sin(x) on [0,1] (self-referential by parts, tried first)", vPartsSelf, expPartsSelf, 1e-6, true, partsSelf.wasLastResultSymbolic(), partsSelf.getLastSymbolicFailureReason());
         System.out.println("  F = " + partsSelf.getLastAntiderivativeDescription());
 
         SymbolicIntegrator ratLin = make("(x^2+1)/(x-3)");

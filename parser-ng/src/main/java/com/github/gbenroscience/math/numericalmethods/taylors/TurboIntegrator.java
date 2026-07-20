@@ -255,11 +255,11 @@ public class TurboIntegrator {
          System.out.println("sin(x^2) - CALCULATED: "+ans+", EXACT: "+exact);
  
         
-          integrator = new TurboIntegrator(new MathExpression("x^x"), 45);
+          integrator = new TurboIntegrator(new MathExpression("x^x"), 100);
          x1=1.1;
          x2=15;
          exact = 3.92135678385800451368E16;
-         ans = integrator.integrate("x", x1, x2, 20, 1.0E-16);
+         ans = integrator.integrate("x", x1, x2, 10, 1000);
          System.out.println("x^x - CALCULATED: "+ans+", EXACT: "+exact);
 //CALCULATED: 1.186851417060609E17, EXACT: 3.921356783858005E16
 //            1.1868514170606243E17, EXACT: 3.921356783858005E16

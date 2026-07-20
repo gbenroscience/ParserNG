@@ -41,6 +41,11 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 // Thread-local cache allocation helper for flat translation buffers
     private static final ThreadLocal<double[]> FLAT_BUFFER_CACHE = ThreadLocal.withInitial(() -> new double[0]);
 
+    /**
+     * The number of workers to use. Set to -1 to imply that no workers will be
+     * needed
+     */
+    protected int numWorkers = BatchedVectorCompositeExpression.computeWorkers();
     // Opcode Constants
     static final int OP_CONST = 1;
     static final int OP_LOAD = 2;
