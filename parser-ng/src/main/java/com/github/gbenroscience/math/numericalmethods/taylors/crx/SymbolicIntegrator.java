@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 package com.github.gbenroscience.math.numericalmethods.taylors.crx;
-
+ 
+ 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathExpression.Token;
 
@@ -22,6 +23,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -75,6 +78,7 @@ import java.util.logging.Logger;
  *
  * <h2>The rule book, concretely</h2>
  * Constant / power / sum / difference / constant-multiple / constant-
+<<<<<<< HEAD
  * denominator rules; a table of ~25 elementary antiderivatives generalized to
  * any affine argument ({@code integral(h(ax+b)) = H(ax+b)/a}); the
  * logarithmic-derivative rule ({@code integral(f'/f) = ln|f|}, which
@@ -87,10 +91,26 @@ import java.util.logging.Logger;
  * linear or quadratic denominators (numerator of any degree, via polynomial
  * long division first). See {@link SymbolicEngine}'s static initializer for the
  * exact ordered rule list.
+=======
+ * denominator rules; a table of ~25 elementary antiderivatives generalized
+ * to any affine argument ({@code integral(h(ax+b)) = H(ax+b)/a}); the
+ * logarithmic-derivative rule ({@code integral(f'/f) = ln|f|}, which
+ * generically covers {@code tan}, {@code cot}, and any derivative-over-
+ * function form); a genuine u-substitution search that recursively
+ * re-invokes the whole engine on the transformed sub-problem; integration
+ * by parts with LIATE-priority factor selection and the classic self-
+ * referential "solve for I" technique (for {@code integral(e^x*sin(x))}-
+ * shaped problems); and a complete-the-square, partial-fraction-free
+ * solver for rational functions with linear or quadratic denominators
+ * (numerator of any degree, via polynomial long division first). See
+ * {@link SymbolicEngine}'s static initializer for the exact ordered rule
+ * list.
+>>>>>>> c5a6fdb... save multiple fixes to differentiation in std and turbo
  *
  * <h2>Revision: general versatility fixes, not point patches</h2>
  * Two originally-failing cases ({@code 2*x*cos(x^2)}, u-substitution;
  * {@code exp(x)*sin(x)}, self-referential by-parts) traced back to four
+<<<<<<< HEAD
  * distinct, generally-applicable gaps rather than anything specific to those
  * two expressions:
  * <ol>
@@ -135,6 +155,56 @@ import java.util.logging.Logger;
  * {@code ruleConstantDenominator} to close that gap. {@code deepEquals} was
  * also made commutative for {@code ADD}/{@code MUL} ({@code a*b} and
  * {@code b*a} now recognized as equal), which strengthens every
+=======
+ * distinct, generally-applicable gaps rather than anything specific to
+ * those two expressions:
+ * <ol>
+ *   <li><b>Nested-constant extraction.</b> {@code ruleConstantMultiple}
+ *       only looked at a {@code MUL} node's two immediate children, so a
+ *       constant buried one level deeper in a left-associated chain like
+ *       {@code (2*x)*cos(x^2)} was never found. Now uses {@link
+ *       #flattenMul}/{@link #rebuildMul} to gather every multiplicative
+ *       factor regardless of nesting, partition constant from
+ *       variable-dependent factors, and recurse on the product of the
+ *       latter -- this also transitively strengthens u-substitution and
+ *       by-parts, since both rely on the same recursive {@code integrate}
+ *       call after a constant is pulled out.</li>
+ *   <li><b>Division-side factor cancellation.</b> {@code simplify}'s
+ *       {@code DIV} case previously only folded exact whole-operand
+ *       matches; it had no notion of canceling a shared factor buried
+ *       inside a product on each side (e.g. {@code x*cos(x^2) / (2*x)}
+ *       never became {@code cos(x^2)/2}). This blocked u-substitution from
+ *       ever recognizing that a candidate substitution actually eliminated
+ *       the original variable. Fixed via the same flatten/rebuild
+ *       machinery, applied to both operands of a division.</li>
+ *   <li><b>Negation-aware cancellation.</b> {@code flattenMul} treats
+ *       {@code -X} as the factor {@code -1} times {@code X}'s own factors,
+ *       so e.g. {@code -sin(x)/sin(x)} now correctly cancels to the literal
+ *       constant {@code -1} -- needed for the self-referential by-parts
+ *       "solve for I" algebra to recognize its own closure at all.</li>
+ *   <li><b>Self-reference search order.</b> {@code tryByParts} previously
+ *       attempted the generic recursive {@code integrate} call on the
+ *       by-parts remainder <i>before</i> the explicit self-referential
+ *       check -- meaning that recursive call could reset context (a fresh
+ *       {@code originalIntegrand}, a reset {@code partsDepth}) before the
+ *       self-reference pattern was ever tried with the correct original
+ *       problem in view. The self-referential check now runs first, with
+ *       the generic recursive attempt as the fallback -- verified this
+ *       reordering doesn't change behavior for an ordinary (non-self-
+ *       referential) case like {@code x*sin(x)}, since {@code
+ *       trySelfReferential} bails out immediately and cheaply whenever the
+ *       by-parts remainder isn't itself a product of two var-dependent
+ *       factors.</li>
+ * </ol>
+ * A fifth, smaller gap found in the same pass: there was no rule at all for
+ * {@code f(x)/constant} (dividing by a plain number) -- {@code
+ * ruleLogDerivative} and {@code ruleRationalLinearOrQuadratic} both
+ * explicitly require the denominator to depend on the variable in a
+ * specific way, so a bare constant denominator matched neither. Added
+ * {@code ruleConstantDenominator} to close that gap. {@code deepEquals}
+ * was also made commutative for {@code ADD}/{@code MUL} ({@code a*b}
+ * and {@code b*a} now recognized as equal), which strengthens every
+>>>>>>> c5a6fdb... save multiple fixes to differentiation in std and turbo
  * cancellation/dedup/matching operation built on top of it throughout the
  * engine, not just the two cases that motivated this revision.
  */
@@ -443,6 +513,7 @@ public final class SymbolicIntegrator {
             return false;
         }
 
+ 
         /**
          * Commutative for ADD/MUL: a+b==b+a and a*b==b*a are both recognized.
          * Strengthens every cancellation/dedup/matching operation built on this
@@ -465,6 +536,7 @@ public final class SymbolicIntegrator {
                         if (!deepEquals(a.children[i], b.children[i])) {
                             return false;
                         }
+ 
                     }
                     return true;
                 }
@@ -473,6 +545,7 @@ public final class SymbolicIntegrator {
                     return (deepEquals(a.children[0], b.children[0]) && deepEquals(a.children[1], b.children[1]))
                             || (deepEquals(a.children[0], b.children[1]) && deepEquals(a.children[1], b.children[0]));
                 default: {
+ 
                     if (a.children.length != b.children.length) {
                         return false;
                     }
@@ -480,6 +553,7 @@ public final class SymbolicIntegrator {
                         if (!deepEquals(a.children[i], b.children[i])) {
                             return false;
                         }
+ 
                     }
                     return true;
                 }
@@ -529,12 +603,19 @@ public final class SymbolicIntegrator {
         }
 
         /**
+<<<<<<< HEAD
          * Flattens a MUL-chain (of any nesting/associativity) into its
          * multiplicative factors. {@code NEG(x)} is unwrapped as the factor
          * {@code -1} followed by {@code x}'s own factors -- this is what lets
          * e.g. {@code -sin(x)/sin(x)} cancel down to the literal constant
          * {@code -1} rather than being left as an unrecognized
          * {@code NEG(sin(x))/sin(x)}.
+=======
+         * Flattens a MUL-chain (of any nesting/associativity) into its multiplicative factors.
+         * {@code NEG(x)} is unwrapped as the factor {@code -1} followed by {@code x}'s own
+         * factors -- this is what lets e.g. {@code -sin(x)/sin(x)} cancel down to the literal
+         * constant {@code -1} rather than being left as an unrecognized {@code NEG(sin(x))/sin(x)}.
+>>>>>>> c5a6fdb... save multiple fixes to differentiation in std and turbo
          */
         void flattenMul(Expr e, List<Expr> out) {
             if (e.kind == Expr.Kind.MUL) {
@@ -549,15 +630,18 @@ public final class SymbolicIntegrator {
         }
 
         Expr rebuildMul(List<Expr> factors) {
+
             if (factors.isEmpty()) {
                 return Expr.constant(1);
             }
+ 
             Expr result = factors.get(0);
             for (int i = 1; i < factors.size(); i++) {
                 result = Expr.mul(result, factors.get(i));
             }
             return result;
         }
+ 
 
         // -------------------- simplification --------------------
         public Expr simplify(Expr e) {
@@ -617,6 +701,7 @@ public final class SymbolicIntegrator {
                 }
                 case DIV: {
                     Expr a = sc[0], b = sc[1];
+ 
                     if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST && b.constVal != 0.0) {
                         return Expr.constant(a.constVal / b.constVal);
                     }
@@ -629,6 +714,7 @@ public final class SymbolicIntegrator {
                     if (deepEquals(a, b)) {
                         return Expr.constant(1);
                     }
+ 
 
                     // Factor cancellation: flatten both sides into multiplicative factors and
                     // remove structurally-matching pairs (one from each side), regardless of
@@ -1385,7 +1471,7 @@ public final class SymbolicIntegrator {
             return ia == null ? null : Expr.neg(ia);
         }
 
-        /**
+        /** 
          * Pulls every constant factor out of a MUL chain of ANY
          * nesting/associativity (via {@link
          * #flattenMul}) -- not just the two immediate children of the top node
@@ -1417,10 +1503,11 @@ public final class SymbolicIntegrator {
             if (integratedVarPart == null) {
                 return null;
             }
+ 
             return Expr.mul(constProduct, integratedVarPart);
         }
 
-        /**
+        /** 
          * integral(f(x)/k) = integral(f(x))/k for a var-free denominator k. A
          * previously-missing rule: neither {@link #ruleLogDerivative} nor
          * {@link #ruleRationalLinearOrQuadratic} matches a plain constant
@@ -1435,6 +1522,7 @@ public final class SymbolicIntegrator {
             if (containsVar(b, var)) {
                 return null;
             }
+ 
             Expr ia = integrate(a, var, depth + 1);
             return ia == null ? null : Expr.div(ia, b);
         }
@@ -1734,9 +1822,11 @@ public final class SymbolicIntegrator {
                 // costs nothing on an ordinary (non-self-referential) case like x*sin(x).
                 if (partsDepth < MAX_BY_PARTS_DEPTH) {
                     Expr selfRef = trySelfReferential(originalIntegrand, remainder, boundary, var, depth, partsDepth + 1);
+ 
                     if (selfRef != null) {
                         return selfRef;
                     }
+ 
                 }
 
                 Expr direct = integrate(remainder, var, depth + 1);
@@ -1906,10 +1996,12 @@ public final class SymbolicIntegrator {
         return rpn;
     }
 
+ 
     /**
      * Exposes the engine so callers can register additional rules before
      * integrating -- see class javadoc, "expandable".
      */
+ 
     public SymbolicEngine getEngine() {
         return engine;
     }
@@ -2141,7 +2233,42 @@ public final class SymbolicIntegrator {
             System.out.println("[PASS] 1/sin(x) on [1,4] correctly threw via numeric fallback: " + expectedEx.getMessage());
             passCount++;
         }
+        
+      SymbolicIntegrator quad = make("1/(x^2+3*x+1)");
+        double quadRes = quad.integrate(1.1, 3);
+        System.out.printf("[INFO ] 1/(x^2+3*x+1) on [1.1,3] (generally non-elementary): got=%.10g path=%s -- expected NUMERIC%n",
+                quadRes, quad.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
 
+        
+        
+// Scenario 1: Highly Oscillatory Wave Decay
+          SymbolicIntegrator hot1 = make("sin(50 * x^2) * exp(-x)");
+        double hot1Res = hot1.integrate(1.1, 3);
+        System.out.printf("[INFO ] sin(50 * x^2) * exp(-x) on [1.1,3] (generally non-elementary): expected=%.10g, got=%.10g path=%s -- expected NUMERIC%n",
+               0.0135728867375, hot1Res, hot1.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
+
+        
+         
+        
+        System.out.println("\n=== DEPLOYING WILD TEST CASCADE ===");
+ 
+// Scenario 2: Severe Logarithmic Barrier Proximity
+          SymbolicIntegrator hot2 = make("1 / (x * (ln(x) - 0.5)^2)");
+        double hot2Res = hot2.integrate(0.0000001, 1.0);
+        System.out.printf("[INFO ] 1 / (x * (ln(x) - 0.5)^2) on [0.0000001, 1.0] (generally non-elementary): expected=%.10g, got=%.10g path=%s -- expected NUMERIC%n",
+               0.463378546175, hot2Res, hot2.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
+
+
+
+// Scenario 3: Sharp Quantum Step Profile
+          SymbolicIntegrator hot3 = make("x^3 / (exp(200 * (x - 1)) + 1)");
+        double hot3Res = hot3.integrate(0.0, 2.0);
+        System.out.printf("[INFO ] x^3 / (exp(200 * (x - 1)) + 1) on [0.0, 2.0] (generally non-elementary): expected=%.10g, got=%.10g path=%s -- expected NUMERIC%n",
+              0.25000214159, hot3Res, hot3.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
+ 
+         
+       
+        
         System.out.println();
         System.out.println(passCount + " passed, " + failCount + " failed");
         if (failCount > 0) {
