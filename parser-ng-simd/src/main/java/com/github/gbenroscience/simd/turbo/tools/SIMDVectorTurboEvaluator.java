@@ -42,6 +42,7 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                 this.NUM_WORKERS = numWorkers - 1;
             }
         }
+ 
 
         @Override
         public MathExpression.EvalResult apply(double[] vars) {

@@ -258,7 +258,7 @@ public class TurboIntegrator {
           integrator = new TurboIntegrator(new MathExpression("x^x"), 100);
          x1=1.1;
          x2=15;
-         exact = 3.92135678385800451368E16;
+         exact = 118685141706060739.36763292129980760724321639737101;
          ans = integrator.integrate("x", x1, x2, 10, 1000);
          System.out.println("x^x - CALCULATED: "+ans+", EXACT: "+exact);
 //CALCULATED: 1.186851417060609E17, EXACT: 3.921356783858005E16
