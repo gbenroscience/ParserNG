@@ -2451,7 +2451,7 @@ public final class SymbolicIntegrator {
         // own interior-singularity scan since the symbolic engine has no principal-value machinery.
         SymbolicIntegrator interiorPole = make("1/sin(x)");
         try {
-            double rp = pole2.integrate(0.1, 0.9);
+            double rp = interiorPole.integrate(0.1, 0.9);
             System.out.println("[FAIL] 1/(x+3) through pole should have thrown via fallback, got " + rp);
             failCount++;
         } catch (Integrator.NonIntegrableSingularityException expectedEx) {
