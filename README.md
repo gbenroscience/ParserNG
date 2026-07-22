@@ -28,7 +28,7 @@ Below are live renderings of a dynamic transcendental surface layer computed ent
 
 Version 2.0.7 marks a complete architectural milestone, featuring the total migration of the bulk evaluation engine to the native JDK Vector API. 
 
-* **The Vector Breakthrough:** Guarantees a **2x to 20x throughput explosion** for complex expressions containing intense transcendental operations.
+* **The Vector Breakthrough:** Guarantees a **2x to 15x throughput explosion** for complex expressions containing intense transcendental operations.
 * **Core Efficiency Saturation:** Single-core throughput per worker thread has been optimized so aggressively that computation speeds approach physical hardware memory bandwidth limits—making horizontal scaling bottlenecks trivial.
 * **Enterprise Horizontal Scaling:** For high-scale parallel clustered JAR deployments (optimized for Linux environments), contact the author(`gbenroscience@gmail.com`) directly for specialized builds of **ParserNG Enterprise**.
 

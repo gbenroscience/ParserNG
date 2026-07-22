@@ -48,7 +48,7 @@ import java.util.logging.Logger;
  *       SymbolicEngine#funcDerivative}, and {@link SymbolicEngine#evalFunc} -- they
  * didn't exist anywhere in this engine before.</li>
  * <li><b>{@code k/(a*sin(u)+b*cos(u))}</b> (e.g. {@code 1/(sin(x)+cos(x))}):
- * needs the auxiliary-angle identity null {@code a*sin(u)+b*cos(u) = R*sin(u+phi)},
+ * needs the auxiliary-angle identity  {@code a*sin(u)+b*cos(u) = R*sin(u+phi)},
  *       {@code R=sqrt(a^2+b^2)}, {@code phi=atan2(b,a)} -- verified by hand at
  * {@code u=0} and {@code u=pi/2} with {@code a=b=1} before trusting it.
  * {@link SymbolicEngine#ruleTrigLinearCombinationReciprocal} detects this shape
@@ -308,6 +308,12 @@ public final class SymbolicIntegrator {
         /**
          * Returns a (not-yet-simplified) candidate antiderivative, or null if
          * this rule does not apply.
+         *
+         * @param integrand
+         * @param var
+         * @param engine
+         * @param depth
+         * @return
          */
         Expr tryIntegrate(Expr integrand, String var, SymbolicEngine engine, int depth);
     }
@@ -2234,7 +2240,7 @@ public final class SymbolicIntegrator {
         return builder().build(expr, "x");
     }
 
-    public static void main(String[] args) {
+    public static void check1(String[] args) {
         SymbolicIntegrator poly = make("x^3+3*x^2-5*x-8");
         double vPoly = poly.integrate(-2, 3);
         expect("x^3+3x^2-5x-8 on [-2,3] (polynomial rule)", vPoly, -1.25, 1e-8, true, poly.wasLastResultSymbolic(), poly.getLastSymbolicFailureReason());
@@ -2315,17 +2321,135 @@ public final class SymbolicIntegrator {
             passCount++;
         }
 
-        SymbolicIntegrator pole1 = make("1/(2*x-7)");
-        try {
-            double rp = pole1.integrate(0.1, 0.9);
-            System.out.println("[FAIL] 1/(2x-7) through pole should have thrown via fallback, got " + rp);
+        System.out.println();
+        System.out.println(passCount + " passed, " + failCount + " failed");
+        if (failCount > 0) {
+            System.exit(1);
+        }
+    }
+
+    public static void check2(String[] args) {
+        SymbolicIntegrator poly = make("x^3+3*x^2-5*x-8");
+        double vPoly = poly.integrate(-2, 3);
+        expect("x^3+3x^2-5x-8 on [-2,3] (polynomial rule)", vPoly, -1.25, 1e-8, true, poly.wasLastResultSymbolic(), poly.getLastSymbolicFailureReason());
+
+        SymbolicIntegrator sinI = make("sin(x)");
+        double vSin = sinI.integrate(0, Math.PI);
+        expect("sin(x) on [0,pi] (linear-argument table)", vSin, 2.0, 1e-8, true, sinI.wasLastResultSymbolic(), sinI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + sinI.getLastAntiderivativeDescription());
+
+        SymbolicIntegrator invX = make("1/x");
+        double vInvX = invX.integrate(1, 2);
+        expect("1/x on [1,2] (power rule n=-1)", vInvX, Math.log(2), 1e-8, true, invX.wasLastResultSymbolic(), invX.getLastSymbolicFailureReason());
+
+        SymbolicIntegrator tanI = make("tan(x)");
+        double vTan = tanI.integrate(0, 1);
+        expect("tan(x) on [0,1] (log-derivative rule)", vTan, -Math.log(Math.cos(1)), 1e-8, true, tanI.wasLastResultSymbolic(), tanI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + tanI.getLastAntiderivativeDescription());
+
+        // u-substitution: integral(2x*cos(x^2)) = sin(x^2) -- FIXED: previously failed because the
+        // constant "2" was buried inside a left-associated (2*x)*cos(x^2) and never got pulled out.
+        SymbolicIntegrator usub = make("2*x*cos(x^2)");
+        double vUsub = usub.integrate(0, 1.5);
+        expect("2x*cos(x^2) on [0,1.5] (u-substitution, nested constant)", vUsub, Math.sin(1.5 * 1.5), 1e-7, true, usub.wasLastResultSymbolic(), usub.getLastSymbolicFailureReason());
+        System.out.println("  F = " + usub.getLastAntiderivativeDescription());
+
+        // A second, independent u-substitution case exercising the same nested-constant fix from a
+        // different angle (constant multiplies the WHOLE product, not just one factor).
+        SymbolicIntegrator usub2 = make("6*x^2*sin(x^3)");
+        double vUsub2 = usub2.integrate(0, 1.2);
+        double expUsub2 = -2.0 * (Math.cos(Math.pow(1.2, 3)) - Math.cos(0));
+        expect("6x^2*sin(x^3) on [0,1.2] (u-substitution, degree-3 inner)", vUsub2, expUsub2, 1e-6, true, usub2.wasLastResultSymbolic(), usub2.getLastSymbolicFailureReason());
+        System.out.println("  F = " + usub2.getLastAntiderivativeDescription());
+
+        // Integration by parts (single application): integral(x*sin(x)) = sin(x) - x*cos(x)
+        SymbolicIntegrator parts1 = make("x*sin(x)");
+        double vParts1 = parts1.integrate(0, 2);
+        double expParts1 = Math.sin(2) - 2 * Math.cos(2) - (Math.sin(0) - 0 * Math.cos(0));
+        expect("x*sin(x) on [0,2] (integration by parts)", vParts1, expParts1, 1e-7, true, parts1.wasLastResultSymbolic(), parts1.getLastSymbolicFailureReason());
+        System.out.println("  F = " + parts1.getLastAntiderivativeDescription());
+
+        // Self-referential by parts: integral(e^x*sin(x)) -- FIXED: needed factor cancellation
+        // (including NEG-as-(-1) unwrapping) to recognize -e^x*sin(x)/(e^x*sin(x)) == -1, and the
+        // reordered self-reference check to actually reach that recognition.
+        SymbolicIntegrator partsSelf = make("exp(x)*sin(x)");
+        double vPartsSelf = partsSelf.integrate(0, 1);
+        java.util.function.DoubleUnaryOperator F = x -> 0.5 * Math.exp(x) * (Math.sin(x) - Math.cos(x));
+        double expPartsSelf = F.applyAsDouble(1) - F.applyAsDouble(0);
+        expect("e^x*sin(x) on [0,1] (self-referential by parts)", vPartsSelf, expPartsSelf, 1e-6, true, partsSelf.wasLastResultSymbolic(), partsSelf.getLastSymbolicFailureReason());
+        System.out.println("  F = " + partsSelf.getLastAntiderivativeDescription());
+
+        // A second self-referential case with the roles of sin/cos swapped, for real evidence this
+        // isn't a fix specific to one expression's exact shape.
+        SymbolicIntegrator partsSelf2 = make("exp(x)*cos(x)");
+        double vPartsSelf2 = partsSelf2.integrate(0, 1);
+        java.util.function.DoubleUnaryOperator F2 = x -> 0.5 * Math.exp(x) * (Math.sin(x) + Math.cos(x));
+        double expPartsSelf2 = F2.applyAsDouble(1) - F2.applyAsDouble(0);
+        expect("e^x*cos(x) on [0,1] (self-referential by parts, swapped)", vPartsSelf2, expPartsSelf2, 1e-6, true, partsSelf2.wasLastResultSymbolic(), partsSelf2.getLastSymbolicFailureReason());
+        System.out.println("  F = " + partsSelf2.getLastAntiderivativeDescription());
+
+        // The previously-missing rule: f(x)/constant.
+        SymbolicIntegrator constDenom = make("cos(x)/2");
+        double vConstDenom = constDenom.integrate(0, 1);
+        expect("cos(x)/2 on [0,1] (constant-denominator rule)", vConstDenom, Math.sin(1) / 2.0, 1e-9, true, constDenom.wasLastResultSymbolic(), constDenom.getLastSymbolicFailureReason());
+        System.out.println("  F = " + constDenom.getLastAntiderivativeDescription());
+
+        // Rational function, linear denominator, numerator degree >= denominator degree (needs division)
+        SymbolicIntegrator ratLin = make("(x^2+1)/(x-3)");
+        double vRatLin = ratLin.integrate(-1, 1);
+        java.util.function.DoubleUnaryOperator FratLin = x -> x * x / 2.0 + 3 * x + 10 * Math.log(Math.abs(x - 3));
+        double expRatLin = FratLin.applyAsDouble(1) - FratLin.applyAsDouble(-1);
+        expect("(x^2+1)/(x-3) on [-1,1] (rational, linear denom + division)", vRatLin, expRatLin, 1e-7, true, ratLin.wasLastResultSymbolic(), ratLin.getLastSymbolicFailureReason());
+        System.out.println("  F = " + ratLin.getLastAntiderivativeDescription());
+
+        // Rational function, quadratic denominator, no real roots -> arctan form
+        SymbolicIntegrator ratQuadAtan = make("1/(x^2+4)");
+        double vRatQuadAtan = ratQuadAtan.integrate(0, 2);
+        double expRatQuadAtan = (Math.atan(2.0 / 2.0) - Math.atan(0.0)) / 2.0;
+        expect("1/(x^2+4) on [0,2] (rational, quadratic denom, arctan form)", vRatQuadAtan, expRatQuadAtan, 1e-8, true, ratQuadAtan.wasLastResultSymbolic(), ratQuadAtan.getLastSymbolicFailureReason());
+        System.out.println("  F = " + ratQuadAtan.getLastAntiderivativeDescription());
+
+        // Rational function, quadratic denominator, real roots -> ln form
+        SymbolicIntegrator ratQuadLn = make("1/(x^2-9)");
+        double vRatQuadLn = ratQuadLn.integrate(0, 2);
+        double expRatQuadLn = (Math.log(Math.abs((2.0 - 3) / (2.0 + 3))) - Math.log(Math.abs((0.0 - 3) / (0.0 + 3)))) / 6.0;
+        expect("1/(x^2-9) on [0,2] (rational, quadratic denom, ln form)", vRatQuadLn, expRatQuadLn, 1e-7, true, ratQuadLn.wasLastResultSymbolic(), ratQuadLn.getLastSymbolicFailureReason());
+        System.out.println("  F = " + ratQuadLn.getLastAntiderivativeDescription());
+
+        // --- Critical negative tests: genuinely non-elementary integrands MUST fail symbolically
+        // and fall back to the numeric engine, not fabricate a wrong closed form.
+        SymbolicIntegrator gaussian = make("exp(-x^2)");
+        double vGaussian = gaussian.integrate(-3, 3);
+        expect("exp(-x^2) on [-3,3] (NO elementary antiderivative -- must fall back)",
+                vGaussian, 1.772414696519202, 1e-6, false, gaussian.wasLastResultSymbolic(), null);
+
+        SymbolicIntegrator xx = make("x^x");
+        double vXX = xx.integrate(1.1, 3);
+        System.out.printf("[INFO ] x^x on [1.1,3] (generally non-elementary): got=%.16g  actual=%.20g, path=%s -- expected NUMERIC%n",
+                vXX, 13.61975862562517599220026990647609183575,
+                xx.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
+        if (!xx.wasLastResultSymbolic()) {
+            passCount++;
+        } else {
             failCount++;
         } catch (Integrator.NonIntegrableSingularityException expectedEx) {
-            System.out.println("[PASS] 1/(2x-7) through pole correctly threw via fallback: " + expectedEx.getMessage());
+            System.out.println("[PASS] 1/(x-0.5) through pole correctly threw via fallback: " + expectedEx.getMessage());
             passCount++;
         }
+         
+        double vXX1 = xx.integrate(1.1, 15);
+        System.out.printf("[INFO ] x^x on [1.1,15] (generally non-elementary): got=%.16g, actual=%.20g, path=%s -- expected NUMERIC%n",
+                vXX1, 118685141706060739.36763292129980760724321639737101, 
+                xx.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
+        if (!xx.wasLastResultSymbolic()) {
+            passCount++;
+        } else {
+            failCount++;
+        }
 
-            SymbolicIntegrator pole2 = make("1/(x+3)");
+        // Fallback still fully functional: an interior pole, handled entirely by the numeric engine's
+        // own interior-singularity scan since the symbolic engine has no principal-value machinery.
+        SymbolicIntegrator interiorPole = make("1/sin(x)");
         try {
             double rp = pole2.integrate(0.1, 0.9);
             System.out.println("[FAIL] 1/(x+3) through pole should have thrown via fallback, got " + rp);
@@ -2341,4 +2465,10 @@ public final class SymbolicIntegrator {
             System.exit(1);
         }
     }
+
+    public static void main(String[] args) {
+        check1(args);
+        check2(args);
+    }
+    
 }

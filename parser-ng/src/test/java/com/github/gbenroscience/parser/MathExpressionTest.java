@@ -4,8 +4,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
-import com.github.gbenroscience.parser.methods.BasicNumericalMethod;
 import com.github.gbenroscience.parser.methods.Declarations;
+import com.github.gbenroscience.parser.methods.ext.Utils;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.MatrixTurboEvaluator;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
@@ -51,7 +51,6 @@ class MathExpressionTest {
         //me = new MathExpression("((weir((    (1)+((1+1)),((2)),((3+2))))))");
         Assertions.assertEquals("3.333333333", me.solve()); //weird, by nature of weird function. Will be removed once it wil be repalced by proper function
     }
-
 
     @Test
     void help() {
@@ -228,7 +227,7 @@ class MathExpressionTest {
         //MathExpression expr = new MathExpression("quad(@(x)3*x-2+3*x^2)");//BUGGY
         //MathExpression expr = new MathExpression("root(@(x)3*x-sin(x)-0.5,2)");//BUGGY
         MathExpression exprs = new MathExpression("r1=4;r1*5");
-   
+
         //A+k.A+AxB+A^c
         if (print) {
             System.out.println("scanner: " + exprs.scanner);
@@ -237,7 +236,7 @@ class MathExpressionTest {
         if (print) {
             System.out.println("solution: " + exprs.solve());
         }
-         
+
         System.out.println("r1:" + exprs.getVariable("r1").toJSON());
         Assertions.assertEquals("20.0", exprs.solve());
 
@@ -871,8 +870,8 @@ class MathExpressionTest {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
-        @Test
+
+    @Test
     void autoDiffTest() {
         try {
             MathExpression me = new MathExpression("autodiff(@(x)3*x^2,3);");
@@ -881,6 +880,22 @@ class MathExpressionTest {
             double m = fce.applyScalar(new double[1]);
             System.out.println("ans:\n" + m);
             Assertions.assertTrue(18 == m);
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    @Test
+    void autoDiffNTest() {
+        try {
+            int n = 10;//how many times to differentiate the expression before evaluating at x = 3;
+            MathExpression me = new MathExpression("autodiff(@(x)x*cos(x), 3, " + n + ");");
+            FastCompositeExpression fce = new ScalarTurboEvaluator1(me).compile();
+            System.out.println("scanner: " + me.getScanner());
+            double m = fce.applyScalar(new double[1]);
+            System.out.println("ans:\n" + m);
+            //actual answer: 1.55877740920266415080727035611
+            Assertions.assertTrue(Math.abs(m - 1.55877740920266415080727035611) <= 5E-14);
         } catch (Throwable ex) {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }

@@ -49,8 +49,8 @@ public class NumericalIntegrator {
 
     private static final int MAX_DEPTH = 22;
     private static final double TOLERANCE = 1e-13;
-    private static final long TIMEOUT_MS = 1500L;
-    private static final long TIMEOUT_LARGE_MS = 5000L;
+    private static final long TIMEOUT_MS = 5000;
+    private static final long TIMEOUT_LARGE_MS = 15000L;
     private static final int POLE_SCAN_SAMPLES = 100;
     private static final int DEEP_SCAN_SAMPLES = 800;
     private static final double DEEP_SCAN_THRESHOLD = 1e6;
@@ -704,6 +704,8 @@ public class NumericalIntegrator {
             testIntegral("@(x)1/sqrt(x)", 0.001, 1.0, 1.937);
             testIntegral("@(x)1/(x-0.5)", 0.1, 0.49, -3.6888794541139363);
             testIntegral("@(x)(1/(x*sin(x)+3*x*cos(x)))", 0.5, 1.8, 0.7356995195194);
+            testIntegral("@(x)(x^x)", 1.1, 3, 13.61975862562517599220026990647609183575);
+            testIntegral("@(x)(x^x)", 1.1, 15, 118685141706060739.36763292129980760724321639737101);
         } catch (TimeoutException e) {
             System.err.println("TIMEOUT: " + e.getMessage());
         } catch (Exception e) {

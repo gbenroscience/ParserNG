@@ -27,7 +27,7 @@ Instead of processing array elements one by one, it binds operations across hard
 
 The **`VectorTurboEvaluator`** is the standard, highly portable bulk evaluation engine embedded directly within the core architecture of ParserNG. It processes mathematical expressions across data arrays using highly optimized sequential loops and zero-allocation memory profiles powered by our foundational interpretation algorithms.
 
-It achieves the absolute peak of pure interpreted execution speed without binding itself to specialized hardware architecture features.
+It achieves the absolute peak of pure interpreted execution speed without binding itself(in user code) to specialized hardware architecture features.
 
 * **Performance Profile:** Extremely fast with zero warm-up time or compilation overhead, outperforming standard loop-based expression evaluators on small to medium-sized data batches.
 * **Environment Requirements:** Highly backward-compatible and portable. It runs anywhere the core library runs (**Java 8+**), requiring no special JVM incubator module flags or environment modifications.
@@ -57,7 +57,7 @@ To use VectorTurboEvaluator(e.g. on Android and legacy systems supporting <JDK21
 </dependency>
 ```
 
-They benchmark at *almost* same speed and same allocation, and you can use workers to increase their throughput
+VectorTurboEvaluator benchmarks at *almost half* the speed of SIMDVectorTurboEvaluator and same allocation, and you can use workers to increase their throughput
 ---
 
 

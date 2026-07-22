@@ -136,7 +136,7 @@ F(x) = sin(x)/2x; intg(F(x),0,2,iterations)
             //no info about the number of interations specified,so set default number of iterations.
             if (iterations == 0) {
                 //int trialValue = abs( (int) ((xUpper - xLower) / 0.01) );
-                setIterations(20);
+                setIterations(20000);
             }//end if
         }//end if
         else if (chooseExpressionType == FUNCTIONAL_INTEGRATION) {
@@ -144,7 +144,7 @@ F(x) = sin(x)/2x; intg(F(x),0,2,iterations)
 //no info about the number of interations specified,so set default number of iterations.
             if (iterations == 0) {
                 //int trialValue = abs( (int) ((xUpper - xLower) / 0.01) );
-                setIterations(20);
+                setIterations(20000);
             }//end if
         }//end else if
         else {
@@ -947,6 +947,7 @@ F(x) = sin(x)/2x; intg(F(x),0,2,iterations)
         FunctionManager.add("G=@(x)x*ln(x)-x");
         FunctionManager.add("H=@(x)(x^2+1)^-1");
         FunctionManager.add("I=@(x)atan(x)");
+        FunctionManager.add("J=@(x)x^x");
 
         System.out.println(FunctionManager.FUNCTIONS);
         //∫(F,2,3)dx
@@ -973,6 +974,17 @@ F(x) = sin(x)/2x; intg(F(x),0,2,iterations)
         System.out.println("Real value: " + realValue);
 
         System.out.println("%Error: " + (100 * (realValue - numericalValue) / realValue));
+        
+        x1=1.1; x2=3.0;
+        numericalIntegral = new NumericalIntegral("intg(J," + x1 + "," + x2 + ")", FUNCTIONAL_INTEGRATION);
+        numericalValue = numericalIntegral.findHighRangeIntegral();
+        System.out.println("Numerical value: " + numericalValue);
+        
+        
+        x1=1.1; x2=15.0;//ACTUAL ANSWER: 118685141706060739.36763292129980760724321639737101
+        numericalIntegral = new NumericalIntegral("intg(J," + x1 + "," + x2 + ")", FUNCTIONAL_INTEGRATION);
+        numericalValue = numericalIntegral.findHighRangeIntegral();
+        System.out.println("Numerical value: " + numericalValue);
 
 //
     }//end main

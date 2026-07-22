@@ -29,14 +29,12 @@ import java.util.logging.Logger;
  * expression into a small algebraic AST ({@link Expr}), attempts to find a
  * closed-form antiderivative via an ordered, expandable rule book ({@link
  * IntegrationRule}), and -- critically -- <b>verifies</b> any candidate
- * antiderivative (symbolic differentiation + numeric spot-checks, plus a
- * singularity pre-check on the numeric fallback -- see "Why sparse verification
- * alone is not enough" below) before trusting it. If symbolic integration is
- * not attempted, fails, or fails verification, {@link
- * SymbolicIntegrator#integrate} transparently falls back to the fully-featured
- * numeric {@link Integrator} built in prior revisions of this codebase
- * (Gauss-Kronrod, endpoint/interior singularity handling, Taylor rescue, all of
- * it) -- unchanged and undiminished.
+ * antiderivative (symbolic differentiation + numeric spot-checks) before
+ * trusting it. If symbolic integration is not attempted, fails, or fails
+ * verification, {@link SymbolicIntegrator#integrate} transparently falls back
+ * to the fully-featured numeric {@link Integrator} built in prior revisions of
+ * this codebase (Gauss-Kronrod, endpoint/interior singularity handling, Taylor
+ * rescue, all of it) -- unchanged and undiminished.
  *
  * <h2>Honesty about scope</h2>
  * General symbolic integration is undecidable (this is literally what the Risch
@@ -49,22 +47,23 @@ import java.util.logging.Logger;
  * expected to (and, per the self-tests, does) fail symbolically on them and
  * fall back cleanly, not fabricate an answer.
  *
- * <h2>Why sparse verification alone is not enough</h2>
- * A candidate antiderivative that differentiates back correctly at 7 spot-check
- * points can still mask a genuine interior pole. Concretely:
- * {@code integral(1/x) = ln|x|}, and this is symbolically correct and
- * differentiates back to {@code 1/x} everywhere except {@code x=0}. Over a
- * symmetric interval like {@code [-1,1]}, one of the 7 spot-check points
- * happens to land exactly at {@code x=0} (skipped, since evaluation throws
- * there), and the other 6 all pass -- so verification alone would accept
- * {@code F(1)-F(-1) = ln(1)-ln(1) = 0}, silently returning the Cauchy
- * <i>principal value</i> for an integral that does not actually converge in the
- * ordinary sense at all. {@link Builder#singularityPrecheckEnabled} (on by
- * default) closes this: after a candidate passes spot-check verification,
- * {@link SingularityAwareIntegrator#rangeLooksSingular} is asked whether the
- * numeric engine's own (more thorough) singularity scan flags anything in
- * range, and if so the symbolic result is discarded in favor of the numeric
- * engine regardless of the spot-checks having passed.
+ * <h2>Why verification is the load-bearing safety mechanism</h2>
+ * Every rule in the book was hand-derived; some (the six inverse
+ * trig/hyperbolic table entries, the by-parts self-reference algebra, the
+ * complete-the-square quadratic-denominator cases) involve enough algebra that
+ * a transcription slip is a real risk, and there is no compiler available in
+ * this environment to catch one. Rather than trust hand-derived calculus
+ * blindly, every candidate antiderivative {@code F} is symbolically
+ * differentiated back to {@code F'} and spot-checked against the original
+ * integrand at 7 points spread across the integration interval (excluding the
+ * exact endpoints, to avoid boundary-singularity false failures) before being
+ * used. A failing check is a hard, reliable veto -- it can never produce a
+ * false <i>positive</i> (an actually-wrong result silently delivered with
+ * confidence); it can only ever cause an unnecessary fall back to the
+ * always-safe numeric engine. Passing is evidence, not mathematical proof
+ * (finite sampling), which is exactly the same epistemic standard applied to
+ * every other verification step built earlier in this codebase
+ * (endpoint-subtraction re-probing, the GK/Taylor cross-check).
  *
  * <h2>Single-variable scope, deliberately</h2>
  * The parser rejects (bails to numeric) any {@code VARIABLE} token whose name
@@ -77,54 +76,67 @@ import java.util.logging.Logger;
  * <h2>The rule book, concretely</h2>
  * Constant / power / sum / difference / constant-multiple / constant-
  * denominator rules; a table of ~25 elementary antiderivatives generalized to
- * any affine argument ({@code integral(h(ax+b)) = H(ax+b)/a}), including ANY
- * integer or non-integer power of an affine base as a denominator (via a
- * {@code DIV(a, POW(base,exp)) -> a*base^(-exp)} normalization in {@code
- * simplify} -- not capped at degree 2 the way the quadratic-denominator rule
- * alone is); the logarithmic-derivative rule ({@code
- * integral(f'/f) = ln|f|}, which generically covers {@code tan}, {@code
- * cot}, and any derivative-over-function form); a genuine u-substitution search
- * that recursively re-invokes the whole engine on the transformed sub-problem
- * (this also transparently covers trig products like {@code
- * sin(x)*cos(x)} -- no dedicated product-to-sum rule needed, see the
- * self-tests); integration by parts with LIATE-priority factor selection and
- * the classic self-referential "solve for I" technique (for {@code
- * integral(e^x*sin(x))}-shaped problems); and a complete-the-square,
- * partial-fraction-free solver for rational functions with linear or quadratic
- * denominators (numerator of any degree, via polynomial long division first).
- * See {@link SymbolicEngine}'s static initializer for the exact ordered rule
- * list.
+ * any affine argument ({@code integral(h(ax+b)) = H(ax+b)/a}); the
+ * logarithmic-derivative rule ({@code integral(f'/f) = ln|f|}, which
+ * generically covers {@code tan}, {@code cot}, and any derivative-over-
+ * function form); a genuine u-substitution search that recursively re-invokes
+ * the whole engine on the transformed sub-problem; integration by parts with
+ * LIATE-priority factor selection and the classic self- referential "solve for
+ * I" technique (for {@code integral(e^x*sin(x))}- shaped problems); and a
+ * complete-the-square, partial-fraction-free solver for rational functions with
+ * linear or quadratic denominators (numerator of any degree, via polynomial
+ * long division first). See {@link SymbolicEngine}'s static initializer for the
+ * exact ordered rule list.
  *
- * <h2>Revision history: general versatility fixes, not point patches</h2>
+ * <h2>Revision: general versatility fixes, not point patches</h2>
+ * Two originally-failing cases ({@code 2*x*cos(x^2)}, u-substitution;
+ * {@code exp(x)*sin(x)}, self-referential by-parts) traced back to four
+ * distinct, generally-applicable gaps rather than anything specific to those
+ * two expressions:
  * <ol>
- * <li><b>Nested-constant extraction.</b> {@code ruleConstantMultiple} now uses
- * {@link #flattenMul}/{@link #rebuildMul} to gather every multiplicative factor
- * regardless of nesting (a constant buried in a left-associated chain like
- * {@code (2*x)*cos(x^2)} used to never be found).</li>
- * <li><b>Division-side factor cancellation</b> (including {@code NEG(x)}
- * unwrapped as the factor {@code -1}), in {@code simplify}'s {@code DIV} case
- * -- needed for u-substitution to recognize a candidate actually eliminated the
- * original variable, and for the self-referential by-parts algebra to recognize
- * its own closure (e.g. {@code -sin(x)/sin(x) == -1}).</li>
- * <li><b>Self-reference search order.</b> {@code tryByParts} tries the explicit
- * self-referential check before the generic recursive {@code integrate} call,
- * which previously could reset context before the pattern was ever tried with
- * the correct original problem in view.</li>
- * <li><b>A previously-missing rule</b>, {@code ruleConstantDenominator}, for
- * {@code f(x)/constant} -- neither {@code ruleLogDerivative} nor
- * {@code ruleRationalLinearOrQuadratic} matched a plain constant
- * denominator.</li>
- * <li><b>Commutative {@code deepEquals}</b> for {@code ADD}/{@code MUL}
- * ({@code a*b == b*a}), strengthening every cancellation/dedup/ matching
- * operation built on it throughout the engine.</li>
- * <li><b>Power-of-affine denominators of any degree</b> (see "The rule book"
- * above) via a {@code DIV(a,POW(base,exp)) -> a*base^(-exp)} normalization, not
- * just the degree-2 case the quadratic-denominator rule happens to also
- * handle.</li>
- * <li><b>The singularity pre-check</b> described above, closing the
- * principal-value-masking gap that sparse spot-check verification cannot see by
- * construction.</li>
+ * <li><b>Nested-constant extraction.</b> {@code ruleConstantMultiple} only
+ * looked at a {@code MUL} node's two immediate children, so a constant buried
+ * one level deeper in a left-associated chain like {@code (2*x)*cos(x^2)} was
+ * never found. Now uses {@link
+ *       #flattenMul}/{@link #rebuildMul} to gather every multiplicative factor
+ * regardless of nesting, partition constant from variable-dependent factors,
+ * and recurse on the product of the latter -- this also transitively
+ * strengthens u-substitution and by-parts, since both rely on the same
+ * recursive {@code integrate} call after a constant is pulled out.</li>
+ * <li><b>Division-side factor cancellation.</b> {@code simplify}'s {@code DIV}
+ * case previously only folded exact whole-operand matches; it had no notion of
+ * canceling a shared factor buried inside a product on each side (e.g.
+ * {@code x*cos(x^2) / (2*x)} never became {@code cos(x^2)/2}). This blocked
+ * u-substitution from ever recognizing that a candidate substitution actually
+ * eliminated the original variable. Fixed via the same flatten/rebuild
+ * machinery, applied to both operands of a division.</li>
+ * <li><b>Negation-aware cancellation.</b> {@code flattenMul} treats {@code -X}
+ * as the factor {@code -1} times {@code X}'s own factors, so e.g.
+ * {@code -sin(x)/sin(x)} now correctly cancels to the literal constant
+ * {@code -1} -- needed for the self-referential by-parts "solve for I" algebra
+ * to recognize its own closure at all.</li>
+ * <li><b>Self-reference search order.</b> {@code tryByParts} previously
+ * attempted the generic recursive {@code integrate} call on the by-parts
+ * remainder <i>before</i> the explicit self-referential check -- meaning that
+ * recursive call could reset context (a fresh {@code originalIntegrand}, a
+ * reset {@code partsDepth}) before the self-reference pattern was ever tried
+ * with the correct original problem in view. The self-referential check now
+ * runs first, with the generic recursive attempt as the fallback -- verified
+ * this reordering doesn't change behavior for an ordinary (non-self-
+ * referential) case like {@code x*sin(x)}, since {@code
+ *       trySelfReferential} bails out immediately and cheaply whenever the by-parts
+ * remainder isn't itself a product of two var-dependent factors.</li>
  * </ol>
+ * A fifth, smaller gap found in the same pass: there was no rule at all for
+ * {@code f(x)/constant} (dividing by a plain number) -- {@code
+ * ruleLogDerivative} and {@code ruleRationalLinearOrQuadratic} both explicitly
+ * require the denominator to depend on the variable in a specific way, so a
+ * bare constant denominator matched neither. Added
+ * {@code ruleConstantDenominator} to close that gap. {@code deepEquals} was
+ * also made commutative for {@code ADD}/{@code MUL} ({@code a*b} and
+ * {@code b*a} now recognized as equal), which strengthens every
+ * cancellation/dedup/matching operation built on top of it throughout the
+ * engine, not just the two cases that motivated this revision.
  */
 public final class SymbolicIntegrator {
 
@@ -157,24 +169,6 @@ public final class SymbolicIntegrator {
         public EvalDomainException(String message) {
             super(message);
         }
-    }
-
-    /**
-     * Implemented by a numeric fallback engine that can cheaply check whether
-     * an interval likely contains an interior singularity, without running a
-     * full adaptive integration. Used as a safety net -- see class javadoc,
-     * "Why sparse verification alone is not enough": a candidate symbolic
-     * antiderivative that passes its own sparse spot-check verification can
-     * still silently mask a genuine pole (e.g. {@code ln|x|} across an interval
-     * straddling {@code x=0} evaluates fine at both bounds and can pass every
-     * spot-check, then silently return the Cauchy principal value instead of
-     * correctly signaling non-convergence). If the numeric fallback implements
-     * this and flags the range, the symbolic result is discarded even after
-     * passing verification.
-     */
-    public interface SingularityAwareIntegrator {
-
-        boolean rangeLooksSingular(double a, double b);
     }
 
     // ------------------------------------------------------------------
@@ -1008,18 +1002,6 @@ public final class SymbolicIntegrator {
                         throw new EvalDomainException("atanh domain");
                     }
                     return 0.5 * Math.log((1 + u) / (1 - u));
-                case "coth":
-                    if (Math.abs(Math.sinh(u)) < 1e-300) {
-                        throw new EvalDomainException("coth domain");
-                    }
-                    return Math.cosh(u) / Math.sinh(u);
-                case "sech":
-                    return 1.0 / Math.cosh(u);
-                case "csch":
-                    if (Math.abs(Math.sinh(u)) < 1e-300) {
-                        throw new EvalDomainException("csch domain");
-                    }
-                    return 1.0 / Math.sinh(u);
                 case "abs":
                     return Math.abs(u);
                 default:
@@ -1303,12 +1285,6 @@ public final class SymbolicIntegrator {
                 case "arctanh":
                     return Expr.add(Expr.mul(u, Expr.func("atanh", u)),
                             Expr.mul(Expr.constant(0.5), Expr.func("ln", Expr.sub(Expr.constant(1), Expr.pow(u, Expr.constant(2))))));
-                case "coth":
-                    return Expr.func("ln", Expr.func("abs", Expr.func("sinh", u)));
-                case "sech":
-                    return Expr.mul(Expr.constant(2), Expr.func("atan", Expr.func("exp", u)));
-                case "csch":
-                    return Expr.func("ln", Expr.func("abs", Expr.func("tanh", Expr.div(u, Expr.constant(2)))));
                 case "abs":
                     return Expr.mul(Expr.constant(0.5), Expr.mul(u, Expr.func("abs", u)));
                 default:
@@ -1346,9 +1322,6 @@ public final class SymbolicIntegrator {
                     case "sinh":
                     case "cosh":
                     case "tanh":
-                    case "coth":
-                    case "sech":
-                    case "csch":
                         return 1;
                     case "exp":
                         return 0;
@@ -2065,20 +2038,6 @@ public final class SymbolicIntegrator {
             return this;
         }
 
-        /**
-         * Default true. When enabled, a symbolic candidate that passes
-         * spot-check verification is still discarded (in favor of the numeric
-         * engine) if {@link SingularityAwareIntegrator#
-         * rangeLooksSingular} flags the range -- see class javadoc, "Why sparse
-         * verification alone is not enough". Disabling this trades that safety
-         * net for avoiding the numeric engine's one-time construction cost on
-         * every symbolic success.
-         */
-        public Builder singularityPrecheckEnabled(boolean enabled) {
-            this.singularityPrecheckEnabled = enabled;
-            return this;
-        }
-
         public SymbolicIntegrator build(MathExpression me, String wrtVar) {
             return new SymbolicIntegrator(me, wrtVar, this);
         }
@@ -2273,7 +2232,98 @@ public final class SymbolicIntegrator {
         return builder().build(expr, "x");
     }
 
-    public static void main(String[] args) {
+    public static void check1(String[] args) {
+        
+        System.out.println("===========================================CHECK1 STARTS=====================================================");
+        SymbolicIntegrator poly = make("x^3+3*x^2-5*x-8");
+        double vPoly = poly.integrate(-2, 3);
+        expect("x^3+3x^2-5x-8 on [-2,3] (polynomial rule)", vPoly, -1.25, 1e-8, true, poly.wasLastResultSymbolic(), poly.getLastSymbolicFailureReason());
+
+        SymbolicIntegrator sinI = make("sin(x)");
+        double vSin = sinI.integrate(0, Math.PI);
+        expect("sin(x) on [0,pi]", vSin, 2.0, 1e-8, true, sinI.wasLastResultSymbolic(), sinI.getLastSymbolicFailureReason());
+
+        SymbolicIntegrator tanI = make("tan(x)");
+        double vTan = tanI.integrate(0, 1);
+        expect("tan(x) on [0,1]", vTan, -Math.log(Math.cos(1)), 1e-8, true, tanI.wasLastResultSymbolic(), tanI.getLastSymbolicFailureReason());
+
+        SymbolicIntegrator usub = make("2*x*cos(x^2)");
+        double vUsub = usub.integrate(0, 1.5);
+        expect("2x*cos(x^2) on [0,1.5] (u-substitution, factor cancellation)", vUsub, Math.sin(1.5 * 1.5), 1e-7, true, usub.wasLastResultSymbolic(), usub.getLastSymbolicFailureReason());
+
+        SymbolicIntegrator partsSelf = make("exp(x)*sin(x)");
+        double vPartsSelf = partsSelf.integrate(0, 1);
+        java.util.function.DoubleUnaryOperator F = x -> 0.5 * Math.exp(x) * (Math.sin(x) - Math.cos(x));
+        double expPartsSelf = F.applyAsDouble(1) - F.applyAsDouble(0);
+        expect("e^x*sin(x) on [0,1] (self-referential by parts)", vPartsSelf, expPartsSelf, 1e-6, true, partsSelf.wasLastResultSymbolic(), partsSelf.getLastSymbolicFailureReason());
+
+        // --- New: reciprocal-trig cases ---
+        SymbolicIntegrator recipSin = make("2/sin(x)");
+        double vRecipSin = recipSin.integrate(1.0, 2.0);
+        java.util.function.DoubleUnaryOperator FcscScaled = x -> -2.0 * Math.log(Math.abs(1.0 / Math.sin(x) + 1.0 / Math.tan(x)));
+        double expRecipSin = FcscScaled.applyAsDouble(2.0) - FcscScaled.applyAsDouble(1.0);
+        expect("2/sin(x) on [1,2] (reciprocal-trig rule)", vRecipSin, expRecipSin, 1e-6, true, recipSin.wasLastResultSymbolic(), recipSin.getLastSymbolicFailureReason());
+        System.out.println("  F = " + recipSin.getLastAntiderivativeDescription());
+
+        SymbolicIntegrator recipCos4x = make("3/cos(4*x)");
+        double vRecipCos4x = recipCos4x.integrate(0.1, 0.3);
+        java.util.function.DoubleUnaryOperator FsecScaled = x -> 0.75 * Math.log(Math.abs(1.0 / Math.cos(4 * x) + Math.tan(4 * x)));
+        double expRecipCos4x = FsecScaled.applyAsDouble(0.3) - FsecScaled.applyAsDouble(0.1);
+        expect("3/cos(4x) on [0.1,0.3] (reciprocal-trig rule, affine argument)", vRecipCos4x, expRecipCos4x, 1e-6, true, recipCos4x.wasLastResultSymbolic(), recipCos4x.getLastSymbolicFailureReason());
+        System.out.println("  F = " + recipCos4x.getLastAntiderivativeDescription());
+
+        // --- New: coth/sech/csch table entries ---
+        SymbolicIntegrator cothI = make("1/tanh(x)");
+        double vCoth = cothI.integrate(0.5, 1.5);
+        double expCoth = Math.log(Math.abs(Math.sinh(1.5))) - Math.log(Math.abs(Math.sinh(0.5)));
+        expect("1/tanh(x) on [0.5,1.5] (-> coth -> ln|sinh|)", vCoth, expCoth, 1e-6, true, cothI.wasLastResultSymbolic(), cothI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + cothI.getLastAntiderivativeDescription());
+
+        SymbolicIntegrator sechI = make("1/cosh(x)");
+        double vSech = sechI.integrate(0.0, 1.0);
+        double expSech = Math.atan(Math.sinh(1.0)) - Math.atan(Math.sinh(0.0));
+        expect("1/cosh(x) on [0,1] (-> sech -> atan(sinh))", vSech, expSech, 1e-6, true, sechI.wasLastResultSymbolic(), sechI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + sechI.getLastAntiderivativeDescription());
+
+        SymbolicIntegrator cschI = make("1/sinh(x)");
+        double vCsch = cschI.integrate(0.5, 1.5);
+        double expCsch = Math.log(Math.abs(Math.tanh(1.5 / 2))) - Math.log(Math.abs(Math.tanh(0.5 / 2)));
+        expect("1/sinh(x) on [0.5,1.5] (-> csch -> ln|tanh(x/2)|)", vCsch, expCsch, 1e-6, true, cschI.wasLastResultSymbolic(), cschI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + cschI.getLastAntiderivativeDescription());
+
+        // --- New: the auxiliary-angle case ---
+        SymbolicIntegrator sinPlusCos = make("1/(sin(x)+cos(x))");
+        double vSinPlusCos = sinPlusCos.integrate(0.2, 0.8);
+        java.util.function.DoubleUnaryOperator Faux = x -> (1.0 / Math.sqrt(2)) * Math.log(Math.abs(Math.tan(x / 2 + Math.PI / 8)));
+        double expSinPlusCos = Faux.applyAsDouble(0.8) - Faux.applyAsDouble(0.2);
+        expect("1/(sin(x)+cos(x)) on [0.2,0.8] (auxiliary-angle rule)", vSinPlusCos, expSinPlusCos, 1e-6, true, sinPlusCos.wasLastResultSymbolic(), sinPlusCos.getLastSymbolicFailureReason());
+        System.out.println("  F = " + sinPlusCos.getLastAntiderivativeDescription());
+
+        // --- Existing safety checks unchanged ---
+        SymbolicIntegrator gaussian = make("exp(-x^2)");
+        double vGaussian = gaussian.integrate(-3, 3);
+        expect("exp(-x^2) on [-3,3] (NO elementary antiderivative -- must fall back)",
+                vGaussian, 1.772414696519202, 1e-6, false, gaussian.wasLastResultSymbolic(), null);
+
+        SymbolicIntegrator pole = make("1/(x-0.5)");
+        try {
+            double rp = pole.integrate(0.1, 0.9);
+            System.out.println("[FAIL] 1/(x-0.5) through pole should have thrown via fallback, got " + rp);
+            failCount++;
+        } catch (Integrator.NonIntegrableSingularityException expectedEx) {
+            System.out.println("[PASS] 1/(x-0.5) through pole correctly threw via fallback: " + expectedEx.getMessage());
+            passCount++;
+        }
+
+        System.out.println("After check1 - ");
+        System.out.println(passCount + " passed, " + failCount + " failed");
+       System.out.println("===========================================CHECK1 ENDS=====================================================");
+       
+    }
+
+    public static void check2(String[] args) {
+         System.out.println("===========================================CHECK2 STARTS=====================================================");
+       
         SymbolicIntegrator poly = make("x^3+3*x^2-5*x-8");
         double vPoly = poly.integrate(-2, 3);
         expect("x^3+3x^2-5x-8 on [-2,3] (polynomial rule)", vPoly, -1.25, 1e-8, true, poly.wasLastResultSymbolic(), poly.getLastSymbolicFailureReason());
@@ -2468,6 +2518,13 @@ public final class SymbolicIntegrator {
 
         System.out.println();
         System.out.println(passCount + " passed, " + failCount + " failed");
+    System.out.println("===========================================CHECK2 ENDS=====================================================");
+      
+    }
+
+    public static void main(String[] args) {
+        check1(args);
+        check2(args);
         if (failCount > 0) {
             System.exit(1);
         }
