@@ -1,4 +1,16 @@
-/** See the License for the specific language governing permissions and
+/*
+ * Copyright 2026 oluwagbemirojiboye.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
  * limitations under the License.
  */
 package com.github.gbenroscience.math.numericalmethods.taylors.crx;
@@ -17,120 +29,102 @@ import java.util.logging.Logger;
  * expression into a small algebraic AST ({@link Expr}), attempts to find a
  * closed-form antiderivative via an ordered, expandable rule book ({@link
  * IntegrationRule}), and -- critically -- <b>verifies</b> any candidate
- * antiderivative (symbolic differentiation + numeric spot-checks) before
- * trusting it. If symbolic integration is not attempted, fails, or fails
- * verification, {@link SymbolicIntegrator#integrate} transparently falls
- * back to the fully-featured numeric {@link Integrator} built in prior
- * revisions of this codebase (Gauss-Kronrod, endpoint/interior singularity
- * handling, Taylor rescue, all of it) -- unchanged and undiminished.
+ * antiderivative (symbolic differentiation + numeric spot-checks, plus a
+ * singularity pre-check on the numeric fallback -- see "Why sparse verification
+ * alone is not enough" below) before trusting it. If symbolic integration is
+ * not attempted, fails, or fails verification, {@link
+ * SymbolicIntegrator#integrate} transparently falls back to the fully-featured
+ * numeric {@link Integrator} built in prior revisions of this codebase
+ * (Gauss-Kronrod, endpoint/interior singularity handling, Taylor rescue, all of
+ * it) -- unchanged and undiminished.
  *
  * <h2>Honesty about scope</h2>
- * General symbolic integration is undecidable (this is literally what the
- * Risch algorithm exists to partially solve, and even it does not cover
- * everything). "Vast and expandable" here means something concrete: a real,
- * checkable rule book (see {@link SymbolicEngine} for the full list) plus a
- * mechanism ({@link SymbolicEngine#registerRule}) to add more -- not a claim
- * that every elementary function is covered. {@code exp(-x^2)} and general
- * {@code x^x} genuinely have no elementary closed-form antiderivative; this
- * class is expected to (and, per the self-tests, does) fail symbolically on
- * them and fall back cleanly, not fabricate an answer.
+ * General symbolic integration is undecidable (this is literally what the Risch
+ * algorithm exists to partially solve, and even it does not cover everything).
+ * "Vast and expandable" here means something concrete: a real, checkable rule
+ * book (see {@link SymbolicEngine} for the full list) plus a mechanism
+ * ({@link SymbolicEngine#registerRule}) to add more -- not a claim that every
+ * elementary function is covered. {@code exp(-x^2)} and general {@code x^x}
+ * genuinely have no elementary closed-form antiderivative; this class is
+ * expected to (and, per the self-tests, does) fail symbolically on them and
+ * fall back cleanly, not fabricate an answer.
  *
- * <h2>Why verification is the load-bearing safety mechanism</h2>
- * Every rule in the book was hand-derived; some (the six inverse
- * trig/hyperbolic table entries, the by-parts self-reference algebra, the
- * complete-the-square quadratic-denominator cases) involve enough algebra
- * that a transcription slip is a real risk, and there is no compiler
- * available in this environment to catch one. Rather than trust hand-derived
- * calculus blindly, every candidate antiderivative {@code F} is symbolically
- * differentiated back to {@code F'} and spot-checked against the original
- * integrand at 7 points spread across the integration interval (excluding
- * the exact endpoints, to avoid boundary-singularity false failures) before
- * being used. A failing check is a hard, reliable veto -- it can never
- * produce a false <i>positive</i> (an actually-wrong result silently
- * delivered with confidence); it can only ever cause an unnecessary fall
- * back to the always-safe numeric engine. Passing is evidence, not
- * mathematical proof (finite sampling), which is exactly the same epistemic
- * standard applied to every other verification step built earlier in this
- * codebase (endpoint-subtraction re-probing, the GK/Taylor cross-check).
+ * <h2>Why sparse verification alone is not enough</h2>
+ * A candidate antiderivative that differentiates back correctly at 7 spot-check
+ * points can still mask a genuine interior pole. Concretely:
+ * {@code integral(1/x) = ln|x|}, and this is symbolically correct and
+ * differentiates back to {@code 1/x} everywhere except {@code x=0}. Over a
+ * symmetric interval like {@code [-1,1]}, one of the 7 spot-check points
+ * happens to land exactly at {@code x=0} (skipped, since evaluation throws
+ * there), and the other 6 all pass -- so verification alone would accept
+ * {@code F(1)-F(-1) = ln(1)-ln(1) = 0}, silently returning the Cauchy
+ * <i>principal value</i> for an integral that does not actually converge in the
+ * ordinary sense at all. {@link Builder#singularityPrecheckEnabled} (on by
+ * default) closes this: after a candidate passes spot-check verification,
+ * {@link SingularityAwareIntegrator#rangeLooksSingular} is asked whether the
+ * numeric engine's own (more thorough) singularity scan flags anything in
+ * range, and if so the symbolic result is discarded in favor of the numeric
+ * engine regardless of the spot-checks having passed.
  *
  * <h2>Single-variable scope, deliberately</h2>
- * The parser rejects (bails to numeric) any {@code VARIABLE} token whose
- * name is not the integration variable. Every expression seen in this
- * codebase's own test suites is single-variable; multi-parameter symbolic
- * calculus is a materially larger feature (coefficients would need to carry
- * {@code Expr}, not {@code double}) that the numeric engine already handles
- * fully via its own variable-slot mechanism, so nothing is lost by
- * deferring it there.
+ * The parser rejects (bails to numeric) any {@code VARIABLE} token whose name
+ * is not the integration variable. Every expression seen in this codebase's own
+ * test suites is single-variable; multi-parameter symbolic calculus is a
+ * materially larger feature (coefficients would need to carry {@code Expr}, not
+ * {@code double}) that the numeric engine already handles fully via its own
+ * variable-slot mechanism, so nothing is lost by deferring it there.
  *
  * <h2>The rule book, concretely</h2>
  * Constant / power / sum / difference / constant-multiple / constant-
- * denominator rules; a table of ~25 elementary antiderivatives generalized
- * to any affine argument ({@code integral(h(ax+b)) = H(ax+b)/a}); the
- * logarithmic-derivative rule ({@code integral(f'/f) = ln|f|}, which
- * generically covers {@code tan}, {@code cot}, and any derivative-over-
- * function form); a genuine u-substitution search that recursively
- * re-invokes the whole engine on the transformed sub-problem; integration
- * by parts with LIATE-priority factor selection and the classic self-
- * referential "solve for I" technique (for {@code integral(e^x*sin(x))}-
- * shaped problems); and a complete-the-square, partial-fraction-free
- * solver for rational functions with linear or quadratic denominators
- * (numerator of any degree, via polynomial long division first). See
- * {@link SymbolicEngine}'s static initializer for the exact ordered rule
+ * denominator rules; a table of ~25 elementary antiderivatives generalized to
+ * any affine argument ({@code integral(h(ax+b)) = H(ax+b)/a}), including ANY
+ * integer or non-integer power of an affine base as a denominator (via a
+ * {@code DIV(a, POW(base,exp)) -> a*base^(-exp)} normalization in {@code
+ * simplify} -- not capped at degree 2 the way the quadratic-denominator rule
+ * alone is); the logarithmic-derivative rule ({@code
+ * integral(f'/f) = ln|f|}, which generically covers {@code tan}, {@code
+ * cot}, and any derivative-over-function form); a genuine u-substitution search
+ * that recursively re-invokes the whole engine on the transformed sub-problem
+ * (this also transparently covers trig products like {@code
+ * sin(x)*cos(x)} -- no dedicated product-to-sum rule needed, see the
+ * self-tests); integration by parts with LIATE-priority factor selection and
+ * the classic self-referential "solve for I" technique (for {@code
+ * integral(e^x*sin(x))}-shaped problems); and a complete-the-square,
+ * partial-fraction-free solver for rational functions with linear or quadratic
+ * denominators (numerator of any degree, via polynomial long division first).
+ * See {@link SymbolicEngine}'s static initializer for the exact ordered rule
  * list.
  *
- * <h2>Revision: general versatility fixes, not point patches</h2>
- * Two originally-failing cases ({@code 2*x*cos(x^2)}, u-substitution;
- * {@code exp(x)*sin(x)}, self-referential by-parts) traced back to four
- * distinct, generally-applicable gaps rather than anything specific to
- * those two expressions:
+ * <h2>Revision history: general versatility fixes, not point patches</h2>
  * <ol>
- *   <li><b>Nested-constant extraction.</b> {@code ruleConstantMultiple}
- *       only looked at a {@code MUL} node's two immediate children, so a
- *       constant buried one level deeper in a left-associated chain like
- *       {@code (2*x)*cos(x^2)} was never found. Now uses {@link
- *       #flattenMul}/{@link #rebuildMul} to gather every multiplicative
- *       factor regardless of nesting, partition constant from
- *       variable-dependent factors, and recurse on the product of the
- *       latter -- this also transitively strengthens u-substitution and
- *       by-parts, since both rely on the same recursive {@code integrate}
- *       call after a constant is pulled out.</li>
- *   <li><b>Division-side factor cancellation.</b> {@code simplify}'s
- *       {@code DIV} case previously only folded exact whole-operand
- *       matches; it had no notion of canceling a shared factor buried
- *       inside a product on each side (e.g. {@code x*cos(x^2) / (2*x)}
- *       never became {@code cos(x^2)/2}). This blocked u-substitution from
- *       ever recognizing that a candidate substitution actually eliminated
- *       the original variable. Fixed via the same flatten/rebuild
- *       machinery, applied to both operands of a division.</li>
- *   <li><b>Negation-aware cancellation.</b> {@code flattenMul} treats
- *       {@code -X} as the factor {@code -1} times {@code X}'s own factors,
- *       so e.g. {@code -sin(x)/sin(x)} now correctly cancels to the literal
- *       constant {@code -1} -- needed for the self-referential by-parts
- *       "solve for I" algebra to recognize its own closure at all.</li>
- *   <li><b>Self-reference search order.</b> {@code tryByParts} previously
- *       attempted the generic recursive {@code integrate} call on the
- *       by-parts remainder <i>before</i> the explicit self-referential
- *       check -- meaning that recursive call could reset context (a fresh
- *       {@code originalIntegrand}, a reset {@code partsDepth}) before the
- *       self-reference pattern was ever tried with the correct original
- *       problem in view. The self-referential check now runs first, with
- *       the generic recursive attempt as the fallback -- verified this
- *       reordering doesn't change behavior for an ordinary (non-self-
- *       referential) case like {@code x*sin(x)}, since {@code
- *       trySelfReferential} bails out immediately and cheaply whenever the
- *       by-parts remainder isn't itself a product of two var-dependent
- *       factors.</li>
+ * <li><b>Nested-constant extraction.</b> {@code ruleConstantMultiple} now uses
+ * {@link #flattenMul}/{@link #rebuildMul} to gather every multiplicative factor
+ * regardless of nesting (a constant buried in a left-associated chain like
+ * {@code (2*x)*cos(x^2)} used to never be found).</li>
+ * <li><b>Division-side factor cancellation</b> (including {@code NEG(x)}
+ * unwrapped as the factor {@code -1}), in {@code simplify}'s {@code DIV} case
+ * -- needed for u-substitution to recognize a candidate actually eliminated the
+ * original variable, and for the self-referential by-parts algebra to recognize
+ * its own closure (e.g. {@code -sin(x)/sin(x) == -1}).</li>
+ * <li><b>Self-reference search order.</b> {@code tryByParts} tries the explicit
+ * self-referential check before the generic recursive {@code integrate} call,
+ * which previously could reset context before the pattern was ever tried with
+ * the correct original problem in view.</li>
+ * <li><b>A previously-missing rule</b>, {@code ruleConstantDenominator}, for
+ * {@code f(x)/constant} -- neither {@code ruleLogDerivative} nor
+ * {@code ruleRationalLinearOrQuadratic} matched a plain constant
+ * denominator.</li>
+ * <li><b>Commutative {@code deepEquals}</b> for {@code ADD}/{@code MUL}
+ * ({@code a*b == b*a}), strengthening every cancellation/dedup/ matching
+ * operation built on it throughout the engine.</li>
+ * <li><b>Power-of-affine denominators of any degree</b> (see "The rule book"
+ * above) via a {@code DIV(a,POW(base,exp)) -> a*base^(-exp)} normalization, not
+ * just the degree-2 case the quadratic-denominator rule happens to also
+ * handle.</li>
+ * <li><b>The singularity pre-check</b> described above, closing the
+ * principal-value-masking gap that sparse spot-check verification cannot see by
+ * construction.</li>
  * </ol>
- * A fifth, smaller gap found in the same pass: there was no rule at all for
- * {@code f(x)/constant} (dividing by a plain number) -- {@code
- * ruleLogDerivative} and {@code ruleRationalLinearOrQuadratic} both
- * explicitly require the denominator to depend on the variable in a
- * specific way, so a bare constant denominator matched neither. Added
- * {@code ruleConstantDenominator} to close that gap. {@code deepEquals}
- * was also made commutative for {@code ADD}/{@code MUL} ({@code a*b}
- * and {@code b*a} now recognized as equal), which strengthens every
- * cancellation/dedup/matching operation built on top of it throughout the
- * engine, not just the two cases that motivated this revision.
  */
 public final class SymbolicIntegrator {
 
@@ -139,25 +133,58 @@ public final class SymbolicIntegrator {
     // ------------------------------------------------------------------
     // Exceptions
     // ------------------------------------------------------------------
-
-    /** Thrown internally whenever the symbolic engine meets a construct outside its scope. Always caught; never escapes {@link #integrate}. */
+    /**
+     * Thrown internally whenever the symbolic engine meets a construct outside
+     * its scope. Always caught; never escapes {@link #integrate}.
+     */
     public static final class UnsupportedSymbolicOperationException extends RuntimeException {
+
         private static final long serialVersionUID = 1L;
-        public UnsupportedSymbolicOperationException(String message) { super(message); }
+
+        public UnsupportedSymbolicOperationException(String message) {
+            super(message);
+        }
     }
 
-    /** Thrown by {@link SymbolicEngine#numericEval} on a domain error (log of a non-positive number, division by zero, etc). */
+    /**
+     * Thrown by {@link SymbolicEngine#numericEval} on a domain error (log of a
+     * non-positive number, division by zero, etc).
+     */
     public static final class EvalDomainException extends RuntimeException {
+
         private static final long serialVersionUID = 1L;
-        public EvalDomainException(String message) { super(message); }
+
+        public EvalDomainException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Implemented by a numeric fallback engine that can cheaply check whether
+     * an interval likely contains an interior singularity, without running a
+     * full adaptive integration. Used as a safety net -- see class javadoc,
+     * "Why sparse verification alone is not enough": a candidate symbolic
+     * antiderivative that passes its own sparse spot-check verification can
+     * still silently mask a genuine pole (e.g. {@code ln|x|} across an interval
+     * straddling {@code x=0} evaluates fine at both bounds and can pass every
+     * spot-check, then silently return the Cauchy principal value instead of
+     * correctly signaling non-convergence). If the numeric fallback implements
+     * this and flags the range, the symbolic result is discarded even after
+     * passing verification.
+     */
+    public interface SingularityAwareIntegrator {
+
+        boolean rangeLooksSingular(double a, double b);
     }
 
     // ------------------------------------------------------------------
     // Expr: minimal algebraic AST
     // ------------------------------------------------------------------
-
     public static final class Expr {
-        public enum Kind { CONST, VAR, ADD, SUB, MUL, DIV, NEG, POW, FUNC }
+
+        public enum Kind {
+            CONST, VAR, ADD, SUB, MUL, DIV, NEG, POW, FUNC
+        }
 
         public final Kind kind;
         public final double constVal;
@@ -175,38 +202,75 @@ public final class SymbolicIntegrator {
             this.children = children;
         }
 
-        public static Expr constant(double v) { return new Expr(Kind.CONST, v, null, null, EMPTY); }
-        public static Expr var(String name) { return new Expr(Kind.VAR, 0, name, null, EMPTY); }
-        public static Expr add(Expr a, Expr b) { return new Expr(Kind.ADD, 0, null, null, new Expr[]{a, b}); }
-        public static Expr sub(Expr a, Expr b) { return new Expr(Kind.SUB, 0, null, null, new Expr[]{a, b}); }
-        public static Expr mul(Expr a, Expr b) { return new Expr(Kind.MUL, 0, null, null, new Expr[]{a, b}); }
-        public static Expr div(Expr a, Expr b) { return new Expr(Kind.DIV, 0, null, null, new Expr[]{a, b}); }
-        public static Expr neg(Expr a) { return new Expr(Kind.NEG, 0, null, null, new Expr[]{a}); }
-        public static Expr pow(Expr a, Expr b) { return new Expr(Kind.POW, 0, null, null, new Expr[]{a, b}); }
-        public static Expr func(String name, Expr... args) { return new Expr(Kind.FUNC, 0, null, name, args); }
+        public static Expr constant(double v) {
+            return new Expr(Kind.CONST, v, null, null, EMPTY);
+        }
+
+        public static Expr var(String name) {
+            return new Expr(Kind.VAR, 0, name, null, EMPTY);
+        }
+
+        public static Expr add(Expr a, Expr b) {
+            return new Expr(Kind.ADD, 0, null, null, new Expr[]{a, b});
+        }
+
+        public static Expr sub(Expr a, Expr b) {
+            return new Expr(Kind.SUB, 0, null, null, new Expr[]{a, b});
+        }
+
+        public static Expr mul(Expr a, Expr b) {
+            return new Expr(Kind.MUL, 0, null, null, new Expr[]{a, b});
+        }
+
+        public static Expr div(Expr a, Expr b) {
+            return new Expr(Kind.DIV, 0, null, null, new Expr[]{a, b});
+        }
+
+        public static Expr neg(Expr a) {
+            return new Expr(Kind.NEG, 0, null, null, new Expr[]{a});
+        }
+
+        public static Expr pow(Expr a, Expr b) {
+            return new Expr(Kind.POW, 0, null, null, new Expr[]{a, b});
+        }
+
+        public static Expr func(String name, Expr... args) {
+            return new Expr(Kind.FUNC, 0, null, name, args);
+        }
 
         static final String UNSUPPORTED = "__unsupported__";
 
         @Override
         public String toString() {
             switch (kind) {
-                case CONST: return trimNum(constVal);
-                case VAR: return varName;
-                case ADD: return "(" + children[0] + " + " + children[1] + ")";
-                case SUB: return "(" + children[0] + " - " + children[1] + ")";
-                case MUL: return "(" + children[0] + " * " + children[1] + ")";
-                case DIV: return "(" + children[0] + " / " + children[1] + ")";
-                case NEG: return "(-" + children[0] + ")";
-                case POW: return "(" + children[0] + "^" + children[1] + ")";
+                case CONST:
+                    return trimNum(constVal);
+                case VAR:
+                    return varName;
+                case ADD:
+                    return "(" + children[0] + " + " + children[1] + ")";
+                case SUB:
+                    return "(" + children[0] + " - " + children[1] + ")";
+                case MUL:
+                    return "(" + children[0] + " * " + children[1] + ")";
+                case DIV:
+                    return "(" + children[0] + " / " + children[1] + ")";
+                case NEG:
+                    return "(-" + children[0] + ")";
+                case POW:
+                    return "(" + children[0] + "^" + children[1] + ")";
                 case FUNC: {
                     StringBuilder sb = new StringBuilder(funcName).append('(');
                     for (int i = 0; i < children.length; i++) {
-                        if (i > 0) sb.append(", ");
+                        if (i > 0) {
+                            sb.append(", ");
+                        }
                         sb.append(children[i]);
                     }
                     return sb.append(')').toString();
                 }
-                default: return "?";
+                default:
+                    return "?";
             }
         }
 
@@ -221,16 +285,18 @@ public final class SymbolicIntegrator {
     // ------------------------------------------------------------------
     // IntegrationRule: the expandable rule-book interface
     // ------------------------------------------------------------------
-
     public interface IntegrationRule {
-        /** Returns a (not-yet-simplified) candidate antiderivative, or null if this rule does not apply. */
+
+        /**
+         * Returns a (not-yet-simplified) candidate antiderivative, or null if
+         * this rule does not apply.
+         */
         Expr tryIntegrate(Expr integrand, String var, SymbolicEngine engine, int depth);
     }
 
     // ------------------------------------------------------------------
     // SymbolicEngine: parse / simplify / differentiate / integrate / evaluate
     // ------------------------------------------------------------------
-
     public static final class SymbolicEngine {
 
         private static final int MAX_INTEGRATE_DEPTH = 14;
@@ -253,7 +319,6 @@ public final class SymbolicIntegrator {
         }
 
         // -------------------- parsing --------------------
-
         public Expr parseToExpr(Token[] rpn, String wrtVar) {
             Deque<Expr> stack = new ArrayDeque<>();
             for (Token t : rpn) {
@@ -265,7 +330,7 @@ public final class SymbolicIntegrator {
                         if (t.name == null || !t.name.equals(wrtVar)) {
                             throw new UnsupportedSymbolicOperationException(
                                     "symbolic engine only supports a single variable ('" + wrtVar
-                                            + "'); found '" + t.name + "'");
+                                    + "'); found '" + t.name + "'");
                         }
                         stack.push(Expr.var(wrtVar));
                         break;
@@ -326,21 +391,39 @@ public final class SymbolicIntegrator {
                 Expr b = requirePop(stack);
                 Expr a = requirePop(stack);
                 switch (t.opChar) {
-                    case '+': stack.push(Expr.add(a, b)); break;
-                    case '-': stack.push(Expr.sub(a, b)); break;
-                    case '*': stack.push(Expr.mul(a, b)); break;
-                    case '/': stack.push(Expr.div(a, b)); break;
-                    case '^': stack.push(Expr.pow(a, b)); break;
+                    case '+':
+                        stack.push(Expr.add(a, b));
+                        break;
+                    case '-':
+                        stack.push(Expr.sub(a, b));
+                        break;
+                    case '*':
+                        stack.push(Expr.mul(a, b));
+                        break;
+                    case '/':
+                        stack.push(Expr.div(a, b));
+                        break;
+                    case '^':
+                        stack.push(Expr.pow(a, b));
+                        break;
                     default:
                         throw new UnsupportedSymbolicOperationException("unsupported binary operator '" + t.opChar + "'");
                 }
             } else {
                 Expr a = requirePop(stack);
                 switch (t.opChar) {
-                    case '-': stack.push(Expr.neg(a)); break;
-                    case '²': stack.push(Expr.pow(a, Expr.constant(2))); break;
-                    case '³': stack.push(Expr.pow(a, Expr.constant(3))); break;
-                    case '√': stack.push(Expr.func("sqrt", a)); break;
+                    case '-':
+                        stack.push(Expr.neg(a));
+                        break;
+                    case '²':
+                        stack.push(Expr.pow(a, Expr.constant(2)));
+                        break;
+                    case '³':
+                        stack.push(Expr.pow(a, Expr.constant(3)));
+                        break;
+                    case '√':
+                        stack.push(Expr.func("sqrt", a));
+                        break;
                     default:
                         if (t.opChar == Token.CBRT_DEF) {
                             stack.push(Expr.func("cbrt", a));
@@ -354,26 +437,40 @@ public final class SymbolicIntegrator {
         }
 
         // -------------------- structural helpers --------------------
-
         public boolean containsVar(Expr e, String var) {
-            if (e.kind == Expr.Kind.VAR) return e.varName.equals(var);
+            if (e.kind == Expr.Kind.VAR) {
+                return e.varName.equals(var);
+            }
             for (Expr c : e.children) {
-                if (containsVar(c, var)) return true;
+                if (containsVar(c, var)) {
+                    return true;
+                }
             }
             return false;
         }
 
-        /** Commutative for ADD/MUL: a+b==b+a and a*b==b*a are both recognized. Strengthens every
-         *  cancellation/dedup/matching operation built on this throughout the engine. */
+        /**
+         * Commutative for ADD/MUL: a+b==b+a and a*b==b*a are both recognized.
+         * Strengthens every cancellation/dedup/matching operation built on this
+         * throughout the engine.
+         */
         public boolean deepEquals(Expr a, Expr b) {
-            if (a.kind != b.kind) return false;
+            if (a.kind != b.kind) {
+                return false;
+            }
             switch (a.kind) {
-                case CONST: return a.constVal == b.constVal;
-                case VAR: return a.varName.equals(b.varName);
+                case CONST:
+                    return a.constVal == b.constVal;
+                case VAR:
+                    return a.varName.equals(b.varName);
                 case FUNC: {
-                    if (!a.funcName.equals(b.funcName) || a.children.length != b.children.length) return false;
+                    if (!a.funcName.equals(b.funcName) || a.children.length != b.children.length) {
+                        return false;
+                    }
                     for (int i = 0; i < a.children.length; i++) {
-                        if (!deepEquals(a.children[i], b.children[i])) return false;
+                        if (!deepEquals(a.children[i], b.children[i])) {
+                            return false;
+                        }
                     }
                     return true;
                 }
@@ -382,43 +479,68 @@ public final class SymbolicIntegrator {
                     return (deepEquals(a.children[0], b.children[0]) && deepEquals(a.children[1], b.children[1]))
                             || (deepEquals(a.children[0], b.children[1]) && deepEquals(a.children[1], b.children[0]));
                 default: {
-                    if (a.children.length != b.children.length) return false;
+                    if (a.children.length != b.children.length) {
+                        return false;
+                    }
                     for (int i = 0; i < a.children.length; i++) {
-                        if (!deepEquals(a.children[i], b.children[i])) return false;
+                        if (!deepEquals(a.children[i], b.children[i])) {
+                            return false;
+                        }
                     }
                     return true;
                 }
             }
         }
 
-        /** Replaces every structurally-matching occurrence of {@code target} in {@code e} with {@code replacement}. */
+        /**
+         * Replaces every structurally-matching occurrence of {@code target} in
+         * {@code e} with {@code replacement}.
+         */
         public Expr replaceSubexpr(Expr e, Expr target, Expr replacement) {
-            if (deepEquals(e, target)) return replacement;
-            if (e.children.length == 0) return e;
+            if (deepEquals(e, target)) {
+                return replacement;
+            }
+            if (e.children.length == 0) {
+                return e;
+            }
             Expr[] newChildren = new Expr[e.children.length];
             boolean changed = false;
             for (int i = 0; i < e.children.length; i++) {
                 newChildren[i] = replaceSubexpr(e.children[i], target, replacement);
-                if (newChildren[i] != e.children[i]) changed = true;
+                if (newChildren[i] != e.children[i]) {
+                    changed = true;
+                }
             }
-            if (!changed) return e;
+            if (!changed) {
+                return e;
+            }
             switch (e.kind) {
-                case ADD: return Expr.add(newChildren[0], newChildren[1]);
-                case SUB: return Expr.sub(newChildren[0], newChildren[1]);
-                case MUL: return Expr.mul(newChildren[0], newChildren[1]);
-                case DIV: return Expr.div(newChildren[0], newChildren[1]);
-                case NEG: return Expr.neg(newChildren[0]);
-                case POW: return Expr.pow(newChildren[0], newChildren[1]);
-                case FUNC: return Expr.func(e.funcName, newChildren);
-                default: return e;
+                case ADD:
+                    return Expr.add(newChildren[0], newChildren[1]);
+                case SUB:
+                    return Expr.sub(newChildren[0], newChildren[1]);
+                case MUL:
+                    return Expr.mul(newChildren[0], newChildren[1]);
+                case DIV:
+                    return Expr.div(newChildren[0], newChildren[1]);
+                case NEG:
+                    return Expr.neg(newChildren[0]);
+                case POW:
+                    return Expr.pow(newChildren[0], newChildren[1]);
+                case FUNC:
+                    return Expr.func(e.funcName, newChildren);
+                default:
+                    return e;
             }
         }
 
         /**
-         * Flattens a MUL-chain (of any nesting/associativity) into its multiplicative factors.
-         * {@code NEG(x)} is unwrapped as the factor {@code -1} followed by {@code x}'s own
-         * factors -- this is what lets e.g. {@code -sin(x)/sin(x)} cancel down to the literal
-         * constant {@code -1} rather than being left as an unrecognized {@code NEG(sin(x))/sin(x)}.
+         * Flattens a MUL-chain (of any nesting/associativity) into its
+         * multiplicative factors. {@code NEG(x)} is unwrapped as the factor
+         * {@code -1} followed by {@code x}'s own factors -- this is what lets
+         * e.g. {@code -sin(x)/sin(x)} cancel down to the literal constant
+         * {@code -1} rather than being left as an unrecognized
+         * {@code NEG(sin(x))/sin(x)}.
          */
         void flattenMul(Expr e, List<Expr> out) {
             if (e.kind == Expr.Kind.MUL) {
@@ -433,7 +555,9 @@ public final class SymbolicIntegrator {
         }
 
         Expr rebuildMul(List<Expr> factors) {
-            if (factors.isEmpty()) return Expr.constant(1);
+            if (factors.isEmpty()) {
+                return Expr.constant(1);
+            }
             Expr result = factors.get(0);
             for (int i = 1; i < factors.size(); i++) {
                 result = Expr.mul(result, factors.get(i));
@@ -442,42 +566,75 @@ public final class SymbolicIntegrator {
         }
 
         // -------------------- simplification --------------------
-
         public Expr simplify(Expr e) {
-            if (e.children.length == 0) return e;
+            if (e.children.length == 0) {
+                return e;
+            }
             Expr[] sc = new Expr[e.children.length];
-            for (int i = 0; i < sc.length; i++) sc[i] = simplify(e.children[i]);
+            for (int i = 0; i < sc.length; i++) {
+                sc[i] = simplify(e.children[i]);
+            }
 
             switch (e.kind) {
                 case ADD: {
                     Expr a = sc[0], b = sc[1];
-                    if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST) return Expr.constant(a.constVal + b.constVal);
-                    if (a.kind == Expr.Kind.CONST && a.constVal == 0.0) return b;
-                    if (b.kind == Expr.Kind.CONST && b.constVal == 0.0) return a;
+                    if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST) {
+                        return Expr.constant(a.constVal + b.constVal);
+                    }
+                    if (a.kind == Expr.Kind.CONST && a.constVal == 0.0) {
+                        return b;
+                    }
+                    if (b.kind == Expr.Kind.CONST && b.constVal == 0.0) {
+                        return a;
+                    }
                     return Expr.add(a, b);
                 }
                 case SUB: {
                     Expr a = sc[0], b = sc[1];
-                    if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST) return Expr.constant(a.constVal - b.constVal);
-                    if (b.kind == Expr.Kind.CONST && b.constVal == 0.0) return a;
-                    if (deepEquals(a, b)) return Expr.constant(0);
-                    if (a.kind == Expr.Kind.CONST && a.constVal == 0.0) return simplify(Expr.neg(b));
+                    if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST) {
+                        return Expr.constant(a.constVal - b.constVal);
+                    }
+                    if (b.kind == Expr.Kind.CONST && b.constVal == 0.0) {
+                        return a;
+                    }
+                    if (deepEquals(a, b)) {
+                        return Expr.constant(0);
+                    }
+                    if (a.kind == Expr.Kind.CONST && a.constVal == 0.0) {
+                        return simplify(Expr.neg(b));
+                    }
                     return Expr.sub(a, b);
                 }
                 case MUL: {
                     Expr a = sc[0], b = sc[1];
-                    if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST) return Expr.constant(a.constVal * b.constVal);
-                    if ((a.kind == Expr.Kind.CONST && a.constVal == 0.0) || (b.kind == Expr.Kind.CONST && b.constVal == 0.0)) return Expr.constant(0);
-                    if (a.kind == Expr.Kind.CONST && a.constVal == 1.0) return b;
-                    if (b.kind == Expr.Kind.CONST && b.constVal == 1.0) return a;
+                    if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST) {
+                        return Expr.constant(a.constVal * b.constVal);
+                    }
+                    if ((a.kind == Expr.Kind.CONST && a.constVal == 0.0) || (b.kind == Expr.Kind.CONST && b.constVal == 0.0)) {
+                        return Expr.constant(0);
+                    }
+                    if (a.kind == Expr.Kind.CONST && a.constVal == 1.0) {
+                        return b;
+                    }
+                    if (b.kind == Expr.Kind.CONST && b.constVal == 1.0) {
+                        return a;
+                    }
                     return Expr.mul(a, b);
                 }
                 case DIV: {
                     Expr a = sc[0], b = sc[1];
-                    if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST && b.constVal != 0.0) return Expr.constant(a.constVal / b.constVal);
-                    if (b.kind == Expr.Kind.CONST && b.constVal == 1.0) return a;
-                    if (a.kind == Expr.Kind.CONST && a.constVal == 0.0) return Expr.constant(0);
-                    if (deepEquals(a, b)) return Expr.constant(1);
+                    if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST && b.constVal != 0.0) {
+                        return Expr.constant(a.constVal / b.constVal);
+                    }
+                    if (b.kind == Expr.Kind.CONST && b.constVal == 1.0) {
+                        return a;
+                    }
+                    if (a.kind == Expr.Kind.CONST && a.constVal == 0.0) {
+                        return Expr.constant(0);
+                    }
+                    if (deepEquals(a, b)) {
+                        return Expr.constant(1);
+                    }
 
                     // Factor cancellation: flatten both sides into multiplicative factors and
                     // remove structurally-matching pairs (one from each side), regardless of
@@ -504,22 +661,45 @@ public final class SymbolicIntegrator {
                     if (cancelled) {
                         return simplify(Expr.div(rebuildMul(numFactors), rebuildMul(denFactors)));
                     }
+
+                    // Normalize division by any power of an affine (or general) base into a
+                    // negative-exponent POW, so rulePowerOfAffine's uncapped-degree handling
+                    // covers it -- not just the degree-2 case ruleRationalLinearOrQuadratic's
+                    // polynomial expansion happens to also reach. E.g. 1/(3x+2)^3 previously had
+                    // no matching rule at all (degree 3 exceeds the quadratic-denominator rule's
+                    // cap, and a bare DIV never reached rulePowerOfAffine, which only looks at POW
+                    // nodes); now it becomes (3x+2)^(-3), which rulePowerOfAffine handles directly
+                    // for any exponent.
+                    if (b.kind == Expr.Kind.POW) {
+                        return simplify(Expr.mul(a, Expr.pow(b.children[0], simplify(Expr.neg(b.children[1])))));
+                    }
+
                     return Expr.div(a, b);
                 }
                 case NEG: {
                     Expr a = sc[0];
-                    if (a.kind == Expr.Kind.CONST) return Expr.constant(-a.constVal);
-                    if (a.kind == Expr.Kind.NEG) return a.children[0];
+                    if (a.kind == Expr.Kind.CONST) {
+                        return Expr.constant(-a.constVal);
+                    }
+                    if (a.kind == Expr.Kind.NEG) {
+                        return a.children[0];
+                    }
                     return Expr.neg(a);
                 }
                 case POW: {
                     Expr a = sc[0], b = sc[1];
                     if (a.kind == Expr.Kind.CONST && b.kind == Expr.Kind.CONST) {
                         double r = Math.pow(a.constVal, b.constVal);
-                        if (Double.isFinite(r)) return Expr.constant(r);
+                        if (Double.isFinite(r)) {
+                            return Expr.constant(r);
+                        }
                     }
-                    if (b.kind == Expr.Kind.CONST && b.constVal == 1.0) return a;
-                    if (b.kind == Expr.Kind.CONST && b.constVal == 0.0) return Expr.constant(1);
+                    if (b.kind == Expr.Kind.CONST && b.constVal == 1.0) {
+                        return a;
+                    }
+                    if (b.kind == Expr.Kind.CONST && b.constVal == 0.0) {
+                        return Expr.constant(1);
+                    }
                     if (a.kind == Expr.Kind.POW && b.kind == Expr.Kind.CONST && a.children[1].kind == Expr.Kind.CONST) {
                         return simplify(Expr.pow(a.children[0], Expr.constant(a.children[1].constVal * b.constVal)));
                     }
@@ -528,7 +708,9 @@ public final class SymbolicIntegrator {
                 case FUNC: {
                     if (sc.length == 1 && sc[0].kind == Expr.Kind.CONST) {
                         Double folded = tryFoldUnary(e.funcName, sc[0].constVal);
-                        if (folded != null) return Expr.constant(folded);
+                        if (folded != null) {
+                            return Expr.constant(folded);
+                        }
                     }
                     return Expr.func(e.funcName, sc);
                 }
@@ -540,13 +722,20 @@ public final class SymbolicIntegrator {
         private Double tryFoldUnary(String name, double x) {
             try {
                 switch (name) {
-                    case "sin": return Math.sin(x);
-                    case "cos": return Math.cos(x);
-                    case "exp": return Math.exp(x);
-                    case "sqrt": return x >= 0 ? Math.sqrt(x) : null;
-                    case "abs": return Math.abs(x);
-                    case "ln": return x > 0 ? Math.log(x) : null;
-                    default: return null;
+                    case "sin":
+                        return Math.sin(x);
+                    case "cos":
+                        return Math.cos(x);
+                    case "exp":
+                        return Math.exp(x);
+                    case "sqrt":
+                        return x >= 0 ? Math.sqrt(x) : null;
+                    case "abs":
+                        return Math.abs(x);
+                    case "ln":
+                        return x > 0 ? Math.log(x) : null;
+                    default:
+                        return null;
                 }
             } catch (RuntimeException ignore) {
                 return null;
@@ -554,14 +743,18 @@ public final class SymbolicIntegrator {
         }
 
         // -------------------- differentiation --------------------
-
         public Expr diff(Expr e, String var) {
             switch (e.kind) {
-                case CONST: return Expr.constant(0);
-                case VAR: return Expr.constant(e.varName.equals(var) ? 1.0 : 0.0);
-                case ADD: return simplify(Expr.add(diff(e.children[0], var), diff(e.children[1], var)));
-                case SUB: return simplify(Expr.sub(diff(e.children[0], var), diff(e.children[1], var)));
-                case NEG: return simplify(Expr.neg(diff(e.children[0], var)));
+                case CONST:
+                    return Expr.constant(0);
+                case VAR:
+                    return Expr.constant(e.varName.equals(var) ? 1.0 : 0.0);
+                case ADD:
+                    return simplify(Expr.add(diff(e.children[0], var), diff(e.children[1], var)));
+                case SUB:
+                    return simplify(Expr.sub(diff(e.children[0], var), diff(e.children[1], var)));
+                case NEG:
+                    return simplify(Expr.neg(diff(e.children[0], var)));
                 case MUL: {
                     Expr a = e.children[0], b = e.children[1];
                     Expr da = diff(a, var), db = diff(b, var);
@@ -576,7 +769,9 @@ public final class SymbolicIntegrator {
                     Expr base = e.children[0], expo = e.children[1];
                     boolean expoConst = !containsVar(expo, var);
                     boolean baseConst = !containsVar(base, var);
-                    if (expoConst && baseConst) return Expr.constant(0);
+                    if (expoConst && baseConst) {
+                        return Expr.constant(0);
+                    }
                     if (expoConst) {
                         Expr newExp = simplify(Expr.sub(expo, Expr.constant(1)));
                         Expr dbase = diff(base, var);
@@ -616,36 +811,65 @@ public final class SymbolicIntegrator {
             }
         }
 
-        /** d/du f(u), expressed in terms of the given argument expr (chain rule multiplier applied by the caller). */
+        /**
+         * d/du f(u), expressed in terms of the given argument expr (chain rule
+         * multiplier applied by the caller).
+         */
         private Expr funcDerivative(String name, Expr arg) {
             switch (name) {
-                case "sin": return Expr.func("cos", arg);
-                case "cos": return Expr.neg(Expr.func("sin", arg));
-                case "tan": return Expr.div(Expr.constant(1), Expr.pow(Expr.func("cos", arg), Expr.constant(2)));
-                case "sec": return Expr.div(Expr.func("sin", arg), Expr.pow(Expr.func("cos", arg), Expr.constant(2)));
-                case "cosec": case "csc":
+                case "sin":
+                    return Expr.func("cos", arg);
+                case "cos":
+                    return Expr.neg(Expr.func("sin", arg));
+                case "tan":
+                    return Expr.div(Expr.constant(1), Expr.pow(Expr.func("cos", arg), Expr.constant(2)));
+                case "sec":
+                    return Expr.div(Expr.func("sin", arg), Expr.pow(Expr.func("cos", arg), Expr.constant(2)));
+                case "cosec":
+                case "csc":
                     return Expr.neg(Expr.div(Expr.func("cos", arg), Expr.pow(Expr.func("sin", arg), Expr.constant(2))));
-                case "cot": return Expr.neg(Expr.div(Expr.constant(1), Expr.pow(Expr.func("sin", arg), Expr.constant(2))));
-                case "exp": return Expr.func("exp", arg);
-                case "ln": return Expr.div(Expr.constant(1), arg);
-                case "lg": return Expr.div(Expr.constant(1), Expr.mul(arg, Expr.constant(Math.log(10))));
-                case "sqrt": return Expr.div(Expr.constant(1), Expr.mul(Expr.constant(2), Expr.func("sqrt", arg)));
-                case "cbrt": return Expr.div(Expr.constant(1), Expr.mul(Expr.constant(3), Expr.pow(Expr.func("cbrt", arg), Expr.constant(2))));
-                case "sinh": return Expr.func("cosh", arg);
-                case "cosh": return Expr.func("sinh", arg);
-                case "tanh": return Expr.div(Expr.constant(1), Expr.pow(Expr.func("cosh", arg), Expr.constant(2)));
-                case "asin": case "arcsin":
+                case "cot":
+                    return Expr.neg(Expr.div(Expr.constant(1), Expr.pow(Expr.func("sin", arg), Expr.constant(2))));
+                case "exp":
+                    return Expr.func("exp", arg);
+                case "ln":
+                    return Expr.div(Expr.constant(1), arg);
+                case "lg":
+                    return Expr.div(Expr.constant(1), Expr.mul(arg, Expr.constant(Math.log(10))));
+                case "sqrt":
+                    return Expr.div(Expr.constant(1), Expr.mul(Expr.constant(2), Expr.func("sqrt", arg)));
+                case "cbrt":
+                    return Expr.div(Expr.constant(1), Expr.mul(Expr.constant(3), Expr.pow(Expr.func("cbrt", arg), Expr.constant(2))));
+                case "sinh":
+                    return Expr.func("cosh", arg);
+                case "cosh":
+                    return Expr.func("sinh", arg);
+                case "tanh":
+                    return Expr.div(Expr.constant(1), Expr.pow(Expr.func("cosh", arg), Expr.constant(2)));
+                case "asin":
+                case "arcsin":
                     return Expr.div(Expr.constant(1), Expr.func("sqrt", Expr.sub(Expr.constant(1), Expr.pow(arg, Expr.constant(2)))));
-                case "acos": case "arccos":
+                case "acos":
+                case "arccos":
                     return Expr.neg(Expr.div(Expr.constant(1), Expr.func("sqrt", Expr.sub(Expr.constant(1), Expr.pow(arg, Expr.constant(2))))));
-                case "atan": case "arctan":
+                case "atan":
+                case "arctan":
                     return Expr.div(Expr.constant(1), Expr.add(Expr.constant(1), Expr.pow(arg, Expr.constant(2))));
-                case "asinh": case "arcsinh":
+                case "asinh":
+                case "arcsinh":
                     return Expr.div(Expr.constant(1), Expr.func("sqrt", Expr.add(Expr.pow(arg, Expr.constant(2)), Expr.constant(1))));
-                case "acosh": case "arccosh":
+                case "acosh":
+                case "arccosh":
                     return Expr.div(Expr.constant(1), Expr.func("sqrt", Expr.sub(Expr.pow(arg, Expr.constant(2)), Expr.constant(1))));
-                case "atanh": case "arctanh":
+                case "atanh":
+                case "arctanh":
                     return Expr.div(Expr.constant(1), Expr.sub(Expr.constant(1), Expr.pow(arg, Expr.constant(2))));
+                case "coth":
+                    return Expr.neg(Expr.pow(Expr.func("csch", arg), Expr.constant(2)));
+                case "sech":
+                    return Expr.neg(Expr.mul(Expr.func("sech", arg), Expr.func("tanh", arg)));
+                case "csch":
+                    return Expr.neg(Expr.mul(Expr.func("csch", arg), Expr.func("coth", arg)));
                 case "abs":
                     return Expr.div(arg, Expr.func("abs", arg));
                 default:
@@ -654,13 +878,14 @@ public final class SymbolicIntegrator {
         }
 
         // -------------------- integration --------------------
-
         public Expr integrate(Expr integrand, String var) {
             return integrate(integrand, var, 0);
         }
 
         Expr integrate(Expr integrand, String var, int depth) {
-            if (depth > MAX_INTEGRATE_DEPTH) return null;
+            if (depth > MAX_INTEGRATE_DEPTH) {
+                return null;
+            }
             Expr e = simplify(integrand);
             for (IntegrationRule rule : rules) {
                 Expr result = rule.tryIntegrate(e, var, this, depth);
@@ -672,20 +897,27 @@ public final class SymbolicIntegrator {
         }
 
         // -------------------- numeric evaluation --------------------
-
         public double numericEval(Expr e, String var, double x) {
             switch (e.kind) {
-                case CONST: return e.constVal;
-                case VAR: return e.varName.equals(var) ? x : 0.0;
-                case ADD: return numericEval(e.children[0], var, x) + numericEval(e.children[1], var, x);
-                case SUB: return numericEval(e.children[0], var, x) - numericEval(e.children[1], var, x);
-                case MUL: return numericEval(e.children[0], var, x) * numericEval(e.children[1], var, x);
+                case CONST:
+                    return e.constVal;
+                case VAR:
+                    return e.varName.equals(var) ? x : 0.0;
+                case ADD:
+                    return numericEval(e.children[0], var, x) + numericEval(e.children[1], var, x);
+                case SUB:
+                    return numericEval(e.children[0], var, x) - numericEval(e.children[1], var, x);
+                case MUL:
+                    return numericEval(e.children[0], var, x) * numericEval(e.children[1], var, x);
                 case DIV: {
                     double denom = numericEval(e.children[1], var, x);
-                    if (Math.abs(denom) < 1e-300) throw new EvalDomainException("division by zero");
+                    if (Math.abs(denom) < 1e-300) {
+                        throw new EvalDomainException("division by zero");
+                    }
                     return numericEval(e.children[0], var, x) / denom;
                 }
-                case NEG: return -numericEval(e.children[0], var, x);
+                case NEG:
+                    return -numericEval(e.children[0], var, x);
                 case POW: {
                     double base = numericEval(e.children[0], var, x);
                     double expo = numericEval(e.children[1], var, x);
@@ -695,8 +927,10 @@ public final class SymbolicIntegrator {
                     }
                     return r;
                 }
-                case FUNC: return evalFunc(e.funcName, e.children, var, x);
-                default: throw new IllegalStateException("unreachable");
+                case FUNC:
+                    return evalFunc(e.funcName, e.children, var, x);
+                default:
+                    throw new IllegalStateException("unreachable");
             }
         }
 
@@ -706,43 +940,98 @@ public final class SymbolicIntegrator {
             }
             double u = numericEval(children[0], var, x);
             switch (name) {
-                case "sin": return Math.sin(u);
-                case "cos": return Math.cos(u);
-                case "tan": return Math.tan(u);
-                case "sec": return 1.0 / Math.cos(u);
-                case "cosec": case "csc": return 1.0 / Math.sin(u);
-                case "cot": return 1.0 / Math.tan(u);
-                case "exp": return Math.exp(u);
-                case "ln": if (u <= 0) throw new EvalDomainException("ln domain"); return Math.log(u);
-                case "lg": if (u <= 0) throw new EvalDomainException("lg domain"); return Math.log10(u);
-                case "sqrt": if (u < 0) throw new EvalDomainException("sqrt domain"); return Math.sqrt(u);
-                case "cbrt": return Math.cbrt(u);
-                case "sinh": return Math.sinh(u);
-                case "cosh": return Math.cosh(u);
-                case "tanh": return Math.tanh(u);
-                case "asin": case "arcsin":
-                    if (Math.abs(u) > 1) throw new EvalDomainException("asin domain");
+                case "sin":
+                    return Math.sin(u);
+                case "cos":
+                    return Math.cos(u);
+                case "tan":
+                    return Math.tan(u);
+                case "sec":
+                    return 1.0 / Math.cos(u);
+                case "cosec":
+                case "csc":
+                    return 1.0 / Math.sin(u);
+                case "cot":
+                    return 1.0 / Math.tan(u);
+                case "exp":
+                    return Math.exp(u);
+                case "ln":
+                    if (u <= 0) {
+                        throw new EvalDomainException("ln domain");
+                    }
+                    return Math.log(u);
+                case "lg":
+                    if (u <= 0) {
+                        throw new EvalDomainException("lg domain");
+                    }
+                    return Math.log10(u);
+                case "sqrt":
+                    if (u < 0) {
+                        throw new EvalDomainException("sqrt domain");
+                    }
+                    return Math.sqrt(u);
+                case "cbrt":
+                    return Math.cbrt(u);
+                case "sinh":
+                    return Math.sinh(u);
+                case "cosh":
+                    return Math.cosh(u);
+                case "tanh":
+                    return Math.tanh(u);
+                case "asin":
+                case "arcsin":
+                    if (Math.abs(u) > 1) {
+                        throw new EvalDomainException("asin domain");
+                    }
                     return Math.asin(u);
-                case "acos": case "arccos":
-                    if (Math.abs(u) > 1) throw new EvalDomainException("acos domain");
+                case "acos":
+                case "arccos":
+                    if (Math.abs(u) > 1) {
+                        throw new EvalDomainException("acos domain");
+                    }
                     return Math.acos(u);
-                case "atan": case "arctan": return Math.atan(u);
-                case "asinh": case "arcsinh": return Math.log(u + Math.sqrt(u * u + 1));
-                case "acosh": case "arccosh":
-                    if (u < 1) throw new EvalDomainException("acosh domain");
+                case "atan":
+                case "arctan":
+                    return Math.atan(u);
+                case "asinh":
+                case "arcsinh":
+                    return Math.log(u + Math.sqrt(u * u + 1));
+                case "acosh":
+                case "arccosh":
+                    if (u < 1) {
+                        throw new EvalDomainException("acosh domain");
+                    }
                     return Math.log(u + Math.sqrt(u * u - 1));
-                case "atanh": case "arctanh":
-                    if (Math.abs(u) >= 1) throw new EvalDomainException("atanh domain");
+                case "atanh":
+                case "arctanh":
+                    if (Math.abs(u) >= 1) {
+                        throw new EvalDomainException("atanh domain");
+                    }
                     return 0.5 * Math.log((1 + u) / (1 - u));
-                case "abs": return Math.abs(u);
+                case "coth":
+                    if (Math.abs(Math.sinh(u)) < 1e-300) {
+                        throw new EvalDomainException("coth domain");
+                    }
+                    return Math.cosh(u) / Math.sinh(u);
+                case "sech":
+                    return 1.0 / Math.cosh(u);
+                case "csch":
+                    if (Math.abs(Math.sinh(u)) < 1e-300) {
+                        throw new EvalDomainException("csch domain");
+                    }
+                    return 1.0 / Math.sinh(u);
+                case "abs":
+                    return Math.abs(u);
                 default:
                     throw new EvalDomainException("unknown function for symbolic evaluation: " + name);
             }
         }
 
         // -------------------- verification --------------------
-
-        /** Passing is evidence (finite sampling), not proof; failing is a hard, reliable veto. See class javadoc. */
+        /**
+         * Passing is evidence (finite sampling), not proof; failing is a hard,
+         * reliable veto. See class javadoc.
+         */
         public boolean verifyAntiderivative(Expr integrand, Expr antiderivative, String var, double a, double b) {
             Expr derivative;
             try {
@@ -752,7 +1041,9 @@ public final class SymbolicIntegrator {
             }
             double lo = Math.min(a, b), hi = Math.max(a, b);
             double width = hi - lo;
-            if (width <= 0) return true;
+            if (width <= 0) {
+                return true;
+            }
             int samples = 7;
             int checked = 0;
             for (int i = 0; i < samples; i++) {
@@ -765,7 +1056,9 @@ public final class SymbolicIntegrator {
                 } catch (EvalDomainException skip) {
                     continue;
                 }
-                if (!Double.isFinite(expected) || !Double.isFinite(actual)) continue;
+                if (!Double.isFinite(expected) || !Double.isFinite(actual)) {
+                    continue;
+                }
                 double scale = Math.max(1.0, Math.max(Math.abs(expected), Math.abs(actual)));
                 if (Math.abs(expected - actual) > 1e-6 * scale) {
                     return false;
@@ -776,12 +1069,16 @@ public final class SymbolicIntegrator {
         }
 
         // -------------------- affine / polynomial coefficient extraction --------------------
-
-        /** Returns [a,b] such that e == a*var+b, or null if e is not affine in var. */
+        /**
+         * Returns [a,b] such that e == a*var+b, or null if e is not affine in
+         * var.
+         */
         double[] affineCoeffs(Expr e, String var) {
             switch (e.kind) {
-                case CONST: return new double[]{0.0, e.constVal};
-                case VAR: return new double[]{1.0, 0.0};
+                case CONST:
+                    return new double[]{0.0, e.constVal};
+                case VAR:
+                    return new double[]{1.0, 0.0};
                 case NEG: {
                     double[] c = affineCoeffs(e.children[0], var);
                     return c == null ? null : new double[]{-c[0], -c[1]};
@@ -796,21 +1093,33 @@ public final class SymbolicIntegrator {
                 }
                 case MUL: {
                     double[] ca = affineCoeffs(e.children[0], var), cb = affineCoeffs(e.children[1], var);
-                    if (ca == null || cb == null) return null;
-                    if (ca[0] == 0.0) return new double[]{ca[1] * cb[0], ca[1] * cb[1]};
-                    if (cb[0] == 0.0) return new double[]{cb[1] * ca[0], cb[1] * ca[1]};
+                    if (ca == null || cb == null) {
+                        return null;
+                    }
+                    if (ca[0] == 0.0) {
+                        return new double[]{ca[1] * cb[0], ca[1] * cb[1]};
+                    }
+                    if (cb[0] == 0.0) {
+                        return new double[]{cb[1] * ca[0], cb[1] * ca[1]};
+                    }
                     return null;
                 }
                 case DIV: {
                     double[] cb = affineCoeffs(e.children[1], var);
-                    if (cb == null || cb[0] != 0.0 || cb[1] == 0.0) return null;
+                    if (cb == null || cb[0] != 0.0 || cb[1] == 0.0) {
+                        return null;
+                    }
                     double[] ca = affineCoeffs(e.children[0], var);
                     return ca == null ? null : new double[]{ca[0] / cb[1], ca[1] / cb[1]};
                 }
                 case POW: {
                     if (e.children[1].kind == Expr.Kind.CONST) {
-                        if (e.children[1].constVal == 0.0) return new double[]{0.0, 1.0};
-                        if (e.children[1].constVal == 1.0) return affineCoeffs(e.children[0], var);
+                        if (e.children[1].constVal == 0.0) {
+                            return new double[]{0.0, 1.0};
+                        }
+                        if (e.children[1].constVal == 1.0) {
+                            return affineCoeffs(e.children[0], var);
+                        }
                     }
                     return null;
                 }
@@ -819,38 +1128,57 @@ public final class SymbolicIntegrator {
             }
         }
 
-        /** Coefficient array [c0,c1,...] (index = degree) if e is a polynomial in var of degree <= maxDegree; else null. */
+        /**
+         * Coefficient array [c0,c1,...] (index = degree) if e is a polynomial
+         * in var of degree <= maxDegree; else null.
+         */
         double[] polyCoeffs(Expr e, String var, int maxDegree) {
             switch (e.kind) {
-                case CONST: return new double[]{e.constVal};
-                case VAR: return new double[]{0.0, 1.0};
+                case CONST:
+                    return new double[]{e.constVal};
+                case VAR:
+                    return new double[]{0.0, 1.0};
                 case NEG: {
                     double[] c = polyCoeffs(e.children[0], var, maxDegree);
-                    if (c == null) return null;
+                    if (c == null) {
+                        return null;
+                    }
                     double[] r = c.clone();
-                    for (int i = 0; i < r.length; i++) r[i] = -r[i];
+                    for (int i = 0; i < r.length; i++) {
+                        r[i] = -r[i];
+                    }
                     return r;
                 }
-                case ADD: return addPoly(polyCoeffs(e.children[0], var, maxDegree), polyCoeffs(e.children[1], var, maxDegree), maxDegree);
+                case ADD:
+                    return addPoly(polyCoeffs(e.children[0], var, maxDegree), polyCoeffs(e.children[1], var, maxDegree), maxDegree);
                 case SUB: {
                     double[] cb = polyCoeffs(e.children[1], var, maxDegree);
-                    if (cb == null) return null;
+                    if (cb == null) {
+                        return null;
+                    }
                     double[] negb = cb.clone();
-                    for (int i = 0; i < negb.length; i++) negb[i] = -negb[i];
+                    for (int i = 0; i < negb.length; i++) {
+                        negb[i] = -negb[i];
+                    }
                     return addPoly(polyCoeffs(e.children[0], var, maxDegree), negb, maxDegree);
                 }
-                case MUL: return mulPoly(polyCoeffs(e.children[0], var, maxDegree), polyCoeffs(e.children[1], var, maxDegree), maxDegree);
+                case MUL:
+                    return mulPoly(polyCoeffs(e.children[0], var, maxDegree), polyCoeffs(e.children[1], var, maxDegree), maxDegree);
                 case POW: {
                     if (e.children[1].kind == Expr.Kind.CONST) {
                         double nv = e.children[1].constVal;
                         if (nv == Math.floor(nv) && nv >= 0 && nv <= maxDegree) {
                             int n = (int) nv;
                             double[] base = polyCoeffs(e.children[0], var, maxDegree);
-                            if (base == null) return null;
+                            if (base == null) {
+                                return null;
+                            }
                             double[] result = new double[]{1.0};
                             for (int i = 0; i < n; i++) {
                                 result = mulPoly(result, base, maxDegree);
-                                if (result == null) return null;
+                                if (result == null) {
+                                    return null;
+                                }
                             }
                             return result;
                         }
@@ -863,19 +1191,31 @@ public final class SymbolicIntegrator {
         }
 
         private static double[] addPoly(double[] a, double[] b, int maxDegree) {
-            if (a == null || b == null) return null;
+            if (a == null || b == null) {
+                return null;
+            }
             int len = Math.max(a.length, b.length);
-            if (len - 1 > maxDegree) return null;
+            if (len - 1 > maxDegree) {
+                return null;
+            }
             double[] r = new double[len];
-            for (int i = 0; i < len; i++) r[i] = (i < a.length ? a[i] : 0) + (i < b.length ? b[i] : 0);
+            for (int i = 0; i < len; i++) {
+                r[i] = (i < a.length ? a[i] : 0) + (i < b.length ? b[i] : 0);
+            }
             return r;
         }
 
         private static double[] mulPoly(double[] a, double[] b, int maxDegree) {
-            if (a == null || b == null) return null;
+            if (a == null || b == null) {
+                return null;
+            }
             int len = a.length + b.length - 1;
-            if (len < 1) return new double[]{0.0};
-            if (len - 1 > maxDegree) return null;
+            if (len < 1) {
+                return new double[]{0.0};
+            }
+            if (len - 1 > maxDegree) {
+                return null;
+            }
             double[] r = new double[len];
             for (int i = 0; i < a.length; i++) {
                 for (int j = 0; j < b.length; j++) {
@@ -888,7 +1228,9 @@ public final class SymbolicIntegrator {
         private Expr polyToExpr(double[] coeffs, String var) {
             Expr result = Expr.constant(0);
             for (int i = coeffs.length - 1; i >= 0; i--) {
-                if (coeffs[i] == 0.0) continue;
+                if (coeffs[i] == 0.0) {
+                    continue;
+                }
                 Expr term = (i == 0) ? Expr.constant(coeffs[i])
                         : Expr.mul(Expr.constant(coeffs[i]), Expr.pow(Expr.var(var), Expr.constant(i)));
                 result = Expr.add(result, term);
@@ -896,73 +1238,131 @@ public final class SymbolicIntegrator {
             return simplify(result);
         }
 
-        /** If a/b simplifies to a single literal constant, returns it; else null. Conservative by design -- see class javadoc. */
+        /**
+         * If a/b simplifies to a single literal constant, returns it; else
+         * null. Conservative by design -- see class javadoc.
+         */
         Double constantRatio(Expr a, Expr b) {
             Expr ratio = simplify(Expr.div(a, b));
             return ratio.kind == Expr.Kind.CONST ? ratio.constVal : null;
         }
 
         // -------------------- elementary antiderivative table --------------------
-
-        /** H(u) such that d/du H(u) = h(u), for the given function name; or null if h is not in the table. */
+        /**
+         * H(u) such that d/du H(u) = h(u), for the given function name; or null
+         * if h is not in the table.
+         */
         Expr elementaryAntiderivative(String name, Expr u) {
             switch (name) {
-                case "sin": return Expr.neg(Expr.func("cos", u));
-                case "cos": return Expr.func("sin", u);
-                case "tan": return Expr.neg(Expr.func("ln", Expr.func("abs", Expr.func("cos", u))));
-                case "sec": return Expr.func("ln", Expr.func("abs", Expr.add(Expr.func("sec", u), Expr.func("tan", u))));
-                case "cosec": case "csc":
+                case "sin":
+                    return Expr.neg(Expr.func("cos", u));
+                case "cos":
+                    return Expr.func("sin", u);
+                case "tan":
+                    return Expr.neg(Expr.func("ln", Expr.func("abs", Expr.func("cos", u))));
+                case "sec":
+                    return Expr.func("ln", Expr.func("abs", Expr.add(Expr.func("sec", u), Expr.func("tan", u))));
+                case "cosec":
+                case "csc":
                     return Expr.neg(Expr.func("ln", Expr.func("abs", Expr.add(Expr.func("cosec", u), Expr.func("cot", u)))));
-                case "cot": return Expr.func("ln", Expr.func("abs", Expr.func("sin", u)));
-                case "exp": return Expr.func("exp", u);
-                case "ln": return Expr.sub(Expr.mul(u, Expr.func("ln", u)), u);
-                case "lg": return Expr.div(Expr.sub(Expr.mul(u, Expr.func("ln", u)), u), Expr.constant(Math.log(10)));
-                case "sqrt": return Expr.mul(Expr.constant(2.0 / 3.0), Expr.pow(u, Expr.constant(1.5)));
-                case "cbrt": return Expr.mul(Expr.constant(0.75), Expr.pow(u, Expr.constant(4.0 / 3.0)));
-                case "sinh": return Expr.func("cosh", u);
-                case "cosh": return Expr.func("sinh", u);
-                case "tanh": return Expr.func("ln", Expr.func("cosh", u));
-                case "asin": case "arcsin":
+                case "cot":
+                    return Expr.func("ln", Expr.func("abs", Expr.func("sin", u)));
+                case "exp":
+                    return Expr.func("exp", u);
+                case "ln":
+                    return Expr.sub(Expr.mul(u, Expr.func("ln", u)), u);
+                case "lg":
+                    return Expr.div(Expr.sub(Expr.mul(u, Expr.func("ln", u)), u), Expr.constant(Math.log(10)));
+                case "sqrt":
+                    return Expr.mul(Expr.constant(2.0 / 3.0), Expr.pow(u, Expr.constant(1.5)));
+                case "cbrt":
+                    return Expr.mul(Expr.constant(0.75), Expr.pow(u, Expr.constant(4.0 / 3.0)));
+                case "sinh":
+                    return Expr.func("cosh", u);
+                case "cosh":
+                    return Expr.func("sinh", u);
+                case "tanh":
+                    return Expr.func("ln", Expr.func("cosh", u));
+                case "asin":
+                case "arcsin":
                     return Expr.add(Expr.mul(u, Expr.func("asin", u)), Expr.func("sqrt", Expr.sub(Expr.constant(1), Expr.pow(u, Expr.constant(2)))));
-                case "acos": case "arccos":
+                case "acos":
+                case "arccos":
                     return Expr.sub(Expr.mul(u, Expr.func("acos", u)), Expr.func("sqrt", Expr.sub(Expr.constant(1), Expr.pow(u, Expr.constant(2)))));
-                case "atan": case "arctan":
+                case "atan":
+                case "arctan":
                     return Expr.sub(Expr.mul(u, Expr.func("atan", u)),
                             Expr.mul(Expr.constant(0.5), Expr.func("ln", Expr.add(Expr.constant(1), Expr.pow(u, Expr.constant(2))))));
-                case "asinh": case "arcsinh":
+                case "asinh":
+                case "arcsinh":
                     return Expr.sub(Expr.mul(u, Expr.func("asinh", u)), Expr.func("sqrt", Expr.add(Expr.pow(u, Expr.constant(2)), Expr.constant(1))));
-                case "acosh": case "arccosh":
+                case "acosh":
+                case "arccosh":
                     return Expr.sub(Expr.mul(u, Expr.func("acosh", u)), Expr.func("sqrt", Expr.sub(Expr.pow(u, Expr.constant(2)), Expr.constant(1))));
-                case "atanh": case "arctanh":
+                case "atanh":
+                case "arctanh":
                     return Expr.add(Expr.mul(u, Expr.func("atanh", u)),
                             Expr.mul(Expr.constant(0.5), Expr.func("ln", Expr.sub(Expr.constant(1), Expr.pow(u, Expr.constant(2))))));
-                case "abs": return Expr.mul(Expr.constant(0.5), Expr.mul(u, Expr.func("abs", u)));
-                default: return null;
+                case "coth":
+                    return Expr.func("ln", Expr.func("abs", Expr.func("sinh", u)));
+                case "sech":
+                    return Expr.mul(Expr.constant(2), Expr.func("atan", Expr.func("exp", u)));
+                case "csch":
+                    return Expr.func("ln", Expr.func("abs", Expr.func("tanh", Expr.div(u, Expr.constant(2)))));
+                case "abs":
+                    return Expr.mul(Expr.constant(0.5), Expr.mul(u, Expr.func("abs", u)));
+                default:
+                    return null;
             }
         }
 
         // -------------------- LIATE priority (for integration by parts) --------------------
-
         int partsPriority(Expr e, String var) {
             if (e.kind == Expr.Kind.FUNC && e.children.length == 1) {
                 switch (e.funcName) {
-                    case "ln": case "lg": return 4;
-                    case "asin": case "arcsin": case "acos": case "arccos": case "atan": case "arctan":
-                    case "asinh": case "arcsinh": case "acosh": case "arccosh": case "atanh": case "arctanh":
+                    case "ln":
+                    case "lg":
+                        return 4;
+                    case "asin":
+                    case "arcsin":
+                    case "acos":
+                    case "arccos":
+                    case "atan":
+                    case "arctan":
+                    case "asinh":
+                    case "arcsinh":
+                    case "acosh":
+                    case "arccosh":
+                    case "atanh":
+                    case "arctanh":
                         return 3;
-                    case "sin": case "cos": case "tan": case "sec": case "cosec": case "csc": case "cot":
-                    case "sinh": case "cosh": case "tanh":
+                    case "sin":
+                    case "cos":
+                    case "tan":
+                    case "sec":
+                    case "cosec":
+                    case "csc":
+                    case "cot":
+                    case "sinh":
+                    case "cosh":
+                    case "tanh":
+                    case "coth":
+                    case "sech":
+                    case "csch":
                         return 1;
-                    case "exp": return 0;
-                    default: return -1;
+                    case "exp":
+                        return 0;
+                    default:
+                        return -1;
                 }
             }
-            if (polyCoeffs(e, var, MAX_POLY_DEGREE) != null) return 2;
+            if (polyCoeffs(e, var, MAX_POLY_DEGREE) != null) {
+                return 2;
+            }
             return -1;
         }
 
         // -------------------- default rule book --------------------
-
         private void registerDefaultRules() {
             rules.add(this::ruleNoVariable);
             rules.add(this::ruleVariableOrPowerOfVariable);
@@ -975,12 +1375,15 @@ public final class SymbolicIntegrator {
             rules.add(this::ruleLinearArgumentTable);
             rules.add(this::ruleLogDerivative);
             rules.add(this::ruleRationalLinearOrQuadratic);
+            rules.add(this::ruleLinearSinCosCombination);
             rules.add(this::ruleUSubstitution);
             rules.add(this::ruleIntegrationByParts);
         }
 
         private Expr ruleNoVariable(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (!containsVar(e, var)) return Expr.mul(e, Expr.var(var));
+            if (!containsVar(e, var)) {
+                return Expr.mul(e, Expr.var(var));
+            }
             return null;
         }
 
@@ -992,70 +1395,105 @@ public final class SymbolicIntegrator {
         }
 
         private Expr ruleSum(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (e.kind != Expr.Kind.ADD) return null;
+            if (e.kind != Expr.Kind.ADD) {
+                return null;
+            }
             Expr ia = integrate(e.children[0], var, depth + 1);
-            if (ia == null) return null;
+            if (ia == null) {
+                return null;
+            }
             Expr ib = integrate(e.children[1], var, depth + 1);
-            if (ib == null) return null;
+            if (ib == null) {
+                return null;
+            }
             return Expr.add(ia, ib);
         }
 
         private Expr ruleDifference(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (e.kind != Expr.Kind.SUB) return null;
+            if (e.kind != Expr.Kind.SUB) {
+                return null;
+            }
             Expr ia = integrate(e.children[0], var, depth + 1);
-            if (ia == null) return null;
+            if (ia == null) {
+                return null;
+            }
             Expr ib = integrate(e.children[1], var, depth + 1);
-            if (ib == null) return null;
+            if (ib == null) {
+                return null;
+            }
             return Expr.sub(ia, ib);
         }
 
         private Expr ruleNegate(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (e.kind != Expr.Kind.NEG) return null;
+            if (e.kind != Expr.Kind.NEG) {
+                return null;
+            }
             Expr ia = integrate(e.children[0], var, depth + 1);
             return ia == null ? null : Expr.neg(ia);
         }
 
         /**
-         * Pulls every constant factor out of a MUL chain of ANY nesting/associativity (via {@link
-         * #flattenMul}) -- not just the two immediate children of the top node -- and recurses on
-         * the product of the variable-dependent factors. This is what lets {@code (2*x)*cos(x^2)}
-         * (left-associated, constant buried one level deep) find its constant at all.
+         * Pulls every constant factor out of a MUL chain of ANY
+         * nesting/associativity (via {@link
+         * #flattenMul}) -- not just the two immediate children of the top node
+         * -- and recurses on the product of the variable-dependent factors.
+         * This is what lets {@code (2*x)*cos(x^2)} (left-associated, constant
+         * buried one level deep) find its constant at all.
          */
         private Expr ruleConstantMultiple(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (e.kind != Expr.Kind.MUL) return null;
+            if (e.kind != Expr.Kind.MUL) {
+                return null;
+            }
             List<Expr> factors = new ArrayList<>();
             flattenMul(e, factors);
             List<Expr> constFactors = new ArrayList<>();
             List<Expr> varFactors = new ArrayList<>();
             for (Expr f : factors) {
-                if (containsVar(f, var)) varFactors.add(f); else constFactors.add(f);
+                if (containsVar(f, var)) {
+                    varFactors.add(f);
+                } else {
+                    constFactors.add(f);
+                }
             }
-            if (constFactors.isEmpty() || varFactors.isEmpty()) return null;
+            if (constFactors.isEmpty() || varFactors.isEmpty()) {
+                return null;
+            }
             Expr constProduct = rebuildMul(constFactors);
             Expr varProduct = rebuildMul(varFactors);
             Expr integratedVarPart = integrate(varProduct, var, depth + 1);
-            if (integratedVarPart == null) return null;
+            if (integratedVarPart == null) {
+                return null;
+            }
             return Expr.mul(constProduct, integratedVarPart);
         }
 
         /**
-         * integral(f(x)/k) = integral(f(x))/k for a var-free denominator k. A previously-missing
-         * rule: neither {@link #ruleLogDerivative} nor {@link #ruleRationalLinearOrQuadratic}
-         * matches a plain constant denominator (both require it to depend on the variable in a
-         * specific way), so {@code cos(x)/2} had no rule at all before this.
+         * integral(f(x)/k) = integral(f(x))/k for a var-free denominator k. A
+         * previously-missing rule: neither {@link #ruleLogDerivative} nor
+         * {@link #ruleRationalLinearOrQuadratic} matches a plain constant
+         * denominator (both require it to depend on the variable in a specific
+         * way), so {@code cos(x)/2} had no rule at all before this.
          */
         private Expr ruleConstantDenominator(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (e.kind != Expr.Kind.DIV) return null;
+            if (e.kind != Expr.Kind.DIV) {
+                return null;
+            }
             Expr a = e.children[0], b = e.children[1];
-            if (containsVar(b, var)) return null;
+            if (containsVar(b, var)) {
+                return null;
+            }
             Expr ia = integrate(a, var, depth + 1);
             return ia == null ? null : Expr.div(ia, b);
         }
 
         private Expr rulePowerOfAffine(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (e.kind != Expr.Kind.POW || e.children[1].kind != Expr.Kind.CONST) return null;
+            if (e.kind != Expr.Kind.POW || e.children[1].kind != Expr.Kind.CONST) {
+                return null;
+            }
             double[] ab = affineCoeffs(e.children[0], var);
-            if (ab == null || ab[0] == 0.0) return null;
+            if (ab == null || ab[0] == 0.0) {
+                return null;
+            }
             double a = ab[0];
             double n = e.children[1].constVal;
             Expr base = e.children[0];
@@ -1066,18 +1504,28 @@ public final class SymbolicIntegrator {
         }
 
         private Expr ruleLinearArgumentTable(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (e.kind != Expr.Kind.FUNC || e.children.length != 1) return null;
+            if (e.kind != Expr.Kind.FUNC || e.children.length != 1) {
+                return null;
+            }
             double[] ab = affineCoeffs(e.children[0], var);
-            if (ab == null || ab[0] == 0.0) return null;
+            if (ab == null || ab[0] == 0.0) {
+                return null;
+            }
             Expr H = elementaryAntiderivative(e.funcName, e.children[0]);
-            if (H == null) return null;
+            if (H == null) {
+                return null;
+            }
             return Expr.div(H, Expr.constant(ab[0]));
         }
 
         private Expr ruleLogDerivative(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (e.kind != Expr.Kind.DIV) return null;
+            if (e.kind != Expr.Kind.DIV) {
+                return null;
+            }
             Expr a = e.children[0], b = e.children[1];
-            if (!containsVar(b, var)) return null;
+            if (!containsVar(b, var)) {
+                return null;
+            }
             Expr db;
             try {
                 db = diff(b, var);
@@ -1085,25 +1533,37 @@ public final class SymbolicIntegrator {
                 return null;
             }
             Double k = constantRatio(a, db);
-            if (k == null) return null;
+            if (k == null) {
+                return null;
+            }
             return Expr.mul(Expr.constant(k), Expr.func("ln", Expr.func("abs", b)));
         }
 
         private Expr ruleRationalLinearOrQuadratic(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (e.kind != Expr.Kind.DIV) return null;
+            if (e.kind != Expr.Kind.DIV) {
+                return null;
+            }
             double[] q = polyCoeffs(e.children[1], var, MAX_POLY_DEGREE);
-            if (q == null) return null;
+            if (q == null) {
+                return null;
+            }
             int dq = degreeOf(q);
-            if (dq != 1 && dq != 2) return null;
+            if (dq != 1 && dq != 2) {
+                return null;
+            }
             double[] p = polyCoeffs(e.children[0], var, MAX_POLY_DEGREE);
-            if (p == null) return null;
+            if (p == null) {
+                return null;
+            }
             int dp = degreeOf(p);
 
             double[] quotient;
             double[] remainder;
             if (dp >= dq) {
                 double[][] qr = polyDivide(p, q, dq);
-                if (qr == null) return null;
+                if (qr == null) {
+                    return null;
+                }
                 quotient = qr[0];
                 remainder = qr[1];
             } else {
@@ -1114,7 +1574,9 @@ public final class SymbolicIntegrator {
             Expr quotientIntegral = null;
             if (!(quotient.length == 1 && quotient[0] == 0.0)) {
                 quotientIntegral = integrate(polyToExpr(quotient, var), var, depth + 1);
-                if (quotientIntegral == null) return null;
+                if (quotientIntegral == null) {
+                    return null;
+                }
             }
 
             Expr remainderPart;
@@ -1161,12 +1623,17 @@ public final class SymbolicIntegrator {
 
         private static int degreeOf(double[] coeffs) {
             for (int i = coeffs.length - 1; i >= 0; i--) {
-                if (coeffs[i] != 0.0) return i;
+                if (coeffs[i] != 0.0) {
+                    return i;
+                }
             }
             return 0;
         }
 
-        /** Polynomial long division: p = quotient*q + remainder, remainder degree < dq. Returns {quotient, remainder} or null. */
+        /**
+         * Polynomial long division: p = quotient*q + remainder, remainder
+         * degree < dq. Returns {quotient, remainder} or null.
+         */
         private double[][] polyDivide(double[] p, double[] q, int dq) {
             double[] rem = p.clone();
             int dp = degreeOf(rem);
@@ -1175,26 +1642,206 @@ public final class SymbolicIntegrator {
             double leadQ = q[dq];
             while (degreeOf(rem) >= dq && !(rem.length == 1 && rem[0] == 0.0)) {
                 int dr = degreeOf(rem);
-                if (dr < dq) break;
+                if (dr < dq) {
+                    break;
+                }
                 double coeff = rem[dr] / leadQ;
                 int shift = dr - dq;
-                if (shift > quotDeg) return null;
+                if (shift > quotDeg) {
+                    return null;
+                }
                 quot[shift] += coeff;
                 for (int i = 0; i <= dq; i++) {
                     rem[i + shift] -= coeff * q[i];
                 }
-                if (dr == 0) break;
+                if (dr == 0) {
+                    break;
+                }
             }
             return new double[][]{quot, rem};
         }
 
+        // -------------------- linear combination of sin/cos in a denominator --------------------
+        private static final class SinCosTerm {
+
+            Expr L; // shared affine argument across all additive sin/cos terms found so far
+            double sinCoeff, cosCoeff;
+        }
+
+        private static final class SinCosCombo {
+
+            double a, b; // A*sin(L)+B*cos(L)
+            double k, m; // L = k*x + m
+        }
+
+        /**
+         * Recursively decomposes a sum/difference/constant-multiple of bare {@code sin(L)}/
+         * {@code cos(L)} terms sharing the SAME affine argument {@code L} into
+         * accumulated (sinCoeff, cosCoeff) totals. Returns null if the
+         * expression doesn't cleanly decompose this way (e.g. a nested
+         * function, or sin/cos terms with different arguments).
+         */
+        private SinCosTerm decomposeSinCosSum(Expr e, String var) {
+            switch (e.kind) {
+                case ADD: {
+                    SinCosTerm l = decomposeSinCosSum(e.children[0], var);
+                    if (l == null) {
+                        return null;
+                    }
+                    SinCosTerm r = decomposeSinCosSum(e.children[1], var);
+                    if (r == null || !deepEquals(l.L, r.L)) {
+                        return null;
+                    }
+                    SinCosTerm result = new SinCosTerm();
+                    result.L = l.L;
+                    result.sinCoeff = l.sinCoeff + r.sinCoeff;
+                    result.cosCoeff = l.cosCoeff + r.cosCoeff;
+                    return result;
+                }
+                case SUB: {
+                    SinCosTerm l = decomposeSinCosSum(e.children[0], var);
+                    if (l == null) {
+                        return null;
+                    }
+                    SinCosTerm r = decomposeSinCosSum(e.children[1], var);
+                    if (r == null || !deepEquals(l.L, r.L)) {
+                        return null;
+                    }
+                    SinCosTerm result = new SinCosTerm();
+                    result.L = l.L;
+                    result.sinCoeff = l.sinCoeff - r.sinCoeff;
+                    result.cosCoeff = l.cosCoeff - r.cosCoeff;
+                    return result;
+                }
+                case NEG: {
+                    SinCosTerm inner = decomposeSinCosSum(e.children[0], var);
+                    if (inner == null) {
+                        return null;
+                    }
+                    SinCosTerm result = new SinCosTerm();
+                    result.L = inner.L;
+                    result.sinCoeff = -inner.sinCoeff;
+                    result.cosCoeff = -inner.cosCoeff;
+                    return result;
+                }
+                case MUL: {
+                    Expr a = e.children[0], b = e.children[1];
+                    if (a.kind == Expr.Kind.CONST) {
+                        SinCosTerm inner = decomposeSinCosSum(b, var);
+                        if (inner != null) {
+                            SinCosTerm result = new SinCosTerm();
+                            result.L = inner.L;
+                            result.sinCoeff = a.constVal * inner.sinCoeff;
+                            result.cosCoeff = a.constVal * inner.cosCoeff;
+                            return result;
+                        }
+                    }
+                    if (b.kind == Expr.Kind.CONST) {
+                        SinCosTerm inner = decomposeSinCosSum(a, var);
+                        if (inner != null) {
+                            SinCosTerm result = new SinCosTerm();
+                            result.L = inner.L;
+                            result.sinCoeff = b.constVal * inner.sinCoeff;
+                            result.cosCoeff = b.constVal * inner.cosCoeff;
+                            return result;
+                        }
+                    }
+                    return null;
+                }
+                case FUNC: {
+                    if (e.children.length == 1 && "sin".equals(e.funcName)) {
+                        SinCosTerm result = new SinCosTerm();
+                        result.L = e.children[0];
+                        result.sinCoeff = 1.0;
+                        result.cosCoeff = 0.0;
+                        return result;
+                    }
+                    if (e.children.length == 1 && "cos".equals(e.funcName)) {
+                        SinCosTerm result = new SinCosTerm();
+                        result.L = e.children[0];
+                        result.sinCoeff = 0.0;
+                        result.cosCoeff = 1.0;
+                        return result;
+                    }
+                    return null;
+                }
+                default:
+                    return null;
+            }
+        }
+
+        private SinCosCombo matchSinCosCombination(Expr denom, String var) {
+            SinCosTerm term = decomposeSinCosSum(denom, var);
+            if (term == null || term.L == null) {
+                return null;
+            }
+            if (term.sinCoeff == 0.0 && term.cosCoeff == 0.0) {
+                return null;
+            }
+            double[] ab = affineCoeffs(term.L, var);
+            if (ab == null || ab[0] == 0.0) {
+                return null;
+            }
+            SinCosCombo c = new SinCosCombo();
+            c.a = term.sinCoeff;
+            c.b = term.cosCoeff;
+            c.k = ab[0];
+            c.m = ab[1];
+            return c;
+        }
+
+        /**
+         * integral(P / (A*sin(L)+B*cos(L))) dx for a var-free P and affine L,
+         * via the identity A*sin(L)+B*cos(L) = R*sin(L+phi) (R=sqrt(A^2+B^2),
+         * phi=atan2(B,A)) -- since L+phi is still affine (same slope, shifted
+         * intercept), this reduces directly to the existing linear-argument
+         * cosecant table entry. Covers {@code 2/sin(x)}, {@code 3/cos(4*x)},
+         * and {@code 1/(sin(x)+cos(x))} (whose closed form works out, via the
+         * standard identity {@code csc(u)+cot(u) == cot(u/2)}, to be
+         * algebraically identical to the commonly-quoted
+         * {@code (1/sqrt(2))*ln|tan(x/2+pi/8)|} -- verified numerically either
+         * way). Scoped to a var-free numerator; a non-constant numerator over a
+         * sin/cos-combination denominator is a genuinely different
+         * (Weierstrass-substitution-shaped) problem, not attempted here.
+         */
+        private Expr ruleLinearSinCosCombination(Expr e, String var, SymbolicEngine eng, int depth) {
+            if (e.kind != Expr.Kind.DIV) {
+                return null;
+            }
+            Expr numerator = e.children[0];
+            if (containsVar(numerator, var)) {
+                return null;
+            }
+            SinCosCombo combo = matchSinCosCombination(e.children[1], var);
+            if (combo == null) {
+                return null;
+            }
+            double R = Math.sqrt(combo.a * combo.a + combo.b * combo.b);
+            if (R < 1e-300) {
+                return null;
+            }
+            double phi = Math.atan2(combo.b, combo.a);
+            Expr newArg = Expr.add(Expr.mul(Expr.constant(combo.k), Expr.var(var)), Expr.constant(combo.m + phi));
+            Expr cscAntideriv = elementaryAntiderivative("cosec", newArg);
+            if (cscAntideriv == null) {
+                return null;
+            }
+            return Expr.div(Expr.mul(Expr.div(numerator, Expr.constant(R)), cscAntideriv), Expr.constant(combo.k));
+        }
+
         private Expr ruleUSubstitution(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (depth > MAX_INTEGRATE_DEPTH - 2) return null;
+            if (depth > MAX_INTEGRATE_DEPTH - 2) {
+                return null;
+            }
             List<Expr> candidates = new ArrayList<>();
             collectCandidateInners(e, var, candidates);
             for (Expr g : candidates) {
-                if (!containsVar(g, var)) continue;
-                if (g.kind == Expr.Kind.VAR) continue;
+                if (!containsVar(g, var)) {
+                    continue;
+                }
+                if (g.kind == Expr.Kind.VAR) {
+                    continue;
+                }
                 Expr dg;
                 try {
                     dg = diff(g, var);
@@ -1202,7 +1849,9 @@ public final class SymbolicIntegrator {
                     continue;
                 }
                 dg = simplify(dg);
-                if (dg.kind == Expr.Kind.CONST && dg.constVal == 0.0) continue;
+                if (dg.kind == Expr.Kind.CONST && dg.constVal == 0.0) {
+                    continue;
+                }
                 Expr ratio;
                 try {
                     ratio = simplify(Expr.div(e, dg));
@@ -1210,16 +1859,22 @@ public final class SymbolicIntegrator {
                     continue;
                 }
                 Expr substituted = replaceSubexpr(ratio, simplify(g), Expr.var(DUMMY_VAR));
-                if (containsVar(substituted, var)) continue;
+                if (containsVar(substituted, var)) {
+                    continue;
+                }
                 Expr recursiveResult = integrate(substituted, DUMMY_VAR, depth + 1);
-                if (recursiveResult == null) continue;
+                if (recursiveResult == null) {
+                    continue;
+                }
                 return replaceSubexpr(recursiveResult, Expr.var(DUMMY_VAR), g);
             }
             return null;
         }
 
         private void collectCandidateInners(Expr e, String var, List<Expr> out) {
-            if (out.size() > 24) return;
+            if (out.size() > 24) {
+                return;
+            }
             if (e.kind == Expr.Kind.FUNC && e.children.length >= 1 && containsVar(e.children[0], var)) {
                 addIfAbsent(out, e.children[0]);
             }
@@ -1227,8 +1882,12 @@ public final class SymbolicIntegrator {
                 addIfAbsent(out, e.children[0]);
             }
             if (e.kind == Expr.Kind.MUL) {
-                if (containsVar(e.children[0], var)) addIfAbsent(out, e.children[0]);
-                if (containsVar(e.children[1], var)) addIfAbsent(out, e.children[1]);
+                if (containsVar(e.children[0], var)) {
+                    addIfAbsent(out, e.children[0]);
+                }
+                if (containsVar(e.children[1], var)) {
+                    addIfAbsent(out, e.children[1]);
+                }
             }
             for (Expr c : e.children) {
                 collectCandidateInners(c, var, out);
@@ -1238,20 +1897,28 @@ public final class SymbolicIntegrator {
         private void addIfAbsent(List<Expr> list, Expr candidate) {
             Expr s = simplify(candidate);
             for (Expr existing : list) {
-                if (deepEquals(existing, s)) return;
+                if (deepEquals(existing, s)) {
+                    return;
+                }
             }
             list.add(s);
         }
 
         private Expr ruleIntegrationByParts(Expr e, String var, SymbolicEngine eng, int depth) {
-            if (depth > MAX_INTEGRATE_DEPTH - 2) return null;
+            if (depth > MAX_INTEGRATE_DEPTH - 2) {
+                return null;
+            }
             return tryByParts(e, e, var, depth, 0);
         }
 
         private Expr tryByParts(Expr originalIntegrand, Expr current, String var, int depth, int partsDepth) {
-            if (partsDepth > MAX_BY_PARTS_DEPTH || current.kind != Expr.Kind.MUL) return null;
+            if (partsDepth > MAX_BY_PARTS_DEPTH || current.kind != Expr.Kind.MUL) {
+                return null;
+            }
             Expr a = current.children[0], b = current.children[1];
-            if (!containsVar(a, var) || !containsVar(b, var)) return null;
+            if (!containsVar(a, var) || !containsVar(b, var)) {
+                return null;
+            }
 
             int pa = partsPriority(a, var), pb = partsPriority(b, var);
             Expr[][] orderings = pa >= pb
@@ -1267,7 +1934,9 @@ public final class SymbolicIntegrator {
                     continue;
                 }
                 Expr V = integrate(dv, var, depth + 1);
-                if (V == null) continue;
+                if (V == null) {
+                    continue;
+                }
                 Expr boundary = simplify(Expr.mul(u, V));
                 Expr remainder = simplify(Expr.mul(V, du));
 
@@ -1280,7 +1949,9 @@ public final class SymbolicIntegrator {
                 // costs nothing on an ordinary (non-self-referential) case like x*sin(x).
                 if (partsDepth < MAX_BY_PARTS_DEPTH) {
                     Expr selfRef = trySelfReferential(originalIntegrand, remainder, boundary, var, depth, partsDepth + 1);
-                    if (selfRef != null) return selfRef;
+                    if (selfRef != null) {
+                        return selfRef;
+                    }
                 }
 
                 Expr direct = integrate(remainder, var, depth + 1);
@@ -1293,9 +1964,13 @@ public final class SymbolicIntegrator {
 
         private Expr trySelfReferential(Expr originalIntegrand, Expr remainder, Expr boundaryFromFirstStep,
                 String var, int depth, int partsDepth) {
-            if (remainder.kind != Expr.Kind.MUL) return null;
+            if (remainder.kind != Expr.Kind.MUL) {
+                return null;
+            }
             Expr a = remainder.children[0], b = remainder.children[1];
-            if (!containsVar(a, var) || !containsVar(b, var)) return null;
+            if (!containsVar(a, var) || !containsVar(b, var)) {
+                return null;
+            }
 
             int pa = partsPriority(a, var), pb = partsPriority(b, var);
             Expr[][] orderings = pa >= pb
@@ -1311,11 +1986,15 @@ public final class SymbolicIntegrator {
                     continue;
                 }
                 Expr V2 = integrate(dv2, var, depth + 1);
-                if (V2 == null) continue;
+                if (V2 == null) {
+                    continue;
+                }
                 Expr boundary2 = simplify(Expr.mul(u2, V2));
                 Expr remainder2 = simplify(Expr.mul(V2, du2));
                 Double k = constantRatio(remainder2, originalIntegrand);
-                if (k == null || Math.abs(1.0 - k) < 1e-12) continue;
+                if (k == null || Math.abs(1.0 - k) < 1e-12) {
+                    continue;
+                }
                 Expr numerator = simplify(Expr.sub(boundaryFromFirstStep, boundary2));
                 return Expr.div(numerator, Expr.constant(1.0 - k));
             }
@@ -1326,12 +2005,12 @@ public final class SymbolicIntegrator {
     // ------------------------------------------------------------------
     // SymbolicIntegrator: the "neat client call" public entry point
     // ------------------------------------------------------------------
-
     public static Builder builder() {
         return new Builder();
     }
 
     public static final class Builder {
+
         private double absTol = 1e-11;
         private double relTol = 1e-11;
         private int maxDepth = 40;
@@ -1340,17 +2019,65 @@ public final class SymbolicIntegrator {
         private boolean taylorRescueEnabled = true;
         private boolean interiorSingularityScanEnabled = true;
         private boolean symbolicEnabled = true;
+        private boolean singularityPrecheckEnabled = true;
 
-        public Builder absoluteTolerance(double absTol) { this.absTol = absTol; return this; }
-        public Builder relativeTolerance(double relTol) { this.relTol = relTol; return this; }
-        public Builder maxDepth(int maxDepth) { this.maxDepth = maxDepth; return this; }
-        public Builder strictSingularities(boolean strict) { this.strictSingularities = strict; return this; }
-        public Builder crossCheckEnabled(boolean enabled) { this.crossCheckEnabled = enabled; return this; }
-        public Builder taylorRescueEnabled(boolean enabled) { this.taylorRescueEnabled = enabled; return this; }
-        public Builder interiorSingularityScanEnabled(boolean enabled) { this.interiorSingularityScanEnabled = enabled; return this; }
+        public Builder absoluteTolerance(double absTol) {
+            this.absTol = absTol;
+            return this;
+        }
 
-        /** Default true. When false, every call goes straight to the numeric engine (useful for A/B comparison or debugging). */
-        public Builder symbolicEnabled(boolean enabled) { this.symbolicEnabled = enabled; return this; }
+        public Builder relativeTolerance(double relTol) {
+            this.relTol = relTol;
+            return this;
+        }
+
+        public Builder maxDepth(int maxDepth) {
+            this.maxDepth = maxDepth;
+            return this;
+        }
+
+        public Builder strictSingularities(boolean strict) {
+            this.strictSingularities = strict;
+            return this;
+        }
+
+        public Builder crossCheckEnabled(boolean enabled) {
+            this.crossCheckEnabled = enabled;
+            return this;
+        }
+
+        public Builder taylorRescueEnabled(boolean enabled) {
+            this.taylorRescueEnabled = enabled;
+            return this;
+        }
+
+        public Builder interiorSingularityScanEnabled(boolean enabled) {
+            this.interiorSingularityScanEnabled = enabled;
+            return this;
+        }
+
+        /**
+         * Default true. When false, every call goes straight to the numeric
+         * engine (useful for A/B comparison or debugging).
+         */
+        public Builder symbolicEnabled(boolean enabled) {
+            this.symbolicEnabled = enabled;
+            return this;
+        }
+
+        /**
+         * Default true. When enabled, a symbolic candidate that passes
+         * spot-check verification is still discarded (in favor of the numeric
+         * engine) if {@link SingularityAwareIntegrator#
+         * rangeLooksSingular} flags the range -- see class javadoc, "Why sparse
+         * verification alone is not enough". Disabling this trades that safety
+         * net for avoiding the numeric engine's one-time construction cost on
+         * every symbolic success.
+         */
+        public Builder singularityPrecheckEnabled(boolean enabled) {
+            this.singularityPrecheckEnabled = enabled;
+            return this;
+        }
 
         public SymbolicIntegrator build(MathExpression me, String wrtVar) {
             return new SymbolicIntegrator(me, wrtVar, this);
@@ -1409,7 +2136,10 @@ public final class SymbolicIntegrator {
         return rpn;
     }
 
-    /** Exposes the engine so callers can register additional rules before integrating -- see class javadoc, "expandable". */
+    /**
+     * Exposes the engine so callers can register additional rules before
+     * integrating -- see class javadoc, "expandable".
+     */
     public SymbolicEngine getEngine() {
         return engine;
     }
@@ -1434,16 +2164,35 @@ public final class SymbolicIntegrator {
                         lastSymbolicFailureReason = "candidate antiderivative failed numeric verification "
                                 + "(discarded for safety rather than risk a wrong answer): " + simplified;
                     } else {
-                        double valAtB = engine.numericEval(simplified, wrtVar, b);
-                        double valAtA = engine.numericEval(simplified, wrtVar, a);
-                        double result = valAtB - valAtA;
-                        if (!Double.isFinite(result)) {
-                            lastSymbolicFailureReason = "symbolic antiderivative evaluated to a non-finite "
-                                    + "value at the bounds: " + simplified;
+                        boolean singularRangeFlagged = false;
+                        if (config.singularityPrecheckEnabled) {
+                            Integrator fallback = numericFallback();
+                            if (fallback instanceof SingularityAwareIntegrator
+                                    && ((SingularityAwareIntegrator) fallback).rangeLooksSingular(a, b)) {
+                                singularRangeFlagged = true;
+                            }
+                        }
+                        if (singularRangeFlagged) {
+                            lastSymbolicFailureReason = "candidate antiderivative passed spot-check "
+                                    + "verification, but the numeric engine's singularity scan flagged this "
+                                    + "range as likely containing an interior pole the sparse verification "
+                                    + "samples could have missed or landed exactly on (e.g. a candidate like "
+                                    + "ln|x| across an interval straddling x=0, where naive evaluation can "
+                                    + "silently return the Cauchy principal value instead of correctly "
+                                    + "reporting divergence); deferring to the full numeric engine instead "
+                                    + "of trusting this symbolic shortcut: " + simplified;
                         } else {
-                            lastCallWasSymbolic = true;
-                            lastAntiderivative = simplified;
-                            return result;
+                            double valAtB = engine.numericEval(simplified, wrtVar, b);
+                            double valAtA = engine.numericEval(simplified, wrtVar, a);
+                            double result = valAtB - valAtA;
+                            if (!Double.isFinite(result)) {
+                                lastSymbolicFailureReason = "symbolic antiderivative evaluated to a non-finite "
+                                        + "value at the bounds: " + simplified;
+                            } else {
+                                lastCallWasSymbolic = true;
+                                lastAntiderivative = simplified;
+                                return result;
+                            }
                         }
                     }
                 }
@@ -1458,10 +2207,11 @@ public final class SymbolicIntegrator {
     }
 
     /**
-     * Why the most recent call used the numeric fallback instead of a symbolic result -- null if
-     * the most recent call succeeded symbolically. Always populated (not gated behind logging
-     * configuration), specifically so a symbolic miss is a one-line answer to inspect rather than
-     * something to reverse-engineer from output patterns.
+     * Why the most recent call used the numeric fallback instead of a symbolic
+     * result -- null if the most recent call succeeded symbolically. Always
+     * populated (not gated behind logging configuration), specifically so a
+     * symbolic miss is a one-line answer to inspect rather than something to
+     * reverse-engineer from output patterns.
      */
     public String getLastSymbolicFailureReason() {
         return lastSymbolicFailureReason;
@@ -1486,7 +2236,10 @@ public final class SymbolicIntegrator {
         return lastCallWasSymbolic;
     }
 
-    /** Human-readable antiderivative from the most recent call, or null if that call used the numeric fallback. */
+    /**
+     * Human-readable antiderivative from the most recent call, or null if that
+     * call used the numeric fallback.
+     */
     public String getLastAntiderivativeDescription() {
         return lastAntiderivative == null ? null : lastAntiderivative.toString();
     }
@@ -1494,7 +2247,6 @@ public final class SymbolicIntegrator {
     // ------------------------------------------------------------------
     // Self-tests
     // ------------------------------------------------------------------
-
     private static int passCount = 0;
     private static int failCount = 0;
 
@@ -1504,13 +2256,17 @@ public final class SymbolicIntegrator {
         boolean numOk = err <= tol;
         boolean pathOk = (expectSymbolic == wasSymbolic);
         boolean ok = numOk && pathOk;
-        System.out.printf("[%s] %-55s actual=%.12g expected=%.12g err=%.3e path=%s(expected %s)%n",
+        System.out.printf("[%s] %-60s actual=%.12g expected=%.12g err=%.3e path=%s(expected %s)%n",
                 ok ? "PASS" : "FAIL", label, actual, expected, err,
                 wasSymbolic ? "SYMBOLIC" : "NUMERIC", expectSymbolic ? "SYMBOLIC" : "NUMERIC");
         if (expectSymbolic && !wasSymbolic && failureReasonIfAny != null) {
             System.out.println("       symbolic failure reason: " + failureReasonIfAny);
         }
-        if (ok) passCount++; else failCount++;
+        if (ok) {
+            passCount++;
+        } else {
+            failCount++;
+        }
     }
 
     private static SymbolicIntegrator make(String expr) {
@@ -1532,25 +2288,54 @@ public final class SymbolicIntegrator {
         double vInvX = invX.integrate(1, 2);
         expect("1/x on [1,2] (power rule n=-1)", vInvX, Math.log(2), 1e-8, true, invX.wasLastResultSymbolic(), invX.getLastSymbolicFailureReason());
 
+        // Reviewer bug 1, hand-verified: 1/x over a NEGATIVE interval (not crossing zero). The
+        // ln|x| chain (including the abs() introduced during differentiation) must evaluate
+        // cleanly at negative x, not throw.
+        SymbolicIntegrator invXNeg = make("1/x");
+        double vInvXNeg = invXNeg.integrate(-2, -1);
+        expect("1/x on [-2,-1] (ln|x| on a negative domain)", vInvXNeg, Math.log(1.0) - Math.log(2.0), 1e-8, true, invXNeg.wasLastResultSymbolic(), invXNeg.getLastSymbolicFailureReason());
+
+        // The REAL danger reviewer bug 1 was pointing at, made concrete: 1/x straddling x=0. Sparse
+        // spot-check verification alone would likely pass this (one sample lands on the skipped
+        // domain edge, the rest verify fine) and silently return the Cauchy principal value (0) for
+        // an integral that does not actually converge. The singularity pre-check must catch this
+        // and force the numeric fallback instead, which correctly throws.
+        SymbolicIntegrator invXStraddle = make("1/x");
+        try {
+            double v = invXStraddle.integrate(-1, 1);
+            System.out.printf("[FAIL] 1/x on [-1,1] (straddles the pole) should have thrown via numeric "
+                    + "fallback, got=%.6g path=%s%n", v, invXStraddle.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
+            failCount++;
+        } catch (Integrator.NonIntegrableSingularityException expectedEx) {
+            boolean wasNumeric = !invXStraddle.wasLastResultSymbolic();
+            System.out.printf("[%s] 1/x on [-1,1] correctly threw via numeric fallback (symbolic shortcut "
+                    + "correctly discarded despite passing spot-checks): %s%n",
+                    wasNumeric ? "PASS" : "FAIL", expectedEx.getMessage());
+            if (wasNumeric) {
+                passCount++;
+            } else {
+                failCount++;
+            }
+        }
+
         SymbolicIntegrator tanI = make("tan(x)");
         double vTan = tanI.integrate(0, 1);
         expect("tan(x) on [0,1] (log-derivative rule)", vTan, -Math.log(Math.cos(1)), 1e-8, true, tanI.wasLastResultSymbolic(), tanI.getLastSymbolicFailureReason());
         System.out.println("  F = " + tanI.getLastAntiderivativeDescription());
 
-        // u-substitution: integral(2x*cos(x^2)) = sin(x^2) -- FIXED: previously failed because the
-        // constant "2" was buried inside a left-associated (2*x)*cos(x^2) and never got pulled out.
+        // u-substitution: integral(2x*cos(x^2)) = sin(x^2)
         SymbolicIntegrator usub = make("2*x*cos(x^2)");
         double vUsub = usub.integrate(0, 1.5);
         expect("2x*cos(x^2) on [0,1.5] (u-substitution, nested constant)", vUsub, Math.sin(1.5 * 1.5), 1e-7, true, usub.wasLastResultSymbolic(), usub.getLastSymbolicFailureReason());
         System.out.println("  F = " + usub.getLastAntiderivativeDescription());
 
-        // A second, independent u-substitution case exercising the same nested-constant fix from a
-        // different angle (constant multiplies the WHOLE product, not just one factor).
-        SymbolicIntegrator usub2 = make("6*x^2*sin(x^3)");
-        double vUsub2 = usub2.integrate(0, 1.2);
-        double expUsub2 = -2.0 * (Math.cos(Math.pow(1.2, 3)) - Math.cos(0));
-        expect("6x^2*sin(x^3) on [0,1.2] (u-substitution, degree-3 inner)", vUsub2, expUsub2, 1e-6, true, usub2.wasLastResultSymbolic(), usub2.getLastSymbolicFailureReason());
-        System.out.println("  F = " + usub2.getLastAntiderivativeDescription());
+        // Trig product: sin(x)*cos(x) -- confirmed to already work via u-substitution, no dedicated
+        // product-to-sum rule needed (see class javadoc).
+        SymbolicIntegrator trigProduct = make("sin(x)*cos(x)");
+        double vTrigProduct = trigProduct.integrate(0, 1);
+        expect("sin(x)*cos(x) on [0,1] (trig product via u-substitution, no dedicated rule needed)",
+                vTrigProduct, 0.5 * Math.sin(1) * Math.sin(1), 1e-8, true, trigProduct.wasLastResultSymbolic(), trigProduct.getLastSymbolicFailureReason());
+        System.out.println("  F = " + trigProduct.getLastAntiderivativeDescription());
 
         // Integration by parts (single application): integral(x*sin(x)) = sin(x) - x*cos(x)
         SymbolicIntegrator parts1 = make("x*sin(x)");
@@ -1559,9 +2344,7 @@ public final class SymbolicIntegrator {
         expect("x*sin(x) on [0,2] (integration by parts)", vParts1, expParts1, 1e-7, true, parts1.wasLastResultSymbolic(), parts1.getLastSymbolicFailureReason());
         System.out.println("  F = " + parts1.getLastAntiderivativeDescription());
 
-        // Self-referential by parts: integral(e^x*sin(x)) -- FIXED: needed factor cancellation
-        // (including NEG-as-(-1) unwrapping) to recognize -e^x*sin(x)/(e^x*sin(x)) == -1, and the
-        // reordered self-reference check to actually reach that recognition.
+        // Self-referential by parts: integral(e^x*sin(x))
         SymbolicIntegrator partsSelf = make("exp(x)*sin(x)");
         double vPartsSelf = partsSelf.integrate(0, 1);
         java.util.function.DoubleUnaryOperator F = x -> 0.5 * Math.exp(x) * (Math.sin(x) - Math.cos(x));
@@ -1569,14 +2352,15 @@ public final class SymbolicIntegrator {
         expect("e^x*sin(x) on [0,1] (self-referential by parts)", vPartsSelf, expPartsSelf, 1e-6, true, partsSelf.wasLastResultSymbolic(), partsSelf.getLastSymbolicFailureReason());
         System.out.println("  F = " + partsSelf.getLastAntiderivativeDescription());
 
-        // A second self-referential case with the roles of sin/cos swapped, for real evidence this
-        // isn't a fix specific to one expression's exact shape.
-        SymbolicIntegrator partsSelf2 = make("exp(x)*cos(x)");
-        double vPartsSelf2 = partsSelf2.integrate(0, 1);
-        java.util.function.DoubleUnaryOperator F2 = x -> 0.5 * Math.exp(x) * (Math.sin(x) + Math.cos(x));
-        double expPartsSelf2 = F2.applyAsDouble(1) - F2.applyAsDouble(0);
-        expect("e^x*cos(x) on [0,1] (self-referential by parts, swapped)", vPartsSelf2, expPartsSelf2, 1e-6, true, partsSelf2.wasLastResultSymbolic(), partsSelf2.getLastSymbolicFailureReason());
-        System.out.println("  F = " + partsSelf2.getLastAntiderivativeDescription());
+        // Reviewer bug 3, generalized: 1/(3x+2)^3 -- degree 3 exceeds the quadratic-denominator
+        // rule's cap, and previously never reached rulePowerOfAffine since a bare DIV isn't a POW
+        // node. Now handled via the DIV(a,POW(base,exp)) -> a*base^(-exp) normalization.
+        SymbolicIntegrator cubedDenom = make("1/(3*x+2)^3");
+        double vCubedDenom = cubedDenom.integrate(0, 1);
+        java.util.function.DoubleUnaryOperator Fcubed = x -> -1.0 / (6.0 * Math.pow(3 * x + 2, 2));
+        double expCubedDenom = Fcubed.applyAsDouble(1) - Fcubed.applyAsDouble(0);
+        expect("1/(3x+2)^3 on [0,1] (power-of-affine denominator, degree > 2)", vCubedDenom, expCubedDenom, 1e-8, true, cubedDenom.wasLastResultSymbolic(), cubedDenom.getLastSymbolicFailureReason());
+        System.out.println("  F = " + cubedDenom.getLastAntiderivativeDescription());
 
         // The previously-missing rule: f(x)/constant.
         SymbolicIntegrator constDenom = make("cos(x)/2");
@@ -1606,6 +2390,53 @@ public final class SymbolicIntegrator {
         expect("1/(x^2-9) on [0,2] (rational, quadratic denom, ln form)", vRatQuadLn, expRatQuadLn, 1e-7, true, ratQuadLn.wasLastResultSymbolic(), ratQuadLn.getLastSymbolicFailureReason());
         System.out.println("  F = " + ratQuadLn.getLastAntiderivativeDescription());
 
+        // --- Linear sin/cos combination rule: 2/sin(x), 3/cos(4x), and the composite case
+        // 1/(sin(x)+cos(x)) whose closed form the user specified explicitly.
+        SymbolicIntegrator twoOverSin = make("2/sin(x)");
+        double vTwoOverSin = twoOverSin.integrate(1, 2);
+        java.util.function.DoubleUnaryOperator FtwoOverSin = x -> 2.0 * Math.log(Math.abs(Math.tan(x / 2.0)));
+        double expTwoOverSin = FtwoOverSin.applyAsDouble(2) - FtwoOverSin.applyAsDouble(1);
+        expect("2/sin(x) on [1,2] (linear sin/cos combination, pure sin)", vTwoOverSin, expTwoOverSin, 1e-7, true, twoOverSin.wasLastResultSymbolic(), twoOverSin.getLastSymbolicFailureReason());
+        System.out.println("  F = " + twoOverSin.getLastAntiderivativeDescription());
+
+        SymbolicIntegrator threeOverCos4x = make("3/cos(4*x)");
+        double vThreeOverCos4x = threeOverCos4x.integrate(0.1, 0.3);
+        java.util.function.DoubleUnaryOperator FthreeOverCos4x = x -> 0.75 * Math.log(Math.abs(1.0 / Math.cos(4 * x) + Math.tan(4 * x)));
+        double expThreeOverCos4x = FthreeOverCos4x.applyAsDouble(0.3) - FthreeOverCos4x.applyAsDouble(0.1);
+        expect("3/cos(4x) on [0.1,0.3] (linear sin/cos combination, pure cos, affine arg)", vThreeOverCos4x, expThreeOverCos4x, 1e-7, true, threeOverCos4x.wasLastResultSymbolic(), threeOverCos4x.getLastSymbolicFailureReason());
+        System.out.println("  F = " + threeOverCos4x.getLastAntiderivativeDescription());
+
+        SymbolicIntegrator sinPlusCos = make("1/(sin(x)+cos(x))");
+        double vSinPlusCos = sinPlusCos.integrate(0, 1);
+        java.util.function.DoubleUnaryOperator FsinPlusCos = x -> (1.0 / Math.sqrt(2.0)) * Math.log(Math.abs(Math.tan(x / 2.0 + Math.PI / 8.0)));
+        double expSinPlusCos = FsinPlusCos.applyAsDouble(1) - FsinPlusCos.applyAsDouble(0);
+        expect("1/(sin(x)+cos(x)) on [0,1] (user-specified composite case)", vSinPlusCos, expSinPlusCos, 1e-7, true, sinPlusCos.wasLastResultSymbolic(), sinPlusCos.getLastSymbolicFailureReason());
+        System.out.println("  F = " + sinPlusCos.getLastAntiderivativeDescription());
+
+        // --- Previously entirely-unsupported hyperbolic functions: coth, sech, csch.
+        SymbolicIntegrator cothI = make("coth(x)");
+        double vCoth = cothI.integrate(0.5, 1.5);
+        expect("coth(x) on [0.5,1.5] (previously unsupported)", vCoth,
+                Math.log(Math.abs(Math.sinh(1.5))) - Math.log(Math.abs(Math.sinh(0.5))), 1e-8,
+                true, cothI.wasLastResultSymbolic(), cothI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + cothI.getLastAntiderivativeDescription());
+
+        SymbolicIntegrator sechI = make("sech(x)");
+        double vSech = sechI.integrate(0, 1);
+        java.util.function.DoubleUnaryOperator Fsech = x -> 2.0 * Math.atan(Math.exp(x));
+        expect("sech(x) on [0,1] (previously unsupported)", vSech,
+                Fsech.applyAsDouble(1) - Fsech.applyAsDouble(0), 1e-8,
+                true, sechI.wasLastResultSymbolic(), sechI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + sechI.getLastAntiderivativeDescription());
+
+        SymbolicIntegrator cschI = make("csch(x)");
+        double vCsch = cschI.integrate(0.5, 1.5);
+        java.util.function.DoubleUnaryOperator Fcsch = x -> Math.log(Math.abs(Math.tanh(x / 2.0)));
+        expect("csch(x) on [0.5,1.5] (previously unsupported)", vCsch,
+                Fcsch.applyAsDouble(1.5) - Fcsch.applyAsDouble(0.5), 1e-8,
+                true, cschI.wasLastResultSymbolic(), cschI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + cschI.getLastAntiderivativeDescription());
+
         // --- Critical negative tests: genuinely non-elementary integrands MUST fail symbolically
         // and fall back to the numeric engine, not fabricate a wrong closed form.
         SymbolicIntegrator gaussian = make("exp(-x^2)");
@@ -1617,7 +2448,11 @@ public final class SymbolicIntegrator {
         double vXX = xx.integrate(1.1, 3);
         System.out.printf("[INFO ] x^x on [1.1,3] (generally non-elementary): got=%.10g path=%s -- expected NUMERIC%n",
                 vXX, xx.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
-        if (!xx.wasLastResultSymbolic()) passCount++; else failCount++;
+        if (!xx.wasLastResultSymbolic()) {
+            passCount++;
+        } else {
+            failCount++;
+        }
 
         // Fallback still fully functional: an interior pole, handled entirely by the numeric engine's
         // own interior-singularity scan since the symbolic engine has no principal-value machinery.
@@ -1637,4 +2472,4 @@ public final class SymbolicIntegrator {
             System.exit(1);
         }
     }
-} 
+}

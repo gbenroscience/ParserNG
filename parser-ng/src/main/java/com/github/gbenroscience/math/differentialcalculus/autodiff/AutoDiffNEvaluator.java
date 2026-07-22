@@ -70,24 +70,31 @@ public class AutoDiffNEvaluator implements Cloneable {
     private static final int OP_SINH = 17;
     private static final int OP_COSH = 18;
     private static final int OP_TANH = 19;
-    private static final int OP_ASINH = 20;
-    private static final int OP_ACOSH = 21;
-    private static final int OP_ATANH = 22;
-    private static final int OP_SQRT = 23;
-    private static final int OP_CBRT = 24;
-    private static final int OP_EXP = 25;
-    private static final int OP_LN = 26;
-    private static final int OP_LG = 27;
-    private static final int OP_ABS = 28;
-    private static final int OP_ATAN2 = 29;
-    private static final int OP_LOG_BASE = 30;
+    private static final int OP_SECH = 20;
+    private static final int OP_COSECH = 21;
+    private static final int OP_COTH = 22;
+    private static final int OP_ASINH = 23;
+    private static final int OP_ACOSH = 24;
+    private static final int OP_ATANH = 25;
+    private static final int OP_ASECH = 26;
+    private static final int OP_ACOSECH = 27;
+    private static final int OP_ACOTH = 28;
+
+    private static final int OP_SQRT = 29;
+    private static final int OP_CBRT = 30;
+    private static final int OP_EXP = 31;
+    private static final int OP_LN = 32;
+    private static final int OP_LG = 33;
+    private static final int OP_ABS = 34;
+    private static final int OP_ATAN2 = 35;
+    private static final int OP_LOG_BASE = 36;
 
     private final Token[] rpnTokens;   // retained only for Token.v / Token.name lookups -- see class javadoc
     private final byte[] opcodes;      // the dense instruction stream actually walked every evaluation
     private final double[] constants;  // NUMBER values, and non-wrt VARIABLE fallback values
     private final int maxOrder;
     private final int maxStackSize;
-    
+
     public final MathExpression targetExpr;
 
     // Thread-local storage for heavy mutable arrays (allocated once per thread to exact max size).
@@ -100,7 +107,7 @@ public class AutoDiffNEvaluator implements Cloneable {
     }
 
     private AutoDiffNEvaluator(Token[] rpnTokens, byte[] opcodes, double[] constants, int maxOrder, int maxStackSize) {
-        
+
         this.targetExpr = null;
         this.rpnTokens = rpnTokens;
         this.opcodes = opcodes;
@@ -209,6 +216,19 @@ public class AutoDiffNEvaluator implements Cloneable {
                         return OP_COSH;
                     case Declarations.TANH:
                         return OP_TANH;
+                    case Declarations.SECH:
+                        return OP_SECH;
+                    case Declarations.COSECH:
+                        return OP_COSECH;
+                    case Declarations.COTH:
+                        return OP_COTH;
+                    case Declarations.ARC_SECH:
+                        return OP_ASECH;
+                    case Declarations.ARC_COSECH:
+                        return OP_ACOSECH;
+                    case Declarations.ARC_COTH:
+                        return OP_ACOTH;
+
                     case Declarations.ARC_SINH:
                     case Declarations.ARC_SINH_ALT:
                         return OP_ASINH;
@@ -613,6 +633,109 @@ public class AutoDiffNEvaluator implements Cloneable {
                     sp++;
                     break;
                 }
+
+                case OP_SECH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    sinhCoshJet(scratchArg, scratch1, scratch2, order);
+                    recipJet(scratch2, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_COSECH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    sinhCoshJet(scratchArg, scratch1, scratch2, order);
+                    recipJet(scratch1, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_COTH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    tanhJet(scratchArg, scratch1, order, scratch2);
+                    recipJet(scratch1, res, order);
+                    sp++;
+                    break;
+                }
+                case OP_ASECH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    if (scratchArg[0] <= 0.0 || scratchArg[0] > 1.0) {
+                        throw new ArithmeticException("asech domain");
+                    }
+                    res[0] = Math.log((1.0 + Math.sqrt(1.0 - scratchArg[0] * scratchArg[0])) / scratchArg[0]);
+                    mul(scratchArg, scratchArg, scratch1, order);
+                    scratch2[0] = 1.0 - scratch1[0];
+                    for (int k = 1; k <= order; k++) {
+                        scratch2[k] = -scratch1[k];
+                    }
+                    sqrtJet(scratch2, scratch3, order);
+                    mul(scratchArg, scratch3, scratch1, order);
+                    for (int k = 1; k <= order; k++) {
+                        double s = 0.0;
+                        for (int l = 1; l < k; l++) {
+                            s += l * res[l] * scratch1[k - l];
+                        }
+                        res[k] = (-scratchArg[k] - s / k) / scratch1[0];
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_ACOSECH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    if (scratchArg[0] == 0.0) {
+                        throw new ArithmeticException("acosech domain");
+                    }
+                    res[0] = Math.log(1.0 / scratchArg[0] + Math.sqrt(1.0 / (scratchArg[0] * scratchArg[0]) + 1.0));
+                    mul(scratchArg, scratchArg, scratch1, order);
+                    scratch2[0] = scratch1[0] + 1.0;
+                    for (int k = 1; k <= order; k++) {
+                        scratch2[k] = scratch1[k];
+                    }
+                    sqrtJet(scratch2, scratch3, order);
+                    scratch1[0] = Math.abs(scratchArg[0]);
+                    for (int k = 1; k <= order; k++) {
+                        scratch1[k] = (scratchArg[0] > 0) ? scratchArg[k]
+                                : (scratchArg[0] < 0) ? -scratchArg[k] : 0.0;
+                    }
+                    mul(scratch1, scratch3, scratch2, order);
+                    for (int k = 1; k <= order; k++) {
+                        double s = 0.0;
+                        for (int l = 1; l < k; l++) {
+                            s += l * res[l] * scratch2[k - l];
+                        }
+                        res[k] = (-scratchArg[k] - s / k) / scratch2[0];
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_ACOTH: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    if (Math.abs(scratchArg[0]) <= 1.0) {
+                        throw new ArithmeticException("acoth domain");
+                    }
+                    res[0] = 0.5 * Math.log((scratchArg[0] + 1.0) / (scratchArg[0] - 1.0));
+                    mul(scratchArg, scratchArg, scratch1, order);
+                    for (int k = 1; k <= order; k++) {
+                        double s = 0.0;
+                        for (int l = 1; l < k; l++) {
+                            s += l * res[l] * scratch1[k - l];
+                        }
+                        res[k] = (scratchArg[k] + s / k) / (1.0 - scratch1[0]);
+                    }
+                    sp++;
+                    break;
+                }
+
                 case OP_SQRT: {
                     double[] arg = valStack[--sp];
                     double[] res = valStack[sp];

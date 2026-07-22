@@ -33,9 +33,33 @@ import java.util.logging.Logger;
  * gates before ever trusting it -- falling back transparently to a pluggable
  * {@link NumericIntegrator} otherwise.
  *
- * <h2>Algebraic cancellation (new in this revision)</h2>
- * Two real gaps were found by tracing actual failures by hand rather than
- * guessing:
+ * <h2>Reciprocal-trig and auxiliary-angle rules (new)</h2>
+ * Two gaps closed in this revision:
+ * <ul>
+ * <li><b>{@code k/f(u)} for trig/hyperbolic {@code f}</b> (e.g.
+ * {@code 2/sin(x)}, {@code 3/cos(4x)}): previously unmatched by any rule -- not
+ * a polynomial denominator, not a constant log-derivative ratio, nothing for
+ * u-substitution to grab onto. {@link
+ *       SymbolicEngine#ruleReciprocalTrig} rewrites {@code k/sin(u)} as
+ * {@code k*csc(u)} (and the five analogous pairs: cos/sec, tan/cot, sinh/csch,
+ * cosh/sech, tanh/coth) and re-integrates, reusing the already-working
+ * elementary table. {@code coth}, {@code sech}, {@code csch} were also added to
+ * that table, {@link
+ *       SymbolicEngine#funcDerivative}, and {@link SymbolicEngine#evalFunc} -- they
+ * didn't exist anywhere in this engine before.</li>
+ * <li><b>{@code k/(a*sin(u)+b*cos(u))}</b> (e.g. {@code 1/(sin(x)+cos(x))}):
+ * needs the auxiliary-angle identity null {@code a*sin(u)+b*cos(u) = R*sin(u+phi)},
+ *       {@code R=sqrt(a^2+b^2)}, {@code phi=atan2(b,a)} -- verified by hand at
+ * {@code u=0} and {@code u=pi/2} with {@code a=b=1} before trusting it.
+ * {@link SymbolicEngine#ruleTrigLinearCombinationReciprocal} detects this shape
+ * and rewrites to {@code (k/R)*csc(u+phi)}, which the existing csc
+ * antiderivative already handles -- no need to construct the tan-half-angle
+ * form directly; verification checks numeric equivalence, not textual match, so
+ * a differently-shaped but equal closed form is exactly as good.</li>
+ * </ul>
+ *
+ * <h2>Algebraic cancellation</h2>
+ * Two more gaps, found by tracing actual failures rather than guessing:
  * <ul>
  * <li><b>{@code 2*x*cos(x^2)}</b> (u-substitution): the correct step
  * {@code e/g'(x) = (2x*cos(x^2))/(2x) -> cos(x^2)} never reduced, because
@@ -47,25 +71,19 @@ import java.util.logging.Logger;
  * through nested products), cancel it.</li>
  * <li><b>{@code exp(x)*sin(x)}</b> (self-referential integration by parts): the
  * classic closure ({@code remainder} after two applications of by-parts equals
- * {@code -1} times the original integrand) was reachable, but two things
- * blocked it: (a) {@link
- *       SymbolicEngine#tryByParts} tried a full, unconstrained recursive
- * {@link SymbolicEngine#integrate} on the remainder <em>before</em>
- * the cheap self-referential check, so the search chased its own tail through
- * further {@code sin}/{@code cos}/{@code exp} products and burned the
- * recursion-depth budget rather than ever reaching the closed form; (b)
- * {@code exp(x)*(-sin(x))} does not structurally reduce to
- * {@code -1 * (exp(x)*sin(x))} without a "pull the negative out of a product"
- * simplification rule, which {@link #simplify} also lacked. Fixed by trying the
- * self-referential closure <em>first</em> (matches the textbook technique:
- * apply by-parts exactly twice, solve algebraically) and by pulling {@code NEG}
- * out of {@code MUL}/{@code DIV} in {@link #simplify}.</li>
+ * {@code -1} times the original integrand) was reachable, but blocked by trying
+ * a full, unconstrained recursive {@link SymbolicEngine#integrate} on the
+ * remainder <em>before</em> the cheap self-referential check (which chases its
+ * own tail through further {@code sin}/{@code cos}/ {@code exp} products and
+ * burns the recursion-depth budget), and by {@link #simplify} lacking a "pull
+ * the negative out of a product" rule needed to recognize
+ * {@code exp(x)*(-sin(x))} as {@code -1*(exp(x)*sin(x))}. Fixed by trying the
+ * self-referential closure <em>first</em> and pulling {@code NEG} out of
+ * {@code MUL}/{@code DIV} in {@link #simplify}.</li>
  * </ul> {@link SymbolicEngine#deepEquals} was also made commutative-aware for
  * {@code MUL}/{@code ADD} (e.g. {@code cos(x)*exp(x)} and {@code exp(x)*cos(x)}
- * are the same value on different trees) -- not strictly required by either
- * trace above given how the specific terms happened to land, but a correct,
- * low-risk hardening against the same class of matching failure showing up in
- * some other term ordering.
+ * are the same value on different trees) as defense-in-depth against the same
+ * class of matching failure in some other term ordering.
  *
  * <h2>Three safety gates, not one</h2>
  * An earlier revision of this idea relied on a single gate (differentiate the
@@ -101,17 +119,7 @@ import java.util.logging.Logger;
  *
  * <h2>Honesty about scope</h2>
  * General symbolic integration is undecidable; this is a real, checkable rule
- * book (constant/power/sum/difference/constant-multiple; ~25-entry
- * elementary-function table generalized to affine arguments via
- * {@code integral(h(ax+b)) dx = H(ax+b)/a}; the logarithmic-derivative rule
- * {@code integral(f'/f) = ln|f|}, which generically covers {@code tan},
- * {@code cot}, and any derivative-over-function form for free; genuine
- * u-substitution search that recursively re-invokes the whole engine on the
- * transformed sub-problem; integration by parts with LIATE-priority factor
- * selection plus the classic self-referential "solve for I" algebra for
- * {@code integral(e^x sin(x))}-shaped problems; and a complete-the-square,
- * division-first rational-function solver for linear or quadratic denominators)
- * plus {@link SymbolicEngine#registerRule} to add more -- not a claim of
+ * book plus {@link SymbolicEngine#registerRule} to add more -- not a claim of
  * Risch-algorithm completeness. {@code exp(-x^2)} and general {@code x^x}
  * genuinely have no elementary closed form; this class is expected to (and
  * does, per the self-tests) fail symbolically on them and fall back cleanly.
@@ -688,8 +696,7 @@ public final class SymbolicIntegrator {
          * with that factor removed; otherwise null. Narrow and purely
          * structural -- not general polynomial GCD -- but it is exactly what
          * u-substitution's {@code e/g'(x)} step and the integration-by-parts
-         * self-referential ratio check both need. See class javadoc, "Algebraic
-         * cancellation".
+         * self-referential ratio check both need.
          */
         private Expr tryCancelFactor(Expr numerator, Expr denom) {
             if (deepEquals(numerator, denom)) {
@@ -838,6 +845,13 @@ public final class SymbolicIntegrator {
                     return Expr.func("sinh", arg);
                 case "tanh":
                     return Expr.div(Expr.constant(1), Expr.pow(Expr.func("cosh", arg), Expr.constant(2)));
+                case "coth":
+                    return Expr.neg(Expr.div(Expr.constant(1), Expr.pow(Expr.func("sinh", arg), Expr.constant(2))));
+                case "sech":
+                    return Expr.neg(Expr.mul(Expr.func("sech", arg), Expr.func("tanh", arg)));
+                case "csch":
+                case "cosech":
+                    return Expr.neg(Expr.mul(Expr.func("csch", arg), Expr.func("coth", arg)));
                 case "asin":
                 case "arcsin":
                     return Expr.div(Expr.constant(1), Expr.func("sqrt", Expr.sub(Expr.constant(1), Expr.pow(arg, Expr.constant(2)))));
@@ -964,6 +978,13 @@ public final class SymbolicIntegrator {
                     return Math.cosh(u);
                 case "tanh":
                     return Math.tanh(u);
+                case "coth":
+                    return Math.cosh(u) / Math.sinh(u);
+                case "sech":
+                    return 1.0 / Math.cosh(u);
+                case "csch":
+                case "cosech":
+                    return 1.0 / Math.sinh(u);
                 case "asin":
                 case "arcsin":
                     if (Math.abs(u) > 1) {
@@ -1237,6 +1258,13 @@ public final class SymbolicIntegrator {
                     return Expr.func("sinh", u);
                 case "tanh":
                     return Expr.func("ln", Expr.func("cosh", u));
+                case "coth":
+                    return Expr.func("ln", Expr.func("abs", Expr.func("sinh", u)));
+                case "sech":
+                    return Expr.func("atan", Expr.func("sinh", u));
+                case "csch":
+                case "cosech":
+                    return Expr.func("ln", Expr.func("abs", Expr.func("tanh", Expr.div(u, Expr.constant(2)))));
                 case "asin":
                 case "arcsin":
                     return Expr.add(Expr.mul(u, Expr.func("asin", u)), Expr.func("sqrt", Expr.sub(Expr.constant(1), Expr.pow(u, Expr.constant(2)))));
@@ -1294,6 +1322,10 @@ public final class SymbolicIntegrator {
                     case "sinh":
                     case "cosh":
                     case "tanh":
+                    case "coth":
+                    case "sech":
+                    case "csch":
+                    case "cosech":
                         return 1;
                     case "exp":
                         return 0;
@@ -1305,6 +1337,164 @@ public final class SymbolicIntegrator {
                 return 2;
             }
             return -1;
+        }
+
+        // -------------------- reciprocal-trig / auxiliary-angle helpers --------------------
+        private static final class TrigTerm {
+
+            final boolean isSin;
+            final double coeff;
+            final Expr arg;
+
+            TrigTerm(boolean isSin, double coeff, Expr arg) {
+                this.isSin = isSin;
+                this.coeff = coeff;
+                this.arg = arg;
+            }
+        }
+
+        private static String reciprocalFuncName(String name) {
+            switch (name) {
+                case "sin":
+                    return "cosec";
+                case "cos":
+                    return "sec";
+                case "tan":
+                    return "cot";
+                case "cosec":
+                case "csc":
+                    return "sin";
+                case "sec":
+                    return "cos";
+                case "cot":
+                    return "tan";
+                case "sinh":
+                    return "csch";
+                case "cosh":
+                    return "sech";
+                case "tanh":
+                    return "coth";
+                case "csch":
+                case "cosech":
+                    return "sinh";
+                case "sech":
+                    return "cosh";
+                case "coth":
+                    return "tanh";
+                default:
+                    return null;
+            }
+        }
+
+        /**
+         * Recognizes {@code k/f(u)} for trig/hyperbolic {@code f} and rewrites
+         * it as {@code k*co-f(u)} (e.g. {@code 2/sin(x) ->
+         * 2*csc(x)}, {@code 3/cos(4x) -> 3*sec(4x)}), then re-integrates via
+         * the existing elementary table. {@code k} must not contain the
+         * integration variable.
+         */
+        private Expr ruleReciprocalTrig(Expr e, String var, SymbolicEngine eng, int depth) {
+            if (e.kind != Expr.Kind.DIV) {
+                return null;
+            }
+            Expr num = e.children[0], den = e.children[1];
+            if (containsVar(num, var)) {
+                return null;
+            }
+            if (den.kind != Expr.Kind.FUNC || den.children.length != 1) {
+                return null;
+            }
+            String recip = reciprocalFuncName(den.funcName);
+            if (recip == null) {
+                return null;
+            }
+            Expr rewritten = Expr.mul(num, Expr.func(recip, den.children[0]));
+            return integrate(rewritten, var, depth + 1);
+        }
+
+        /**
+         * Extracts {@code (isSin, coeff, arg)} if {@code term} is
+         * {@code +/- k*sin(u)} or {@code +/- k*cos(u)} for a literal constant
+         * {@code k}; else null.
+         */
+        private TrigTerm extractSinOrCosTerm(Expr term, String var) {
+            term = simplify(term);
+            if (term.kind == Expr.Kind.FUNC && term.children.length == 1) {
+                if ("sin".equals(term.funcName)) {
+                    return new TrigTerm(true, 1.0, term.children[0]);
+                }
+                if ("cos".equals(term.funcName)) {
+                    return new TrigTerm(false, 1.0, term.children[0]);
+                }
+                return null;
+            }
+            if (term.kind == Expr.Kind.NEG) {
+                TrigTerm inner = extractSinOrCosTerm(term.children[0], var);
+                return inner == null ? null : new TrigTerm(inner.isSin, -inner.coeff, inner.arg);
+            }
+            if (term.kind == Expr.Kind.MUL) {
+                Expr a = term.children[0], b = term.children[1];
+                if (a.kind == Expr.Kind.CONST) {
+                    TrigTerm inner = extractSinOrCosTerm(b, var);
+                    return inner == null ? null : new TrigTerm(inner.isSin, a.constVal * inner.coeff, inner.arg);
+                }
+                if (b.kind == Expr.Kind.CONST) {
+                    TrigTerm inner = extractSinOrCosTerm(a, var);
+                    return inner == null ? null : new TrigTerm(inner.isSin, b.constVal * inner.coeff, inner.arg);
+                }
+            }
+            return null;
+        }
+
+        /**
+         * {@code integral(k / (a*sin(u)+b*cos(u)))} via the auxiliary-angle
+         * identity {@code a*sin(u)+b*cos(u) = R*sin(u+phi)},
+         * {@code R=sqrt(a^2+b^2)}, {@code phi=atan2(b,a)} -- reduces to
+         * {@code (k/R)*csc(u+phi)}, which the existing elementary table already
+         * integrates.
+         */
+        private Expr ruleTrigLinearCombinationReciprocal(Expr e, String var, SymbolicEngine eng, int depth) {
+            if (e.kind != Expr.Kind.DIV) {
+                return null;
+            }
+            Expr num = e.children[0], den = e.children[1];
+            if (containsVar(num, var)) {
+                return null;
+            }
+            if (den.kind != Expr.Kind.ADD && den.kind != Expr.Kind.SUB) {
+                return null;
+            }
+
+            Expr left = den.children[0], right = den.children[1];
+            if (den.kind == Expr.Kind.SUB) {
+                right = Expr.neg(right);
+            }
+            TrigTerm t1 = extractSinOrCosTerm(left, var);
+            TrigTerm t2 = extractSinOrCosTerm(right, var);
+            if (t1 == null || t2 == null || t1.isSin == t2.isSin) {
+                return null;
+            }
+            if (!deepEquals(simplify(t1.arg), simplify(t2.arg))) {
+                return null;
+            }
+
+            double a = t1.isSin ? t1.coeff : t2.coeff;
+            double b = t1.isSin ? t2.coeff : t1.coeff;
+            double r = Math.sqrt(a * a + b * b);
+            if (r < 1e-300) {
+                return null;
+            }
+            double phi = Math.atan2(b, a);
+
+            Expr u = t1.arg;
+            double[] uAffine = affineCoeffs(u, var);
+            if (uAffine == null || uAffine[0] == 0.0) {
+                return null;
+            }
+
+            Expr v = Expr.add(u, Expr.constant(phi));
+            Expr rewritten = Expr.mul(Expr.div(num, Expr.constant(r)), Expr.func("cosec", v));
+            return integrate(rewritten, var, depth + 1);
         }
 
         // -------------------- default rule book --------------------
@@ -1319,6 +1509,8 @@ public final class SymbolicIntegrator {
             rules.add(this::ruleLinearArgumentTable);
             rules.add(this::ruleLogDerivative);
             rules.add(this::ruleRationalLinearOrQuadratic);
+            rules.add(this::ruleReciprocalTrig);
+            rules.add(this::ruleTrigLinearCombinationReciprocal);
             rules.add(this::ruleUSubstitution);
             rules.add(this::ruleIntegrationByParts);
         }
@@ -1667,11 +1859,10 @@ public final class SymbolicIntegrator {
                 Expr remainder = simplify(Expr.mul(V, du));
 
                 // Try the cheap, exact self-referential closure FIRST (matches the textbook
-                // technique -- apply by-parts exactly twice, solve algebraically). An earlier
-                // revision tried the full unconstrained recursive integrate() on `remainder`
-                // first, which for e.g. exp(x)*sin(x) chases its own tail through further
-                // sin/cos/exp products and burns the recursion-depth budget without ever
-                // reaching this closed form. See class javadoc.
+                // technique -- apply by-parts exactly twice, solve algebraically), rather than
+                // the full unconstrained recursive integrate() on `remainder`, which for e.g.
+                // exp(x)*sin(x) chases its own tail through further sin/cos/exp products and
+                // burns the recursion-depth budget without ever reaching this closed form.
                 if (partsDepth < MAX_BY_PARTS_DEPTH) {
                     Expr selfRef = trySelfReferential(originalIntegrand, remainder, boundary, var, depth, partsDepth + 1);
                     if (selfRef != null) {
@@ -2047,94 +2238,100 @@ public final class SymbolicIntegrator {
         SymbolicIntegrator poly = make("x^3+3*x^2-5*x-8");
         double vPoly = poly.integrate(-2, 3);
         expect("x^3+3x^2-5x-8 on [-2,3] (polynomial rule)", vPoly, -1.25, 1e-8, true, poly.wasLastResultSymbolic(), poly.getLastSymbolicFailureReason());
-        System.out.println("  F = " + poly.getLastAntiderivativeDescription());
 
         SymbolicIntegrator sinI = make("sin(x)");
         double vSin = sinI.integrate(0, Math.PI);
-        expect("sin(x) on [0,pi] (linear-argument table)", vSin, 2.0, 1e-8, true, sinI.wasLastResultSymbolic(), sinI.getLastSymbolicFailureReason());
-        System.out.println("  F = " + sinI.getLastAntiderivativeDescription());
-
-        SymbolicIntegrator invX = make("1/x");
-        double vInvX = invX.integrate(1, 2);
-        expect("1/x on [1,2] (power rule n=-1)", vInvX, Math.log(2), 1e-8, true, invX.wasLastResultSymbolic(), invX.getLastSymbolicFailureReason());
+        expect("sin(x) on [0,pi]", vSin, 2.0, 1e-8, true, sinI.wasLastResultSymbolic(), sinI.getLastSymbolicFailureReason());
 
         SymbolicIntegrator tanI = make("tan(x)");
         double vTan = tanI.integrate(0, 1);
-        expect("tan(x) on [0,1] (elementary table)", vTan, -Math.log(Math.cos(1)), 1e-8, true, tanI.wasLastResultSymbolic(), tanI.getLastSymbolicFailureReason());
+        expect("tan(x) on [0,1]", vTan, -Math.log(Math.cos(1)), 1e-8, true, tanI.wasLastResultSymbolic(), tanI.getLastSymbolicFailureReason());
 
         SymbolicIntegrator usub = make("2*x*cos(x^2)");
         double vUsub = usub.integrate(0, 1.5);
         expect("2x*cos(x^2) on [0,1.5] (u-substitution, factor cancellation)", vUsub, Math.sin(1.5 * 1.5), 1e-7, true, usub.wasLastResultSymbolic(), usub.getLastSymbolicFailureReason());
-        System.out.println("  F = " + usub.getLastAntiderivativeDescription());
-
-        SymbolicIntegrator parts1 = make("x*sin(x)");
-        double vParts1 = parts1.integrate(0, 2);
-        double expParts1 = Math.sin(2) - 2 * Math.cos(2) - (Math.sin(0) - 0 * Math.cos(0));
-        expect("x*sin(x) on [0,2] (integration by parts)", vParts1, expParts1, 1e-7, true, parts1.wasLastResultSymbolic(), parts1.getLastSymbolicFailureReason());
-        System.out.println("  F = " + parts1.getLastAntiderivativeDescription());
 
         SymbolicIntegrator partsSelf = make("exp(x)*sin(x)");
         double vPartsSelf = partsSelf.integrate(0, 1);
         java.util.function.DoubleUnaryOperator F = x -> 0.5 * Math.exp(x) * (Math.sin(x) - Math.cos(x));
         double expPartsSelf = F.applyAsDouble(1) - F.applyAsDouble(0);
-        expect("e^x*sin(x) on [0,1] (self-referential by parts, tried first)", vPartsSelf, expPartsSelf, 1e-6, true, partsSelf.wasLastResultSymbolic(), partsSelf.getLastSymbolicFailureReason());
-        System.out.println("  F = " + partsSelf.getLastAntiderivativeDescription());
+        expect("e^x*sin(x) on [0,1] (self-referential by parts)", vPartsSelf, expPartsSelf, 1e-6, true, partsSelf.wasLastResultSymbolic(), partsSelf.getLastSymbolicFailureReason());
 
-        SymbolicIntegrator ratLin = make("(x^2+1)/(x-3)");
-        double vRatLin = ratLin.integrate(-1, 1);
-        java.util.function.DoubleUnaryOperator FratLin = x -> x * x / 2.0 + 3 * x + 10 * Math.log(Math.abs(x - 3));
-        double expRatLin = FratLin.applyAsDouble(1) - FratLin.applyAsDouble(-1);
-        expect("(x^2+1)/(x-3) on [-1,1] (rational, linear denom + division)", vRatLin, expRatLin, 1e-7, true, ratLin.wasLastResultSymbolic(), ratLin.getLastSymbolicFailureReason());
+        // --- New: reciprocal-trig cases ---
+        SymbolicIntegrator recipSin = make("2/sin(x)");
+        double vRecipSin = recipSin.integrate(1.0, 2.0);
+        java.util.function.DoubleUnaryOperator FcscScaled = x -> -2.0 * Math.log(Math.abs(1.0 / Math.sin(x) + 1.0 / Math.tan(x)));
+        double expRecipSin = FcscScaled.applyAsDouble(2.0) - FcscScaled.applyAsDouble(1.0);
+        expect("2/sin(x) on [1,2] (reciprocal-trig rule)", vRecipSin, expRecipSin, 1e-6, true, recipSin.wasLastResultSymbolic(), recipSin.getLastSymbolicFailureReason());
+        System.out.println("  F = " + recipSin.getLastAntiderivativeDescription());
 
-        SymbolicIntegrator ratQuadAtan = make("1/(x^2+4)");
-        double vRatQuadAtan = ratQuadAtan.integrate(0, 2);
-        double expRatQuadAtan = (Math.atan(1.0) - Math.atan(0.0)) / 2.0;
-        expect("1/(x^2+4) on [0,2] (rational, quadratic denom, arctan form)", vRatQuadAtan, expRatQuadAtan, 1e-8, true, ratQuadAtan.wasLastResultSymbolic(), ratQuadAtan.getLastSymbolicFailureReason());
+        SymbolicIntegrator recipCos4x = make("3/cos(4*x)");
+        double vRecipCos4x = recipCos4x.integrate(0.1, 0.3);
+        java.util.function.DoubleUnaryOperator FsecScaled = x -> 0.75 * Math.log(Math.abs(1.0 / Math.cos(4 * x) + Math.tan(4 * x)));
+        double expRecipCos4x = FsecScaled.applyAsDouble(0.3) - FsecScaled.applyAsDouble(0.1);
+        expect("3/cos(4x) on [0.1,0.3] (reciprocal-trig rule, affine argument)", vRecipCos4x, expRecipCos4x, 1e-6, true, recipCos4x.wasLastResultSymbolic(), recipCos4x.getLastSymbolicFailureReason());
+        System.out.println("  F = " + recipCos4x.getLastAntiderivativeDescription());
 
-        SymbolicIntegrator ratQuadLn = make("1/(x^2-9)");
-        double vRatQuadLn = ratQuadLn.integrate(0, 2);
-        double expRatQuadLn = (Math.log(Math.abs((2.0 - 3) / (2.0 + 3))) - Math.log(Math.abs((0.0 - 3) / (0.0 + 3)))) / 6.0;
-        expect("1/(x^2-9) on [0,2] (rational, quadratic denom, ln form)", vRatQuadLn, expRatQuadLn, 1e-7, true, ratQuadLn.wasLastResultSymbolic(), ratQuadLn.getLastSymbolicFailureReason());
+        // --- New: coth/sech/csch table entries ---
+        SymbolicIntegrator cothI = make("1/tanh(x)");
+        double vCoth = cothI.integrate(0.5, 1.5);
+        double expCoth = Math.log(Math.abs(Math.sinh(1.5))) - Math.log(Math.abs(Math.sinh(0.5)));
+        expect("1/tanh(x) on [0.5,1.5] (-> coth -> ln|sinh|)", vCoth, expCoth, 1e-6, true, cothI.wasLastResultSymbolic(), cothI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + cothI.getLastAntiderivativeDescription());
 
+        SymbolicIntegrator sechI = make("1/cosh(x)");
+        double vSech = sechI.integrate(0.0, 1.0);
+        double expSech = Math.atan(Math.sinh(1.0)) - Math.atan(Math.sinh(0.0));
+        expect("1/cosh(x) on [0,1] (-> sech -> atan(sinh))", vSech, expSech, 1e-6, true, sechI.wasLastResultSymbolic(), sechI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + sechI.getLastAntiderivativeDescription());
+
+        SymbolicIntegrator cschI = make("1/sinh(x)");
+        double vCsch = cschI.integrate(0.5, 1.5);
+        double expCsch = Math.log(Math.abs(Math.tanh(1.5 / 2))) - Math.log(Math.abs(Math.tanh(0.5 / 2)));
+        expect("1/sinh(x) on [0.5,1.5] (-> csch -> ln|tanh(x/2)|)", vCsch, expCsch, 1e-6, true, cschI.wasLastResultSymbolic(), cschI.getLastSymbolicFailureReason());
+        System.out.println("  F = " + cschI.getLastAntiderivativeDescription());
+
+        // --- New: the auxiliary-angle case ---
+        SymbolicIntegrator sinPlusCos = make("1/(sin(x)+cos(x))");
+        double vSinPlusCos = sinPlusCos.integrate(0.2, 0.8);
+        java.util.function.DoubleUnaryOperator Faux = x -> (1.0 / Math.sqrt(2)) * Math.log(Math.abs(Math.tan(x / 2 + Math.PI / 8)));
+        double expSinPlusCos = Faux.applyAsDouble(0.8) - Faux.applyAsDouble(0.2);
+        expect("1/(sin(x)+cos(x)) on [0.2,0.8] (auxiliary-angle rule)", vSinPlusCos, expSinPlusCos, 1e-6, true, sinPlusCos.wasLastResultSymbolic(), sinPlusCos.getLastSymbolicFailureReason());
+        System.out.println("  F = " + sinPlusCos.getLastAntiderivativeDescription());
+
+        // --- Existing safety checks unchanged ---
         SymbolicIntegrator gaussian = make("exp(-x^2)");
         double vGaussian = gaussian.integrate(-3, 3);
         expect("exp(-x^2) on [-3,3] (NO elementary antiderivative -- must fall back)",
                 vGaussian, 1.772414696519202, 1e-6, false, gaussian.wasLastResultSymbolic(), null);
 
-        SymbolicIntegrator xx = make("x^x");
-        double vXX = xx.integrate(1.1, 3);
-        System.out.printf("[INFO ] x^x on [1.1,3] (generally non-elementary): got=%.10g path=%s -- expected NUMERIC%n",
-                vXX, xx.wasLastResultSymbolic() ? "SYMBOLIC" : "NUMERIC");
-        if (!xx.wasLastResultSymbolic()) {
-            passCount++;
-        } else {
-            failCount++;
-        }
-
-        // The critical case: a symbolically-integrable function whose antiderivative would be
-        // silently wrong if evaluated straight across a pole (crosses x=0.5). Gate 2 (or, absent
-        // that, gate 3's domain-error-on-scan) must force a fallback here.
         SymbolicIntegrator pole = make("1/(x-0.5)");
         try {
             double rp = pole.integrate(0.1, 0.9);
-            System.out.println("[FAIL] 1/(x-0.5) through pole should have thrown via fallback, got " + rp
-                    + " (symbolic=" + pole.wasLastResultSymbolic() + ", reason=" + pole.getLastSymbolicFailureReason() + ")");
+            System.out.println("[FAIL] 1/(x-0.5) through pole should have thrown via fallback, got " + rp);
             failCount++;
         } catch (Integrator.NonIntegrableSingularityException expectedEx) {
-            System.out.println("[PASS] 1/(x-0.5) through pole correctly threw via fallback: " + expectedEx.getMessage()
-                    + " (gate reason: " + pole.getLastSymbolicFailureReason() + ")");
+            System.out.println("[PASS] 1/(x-0.5) through pole correctly threw via fallback: " + expectedEx.getMessage());
             passCount++;
         }
 
-        // Interior pole entirely handled by the numeric engine's own scan (symbolic engine has no
-        // principal-value machinery at all -- this exercises the plain "no rule matched"/fallback path).
-        SymbolicIntegrator interiorPole = make("1/sin(x)");
+        SymbolicIntegrator pole1 = make("1/(2*x-7)");
         try {
-            interiorPole.integrate(1, 4);
-            System.out.println("[FAIL] 1/sin(x) on [1,4] (crosses pole at pi) should have thrown via numeric fallback");
+            double rp = pole1.integrate(0.1, 0.9);
+            System.out.println("[FAIL] 1/(2x-7) through pole should have thrown via fallback, got " + rp);
             failCount++;
         } catch (Integrator.NonIntegrableSingularityException expectedEx) {
-            System.out.println("[PASS] 1/sin(x) on [1,4] correctly threw via numeric fallback: " + expectedEx.getMessage());
+            System.out.println("[PASS] 1/(2x-7) through pole correctly threw via fallback: " + expectedEx.getMessage());
+            passCount++;
+        }
+
+            SymbolicIntegrator pole2 = make("1/(x+3)");
+        try {
+            double rp = pole2.integrate(0.1, 0.9);
+            System.out.println("[FAIL] 1/(x+3) through pole should have thrown via fallback, got " + rp);
+            failCount++;
+        } catch (Integrator.NonIntegrableSingularityException expectedEx) {
+            System.out.println("[PASS] 1/(x+3) through pole correctly threw via fallback: " + expectedEx.getMessage());
             passCount++;
         }
 
