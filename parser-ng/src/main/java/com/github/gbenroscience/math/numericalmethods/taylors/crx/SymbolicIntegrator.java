@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 package com.github.gbenroscience.math.numericalmethods.taylors.crx;
-
+ 
+import com.github.gbenroscience.math.numericalmethods.taylors.crx.Integrator.NonIntegrableSingularityException;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathExpression.Token;
 
@@ -139,7 +140,32 @@ import java.util.logging.Logger;
  * engine, not just the two cases that motivated this revision.
  */
 public final class SymbolicIntegrator {
+   /**
+     * Minimal contract for "given bounds, produce a definite integral value" --
+     * lets {@link SymbolicIntegrator} (or anything else) swap in any numeric
+     * backend as its fallback without depending on {@link Integrator}
+     * specifically.
+     */
+    public interface NumericIntegrator {
 
+        double integrate(double a, double b);
+    }
+
+    /**
+     * Optional capability a {@link NumericIntegrator} may offer: a cheap,
+     * full-integration-free check for whether a range appears to contain a
+     * singularity. {@link SymbolicIntegrator} uses this (when the configured
+     * fallback provides it) as an extra safety gate before trusting a symbolic
+     * shortcut across a range that might cross a pole between verification
+     * sample points. Fallbacks that don't implement this remain fully usable --
+     * the gate is simply skipped, and sample-based verification plus the coarse
+     * numeric cross-check remain as the safety net.
+     */
+    public interface SingularityAwareIntegrator extends NumericIntegrator {
+
+        boolean rangeLooksSingular(double a, double b);
+
+    }
     private static final Logger LOG = Logger.getLogger(SymbolicIntegrator.class.getName());
 
     // ------------------------------------------------------------------
@@ -2233,7 +2259,7 @@ public final class SymbolicIntegrator {
     }
 
     public static void check1(String[] args) {
-        
+
         System.out.println("===========================================CHECK1 STARTS=====================================================");
         SymbolicIntegrator poly = make("x^3+3*x^2-5*x-8");
         double vPoly = poly.integrate(-2, 3);
@@ -2310,20 +2336,20 @@ public final class SymbolicIntegrator {
             double rp = pole.integrate(0.1, 0.9);
             System.out.println("[FAIL] 1/(x-0.5) through pole should have thrown via fallback, got " + rp);
             failCount++;
-        } catch (Integrator.NonIntegrableSingularityException expectedEx) {
+        } catch (NonIntegrableSingularityException expectedEx) {
             System.out.println("[PASS] 1/(x-0.5) through pole correctly threw via fallback: " + expectedEx.getMessage());
             passCount++;
         }
 
         System.out.println("After check1 - ");
         System.out.println(passCount + " passed, " + failCount + " failed");
-       System.out.println("===========================================CHECK1 ENDS=====================================================");
-       
+        System.out.println("===========================================CHECK1 ENDS=====================================================");
+
     }
 
     public static void check2(String[] args) {
-         System.out.println("===========================================CHECK2 STARTS=====================================================");
-       
+        System.out.println("===========================================CHECK2 STARTS=====================================================");
+
         SymbolicIntegrator poly = make("x^3+3*x^2-5*x-8");
         double vPoly = poly.integrate(-2, 3);
         expect("x^3+3x^2-5x-8 on [-2,3] (polynomial rule)", vPoly, -1.25, 1e-8, true, poly.wasLastResultSymbolic(), poly.getLastSymbolicFailureReason());
@@ -2518,8 +2544,8 @@ public final class SymbolicIntegrator {
 
         System.out.println();
         System.out.println(passCount + " passed, " + failCount + " failed");
-    System.out.println("===========================================CHECK2 ENDS=====================================================");
-      
+        System.out.println("===========================================CHECK2 ENDS=====================================================");
+
     }
 
     public static void main(String[] args) {
