@@ -7,7 +7,7 @@
 
 > **The Fastest Pure-Java Expression Engine & Vector Math Kernels. Zero JNI. Zero Native Binaries. Zero Bytecode Safety Risks.**
 
-**ParserNG** is a ultra-high-performance mathematical expression evaluation engine designed for modern JVM workloads, including complex real-time plotting pipelines, financial modeling, and deep learning neural network activations (e.g., Transformer architectures). 
+**ParserNG** is a ultra-high-performance mathematical runtime designed for modern JVM workloads, including complex real-time plotting pipelines, financial modeling, and deep learning neural network activations (e.g., Transformer architectures). 
 
 By adopting a hardware-aligned, fast-interpreted memory model instead of risky dynamic bytecode generation, ParserNG eliminates classloader bloat, protects your runtime from native segmentation faults, and dramatically simplifies your Software Bill of Materials (SBOM) compliance posture.
 
