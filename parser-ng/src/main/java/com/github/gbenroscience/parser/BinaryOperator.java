@@ -55,7 +55,6 @@ public class BinaryOperator extends Operator implements Validatable {
         return precedence;
     }
 
-
     /**
      *
      * @param index sets the index of this operator in the scanned Function that
@@ -80,12 +79,11 @@ public class BinaryOperator extends Operator implements Validatable {
         return index;
     }
 
-  
     /**
-     * 
-     * @param scan the Function object that this BinaryOperator object
-     * exists in. validates the grammatical usage of this operator (by leaving
-     * the correctFunction attribute of the function object un-modified) if the
+     *
+     * @param scan the Function object that this BinaryOperator object exists
+     * in. validates the grammatical usage of this operator (by leaving the
+     * correctFunction attribute of the function object un-modified) if the
      * usage of this operator in its immediate environment i.e to its left and
      * right is correct.
      * @return true if valid
@@ -93,23 +91,22 @@ public class BinaryOperator extends Operator implements Validatable {
     @Override
     public boolean validate(List<String> scan, ErrorLog errorLog) {
 
-
-        int leftInd = index-1;
-        int rightInd = index+1;
+        int leftInd = index - 1;
+        int rightInd = index + 1;
         int sz = scan.size();
         boolean correct = true;
         String prev = leftInd >= 0 ? scan.get(leftInd) : null;
         String curr = scan.get(index);
         String next = rightInd < sz ? scan.get(rightInd) : null;
-  
+
         try {
             //specify valid tokens that can come before a binary operator
             if (isPlusOrMinus(curr)) {
 
-                if (leftInd>=0 && !Number.isNumber(prev) && !Variable.isVariableString(prev)
+                if (leftInd >= 0 && !Number.isNumber(prev) && !Variable.isVariableString(prev)
                         && !isUnaryPostOperator(prev) && !isClosingBracket(prev) && !isOpeningBracket(prev)) {
-                  errorLog.error(
-                            "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
+                    errorLog.error(
+                            "1 - ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
                     correct = false;
@@ -117,12 +114,12 @@ public class BinaryOperator extends Operator implements Validatable {
 
                 }
                 //specify valid tokens that can come after a binary operator
-                if (rightInd<sz && !Number.isNumber(next) && !Variable.isVariableString(next)
+                if (rightInd < sz && !Number.isNumber(next) && !Variable.isVariableString(next)
                         && !isOpeningBracket(next)
                         && !Method.isUnaryPreOperatorORDefinedMethod(next) && !Method.isNumberReturningStatsMethod(next)
                         && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
                     errorLog.error(
-                            "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
+                            "2 - ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
                     correct = false;
@@ -131,22 +128,22 @@ public class BinaryOperator extends Operator implements Validatable {
 
             }//end if
             else if (!isPlusOrMinus(curr)) {
-                if (leftInd>=0 && !Number.isNumber(prev) && !Variable.isVariableString(prev)
+                if (leftInd >= 0 && !Number.isNumber(prev) && !Variable.isVariableString(prev)
                         && !isUnaryPostOperator(prev) && !isClosingBracket(prev)) {
                     errorLog.error(
-                            "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
+                            "3 - ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
                     correct = false;
                     scan.clear();
                 }//end if
                 //specify valid tokens that can come after a binary operator
-                if (rightInd<sz && !Number.isNumber(next) && !Variable.isVariableString(next)
+                if (rightInd < sz && !Number.isNumber(next) && !Variable.isVariableString(next)
                         && !isOpeningBracket(next)
                         && !Method.isUnaryPreOperatorORDefinedMethod(next) && !Method.isNumberReturningStatsMethod(next)
                         && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
-                   errorLog.error(
-                            "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
+                    errorLog.error(
+                            "4 - ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                             + " As You Have Done."
                             + "ParserNG Error Detector For Binary Operators!");
                     correct = false;
@@ -157,7 +154,7 @@ public class BinaryOperator extends Operator implements Validatable {
 
         }//end try
         catch (IndexOutOfBoundsException ind) {
-ind.printStackTrace();
+            ind.printStackTrace();
         }//end catch
 
         return correct;

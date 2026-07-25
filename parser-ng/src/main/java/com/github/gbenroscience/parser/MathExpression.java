@@ -710,9 +710,9 @@ public class MathExpression implements Savable, Solvable {
             }
             int indexOfEquals = code.indexOf("=");
             boolean equalsPresentAndCanLookForwardAndBackward = indexOfEquals != -1 && indexOfEquals != 0 && indexOfEquals + 1 < code.length();
-            
-            if (equalsPresentAndCanLookForwardAndBackward && !isLogicOperator(code.substring(indexOfEquals-1, indexOfEquals+1))
-            && !isLogicOperator(code.substring(indexOfEquals, indexOfEquals+2)) ) {
+
+            if (equalsPresentAndCanLookForwardAndBackward && !isLogicOperator(code.substring(indexOfEquals - 1, indexOfEquals + 1))
+                    && !isLogicOperator(code.substring(indexOfEquals, indexOfEquals + 2))) {
                 boolean success = Function.assignObject(code + ";", this);
                 if (!success) {
                     correctFunction = success;
@@ -856,8 +856,8 @@ public class MathExpression implements Savable, Solvable {
             //refixCommas(); 
             statsVerifier();
             refixCommas();
-            mapBrackets();
-            functionComponentsAssociation();
+            mapBrackets();System.out.println("sc - 5 "+scanner);
+            functionComponentsAssociation();System.out.println("sc - 6 "+scanner);errorLog.print();
             compileToPostfix();  // Compile once if not already done 
         }//end if
 
@@ -3837,23 +3837,17 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println(m222.scanner);
 
         System.out.println(m222.expression + ": -->> " + m222.solve());
-        
-        
-        MathExpression m333 = new MathExpression("x=5;if( 3*x+7>5 && x-1>13, if( x>0 && x-1>=4,cosh(x), ln(x)) , 33)");
+
+        MathExpression m333 = new MathExpression("x=5;if( 3*x+7>5 && x-1> -13, if( x>0 && x-1>=4,cosh(x), ln(x)) , 33)");
         System.out.println(m333.scanner);
 
         System.out.println(m333.expression + ": -->> " + m333.solve());
-        
-           MathExpression m444 = new MathExpression("x=5;if(0==1 && sqrt(-1)>0,   1,   2)");
+
+        MathExpression m444 = new MathExpression("x=5;if(0==1 && sqrt(-1)>0,   1,   2)");
         System.out.println(m444.scanner);
 
         System.out.println(m444.expression + ": -->> " + m444.solve());
-        
-        
-   
-        
-        
-        
+
         System.out.println("abs(-3+22*-5): -->> " + new MathExpression("abs(-3+22*-5)").solve());
         System.out.println("floor(3.141): -->> " + new MathExpression("floor(3.141)").solve());
         System.out.println("ceil(2.138): -->> " + new MathExpression("ceil(2.138)").solve());

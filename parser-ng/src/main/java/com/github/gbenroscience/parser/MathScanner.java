@@ -1085,7 +1085,9 @@ public class MathScanner {
 // --- HELPER METHODS ---
     private static boolean isOperator(String s) {
         // These are tokens that, if they appear BEFORE a sign, make that sign UNARY
-        return s.equals("+") || s.equals("-") || s.equals("*") || s.equals("/")
+        return s.equals("+") || s.equals("-") || s.equals("*") || s.equals("/") 
+                || s.equals("<") ||  s.equals(">")|| s.equals("<=") ||  s.equals(">=")
+                || s.equals("==") ||  s.equals("!=")|| s.equals("&&") ||  s.equals("||")
                 || s.equals("^") || s.equals("%") || s.equals("Р") || s.equals("Č")
                 || s.equals("(") || s.equals("√");
     }
