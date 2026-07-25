@@ -115,6 +115,17 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             BINARY_MAP.put("-", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "subtract", MT_DOUBLE_DD));
             BINARY_MAP.put("*", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "multiply", MT_DOUBLE_DD));
             BINARY_MAP.put("/", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "divide", MT_DOUBLE_DD));
+            
+            
+            BINARY_MAP.put("<", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "lessThan", MT_DOUBLE_DD));
+            BINARY_MAP.put(">", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "greaterThan", MT_DOUBLE_DD));
+            BINARY_MAP.put(String.valueOf(MathExpression.Token.LT_EQ_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "lessThanOrEquals", MT_DOUBLE_DD));
+            BINARY_MAP.put(String.valueOf(MathExpression.Token.GT_EQ_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "greaterThanOrEquals", MT_DOUBLE_DD));
+            BINARY_MAP.put(String.valueOf(MathExpression.Token.EQ_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "equals", MT_DOUBLE_DD));
+            BINARY_MAP.put(String.valueOf(MathExpression.Token.NOT_EQ_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "notEquals", MT_DOUBLE_DD));
+            BINARY_MAP.put(String.valueOf(MathExpression.Token.BIN_AND_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "and", MT_DOUBLE_DD));
+            BINARY_MAP.put(String.valueOf(MathExpression.Token.BIN_OR_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "or", MT_DOUBLE_DD));
+            
             BINARY_MAP.put("Р", LOOKUP.findStatic(Maths.class, "permutation", MT_DOUBLE_DD));
             BINARY_MAP.put("Č", LOOKUP.findStatic(Maths.class, "combination", MT_DOUBLE_DD));
             BINARY_MAP.put("%", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "modulo", MT_DOUBLE_DD));
@@ -1684,6 +1695,50 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
     public static double invSqrt(double x) {
         return 1.0 / Math.sqrt(x);
+    }
+
+    
+    
+    public static double lessThan(double a, double b) {
+        return a < b ? 1 : 0;
+    }
+
+    public static double greaterThan(double a, double b) {
+        return a > b ? 1 : 0;
+    }
+
+    public static double lessThanOrEquals(double a, double b) {
+        return a <= b ? 1 : 0;
+    }
+
+    public static double greaterThanOrEquals(double a, double b) {
+        return a >= b ? 1 : 0;
+    }
+
+    public static double equals(double a, double b) {
+        return a == b ? 1 : 0;
+    }
+
+    public static double notEquals(double a, double b) {
+        return a != b ? 1 : 0;
+    }
+
+    public static double and(double a, double b) {
+        if((a==1||a==0)&&(b==1||b==0)){
+            boolean aa = a==1;
+            boolean bb = b==1;
+            return aa && bb ? 1 : 0;
+        }
+        throw new RuntimeException("Invalid! the args passed to `and` must be either zero or one in value"); 
+    }
+
+    public static double or(double a, double b) {
+          if((a==1||a==0)&&(b==1||b==0)){
+            boolean aa = a==1;
+            boolean bb = b==1;
+            return aa || bb ? 1 : 0;
+        }
+        throw new RuntimeException("Invalid! the args passed to `or` must be either zero or one in value"); 
     }
 
     public static final class MethodHandlePolyfill {

@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -899,6 +900,42 @@ class MathExpressionTest {
         } catch (Throwable ex) {
             Logger.getLogger(MathExpressionTest.class.getName()).log(Level.SEVERE, null, ex);
         }
+    }
+
+    @Test
+    void ifExprTest() {
+
+        MathExpression m111 = new MathExpression("if(3*x+7>5,sin(x), -3)");
+        System.out.println(m111.scanner);
+
+        Random r = new Random(System.nanoTime());
+        for (int i = 0; i < 10; i++) {
+            double val = -r.nextDouble(1000);
+            MathExpression.EvalResult res = m111.solveGeneric(val);
+            System.out.println(m111.getExpression() + ": at x=" + val + " -->> " + res.scalar);
+            Assertions.assertTrue(res.scalar == (3 * val + 7 > 5 ? Math.sin(val) : -3));
+        }
+
+    }
+
+    @Test
+    void ifExprTestTurbo1() throws Throwable {
+
+        MathExpression m111 = new MathExpression("if(3*x+7>5,sin(x), -3)");
+        System.out.println(m111.scanner);
+        ScalarTurboEvaluator1 sct = new ScalarTurboEvaluator1(m111);
+        FastCompositeExpression fce = sct.compile(); 
+
+        Random r = new Random(System.nanoTime());
+        double[] vars = new double[1];
+        for (int i = 0; i < 10; i++) {
+            double val = -r.nextDouble(1000);
+            vars[0] = val;
+            double res = fce.applyScalar(vars);
+            System.out.println(m111.getExpression() + ": at x=" + val + " -->> " + res);
+            Assertions.assertTrue(res == (3 * val + 7 > 5 ? Math.sin(val) : -3));
+        }
+
     }
 
     public static void main(String[] args) {

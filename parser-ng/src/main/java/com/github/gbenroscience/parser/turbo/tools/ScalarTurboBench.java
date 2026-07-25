@@ -22,6 +22,7 @@ import com.github.gbenroscience.util.FunctionManager;
 import com.github.gbenroscience.util.VariableManager;
 import java.security.SecureRandom;
 import java.util.Arrays;
+import java.util.Random;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -41,6 +42,7 @@ public class ScalarTurboBench {
         System.out.println("SCALAR TURBO COMPILER BENCHMARKS");
         System.out.println(rpt);
 
+        ifExprTestTurbo1();
         testUserDefinedFunctionWidening();
         testUserDefinedFunctionArrayBased();
 
@@ -1079,6 +1081,26 @@ public class ScalarTurboBench {
         System.out.printf("Speedup:     %.1fx%n", (double) interpretedDur / turboDur);
     }
 
+      static void ifExprTestTurbo1() throws Throwable {
+
+        MathExpression m111 = new MathExpression("if(3*x+7>5,sin(x), -3)");
+        System.out.println(m111.getScanner());
+        ScalarTurboEvaluator1 sct = new ScalarTurboEvaluator1(m111);
+        FastCompositeExpression fce = sct.compile(); 
+
+        Random r = new Random(System.nanoTime());
+        double[] vars = new double[1];
+        for (int i = 0; i < 10; i++) {
+            double val = -r.nextDouble(1000);
+            vars[0] = val;
+            double res = fce.applyScalar(vars);
+            System.out.println(m111.getExpression() + ": at x=" + val + " -->> " + res);
+            if(res != (3 * val + 7 > 5 ? Math.sin(val) : -3)){
+                 throw new RuntimeException("Not correct! Test failed! at i="+i+" for x = "+val);
+            } 
+        }
+
+    }
     private static void runVariableStressTest() throws Throwable {
         String rpt = STRING.repeating("=", 40);
 

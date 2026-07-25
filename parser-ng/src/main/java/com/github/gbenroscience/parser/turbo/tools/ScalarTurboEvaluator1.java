@@ -116,7 +116,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
     // Common method types
     private static final MethodType MT_DOUBLE_D = MethodType.methodType(double.class, double.class);
-    private static final MethodType MT_DOUBLE_DD = MethodType.methodType(double.class, double.class, double.class);
+    private static final MethodType MT_DOUBLE_DD = MethodType.methodType(double.class, double.class, double.class); 
     private static final MethodType MT_SAFE_WRAP = MethodType.methodType(double.class, double[].class);
 
     // 1. ThreadLocal holding a reusable array of EvalResults to avoid GC pressure
@@ -252,41 +252,6 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         return resultContainer;
     }
 
-    /**
-     * Compile scalar expression to EvalResult-wrapped bytecode.
-     *
-     * The compilation process: 1. Build MethodHandle chain from postfix tokens
-     * 2. Each handle transforms (double[]) -> double 3. Binary ops: combine
-     * left & right, permute args 4. Wrap result in EvalResult.wrap(scalar)
-     *
-     * @return A FastCompositeExpression that returns wrapped scalar
-     * @throws Throwable if compilation fails
-     *
-     * @Override public FastCompositeExpression compile() throws Throwable { //
-     * This now yields a handle with signature (double[])Object MethodHandle
-     * scalarHandle = compileScalar(postfix);
-     *
-     * return new FastCompositeExpression() {
-     * @Override public MathExpression.EvalResult apply(double[] variables) {
-     * try { // invoke() now returns Double (boxed) or double[] Object result =
-     * scalarHandle.invoke(variables);
-     *
-     * if (result instanceof double[]) { return new
-     * MathExpression.EvalResult().wrap((double[]) result); } return new
-     * MathExpression.EvalResult().wrap(((Number) result).doubleValue()); }
-     * catch (Throwable t) { throw new RuntimeException("Turbo evaluation
-     * failed", t); } }
-     *
-     * @Override public double applyScalar(double[] variables) { try { Object
-     * result = scalarHandle.invoke(variables);
-     *
-     * if (result instanceof Number) { return ((Number) result).doubleValue(); }
-     * // Coercion: If the user calls a vector function in a scalar context, //
-     * we return the first element to prevent a crash. double[] arr = (double[])
-     * result; return (arr != null && arr.length > 0) ? arr[0] : Double.NaN; }
-     * catch (Throwable t) { throw new RuntimeException("Turbo primitive
-     * execution failed", t); } } }; }
-     */
     ///////////////////////////////////////////UPDATE STARTS////////////////////////////////////////////////////////////////////////////////
     
         @Override
@@ -327,7 +292,6 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
             private MathExpression.EvalResult execute(double[] variables) {
                 try {
-                    //Object result = genericHandle.invokeExact(MathExpression.EvalResult.ERROR);
                     Object result = genericHandle.invokeExact(variables);
                     return handleResult(result);
                 } catch (Throwable t) {
@@ -469,6 +433,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     } else {
                         MethodHandle right = ensurePrimitive(stack.pop());
                         MethodHandle left = ensurePrimitive(stack.pop());
+                        
                         pushAndVerify(stack, applyBinaryOpNoPermute(t.opChar, left, right));
                     }
                     break;
@@ -476,7 +441,25 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 case MathExpression.Token.METHOD:
                     String name = t.name.toLowerCase();
 
-                    if (Method.isPureStatsMethod(name)) {
+                    if (name.equals(Declarations.IF)) {
+                        int arity = t.arity;
+                        if (arity != 3) {
+                            throw new RuntimeException("Invalid number of args for `if` method");
+                        }
+
+                        MethodHandle falseHandle = ensurePrimitive(stack.pop());
+                        MethodHandle trueHandle = ensurePrimitive(stack.pop());
+                        MethodHandle condHandle = ensurePrimitive(stack.pop());
+
+                        MethodHandle toBool = LOOKUP.findStatic(ScalarTurboEvaluator1.class, "toBoolean", MethodType.methodType(boolean.class, double.class));
+                        MethodHandle testHandle = MethodHandles.filterReturnValue(condHandle, toBool);
+
+                        MethodHandle ifHandle = MethodHandles.guardWithTest(testHandle, trueHandle, falseHandle);
+
+                        pushAndVerify(stack, ifHandle);
+                        
+                        break;
+                    } else if (Method.isPureStatsMethod(name)) {
                         int arity = t.arity;
                         String[] rawArgs = t.getRawArgs();
 
@@ -768,7 +751,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                             pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
                         } else if (solution.getType() == TYPE.VECTOR) {
                             if (name.equals(Declarations.AUTO_DIFF)) {
-                                constant = MethodHandles.constant(double.class, solution.vector[solution.vector.length-1]);//return all derivatives from the evaluated function to the nth derivative
+                                constant = MethodHandles.constant(double.class, solution.vector[solution.vector.length - 1]);//return all derivatives from the evaluated function to the nth derivative
                                 pushAndVerify(stack, MethodHandles.dropArguments(constant, 0, double[].class)); // FIXED SIGNATURE
 
                             } else {//Declarations.AUTO_DIFF_N
@@ -1373,6 +1356,23 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                 return LOOKUP.findStatic(Maths.class, "permutation", MT_DOUBLE_DD);
             case 'C':
                 return LOOKUP.findStatic(Maths.class, "combination", MT_DOUBLE_DD);
+            case '<':
+                return LOOKUP.findStatic(ScalarTurboEvaluator1.class, "lessThan", MT_DOUBLE_DD);
+            case '>':
+                return LOOKUP.findStatic(ScalarTurboEvaluator1.class, "greaterThan", MT_DOUBLE_DD);
+            case MathExpression.Token.LT_EQ_DEF:
+                return LOOKUP.findStatic(ScalarTurboEvaluator1.class, "lessThanOrEquals", MT_DOUBLE_DD);
+            case MathExpression.Token.GT_EQ_DEF:
+                return LOOKUP.findStatic(ScalarTurboEvaluator1.class, "greaterThanOrEquals", MT_DOUBLE_DD);
+            case MathExpression.Token.EQ_DEF:
+                return LOOKUP.findStatic(ScalarTurboEvaluator1.class, "equals", MT_DOUBLE_DD);
+            case MathExpression.Token.NOT_EQ_DEF:
+                return LOOKUP.findStatic(ScalarTurboEvaluator1.class, "notEquals", MT_DOUBLE_DD);
+            case MathExpression.Token.BIN_AND_DEF:
+                return LOOKUP.findStatic(ScalarTurboEvaluator1.class, "and", MT_DOUBLE_DD);
+            case MathExpression.Token.BIN_OR_DEF:
+                return LOOKUP.findStatic(ScalarTurboEvaluator1.class, "or", MT_DOUBLE_DD);
+
             default:
                 throw new IllegalArgumentException("Unsupported binary operator: " + op);
         }
@@ -1459,6 +1459,14 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         }
 
         switch (method) {
+            case Declarations.IF: {
+                double total = 0.0;
+                // The JIT compiler will aggressively unroll this primitive loop
+                for (int i = 0; i < n; i++) {
+                    total += args[i];
+                }
+                return total;
+            }
             case Declarations.LIST_SUM:
             case Declarations.SUM: {
                 double total = 0.0;
@@ -2439,6 +2447,53 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
     public static double quad(double x) {
         double x2 = x * x;
         return x2 * x2;
+    }
+
+ 
+    public static double lessThan(double a, double b) {
+        return a < b ? 1 : 0;
+    }
+
+    public static double greaterThan(double a, double b) {
+        return a > b ? 1 : 0;
+    }
+
+    public static double lessThanOrEquals(double a, double b) {
+        return a <= b ? 1 : 0;
+    }
+
+    public static double greaterThanOrEquals(double a, double b) {
+        return a >= b ? 1 : 0;
+    }
+
+    public static double equals(double a, double b) {
+        return a == b ? 1 : 0;
+    }
+
+    public static double notEquals(double a, double b) {
+        return a != b ? 1 : 0;
+    }
+
+   public static double and(double a, double b) {
+        if((a==1||a==0)&&(b==1||b==0)){
+            boolean aa = a==1;
+            boolean bb = b==1;
+            return aa && bb ? 1 : 0;
+        }
+        throw new RuntimeException("Invalid! the args passed to `and` must be either zero or one in value"); 
+    }
+
+    public static double or(double a, double b) {
+          if((a==1||a==0)&&(b==1||b==0)){
+            boolean aa = a==1;
+            boolean bb = b==1;
+            return aa || bb ? 1 : 0;
+        }
+        throw new RuntimeException("Invalid! the args passed to `or` must be either zero or one in value"); 
+    }
+
+    public static boolean toBoolean(double val) {
+        return val != 0.0;
     }
 
     public static final class AndroidFriendlyMethodHandles {
