@@ -235,16 +235,30 @@ public final class MatrixTurboEvaluator extends ScalarTurboEvaluator1 implements
                 case MathExpression.Token.METHOD:
                     String name = t.name.toLowerCase();
 
+                    boolean isConstantStats = false;
+                    double[] data = null;
+
+                    // Safely attempt compile-time execution only if all args are pure numeric constants
                     if (Method.isPureStatsMethod(name)) {
+                        String[] rawArgs = t.getRawArgs();
+                        if (rawArgs != null && rawArgs.length >= t.arity) {
+                            data = new double[t.arity];
+                            isConstantStats = true;
+                            for (int i = 0; i < t.arity; i++) {
+                                try {
+                                    data[i] = Double.parseDouble(rawArgs[i]);
+                                } catch (NumberFormatException e) {
+                                    isConstantStats = false;
+                                    break; // Fallback to standard runtime evaluation
+                                }
+                            }
+                        }
+                    }
+
+                    if (isConstantStats) {
                         for (int i = 0; i < t.arity; i++) {
                             stack.pop();
                         }
-                        String[] rawArgs = t.getRawArgs();
-                        double[] data = new double[t.arity];
-                        for (int i = 0; i < t.arity; i++) {
-                            data[i] = Double.parseDouble(rawArgs[i]);
-                        }
-
                         EvalResult precalculated = new EvalResult();
                         if (name.equals(Declarations.SORT) || name.equals(Declarations.MODE)) {
                             double[] vecResult = executeVectorStatAtCompileTime(name, data);
@@ -254,7 +268,6 @@ public final class MatrixTurboEvaluator extends ScalarTurboEvaluator1 implements
                             precalculated.wrap(scalarResult);
                         }
                         stack.push(createConstantHandle(precalculated));
-                        break;
                     } else if (t.name.equalsIgnoreCase("print")) {
                         for (int i = 0; i < t.arity; i++) {
                             stack.pop();
@@ -596,6 +609,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
         // =========================================================================
         // ⚡ ULTRA-TURBO FAST-PATH FOR PURE SCALAR ARITHMETIC
         // Removes all internal conditional type-checking gates for scalar operations.
+        // Added support for Logical & Relational Operators (>, <, =, >=, <=, !=, &, |)
         // =========================================================================
         if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_SCALAR) {
             switch (op) {
@@ -613,6 +627,33 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                     break;
                 case '^':
                     cache.result.wrap(Math.pow(left.scalar, right.scalar));
+                    break;
+                case '%':
+                    cache.result.wrap(left.scalar % right.scalar);
+                    break;
+                case '>':
+                    cache.result.wrap((left.scalar > right.scalar) ? 1.0 : 0.0);
+                    break;
+                case '<':
+                    cache.result.wrap((left.scalar < right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.EQ_DEF: // Assuming '=' is mapped to equivalence
+                    cache.result.wrap((left.scalar == right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.GT_EQ_DEF:
+                    cache.result.wrap((left.scalar >= right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.LT_EQ_DEF:
+                    cache.result.wrap((left.scalar <= right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.NOT_EQ_DEF:
+                    cache.result.wrap((left.scalar != right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.BIN_AND_DEF:
+                    cache.result.wrap((left.scalar != 0.0 && right.scalar != 0.0) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.BIN_OR_DEF:
+                    cache.result.wrap((left.scalar != 0.0 || right.scalar != 0.0) ? 1.0 : 0.0);
                     break;
                 default:
                     throw new UnsupportedOperationException("Operator not implemented: " + op);

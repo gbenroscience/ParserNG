@@ -245,16 +245,30 @@ public final class AndroidCapableMatrixTurboEvaluator extends ScalarTurboEvaluat
                 case MathExpression.Token.METHOD:
                     String name = t.name.toLowerCase();
 
+                    boolean isConstantStats = false;
+                    double[] data = null;
+
+                    // Safely attempt compile-time execution only if all args are pure numeric constants
                     if (Method.isPureStatsMethod(name)) {
+                        String[] rawArgs = t.getRawArgs();
+                        if (rawArgs != null && rawArgs.length >= t.arity) {
+                            data = new double[t.arity];
+                            isConstantStats = true;
+                        for (int i = 0; i < t.arity; i++) {
+                                try {
+                            data[i] = Double.parseDouble(rawArgs[i]);
+                                } catch (NumberFormatException e) {
+                                    isConstantStats = false;
+                                    break; // Fallback to standard runtime evaluation
+                        }
+                            }
+                        }
+                    }
+
+                    if (isConstantStats) {
                         for (int i = 0; i < t.arity; i++) {
                             stack.pop();
                         }
-                        String[] rawArgs = t.getRawArgs();
-                        double[] data = new double[t.arity];
-                        for (int i = 0; i < t.arity; i++) {
-                            data[i] = Double.parseDouble(rawArgs[i]);
-                        }
-
                         EvalResult precalculated = new EvalResult();
                         if (name.equals(Declarations.SORT) || name.equals(Declarations.MODE)) {
                             double[] vecResult = executeVectorStatAtCompileTime(name, data);
@@ -264,7 +278,6 @@ public final class AndroidCapableMatrixTurboEvaluator extends ScalarTurboEvaluat
                             precalculated.wrap(scalarResult);
                         }
                         stack.push(createConstantHandle(precalculated));
-                        break;
                     } else if (t.name.equalsIgnoreCase("print")) {
                         for (int i = 0; i < t.arity; i++) {
                             stack.pop();
@@ -324,6 +337,7 @@ public final class AndroidCapableMatrixTurboEvaluator extends ScalarTurboEvaluat
                     // finalHandle now reads straight from the user's input variable coordinates pointer.
                     return (EvalResult) finalHandle.invokeExact(variables);
                 } catch (Throwable e) {
+                    e.printStackTrace();
                     errorLog.error(e);
                     throw new RuntimeException("Turbo matrix execution failed", e);
                 }
@@ -605,6 +619,7 @@ private static MethodHandle createConstantHandle(EvalResult res) {
         // =========================================================================
         // ⚡ ULTRA-TURBO FAST-PATH FOR PURE SCALAR ARITHMETIC
         // Removes all internal conditional type-checking gates for scalar operations.
+        // Added support for Logical & Relational Operators (>, <, =, >=, <=, !=, &, |)
         // =========================================================================
         if (leftType == EvalResult.TYPE_SCALAR && rightType == EvalResult.TYPE_SCALAR) {
             switch (op) {
@@ -622,6 +637,33 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                     break;
                 case '^':
                     cache.result.wrap(Math.pow(left.scalar, right.scalar));
+                    break;
+                case '%':
+                    cache.result.wrap(left.scalar % right.scalar);
+                    break;
+                case '>':
+                    cache.result.wrap((left.scalar > right.scalar) ? 1.0 : 0.0);
+                    break;
+                case '<':
+                    cache.result.wrap((left.scalar < right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.EQ_DEF: // Assuming '=' is mapped to equivalence
+                    cache.result.wrap((left.scalar == right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.GT_EQ_DEF:
+                    cache.result.wrap((left.scalar >= right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.LT_EQ_DEF:
+                    cache.result.wrap((left.scalar <= right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.NOT_EQ_DEF:
+                    cache.result.wrap((left.scalar != right.scalar) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.BIN_AND_DEF:
+                    cache.result.wrap((left.scalar != 0.0 && right.scalar != 0.0) ? 1.0 : 0.0);
+                    break;
+                case MathExpression.Token.BIN_OR_DEF:
+                    cache.result.wrap((left.scalar != 0.0 || right.scalar != 0.0) ? 1.0 : 0.0);
                     break;
                 default:
                     throw new UnsupportedOperationException("Operator not implemented: " + op);
@@ -689,7 +731,29 @@ private static MethodHandle createConstantHandle(EvalResult res) {
 
             case '^':
                 if (leftType == EvalResult.TYPE_MATRIX && rightType == EvalResult.TYPE_SCALAR) {
-                    cache.result.wrap(flatMatrixPower(left.matrix, right.scalar, cache));
+                    int power = (int) right.scalar;
+
+                    // 1. Fail fast on non-integer exponents
+                    if (Math.abs(right.scalar - power) > 1e-9) {
+                        throw new IllegalArgumentException("floating point powers are not supported for matrices");
+                }
+
+                    // 2. Fail fast on non-square matrices (handles power 0, positive, and negative)
+                    if (!left.matrix.isSquareMatrix()) {
+                        throw new IllegalArgumentException("matrix exponentiation is only supported for square matrices");
+                    }
+
+                    Matrix m;
+                    if (power == 0) {
+                        m = unitMatrix(left.matrix.getRows(), left.matrix.getCols(), cache);
+                    } else if (power > 0) {
+                        m = flatMatrixPower(left.matrix, power, cache);
+                    } else { // power < 0
+                        Matrix rawPow = flatMatrixPower(left.matrix, Math.abs(power), cache);//  Matrix.power(left.matrix, Math.abs(power)).inverse();
+                        m = flatMatrixInverseLUTurbo(rawPow, cache);
+                    }
+
+                    cache.result.wrap(m);
                 }
                 break;
 
@@ -1437,6 +1501,23 @@ private static MethodHandle createConstantHandle(EvalResult res) {
             }
         }
         return out;
+    }
+
+    public static Matrix unitMatrix(int rowSize, int colSize, ResultCache cache) {
+        // 1. Fetch a recycled matrix from the cache (Zero allocation!)
+        Matrix matrix = cache.getMatrixBuffer(rowSize, colSize);
+
+        double[] flatArr = matrix.getFlatArray();
+        // 2. Clear leftover garbage data from previous cache uses natively
+        Arrays.fill(flatArr, 0.0);
+
+        // 3. Set the diagonal directly without any nested loops or if/else branching
+        int limit = Math.min(rowSize, colSize);
+        for (int i = 0; i < limit; i++) {
+            flatArr[i * colSize + i] = 1.0;
+        }
+
+        return matrix;
     }
 
     private static Matrix flatMatrixMultiply(Matrix a, Matrix b, Matrix out) {

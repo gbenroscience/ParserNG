@@ -198,11 +198,11 @@ public class Operator {
 
         // Case 1: "< > <= >= && || == != " (Length 1)
         if (len == 1) {
-            return op.equals(LESS_OR_EQUALS) || op.equals(GREATER_OR_EQUALS) || op.charAt(0) == LESS_THAN.charAt(0) || op.charAt(0) == GREATER_THAN.charAt(0)
-                    || op.equals(OR) || op.equals(AND) || op.equals(EQUALS) || op.equals(NOT_EQUALS);
+            return op.charAt(0) == LESS_THAN.charAt(0) || op.charAt(0) == GREATER_THAN.charAt(0);
         }        
         
-        return false;
+          return op.equals(LESS_OR_EQUALS) || op.equals(GREATER_OR_EQUALS) || 
+                    op.equals(OR) || op.equals(AND) || op.equals(EQUALS) || op.equals(NOT_EQUALS);
     }
 
     /**

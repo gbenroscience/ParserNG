@@ -215,19 +215,20 @@ public class MathExpression implements Savable, Solvable {
      * </table>
      */
     public static final class Token implements Savable {
-        // Precedence levels
 
-        private static final int PREC_POSTFIX = 7;  // !, ², ³, √, ³√, -¹
-        private static final int PREC_POWER = 6;    // ^
-        private static final int PREC_MULDIV = 5;   // *, /, %, Р, Č
-        private static final int PREC_ADDSUB = 4;   // +, -
-        private static final int PREC_LOGICAL = 3;   // <, <=, >, >=, ==, !=
-        private static final int PREC_BINARY_AND = 2;   // AND, &&
-        private static final int PREC_BINARY_OR = 1;   // OR, ||
-        private static final int PREC_UNARY = 100;  // Unary minus
+        // Precedence levels - Shifted to separate Relational and Equality
+        private static final int PREC_POSTFIX = 8;    // !, ², ³, √, ³√, -¹
+        private static final int PREC_POWER = 7;      // ^
+        private static final int PREC_MULDIV = 6;     // *, /, %, Р, Č
+        private static final int PREC_ADDSUB = 5;     // +, -
+        private static final int PREC_RELATIONAL = 4; // <, <=, >, >=
+        private static final int PREC_EQUALITY = 3;   // ==, !=
+        private static final int PREC_BINARY_AND = 2; // AND, &&
+        private static final int PREC_BINARY_OR = 1;  // OR, ||
+        private static final int PREC_UNARY = 100;    // Unary minus
 
         public static final char CBRT_DEF = 'º';
-        public static final char INVERSE_DEF = '¹';//<, >, <=, >=, ==, 
+        public static final char INVERSE_DEF = '¹';
         public static final char LT_EQ_DEF = '«';
         public static final char GT_EQ_DEF = '»';
         public static final char EQ_DEF = '꞊';
@@ -238,9 +239,11 @@ public class MathExpression implements Savable, Solvable {
         private static final long serialVersionUID = 1L;
         public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5, COMMA = 6, MATRIX = 7, VARIABLE = 8, FUNCTION_HANDLE = 9,
                 FUNCTION_HANDLE_UNDEFINED = 10;
+
         public int kind;
         public double value;
-        public String name; // REQUIRED for functions/methods/variables/function-handles
+        public String name;
+
         /**
          * The slot in the execution frame where this token's value lives. Used
          * only when kind == NUMBER or VARIABLE and it represents a variable.
@@ -290,16 +293,7 @@ public class MathExpression implements Savable, Solvable {
         }
 
         /**
-         * Constructor for Function Handles. Used to pass references of
-         * functions as arguments to higher-order functions. e.g., in
-         * f(x)=x^3*sin(x); diff(f,1,1), 'f' is the function handle.
-         *
-         * In certain contexts, a function handle is passed to a method but it
-         * has not being defined anywhere. This method after it runs will create
-         * the function from the passed undefined handle and automatically store
-         * it. A good example is the diff method.
-         *
-         * @param fn The name of the function being referenced.
+         * Constructor for Function Handles.
          */
         public Token(String fn, boolean defined) {
             this.kind = defined ? FUNCTION_HANDLE : FUNCTION_HANDLE_UNDEFINED;
@@ -325,7 +319,6 @@ public class MathExpression implements Savable, Solvable {
             this.precedence = precedence;
             this.isRightAssoc = isRightAssoc;
             this.isPostfix = isPostfix;
-            // FIX: Ensure unary prefix operators (like '√' or 'R' for cbrt) are fallback-assigned an arity of 1 instead of 2
             this.arity = (isPostfix || opChar == '√' || opChar == CBRT_DEF || opChar == INVERSE_DEF) ? 1 : 2;
         }
 
@@ -337,7 +330,6 @@ public class MathExpression implements Savable, Solvable {
             this.id = id;
             this.precedence = PREC_POSTFIX + 1;  // Bind tighter than postfix
             this.isRightAssoc = false;
-            // This is an inbuilt method call
             if (id != -1) {
                 this.action = MethodRegistry.getAction(id);
             } else {
@@ -395,15 +387,14 @@ public class MathExpression implements Savable, Solvable {
             return rawArgs;
         }
 
-        // FIX: Account for native VARIABLE tokens alongside the legacy context validation pattern
         public boolean isVariable() {
             return this.kind == VARIABLE || (this.name != null && !this.name.isEmpty() && this.v != null && this.frameIndex >= 0);
         }
-         
-         public static final char getAlias(String name){
-            if(name.length()==1){
+
+        public static final char getAlias(String name) {
+            if (name.length() == 1) {
                 return name.charAt(0);
-            } 
+            }
             switch (name) {
                 case "³√":
                     return CBRT_DEF;
@@ -422,27 +413,28 @@ public class MathExpression implements Savable, Solvable {
                 case "||":
                     return BIN_OR_DEF;
                 default:
-                    throw new AssertionError();
+                    throw new AssertionError("Unknown token alias: " + name);
             }
         }
 
-        // Helper to get precedence for opChar
+        // Helper to get precedence for opChar - Updated to separate Relational and Equality
         public static int getPrec(char op) {
             switch (op) {
                 case '!':
                 case '²':
                 case '³':
                 case '√':
-                case CBRT_DEF:  // Internal for ³√
-                case INVERSE_DEF:  // FIX: Explicit support for inverse operator (⁻¹)
+                case CBRT_DEF:
+                case INVERSE_DEF:
                     return PREC_POSTFIX;
                 case '<':
                 case '>':
                 case LT_EQ_DEF:
                 case GT_EQ_DEF:
+                    return PREC_RELATIONAL;
                 case EQ_DEF:
                 case NOT_EQ_DEF:
-                    return PREC_LOGICAL;
+                    return PREC_EQUALITY;
                 case BIN_AND_DEF:
                     return PREC_BINARY_AND;
                 case BIN_OR_DEF:
@@ -499,17 +491,17 @@ public class MathExpression implements Savable, Solvable {
         public String toJsonString() {
             return "{\n"
                     + "\"kind\": \"" + kind + "\",\n"
-                    + "\"kindName\": " + getKind(kind) + ","
+                    + "\"kindName\": \"" + getKind(kind) + "\",\n"
                     + "\"value\": " + value + ",\n"
                     + "\"name\": \"" + name + "\",\n"
                     + "\"id\": " + id + ",\n"
-                    + "\"opChar\": " + opChar + ",\n"
+                    + "\"opChar\": \"" + opChar + "\",\n"
                     + "\"precedence\": " + precedence + ",\n"
                     + "\"isRightAssoc\": " + isRightAssoc + ",\n"
                     + "\"isPostfix\": " + isPostfix + ",\n"
                     + "\"arity\": " + arity + ",\n"
                     + "\"rawArgs\": " + Arrays.toString(rawArgs) + ",\n"
-                    + "\"assignToName\": " + assignToName + ",\n"
+                    + "\"assignToName\": \"" + assignToName + "\",\n"
                     + "\"isAssignmentTarget\": " + isAssignmentTarget + ",\n"
                     + "\"matrix\": " + (m == null ? "null" : m.toString()) + "\n"
                     + "}\n";
@@ -519,17 +511,17 @@ public class MathExpression implements Savable, Solvable {
         public String toString() {
             return "{"
                     + "\"kind\": " + kind + ","
-                    + "\"kindName\": " + getKind(kind) + ","
+                    + "\"kindName\": \"" + getKind(kind) + "\","
                     + "\"value\": " + value + ","
-                    + "\"name\": " + name + ","
+                    + "\"name\": \"" + name + "\","
                     + "\"id\": " + id + ","
-                    + "\"opChar\": " + opChar + ","
+                    + "\"opChar\": \"" + opChar + "\","
                     + "\"precedence\": " + precedence + ","
                     + "\"isRightAssoc\": " + isRightAssoc + ","
                     + "\"isPostfix\": " + isPostfix + ","
                     + "\"arity\": " + arity + ","
                     + "\"rawArgs\": " + Arrays.toString(rawArgs) + ","
-                    + "\"assignToName\": " + assignToName + ","
+                    + "\"assignToName\": \"" + assignToName + "\","
                     + "\"isAssignmentTarget\": " + isAssignmentTarget + ","
                     + "\"matrix\": " + (m == null ? "null" : m.toString()) + ","
                     + "\n\"v\": " + (v == null ? "null" : v.toJSON()) + "\n"
@@ -716,7 +708,11 @@ public class MathExpression implements Savable, Solvable {
                     code = processRotScenarios(sc.getScanner());
                 }
             }
-            if (code.contains("=")) {
+            int indexOfEquals = code.indexOf("=");
+            boolean equalsPresentAndCanLookForwardAndBackward = indexOfEquals != -1 && indexOfEquals != 0 && indexOfEquals + 1 < code.length();
+            
+            if (equalsPresentAndCanLookForwardAndBackward && !isLogicOperator(code.substring(indexOfEquals-1, indexOfEquals+1))
+            && !isLogicOperator(code.substring(indexOfEquals, indexOfEquals+2)) ) {
                 boolean success = Function.assignObject(code + ";", this);
                 if (!success) {
                     correctFunction = success;
@@ -864,6 +860,7 @@ public class MathExpression implements Savable, Solvable {
             functionComponentsAssociation();
             compileToPostfix();  // Compile once if not already done 
         }//end if
+
     }//end method initializing(args)
 
     public void setWillFoldConstants(boolean willFoldConstants) {
@@ -1392,14 +1389,15 @@ public class MathExpression implements Savable, Solvable {
 //check for the various valid arrangements for all members of the function.
                 String token = scanner.get(i);
                 //Variables
-                if (isVariableString(scanner.get(i)) && !Method.isUserDefinedFunction(token) && !Method.isDefinedMethod(token)) {
+                if (isVariableString(token) && !Method.isUserDefinedFunction(token) && !Method.isDefinedMethod(token)) {
                     try {
                         //specify valid tokens that can come before a variable
                         if (i - 1 >= 0 && !isOpeningBracket(scanner.get(i - 1))
                                 && !isLogicOperator(scanner.get(i - 1)) && !isUnaryPreOperator(scanner.get(i - 1))
-                                && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1)) && !isNumber(scanner.get(i - 1))
-                                && !isVariableString(scanner.get(i - 1)) && !isComma(scanner.get(i - 1))) {
-                            errorLog.info("ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i - 1) + "\" And \"" + scanner.get(i) + "\"\n");
+                                && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1))
+                                && !isNumber(scanner.get(i - 1)) && !isVariableString(scanner.get(i - 1)) && !isComma(scanner.get(i - 1))) {
+                            errorLog.info("1 - ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i - 1)
+                                    + "\" And \"" + scanner.get(i) + "\"\n");
                             correctFunction = false;
                             scanner.clear();
                             break;
@@ -1411,7 +1409,7 @@ public class MathExpression implements Savable, Solvable {
                                 && !isUnaryPreOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
                                 && !Method.isLogToAnyBase(scanner.get(i + 1)) && !Method.isAntiLogToAnyBase(scanner.get(i + 1)) && !isNumber(scanner.get(i + 1))
                                 && !isVariableString(scanner.get(i + 1)) && !isComma(scanner.get(i + 1))) {
-                            errorLog.info("ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i) + "\" And \"" + scanner.get(i + 1) + "\"PLUS As You Have Done.\n");
+                            errorLog.info("2 - ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i) + "\" And \"" + scanner.get(i + 1) + "\"PLUS As You Have Done.\n");
                             correctFunction = false;
                             scanner.clear();
                             break;
@@ -1958,9 +1956,9 @@ public class MathExpression implements Savable, Solvable {
     public static final boolean isOperator(String s) {
         if (s.length() == 1) {
             char c = s.charAt(0);
-            return "+-*/%^√!²³ČР<=>=&&||".indexOf(c) != -1;
+            return "+-*/%^√!²³ČР<>".indexOf(c) != -1;//≠↔꞊»«¹º
         }
-        return s.equals("³√") || s.equals("-¹");
+        return s.equals("³√") || s.equals("-¹") || s.equals("<=") || s.equals(">=") || s.equals("&&") || s.equals("||") || s.equals("==") || s.equals("!=");
     }
 
     private final class ExpressionSolver implements Savable {
@@ -2177,6 +2175,11 @@ public class MathExpression implements Savable, Solvable {
 
             if (ptr > 0) {
                 String err = "WARNING: Evaluation stack has " + (ptr + 1) + " values at end, returning top";
+                System.out.println("====================================END VALUES--PRINT==============================================");
+                for (int i = 0; i < (ptr + 1); i++) {
+                    System.out.println(stack[i]);
+                }
+                System.out.println("=====================================END VALUES--PRINT-END=============================================");
                 errorLog.info(err);
                 System.out.println(err);
             }
@@ -2219,10 +2222,8 @@ public class MathExpression implements Savable, Solvable {
         }
 
         private void applyBinary(char op, EvalResult left, EvalResult right) {
-            // =========================================================================
-            // ⚡ ULTRA-TURBO FAST-PATH FOR PURE SCALAR ARITHMETIC
-            // Bypasses all string lookups and matrix type resolution entirely.
-            // =========================================================================
+
+            // 1. SCALAR PATH
             if (left.type == EvalResult.TYPE_SCALAR && right.type == EvalResult.TYPE_SCALAR) {
                 switch (op) {
                     case '+':
@@ -2245,41 +2246,45 @@ public class MathExpression implements Savable, Solvable {
                     case '<':
                         left.wrap(left.scalar < right.scalar);
                         left.scalar = left.boolVal ? 1 : 0;
-                        right.scalar = left.boolVal ? 1 : 0;
-                        break;
-                    case Token.LT_EQ_DEF:
-                        left.wrap(left.scalar <= right.scalar);
-                        left.scalar = left.boolVal ? 1 : 0;
-                        right.scalar = left.boolVal ? 1 : 0;
                         break;
                     case '>':
                         left.wrap(left.scalar > right.scalar);
                         left.scalar = left.boolVal ? 1 : 0;
-                        right.scalar = left.boolVal ? 1 : 0;
+                        break;
+                    case Token.LT_EQ_DEF:
+                        left.wrap(left.scalar <= right.scalar);
+                        left.scalar = left.boolVal ? 1 : 0;
                         break;
                     case Token.GT_EQ_DEF:
                         left.wrap(left.scalar >= right.scalar);
                         left.scalar = left.boolVal ? 1 : 0;
-                        right.scalar = left.boolVal ? 1 : 0;
                         break;
                     case Token.EQ_DEF:
                         left.wrap(left.scalar == right.scalar);
                         left.scalar = left.boolVal ? 1 : 0;
-                        right.scalar = left.boolVal ? 1 : 0;
                         break;
                     case Token.NOT_EQ_DEF:
                         left.wrap(left.scalar != right.scalar);
                         left.scalar = left.boolVal ? 1 : 0;
-                        right.scalar = left.boolVal ? 1 : 0;
                         break;
-
+                    case Token.BIN_AND_DEF:
+                        boolean a = left.type == EvalResult.TYPE_BOOLEAN ? left.boolVal : (left.scalar != 0);
+                        boolean b = right.type == EvalResult.TYPE_BOOLEAN ? right.boolVal : (right.scalar != 0);
+                        left.wrap(a && b);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        break;
+                    case Token.BIN_OR_DEF:
+                        a = left.type == EvalResult.TYPE_BOOLEAN ? left.boolVal : (left.scalar != 0);
+                        b = right.type == EvalResult.TYPE_BOOLEAN ? right.boolVal : (right.scalar != 0);
+                        left.wrap(a || b);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        break;
                     case '%':
                         left.scalar %= right.scalar;
                         break;
                     case '^':
                         double exp = right.scalar;
                         double base = left.scalar;
-
                         if (exp == 2.0) {
                             left.scalar = base * base;
                         } else if (exp == 3.0) {
@@ -2287,29 +2292,10 @@ public class MathExpression implements Savable, Solvable {
                         } else if (exp == 0.5) {
                             left.scalar = Math.sqrt(base);
                         } else if (exp == 1.0) {
-                            // No-op
                         } else if (exp == 0.0) {
                             left.scalar = 1.0;
                         } else if (exp == -1.0) {
                             left.scalar = 1.0 / base;
-                        } else if (exp == -2.0) {
-                            left.scalar = 1.0 / (base * base);
-                        } else if (exp == -3.0) {
-                            left.scalar = 1.0 / (base * base * base);
-                        } else if (exp == 4.0) {
-                            double a2 = base * base;
-                            left.scalar = a2 * a2;
-                        } else if (exp == 5.0) {
-                            double a2 = base * base;
-                            left.scalar = a2 * a2 * base;
-                        } else if (exp == -4.0) {
-                            double a2 = base * base;
-                            left.scalar = 1.0 / (a2 * a2);
-                        } else if (exp == -5.0) {
-                            double a2 = base * base;
-                            left.scalar = 1.0 / (a2 * a2 * base);
-                        } else if (Math.abs(exp - (1.0 / 3.0)) < 1E-9) {
-                            left.scalar = Math.cbrt(base);
                         } else {
                             left.scalar = Math.pow(base, exp);
                         }
@@ -2323,22 +2309,35 @@ public class MathExpression implements Savable, Solvable {
                     default:
                         throw new UnsupportedOperationException("Operator not implemented: " + op);
                 }
-
-                return; // Hot path exit
+                return; // Exit scalar hot path
             }
+
+            // 2. BOOLEAN PATH
             if (left.type == EvalResult.TYPE_BOOLEAN && right.type == EvalResult.TYPE_BOOLEAN) {
                 switch (op) {
                     case Token.BIN_AND_DEF:
                         left.wrap(left.boolVal && right.boolVal);
+                        left.scalar = left.boolVal ? 1 : 0;
                         break;
                     case Token.BIN_OR_DEF:
                         left.wrap(left.boolVal || right.boolVal);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        break;
+                    case Token.EQ_DEF:
+                        left.wrap(left.boolVal == right.boolVal);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        break;
+                    case Token.NOT_EQ_DEF:
+                        left.wrap(left.boolVal != right.boolVal);
+                        left.scalar = left.boolVal ? 1 : 0;
                         break;
                     default:
-                        throw new UnsupportedOperationException("Operator not implemented: " + op);
+                        throw new UnsupportedOperationException("Operator not implemented for booleans: " + op);
                 }
+                return; // Critical fix: Return immediately after boolean evaluation
             }
 
+            // 3. MATRIX AND COMPLEX TYPES PATH...
             Function leftFun = left.type == EvalResult.TYPE_STRING ? FunctionManager.lookUp(left.textRes) : null;
             Function rightFun = right.type == EvalResult.TYPE_STRING ? FunctionManager.lookUp(right.textRes) : null;
 
@@ -2468,9 +2467,10 @@ public class MathExpression implements Savable, Solvable {
                     break;
 
                 default:
-                    throw new UnsupportedOperationException("Operator not implemented for complex structures: " + op);
+                    throw new UnsupportedOperationException("Operator not implemented for complex structures: " + op + ", left=" + left + ", right=" + right);
             }
         }
+
     }
 
     /**
@@ -3830,8 +3830,30 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
         MathExpression m111 = new MathExpression("x=-5;if(3*x+7<5,sin(x), -3)");
         System.out.println(m111.scanner);
-       
-        System.out.println(m111.expression+ ": -->> " + m111.solve());
+
+        System.out.println(m111.expression + ": -->> " + m111.solve());
+
+        MathExpression m222 = new MathExpression("x=5;if( 3*x+7>5 && x-1>13,sin(x), -3)");
+        System.out.println(m222.scanner);
+
+        System.out.println(m222.expression + ": -->> " + m222.solve());
+        
+        
+        MathExpression m333 = new MathExpression("x=5;if( 3*x+7>5 && x-1>13, if( x>0 && x-1>=4,cosh(x), ln(x)) , 33)");
+        System.out.println(m333.scanner);
+
+        System.out.println(m333.expression + ": -->> " + m333.solve());
+        
+           MathExpression m444 = new MathExpression("x=5;if(0==1 && sqrt(-1)>0,   1,   2)");
+        System.out.println(m444.scanner);
+
+        System.out.println(m444.expression + ": -->> " + m444.solve());
+        
+        
+   
+        
+        
+        
         System.out.println("abs(-3+22*-5): -->> " + new MathExpression("abs(-3+22*-5)").solve());
         System.out.println("floor(3.141): -->> " + new MathExpression("floor(3.141)").solve());
         System.out.println("ceil(2.138): -->> " + new MathExpression("ceil(2.138)").solve());

@@ -761,16 +761,15 @@ public class MethodRegistry {
         });
 
         registerMethod(Declarations.IF, (ctx, arity, args) -> {//if(x > 0.5, x * 2, 0)
-           // System.out.println("METHOD-NAME - IF, args - " + Arrays.deepToString(args) + ", arity = " + arity);
-            for (MathExpression.EvalResult e : args) {
-                if (e.type == MathExpression.EvalResult.TYPE_BOOLEAN) {
-                    System.out.println(e.boolVal);
-                }
-                if (e.type == MathExpression.EvalResult.TYPE_SCALAR) {
-                    System.out.println(e.scalar);
-                }
-            }
-
+     //       System.out.println("METHOD-NAME - IF, args - " + Arrays.deepToString(args) + ", arity = " + arity);
+//            for (MathExpression.EvalResult e : args) {
+//                if (e.type == MathExpression.EvalResult.TYPE_BOOLEAN) {
+//                    System.out.println(e.boolVal);
+//                }
+//                if (e.type == MathExpression.EvalResult.TYPE_SCALAR) {
+//                    System.out.println(e.scalar);
+//                }
+//            }
             return ctx.wrap(args[0].boolVal ? args[1] : args[2]);
         });
         registerMethod(Declarations.PLOT, (ctx, arity, args) -> ctx.wrap(-1));

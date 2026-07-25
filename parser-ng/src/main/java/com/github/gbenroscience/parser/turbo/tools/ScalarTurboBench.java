@@ -277,7 +277,7 @@ public class ScalarTurboBench {
 
         // Compile to turbo
         FastCompositeExpression compiled = get(interpreted, useWidening);
-    
+
         // Warm up turbo JIT
         double[] vars = new double[3];
         MathExpression.EvalResult evr = compiled.apply(vars);
@@ -1081,12 +1081,11 @@ public class ScalarTurboBench {
         System.out.printf("Speedup:     %.1fx%n", (double) interpretedDur / turboDur);
     }
 
-      static void ifExprTestTurbo1() throws Throwable {
+    static void ifExprTestTurbo1() throws Throwable {
 
         MathExpression m111 = new MathExpression("if(3*x+7>5,sin(x), -3)");
         System.out.println(m111.getScanner());
-        ScalarTurboEvaluator1 sct = new ScalarTurboEvaluator1(m111);
-        FastCompositeExpression fce = sct.compile(); 
+        FastCompositeExpression fce = new ScalarTurboEvaluator(m111, useWidening).compile();
 
         Random r = new Random(System.nanoTime());
         double[] vars = new double[1];
@@ -1095,12 +1094,13 @@ public class ScalarTurboBench {
             vars[0] = val;
             double res = fce.applyScalar(vars);
             System.out.println(m111.getExpression() + ": at x=" + val + " -->> " + res);
-            if(res != (3 * val + 7 > 5 ? Math.sin(val) : -3)){
-                 throw new RuntimeException("Not correct! Test failed! at i="+i+" for x = "+val);
-            } 
+            double ans = (3 * val + 7 > 5 ? Math.sin(val) : -3);
+            if (res != ans) {
+                throw new RuntimeException("Not correct! Test failed! at i=" + i + " for x = " + val+", got "+res+", expected: "+ans);
+            }
         }
-
     }
+
     private static void runVariableStressTest() throws Throwable {
         String rpt = STRING.repeating("=", 40);
 
