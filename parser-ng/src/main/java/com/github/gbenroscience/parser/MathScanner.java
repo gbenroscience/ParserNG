@@ -524,6 +524,7 @@ public class MathScanner {
                 .addTokens(Method.getAllFunctions())
                 .addTokens(operators)
                 .build();
+          
         
         
         scanner = csBuilder.scan();
@@ -593,6 +594,7 @@ public class MathScanner {
             }
         }//end for loop
 
+         
 //sort(5,3,2,1,-8,-9,12,34,98,-900,34,23,12,340)
         for (int i = 0; i < scanner.size(); i++) {//±–
             if (scanner.get(i).contains("±")) {

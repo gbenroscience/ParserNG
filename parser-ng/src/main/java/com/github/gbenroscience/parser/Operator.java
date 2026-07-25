@@ -17,7 +17,7 @@ public class Operator {
      * The name of the operator object
      */
     protected String name;
-
+    
     public static final String PLUS = OperatorConstant.PLUS.getSymbol();
     public static final String MINUS = OperatorConstant.MINUS.getSymbol();
     public static final String DIVIDE = OperatorConstant.DIVIDE.getSymbol();
@@ -29,6 +29,7 @@ public class Operator {
     public static final String GREATER_THAN = OperatorConstant.GREATER_THAN.getSymbol();
     public static final String ASSIGN = OperatorConstant.ASSIGN.getSymbol();
     public static final String EQUALS = OperatorConstant.EQUALS.getSymbol();
+    public static final String NOT_EQUALS = OperatorConstant.NOT_EQUALS.getSymbol();
     public static final String LESS_OR_EQUALS = OperatorConstant.LESS_OR_EQUALS.getSymbol();
     public static final String GREATER_OR_EQUALS = OperatorConstant.GREATER_OR_EQUALS.getSymbol();
     public static final String AND = OperatorConstant.AND.getSymbol();
@@ -59,7 +60,7 @@ public class Operator {
      */
     public static final String[] operators
             = new String[]{PLUS, MINUS, DIVIDE, MULTIPLY, FACTORIAL, POWER, LESS_THAN, GREATER_THAN,
-                ASSIGN, EQUALS, LESS_OR_EQUALS, GREATER_OR_EQUALS, AND, OR, REMAINDER, OPEN_CIRC_BRAC, CLOSE_CIRC_BRAC, COMMA, ROOT, CUBE_ROOT,
+                ASSIGN, EQUALS, NOT_EQUALS, LESS_OR_EQUALS, GREATER_OR_EQUALS, AND, OR, REMAINDER, OPEN_CIRC_BRAC, CLOSE_CIRC_BRAC, COMMA, ROOT, CUBE_ROOT,
                 PERMUTATION, COMBINATION, INVERSE, SQUARE, CUBE, OPEN_SQUARE_BRAC, CLOSE_SQUARE_BRAC, COLON, CONST, STORE, EXIT, SPACE,
                 SEMI_COLON, AT
             };
@@ -109,7 +110,7 @@ public class Operator {
     public static boolean isExitCommand(String op) {
         return op.equals(EXIT);
     }
-
+    
     public boolean isSemiColon(String op) {
         if (op.length() != 1) {
             return false;
@@ -117,7 +118,7 @@ public class Operator {
         // 2. Direct character comparison avoids the overhead of the .equals() loop
         return op.charAt(0) == SEMI_COLON.charAt(0);
     }
-
+    
     public static boolean isAtOperator(String op) {
         if (op.length() != 1) {
             return false;
@@ -193,19 +194,14 @@ public class Operator {
      * defined here are ==,&lte;,&gte;,&lt;,&gt;,|,&amp;
      */
     public static boolean isLogicOperator(String op) {
-         int len = op.length();
- 
-        // Case 1: "< > ≤ ≥ & |" (Length 1)
+        int len = op.length();
+
+        // Case 1: "< > <= >= && || == != " (Length 1)
         if (len == 1) {
-            return op.charAt(0) == LESS_OR_EQUALS.charAt(0) || op.charAt(0) == GREATER_OR_EQUALS.charAt(0) || op.charAt(0) == LESS_THAN.charAt(0) || op.charAt(0) == GREATER_THAN.charAt(0) || 
-                    op.charAt(0) == OR.charAt(0) || op.charAt(0) == AND.charAt(0);
-        }
-
-        // Case 2: "==" (Length 2)
-        if (len == 2) {
-            return op.charAt(0) == EQUALS.charAt(0) && op.charAt(1) == EQUALS.charAt(1);
-        }
-
+            return op.equals(LESS_OR_EQUALS) || op.equals(GREATER_OR_EQUALS) || op.charAt(0) == LESS_THAN.charAt(0) || op.charAt(0) == GREATER_THAN.charAt(0)
+                    || op.equals(OR) || op.equals(AND) || op.equals(EQUALS) || op.equals(NOT_EQUALS);
+        }        
+        
         return false;
     }
 
@@ -218,51 +214,48 @@ public class Operator {
         if (op.length() != 2) {
             return false;
         }
-
+        
         return op.charAt(0) == EQUALS.charAt(0) && op.charAt(1) == EQUALS.charAt(1);
     }
     
     public static boolean isGreaterThanOperator(String op) {
-         if (op.length() != 1) {
+        if (op.length() != 1) {
             return false;
         }
-
+        
         return op.charAt(0) == GREATER_THAN.charAt(0);
     }
-        
+    
     public static boolean isGreaterOrEqualsOperator(String op) {
         int len = op.length();
-        if(len == 1){
-            return op.charAt(0) == GREATER_OR_EQUALS.charAt(0);
+        if (len == 1) {
+            return op.charAt(0) == GREATER_THAN.charAt(0);
         }
         if (len == 2) {
-            return op.charAt(0) == GREATER_THAN.charAt(0) && op.charAt(1) == ASSIGN.charAt(1);
+            return op.charAt(0) == GREATER_THAN.charAt(0) && op.charAt(1) == ASSIGN.charAt(0);
         }
-
+        
         return false;
     }
-        
+    
     public static boolean isLessThanOperator(String op) {
-      if (op.length() != 1) {
+        if (op.length() != 1) {
             return false;
         }
-
+        
         return op.charAt(0) == LESS_THAN.charAt(0);
     }
-        
+    
     public static boolean isLessThanOrEqualsOperator(String op) {
-      int len = op.length();
-        if(len == 1){
+        int len = op.length();
+        if (len == 1) {
             return op.charAt(0) == LESS_OR_EQUALS.charAt(0);
         }
         if (len == 2) {
-            return op.charAt(0) == LESS_THAN.charAt(0) && op.charAt(1) == ASSIGN.charAt(1);
+            return op.charAt(0) == LESS_THAN.charAt(0) && op.charAt(1) == ASSIGN.charAt(0);
         }
         return false;
     }
-    
-    
-    
 
     /**
      * @param op the String to check
@@ -283,11 +276,12 @@ public class Operator {
      * numbers or variables i.e,+,-,*,/,^,%,Č,Р
      */
     public static boolean isBinaryOperator(String op) {
-         if (op.length() != 1) {
+        if (op.length() != 1) {
             return false;
         }
         return (op.charAt(0) == PLUS.charAt(0) || op.charAt(0) == MINUS.charAt(0) || op.charAt(0) == DIVIDE.charAt(0) || op.charAt(0) == MULTIPLY.charAt(0)
-                || op.charAt(0) == POWER.charAt(0) || op.charAt(0) == REMAINDER.charAt(0) || op.charAt(0) == COMBINATION.charAt(0) || op.charAt(0) == PERMUTATION.charAt(0));
+                || op.charAt(0) == POWER.charAt(0) || op.charAt(0) == REMAINDER.charAt(0) || op.charAt(0) == COMBINATION.charAt(0) || op.charAt(0) == PERMUTATION.charAt(0)
+                || isLogicOperator(op));
     }
 
     /**
@@ -462,7 +456,7 @@ public class Operator {
      * @return true if the operator is a pre-number operator
      */
     public static boolean isUnaryPreOperator(String op) {
-       
+        
         int len = op.length();
 
         // Case 1: "√" (Length 1)
@@ -474,7 +468,7 @@ public class Operator {
         if (len == 2) {
             return op.charAt(0) == CUBE_ROOT.charAt(0) && op.charAt(1) == CUBE_ROOT.charAt(1);
         }
-
+        
         return false;
     }
 
@@ -484,7 +478,7 @@ public class Operator {
      * operator,the factorial,the square and the cube
      */
     public static boolean isUnaryPostOperator(String op) {
-  
+        
         int len = op.length();
 
         // Case 1: "!", "²", "³" (Length 1)
@@ -498,7 +492,7 @@ public class Operator {
             // Direct char comparison is faster than .equals(INVERSE)
             return op.charAt(0) == INVERSE.charAt(0) && op.charAt(1) == INVERSE.charAt(1);
         }
-
+        
         return false;
     }
 
@@ -511,7 +505,7 @@ public class Operator {
             return false;
         }
         return op.charAt(0) == COMMA.charAt(0);
-
+        
     }
 
     /**
@@ -520,23 +514,9 @@ public class Operator {
      * @param name the name of the Operator object
      * @return the Operator's Precedence attribute
      */
-    public static Precedence getPrecedence(String name) {
-
-        if (isUnaryPostOperator(name)) {
-            return new Precedence(10000);
-        } else if (isPower(name)) {
-            return new Precedence(9999);
-        } else if (isUnaryPreOperator(name)) {
-            return new Precedence(9998);
-        } else if (isMulOrDiv(name)) {
-            return new Precedence(9997);
-        } else if (isRemainder(name)) {
-            return new Precedence(9996);
-        } else if (isPlusOrMinus(name)) {
-            return new Precedence(9995);
-        }
-
-        return null;
+    public static int getPrecedence(String name) {
+        int prec = MathExpression.Token.getPrec(MathExpression.Token.getAlias(name));
+        return prec; 
     }
 
     /**

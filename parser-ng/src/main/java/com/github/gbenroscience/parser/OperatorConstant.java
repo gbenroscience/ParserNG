@@ -26,12 +26,13 @@ public enum OperatorConstant {
     // Logic and Comparison
     LESS_THAN("<"), 
     GREATER_THAN(">"), 
-    LESS_OR_EQUALS("≤"), 
-    GREATER_OR_EQUALS("≥"), 
+    LESS_OR_EQUALS("<="), 
+    GREATER_OR_EQUALS(">="), 
     EQUALS("=="), 
+    NOT_EQUALS("!="), 
     ASSIGN("="),
-    AND("&"), 
-    OR("|"),
+    AND("&&"), 
+    OR("||"),
     
     // Brackets and Delimiters
     OPEN_CIRC_BRAC("("), 

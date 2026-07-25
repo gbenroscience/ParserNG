@@ -19,7 +19,7 @@ public class BinaryOperator extends Operator implements Validatable {
     /**
      * The precedence of this BinaryOperator object.
      */
-    private final Precedence precedence;
+    private final int precedence;
     /**
      * The index of this operator in the scanned Function that it belongs to.
      */
@@ -51,7 +51,7 @@ public class BinaryOperator extends Operator implements Validatable {
      *
      * @return the precedence of this operator
      */
-    public Precedence getPrecedence() {
+    public int getPrecedence() {
         return precedence;
     }
 

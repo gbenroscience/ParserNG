@@ -88,6 +88,8 @@ public class AutoDiffNEvaluator implements Cloneable {
     private static final int OP_ABS = 34;
     private static final int OP_ATAN2 = 35;
     private static final int OP_LOG_BASE = 36;
+    private static final int OP_FLOOR = 37;
+    private static final int OP_CEIL = 38;
 
     private final Token[] rpnTokens;   // retained only for Token.v / Token.name lookups -- see class javadoc
     private final byte[] opcodes;      // the dense instruction stream actually walked every evaluation
@@ -240,6 +242,10 @@ public class AutoDiffNEvaluator implements Cloneable {
                         return OP_ATANH;
                     case Declarations.SQRT:
                         return OP_SQRT;
+                    case Declarations.CEIL:
+                        return OP_CEIL;
+                    case Declarations.FLOOR:
+                        return OP_FLOOR;
                     case Declarations.CBRT:
                         return OP_CBRT;
                     case Declarations.EXP:
@@ -795,6 +801,31 @@ public class AutoDiffNEvaluator implements Cloneable {
                     sp++;
                     break;
                 }
+                case OP_CEIL: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    res[0] = Math.ceil(scratchArg[0]);
+                    for (int k = 1; k <= order; k++) {
+                        res[k] = (scratchArg[0] > 0) ? scratchArg[k]
+                                : (scratchArg[0] < 0) ? -scratchArg[k] : 0.0;
+                    }
+                    sp++;
+                    break;
+                }
+                case OP_FLOOR: {
+                    double[] arg = valStack[--sp];
+                    double[] res = valStack[sp];
+                    System.arraycopy(arg, 0, scratchArg, 0, order + 1);
+                    res[0] = Math.floor(scratchArg[0]);
+                    for (int k = 1; k <= order; k++) {
+                        res[k] = (scratchArg[0] > 0) ? scratchArg[k]
+                                : (scratchArg[0] < 0) ? -scratchArg[k] : 0.0;
+                    }
+                    sp++;
+                    break;
+                }
+
                 case OP_ATAN2: {
                     double[] v = valStack[--sp];
                     double[] u = valStack[--sp];

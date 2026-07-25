@@ -61,7 +61,7 @@ import org.openjdk.jmh.runner.options.TimeValue;
 @Warmup(iterations = 5, time = 1)
 @Measurement(iterations = 5, time = 1)
 @Fork(value = 3, jvmArgs = {
-    "-Xms5g", "-Xmx5g",
+    "-Xms8g", "-Xmx8g",
     "-XX:+UseG1GC",
     "-XX:-UseCompressedOops", // Avoids compressed oops artifacts
     "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"
@@ -134,7 +134,9 @@ public class ParserNgBench {
         "12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2",
         "0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))",
         "(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)-2)/(2*x1-2))",
-        "(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)",};
+        "(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)",
+        "3*sin(x)*cos(y)+sqrt(abs(x*y))"
+    };
 
     static int index = 23;
 
@@ -154,7 +156,7 @@ public class ParserNgBench {
 
     double[] result;
 
-    @Param({"2000000"})
+    @Param({"1000000"})
     private int dataSize;
 
     private double[] vars;
@@ -468,7 +470,8 @@ public class ParserNgBench {
             41====12*x1 + 3*x2 - 4*x3 + 5*x1 - x2 - 4*x3 + 2*x1 + x2
             42====0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))
             43====(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)-2)/(2*x1-2))
-            44====(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)  
+            44====(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)
+            45====(3*sin(x1)*cos(x2)+sqrt(abs(x1*x2)))
             """;
 
     public static final StringBuilder EXPR_MAP = new StringBuilder();

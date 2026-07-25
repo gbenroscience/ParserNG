@@ -342,6 +342,9 @@ public class MethodRegistry {
         });
         registerMethod(Declarations.CBRT, (ctx, arity, args) -> ctx.wrap(Math.cbrt(args[0].scalar)));
         registerMethod(Declarations.SQRT, (ctx, arity, args) -> ctx.wrap(Math.sqrt(args[0].scalar)));
+        registerMethod(Declarations.ABS, (ctx, arity, args) -> ctx.wrap(Math.abs(args[0].scalar)));
+        registerMethod(Declarations.CEIL, (ctx, arity, args) -> ctx.wrap(Math.ceil(args[0].scalar)));
+        registerMethod(Declarations.FLOOR, (ctx, arity, args) -> ctx.wrap(Math.floor(args[0].scalar)));
         registerMethod(Declarations.POW, (ctx, arity, args) -> ctx.wrap(Math.pow(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.ATAN2, (ctx, arity, args) -> ctx.wrap(Math.atan2(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.EXP, (ctx, arity, args) -> ctx.wrap(Math.exp(args[0].scalar)));
@@ -398,12 +401,13 @@ public class MethodRegistry {
                 return der.findDerivativeByPolynomialExpander();
                      */
                     MathExpression.EvalResult ev = Derivative.eval("diff(" + anonFunc + "," + (args[1].textRes != null ? args[1].textRes : args[1].scalar) + "," + args[2] + ")");
-                    
-                    if(ev.type == MathExpression.EvalResult.TYPE_VECTOR)
-                    return ctx.wrap(ev.vector[ev.vector.length-1]);
-                    else 
-                    return ctx.wrap(ev.textRes); 
- 
+
+                    if (ev.type == MathExpression.EvalResult.TYPE_VECTOR) {
+                        return ctx.wrap(ev.vector[ev.vector.length - 1]);
+                    } else {
+                        return ctx.wrap(ev.textRes);
+                    }
+
                 }
                 default:
                     return ctx.wrap(Double.NaN);
@@ -425,7 +429,7 @@ public class MethodRegistry {
                     String var = vars != null && vars.length == 1 ? vars[0] : null;
                     if (Variable.isVariableString(var)) {
                         double val = args[1].scalar;
-                        double[]d = ade.evaluateRPN(var, val);
+                        double[] d = ade.evaluateRPN(var, val);
                         return ctx.wrap(d[1]);
                     } else {
                         throw new InputMismatchException("The second arg must be a Variable name");
@@ -434,7 +438,7 @@ public class MethodRegistry {
                     throw new InputMismatchException("The first arg must be a function");
                 }
 
-            }else if (sz == 3) {
+            } else if (sz == 3) {
                 String fn = args[0].textRes;
                 Function f = FunctionManager.lookUp(fn);
                 if (f != null) {
@@ -443,8 +447,8 @@ public class MethodRegistry {
                     int order = (int) args[2].scalar;
                     if (Variable.isVariableString(var)) {
                         double val = args[1].scalar;
-                        double[]d = ade.evaluateRPN(var, val, order);
-                        return ctx.wrap(d[d.length-1]);
+                        double[] d = ade.evaluateRPN(var, val, order);
+                        return ctx.wrap(d[d.length - 1]);
                     } else {
                         throw new InputMismatchException("The second arg must be a Variable name");
                     }
@@ -456,7 +460,7 @@ public class MethodRegistry {
                 throw new InputMismatchException("Invalid arguments passed to autoDiff function: required - autoDiff(function, number, order)");
             }
         });
-         registerMethod(Declarations.AUTO_DIFF_N, (ctx, arity, args) -> {
+        registerMethod(Declarations.AUTO_DIFF_N, (ctx, arity, args) -> {
 //            System.out.println("Derivatives Action");
 //            System.out.println("args: " + Arrays.toString(args));
 //            System.out.println("arity: " + arity);
@@ -472,7 +476,7 @@ public class MethodRegistry {
                     String var = vars != null && vars.length == 1 ? vars[0] : null;
                     if (Variable.isVariableString(var)) {
                         double val = args[1].scalar;
-                        double[]d = ade.evaluateRPN(var, val);
+                        double[] d = ade.evaluateRPN(var, val);
                         return ctx.wrap(d);
                     } else {
                         throw new InputMismatchException("The second arg must be a Variable name");
@@ -481,7 +485,7 @@ public class MethodRegistry {
                     throw new InputMismatchException("The first arg must be a function");
                 }
 
-            }else if (sz == 3) {
+            } else if (sz == 3) {
                 String fn = args[0].textRes;
                 Function f = FunctionManager.lookUp(fn);
                 if (f != null) {
@@ -490,7 +494,7 @@ public class MethodRegistry {
                     int order = (int) args[2].scalar;
                     if (Variable.isVariableString(var)) {
                         double val = args[1].scalar;
-                        double[]d = ade.evaluateRPN(var, val, order);
+                        double[] d = ade.evaluateRPN(var, val, order);
                         return ctx.wrap(d);
                     } else {
                         throw new InputMismatchException("The second arg must be a Variable name");
@@ -503,7 +507,7 @@ public class MethodRegistry {
                 throw new InputMismatchException("Invalid arguments passed to autoDiff function: required - autoDiff(function, number, order)");
             }
         });
-       
+
         registerMethod(Declarations.INTEGRATION, (ctx, arity, args) -> {
             boolean hasIterations = args.length == 4;//[F, 2.0, 3.0, 10000] ---rotates any function in 3D including points and planes and generic functions
             boolean hasNoIterations = args.length == 3;//[F, 2.0, 3.0]
@@ -754,6 +758,20 @@ public class MethodRegistry {
             }
 
             return ctx;
+        });
+
+        registerMethod(Declarations.IF, (ctx, arity, args) -> {//if(x > 0.5, x * 2, 0)
+           // System.out.println("METHOD-NAME - IF, args - " + Arrays.deepToString(args) + ", arity = " + arity);
+            for (MathExpression.EvalResult e : args) {
+                if (e.type == MathExpression.EvalResult.TYPE_BOOLEAN) {
+                    System.out.println(e.boolVal);
+                }
+                if (e.type == MathExpression.EvalResult.TYPE_SCALAR) {
+                    System.out.println(e.scalar);
+                }
+            }
+
+            return ctx.wrap(args[0].boolVal ? args[1] : args[2]);
         });
         registerMethod(Declarations.PLOT, (ctx, arity, args) -> ctx.wrap(-1));
 

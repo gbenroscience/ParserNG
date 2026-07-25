@@ -81,6 +81,13 @@ public class Declarations {
     public static final String FACT = "fact";
     public static final String COMBINATION = "comb";
     public static final String PERMUTATION = "perm";
+    
+    
+    
+    public static final String ABS = "abs"; 
+    public static final String FLOOR = "floor";
+    public static final String CEIL = "ceil";
+    
     public static final String LIST_SUM = "listsum";
     public static final String SUM = "sum";
     public static final String PROD = "prod";
@@ -247,7 +254,7 @@ public class Declarations {
     }
 
     static {
-        //System.out.println("registring BasicNumeralMethods--------------------------------------------------------------------------------");
+        //System.out.println("registering BasicNumeralMethods--------------------------------------------------------------------------------");
         registerBasicNumericalMethod(new Echo());
         registerBasicNumericalMethod(new Echo.EchoN());
         registerBasicNumericalMethod(new Echo.EchoNI());
@@ -302,6 +309,7 @@ public class Declarations {
             ARC_COSH_ALT, ARC_TANH_ALT, ARC_SEC_ALT, ARC_COSEC_ALT,
             ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT,
             LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, SQRT, CBRT, INVERSE,
+            ABS, CEIL, FLOOR, IF,
             ERF, GELU, GEGLU, SWIGLU, FAST_GELU,
             SQUARE, CUBE, POW, ATAN2, FACT, COMBINATION, PERMUTATION, SUM, LIST_SUM, PROD,
             MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED,
@@ -394,6 +402,8 @@ public class Declarations {
                 return TYPE.NUMBER.toString();
             case ARC_COTH:
                 return TYPE.NUMBER.toString();
+            case IF:
+                return TYPE.NUMBER.toString();
             case EXP:
                 return TYPE.NUMBER.toString();
             case LN:
@@ -437,6 +447,12 @@ public class Declarations {
             case LG_INV_ALT:
                 return TYPE.NUMBER.toString();
             case LOG_INV_ALT:
+                return TYPE.NUMBER.toString();
+            case ABS:
+                return TYPE.NUMBER.toString();
+            case CEIL:
+                return TYPE.NUMBER.toString();
+            case FLOOR:
                 return TYPE.NUMBER.toString();
             case SQRT:
                 return TYPE.NUMBER.toString();
@@ -574,7 +590,7 @@ public class Declarations {
      */
     static String[] getStatsMethods() {
         return new String[]{LIST_SUM, PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR,
-            RANDOM, SORT, NANOS, NOW};
+            RANDOM, SORT, NANOS, NOW, IF};
     }
 
     public static boolean isBasicNumericalFunction(String op) {

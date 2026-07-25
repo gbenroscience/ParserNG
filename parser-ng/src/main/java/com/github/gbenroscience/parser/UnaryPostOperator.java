@@ -24,7 +24,7 @@ public class UnaryPostOperator extends Operator implements Validatable {
     /**
      * The precedence of this UnaryPostOperator object.
      */
-    private final Precedence precedence;
+    private final int precedence;
     /**
      * The index of this operator in the scanned Function that it belongs to.
      */
@@ -57,7 +57,7 @@ public class UnaryPostOperator extends Operator implements Validatable {
      *
      * @return the Precedence of this Operator object.
      */
-    public Precedence getPrecedence() {
+    public int getPrecedence() {
         return precedence;
     }
 

@@ -149,12 +149,6 @@ public class MathExpression implements Savable, Solvable {
      */
     TYPE returnType = TYPE.NUMBER;
 
-    // Precedence levels
-    private static final int PREC_POSTFIX = 5;  // !, ², ³, √, ³√, -¹
-    private static final int PREC_POWER = 4;    // ^
-    private static final int PREC_MULDIV = 3;   // *, /, %, Р, Č
-    private static final int PREC_ADDSUB = 2;   // +, -
-    private static final int PREC_UNARY = 100;  // Unary minus
     private Token[] cachedPostfix = null;  // Cache the compiled postfix
 
     private int[] slots;
@@ -168,15 +162,78 @@ public class MathExpression implements Savable, Solvable {
      * return this variable, but instead returns the data which it refers
      * to..e.g a {@link Matrix} function or other. But we at times need that
      * function name...So we cache this value here.
+     *
      */
     private String returnObjectName;
     public static final String SYNTAX_ERROR = "SYNTAX ERROR";
 
-// Updated Token class with native MATRIX and VARIABLE support, fixed operator arity fallbacks, and serialization
+    /**
+     *
+     * class with native MATRIX and VARIABLE support, fixed operator arity
+     * fallbacks, and serialization
+     * <table>
+     * <tr>
+     * <td>Priority = 1</td>
+     * <td>(Highest) Parentheses() </td>
+     * <td> Explicit grouping</td>
+     * </tr>
+     * <tr>
+     * <td>Priority = 2</td>
+     * <td>Exponentiation / Power ^ or ** </td>
+     * <td>Raises a number to a power Updated Token</td>
+     * </tr>
+     * <tr>
+     * <td> Priority = 3</td>
+     * <td>Unary Logical NOT! or not </td>
+     * <td>Inverts a boolean state</td>
+     * </tr>
+     * <tr>
+     * <td>Priority = 4</td>
+     * <td>Multiplicative Math *, /, %</td>
+     * <td>Multiplication, division, modulo</td>
+     * </tr>
+     * <tr>
+     * <td>Priority = 5</td>
+     * <td>Additive Math +, - </td>
+     * <td>Addition and subtraction </td>
+     * </tr>
+     * <tr>
+     * <td>Priority = 6</td>
+     * <td>Relational / Comparison <, >, <=, >=, ==, !=</td>
+     * <td>Value comparisons</td>
+     * </tr>
+     * <tr>
+     * <td>Priority = 7</td>
+     * <td>Binary Logical AND && or and</td>
+     * <td>True if both conditions pass</td>
+     * </tr>
+     * <tr>
+     * <td>Priority = 8</td>
+     * <td>(Lowest)Binary Logical OR || or or</td>
+     * <td> True if at least one condition passes</td>
+     * </tr>
+     * </table>
+     */
     public static final class Token implements Savable {
+        // Precedence levels
+
+        private static final int PREC_POSTFIX = 7;  // !, ², ³, √, ³√, -¹
+        private static final int PREC_POWER = 6;    // ^
+        private static final int PREC_MULDIV = 5;   // *, /, %, Р, Č
+        private static final int PREC_ADDSUB = 4;   // +, -
+        private static final int PREC_LOGICAL = 3;   // <, <=, >, >=, ==, !=
+        private static final int PREC_BINARY_AND = 2;   // AND, &&
+        private static final int PREC_BINARY_OR = 1;   // OR, ||
+        private static final int PREC_UNARY = 100;  // Unary minus
 
         public static final char CBRT_DEF = 'º';
-        public static final char INVERSE_DEF = '¹';
+        public static final char INVERSE_DEF = '¹';//<, >, <=, >=, ==, 
+        public static final char LT_EQ_DEF = '«';
+        public static final char GT_EQ_DEF = '»';
+        public static final char EQ_DEF = '꞊';
+        public static final char NOT_EQ_DEF = '≠';
+        public static final char BIN_AND_DEF = '↔';
+        public static final char BIN_OR_DEF = '↕';
 
         private static final long serialVersionUID = 1L;
         public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5, COMMA = 6, MATRIX = 7, VARIABLE = 8, FUNCTION_HANDLE = 9,
@@ -342,6 +399,32 @@ public class MathExpression implements Savable, Solvable {
         public boolean isVariable() {
             return this.kind == VARIABLE || (this.name != null && !this.name.isEmpty() && this.v != null && this.frameIndex >= 0);
         }
+         
+         public static final char getAlias(String name){
+            if(name.length()==1){
+                return name.charAt(0);
+            } 
+            switch (name) {
+                case "³√":
+                    return CBRT_DEF;
+                case "-¹":
+                    return INVERSE_DEF;
+                case "<=":
+                    return LT_EQ_DEF;
+                case ">=":
+                    return GT_EQ_DEF;
+                case "==":
+                    return EQ_DEF;
+                case "!=":
+                    return NOT_EQ_DEF;
+                case "&&":
+                    return BIN_AND_DEF;
+                case "||":
+                    return BIN_OR_DEF;
+                default:
+                    throw new AssertionError();
+            }
+        }
 
         // Helper to get precedence for opChar
         public static int getPrec(char op) {
@@ -353,6 +436,17 @@ public class MathExpression implements Savable, Solvable {
                 case CBRT_DEF:  // Internal for ³√
                 case INVERSE_DEF:  // FIX: Explicit support for inverse operator (⁻¹)
                     return PREC_POSTFIX;
+                case '<':
+                case '>':
+                case LT_EQ_DEF:
+                case GT_EQ_DEF:
+                case EQ_DEF:
+                case NOT_EQ_DEF:
+                    return PREC_LOGICAL;
+                case BIN_AND_DEF:
+                    return PREC_BINARY_AND;
+                case BIN_OR_DEF:
+                    return PREC_BINARY_OR;
                 case '^':
                     return PREC_POWER;
                 case '*':
@@ -760,7 +854,6 @@ public class MathExpression implements Savable, Solvable {
 
         this.commaAlias = opScanner.commaAlias;
         scanner = opScanner.getScanner();
-
         correctFunction = opScanner.isRunnable();
         parser_Result = opScanner.parser_Result;
         if (parser_Result == ParserResult.VALID) {
@@ -771,7 +864,6 @@ public class MathExpression implements Savable, Solvable {
             functionComponentsAssociation();
             compileToPostfix();  // Compile once if not already done 
         }//end if
-
     }//end method initializing(args)
 
     public void setWillFoldConstants(boolean willFoldConstants) {
@@ -1625,6 +1717,25 @@ public class MathExpression implements Savable, Solvable {
             if (s.equals("³√")) {
                 c0 = Token.CBRT_DEF;
             }
+            if (s.equals("<=")) {
+                c0 = Token.LT_EQ_DEF;
+            }
+            if (s.equals(">=")) {
+                c0 = Token.GT_EQ_DEF;
+            }
+            if (s.equals("==")) {
+                c0 = Token.EQ_DEF;
+            }
+            if (s.equals("&&")) {
+                c0 = Token.BIN_AND_DEF;
+            }
+            if (s.equals("||")) {
+                c0 = Token.BIN_OR_DEF;
+            }
+            if (s.equals("!=")) {
+                c0 = Token.NOT_EQ_DEF;
+            }
+
             boolean isPostfix = (c0 == '!' || c0 == '²' || c0 == '³' || c0 == Token.INVERSE_DEF);
             char internalOp = c0;
             return new Token(internalOp, Token.getPrec(internalOp), Token.isRightAssociative(internalOp), isPostfix);
@@ -1653,9 +1764,7 @@ public class MathExpression implements Savable, Solvable {
 
         if (cachedPostfix != null) {
             return;
-        }
-
-        // --- 1. THE FIX: Passive Listeners for Function Arguments ---
+        }        // --- 1. THE FIX: Passive Listeners for Function Arguments ---
         class FuncArgTracker {
 
             Token funcToken;
@@ -1849,7 +1958,7 @@ public class MathExpression implements Savable, Solvable {
     public static final boolean isOperator(String s) {
         if (s.length() == 1) {
             char c = s.charAt(0);
-            return "+-*/%^√!²³ČР".indexOf(c) != -1;
+            return "+-*/%^√!²³ČР<=>=&&||".indexOf(c) != -1;
         }
         return s.equals("³√") || s.equals("-¹");
     }
@@ -2109,44 +2218,7 @@ public class MathExpression implements Savable, Solvable {
             // Note: type remains TYPE_SCALAR, so no need to call wrap()
         }
 
-        /*
-        private void applyBinary(char op, EvalResult aRes, EvalResult b) {
-            double a = aRes.scalar;
-            switch (op) {
-                case '+':
-                    aRes.scalar = a + b;
-                    break;
-                case '-':
-                    aRes.scalar = a - b;
-                    break;
-                case '*':
-                    aRes.scalar = a * b;
-                    break;
-                case '/':
-                    if (b == 0) {
-                        String err = "Division by zero---op=" + op + ", b=" + b + ", aRes=" + aRes + ", aRes.type = " + aRes.getTypeName();
-                        errorLog.info(err);
-                        aRes.scalar = Double.POSITIVE_INFINITY;
-                    }
-                    aRes.scalar = a / b;
-                    break;
-                case '%':
-                    aRes.scalar = a % b;
-                    break;
-                case '^':
-                    aRes.scalar = Math.pow(a, b);
-                    break;
-                case 'Č':
-                    aRes.scalar = Maths.combination(a, b);
-                    break;
-                case 'Р':
-                    aRes.scalar = Maths.permutation(a, b);
-                    break;
-            }
-        }
-         */
         private void applyBinary(char op, EvalResult left, EvalResult right) {
-
             // =========================================================================
             // ⚡ ULTRA-TURBO FAST-PATH FOR PURE SCALAR ARITHMETIC
             // Bypasses all string lookups and matrix type resolution entirely.
@@ -2170,6 +2242,37 @@ public class MathExpression implements Savable, Solvable {
                             left.scalar /= right.scalar;
                         }
                         break;
+                    case '<':
+                        left.wrap(left.scalar < right.scalar);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        right.scalar = left.boolVal ? 1 : 0;
+                        break;
+                    case Token.LT_EQ_DEF:
+                        left.wrap(left.scalar <= right.scalar);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        right.scalar = left.boolVal ? 1 : 0;
+                        break;
+                    case '>':
+                        left.wrap(left.scalar > right.scalar);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        right.scalar = left.boolVal ? 1 : 0;
+                        break;
+                    case Token.GT_EQ_DEF:
+                        left.wrap(left.scalar >= right.scalar);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        right.scalar = left.boolVal ? 1 : 0;
+                        break;
+                    case Token.EQ_DEF:
+                        left.wrap(left.scalar == right.scalar);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        right.scalar = left.boolVal ? 1 : 0;
+                        break;
+                    case Token.NOT_EQ_DEF:
+                        left.wrap(left.scalar != right.scalar);
+                        left.scalar = left.boolVal ? 1 : 0;
+                        right.scalar = left.boolVal ? 1 : 0;
+                        break;
+
                     case '%':
                         left.scalar %= right.scalar;
                         break;
@@ -2220,7 +2323,20 @@ public class MathExpression implements Savable, Solvable {
                     default:
                         throw new UnsupportedOperationException("Operator not implemented: " + op);
                 }
+
                 return; // Hot path exit
+            }
+            if (left.type == EvalResult.TYPE_BOOLEAN && right.type == EvalResult.TYPE_BOOLEAN) {
+                switch (op) {
+                    case Token.BIN_AND_DEF:
+                        left.wrap(left.boolVal && right.boolVal);
+                        break;
+                    case Token.BIN_OR_DEF:
+                        left.wrap(left.boolVal || right.boolVal);
+                        break;
+                    default:
+                        throw new UnsupportedOperationException("Operator not implemented: " + op);
+                }
             }
 
             Function leftFun = left.type == EvalResult.TYPE_STRING ? FunctionManager.lookUp(left.textRes) : null;
@@ -3712,6 +3828,13 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
     public static void main(String... args) {
 
+        MathExpression m111 = new MathExpression("x=-5;if(3*x+7<5,sin(x), -3)");
+        System.out.println(m111.scanner);
+       
+        System.out.println(m111.expression+ ": -->> " + m111.solve());
+        System.out.println("abs(-3+22*-5): -->> " + new MathExpression("abs(-3+22*-5)").solve());
+        System.out.println("floor(3.141): -->> " + new MathExpression("floor(3.141)").solve());
+        System.out.println("ceil(2.138): -->> " + new MathExpression("ceil(2.138)").solve());
         System.out.println("gelu(3): -->> " + new MathExpression("gelu(3)").solve());
         System.out.println("swiglu(4): -->> " + new MathExpression("swiglu(4)").solve());
         System.out.println("swiglu(4,9): -->> " + new MathExpression("swiglu(4,9)").solve());
@@ -3861,7 +3984,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
         MathExpression printer = new MathExpression("print(anon9,anon2,C)");
         System.out.println("anon9: " + FunctionManager.lookUp("anon9"));
-        MathExpression mee = new MathExpression("sum(2,3,sort(3,0,1,2))");
+        MathExpression mee = new MathExpression("listsum(2,3,sort(3,0,1,2))");
 
         System.out.println("listsum(2,3,sort(3,0,1,2)): " + mee.solve());
         System.out.println(printer.solve());

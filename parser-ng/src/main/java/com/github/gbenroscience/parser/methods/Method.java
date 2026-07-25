@@ -879,6 +879,12 @@ public class Method {
                             } else if (name.equals(INVERSE)) {
                                 double val = Double.parseDouble(list.get(0));
                                 result = String.valueOf(1 / val);
+                            } else if (name.equals(ABS)) {
+                                result = String.valueOf(Math.abs(Double.parseDouble(list.get(0))));
+                            } else if (name.equals(CEIL)) {
+                                result = String.valueOf(Math.ceil(Double.parseDouble(list.get(0))));
+                            } else if (name.equals(FLOOR)) {
+                                result = String.valueOf(Math.floor(Double.parseDouble(list.get(0))));
                             } else if (name.equals(FACT)) {
                                 result = Maths.fact(list.get(0));
                             }
@@ -961,6 +967,12 @@ public class Method {
                                 result = String.valueOf(1 / val);
                             } else if (name.equals(FACT)) {
                                 result = Maths.fact(list.get(0));
+                            }else if (name.equals(ABS)) {
+                                result = String.valueOf(Math.abs(Double.parseDouble(list.get(0))));
+                            } else if (name.equals(CEIL)) {
+                                result = String.valueOf(Math.ceil(Double.parseDouble(list.get(0))));
+                            } else if (name.equals(FLOOR)) {
+                                result = String.valueOf(Math.floor(Double.parseDouble(list.get(0))));
                             }
 
                             list.clear();
@@ -1041,6 +1053,12 @@ public class Method {
                                 result = String.valueOf(1 / val);
                             } else if (name.equals(FACT)) {
                                 result = Maths.fact(list.get(0));
+                            }else if (name.equals(ABS)) {
+                                result = String.valueOf(Math.abs(Double.parseDouble(list.get(0))));
+                            } else if (name.equals(CEIL)) {
+                                result = String.valueOf(Math.ceil(Double.parseDouble(list.get(0))));
+                            } else if (name.equals(FLOOR)) {
+                                result = String.valueOf(Math.floor(Double.parseDouble(list.get(0))));
                             }
                             list.clear();
                             list.add(result);

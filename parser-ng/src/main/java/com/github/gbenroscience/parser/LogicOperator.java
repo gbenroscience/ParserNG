@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import static com.github.gbenroscience.parser.Number.*;
 import static com.github.gbenroscience.parser.Variable.*;
 import com.github.gbenroscience.util.ErrorLog;
+import com.github.gbenroscience.util.FunctionManager;
 import java.util.List;
 
 /**
@@ -22,7 +23,7 @@ public class LogicOperator extends Operator implements Validatable {
     /**
      * The precedence of this LogicOperator object.
      */
-    private final Precedence precedence;
+    private final int precedence;
     /**
      * The index of this operator in the scanned Function that it belongs to.
      */
@@ -36,7 +37,7 @@ public class LogicOperator extends Operator implements Validatable {
      * @param scan the Function object that this LogicOperator object belongs
      * to.
      */
-    public LogicOperator(String name, int index,  List<String> scan) {
+    public LogicOperator(String name, int index, List<String> scan) {
         super(isLogicOperator(name) ? name : "");
 
         if (this.getName().equals("")) {
@@ -56,7 +57,7 @@ public class LogicOperator extends Operator implements Validatable {
      *
      * @return the precedence of this operator
      */
-    public Precedence getPrecedence() {
+    public int getPrecedence() {
         return precedence;
     }
 
@@ -90,45 +91,46 @@ public class LogicOperator extends Operator implements Validatable {
      * correctFunction attribute of the function object un-modified) if the
      * usage of this operator in its immediate environment i.e to its left and
      * right is correct.
-     * 
+     *
      * @return true if valid
      */
     @Override
     public boolean validate(List<String> scan, ErrorLog errorLog) {
 
-        int leftInd = index-1;
-        int rightInd = index+1;
+        int leftInd = index - 1;
+        int rightInd = index + 1;
         int sz = scan.size();
         boolean correct = true;
         String prev = leftInd >= 0 ? scan.get(leftInd) : null;
         String curr = scan.get(index);
         String next = rightInd < sz ? scan.get(rightInd) : null;
-  
-            //specify valid tokens that can come before a logic operator
-            if (leftInd>=0 && !isNumber(prev)
-                    && !isVariableString(prev) && !isUnaryPostOperator(prev)
-                    && !isClosingBracket(prev)) {
-                errorLog.error(
-                        "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
-                        + " As You Have Done."
-                        + "ParserNG Error Detector For Logic operators!");
-                correct = false;
-                scan.clear();
 
-            }//end if
-            //specify valid tokens that can come after a logic operator
-            if (rightInd<sz && isNumber(next) && !isVariableString(next)
-                    && !isOpeningBracket(next)
-                    && !Method.isUnaryPreOperatorORDefinedMethod(next) && !Method.isNumberReturningStatsMethod(next)
-                    && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
+        // if(a<b, a*9, c)
+        //specify valid tokens that can come before a logic operator
+        if (leftInd >= 0) {
+            if (!isNumber(prev)  && ((!isVariableString(prev) || Method.isDefinedMethod(prev)) || FunctionManager.containsAny(prev)) && !isClosingBracket(prev)
+                    && !isUnaryPostOperator(prev)) {
                 errorLog.error(
-                        "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
+                        "1. ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
+                                + " As You Have Done."
+                                + "ParserNG Error Detector For Logic operators!");
+                correct = false;
+                scan.clear();
+            }
+        }//end if
+
+        //specify valid tokens that can come after a logic operator
+        if (rightInd < sz) {
+            if (!isNumber(next) && !isVariableString(next) && !isOpeningBracket(next)) {
+                errorLog.error(
+                        "2. ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                         + " As You Have Done."
                         + "ParserNG Error Detector For Logic operators!");
                 correct = false;
                 scan.clear();
-            }//end if
- 
+            }
+        }//end if
+
         return correct;
     }//end method
 

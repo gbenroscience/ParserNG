@@ -24,7 +24,7 @@ public final class UnaryPreOperator extends Operator implements Validatable {
     /**
      * The precedence of this BinaryOperator object.
      */
-    private final Precedence precedence;
+    private final int precedence;
 
     /**
      * The index of this operator in the scanned MathExpression that it belongs
@@ -60,7 +60,7 @@ to.
      *
      * @return the precedence of this operator
      */
-    public Precedence getPrecedence() {
+    public int getPrecedence() {
         return precedence;
     }
 
