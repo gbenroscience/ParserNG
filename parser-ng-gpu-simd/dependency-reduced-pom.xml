@@ -1,19 +1,48 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
-  <parent>
-    <artifactId>parser-ng-parent</artifactId>
-    <groupId>com.github.gbenroscience</groupId>
-    <version>2.0.8</version>
-  </parent>
   <modelVersion>4.0.0</modelVersion>
-  <artifactId>parser-ng-bench</artifactId>
-  <name>parser-ng-bench</name>
+  <groupId>com.github.gbenroscience</groupId>
+  <artifactId>parser-ng-gpu-simd</artifactId>
+  <name>parser-ng-gpu-simd</name>
   <version>2.0.8</version>
+  <description>Hardware-accelerated, scalable(Linux-(Centos tested)) SIMD vector calculation pipelines for ParserNG.
+        Fastest Java math evaluator in the world period
+        Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.(e.g. JNI) 
+        Version 1.0.0 features complete migration of all transcendentals to the Vector APi, and CPU pinning of workers
+        to minimize cache thrashing and other stories.
+        For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034</description>
+  <url>https://github.com/gbenroscience/parserng-enterprise</url>
   <build>
     <plugins>
       <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+        <configuration>
+          <release>22</release>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.openjdk.jmh</groupId>
+              <artifactId>jmh-generator-annprocess</artifactId>
+              <version>1.37</version>
+            </path>
+          </annotationProcessorPaths>
+          <compilerArgs>
+            <arg>--add-modules</arg>
+            <arg>jdk.incubator.vector</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+        <configuration>
+          <argLine>--add-modules jdk.incubator.vector
+                        --enable-native-access=ALL-UNNAMED</argLine>
+        </configuration>
+      </plugin>
+      <plugin>
         <artifactId>maven-shade-plugin</artifactId>
-        <version>3.5.0</version>
+        <version>3.5.2</version>
         <executions>
           <execution>
             <phase>package</phase>
@@ -22,11 +51,7 @@
             </goals>
             <configuration>
               <finalName>benchmarks</finalName>
-              <transformers>
-                <transformer>
-                  <mainClass>com.github.gbenroscience.parser.ng.bench.ParserNgBench</mainClass>
-                </transformer>
-              </transformers>
+              <includeDependencySources>false</includeDependencySources>
               <filters>
                 <filter>
                   <artifact>*:*</artifact>
@@ -37,23 +62,14 @@
                   </excludes>
                 </filter>
               </filters>
+              <transformers>
+                <transformer>
+                  <mainClass>com.github.gbenroscience.simd.turbo.tools.bench.ParserNgBench</mainClass>
+                </transformer>
+              </transformers>
             </configuration>
           </execution>
         </executions>
-      </plugin>
-      <plugin>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.11.0</version>
-        <configuration>
-          <release>24</release>
-          <annotationProcessorPaths>
-            <path>
-              <groupId>org.openjdk.jmh</groupId>
-              <artifactId>jmh-generator-annprocess</artifactId>
-              <version>1.37</version>
-            </path>
-          </annotationProcessorPaths>
-        </configuration>
       </plugin>
     </plugins>
   </build>
@@ -114,7 +130,9 @@
     </dependency>
   </dependencies>
   <properties>
-    <maven.compiler.release>21</maven.compiler.release>
-    <exec.mainClass>com.github.gbenroscience.parser.ng.bench.ParserNgBench</exec.mainClass>
+    <maven.compiler.release>22</maven.compiler.release>
+    <exec.mainClass>com.github.gbenroscience.simd.turbo.tools.bench.ParserNgBench</exec.mainClass>
+    <maven.compiler.target>22</maven.compiler.target>
+    <maven.compiler.source>22</maven.compiler.source>
   </properties>
 </project>

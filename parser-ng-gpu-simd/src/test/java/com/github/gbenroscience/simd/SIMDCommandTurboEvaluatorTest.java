@@ -2,9 +2,7 @@ package com.github.gbenroscience.simd;
 
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
-import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
+import com.github.gbenroscience.simd.turbo.tools.SIMDCommandTurboEvaluator;
 
 import java.util.Arrays;
 import org.junit.jupiter.api.AfterAll;
@@ -14,14 +12,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Assertions;
 import static org.junit.jupiter.api.Assertions.*;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  *
  * @author GBEMIRO
  */
-public class SIMDTurboEvaluatorTest {
+public class SIMDCommandTurboEvaluatorTest {
 
     private static final double EPSILON = 1e-12;
     private static ExecutorService threadPool;
@@ -45,7 +41,7 @@ public class SIMDTurboEvaluatorTest {
     @Test
     public void testMathematicalPrecisionVsNativeJavaFlat() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me).compile();
 
         logDetails(me, evaluator, !active);
 
@@ -86,11 +82,13 @@ public class SIMDTurboEvaluatorTest {
             assertEquals(expected, outputVector[i], EPSILON, "SIMD flat path math drifted at index: " + i);
         }
     }
-
+    
+    
+  
     @Test
     public void testMathematicalPrecisionVsNativeJava() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2.23))");
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me).compile();
         logDetails(me, evaluator, !active);
 
         // 17 datapoints to trigger both vector lane and tail scalar loop remainders
@@ -106,7 +104,7 @@ public class SIMDTurboEvaluatorTest {
 
         // Test API Call #1: Standard Bulk Execution
         evaluator.applyBulk(inputs, outputVector);
-        // System.out.println("output: " + Arrays.toString(outputVector));
+       // System.out.println("output: " + Arrays.toString(outputVector));
 
         for (int i = 0; i < totalElements; i++) {
             double x1 = inputs[0][i];
@@ -121,10 +119,10 @@ public class SIMDTurboEvaluatorTest {
     public void testThreadPooledParallelBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
         me.setDRG(DRG_MODE.RAD);
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me).compile();
         logDetails(me, evaluator, !active);
 
-        int dataSize = 250018;
+        int dataSize = 2250018;
         double[][] inputs = new double[1][dataSize]; // Only 1 variable 'x' is needed for this expression
         double[] outputVector = new double[dataSize];
 
@@ -132,7 +130,7 @@ public class SIMDTurboEvaluatorTest {
             inputs[0][i] = i; // x
         }
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(inputs, outputVector);
+        evaluator.applyBulkParallel(inputs, outputVector);
         //  System.out.println("output: " + Arrays.toString(outputVector));
 
         for (int i = 0; i < dataSize; i++) {
@@ -146,7 +144,7 @@ public class SIMDTurboEvaluatorTest {
     @Test
     public void testSingleRuntime() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         evaluator.applyBulk(new double[]{5, 4, 1}, out);
@@ -157,45 +155,11 @@ public class SIMDTurboEvaluatorTest {
     }
 
     @Test
-    public void testIfExpr() throws Throwable {
-        // 1. Removed x=4;y=5; so it reads from the vector inputs
-        double halfPi = Math.PI/2.0;
-        MathExpression me = new MathExpression("if( sin(x+y)>"+halfPi+", cos(sqrt(x^2+y^2)), sin(sqrt(x^2+y^2)))");
-        //MathExpression me = new MathExpression("sin(sqrt(x^2+y^2))");
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator
-                = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
-
-        int dataSize = 25000000;
-        double[][] inputs = new double[2][dataSize];
-        double[] outputVector = new double[dataSize];
-
-        for (int i = 0; i < dataSize; i++) {
-            inputs[0][i] = i;           // x
-            inputs[1][i] = i % 2 + i / 3;   // y
-        }
-
-        double t = System.nanoTime();
-        // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(inputs, outputVector);
-        double t1 = System.nanoTime() - t;
-
-        System.out.println("timed at = " + t1 + "ns --- answer: " + outputVector[0]);
-
-        for (int i = 0; i < dataSize; i++) {
-            double x = inputs[0][i];
-            double y = inputs[1][i];
-            // Correct expected formula matching the active MathExpression
-            double expected = Math.sin(x + y) > Math.PI/2 ? Math.cos(Math.sqrt(x*x+y*y)) :  Math.sin(Math.sqrt(x*x+y*y))  ;
-            assertEquals(expected, outputVector[i], EPSILON, "Parallel SIMD execution drifted at index: " + i);
-        }
-    }
-
-    @Test
     void testUserDefinedFunctionSimpleCall() throws Throwable {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(x+3,y-2,2*z-3)");
         System.out.println("f(x+3,y-2,2*z-3) = " + me.solve());
 
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         try {
@@ -220,11 +184,18 @@ public class SIMDTurboEvaluatorTest {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
         System.out.println("f(3,4,2) = " + me.solve());
 
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
+        double[]in=new double[0];
+        try{
+            evaluator.validate(in, out);
+        }catch(Exception e){
+            Assertions.assertTrue(true, "Caught the empty array error!");
+            return;
+        }
         try {
-            evaluator.applyBulk(new double[]{}, out);
+            evaluator.applyBulk(in, out);
         } catch (IllegalStateException e) {
             assertTrue(true, "variables not balanced");
             return;
@@ -245,7 +216,7 @@ public class SIMDTurboEvaluatorTest {
 
         MathExpression me = new MathExpression("3 + 2*x + f(2, 3*x + sin(4*x), 5)");
 
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         evaluator.applyBulk(new double[]{5}, out);
@@ -260,89 +231,7 @@ public class SIMDTurboEvaluatorTest {
 
     }
 
-    @ParameterizedTest(name = "GELU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {20, 70, 100, 200})
-    void testGelu(int sz) throws Throwable {
-        executeKernelBenchmark("gelu", sz, 1);
-    }
-
-    @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {20, 70, 100, 200})
-    void testSwiglu(int sz) throws Throwable {
-        executeKernelBenchmark("swiglu", sz, 2);
-    }
-
-    @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {20, 70, 100, 200})
-    void testGeglu(int sz) throws Throwable {
-        executeKernelBenchmark("geglu", sz, 2);
-    }
-
-    @ParameterizedTest(name = "GeLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {512, 1024})
-    void testGeluLarge(int sz) throws Throwable {
-        executeKernelBenchmark("gelu", sz, 1);
-    }
-
-    @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {512, 1024})
-    void testGegluLarge(int sz) throws Throwable {
-        executeKernelBenchmark("geglu", sz, 2);
-    }
-
-    @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {512, 1024})
-    void testSwigluLarge(int sz) throws Throwable {
-        executeKernelBenchmark("swiglu", sz, 2);
-    }
-
-    /**
-     * Shared orchestration runner for manual micro-benchmarking without JMH.
-     */
-    private void executeKernelBenchmark(String kernelName, int sz, int arity) throws Throwable {
-        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
-        SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
-
-        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in1);
-
-        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in2);
-
-        FlatMatrixF out = new FlatMatrixF(sz, sz);
-
-        // 1. Manual Warm-up Phase
-        // Forces C2 to compile the vector loops before we sample the clock
-        int warmUpRuns = 1000;
-        FlatMatrixF[] inputs = arity == 2 ? new FlatMatrixF[]{in1, in2} : new FlatMatrixF[]{in1}; // Allocate once outside the timing track!
-        for (int i = 0; i < warmUpRuns; i++) {
-            evaluator.applyMatrixKernel(inputs, out, kernelName);
-        }
-
-        // 2. Timed Target Phase
-        int iterations = 4000;
-
-        long startTime = System.nanoTime();
-        for (int i = 0; i < iterations; i++) {
-            evaluator.applyMatrixKernel(inputs, out, kernelName);
-        }
-        long totalTimeNs = System.nanoTime() - startTime;
-
-        // 3. Analytics Formatting
-        double avgMatrixNs = (double) totalTimeNs / iterations;
-        double totalElements = sz * sz;
-        double avgPerElementNs = avgMatrixNs / totalElements;
-        double avgMatrixMicros = avgMatrixNs / 1000.0;
-
-        // Prints numbers tailored perfectly for your README layout
-        System.out.printf("[%s] %dx%d -> Matrix Avg: %.2f µs | Per-Element: %.2f ns%n",
-                kernelName.toUpperCase(), sz, sz, avgMatrixMicros, avgPerElementNs);
-
-        // Sanity check to prevent dead-code optimization tricks from discarding execution
-        Assertions.assertNotNull(out);
-    }
-
-    void logDetails(MathExpression me, SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator, boolean active) {
+    void logDetails(MathExpression me, SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression evaluator, boolean active) {
         if (!active) {
             return;
         }

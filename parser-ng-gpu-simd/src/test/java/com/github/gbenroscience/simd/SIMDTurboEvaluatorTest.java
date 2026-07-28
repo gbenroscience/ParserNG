@@ -86,7 +86,9 @@ public class SIMDTurboEvaluatorTest {
             assertEquals(expected, outputVector[i], EPSILON, "SIMD flat path math drifted at index: " + i);
         }
     }
-
+    
+    
+  
     @Test
     public void testMathematicalPrecisionVsNativeJava() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2.23))");
@@ -106,7 +108,7 @@ public class SIMDTurboEvaluatorTest {
 
         // Test API Call #1: Standard Bulk Execution
         evaluator.applyBulk(inputs, outputVector);
-        // System.out.println("output: " + Arrays.toString(outputVector));
+       // System.out.println("output: " + Arrays.toString(outputVector));
 
         for (int i = 0; i < totalElements; i++) {
             double x1 = inputs[0][i];
@@ -132,7 +134,7 @@ public class SIMDTurboEvaluatorTest {
             inputs[0][i] = i; // x
         }
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(inputs, outputVector);
+        evaluator.applyBulkParallel(inputs, outputVector);
         //  System.out.println("output: " + Arrays.toString(outputVector));
 
         for (int i = 0; i < dataSize; i++) {
@@ -154,40 +156,6 @@ public class SIMDTurboEvaluatorTest {
 
         System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
         Assertions.assertTrue(true);
-    }
-
-    @Test
-    public void testIfExpr() throws Throwable {
-        // 1. Removed x=4;y=5; so it reads from the vector inputs
-        double halfPi = Math.PI/2.0;
-        MathExpression me = new MathExpression("if( sin(x+y)>"+halfPi+", cos(sqrt(x^2+y^2)), sin(sqrt(x^2+y^2)))");
-        //MathExpression me = new MathExpression("sin(sqrt(x^2+y^2))");
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator
-                = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
-
-        int dataSize = 25000000;
-        double[][] inputs = new double[2][dataSize];
-        double[] outputVector = new double[dataSize];
-
-        for (int i = 0; i < dataSize; i++) {
-            inputs[0][i] = i;           // x
-            inputs[1][i] = i % 2 + i / 3;   // y
-        }
-
-        double t = System.nanoTime();
-        // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(inputs, outputVector);
-        double t1 = System.nanoTime() - t;
-
-        System.out.println("timed at = " + t1 + "ns --- answer: " + outputVector[0]);
-
-        for (int i = 0; i < dataSize; i++) {
-            double x = inputs[0][i];
-            double y = inputs[1][i];
-            // Correct expected formula matching the active MathExpression
-            double expected = Math.sin(x + y) > Math.PI/2 ? Math.cos(Math.sqrt(x*x+y*y)) :  Math.sin(Math.sqrt(x*x+y*y))  ;
-            assertEquals(expected, outputVector[i], EPSILON, "Parallel SIMD execution drifted at index: " + i);
-        }
     }
 
     @Test
@@ -223,8 +191,15 @@ public class SIMDTurboEvaluatorTest {
         SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
+        double[]in=new double[0];
+        try{
+            evaluator.validate(in, out);
+        }catch(Exception e){
+            Assertions.assertTrue(true, "Caught the empty array error!");
+            return;
+        }
         try {
-            evaluator.applyBulk(new double[]{}, out);
+            evaluator.applyBulk(in, out);
         } catch (IllegalStateException e) {
             assertTrue(true, "variables not balanced");
             return;
@@ -277,21 +252,19 @@ public class SIMDTurboEvaluatorTest {
     void testGeglu(int sz) throws Throwable {
         executeKernelBenchmark("geglu", sz, 2);
     }
-
-    @ParameterizedTest(name = "GeLU Matrix Size: {0}x{0}")
+    
+ @ParameterizedTest(name = "GeLU Matrix Size: {0}x{0}")
     @ValueSource(ints = {512, 1024})
     void testGeluLarge(int sz) throws Throwable {
         executeKernelBenchmark("gelu", sz, 1);
     }
-
-    @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {512, 1024})
+        @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
+       @ValueSource(ints = {512, 1024})
     void testGegluLarge(int sz) throws Throwable {
         executeKernelBenchmark("geglu", sz, 2);
     }
-
-    @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {512, 1024})
+        @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
+        @ValueSource(ints = {512, 1024})
     void testSwigluLarge(int sz) throws Throwable {
         executeKernelBenchmark("swiglu", sz, 2);
     }

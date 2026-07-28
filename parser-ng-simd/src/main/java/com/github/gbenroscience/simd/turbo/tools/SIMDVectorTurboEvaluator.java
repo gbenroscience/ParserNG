@@ -22,6 +22,22 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         super(me);
     }
 
+    public static final SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
+        return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+    }
+
+    public static final SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
+        return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(new MathExpression(expr)).compile();
+    }
+
+    public static final SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+    }
+
+    public static final SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
+        return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(new MathExpression(expr)).compile();
+    }
+
     @Override
     public BatchedVectorCompositeExpression compile() throws Throwable {
         return new SIMDVectorCompositeExpression();
@@ -42,7 +58,6 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                 this.NUM_WORKERS = numWorkers - 1;
             }
         }
- 
 
         @Override
         public MathExpression.EvalResult apply(double[] vars) {
@@ -840,6 +855,12 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                         for (int k = 0; k < n; k++) {
                             scratch[stackOffset + k] = _2DVariables[slotIdx][blockStart + k];
                         }*/
+                        if (stackOffset + n > scratch.length) {
+                            throw new IllegalStateException(
+                                    String.format("Buffer overflow imminent! destArray.length=%d, destPos=%d, copyLength=%d",
+                                            scratch.length, stackOffset, n)
+                            );
+                        }
                         System.arraycopy(_2DVariables[slotIdx], blockStart, scratch, stackOffset, n);
                     }
 
@@ -1358,7 +1379,6 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                             va.fma(vb, vc).intoArray(scratch, resOffset + k, mask);
                         }
                     }
-
                     case OP_IF -> {
                         final int falseOffset = (--sp) * BLOCK_SIZE;
                         final int trueOffset = (--sp) * BLOCK_SIZE;
@@ -1366,7 +1386,39 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
                         final int resOffset = sp * BLOCK_SIZE;
                         sp++;
                         for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = (scratch[condOffset + k] != 0.0) ? scratch[trueOffset + k] : scratch[falseOffset + k];
+                            double c = scratch[condOffset + k];
+                            double t = scratch[trueOffset + k];
+                            double f = scratch[falseOffset + k];
+
+                            // Branchless: c!= 0? 1 : 0 -> becomes cmov on x86
+                            double m = Double.doubleToRawLongBits(c) != 0L ? 1.0 : 0.0;
+
+                            scratch[resOffset + k] = m * t + (1.0 - m) * f;
+                        }
+                    }
+                    case OP_AND -> {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            // Any non-zero value is treated as TRUE
+                            scratch[resOffset + k] = (scratch[lOffset + k] != 0.0 && scratch[rOffset + k] != 0.0) ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_OR -> {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            // Any non-zero value is treated as TRUE
+                            scratch[resOffset + k] = (scratch[lOffset + k] != 0.0 || scratch[rOffset + k] != 0.0) ? 1.0 : 0.0;
                         }
                     }
 

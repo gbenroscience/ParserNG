@@ -937,6 +937,22 @@ class MathExpressionTest {
         }
 
     }
+    
+    @Test
+    void logicTest() {
+
+        MathExpression m111 = new MathExpression("x>y");
+        System.out.println(m111.scanner);
+
+        Random r = new Random(System.nanoTime());
+        for (int i = 0; i < 10; i++) {
+            double x = r.nextDouble(20);
+            double y = r.nextDouble(20);
+            MathExpression.EvalResult res = m111.solveGeneric(x,y);
+            System.out.println(m111.getExpression() + ": at x=" + x + ", y ="+y+" -->> " + res.boolVal);
+            Assertions.assertTrue(res.boolVal == (x>y));
+        }
+    }
 
     public static void main(String[] args) {
         new MathExpressionTest().matrixTestAlgebraAssignments();

@@ -5,36 +5,41 @@
                              https://maven.apache.org/xsd/maven-4.0.0.xsd">
 
     <modelVersion>4.0.0</modelVersion>
-    <parent>
-        <groupId>com.github.gbenroscience</groupId>
-        <artifactId>parser-ng-parent</artifactId>
-        <version>2.0.8</version>
-        <relativePath>../pom.xml</relativePath>
-    </parent>
 
-    <artifactId>parser-ng-simd</artifactId>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng-gpu-simd</artifactId>
+    <version>2.0.8</version>
     <packaging>jar</packaging>
-    <name>parser-ng-simd</name>
+    <name>parser-ng-gpu-simd</name>
     <description>
-        Hardware-accelerated SIMD vector calculation pipelines for ParserNG
+        Hardware-accelerated, scalable(Linux-(Centos tested)) SIMD vector calculation pipelines for ParserNG.
+        Fastest Java math evaluator in the world period
         Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.(e.g. JNI) 
-        Version 2.0.8 features updates to GeLU and SwiGLU for correctness
+        Version 1.0.0 features complete migration of all transcendentals to the Vector APi, and CPU pinning of workers
+        to minimize cache thrashing and other stories.
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
     </description>
-    <url>https://github.com/gbenroscience/ParserNG</url>
+    <url>https://github.com/gbenroscience/parserng-enterprise</url>
 
     <properties>
-        <!-- This module requires Java 21+ because of Vector API -->
-        <maven.compiler.release>21</maven.compiler.release>
+        <exec.mainClass>com.github.gbenroscience.simd.turbo.tools.bench.ParserNgBench</exec.mainClass>
+        <!-- This module requires Java 22+ because of CPU Pinning tasks and other stories -->
+        <maven.compiler.release>22</maven.compiler.release>
+        <maven.compiler.source>22</maven.compiler.source>
+        <maven.compiler.target>22</maven.compiler.target>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
-            <version>${project.version}</version>
+            <version>2.0.8</version>
         </dependency>
-
+        <dependency>
+            <groupId>com.github.gbenroscience</groupId>
+            <artifactId>parser-ng-simd</artifactId>
+            <version>2.0.8</version>
+        </dependency>
 
         <!-- Test dependencies -->
         <dependency>
@@ -47,7 +52,7 @@
             <groupId>org.codehaus.janino</groupId>
             <artifactId>janino</artifactId>
             <version>3.1.12</version>
-            <scope>test</scope>
+            <type>jar</type>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -65,7 +70,7 @@
             <groupId>org.openjdk.jmh</groupId>
             <artifactId>jmh-core</artifactId>
             <version>1.37</version>
-            <scope>provided</scope>
+            <scope>compile</scope>
         </dependency>
         <dependency>
             <groupId>org.openjdk.jmh</groupId>
@@ -80,9 +85,9 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version> <!-- Updated to newer version -->
+                <version>3.11.0</version>
                 <configuration>
-                    <release>21</release>
+                    <release>22</release>
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.openjdk.jmh</groupId>
@@ -104,7 +109,10 @@
                 <configuration>
                     <argLine>
                         --add-modules jdk.incubator.vector
+                        --enable-native-access=ALL-UNNAMED
                     </argLine>
+                    <!--                    
+                    <skipTests>false</skipTests>-->
                 </configuration>
             </plugin>
 
@@ -134,7 +142,7 @@
                             </filters>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>org.openjdk.jmh.Main</mainClass>
+                                    <mainClass>com.github.gbenroscience.simd.turbo.tools.bench.ParserNgBench</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>

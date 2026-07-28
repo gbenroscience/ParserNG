@@ -2,6 +2,7 @@ package com.github.gbenroscience.simd.turbo.tools;
 
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.MathExpressionTreeDepth;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.simd.turbo.tools.utils.HardwareDetector;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
@@ -174,6 +175,9 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     static final int OP_SWIGLU_2 = 100;
     static final int OP_ERF = 101;
 
+    static final int OP_AND = 102;
+    static final int OP_OR = 103;
+
     // Pre-allocated compilation state
     protected MathExpression.Token[] postfix;
     protected final MethodHandle compiledScalarHandle;
@@ -188,12 +192,33 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     protected KernelInterceptException interceptedKernel;
 
     public VectorTurboEvaluator(MathExpression me) throws Throwable {
+        this(me, BatchedVectorCompositeExpression.computeWorkers());
+    }
+
+    public VectorTurboEvaluator(MathExpression me, int numWorkers) throws Throwable {
         super(me);
+        this.numWorkers = numWorkers;
         this.postfix = me.getCachedPostfix();
         this.varCount = me.getVariablesNames().length;
         this.compiledScalarHandle = compileScalar(postfix);
-        stackDepth = me.getTreeStats().depth;
+        stackDepth = MathExpressionTreeDepth.calculate(postfix).depth;
         compileToPrimitiveProgram();
+    }
+
+    public static VectorTurboEvaluator.BatchedVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
+        return (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+    }
+
+    public static VectorTurboEvaluator.BatchedVectorCompositeExpression getEvaluator(String expr) throws Throwable {
+        return (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(new MathExpression(expr)).compile();
+    }
+
+    public static VectorTurboEvaluator.BatchedVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        return (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+    }
+
+    public static VectorTurboEvaluator.BatchedVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
+        return (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(new MathExpression(expr)).compile();
     }
 
     protected final void compileToPrimitiveProgram() {
@@ -233,6 +258,19 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                             OP_REM;
                         case '>' ->
                             OP_GT;
+                        case MathExpression.Token.GT_EQ_DEF ->
+                            OP_GE;
+                        case MathExpression.Token.LT_EQ_DEF ->
+                            OP_LE;
+                        case MathExpression.Token.NOT_EQ_DEF ->
+                            OP_NE;
+                        case MathExpression.Token.EQ_DEF ->
+                            OP_EQ;
+
+                        case MathExpression.Token.BIN_AND_DEF ->
+                            OP_AND;
+                        case MathExpression.Token.BIN_OR_DEF ->
+                            OP_OR;
                         case '<' ->
                             OP_LT;
                         default ->
@@ -485,6 +523,35 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         return varCount;
     }
 
+    /**
+     * Exposes the compiled opcode program so it can be handed to a backend
+     * other than this class's own interpreter loop (e.g.
+     * GpuCompositeExpression). These arrays are the exact ones evaluateTile()
+     * runs against -- read-only views are intentionally not defensive-copied
+     * here since compile() already hands the same references to
+     * BatchedVectorCompositeExpression internally; callers should treat the
+     * returned arrays as immutable.
+     */
+    public int[] getOpcodes() {
+        return opcodes;
+    }
+
+    public int[] getTargetSlots() {
+        return targetSlots;
+    }
+
+    public double[] getLiteralConstants() {
+        return literalConstants;
+    }
+
+    public int getInstructionCount() {
+        return instructionCount;
+    }
+
+    public int getStackDepth() {
+        return stackDepth;
+    }
+
     @Override
     public SIMDCompositeExpression compile() throws Throwable {
         return new BatchedVectorCompositeExpression(compiledScalarHandle, opcodes, targetSlots,
@@ -587,8 +654,6 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 workers[i].start();
             }
         }
-
-  
 
         @Override
         public double applyScalar(double[] variables) {
@@ -1282,6 +1347,32 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         sp++;
                         for (int k = 0; k < n; k++) {
                             scratch[resOffset + k] = scratch[lOffset + k] <= scratch[rOffset + k] ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_AND -> {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            // Any non-zero value is treated as TRUE
+                            scratch[resOffset + k] = (scratch[lOffset + k] != 0.0 && scratch[rOffset + k] != 0.0) ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_OR -> {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            // Any non-zero value is treated as TRUE
+                            scratch[resOffset + k] = (scratch[lOffset + k] != 0.0 || scratch[rOffset + k] != 0.0) ? 1.0 : 0.0;
                         }
                     }
 

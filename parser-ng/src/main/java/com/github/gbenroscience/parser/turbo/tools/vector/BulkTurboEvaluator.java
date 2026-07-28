@@ -5,6 +5,8 @@ import com.github.gbenroscience.parser.turbo.tools.exceptions.KernelInterceptExc
 import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrixF;
 import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrix;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.MathExpression.Token;
+import com.github.gbenroscience.parser.MathExpressionTreeDepth;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import com.github.gbenroscience.parser.turbo.tools.vector.matrix.kernels.KernelsFloat;
@@ -173,6 +175,8 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
     static final int OP_SWIGLU_2 = 100;
     static final int OP_ERF = 101;
 
+    static final int OP_AND = 102;
+    static final int OP_OR = 103;
     // Pre-allocated compilation state
     protected MathExpression.Token[] postfix;
     protected final MethodHandle compiledScalarHandle;
@@ -190,7 +194,9 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
         this.postfix = me.getCachedPostfix();
         this.varCount = me.getVariablesNames().length;
         this.compiledScalarHandle = compileScalar(postfix);
-        stackDepth = me.getTreeStats().depth;
+        stackDepth = MathExpressionTreeDepth.calculate(postfix).depth;
+        
+        System.out.println("expression tree depth = "+stackDepth);
         compileToPrimitiveProgram();
     }
 
@@ -239,6 +245,24 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                             break;
                         case '>':
                             opcodes[instructionCount] = OP_GT;
+                            break;
+                        case MathExpression.Token.GT_EQ_DEF:
+                            opcodes[instructionCount] = OP_GE;
+                            break;
+                        case MathExpression.Token.LT_EQ_DEF:
+                            opcodes[instructionCount] = OP_LE;
+                            break;
+                        case Token.NOT_EQ_DEF:
+                            opcodes[instructionCount] = OP_NE;
+                            break;
+                        case Token.EQ_DEF:
+                            opcodes[instructionCount] = OP_EQ;
+                            break;
+                        case Token.BIN_AND_DEF:
+                            opcodes[instructionCount] = OP_AND;
+                            break;
+                        case Token.BIN_OR_DEF:
+                            opcodes[instructionCount] = OP_OR;
                             break;
                         case '<':
                             opcodes[instructionCount] = OP_LT;
@@ -1452,6 +1476,30 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         break;
                     }
 
+                    case OP_AND: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = ((scratch[lOffset + k]) == 1.0 && (scratch[rOffset + k] == 1.0)) ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_OR: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = ((scratch[lOffset + k]) == 1.0 || (scratch[rOffset + k] == 1.0)) ? 1.0 : 0.0;
+                        }
+                    }
+
                     case OP_VMA: {
                         sp -= 3;
                         final int base = sp * BLOCK_SIZE;
@@ -1962,6 +2010,30 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                             scratch[resOffset + k] = scratch[lOffset + k] < scratch[rOffset + k] ? 1.0 : 0.0;
                         }
                         break;
+                    }
+
+                    case OP_AND: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = ((scratch[lOffset + k]) == 1.0 && (scratch[rOffset + k] == 1.0)) ? 1.0 : 0.0;
+                        }
+                    }
+
+                    case OP_OR: {
+                        sp -= 2;
+                        final int base = sp * BLOCK_SIZE;
+                        final int lOffset = base;
+                        final int rOffset = base + BLOCK_SIZE;
+                        final int resOffset = base;
+                        sp++;
+                        for (int k = 0; k < n; k++) {
+                            scratch[resOffset + k] = ((scratch[lOffset + k]) == 1.0 || (scratch[rOffset + k] == 1.0)) ? 1.0 : 0.0;
+                        }
                     }
 
                     case OP_EQ: {

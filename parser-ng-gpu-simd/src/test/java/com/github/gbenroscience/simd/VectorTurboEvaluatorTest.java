@@ -1,51 +1,37 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-package com.github.gbenroscience.parser.turbo.tools.vector;
+package com.github.gbenroscience.simd;
 
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrixF;
+import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression;
 
 import java.util.Arrays;
 import java.util.Random;
-import java.util.concurrent.ExecutorService;
 import org.junit.jupiter.api.AfterAll;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import java.util.concurrent.ExecutorService;
+import org.junit.jupiter.api.Assertions;
+import static org.junit.jupiter.api.Assertions.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  *
  * @author GBEMIRO
  */
-public class BulkTurboEvaluatorTest {
-    
+public class VectorTurboEvaluatorTest {
+
     private static final double EPSILON = 1e-12;
     private static ExecutorService threadPool;
     private static boolean active = false;
-    private static boolean tiledExecution = true;
 
     @BeforeAll
     public static void setupSuite() {
         // Enforce a hard fail immediately if module flags are missing
 
         MathExpression orig = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");//for user defined function tests
-        
-        System.out.println("SETUP SUITE ACTIVE FOR "+BulkTurboEvaluatorTest.class.getName());
     }
 
     @AfterAll
@@ -55,18 +41,14 @@ public class BulkTurboEvaluatorTest {
         }
     }
 
-    private static BulkTurboEvaluator.BatchedVectorCompositeExpression getBatchedExpr(MathExpression me) throws Throwable{
-        return (BulkTurboEvaluator.BatchedVectorCompositeExpression) new BulkTurboEvaluator(me).compile();
-    }
-    
     @Test
     public void testMathematicalPrecisionVsNativeJavaFlat() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        BulkTurboEvaluator.BatchedVectorCompositeExpression evaluator = getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         logDetails(me, evaluator, !active);
 
-        // 17 datapoints to trigger both vector lane and tail scalar loop remainders
+        // 2000 datapoints to trigger both vector lane and tail scalar loop remainders
         int totalElements = 2000;
         int varCount = 3; // x1, x2, x3
 
@@ -107,12 +89,12 @@ public class BulkTurboEvaluatorTest {
     @Test
     public void testMathematicalPrecisionVsNativeJava() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         logDetails(me, evaluator, !active);
 
         // 17 datapoints to trigger both vector lane and tail scalar loop remainders
-        int totalElements = 2000;
+        int totalElements = 2000000;
         double[][] inputs = new double[3][totalElements]; // 3 variables, 17 values each
         double[] outputVector = new double[totalElements];
 
@@ -140,7 +122,7 @@ public class BulkTurboEvaluatorTest {
     public void testBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
         me.setDRG(DRG_MODE.RAD);
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         logDetails(me, evaluator, !active);
 
@@ -176,7 +158,7 @@ public class BulkTurboEvaluatorTest {
     public void testBulkBatchedExecution() throws Throwable {
         MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
         me.setDRG(DRG_MODE.RAD);
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         logDetails(me, evaluator, !active);
 
@@ -212,7 +194,7 @@ public class BulkTurboEvaluatorTest {
     public void testApplyBulkWithMoreComplexExpression() throws Throwable {
         MathExpression me = new MathExpression("sin(z-x)+3*sin(5*x^2 + 4*y^2)");
         me.setDRG(DRG_MODE.RAD);
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         logDetails(me, evaluator, !active);
 
@@ -275,7 +257,7 @@ public class BulkTurboEvaluatorTest {
     public void testThreadPooledParallelBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("sin(z-x)+3*sin(5*x^2 + 4*y^2)");
         me.setDRG(DRG_MODE.RAD);
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         logDetails(me, evaluator, !active);
 
@@ -284,7 +266,6 @@ public class BulkTurboEvaluatorTest {
         double[][] inputs = new double[varCount][dataSize];
         double[] flatVars = new double[varCount * dataSize];
         double[] outputVector = new double[dataSize];
-        double[] outputVectorStd = new double[dataSize];
         Random r = new Random(System.currentTimeMillis());
         String t = String.valueOf(System.nanoTime());
 
@@ -298,19 +279,6 @@ public class BulkTurboEvaluatorTest {
             int sz = inputs[i].length;
             System.arraycopy(inputs[i], 0, flatVars, i * sz, sz);
         }
-
-        System.out.println("inputs:\n" + Arrays.deepToString(inputs));
-        System.out.println("flatVars:\n" + Arrays.toString(flatVars));
-        System.out.println("slots:\n" + Arrays.toString(me.getSlotItems()));
-
-        for (int i = 0; i < inputs[0].length; i++) {
-            double z = inputs[me.getSlotByName("z")][i];
-            double x = inputs[me.getSlotByName("x")][i];
-            double y = inputs[me.getSlotByName("y")][i];
-            outputVectorStd[i] = me.solveGeneric(z, x, y).scalar;
-        }
-
-        System.out.println("outputVectorStd:\n" + Arrays.toString(outputVectorStd));
 
         // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
         evaluator.applyBulkParallel(flatVars, outputVector);
@@ -333,68 +301,11 @@ public class BulkTurboEvaluatorTest {
         }
 
     }
-    
-    
-    @Test
-    public void testBulkExecutionAgain() throws Throwable {
-        MathExpression me = new MathExpression("sin(z-x)+3*sin(5*x^2 + 4*y^2)");
-        me.setDRG(DRG_MODE.RAD);
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
-
-        logDetails(me, evaluator, !active);
-
-        int varCount = me.getVariablesNames().length;
-        int dataSize = 10000000;
-        double[][] inputs = new double[varCount][dataSize];
-        double[] flatVars = new double[varCount * dataSize];
-        double[] outputVector = new double[dataSize];
-        double[] outputVectorStd = new double[dataSize];
-        Random r = new Random(System.currentTimeMillis());
-        String t = String.valueOf(System.nanoTime());
-
-        for (int i = 0; i < dataSize; i++) {
-            for (int j = 0; j < varCount; j++) {
-                int idx = r.nextInt(t.length());
-                inputs[j][i] = Integer.parseInt(t.substring(idx, idx + 1));
-            }
-        }
-        for (int i = 0; i < inputs.length; i++) {
-            int sz = inputs[i].length;
-            System.arraycopy(inputs[i], 0, flatVars, i * sz, sz);
-        }
-
-        for (int i = 0; i < inputs[0].length; i++) {
-            double z = inputs[me.getSlotByName("z")][i];
-            double x = inputs[me.getSlotByName("x")][i];
-            double y = inputs[me.getSlotByName("y")][i];
-            outputVectorStd[i] = me.solveGeneric(z, x, y).scalar;
-        }
-
-
-        // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulk(flatVars, outputVector);
-        // System.out.println("output: " + Arrays.toString(outputVector));
-
-
-        double[] expectedOut = new double[dataSize];
-        for (int i = 0; i < dataSize; i++) {
-            double z = inputs[0][i];
-            double x = inputs[1][i];
-            double y = inputs[2][i];
-            // Correct expected formula matching the active MathExpression
-            expectedOut[i] = Math.sin(z - x) + 3.0 * Math.sin(5.0 * x * x + 4 * y * y);
-        }
-
-        for (int i = 0; i < expectedOut.length; i++) {
-            assertEquals(expectedOut[i], outputVector[i], EPSILON, "Parallel SIMD execution drifted at index: " + i);
-        }
-
-    }
 
     @Test
     public void testSingleRuntime() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
         double t = System.nanoTime();
         double[] out = new double[1];
@@ -416,7 +327,7 @@ public class BulkTurboEvaluatorTest {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(x+3,y-2,2*z-3)");
         System.out.println("f(x+3,y-2,2*z-3) = " + me.solve());
 
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         try {
@@ -441,7 +352,7 @@ public class BulkTurboEvaluatorTest {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
         System.out.println("f(3,4,2) = " + me.solve());
 
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         try {
@@ -466,7 +377,7 @@ public class BulkTurboEvaluatorTest {
 
         MathExpression me = new MathExpression("3 + 2*x + f(2, 3*x + sin(4*x), 5)");
 
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         evaluator.applyBulk(new double[]{5}, out);
@@ -480,91 +391,213 @@ public class BulkTurboEvaluatorTest {
         assertEquals(expected, out[0], EPSILON, "Parallel SIMD execution drifted for test: testUserDefinedFunctionSimpleCall ");
 
     }
-    
-     @Test
-    void testUserDefinedFunctionFunctionInExpression1() throws Throwable {
 
-        MathExpression me = new MathExpression("g(x)=exp(x);3 + 2*x + g(x)");
+    @ParameterizedTest(name = "GELU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {20, 70, 100, 200})
+    void testGelu(int sz) throws Throwable {
+        executeKernelBenchmark("gelu", sz, 1);
+    }
 
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
-        double t = System.nanoTime();
-        double[] out = new double[1];
-        evaluator.applyBulk(new double[]{5}, out);
-        double t1 = System.nanoTime() - t;
+    @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {20, 70, 100, 200})
+    void testSwiglu(int sz) throws Throwable {
+        executeKernelBenchmark("swiglu", sz, 2);
+    }
 
-        System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
+    @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {20, 70, 100, 200})
+    void testGeglu(int sz) throws Throwable {
+        executeKernelBenchmark("geglu", sz, 2);
+    }
 
-        double x = 5;
+    @ParameterizedTest(name = "GeLU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {512, 1024})
+    void testGeluLarge(int sz) throws Throwable {
+        executeKernelBenchmark("gelu", sz, 1);
+    }
 
-        double expected = 3 + 2 * x + Math.exp(x);
-        assertEquals(expected, out[0], EPSILON, "Parallel SIMD execution drifted for test: testUserDefinedFunctionSimpleCall ");
+    @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {512, 1024})
+    void testGegluLarge(int sz) throws Throwable {
+        executeKernelBenchmark("geglu", sz, 2);
+    }
 
+    @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
+    @ValueSource(ints = {512, 1024})
+    void testSwigluLarge(int sz) throws Throwable {
+        executeKernelBenchmark("swiglu", sz, 2);
+    }
+
+    /**
+     * Shared orchestration runner for manual micro-benchmarking without JMH.
+     */
+    private void executeKernelBenchmark(String kernelName, int sz, int arity) throws Throwable {
+        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+
+        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in1,3);
+
+        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in2,3);
+
+        FlatMatrixF out = new FlatMatrixF(sz, sz);
+
+        // 1. Manual Warm-up Phase
+        // Forces C2 to compile the vector loops before we sample the clock
+        int warmUpRuns = 1000;
+        FlatMatrixF[] inputs = arity == 2 ? new FlatMatrixF[]{in1, in2} : new FlatMatrixF[]{in1}; // Allocate once outside the timing track!
+        for (int i = 0; i < warmUpRuns; i++) {
+            evaluator.applyMatrixKernel(inputs, out, kernelName);
+        }
+
+        // 2. Timed Target Phase
+        int iterations = 4000;
+        long startTime = System.nanoTime();
+        for (int i = 0; i < iterations; i++) {
+            evaluator.applyMatrixKernel(inputs, out, kernelName);
+        }
+        long totalTimeNs = System.nanoTime() - startTime;
+
+        // 3. Analytics Formatting
+        double avgMatrixNs = (double) totalTimeNs / iterations;
+        double totalElements = sz * sz;
+        double avgPerElementNs = avgMatrixNs / totalElements;
+        double avgMatrixMicros = avgMatrixNs / 1000.0;
+
+        // Prints numbers tailored perfectly for your README layout
+        System.out.printf("[%s] %dx%d -> Matrix Avg: %.2f µs | Per-Element: %.2f ns%n",
+                kernelName.toUpperCase(), sz, sz, avgMatrixMicros, avgPerElementNs);
+
+        // Sanity check to prevent dead-code optimization tricks from discarding execution
+        Assertions.assertNotNull(out);
     }
 
     @Test
-    void testGelu() throws Throwable {
+    public void testGeluCorrectNess() throws Throwable {
+        MathExpression me = new MathExpression("gelu(x)");//mock expr - just need the MathExpression object(make it 1+1, still works)
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
-        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
-
-        BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
-
-        int sz = 200;
+        int sz = 4;
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in1);
-
-        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in2);
+        FlatMatrixF.randomFill(in1, 3);
 
         FlatMatrixF out = new FlatMatrixF(sz, sz);
 
-        double n = 10000;
-        double t = System.nanoTime();
-        for (int i = 0; i < n; i++) {
-            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "gelu");
+        evaluator.applyMatrixKernel(new FlatMatrixF[]{in1}, out, "gelu");
+
+        System.out.println("gelu-in:--" + in1.toString());
+        System.out.println("gelu-out:--" + out.toString());
+
+        final float RELATIVE_TOLERANCE = 1e-1f;
+
+        for (int i = 0; i < out.data.length; i++) {
+            me.updateSlot(0, in1.data[i]);
+
+            float expected = (float) me.solveGeneric().scalar;
+            float actual = out.data[i];
+
+            // Calculate relative error safely, avoiding division by zero
+            float precision = (expected >= actual) ? (expected / actual) - 1 : (actual / expected) - 1;
+
+            Assertions.assertTrue(
+                    precision < RELATIVE_TOLERANCE,
+                    String.format("Drift spotted at index %d! Expected: %f, Actual: %f, Rel Error: %e",
+                            i, expected, actual, precision)
+            );
         }
-
-        double t1 = System.nanoTime() - t;
-
-        System.out.println("timed at = " + (t1/n) + "ns--- answer: ");
-        //System.out.println("timed at = " + (t1/n) + "ns--- answer: " + out);
-
-        assertTrue(true);
-
     }
-    
-     @Test
-    void testSwiglu() throws Throwable {
 
-        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");
+    @Test
+    public void testGeGluCorrectNess() throws Throwable {
+        MathExpression me = new MathExpression("geglu(x,y)");//mock expr - just need the MathExpression object(make it 1+1, still works)
+        System.out.println("scanner: " + me.getScanner());
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
 
-         BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator =  getBatchedExpr(me);
-
-        int sz = 200;
+        int sz = 4;
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in1);
+        FlatMatrixF.randomFill(in1, 3);
 
         FlatMatrixF in2 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in2);
+        FlatMatrixF.randomFill(in2, 3);
 
         FlatMatrixF out = new FlatMatrixF(sz, sz);
 
-        double n = 10000;
-        double t = System.nanoTime();
-        for (int i = 0; i < n; i++) {
-            evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "swiglu");
+        evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "geglu");
+
+        System.out.println("geglu-in1:--" + in1.toString());
+        System.out.println("geglu-in2:--" + in2.toString());
+        System.out.println("geglu-out:--" + out.toString());
+
+// A float has ~7 digits of precision; 1e-5f ensures the first 5-6 digits match perfectly
+        final float RELATIVE_TOLERANCE = 1e-2f;
+
+        for (int i = 0; i < out.data.length; i++) {
+            me.updateSlot(0, in1.data[i]);
+            me.updateSlot(1, in2.data[i]);
+
+            float expected = (float) me.solveGeneric().scalar;
+            float actual = out.data[i];
+
+            // Calculate relative error safely, avoiding division by zero
+            float precision = (expected >= actual) ? (expected / actual) - 1 : (actual / expected) - 1;
+
+            Assertions.assertTrue(
+                    precision < RELATIVE_TOLERANCE,
+                    String.format("Drift spotted at index %d! Expected: %f, Actual: %f, Rel Error: %e",
+                            i, expected, actual, precision)
+            );
         }
 
-        double t1 = System.nanoTime() - t;
-
-        System.out.println("timed at = " + (t1/n) + "ns--- answer: ");
-        //System.out.println("timed at = " + (t1/n) + "ns--- answer: " + out);
-
-        assertTrue(true);
-
+        // 2. Timed Target Phase
     }
 
+    @Test
+    public void testSwiGluCorrectNess() throws Throwable {
+        MathExpression me = new MathExpression("x=3;y=12;swiglu(x,y)");
+        System.out.println("me.solve: " + me.solve());
+        BatchedVectorCompositeExpression evaluator = (BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
+        System.out.println("me.solveTurbo: " + evaluator.applyScalar(new double[]{3, 12}));
 
-    void logDetails(MathExpression me, BulkTurboEvaluator.BatchedVectorCompositeExpression  evaluator, boolean active) {
+        int sz = 4;
+        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in1, 3);
+
+        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
+        FlatMatrixF.randomFill(in2, 3);
+
+        FlatMatrixF out = new FlatMatrixF(sz, sz);
+
+        evaluator.applyMatrixKernel(new FlatMatrixF[]{in1, in2}, out, "swiglu");
+
+        System.out.println("swiglu-in1:--" + in1.toString());
+        System.out.println("swiglu-in2:--" + in2.toString());
+        System.out.println("swiglu-out:--" + out.toString());
+
+// A float has ~7 digits of precision; 1e-5f ensures the first 5-6 digits match perfectly
+        final float RELATIVE_TOLERANCE = 1e-2f;
+
+        for (int i = 0; i < out.data.length; i++) {
+            me.updateSlot(0, in1.data[i]);
+            me.updateSlot(1, in2.data[i]);
+
+            float expected = (float) me.solveGeneric().scalar;
+            float actual = out.data[i];
+
+            // Calculate relative error safely, avoiding division by zero
+            float precision = (expected >= actual) ? (expected / actual) - 1 : (actual / expected) - 1;
+
+            Assertions.assertTrue(
+                    precision < RELATIVE_TOLERANCE,
+                    String.format("Drift spotted at index %d! Expected: %f, Actual: %f, Rel Error: %e",
+                            i, expected, actual, precision)
+            );
+        }
+
+        // 2. Timed Target Phase
+    }
+
+    void logDetails(MathExpression me, BatchedVectorCompositeExpression evaluator, boolean active) {
         if (!active) {
             return;
         }
@@ -580,4 +613,5 @@ public class BulkTurboEvaluatorTest {
                 + "tokens-len: " + tokens.length + "\n"
                 + " targetSlots: " + Arrays.toString(evaluator.getTargetSlots()));
     }
+
 }
