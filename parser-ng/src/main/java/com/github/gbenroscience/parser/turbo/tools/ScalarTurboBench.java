@@ -1090,7 +1090,7 @@ public class ScalarTurboBench {
         Random r = new Random(System.nanoTime());
         double[] vars = new double[1];
         for (int i = 0; i < 10; i++) {
-            double val = -r.nextDouble(1000);
+            double val = -r.nextDouble();
             vars[0] = val;
             double res = fce.applyScalar(vars);
             System.out.println(m111.getExpression() + ": at x=" + val + " -->> " + res);

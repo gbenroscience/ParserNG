@@ -657,7 +657,7 @@ public class FlatMatrix {
   public static void randomFill(FlatMatrix A) {
         ThreadLocalRandom ran = ThreadLocalRandom.current();
         for (int i = 0; i < A.data.length; i++) {
-            A.data[i] = 1 + ran.nextDouble(101);
+            A.data[i] = 1 + ran.nextDouble();
         }
     }//end method randomFill
    /**

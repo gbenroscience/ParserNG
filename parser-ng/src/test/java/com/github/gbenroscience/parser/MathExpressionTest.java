@@ -910,7 +910,7 @@ class MathExpressionTest {
 
         Random r = new Random(System.nanoTime());
         for (int i = 0; i < 10; i++) {
-            double val = -r.nextDouble(1000);
+            double val = -r.nextDouble();
             MathExpression.EvalResult res = m111.solveGeneric(val);
             System.out.println(m111.getExpression() + ": at x=" + val + " -->> " + res.scalar);
             Assertions.assertTrue(res.scalar == (3 * val + 7 > 5 ? Math.sin(val) : -3));
@@ -929,7 +929,7 @@ class MathExpressionTest {
         Random r = new Random(System.nanoTime());
         double[] vars = new double[1];
         for (int i = 0; i < 10; i++) {
-            double val = -r.nextDouble(1000);
+            double val = -r.nextDouble();
             vars[0] = val;
             double res = fce.applyScalar(vars);
             System.out.println(m111.getExpression() + ": at x=" + val + " -->> " + res);
@@ -946,8 +946,8 @@ class MathExpressionTest {
 
         Random r = new Random(System.nanoTime());
         for (int i = 0; i < 10; i++) {
-            double x = r.nextDouble(20);
-            double y = r.nextDouble(20);
+            double x = r.nextDouble();
+            double y = r.nextDouble();
             MathExpression.EvalResult res = m111.solveGeneric(x,y);
             System.out.println(m111.getExpression() + ": at x=" + x + ", y ="+y+" -->> " + res.boolVal);
             Assertions.assertTrue(res.boolVal == (x>y));
