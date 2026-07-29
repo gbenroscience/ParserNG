@@ -400,7 +400,7 @@ Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evalua
 
 ## 🏢 Trusted in Production by Global Organizations
 
-ParserNG is used globally by **618 organizations** to power mission-critical math visualization, analytical pipelines, and platform tooling. Special thanks to Jiri Vanek for his contribution of `ExpandingParser` and its integration within the [jenkins-report-generic-chart-column](https://github.com/jenkinsci/report-generic-chart-column-plugin/) plugin ecosystem.
+ParserNG is used globally by **167 organizations** to power mission-critical math visualization, analytical pipelines, and platform tooling. Special thanks to Jiri Vanek for his contribution of `ExpandingParser` and its integration within the [jenkins-report-generic-chart-column](https://github.com/jenkinsci/report-generic-chart-column-plugin/) plugin ecosystem.
 
 ### Looking for Enterprise Guarantees?
 
