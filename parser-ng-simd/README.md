@@ -1,6 +1,6 @@
 # parser-ng-simd
 
-### ParserNG 2.0.7
+### ParserNG 3.0.1
 
 High-performance, hardware-accelerated mathematical kernels for Java. **No JNI. No native binaries.** Powered entirely by the JDK Vector API and optimized for C2 loop fusion.
 
@@ -66,13 +66,13 @@ Include both the core module and the SIMD engine extension in your `pom.xml`:
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng</artifactId>
-        <version>2.0.7</version>
+        <version>3.0.1</version>
     </dependency>
     
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-simd</artifactId>
-        <version>2.0.7</version>
+        <version>3.0.1</version>
     </dependency>
 </dependencies>
 ```

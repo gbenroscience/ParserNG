@@ -1,7 +1,8 @@
 # ParserNG
 
 
-
+### ParserNG 3.0.1 is out on maven-central!
+Stabilized v3.0.0
 ### ParserNG 3.0.0 is out on maven-central! 
 1. GPU bulk evaluator(CUDA and OpenCL) comes to ParserNG with MemorySegments and zero dependencies; no JNI hell.
 2. SIMDEngineEvaluator with MemorySegments also and SIMDCommandTurboEvaluator from ParserNG Enterprise now open-sourced and released with version 3.0.0
