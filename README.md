@@ -9,6 +9,7 @@
 
 **ParserNG 3.0.0 is live**, and it's the biggest release yet: your math expressions can now run on the GPU — CUDA or OpenCL, your choice — through nothing but standard Java. No driver bundling, no native wrapper to compile, no JNI surface to audit. And the SIMD engine that used to be an Enterprise-only feature is now fully open source.
 
+
 **ParserNG** is an ultra-high-performance mathematical runtime built for modern JVM workloads — real-time plotting pipelines, financial modeling, and deep learning activation functions (SwiGLU, GELU, and the rest of the Transformer toolkit). By adopting a hardware-aligned, fast-interpreted memory model instead of risky dynamic bytecode generation, ParserNG eliminates classloader bloat, protects your runtime from native segmentation faults, and dramatically simplifies your Software Bill of Materials (SBOM) compliance posture.
 
 Five execution tiers, one parser, one syntax. Pick the tier that matches how hot your loop is — you never rewrite the expression to move up a tier.
