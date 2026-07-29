@@ -2104,14 +2104,13 @@ public class MathExpression implements Savable, Solvable {
 
                         EvalResult result = t.action.calc(getNextResult(), arity, args);
                         stack[++ptr] = result;
-                        break;
-
+                        break; 
                 }
             }
 
             // Final validation
             if (ptr < 0) {
-                EvalResult r = new EvalResult();
+                EvalResult r = getNextResult();
                 r.wrap(ParserResult.SYNTAX_ERROR);
                 errorLog.info(ParserResult.SYNTAX_ERROR.name());
                 return r;
@@ -2504,7 +2503,7 @@ public class MathExpression implements Savable, Solvable {
                         }
 
                         try {
-                            EvalResult evalResult = t.action.calc(new EvalResult(), t.arity, args);
+                            EvalResult evalResult = t.action.calc(getNextResult(), t.arity, args);
 
                             if (evalResult.type == EvalResult.TYPE_SCALAR && isFoldableResult(evalResult.scalar)) {
                                 writePtr -= t.arity;

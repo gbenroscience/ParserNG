@@ -1,10 +1,10 @@
 package com.github.gbenroscience.parser.ng.bench;
 
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.turbo.tools.vector.SIMDCompositeExpression;
+import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrixF; 
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
-import org.openjdk.jmh.annotations.*;
-import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
+import org.openjdk.jmh.annotations.*; 
 import org.openjdk.jmh.infra.Blackhole;
 
 import java.util.concurrent.ThreadLocalRandom;

@@ -30,19 +30,21 @@ import java.util.regex.Pattern;
  *
  * Features: - Handles numbers (integers, decimals, scientific notation like
  * 1.2e-3) - Variables (e.g., x, varName_123) - Binary operators: + - * / ^
- * (power, right-associative) - Unary + - ! - Functions with any number of
- * arguments (e.g., sin(x), max(a, b, c+ d)) - Parentheses for grouping AND
- * for comma-separated literal lists, e.g. matrix data "(3,1,4,7)" -
- * Relational operators: &gt; &lt; &gt;= &lt;= == != - Logical operators:
- * &amp;&amp; || (and the symbolic single &amp; / |), plus the textual
- * keywords OR / AND (word-boundary safe, so identifiers like "orange" or
- * "android" are never mistaken for the keyword) - Anonymous function and
- * matrix definitions via '@', e.g. "@(x)sin(x)", "@(x,y,z)=2*x+3*y+4*z",
- * "@(2,2)(3,1,4,7)" - No external libraries, single-pass O(n) parsing -
- * Spaces are ignored
+ * (power, right-associative) - Unary + - ! √ (square root) - Postfix Unicode
+ * superscript exponents, e.g. "x²", "3³", "y²³" (== y^23) - Functions with
+ * any number of arguments (e.g., sin(x), max(a, b, c+ d)) - Parentheses for
+ * grouping AND for comma-separated literal lists, e.g. matrix data
+ * "(3,1,4,7)" - Relational operators: &gt; &lt; &gt;= &lt;= == != - Logical
+ * operators: &amp;&amp; || (and the symbolic single &amp; / |), plus the
+ * textual keywords OR / AND (word-boundary safe, so identifiers like
+ * "orange" or "android" are never mistaken for the keyword) - Anonymous
+ * function and matrix definitions via '@', e.g. "@(x)sin(x)",
+ * "@(x,y,z)=2*x+3*y+4*z", "@(2,2)(3,1,4,7)" - No external libraries,
+ * single-pass O(n) parsing - Spaces are ignored
  *
  * Tree depth definition: - Leaf (number or variable) = 1 - Binary operator
- * node = 1 + max(left depth, right depth) - Unary operator node = 1 + operand
+ * node = 1 + max(left depth, right depth) - Unary operator node (prefix
+ * +/-/!/√, or a postfix Unicode superscript exponent run) = 1 + operand
  * depth - Function node (named call, parenthesized comma-list, or anonymous
  * '@' function/matrix) = max over items of (depth of that item + number of
  * items already evaluated and left on the stack), never less than 1 -
@@ -50,7 +52,7 @@ import java.util.regex.Pattern;
  *
  * Example: "2 + 3 * 4" -> depth 3 ((2 + (3 * 4))) "-2^3" -> depth 3 (- (2 ^ 3))
  * "2^-3" -> depth 3 (2 ^ (-3)) "sin(2 + 3 * 4)" -> depth 4 "(1 + (2 + (3 +
- * 4)))"-> depth 4
+ * 4)))"-> depth 4 "2²+3³+√9" -> depth 4 ((2²) + ((3³) + (√9)))
  *
  * <h2>Production / correctness guarantees</h2>
  * <ul>
@@ -93,6 +95,24 @@ public class MathExpressionTreeDepth implements Savable {
      */
     private static final Pattern NUMBER_PATTERN =
             Pattern.compile("(\\d+(\\.\\d+)?|\\.\\d+)([eE][+-]?\\d+)?");
+
+    /**
+     * Prefix unary "square root" operator, e.g. "√9", "√√9", "-√9". Treated
+     * exactly like the other unary prefix operators (+ - !): it recurses via
+     * {@link #parseUnary()} so chains and combinations with signs work, and
+     * contributes {@code 1 + operandDepth} like any unary node.
+     */
+    private static final char ROOT_CHAR = '\u221A'; // '√'
+
+    /**
+     * All ten Unicode superscript digit characters (⁰¹²³⁴⁵⁶⁷⁸⁹), in the same
+     * order as their plain-ASCII counterparts '0'-'9'. A run of one or more
+     * of these immediately following a parsed primary/power base is treated
+     * as a single postfix "raised to the power of &lt;these digits&gt;"
+     * operator, e.g. "x²" == "x^2" and "y²³" == "y^23" (the whole run forms
+     * one literal exponent, not a chain of separate '^' applications).
+     */
+    private static final String SUPERSCRIPT_DIGITS = "\u2070\u00B9\u00B2\u00B3\u2074\u2075\u2076\u2077\u2078\u2079";
 
     private final String expr;
     private int pos;
@@ -240,6 +260,14 @@ public class MathExpressionTreeDepth implements Savable {
         }
     }
 
+    /**
+     * True if {@code c} is one of the ten Unicode superscript digit
+     * characters (⁰¹²³⁴⁵⁶⁷⁸⁹).
+     */
+    private static boolean isSuperscriptDigit(char c) {
+        return SUPERSCRIPT_DIGITS.indexOf(c) >= 0;
+    }
+
     private int parseRelationalLogical() {
         int maxDepth = parseAdditive();
 
@@ -383,11 +411,15 @@ public class MathExpressionTreeDepth implements Savable {
      * is therefore the entry point that decides whether to consume a sign
      * (recursing into itself to allow chains like "--3" or "-!x", bounded by
      * the nesting guard) or fall through to {@link #parsePower()}.
+     *
+     * <p>The Unicode root symbol {@code √} is treated as a fourth prefix
+     * unary operator alongside {@code + - !}: {@code √9}, {@code -√9}, and
+     * {@code √√9} are all handled by the same recursive chain.</p>
      */
     private int parseUnary() {
         skipWhitespace();
         char c = peek();
-        if (c == '+' || c == '-' || c == '!') {
+        if (c == '+' || c == '-' || c == '!' || c == ROOT_CHAR) {
             nextChar();
             unaryOpCount++;
             enterNesting();
@@ -407,10 +439,29 @@ public class MathExpressionTreeDepth implements Savable {
      * around the entire power expression, e.g. "-2^3" -> -(2^3). The
      * exponent, however, is parsed via {@link #parseUnary()} so that
      * "2^-3" and right-associative chains like "2^3^2" both work correctly.
+     *
+     * <p>After the base is parsed, a run of one or more Unicode superscript
+     * digits (⁰¹²³⁴⁵⁶⁷⁸⁹) is also recognized here as a postfix "raised to
+     * the power of &lt;these digits&gt;" operator, e.g. {@code "x²"} ==
+     * {@code "x^2"} and {@code "y²³"} == {@code "y^23"} (the whole run of
+     * superscript digits forms a single literal exponent, contributing one
+     * unary-style depth increment — there is no separately parsed exponent
+     * subexpression, so it is counted like the other unary operators
+     * rather than as a binary '^').</p>
      */
     private int parsePower() {
         int leftDepth = parsePrimary();
         skipWhitespace();
+
+        if (isSuperscriptDigit(peek())) {
+            while (isSuperscriptDigit(peek())) {
+                nextChar();
+            }
+            unaryOpCount++;
+            leftDepth = 1 + leftDepth;
+            skipWhitespace();
+        }
+
         if (peek() == '^') {
             nextChar();
             binaryOpCount++;
@@ -678,7 +729,8 @@ public class MathExpressionTreeDepth implements Savable {
      *       be compiled down to one of these leaf kinds by the tokenizer by
      *       the time they reach the bulk evaluator, the same way METHOD calls
      *       arrive with their {@code rawArgs} already resolved.</li>
-     *   <li>OPERATOR with arity 1 (prefix or postfix unary, e.g. {@code -x}, {@code x!}) —
+     *   <li>OPERATOR with arity 1 (prefix or postfix unary, e.g. {@code -x}, {@code x!},
+     *       {@code √x}, or a compiled Unicode-superscript power) —
      *       pop 1 depth {@code d}, push {@code 1 + d}.</li>
      *   <li>OPERATOR with arity 2 (binary infix, e.g. {@code +  *  ^  <  &&}) —
      *       pop 2 depths {@code d1, d2} (evaluation order irrelevant here since
@@ -855,7 +907,11 @@ public class MathExpressionTreeDepth implements Savable {
             "g(x,y,z)=2*x+3*y+4*z",   // named function definition shorthand, multi-arg
             "A(2,2)=(3,1,4,7)",       // named matrix definition, parenthesized data list
             "A=@(2,2)(3,1,4,7)",      // anonymous matrix, dims then data
-            "A=@(2,2)=(3,1,4,7)"      // anonymous matrix, '=' before data
+            "A=@(2,2)=(3,1,4,7)",     // anonymous matrix, '=' before data
+            "2\u00B2+3\u00B3+\u221A9",         // "2²+3³+√9" -- Unicode superscripts + root
+            "-\u221A9",                        // "-√9" -- signed root
+            "\u221A\u221A9",                   // "√√9" -- nested root
+            "x\u00B2\u00B3"                    // "x²³" -- multi-digit superscript exponent (== x^23)
         };
 
         for (String s : tests) {

@@ -3,8 +3,8 @@ package com.github.gbenroscience.simd;
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
-import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
+import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF; 
+import com.github.gbenroscience.simd.turbo.tools.SIMDEngineEvaluator;
 
 import java.util.Arrays;
 import org.junit.jupiter.api.AfterAll;
@@ -45,7 +45,7 @@ public class SIMDTurboEvaluatorTest {
     @Test
     public void testMathematicalPrecisionVsNativeJavaFlat() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
 
         logDetails(me, evaluator, !active);
 
@@ -92,7 +92,7 @@ public class SIMDTurboEvaluatorTest {
     @Test
     public void testMathematicalPrecisionVsNativeJava() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2.23))");
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
         logDetails(me, evaluator, !active);
 
         // 17 datapoints to trigger both vector lane and tail scalar loop remainders
@@ -123,7 +123,7 @@ public class SIMDTurboEvaluatorTest {
     public void testThreadPooledParallelBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
         me.setDRG(DRG_MODE.RAD);
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
         logDetails(me, evaluator, !active);
 
         int dataSize = 250018;
@@ -148,7 +148,7 @@ public class SIMDTurboEvaluatorTest {
     @Test
     public void testSingleRuntime() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         evaluator.applyBulk(new double[]{5, 4, 1}, out);
@@ -163,7 +163,7 @@ public class SIMDTurboEvaluatorTest {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(x+3,y-2,2*z-3)");
         System.out.println("f(x+3,y-2,2*z-3) = " + me.solve());
 
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         try {
@@ -188,7 +188,7 @@ public class SIMDTurboEvaluatorTest {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
         System.out.println("f(3,4,2) = " + me.solve());
 
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         double[]in=new double[0];
@@ -220,7 +220,7 @@ public class SIMDTurboEvaluatorTest {
 
         MathExpression me = new MathExpression("3 + 2*x + f(2, 3*x + sin(4*x), 5)");
 
-        SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
         double t = System.nanoTime();
         double[] out = new double[1];
         evaluator.applyBulk(new double[]{5}, out);
@@ -274,7 +274,7 @@ public class SIMDTurboEvaluatorTest {
      */
     private void executeKernelBenchmark(String kernelName, int sz, int arity) throws Throwable {
         MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
-        SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new SIMDEngineEvaluator(me).compile();
 
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
         FlatMatrixF.randomFill(in1);
@@ -315,7 +315,7 @@ public class SIMDTurboEvaluatorTest {
         Assertions.assertNotNull(out);
     }
 
-    void logDetails(MathExpression me, SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator, boolean active) {
+    void logDetails(MathExpression me, SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator, boolean active) {
         if (!active) {
             return;
         }

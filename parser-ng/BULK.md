@@ -1,4 +1,4 @@
-# ParserNG 2.0.7
+# ParserNG 3.0.0
 
 An ultra-high-performance mathematical expression parsing and evaluation engine for Java. Version 2.0.x introduces a breakthrough **Block Vectorization Engine** (`VectorTurboEvaluator`) and `SIMDVectorTurboEvaluator` powered by the Java **Vector API** (`jdk.incubator.vector`). 
 
@@ -39,25 +39,25 @@ To use SIMDVectorTurboEvaluator(e.g. on modern servers(JDK 21+) and laptops(JDK2
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>2.0.7</version>
+    <version>3.0.0</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>2.0.7</version>
+    <version>3.0.0</version>
 </dependency>
 ```
 
-To use VectorTurboEvaluator(e.g. on Android and legacy systems supporting <JDK21), add to your application's `pom.xml`:
+To use VectorTurboEvaluator's exact cousin, i.e `BulkTurboEvaluator`(e.g. on Android and legacy systems supporting <JDK21), add to your application's `pom.xml`:
 ```XML
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>2.0.7</version>
+    <version>3.0.0</version>
 </dependency>
 ```
 
-VectorTurboEvaluator benchmarks at *almost half* the speed of SIMDVectorTurboEvaluator and same allocation, and you can use workers to increase their throughput
+VectorTurboEvaluator/BulkTurboEvaluator benchmarks at *about half* the speed of SIMDVectorTurboEvaluator and same allocation, and you can use its inbuilt paralellism to increase their throughput
 ---
 
 

@@ -3,17 +3,14 @@
  * @author oluwagbemirojiboye
  */
 package com.github.gbenroscience.gpu;
- 
+
 import com.github.gbenroscience.gpu.opencl.OpenClCompositeExpression;
 import com.github.gbenroscience.gpu.opencl.OpenClExpressionBridge;
 import com.github.gbenroscience.gpu.opencl.OpenClKernelSource;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
-// OpenClCompositeExpression, OpenClExpressionBridge, OpenClKernelSource,
-// GpuCompositeExpression, GpuExpressionBridge, GpuBackend all live in this
-// same package (com.github.gbenroscience.gpu) -- no import needed for those.
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator; 
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -507,6 +504,26 @@ public class GpuCompositeExpressionTest {
             System.out.println("gpu-time: " + (gpuNanos / 1000) + " us");
 
             assertParity("x^2+y^2-2xy*cos(x-y)", cpuOut, gpuOut, 1e-6);
+        }
+    }
+
+    @Test
+    void multiVariableExpressionParity1() throws Throwable {
+        MathExpression me = new MathExpression("x^2+y^2-2*x*y*cos(x-y)");
+        VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
+        SIMDCompositeExpression cpu = vte.compile();
+
+        try (GpuCompositeExpression gpu = GpuExpressionBridge.from(vte)) {
+            int dataSize = 250_000; // e.g. a 500x500 grid, flattened
+            double[] flat = buildSafeSamples(me, new String[]{"x", "y"},
+                    new double[][]{{-8, 8}, {-8, 8}}, dataSize, vte.getVarCount());
+
+            double[] gpuOut = new double[dataSize];
+            long gpuNanos = System.nanoTime();
+            gpu.applyBulk(flat, gpuOut);
+            gpuNanos = System.nanoTime() - gpuNanos;
+            System.out.println("gpu-time: " + (gpuNanos / 1000) + " us");
+
         }
     }
 

@@ -3,10 +3,12 @@
 
 
 
- I started this project 2009 ending and have been upgrading it since then.
-      Please consider sponsoring me. That would be very helpful.
-      Click the Sponsor button to do this.
+ I started this project 2009 ending and have been upgrading it since then. Please consider sponsoring me. That would be very helpful. Click the Sponsor button to do this.
 
+ParserNG v3.0.0 brings GPU bulk evaluation to the platform, alongside SIMDEngineEvaluator, the enterprise engine, now open-sourced. It also comes with the if construct...e.g.
+```Java
+if(x<2||y>=4, cos(3-x), sin(3.2))
+```
 
 ParserNG v2.0.x breaks the barrier in fully featured math parser frequencies!
 With various other optimizations, v2.0.x comes with inner loop optimizations which uses a blazing fast, post-fix style algorithm to quickly evaluate inner brackets with less checks and less string manipulations.

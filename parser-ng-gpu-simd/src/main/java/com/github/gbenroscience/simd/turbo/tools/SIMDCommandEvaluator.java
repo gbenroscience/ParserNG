@@ -29,30 +29,30 @@ import jdk.incubator.vector.*;
  * 
  *
  */
-public class SIMDCommandTurboEvaluator extends VectorTurboEvaluator {
+public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
-    public SIMDCommandTurboEvaluator(MathExpression me) throws Throwable {
+    public SIMDCommandEvaluator(MathExpression me) throws Throwable {
         super(me);
     }
 
-    public SIMDCommandTurboEvaluator(MathExpression me, int numWorkers) throws Throwable {
+    public SIMDCommandEvaluator(MathExpression me, int numWorkers) throws Throwable {
         super(me, numWorkers);
     }
  
-    public static final SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
-        return (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me).compile();
+    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
+        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me).compile();
     }
 
-    public static final SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
-        return (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(new MathExpression(expr)).compile();
+    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
+        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(new MathExpression(expr)).compile();
     }
 
-    public static final SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
-        return (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me).compile();
+    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me).compile();
     }
 
-    public static final SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
-        return (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(new MathExpression(expr)).compile();
+    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
+        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(new MathExpression(expr)).compile();
     }
 
     // 1. Updated Command Interface
@@ -395,7 +395,7 @@ public class SIMDCommandTurboEvaluator extends VectorTurboEvaluator {
                 }
 
                 // --- Comparisons ---
-                case OP_GT, OP_LT, OP_EQ, OP_NE, OP_GE, OP_LE -> {
+                case OP_GT, OP_LT, OP_EQ, OP_NE, OP_GE, OP_LE, OP_AND, OP_OR -> {
                     int rOff = virtualStack[--sp];
                     int lOff = virtualStack[--sp];
                     int destOff = lOff;

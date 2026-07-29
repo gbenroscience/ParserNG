@@ -29,6 +29,8 @@ public final class OpenClExpressionBridge {
      * VectorTurboEvaluator, reusing its compiled program without recompiling
      * or re-parsing anything.
      *
+     * @param vte
+     * @return 
      * @throws IllegalArgumentException if the expression's stack depth
      *         exceeds OpenClKernelSource.MAX_STACK. The GPU kernel's
      *         per-thread stack is a fixed-size private array with no bounds

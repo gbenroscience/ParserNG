@@ -1,13 +1,8 @@
-# ParserNG SIMD GPU Extension
-
-[![Version](https://img.shields.io/badge/Release-v1.0.0--Enterprise-blue.svg?style=flat-square)](https://github.com/gbenroscience/parserng-enterprise)
-[![License](https://img.shields.io/badge/License-Proprietary%20%2F%20Commercial-red.svg?style=flat-square)](https://github.com/gbenroscience/parserng-enterprise/blob/main/LICENSE)
-[![Platform](https://img.shields.io/badge/JVM-22%20%7C%2024%20%7C%2026-orange.svg?style=flat-square)](https://www.oracle.com/java/)
-[![Architecture](https://img.shields.io/badge/Hardware-x86__64%20(AVX2%2F512)%20%7C%20ARM64%20(NEON%2FSVE)-green.svg?style=flat-square)](https://github.com/gbenroscience/parserng-enterprise)
+# ParserNG SIMD/GPU Extension(Enterprise version now open-source!)
 
 > **Hardware-Accelerated Mathematical Kernels for Enterprise JVM Ecosystems. Zero JNI. Zero Native Binaries. Zero Garbage Collection Churn.**
 
-**ParserNG Enterprise Edition** provides an architectural extension for ParserNG via the proprietary `parser-ng-simd` module. It enables zero-dependency, ultra-high-throughput, tile-based bulk evaluations powered entirely by the native JDK Vector API (`jdk.incubator.vector`).
+**ParserNG SIMD/GPU extension** provides an architectural extension for ParserNG via the proprietary `parser-ng-gpu-simd` module. It enables zero-dependency, ultra-high-throughput, tile-based bulk evaluations powered entirely by the native JDK Vector API(`jdk.incubator.vector`) and pure Java native GPU access.
 
 By compiling mathematical expression trees into hyper-optimized, vectorized machine loops at runtime, this extension delivers native-C/C++ throughput directly within a secure, managed Java runtime. This completely eliminates the stability risks, memory leaks, security vulnerabilities, and deployment complexities of native toolchains (e.g., ND4J, `libnd4j`, or custom JNI bindings).
 
@@ -119,13 +114,18 @@ Enterprise binaries are hosted securely inside your designated private repositor
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng</artifactId>
-        <version>2.0.7</version>
+        <version>3.0.0</version>
     </dependency>
     
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-simd</artifactId>
-        <version>1.0.0</version>
+        <version>3.0.0</version>
+    </dependency>
+        <dependency>
+        <groupId>com.github.gbenroscience</groupId>
+        <artifactId>parser-ng-gpu-simd</artifactId>
+        <version>3.0.0</version>
     </dependency>
 </dependencies>
 
@@ -144,7 +144,7 @@ public class EnterpriseComputeRegistry {
         
         // 1. Instantiation and Turbo Registration
         MathExpression mathExpr = new MathExpression(expression, true);
-        SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression evaluator = SIMDCommandTurboEvaluator.getEvaluator(mathExpr);
+        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = SIMDEngineEvaluator.getEvaluator(mathExpr);
         
         // 2. Prepare Structure of Arrays (SoA) Buffers
         int dataSize = 2_000_000;

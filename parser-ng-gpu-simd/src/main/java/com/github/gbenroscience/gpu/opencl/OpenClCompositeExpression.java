@@ -614,11 +614,25 @@ public final class OpenClCompositeExpression implements GpuCompositeExpression {
         }
     }
 
+    /**
+     *
+     * @param in
+     * @param out
+     * @throws Throwable
+     */
+    @Override
     public void applyBulk(MemorySegment in, MemorySegment out) throws Throwable {
         long dataSize = out.byteSize() / ValueLayout.JAVA_DOUBLE.byteSize();
         dispatch(in, out, (int) dataSize);
     }
 
+    /**
+     *
+     * @param in
+     * @param out
+     * @throws Throwable
+     */
+    @Override
     public void applyBulk(double[] in, double[] out) throws Throwable {
         ensureStaging(in.length, out.length);
         MemorySegment.copy(in, 0, stagingIn, ValueLayout.JAVA_DOUBLE, 0, in.length);
@@ -628,6 +642,13 @@ public final class OpenClCompositeExpression implements GpuCompositeExpression {
         MemorySegment.copy(outSlice, ValueLayout.JAVA_DOUBLE, 0, out, 0, out.length);
     }
 
+    /**
+     *
+     * @param in
+     * @param out
+     * @throws Throwable
+     */
+    @Override
     public void applyBulk(double[][] in, double[] out) throws Throwable {
         if (in.length != varCount) {
             throw new IllegalArgumentException(

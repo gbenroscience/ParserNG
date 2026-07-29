@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.math.numericalmethods.taylors.crx;
+package com.github.gbenroscience.math.numericalmethods.taylors;
 
 import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffNEvaluator;
 import com.github.gbenroscience.math.numericalmethods.SingularityExtractor;
@@ -134,7 +134,7 @@ import java.util.logging.Logger;
  * Not thread-safe. One instance per thread, built from the same {@code
  * rpnTokens} (which is only read).
  */
-public class Integrator implements com.github.gbenroscience.math.numericalmethods.taylors.ffx.smart.SymbolicIntegrator.SingularityAwareIntegrator {
+public class Integrator implements com.github.gbenroscience.math.numericalmethods.taylors.symbolic.SymbolicIntegrator.SingularityAwareIntegrator {
 
     private static final Logger LOG = Logger.getLogger(Integrator.class.getName());
 

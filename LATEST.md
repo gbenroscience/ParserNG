@@ -2,8 +2,14 @@
 
 
 
+### ParserNG 3.0.0 is out on maven-central! 
+1. GPU bulk evaluator(CUDA and OpenCL) comes to ParserNG with MemorySegments and zero dependencies; no JNI hell.
+2. SIMDEngineEvaluator with MemorySegments also and SIMDCommandTurboEvaluator from ParserNG Enterprise now open-sourced and released with version 3.0.0
+3. Nth-order Automatic Differentiation, A fresh symbolic differentiator and a resilient numerical integrator, fronted by a symbolic integrator to expand the range of numerically integrable functions
+4. Conditionals; if, &&, || implemented all the way from parser frontend to all backends(std evaluator, 2 turbo scalar evaluators and 1 turbo matrix evaluator, bulk evaluators(vector simd and auto-vectorization type) and GPU bulk evaluator)
+
 ### ParserNG 2.0.7 is out on maven-central! 
-Full migration of all inbuilt functions and UDFs to the Vector API(not stats functions), leading to 2.0x to 20x speedup in bulk evaluations
+Full migration of all inbuilt functions and UDFs to the Vector API(not stats functions), leading to 2.0x to 14x speedup in bulk evaluations
 
 
 ### ParserNG 2.0.6 is out on maven-central! 
@@ -18,8 +24,8 @@ More stable. Indexing bugs fixed in bulk processors
 
 ### ParserNG 2.0.0 is out on maven-central! 
 Guess who the kid on the block is? Vector API bulk evaluator(SIMDVectorTurboEvaluator)and its compatibility partner, VectorTurboEvaluator.
-Both run bulk evaluations at roughly same speed(faster than Janino), and come with workers out of the box!
-`VectorTurboEvaluator` works because its code is mechanically sympathetic to the hardware running it,so auto-vectorization occurs.
+Both run bulk evaluations at roughly same speed(competitive with Janino), and come with workers out of the box!
+`VectorTurboEvaluator` works because its code is mechanically sympathetic to the hardware running it, so auto-vectorization occurs.
 
 
 

@@ -20,6 +20,7 @@ import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
 import com.github.gbenroscience.math.numericalmethods.NumericalIntegrator;
 import com.github.gbenroscience.math.numericalmethods.TurboRootFinder;
+import com.github.gbenroscience.math.numericalmethods.taylors.symbolic.SymbolicIntegrator;
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
 import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
 import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
@@ -116,7 +117,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             BINARY_MAP.put("-", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "subtract", MT_DOUBLE_DD));
             BINARY_MAP.put("*", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "multiply", MT_DOUBLE_DD));
             BINARY_MAP.put("/", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "divide", MT_DOUBLE_DD));
-            
+
             BINARY_MAP.put("<", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "lessThan", MT_DOUBLE_DD));
             BINARY_MAP.put(">", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "greaterThan", MT_DOUBLE_DD));
             BINARY_MAP.put(String.valueOf(MathExpression.Token.LT_EQ_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "lessThanOrEquals", MT_DOUBLE_DD));
@@ -125,7 +126,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
             BINARY_MAP.put(String.valueOf(MathExpression.Token.NOT_EQ_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "notEquals", MT_DOUBLE_DD));
             BINARY_MAP.put(String.valueOf(MathExpression.Token.BIN_AND_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "and", MT_DOUBLE_DD));
             BINARY_MAP.put(String.valueOf(MathExpression.Token.BIN_OR_DEF), LOOKUP.findStatic(ScalarTurboEvaluator2.class, "or", MT_DOUBLE_DD));
-            
+
             BINARY_MAP.put("Р", LOOKUP.findStatic(Maths.class, "permutation", MT_DOUBLE_DD));
             BINARY_MAP.put("Č", LOOKUP.findStatic(Maths.class, "combination", MT_DOUBLE_DD));
             BINARY_MAP.put("%", LOOKUP.findStatic(ScalarTurboEvaluator2.class, "modulo", MT_DOUBLE_DD));
@@ -282,7 +283,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
     }
 
     public static Object invokeRegistryMethod(int methodId, MathExpression.EvalResult[] argsValues) {
-        System.out.println("argsValues: "+Arrays.toString(argsValues));
+        System.out.println("argsValues: " + Arrays.toString(argsValues));
         int arity = argsValues.length;
 
         MathExpression.EvalResult resultContainer = new MathExpression.EvalResult();
@@ -574,7 +575,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                             || name.equals(Declarations.DIFF_EQN)
                             || name.equals(Declarations.PRINT) || name.equals(Declarations.ROTOR)) {
                         MethodHandle legacy = compileComplexFunction(t);
-                   
+
                         if (legacy.type().parameterCount() == 0) {
                             if (varCount > 0) {
                                 legacy = MethodHandles.dropArguments(legacy, 0, pTypes);
@@ -670,7 +671,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
                 MathExpression.EvalResult res = (MathExpression.EvalResult) arg;
                 len += (res.type == MathExpression.EvalResult.TYPE_VECTOR) ? res.vector.length : 1;
             } else {
-                len++; 
+                len++;
             }
         }
 
@@ -907,7 +908,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
     private MethodHandle compileComplexFunction(MathExpression.Token t) throws Throwable {
         String name = t.name;
-        
+
         switch (name) {
             case Declarations.DIFFERENTIATION:
                 return compileDerivativeHandle(t);
@@ -1268,13 +1269,19 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
         boolean shouldSwap = lower > upper;
         if (shouldSwap) {
-
+            /*
             NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, upper, lower, vars, slots);
             return numericalIntegrator.integrate(f);
+             */
+            SymbolicIntegrator sym = SymbolicIntegrator.make(f.getMathExpression().getExpression());
+            return sym.integrate(upper, lower);
         } else {
-
+            SymbolicIntegrator sym = SymbolicIntegrator.make(f.getMathExpression().getExpression());
+            return sym.integrate(lower, upper);
+            /*
             NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
             return numericalIntegrator.integrate(f);
+             */
         }
     }
 
@@ -1734,21 +1741,21 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
     }
 
     public static double and(double a, double b) {
-        if((a==1||a==0)&&(b==1||b==0)){
-            boolean aa = a==1;
-            boolean bb = b==1;
+        if ((a == 1 || a == 0) && (b == 1 || b == 0)) {
+            boolean aa = a == 1;
+            boolean bb = b == 1;
             return aa && bb ? 1 : 0;
         }
-        throw new RuntimeException("Invalid! the args passed to `and` must be either zero or one in value"); 
+        throw new RuntimeException("Invalid! the args passed to `and` must be either zero or one in value");
     }
 
     public static double or(double a, double b) {
-          if((a==1||a==0)&&(b==1||b==0)){
-            boolean aa = a==1;
-            boolean bb = b==1;
+        if ((a == 1 || a == 0) && (b == 1 || b == 0)) {
+            boolean aa = a == 1;
+            boolean bb = b == 1;
             return aa || bb ? 1 : 0;
         }
-        throw new RuntimeException("Invalid! the args passed to `or` must be either zero or one in value"); 
+        throw new RuntimeException("Invalid! the args passed to `or` must be either zero or one in value");
     }
 
     public static final class MethodHandlePolyfill {

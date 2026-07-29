@@ -195,9 +195,24 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
         this.varCount = me.getVariablesNames().length;
         this.compiledScalarHandle = compileScalar(postfix);
         stackDepth = MathExpressionTreeDepth.calculate(postfix).depth;
-        
-        System.out.println("expression tree depth = "+stackDepth);
+ 
         compileToPrimitiveProgram();
+    }
+
+    public static BulkTurboEvaluator.BatchedVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
+        return (BulkTurboEvaluator.BatchedVectorCompositeExpression) new BulkTurboEvaluator(me).compile();
+    }
+
+    public static BulkTurboEvaluator.BatchedVectorCompositeExpression getEvaluator(String expr) throws Throwable {
+        return (BulkTurboEvaluator.BatchedVectorCompositeExpression) new BulkTurboEvaluator(new MathExpression(expr)).compile();
+    }
+
+    public static BulkTurboEvaluator.BatchedVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        return (BulkTurboEvaluator.BatchedVectorCompositeExpression) new BulkTurboEvaluator(me).compile();
+    }
+
+    public static BulkTurboEvaluator.BatchedVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
+        return (BulkTurboEvaluator.BatchedVectorCompositeExpression) new BulkTurboEvaluator(new MathExpression(expr)).compile();
     }
 
     protected final void compileToPrimitiveProgram() {

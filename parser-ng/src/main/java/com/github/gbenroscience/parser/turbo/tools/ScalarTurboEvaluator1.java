@@ -26,7 +26,7 @@ import com.github.gbenroscience.math.geom.ROTOR;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.math.numericalmethods.NumericalIntegrator;
 import com.github.gbenroscience.math.numericalmethods.TurboRootFinder;
-import com.github.gbenroscience.math.numericalmethods.taylors.ffx.Integrator;
+import com.github.gbenroscience.math.numericalmethods.taylors.symbolic.SymbolicIntegrator;
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
 import com.github.gbenroscience.math.quadratic.Quadratic_Equation;
 import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
@@ -116,7 +116,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
     // Common method types
     private static final MethodType MT_DOUBLE_D = MethodType.methodType(double.class, double.class);
-    private static final MethodType MT_DOUBLE_DD = MethodType.methodType(double.class, double.class, double.class); 
+    private static final MethodType MT_DOUBLE_DD = MethodType.methodType(double.class, double.class, double.class);
     private static final MethodType MT_SAFE_WRAP = MethodType.methodType(double.class, double[].class);
 
     // 1. ThreadLocal holding a reusable array of EvalResults to avoid GC pressure
@@ -433,7 +433,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     } else {
                         MethodHandle right = ensurePrimitive(stack.pop());
                         MethodHandle left = ensurePrimitive(stack.pop());
-                        
+
                         pushAndVerify(stack, applyBinaryOpNoPermute(t.opChar, left, right));
                     }
                     break;
@@ -457,7 +457,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                         MethodHandle ifHandle = MethodHandles.guardWithTest(testHandle, trueHandle, falseHandle);
 
                         pushAndVerify(stack, ifHandle);
-                        
+
                         break;
                     } else if (Method.isPureStatsMethod(name)) {
                         int arity = t.arity;
@@ -1417,18 +1417,20 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         );
         boolean shouldSwap = lower > upper;
         if (shouldSwap) {
-            NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, upper, lower, vars, slots);
-            return numericalIntegrator.integrate(f);
+            SymbolicIntegrator sym = SymbolicIntegrator.make(f.getMathExpression().getExpression());
+            return sym.integrate(upper, lower);
+
             /*
-                        Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
-            return intg.integrate(upper, lower);
+                    NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, upper, lower, vars, slots);
+            return numericalIntegrator.integrate(f);
              */
         } else {
-            NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
-            return numericalIntegrator.integrate(f);
+            SymbolicIntegrator sym = SymbolicIntegrator.make(f.getMathExpression().getExpression());
+            return sym.integrate(lower, upper);
+
             /* 
-            Integrator intg = Integrator.forExpression(f.getMathExpression().getExpression(), vars[0]);
-            return intg.integrate(lower, upper);
+                      NumericalIntegrator numericalIntegrator = new NumericalIntegrator(f, primitiveHandle, lower, upper, vars, slots);
+            return numericalIntegrator.integrate(f);
              */
         }
 
@@ -2449,7 +2451,6 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         return x2 * x2;
     }
 
- 
     public static double lessThan(double a, double b) {
         return a < b ? 1 : 0;
     }
@@ -2474,22 +2475,22 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         return a != b ? 1 : 0;
     }
 
-   public static double and(double a, double b) {
-        if((a==1||a==0)&&(b==1||b==0)){
-            boolean aa = a==1;
-            boolean bb = b==1;
+    public static double and(double a, double b) {
+        if ((a == 1 || a == 0) && (b == 1 || b == 0)) {
+            boolean aa = a == 1;
+            boolean bb = b == 1;
             return aa && bb ? 1 : 0;
         }
-        throw new RuntimeException("Invalid! the args passed to `and` must be either zero or one in value"); 
+        throw new RuntimeException("Invalid! the args passed to `and` must be either zero or one in value");
     }
 
     public static double or(double a, double b) {
-          if((a==1||a==0)&&(b==1||b==0)){
-            boolean aa = a==1;
-            boolean bb = b==1;
+        if ((a == 1 || a == 0) && (b == 1 || b == 0)) {
+            boolean aa = a == 1;
+            boolean bb = b == 1;
             return aa || bb ? 1 : 0;
         }
-        throw new RuntimeException("Invalid! the args passed to `or` must be either zero or one in value"); 
+        throw new RuntimeException("Invalid! the args passed to `or` must be either zero or one in value");
     }
 
     public static boolean toBoolean(double val) {

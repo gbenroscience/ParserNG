@@ -81,13 +81,14 @@ public class MemorySegmentEvaluatorTest {
     public void testMathematicalPrecisionVsNativeMemorySegmentBulkParallel() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
         // Instantiate with 4 workers to ensure parallel execution pool is created
-        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator
-                = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me, 4).compile();
+        var evaluator = SIMDEngineEvaluator.getEvaluator(me, 2);// the second argument is the number of workers to use.
+        //If not specified, the worker count
+        //is equal to the number of cpus. NOTE: parallel processing only occurs when applyBulkParallel is called
 
         logDetails(me, evaluator, !active);
 
         // Use a dataset large enough to exceed PARALLEL_OPS_THRESHOLD
-        long totalElements = 300_000_000L;
+        long totalElements = 300_000_00L;
         int varCount = 3; // x1, x2, x3
         double start = System.nanoTime();
         // MUST use shared arena for multi-threaded memory access

@@ -853,7 +853,7 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
                     }
                     case OP_COT_GRAD -> {
                         materialize(ctx, ctx.sp - 1, n);
-                        SIMDCommandTurboEvaluator.VectorMath.cotGrad((ctx.sp - 1) * BLOCK_SIZE, n, ctx.scratch);
+                        SIMDCommandEvaluator.VectorMath.cotGrad((ctx.sp - 1) * BLOCK_SIZE, n, ctx.scratch);
                     }
 
 // Inverse Reciprocal Trig Variants

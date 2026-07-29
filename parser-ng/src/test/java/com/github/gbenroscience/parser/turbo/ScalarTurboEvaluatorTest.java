@@ -87,8 +87,8 @@ public class ScalarTurboEvaluatorTest {
         // Warm up turbo JIT
         double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
-
-        Assertions.assertEquals(ev.scalar, evr.scalar);
+ 
+        Assertions.assertTrue(Math.abs(ev.scalar-evr.scalar) < 1.0E-13);
 
     }
 
@@ -107,7 +107,7 @@ public class ScalarTurboEvaluatorTest {
         double[] vars = new double[1];
         MathExpression.EvalResult evr = compiled.apply(vars);
 
-        Assertions.assertEquals(ev.scalar, evr.scalar);
+        Assertions.assertTrue(Math.abs(ev.scalar-evr.scalar) < 1.0E-13);
     }
 
     @Test

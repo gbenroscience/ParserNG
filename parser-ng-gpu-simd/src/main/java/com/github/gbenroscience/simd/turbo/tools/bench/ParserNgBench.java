@@ -20,7 +20,7 @@ package com.github.gbenroscience.simd.turbo.tools.bench;
  * @author GBEMIRO
  */
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.SIMDCommandTurboEvaluator;
+import com.github.gbenroscience.simd.turbo.tools.SIMDCommandEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.utils.MathToJaninoConverter;
 import com.github.gbenroscience.util.FunctionManager;
@@ -163,7 +163,7 @@ public class ParserNgBench {
     private double[] vars;
     private JaninoMathFunction fastEvaluator;
 
-    SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression simdCommandTurbo;
+    SIMDCommandEvaluator.SIMDVectorCompositeExpression simdCommandTurbo;
     SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVec;
 
     private int varCount;
@@ -422,7 +422,7 @@ public class ParserNgBench {
 
     private void setupParserNG(MathExpression me) {
         try {
-            simdCommandTurbo = (SIMDCommandTurboEvaluator.SIMDVectorCompositeExpression) new SIMDCommandTurboEvaluator(me.copy()).compile();
+            simdCommandTurbo = (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me.copy()).compile();
             //simdVec = SIMDVectorTurboEvaluator.getEvaluator(me, 2);
             simdVec = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me.copy()).compile();
         } catch (Throwable ex) {
