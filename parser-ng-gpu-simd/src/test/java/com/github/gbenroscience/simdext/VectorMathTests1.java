@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.simdext;
 
 /**
  *
@@ -21,7 +21,7 @@ package com.github.gbenroscience.simd;
  */
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.SIMDCommandEvaluator.VectorMath;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDCommandEvaluator.VectorMath;
 import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import static org.junit.jupiter.api.Assertions.assertEquals;

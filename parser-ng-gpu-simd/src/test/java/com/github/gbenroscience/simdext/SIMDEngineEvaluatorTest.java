@@ -1,10 +1,10 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.simdext;
 
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF; 
-import com.github.gbenroscience.simd.turbo.tools.SIMDEngineEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
 
 import java.util.Arrays;
 import org.junit.jupiter.api.AfterAll;
@@ -21,7 +21,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  *
  * @author GBEMIRO
  */
-public class SIMDTurboEvaluatorTest {
+public class SIMDEngineEvaluatorTest {
 
     private static final double EPSILON = 1e-12;
     private static ExecutorService threadPool;

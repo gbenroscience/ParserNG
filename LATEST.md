@@ -1,6 +1,7 @@
 # ParserNG
 
 
+### ParserNG 3.0.2 is out on maven-central!
 ### ParserNG 3.0.1 is out on maven-central!
 Stabilized v3.0.0
 ### ParserNG 3.0.0 is out on maven-central! 

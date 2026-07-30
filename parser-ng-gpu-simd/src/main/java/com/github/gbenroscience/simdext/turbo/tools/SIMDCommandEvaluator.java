@@ -1,12 +1,14 @@
-package com.github.gbenroscience.simd.turbo.tools;
+package com.github.gbenroscience.simdext.turbo.tools;
 
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*; 
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
+import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
-import com.github.gbenroscience.simd.turbo.tools.utils.CPUPinner;
+import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
 import java.lang.ref.Cleaner;
 import java.util.ArrayList;
@@ -430,7 +432,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
                         case OP_SQRT ->
                             VectorMath::sqrt;
-                        case OP_CBRT ->
+                        case OP_CBRT -> 
                             VectorMath::cbrt;
 
                         case OP_GELU ->

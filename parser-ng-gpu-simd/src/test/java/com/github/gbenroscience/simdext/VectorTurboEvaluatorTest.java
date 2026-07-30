@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.simdext;
 
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;

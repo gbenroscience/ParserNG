@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd.turbo.tools.utils;
+package com.github.gbenroscience.simdext.turbo.tools.utils;
 
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;

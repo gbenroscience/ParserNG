@@ -48,135 +48,135 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
      */
     protected int numWorkers = BatchedVectorCompositeExpression.computeWorkers();
     // Opcode Constants
-    static final int OP_CONST = 1;
-    static final int OP_LOAD = 2;
-    static final int OP_ADD = 3;
-    static final int OP_SUB = 4;
-    static final int OP_MUL = 5;
-    static final int OP_DIV = 6;
-    static final int OP_POW = 7;
+    public static final int OP_CONST = 1;
+    public static final int OP_LOAD = 2;
+    public static final int OP_ADD = 3;
+    public static final int OP_SUB = 4;
+    public static final int OP_MUL = 5;
+    public static final int OP_DIV = 6;
+    public static final int OP_POW = 7;
 
-    static final int OP_SIN = 8;
-    static final int OP_COS = 9;
-    static final int OP_TAN = 10;
+    public static final int OP_SIN = 8;
+    public static final int OP_COS = 9;
+    public static final int OP_TAN = 10;
 
-    static final int OP_SIN_DEG = 11;
-    static final int OP_COS_DEG = 12;
-    static final int OP_TAN_DEG = 13;
+    public static final int OP_SIN_DEG = 11;
+    public static final int OP_COS_DEG = 12;
+    public static final int OP_TAN_DEG = 13;
 
-    static final int OP_SIN_GRAD = 14;
-    static final int OP_COS_GRAD = 15;
-    static final int OP_TAN_GRAD = 16;
+    public static final int OP_SIN_GRAD = 14;
+    public static final int OP_COS_GRAD = 15;
+    public static final int OP_TAN_GRAD = 16;
 
-    static final int OP_ASIN = 17;
-    static final int OP_ACOS = 18;
-    static final int OP_ATAN = 19;
+    public static final int OP_ASIN = 17;
+    public static final int OP_ACOS = 18;
+    public static final int OP_ATAN = 19;
 
-    static final int OP_ASIN_ALT = 20;
-    static final int OP_ACOS_ALT = 21;
-    static final int OP_ATAN_ALT = 22;
+    public static final int OP_ASIN_ALT = 20;
+    public static final int OP_ACOS_ALT = 21;
+    public static final int OP_ATAN_ALT = 22;
 
-    static final int OP_ASIN_DEG = 23;
-    static final int OP_ACOS_DEG = 24;
-    static final int OP_ATAN_DEG = 25;
+    public static final int OP_ASIN_DEG = 23;
+    public static final int OP_ACOS_DEG = 24;
+    public static final int OP_ATAN_DEG = 25;
 
-    static final int OP_ASIN_DEG_ALT = 26;
-    static final int OP_ACOS_DEG_ALT = 27;
-    static final int OP_ATAN_DEG_ALT = 28;
+    public static final int OP_ASIN_DEG_ALT = 26;
+    public static final int OP_ACOS_DEG_ALT = 27;
+    public static final int OP_ATAN_DEG_ALT = 28;
 
-    static final int OP_ASIN_GRAD = 29;
-    static final int OP_ACOS_GRAD = 30;
-    static final int OP_ATAN_GRAD = 31;
+    public static final int OP_ASIN_GRAD = 29;
+    public static final int OP_ACOS_GRAD = 30;
+    public static final int OP_ATAN_GRAD = 31;
 
-    static final int OP_ASIN_GRAD_ALT = 32;
-    static final int OP_ACOS_GRAD_ALT = 33;
-    static final int OP_ATAN_GRAD_ALT = 34;
+    public static final int OP_ASIN_GRAD_ALT = 32;
+    public static final int OP_ACOS_GRAD_ALT = 33;
+    public static final int OP_ATAN_GRAD_ALT = 34;
 
-    static final int OP_SEC = 35;
-    static final int OP_SEC_DEG = 36;
-    static final int OP_SEC_GRAD = 37;
+    public static final int OP_SEC = 35;
+    public static final int OP_SEC_DEG = 36;
+    public static final int OP_SEC_GRAD = 37;
 
-    static final int OP_COSEC = 38;
-    static final int OP_COSEC_DEG = 39;
-    static final int OP_COSEC_GRAD = 40;
+    public static final int OP_COSEC = 38;
+    public static final int OP_COSEC_DEG = 39;
+    public static final int OP_COSEC_GRAD = 40;
 
-    static final int OP_COT = 41;
-    static final int OP_COT_DEG = 42;
-    static final int OP_COT_GRAD = 43;
+    public static final int OP_COT = 41;
+    public static final int OP_COT_DEG = 42;
+    public static final int OP_COT_GRAD = 43;
 
-    static final int OP_ARC_SEC = 44;
-    static final int OP_ARC_SEC_DEG = 45;
-    static final int OP_ARC_SEC_GRAD = 46;
+    public static final int OP_ARC_SEC = 44;
+    public static final int OP_ARC_SEC_DEG = 45;
+    public static final int OP_ARC_SEC_GRAD = 46;
 
-    static final int OP_ARC_COSEC = 47;
-    static final int OP_ARC_COSEC_DEG = 48;
-    static final int OP_ARC_COSEC_GRAD = 49;
+    public static final int OP_ARC_COSEC = 47;
+    public static final int OP_ARC_COSEC_DEG = 48;
+    public static final int OP_ARC_COSEC_GRAD = 49;
 
-    static final int OP_ARC_COT = 50;
-    static final int OP_ARC_COT_DEG = 51;
-    static final int OP_ARC_COT_GRAD = 52;
+    public static final int OP_ARC_COT = 50;
+    public static final int OP_ARC_COT_DEG = 51;
+    public static final int OP_ARC_COT_GRAD = 52;
 
-    static final int OP_ARC_SIN_ALT = 53;
-    static final int OP_ARC_SIN_ALT_DEG = 54;
-    static final int OP_ARC_SIN_ALT_GRAD = 55;
+    public static final int OP_ARC_SIN_ALT = 53;
+    public static final int OP_ARC_SIN_ALT_DEG = 54;
+    public static final int OP_ARC_SIN_ALT_GRAD = 55;
 
-    static final int OP_ARC_COS_ALT = 56;
-    static final int OP_ARC_COS_ALT_DEG = 57;
-    static final int OP_ARC_COS_ALT_GRAD = 58;
+    public static final int OP_ARC_COS_ALT = 56;
+    public static final int OP_ARC_COS_ALT_DEG = 57;
+    public static final int OP_ARC_COS_ALT_GRAD = 58;
 
-    static final int OP_ARC_TAN_ALT = 59;
-    static final int OP_ARC_TAN_ALT_DEG = 60;
-    static final int OP_ARC_TAN_ALT_GRAD = 61;
+    public static final int OP_ARC_TAN_ALT = 59;
+    public static final int OP_ARC_TAN_ALT_DEG = 60;
+    public static final int OP_ARC_TAN_ALT_GRAD = 61;
 
-    static final int OP_ARC_SEC_ALT = 62;
-    static final int OP_ARC_SEC_ALT_DEG = 63;
-    static final int OP_ARC_SEC_ALT_GRAD = 64;
+    public static final int OP_ARC_SEC_ALT = 62;
+    public static final int OP_ARC_SEC_ALT_DEG = 63;
+    public static final int OP_ARC_SEC_ALT_GRAD = 64;
 
-    static final int OP_ARC_COSEC_ALT = 65;
-    static final int OP_ARC_COSEC_ALT_DEG = 66;
-    static final int OP_ARC_COSEC_ALT_GRAD = 67;
+    public static final int OP_ARC_COSEC_ALT = 65;
+    public static final int OP_ARC_COSEC_ALT_DEG = 66;
+    public static final int OP_ARC_COSEC_ALT_GRAD = 67;
 
-    static final int OP_ARC_COT_ALT = 68;
-    static final int OP_ARC_COT_ALT_DEG = 69;
-    static final int OP_ARC_COT_ALT_GRAD = 70;
+    public static final int OP_ARC_COT_ALT = 68;
+    public static final int OP_ARC_COT_ALT_DEG = 69;
+    public static final int OP_ARC_COT_ALT_GRAD = 70;
 
-    static final int OP_SINH = 71;
-    static final int OP_COSH = 72;
-    static final int OP_TANH = 73;
+    public static final int OP_SINH = 71;
+    public static final int OP_COSH = 72;
+    public static final int OP_TANH = 73;
 
-    static final int OP_ASINH = 74;
-    static final int OP_ACOSH = 75;
-    static final int OP_ATANH = 76;
+    public static final int OP_ASINH = 74;
+    public static final int OP_ACOSH = 75;
+    public static final int OP_ATANH = 76;
 
-    static final int OP_ASINH_ALT = 77;
-    static final int OP_ACOSH_ALT = 78;
-    static final int OP_ATANH_ALT = 79;
+    public static final int OP_ASINH_ALT = 77;
+    public static final int OP_ACOSH_ALT = 78;
+    public static final int OP_ATANH_ALT = 79;
 
-    static final int OP_ABS = 80;
-    static final int OP_EXP = 81;
-    static final int OP_SQRT = 82;
-    static final int OP_CBRT = 83;
-    static final int OP_LOG = 84;
-    static final int OP_LOG10 = 85;
-    static final int OP_VMA = 86;
-    static final int OP_REM = 87;
-    static final int OP_IF = 88;
-    static final int OP_GT = 89;
-    static final int OP_LT = 90;
-    static final int OP_EQ = 91;
-    static final int OP_NE = 92;
-    static final int OP_GE = 93;
-    static final int OP_LE = 94;
-    static final int OP_GELU = 95;
-    static final int OP_GELU_FAST = 96;
-    static final int OP_GEGLU = 97;
-    static final int OP_SWIGLU = 98;
-    static final int OP_GEGLU_2 = 99;
-    static final int OP_SWIGLU_2 = 100;
-    static final int OP_ERF = 101;
+    public static final int OP_ABS = 80;
+    public static final int OP_EXP = 81;
+    public static final int OP_SQRT = 82;
+    public static final int OP_CBRT = 83;
+    public static final int OP_LOG = 84;
+    public static final int OP_LOG10 = 85;
+    public static final int OP_VMA = 86;
+    public static final int OP_REM = 87;
+    public static final int OP_IF = 88;
+    public static final int OP_GT = 89;
+    public static final int OP_LT = 90;
+    public static final int OP_EQ = 91;
+    public static final int OP_NE = 92;
+    public static final int OP_GE = 93;
+    public static final int OP_LE = 94;
+    public static final int OP_GELU = 95;
+    public static final int OP_GELU_FAST = 96;
+    public static final int OP_GEGLU = 97;
+    public static final int OP_SWIGLU = 98;
+    public static final int OP_GEGLU_2 = 99;
+    public static final int OP_SWIGLU_2 = 100;
+    public static final int OP_ERF = 101;
 
-    static final int OP_AND = 102;
-    static final int OP_OR = 103;
+    public static final int OP_AND = 102;
+    public static final int OP_OR = 103;
 
     // Pre-allocated compilation state
     protected MathExpression.Token[] postfix;
@@ -564,22 +564,22 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * When the parallel processing methods are called, parallel processing
          * will kick in at this value
          */
-        protected static final int PARALLEL_OPS_THRESHOLD = 1024;
+        public static final int PARALLEL_OPS_THRESHOLD = 1024;
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
-        protected static final int BLOCK_SIZE = 1024;
-        protected static final int BLOCK_SIZE_256 = 256;
-        protected static final int BLOCK_SIZE_512 = 512;
-        protected static final int BLOCK_SIZE_1024 = 1024;
-        protected static final int BLOCK_SIZE_2048 = 2048;
-        protected static final int BLOCK_SIZE_4096 = 4096;
-        protected static final int BLOCK_SIZE_8192 = 8192;
-        protected static final int BLOCK_SIZE_16384 = 16384;
-        protected static final int BLOCK_SIZE_32768 = 32768;
-        protected static final int BLOCK_SIZE_65536 = 65536;
-        protected static final int BLOCK_SIZE_131072 = 131072;
-        protected static final int BLOCK_SIZE_262144 = 262144;
-        protected static final int BLOCK_SIZE_524288 = 524288;
-        protected static final int BLOCK_SIZE_1048576 = 1048576;
+        public static final int BLOCK_SIZE = 1024;
+        public static final int BLOCK_SIZE_256 = 256;
+        public static final int BLOCK_SIZE_512 = 512;
+        public static final int BLOCK_SIZE_1024 = 1024;
+        public static final int BLOCK_SIZE_2048 = 2048;
+        public static final int BLOCK_SIZE_4096 = 4096;
+        public static final int BLOCK_SIZE_8192 = 8192;
+        public static final int BLOCK_SIZE_16384 = 16384;
+        public static final int BLOCK_SIZE_32768 = 32768;
+        public static final int BLOCK_SIZE_65536 = 65536;
+        public static final int BLOCK_SIZE_131072 = 131072;
+        public static final int BLOCK_SIZE_262144 = 262144;
+        public static final int BLOCK_SIZE_524288 = 524288;
+        public static final int BLOCK_SIZE_1048576 = 1048576;
 
         private final MethodHandle scalarHandle;
         private final int[] opcodes;
@@ -590,9 +590,9 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         //NEW FIELDS
         // --- ZERO-ALLOCATION MULTI-THREADING SUBSYSTEM ---
-        protected static final int STATE_IDLE = 0;
-        protected static final int STATE_RUNNING = 1;
-        protected static final int STATE_FINISHED = 2;
+        public static final int STATE_IDLE = 0;
+        public static final int STATE_RUNNING = 1;
+        public static final int STATE_FINISHED = 2;
 
         protected int cores;
         protected WorkerThread[] workers;
@@ -632,7 +632,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             return dcores;
         }
 
-        BatchedVectorCompositeExpression(MethodHandle handle, int[] ops, int[] targetSlots,
+        public BatchedVectorCompositeExpression(MethodHandle handle, int[] ops, int[] targetSlots,
                 double[] consts, int count, int varCount) {
             this.scalarHandle = handle;
             // DEFENSIVE: Make copies to isolate from VectorTurboEvaluator mutations

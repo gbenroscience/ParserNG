@@ -1,8 +1,8 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.simdext;
 
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.SIMDCommandEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDCommandEvaluator;
 
 import java.util.Arrays;
 import org.junit.jupiter.api.AfterAll;

@@ -13,14 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.simd.turbo.tools.bench;
+package com.github.gbenroscience.simdext.turbo.tools.bench;
 
 /**
  *
  * @author GBEMIRO
  */
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.SIMDCommandEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDCommandEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.utils.MathToJaninoConverter;
 import com.github.gbenroscience.util.FunctionManager;
@@ -165,6 +166,7 @@ public class ParserNgBench {
 
     SIMDCommandEvaluator.SIMDVectorCompositeExpression simdCommandTurbo;
     SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVec;
+    SIMDEngineEvaluator.SIMDVectorCompositeExpression simdEngine;
 
     private int varCount;
 
@@ -419,12 +421,39 @@ public class ParserNgBench {
         simdVec.applyBulkParallel(input, res);
         bh.consume(res);
     }
+    
+     @Benchmark
+    @BenchmarkMode(Mode.AverageTime)
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    public void simdEngine(Blackhole bh) {
+        // Read from the same stable scenario index—zero cursor modifications inside!
+        final double[][] input = dataSink[benchmarkScenario];
+        final double[] res = result;
+
+        // Execute core computation kernel
+        simdEngine.applyBulk(input, res);
+        bh.consume(res);
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.AverageTime)
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    public void simdEngineParallel(Blackhole bh) {
+        // Read from the same stable scenario index—zero cursor modifications inside!
+        final double[][] input = dataSink[benchmarkScenario];
+        final double[] res = result;
+
+        // Execute core computation kernel
+        simdEngine.applyBulkParallel(input, res);
+        bh.consume(res);
+    }
 
     private void setupParserNG(MathExpression me) {
         try {
-            simdCommandTurbo = (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me.copy()).compile();
+            simdCommandTurbo = SIMDCommandEvaluator.getEvaluator(me);
             //simdVec = SIMDVectorTurboEvaluator.getEvaluator(me, 2);
-            simdVec = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me.copy()).compile();
+            simdVec = SIMDVectorTurboEvaluator.getEvaluator(me);
+            simdEngine = SIMDEngineEvaluator.getEvaluator(me);
         } catch (Throwable ex) {
             System.getLogger(ParserNgBench.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }

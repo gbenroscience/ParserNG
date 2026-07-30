@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simd.turbo.tools.bench;
+package com.github.gbenroscience.simdext.turbo.tools.bench;
 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
@@ -8,13 +8,7 @@ import java.util.Scanner;
  * Set as main class in pom and run OR:
  * 
  * FROM TERMINAL, do:
-cd /home/oluwagbemirojiboye/Documents/NetBeansProjects/parserng-enterprise; \
-JAVA_HOME=/usr/lib/jvm/jdk-26.0.1 /opt/netbeans/java/maven/bin/mvn \
--Dexec.executable=/usr/lib/jvm/jdk-26.0.1/bin/java \
--Dexec.mainClass=com.github.gbenroscience.simd.turbo.tools.bench.SIMDThrptBench \
--Dexec.classpathScope=runtime \
--Dexec.args="--add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -classpath %classpath com.github.gbenroscience.simd.turbo.tools.bench.SIMDThrptBench" \
---no-transfer-progress process-classes org.codehaus.mojo:exec-maven-plugin:3.5.1:exec
+mvn exec:exec -Dexec.executable="java" -Dexec.args="--add-modules jdk.incubator.vector -classpath %classpath com.github.gbenroscience.simd.turbo.tools.bench.SIMDThrptBench"
 
  * 
  * 

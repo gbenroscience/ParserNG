@@ -1,11 +1,11 @@
-package com.github.gbenroscience.simd;
+package com.github.gbenroscience.simdext;
 
 /**
  *
  * @author oluwagbemirojiboye
  */
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.SIMDEngineEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

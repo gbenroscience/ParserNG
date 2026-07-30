@@ -9,7 +9,7 @@ import com.github.gbenroscience.gpu.opencl.OpenClExpressionBridge;
 import com.github.gbenroscience.gpu.opencl.OpenClKernelSource;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
-import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator; 
 
 import org.junit.jupiter.api.Test;
@@ -579,8 +579,9 @@ public class GpuCompositeExpressionTest {
     @Test
     void largeGridInformationalTimingWithMemorySegments() throws Throwable {
         MathExpression me = new MathExpression("3*sin(x)*cos(y)+sqrt(abs(x*y))");
-        SIMDVectorTurboEvaluator vte = new SIMDVectorTurboEvaluator(me);
-        SIMDCompositeExpression cpu = vte.compile();
+        SIMDEngineEvaluator.SIMDVectorCompositeExpression cpu = SIMDEngineEvaluator.getEvaluator(me);
+        VectorTurboEvaluator vte = (VectorTurboEvaluator) cpu.getCompiler();
+ 
         OpenClCompositeExpression.selectDevice(OpenClCompositeExpression.GpuVendor.INTEL);
         //System.setProperty("opencl.gpu.vendor", "Advanced Micro Devices, Inc.");
         //OpenClCompositeExpression.selectDevice("Advanced Micro Devices, Inc."); 
