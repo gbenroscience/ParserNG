@@ -16,6 +16,7 @@
 package com.github.gbenroscience.parser.ng.bench;
 
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.turbo.tools.vector.BulkTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import java.util.Random;
@@ -43,8 +44,6 @@ import org.openjdk.jmh.runner.options.TimeValue;
  *
  * @author GBEMIRO
  */
-
-
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @Warmup(iterations = 5, time = 500, timeUnit = TimeUnit.MILLISECONDS)
@@ -53,12 +52,10 @@ import org.openjdk.jmh.runner.options.TimeValue;
     "-Xms5g", "-Xmx5g",
     "-XX:+UseG1GC",
     "-XX:-UseCompressedOops", // Avoids compressed oops artifacts
-    "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"    
+    "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"
 })
 @State(Scope.Thread)
 public class QuickBench {
-
- 
 
     @Param({
         "0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))"
@@ -68,16 +65,18 @@ public class QuickBench {
     @Param({"2000000"})
     private int dataSize;
 
-    private double[] flatInput; 
+    private double[] flatInput;
     private double[] result;
     private SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVectorTurbo;
+    private BulkTurboEvaluator.BatchedVectorCompositeExpression bte;
 
     private int varCount;
     private double[] vars;
 
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws Throwable {
         MathExpression me = new MathExpression(expression);
+
         String[] expressionVars = me.getVariablesNames();
         this.varCount = expressionVars.length;
         this.vars = new double[varCount];
@@ -90,33 +89,53 @@ public class QuickBench {
         for (int i = 0; i < flatInput.length; i++) {
             flatInput[i] = 1.0 + (r.nextDouble() * 9.0);
         }
-        
+
         setupParserNG(me);
     }
 
     @Benchmark
-    public void parserNG(Blackhole bh) {
+    public void simdVec(Blackhole bh) {
         // True measurement of high-performance vectorized vector logic execution
         simdVectorTurbo.applyBulk(flatInput, result);
-        bh.consume(result); 
+        bh.consume(result);
+    }
+    
+    @Benchmark
+    public void simdVecParallel(Blackhole bh) {
+        // True measurement of high-performance vectorized vector logic execution
+        simdVectorTurbo.applyBulkParallel(flatInput, result);
+        bh.consume(result);
+    }
+    
+    
+    @Benchmark
+    public void bulkTurbo(Blackhole bh) {
+        // True measurement of high-performance vectorized vector logic execution
+        bte.applyBulk(flatInput, result);
+        bh.consume(result);
+    }
+    
+        @Benchmark
+    public void bulkTurboParallel(Blackhole bh) {
+        // True measurement of high-performance vectorized vector logic execution
+        bte.applyBulkParallel(flatInput, result);
+        bh.consume(result);
     }
 
     private void setupParserNG(MathExpression me) {
         try {
             simdVectorTurbo = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+            bte = BulkTurboEvaluator.getEvaluator(me);
         } catch (Throwable ex) {
             throw new RuntimeException("Failed to compile SIMDVectorTurboEvaluator expressions", ex);
         }
     }
 
-
-    
-
     public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
         opt.include(QuickBench.class.getSimpleName());
-        
-       Options configurations = opt.mode(Mode.AverageTime)
+
+        Options configurations = opt.mode(Mode.AverageTime)
                 .timeUnit(TimeUnit.NANOSECONDS)
                 .warmupIterations(5)
                 .warmupTime(TimeValue.milliseconds(200L))

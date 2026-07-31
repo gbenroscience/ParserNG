@@ -9,7 +9,7 @@ import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
 import jdk.incubator.vector.*;
-import java.util.stream.IntStream;
+import java.util.concurrent.locks.LockSupport;
 
 /**
  * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
@@ -48,14 +48,95 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         // Pre-allocated ONCE during initialization/compilation
         private final int NUM_WORKERS;
 
+        // --- ZERO-ALLOCATION MULTI-THREADING SUBSYSTEM (ported from
+        // BulkTurboEvaluator.BatchedVectorCompositeExpression) ---
+        //
+        // A fixed ring of daemon worker threads is spawned exactly once, at
+        // construction time. Every subsequent dispatchToWorkerRing(...) call
+        // coordinates those SAME pre-existing threads purely through
+        // LockSupport.park()/unpark() on volatile "transfer registers" —
+        // no task object, no lambda, no Stream pipeline node, no
+        // ForkJoinTask is ever created after construction. This is what
+        // gives bulkTurboParallel its ~0 B/op allocation profile, and it
+        // is exactly reproduced here for the SIMD path.
+        private static final int SIMD_STATE_IDLE = 0;
+        private static final int SIMD_STATE_RUNNING = 1;
+        private static final int SIMD_STATE_FINISHED = 2;
+
+        private final SIMDWorkerThread[] simdWorkers;
+
+        // Volatile transfer registers (zero-heap parameter passing into the ring)
+        private volatile Thread simdMasterThread;
+        private volatile double[] simdCurrentFlatVars;
+        private volatile double[][] simdCurrent2DVars;
+        private volatile double[] simdCurrentOutput;
+        private volatile int simdCurrentDataSize;
+
+        /**
+         * Private worker used exclusively by the SIMD worker ring. Spins
+         * parked until the master publishes work into the volatile
+         * registers above, executes its slice via the existing
+         * applyBulkInternal(...) overloads (which already do the SIMD/Vector
+         * API work), then parks again.
+         */
+        private final class SIMDWorkerThread extends Thread {
+
+            private final int workerId;
+            volatile int state = SIMD_STATE_IDLE;
+
+            SIMDWorkerThread(int workerId) {
+                super("SIMDTurbo-Worker-" + workerId);
+                this.workerId = workerId;
+            }
+
+            @Override
+            public void run() {
+                while (true) {
+                    while (state != SIMD_STATE_RUNNING) {
+                        LockSupport.park();
+                    }
+
+                    // Volatile reads establish a happens-before guarantee
+                    final double[] flatVars = simdCurrentFlatVars;
+                    final double[][] vars2D = simdCurrent2DVars;
+                    final double[] out = simdCurrentOutput;
+                    final int dataSize = simdCurrentDataSize;
+
+                    final int chunkSize = (dataSize + NUM_WORKERS - 1) / NUM_WORKERS;
+                    final int start = workerId * chunkSize;
+                    final int end = Math.min(start + chunkSize, dataSize);
+                    if (start < end) {
+                        if (flatVars != null) {
+                            applyBulkInternal(flatVars, dataSize, out, start, end - start);
+                        } else {
+                            applyBulkInternal(vars2D, dataSize, out, start, end - start);
+                        }
+                    }
+
+                    state = SIMD_STATE_FINISHED;
+                    LockSupport.unpark(simdMasterThread);
+                }
+            }
+        }
+
         SIMDVectorCompositeExpression() {
             super(compiledScalarHandle, opcodes, targetSlots,
                     literalConstants, instructionCount, varCount);
 
-            if (numWorkers <= 2) {
-                this.NUM_WORKERS = numWorkers;
-            } else {
-                this.NUM_WORKERS = numWorkers - 1;
+            // Match bulkTurbo's worker-ring sizing (BulkTurboEvaluator uses
+            // the full detected core count with no reduction). The master
+            // thread fully parks in dispatchToWorkerRing(...) while workers
+            // run — it performs zero CPU work during dispatch — so reserving
+            // a core for it here only threw away a worker's worth of
+            // parallelism for no benefit.
+            this.NUM_WORKERS = numWorkers;
+
+            // Spawn the worker ring exactly once, at compile/construction time.
+            this.simdWorkers = new SIMDWorkerThread[this.NUM_WORKERS];
+            for (int i = 0; i < this.NUM_WORKERS; i++) {
+                simdWorkers[i] = new SIMDWorkerThread(i);
+                simdWorkers[i].setDaemon(true);
+                simdWorkers[i].start();
             }
         }
 
@@ -74,33 +155,80 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             return SIMDVectorTurboEvaluator.this;
         }
 
-        // --- JDK 21+ ForkJoinPool Dispatchers ---
+        // --- Zero-Allocation Worker-Ring Dispatchers ---
+        //
+        // Previously this used IntStream.range(0, numCores).parallel().forEach(...),
+        // which rebuilds an entire java.util.stream pipeline (Head node,
+        // ForEachOps.ForEachTask recursive-splitting tree, Spliterator
+        // wrappers, Sink chains) on every single call — none of it cached.
+        // That's why the parallel SIMD path showed ~49-54KB/op of allocation
+        // versus ~0.3KB/op for bulkTurboParallel.
+        //
+        // bulkTurboParallel avoids all of that by never allocating a task
+        // graph per call in the first place: it pre-spawns a fixed ring of
+        // daemon threads once, then coordinates them via LockSupport
+        // park()/unpark() on volatile fields for every dispatch. That
+        // pattern is reproduced here verbatim — dispatch is now just a
+        // couple of volatile writes and unpark() calls per worker, with
+        // zero object allocation on the hot path.
         @Override
         protected void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize) {
-            int numCores = NUM_WORKERS;
-            int chunkSize = (dataSize + numCores - 1) / numCores;
+            // 1. Publish parameters to volatile registers (No allocations)
+            this.simdMasterThread = Thread.currentThread();
+            this.simdCurrentFlatVars = flatVariables;
+            this.simdCurrent2DVars = null;
+            this.simdCurrentOutput = output;
+            this.simdCurrentDataSize = dataSize;
 
-            IntStream.range(0, numCores).parallel().forEach(workerId -> {
-                int start = workerId * chunkSize;
-                int end = Math.min(start + chunkSize, dataSize);
-                if (start < end) {
-                    applyBulkInternal(flatVariables, dataSize, output, start, end - start);
+            // 2. Wake up the pre-spawned worker threads via OS permits
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                simdWorkers[i].state = SIMD_STATE_RUNNING;
+                LockSupport.unpark(simdWorkers[i]);
+            }
+
+            // 3. Wait loop (0 bytes allocated on heap while sleeping)
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                SIMDWorkerThread worker = simdWorkers[i];
+                while (worker.state != SIMD_STATE_FINISHED) {
+                    LockSupport.park();
                 }
-            });
+                worker.state = SIMD_STATE_IDLE;
+            }
+
+            // 4. Memory leak protection
+            this.simdMasterThread = null;
+            this.simdCurrentFlatVars = null;
+            this.simdCurrentOutput = null;
         }
 
         @Override
         protected void dispatchToWorkerRing(double[][] variables, double[] output, int dataSize) {
-            int numCores = NUM_WORKERS;
-            int chunkSize = (dataSize + numCores - 1) / numCores;
+            // 1. Publish parameters to volatile registers (No allocations)
+            this.simdMasterThread = Thread.currentThread();
+            this.simdCurrentFlatVars = null;
+            this.simdCurrent2DVars = variables;
+            this.simdCurrentOutput = output;
+            this.simdCurrentDataSize = dataSize;
 
-            IntStream.range(0, numCores).parallel().forEach(workerId -> {
-                int start = workerId * chunkSize;
-                int end = Math.min(start + chunkSize, dataSize);
-                if (start < end) {
-                    applyBulkInternal(variables, dataSize, output, start, end - start);
+            // 2. Wake up the pre-spawned worker threads via OS permits
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                simdWorkers[i].state = SIMD_STATE_RUNNING;
+                LockSupport.unpark(simdWorkers[i]);
+            }
+
+            // 3. Wait loop (0 bytes allocated on heap while sleeping)
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                SIMDWorkerThread worker = simdWorkers[i];
+                while (worker.state != SIMD_STATE_FINISHED) {
+                    LockSupport.park();
                 }
-            });
+                worker.state = SIMD_STATE_IDLE;
+            }
+
+            // 4. Memory leak protection
+            this.simdMasterThread = null;
+            this.simdCurrent2DVars = null;
+            this.simdCurrentOutput = null;
         }
 
         @Override

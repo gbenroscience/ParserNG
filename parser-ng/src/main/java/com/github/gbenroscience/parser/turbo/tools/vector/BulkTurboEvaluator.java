@@ -809,7 +809,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
             volatile int state = STATE_IDLE;
 
             public WorkerThread(int workerId) {
-                super("VectorTurbo-Worker-" + workerId);
+                super("BulkTurbo-Worker-" + workerId);
                 this.workerId = workerId;
             }
 
