@@ -163,6 +163,7 @@ public class ParserNgBench {
     private JaninoMathFunction fastEvaluator;
  
     SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVec;
+    
 
     private int varCount;
 

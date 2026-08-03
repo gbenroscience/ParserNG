@@ -35,6 +35,7 @@ public class QuickTime {
      * are susceptible to JIT "cold" overhead.
      *
      * * @param task The logic to time.
+     * @param task
      * @return Execution time in nanoseconds.
      */
     public static long timeNano(Timable task) {
