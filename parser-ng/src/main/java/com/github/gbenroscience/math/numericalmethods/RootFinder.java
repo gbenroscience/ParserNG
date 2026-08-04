@@ -15,9 +15,7 @@ import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.Operator;
 import com.github.gbenroscience.util.FunctionManager;
 import static java.lang.Math.*;
-import java.util.Arrays;
 import java.util.List;
-import com.github.gbenroscience.math.differentialcalculus.symbolic.old.DerivativeOld;
 import com.github.gbenroscience.util.VariableManager;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -348,7 +346,7 @@ public class RootFinder {
                 if (exists) {
                     for (int i = 3; i < list.size(); i++) {
                         if (Operator.isOpeningBracket(list.get(i))) {
-                            int closeBracket = Bracket.getComplementIndex(true, i, list);
+                            int closeBracket = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i, list);
                             args1 = new MathExpression(LISTS.createStringFrom(list, i, closeBracket + 1)).solve();
                             List l = list.subList(i, closeBracket + 1);
                             l.clear();

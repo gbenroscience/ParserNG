@@ -213,7 +213,7 @@ multiplyOutProductBrackets(scan);
         try{
             
             if(isMethodName(scan.get(i))&&isOpeningBracket(scan.get(i+1))){
-                int initialCloseIndex = Bracket.getComplementIndex(true, i+1, scan); 
+                int initialCloseIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i+1, scan); 
                 //Check for double brackets.
                 if(isOpeningBracket(scan.get(i+2))){
                     /**
@@ -221,7 +221,7 @@ multiplyOutProductBrackets(scan);
                      * Because the pattern is possible...sin((4*x-7)+1) and this is not really double.
                      * The pattern we wish to build is sin(((4*x-7)+1))
                      */
-                    int closeIndex = Bracket.getComplementIndex(true, i+2, scan);
+                    int closeIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i+2, scan);
                     //method has double bracket already..sin((expr))..so do not add extra.
                     if(closeIndex+1==initialCloseIndex){
                         
@@ -289,11 +289,11 @@ public static void openUpUnnecessaryBrackets(ArrayList<String>scan){
    
         if(isClosingBracket(scan.get(i))){
             int close = i;
-            int open = Bracket.getComplementIndex(false, close, scan);
+            int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, close, scan);
             if(open>0){
                 if(isOpeningBracket(scan.get(open-1))){
                     int outerOpen = open-1;
-                    int outerClose = Bracket.getComplementIndex(true, outerOpen, scan);
+                    int outerClose = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, outerOpen, scan);
                   if(outerClose == close+1){
                       scan.remove(outerClose);
                       scan.remove(outerOpen);
@@ -330,7 +330,7 @@ private static void bracketVariableProductsAndQuotients(ArrayList<String>scan){
            while(isNumber(token)||isMulOrDiv(token)||(isVariableString(token))){ 
         
            if(isVariableString(token)&&isOpeningBracket(nextToken)){
-               i=Bracket.getComplementIndex(true, i+1, scan);
+               i=Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN,  i+1, scan);
            }
            ++i;
           
@@ -535,8 +535,8 @@ private static void multiplyOutProductBrackets(ArrayList<String>scan){
         * 
         */
             if(isClosingBracket(scan.get(i-1))&&scan.get(i).equals("*") &&isOpeningBracket(scan.get(i+1))){
-                int start = Bracket.getComplementIndex(false, i-1, scan);
-                int end = Bracket.getComplementIndex(true, i+1, scan);
+                int start = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i-1, scan);
+                int end = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i+1, scan);
                 
                 List<String>leftBrac  = new ArrayList<String>(scan.subList(start, i));
                 List<String>rightBrac = new ArrayList<String>(scan.subList(i+1,end+1));
@@ -727,14 +727,14 @@ private static void tokenRearranger(ArrayList<String>scan){
    try{
         if(isClosingBracket(scan.get(i))){
             int close = i;
-            int open = Bracket.getComplementIndex(false, close, scan);
+            int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, close, scan);
             List<String>temp= new ArrayList<String>();
             int j = open+1;
           while(j<close){
               
               
               if(isOpeningBracket(scan.get(j))){
-               int closeIndex = Bracket.getComplementIndex(true, j, scan);
+               int closeIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, j, scan);
                j = closeIndex;
               }//end if
               
@@ -754,7 +754,7 @@ private static void tokenRearranger(ArrayList<String>scan){
           }//end while  
             scan.addAll(close, temp);  
             
-            freeSpaces(scan.subList(open, Bracket.getComplementIndex(true, open, scan)));
+            freeSpaces(scan.subList(open, Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, open, scan)));
 if(scan.get(open+1).equals("+")){
                 scan.set(open+1,"");
                 //print("open = "+open);

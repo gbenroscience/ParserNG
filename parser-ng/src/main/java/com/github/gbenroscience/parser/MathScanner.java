@@ -120,9 +120,7 @@ public class MathScanner {
 
         DataSetFormatter dsf = new DataSetFormatter(scannerInput);
         this.scannerInput = dsf.getFormattedDataSet();
-
         scan(me);
-
     }
 
     /**
@@ -513,10 +511,10 @@ public class MathScanner {
      * Split the {@link MathScanner#scannerInput} String on the operators.
      */
     public void splitStringOnMethods_Variables_And_Operators() {
-        
-             Predicate<String> dynamicRules = word -> 
-            (FunctionManager.isAnonymousFormat(word)) || word.startsWith("_");
-          Scanner csBuilder = new Scanner.Builder(scannerInput)
+
+        Predicate<String> dynamicRules = word
+                -> (FunctionManager.isAnonymousFormat(word)) || word.startsWith("_");
+        Scanner csBuilder = new Scanner.Builder(scannerInput)
                 .includeTokens(true)
                 .ignoreWhitespace(false)
                 .withDynamicMatcher(dynamicRules)
@@ -524,9 +522,7 @@ public class MathScanner {
                 .addTokens(Method.getAllFunctions())
                 .addTokens(operators)
                 .build();
-          
-        
-        
+
         scanner = csBuilder.scan();
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
@@ -562,7 +558,7 @@ public class MathScanner {
                 /**
                  * Check if the bracket owner allows for multiplication.
                  */
-                int open = Bracket.getComplementIndex(false, i, scanner);
+                int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, scanner);
                 if (open > 0 && !isAtOperator(scanner.get(open - 1)) && !Method.isListReturningStatsMethod(scanner.get(open - 1))) {
                     scanner.add(i + 1, "*");
                 }
@@ -594,7 +590,6 @@ public class MathScanner {
             }
         }//end for loop
 
-         
 //sort(5,3,2,1,-8,-9,12,34,98,-900,34,23,12,340)
         for (int i = 0; i < scanner.size(); i++) {//±–
             if (scanner.get(i).contains("±")) {
@@ -634,7 +629,7 @@ public class MathScanner {
             String nextToken = scanner.get(i + 1);
             if (token.equals("diff") && nextToken.equals("(")) {
                 ///diff,(,@,(x),log,(,x, , ,2,), , ,4,)
-                int close = Bracket.getComplementIndex(true, i + 1, scanner);
+                int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
                 Parser.parseDerivativeCommand(list);
                 if (list.isEmpty()) {
@@ -646,7 +641,7 @@ public class MathScanner {
             else if (token.equals("intg") && nextToken.equals("(")) {
 // intg,(,@,(x),log(x,2),4,2,5)
 
-                int close = Bracket.getComplementIndex(true, i + 1, scanner);
+                int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
                 //IF THINGS GO BAD, UNCOMMENT HERE---1 NumericalIntegral.extractFunctionStringFromExpression(list);
                 if (list.isEmpty()) {
@@ -657,7 +652,7 @@ public class MathScanner {
             }//end else if
             else if (Method.isMatrixMethod(token) && nextToken.equals("(")) {
 // matrix_mul,(,@,(x),log(x,2),4,8)
-                int close = Bracket.getComplementIndex(true, i + 1, scanner);
+                int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
                 if (list.isEmpty()) {
                     parser_Result = ParserResult.INCOMPLETE_PARAMS;
@@ -667,9 +662,9 @@ public class MathScanner {
             }//end else if
             else if ((token.equals("root")) && nextToken.equals("(")) {
 // root,(,@,(x),log(x,2),4,2,5)
-                int close = Bracket.getComplementIndex(true, i + 1, scanner);
+                int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                 List<String> list = scanner.subList(i, close + 1);
-              
+
                 if (list.isEmpty()) {
                     parser_Result = ParserResult.INCOMPLETE_PARAMS;
                     setRunnable(false);
@@ -682,13 +677,13 @@ public class MathScanner {
             String token = scanner.get(i);
             if (Method.isDefinedMethod(token) && !Method.isStatsMethod(token)) {
                 int op = i + 1;
-                int cl = Bracket.getComplementIndex(true, op, scanner);
+                int cl = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, op, scanner);
 
                 for (int cursor = op + 1; cursor < cl; cursor++) {
                     String tkn = scanner.get(cursor);
                     if (isOpeningBracket(tkn)) {
                         //skip to bracket close and continue searching for commas
-                        cursor = Bracket.getComplementIndex(true, cursor, scanner);
+                        cursor = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, cursor, scanner);
                     } else if (isComma(tkn)) {
                         parser_Result = ParserResult.SYNTAX_ERROR;
                         setRunnable(false);
@@ -736,8 +731,9 @@ public class MathScanner {
                  */
                 boolean canCheckNextToken = i + 1 < scanner.size();
                 if ((Method.isFunctionOperatingMethod(scanner.get(i)) || Method.isStatsMethod(scanner.get(i))) && (canCheckNextToken && isOpeningBracket(scanner.get(i + 1)))) {
-                    i = Bracket.getComplementIndex(true, i + 1, scanner);
+                    i = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                 }//end if
+                
                 /**
                  * Enable the use of number(expr..)...and var(expr...) but avoid
                  * func_name(expr....) Users dont have to enter products of
@@ -748,11 +744,9 @@ public class MathScanner {
                  */
                 else if ((isNumber(scanner.get(i))) && canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) {
                     scanner.add(i + 1, "*");
-                    i++;
                 }//end if
                 else if ((isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))) && canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) {
-                    System.out.println("tkn: " + scanner.get(i));
-                    if (me != null || VariableManager.lookUp(scanner.get(i)) != null) {
+                     if (me != null || VariableManager.lookUp(scanner.get(i)) != null) {
                         scanner.add(i + 1, "*");
                         i++;
                     } else {
@@ -786,7 +780,7 @@ public class MathScanner {
                     scanner.add(i + 1, "*");
                     i++;
                 }
-
+ 
             }//end try
             catch (IndexOutOfBoundsException boundsException) {
                 errorLog.error(boundsException);
@@ -830,7 +824,7 @@ public class MathScanner {
                      * expression..e.g. new
                      * MathExpression("3+sin(x)+f(x,5*y,2*z-5)")
                      */
-                    int closeBracOfFunctionCall = Bracket.getComplementIndex(true, i + 1, scanner);
+                    int closeBracOfFunctionCall = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                     /**
                      * The function is being used in another expression if all
                      * the args passed to it are expressions themselves or
@@ -841,7 +835,7 @@ public class MathScanner {
                     int argStart = -1;//the start of the first argument
 
                     int argCount = 0;
-                   boolean allArgsAreVariableExpressions = true;
+                    boolean allArgsAreVariableExpressions = true;
                     boolean allArgsAreConstExpressions = true;
 
                     List<List<String>> argVectors = new ArrayList<>();
@@ -852,7 +846,7 @@ public class MathScanner {
                             if (j == i + 1) {
                                 argStart = j;
                             } else {//skip the open bracket ...jump to its close to avoid any complexities inside...e.g. nested commas, more brackets etc
-                                j = Bracket.getComplementIndex(true, j, scanner);
+                                j = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, j, scanner);
                             }
                         } else if (cToken.equals(")")) {
                             if (j == closeBracOfFunctionCall) {
@@ -1085,9 +1079,9 @@ public class MathScanner {
 // --- HELPER METHODS ---
     private static boolean isOperator(String s) {
         // These are tokens that, if they appear BEFORE a sign, make that sign UNARY
-        return s.equals("+") || s.equals("-") || s.equals("*") || s.equals("/") 
-                || s.equals("<") ||  s.equals(">")|| s.equals("<=") ||  s.equals(">=")
-                || s.equals("==") ||  s.equals("!=")|| s.equals("&&") ||  s.equals("||")
+        return s.equals("+") || s.equals("-") || s.equals("*") || s.equals("/")
+                || s.equals("<") || s.equals(">") || s.equals("<=") || s.equals(">=")
+                || s.equals("==") || s.equals("!=") || s.equals("&&") || s.equals("||")
                 || s.equals("^") || s.equals("%") || s.equals("Р") || s.equals("Č")
                 || s.equals("(") || s.equals("√");
     }
@@ -1125,8 +1119,8 @@ public class MathScanner {
      */
     private final List<String> scan(MathExpression me) {
         VariableManager varMan = new VariableManager();
-        splitStringOnMethods_Variables_And_Operators();
-        validateInputAfterSplitOnMethodsAndOps(me);
+        splitStringOnMethods_Variables_And_Operators(); 
+        validateInputAfterSplitOnMethodsAndOps(me); 
 
         /*
          * Re-build the negative numbers in a statistical
@@ -1199,7 +1193,7 @@ public class MathScanner {
              * to be able to deal with anonymous functions.
              */
             if (i + 1 < sz && Method.isFunctionOperatingMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
-                int close = Bracket.getComplementIndex(true, i + 1, scanner);
+                int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                 i = close;
                 continue;
             }//end if
@@ -1238,17 +1232,16 @@ public class MathScanner {
                     }
                 }
             }//end if
-            else if(i==sz-1 && Variable.isVariableString(tk) && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)){
+            else if (i == sz - 1 && Variable.isVariableString(tk) && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)) {
                 Variable v = VariableManager.lookUp(tk);
-                    if (me != null) {
-                        me.registry.saveIfNotExists(new Variable(tk, v == null ? 0 : v.getValue()));
-                    } else {
-                        if (v == null) {
-                            VariableManager.VARIABLES.put(tk, new Variable(tk, 0));
-                        }
+                if (me != null) {
+                    me.registry.saveIfNotExists(new Variable(tk, v == null ? 0 : v.getValue()));
+                } else {
+                    if (v == null) {
+                        VariableManager.VARIABLES.put(tk, new Variable(tk, 0));
                     }
-            }
-            else if (i == 0 && sz == 1 && Variable.isVariableString(tk)) {
+                }
+            } else if (i == 0 && sz == 1 && Variable.isVariableString(tk)) {
                 if (!FunctionManager.containsAny(tk)) {
                     Variable v = VariableManager.lookUp(tk);
                     if (me != null) {
@@ -1304,7 +1297,7 @@ public class MathScanner {
                 for (int i = indexOfAt; i < scanner.size(); i++) {
                     String token = scanner.get(i);
                     if (isOpeningBracket(token)) {
-                        i = Bracket.getComplementIndex(true, i, scanner);
+                        i = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i, scanner);
                     } else if (isComma(token)) {
                         Function f = new Function(LISTS.createStringFrom(scanner, indexOfAt, i));
                         FunctionManager.add(f);
@@ -1313,7 +1306,7 @@ public class MathScanner {
                         sub.add(f.getName());
                         break;
                     } else if (isClosingBracket(token)) {
-                        int open = Bracket.getComplementIndex(false, i, scanner);
+                        int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, scanner);
                         if (open < indexOfAt) {//you have gotten to the end of the enclosing brackets of the function and no comma yet
                             Function f = new Function(LISTS.createStringFrom(scanner, indexOfAt, i));
                             FunctionManager.add(f);
@@ -1372,12 +1365,12 @@ public class MathScanner {
         for (int i = indexOfAt; i < scanner.size(); i++) {
             String token = scanner.get(i);
             if (isOpeningBracket(token)) {
-                i = Bracket.getComplementIndex(true, i, scanner);
+                i = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i, scanner);
             } else if (isComma(token)) {
                 replaceWithFunctionName(scanner, indexOfAt, i);
                 return indexOfAt + 1;
             } else if (isClosingBracket(token)) {
-                int open = Bracket.getComplementIndex(false, i, scanner);
+                int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, scanner);
                 if (open < indexOfAt) {
                     replaceWithFunctionName(scanner, indexOfAt, i);
                     return indexOfAt + 1;
@@ -1434,7 +1427,7 @@ public class MathScanner {
                     continue;
                 }
 
-                int open = Bracket.getComplementIndex(false, i, scanner);
+                int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, scanner);
                 if (i - open == 2) {//confirm that the bracket has only 1 token inside it
                     if (open > 0) {//open bracket is beyond 0
                         String token = scanner.get(open - 1);
@@ -1457,8 +1450,8 @@ public class MathScanner {
                 if (i + 1 < scanner.size()) {
 
                     if (isClosingBracket(scanner.get(i + 1))) {//you have a match for an unnecessary wasted bracket
-                        int inner_open = Bracket.getComplementIndex(false, i, scanner);
-                        int outer_open = Bracket.getComplementIndex(false, i + 1, scanner);
+                        int inner_open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, scanner);
+                        int outer_open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i + 1, scanner);
 
                         if (inner_open != -1 && outer_open != -1 && inner_open - 1 == outer_open) {
                             //Skip for log tokens...the bracket is needed to evaluate content.
@@ -1519,7 +1512,7 @@ public class MathScanner {
         } else {
             for (int i = 0; i < list.size(); i++) {
                 if (isClosingBracket(list.get(i))) {
-                    int open = Bracket.getComplementIndex(false, i, list);
+                    int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, list);
                     if (open > 0) {
                         String token = list.get(open - 1);
                         if (Method.isMatrixMethod(token)) {
@@ -1648,7 +1641,7 @@ public class MathScanner {
         } else {
             for (int i = 0; i < list.size(); i++) {
                 if (isClosingBracket(list.get(i))) {
-                    int open = Bracket.getComplementIndex(false, i, list);
+                    int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, list);
                     if (open > 0) {
                         String token = list.get(open - 1);
                         if (Method.isMatrixMethod(token)) {

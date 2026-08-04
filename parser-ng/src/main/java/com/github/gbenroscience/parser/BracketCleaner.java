@@ -17,7 +17,6 @@
 package com.github.gbenroscience.parser;
 
 import com.github.gbenroscience.parser.methods.Method;
-import com.github.gbenroscience.util.VariableManager;
 import static com.github.gbenroscience.parser.Operator.*;
 import static com.github.gbenroscience.parser.Variable.*;
 import com.github.gbenroscience.util.FunctionManager;
@@ -142,6 +141,7 @@ public class BracketCleaner {
   
     public static void main(String[] args) {
          
+        MathExpression me = new MathExpression("1+sin(3*log((((4*x-3*y),3)))-4)");me.solve();
         MathExpression mexie = new MathExpression("v=@(x,y)sin(3*log((((4*x-3*y),3)))-4);v(3,2)");
     
         // Example with @ operator

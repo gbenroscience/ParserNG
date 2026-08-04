@@ -78,28 +78,7 @@ MathExpressionManager object will store
         return drgStatus;
     }
 
-    /**
-     * A workspace uses a MathExpressionManager to manage and optimize functions
-     * used in calculations. Each of these functions have different
-     * VariableManager objects but all these objects are actually accessing,
-     * storing creating and modifying their variables and constants from one
-     * single Variable database( actually an ArrayList of Variable objects ) in
-     * the program. This method hence allows an object of this class to return a
-     * reference to any of the VariableManager objects associated with the
-     * MathExpression objects it manages,since it knows that the destination
-     * database(ArrayList) is the same,i.e all the MathExpression objects are
-     * only accessing the same set and copy of variables and constants.
-     *
-     * @return the VariableManager object associated with the first
-MathExpression object stored by objects of this class.
-     */
-    public VariableManager getVariableManager() {
-        if (functions.size() > 0) {
-            return functions.get(0).getVariableManager();
-        } else {
-            throw new NullPointerException("No function created yet!");
-        }
-    }
+   
 
     /**
      * checks if the MathExpression object passed to it as an argument can be

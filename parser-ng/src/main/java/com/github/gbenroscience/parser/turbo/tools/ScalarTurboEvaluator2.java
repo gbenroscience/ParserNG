@@ -1558,7 +1558,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         Function f = FunctionManager.lookUp(funcHandle);
         String input = f.expressionForm();
         input = input.substring(1);
-        int closeBracOfAt = Bracket.getComplementIndex(true, 0, input);
+        int closeBracOfAt = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, 0, input);
         input = input.substring(closeBracOfAt + 1);
         if (input.startsWith("(")) {
             input = input.substring(1, input.length() - 1);
@@ -1576,7 +1576,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         Function f = FunctionManager.lookUp(funcHandle);
         String input = f.expressionForm();
         input = input.substring(1);
-        int closeBracOfAt = Bracket.getComplementIndex(true, 0, input);
+        int closeBracOfAt = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, 0, input);
         input = input.substring(closeBracOfAt + 1);
         if (input.startsWith("(")) {
             input = input.substring(1, input.length() - 1);

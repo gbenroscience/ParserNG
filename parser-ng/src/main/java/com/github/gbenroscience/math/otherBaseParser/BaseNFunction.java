@@ -131,8 +131,7 @@ public class BaseNFunction extends MathExpression {
     }//end method.
 
     public static void main(String args[]) {
-        BaseNFunction bNFunction = new BaseNFunction("a=10;b=01010;ln(a+b)/cos(a-b)", 2);
-        System.out.println(bNFunction.getVariableManager());
+        BaseNFunction bNFunction = new BaseNFunction("a=10;b=01010;ln(a+b)/cos(a-b)", 2); 
         System.out.println(bNFunction.solve());
     }
 

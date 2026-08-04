@@ -164,7 +164,7 @@ public class DataSetFormatter1 {
 
             if (isCloseBracket(dataset.get(i))) {
                 int close = i;
-                int open = Bracket.getComplementIndex(false, close, dataset);
+                int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, close, dataset);
                 dataset.set(open, OPEN_BRACKET_MASK);
                 dataset.set(close, CLOSE_BRACKET_MASK);
 

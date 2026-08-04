@@ -215,7 +215,7 @@ return false;
             //x,^,-,x convert to x,^,(,-1,*,x,)...or if x,^,-,sin,(,...,) convert to x,^,(,-1,*,sin,(,.....,),)
             else if(isPower(scanner.get(i))&&scanner.get(i+1).equals("-")&&isVariableString(scanner.get(i+2))){
                 if(isOpeningBracket(scanner.get(i+3))){
-                    int close = Bracket.getComplementIndex(true, i+3, scanner);
+                    int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i+3, scanner);
                     scanner.add(close,")");
                     scanner.add(i+2,"*");
                     scanner.set(i+1,"-1");

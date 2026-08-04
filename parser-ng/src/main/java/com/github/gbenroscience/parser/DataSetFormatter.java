@@ -67,7 +67,7 @@ public class DataSetFormatter {
         for (int i = 0; i < tokens.size(); i++) {
             if (isCloseBracket(tokens.get(i))) {
                 int closeIdx = i;
-                int openIdx = Bracket.getComplementIndex(false, closeIdx, tokens);
+                int openIdx = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, closeIdx, tokens);
 
                 tokens.set(openIdx, OPEN_BRACKET_MASK);
                 tokens.set(closeIdx, CLOSE_BRACKET_MASK);

@@ -1,28 +1,17 @@
-package com.github.gbenroscience.math.differentialcalculus.equations;
+package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
-import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodType;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * High-performance, JIT-optimized Vectorized Ordinary Differential Equation
- * (ODE) solvers. Supports arbitrary n-th order differential equations by
- * reduction to first-order vector systems.
+ * High-performance, JIT-optimized Vectorized Ordinary Differential Equation (ODE) solvers.
+ * Supports arbitrary n-th order differential equations by reduction to first-order vector systems.
  *
- * Target MethodHandle signature MUST strictly match: void f(double[] vars,
- * double[] outDerivatives)
+ * Target ODEFunction signature MUST strictly match: void f(double[] vars, double[] outDerivatives)
  *
  * @author GBEMIRO
  */
 public class DifferentialEquations {
-
-    /**
-     * Required MethodHandle descriptor for every dy_dt handle passed into these
-     * solvers.
-     */
-    private static final MethodType DY_DT_TYPE
-            = MethodType.methodType(void.class, double[].class, double[].class);
 
     // Dormand-Prince 5(4) Coefficients
     private static final double DP_A21 = 1.0 / 5.0,
@@ -45,57 +34,48 @@ public class DifferentialEquations {
             DP_C5 = 8.0 / 9.0, DP_C6 = 1.0;
 
     public enum ODESolverMethod {
-        EULER, // Fast, O(h) error. Best for real-time graphics/particles.
-        RK4, // Classical 4th Order fixed-step system workhorse.
+        EULER,              // Fast, O(h) error. Best for real-time graphics/particles.
+        RK4,                // Classical 4th Order fixed-step system workhorse.
         RK45_DORMAND_PRINCE,// Adaptive-step size system engine (Industry standard).
         IMPLICIT_EULER      // Backwards implicit setup optimized for stiff vector spaces.
     }
 
     /**
-     * Callback invoked once per accepted state, (t, y). Used to record a
-     * trajectory without forking a second copy of each solver. y is only valid
-     * for the duration of the call — implementations that need to retain it
-     * must clone it.
+     * Callback invoked once per accepted state, (t, y). Used to record a trajectory
+     * without forking a second copy of each solver. y is only valid for the duration
+     * of the call — implementations that need to retain it must clone it.
      */
     @FunctionalInterface
     public interface StepListener {
-
         void onStep(double t, double[] y);
     }
 
     /**
      * Supplies the raw df/dy Jacobian (NOT the Newton "I - h*df/dy" matrix —
-     * the solver applies that transform itself) for the implicit solver. The
-     * default implementation used when none is supplied is central- difference
-     * finite differences; passing an
+     * the solver applies that transform itself) for the implicit solver.
+     * The default implementation used when none is supplied is central-
+     * difference finite differences; passing an
      * {@code com.github.gbenroscience.math.differentialcalculus.autodiff.AnalyticJacobian}-backed
      * strategy replaces that with an exact forward-mode-AD Jacobian.
      */
     @FunctionalInterface
     public interface JacobianStrategy {
-
         /**
-         * @param vars the current frame —
-         * vars[ySlotStart..ySlotStart+systemSize) holds the Newton iterate to
-         * differentiate at, vars[tSlot] holds the corresponding evaluation time
-         * @param outDfDy systemSize x systemSize; fill outDfDy[row][col] = d
-         * f_row / d y_col
+         * @param vars      the current frame — vars[ySlotStart..ySlotStart+systemSize)
+         *                  holds the Newton iterate to differentiate at, vars[tSlot]
+         *                  holds the corresponding evaluation time
+         * @param outDfDy   systemSize x systemSize; fill outDfDy[row][col] = d f_row / d y_col
          */
-        void computeDfDy(double[] vars, double[][] outDfDy) throws Throwable;
+        void computeDfDy(double[] vars, double[][] outDfDy);
     }
 
     // ------------------------------------------------------------------
     // Shared validation helpers
     // ------------------------------------------------------------------
-    private static void validateHandle(MethodHandle dy_dt) {
+
+    private static void validateHandle(ODEFunction dy_dt) {
         if (dy_dt == null) {
-            throw new IllegalArgumentException("dy_dt MethodHandle must not be null");
-        }
-        if (!dy_dt.type().equals(DY_DT_TYPE)) {
-            throw new IllegalArgumentException(
-                    "dy_dt MethodHandle has incompatible signature. Expected " + DY_DT_TYPE
-                    + " but got " + dy_dt.type()
-                    + ". ParserNG's compiled handle must exactly match void f(double[], double[]).");
+            throw new IllegalArgumentException("dy_dt ODEFunction must not be null");
         }
     }
 
@@ -131,28 +111,24 @@ public class DifferentialEquations {
         return direction > 0 ? (t >= tEnd) : (t <= tEnd);
     }
 
-    /**
-     * Convenience no-op listener used internally so the recording and
-     * non-recording paths share one core loop.
-     */
-    private static final StepListener NO_OP = (t, y) -> {
-    };
+    /** Convenience no-op listener used internally so the recording and non-recording paths share one core loop. */
+    private static final StepListener NO_OP = (t, y) -> { };
 
     // ------------------------------------------------------------------
     // Euler
     // ------------------------------------------------------------------
-    public static double[] stepEuler(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps) throws Throwable {
+
+    public static double[] stepEuler(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                     int frameSize, double t0, double[] y0, double tEnd, int steps) {
         return stepEulerCore(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP);
     }
 
     /**
-     * Same as {@link #stepEuler}, but records (t, y) at t0 and after every
-     * step. Returns a [steps+1][1+systemSize] matrix: column 0 is t, columns
-     * 1..systemSize are y.
+     * Same as {@link #stepEuler}, but records (t, y) at t0 and after every step.
+     * Returns a [steps+1][1+systemSize] matrix: column 0 is t, columns 1..systemSize are y.
      */
-    public static double[][] stepEulerWithHistory(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps) throws Throwable {
+    public static double[][] stepEulerWithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                                  int frameSize, double t0, double[] y0, double tEnd, int steps) {
         List<double[]> rows = new ArrayList<>(steps + 1);
         StepListener recorder = (t, y) -> {
             double[] row = new double[1 + systemSize];
@@ -164,9 +140,9 @@ public class DifferentialEquations {
         return rows.toArray(new double[0][]);
     }
 
-    private static double[] stepEulerCore(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps,
-            StepListener listener) throws Throwable {
+    private static double[] stepEulerCore(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                          int frameSize, double t0, double[] y0, double tEnd, int steps,
+                                          StepListener listener) {
         validateHandle(dy_dt);
         validateSlots(tSlot, ySlotStart, systemSize, frameSize);
         if (steps <= 0) {
@@ -185,7 +161,7 @@ public class DifferentialEquations {
             vars[tSlot] = t;
             System.arraycopy(currentY, 0, vars, ySlotStart, systemSize);
 
-            dy_dt.invokeExact(vars, slopes);
+            dy_dt.apply(vars, slopes);
 
             for (int j = 0; j < systemSize; j++) {
                 currentY[j] += h * slopes[j];
@@ -199,13 +175,14 @@ public class DifferentialEquations {
     // ------------------------------------------------------------------
     // RK4
     // ------------------------------------------------------------------
-    public static double[] stepRK4(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps) throws Throwable {
+
+    public static double[] stepRK4(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                   int frameSize, double t0, double[] y0, double tEnd, int steps) {
         return stepRK4Core(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP);
     }
 
-    public static double[][] stepRK4WithHistory(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps) throws Throwable {
+    public static double[][] stepRK4WithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                                int frameSize, double t0, double[] y0, double tEnd, int steps) {
         List<double[]> rows = new ArrayList<>(steps + 1);
         StepListener recorder = (t, y) -> {
             double[] row = new double[1 + systemSize];
@@ -217,9 +194,9 @@ public class DifferentialEquations {
         return rows.toArray(new double[0][]);
     }
 
-    private static double[] stepRK4Core(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps,
-            StepListener listener) throws Throwable {
+    private static double[] stepRK4Core(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                        int frameSize, double t0, double[] y0, double tEnd, int steps,
+                                        StepListener listener) {
         validateHandle(dy_dt);
         validateSlots(tSlot, ySlotStart, systemSize, frameSize);
         if (steps <= 0) {
@@ -237,25 +214,25 @@ public class DifferentialEquations {
         for (int i = 0; i < steps; i++) {
             vars[tSlot] = t;
             System.arraycopy(currentY, 0, vars, ySlotStart, systemSize);
-            dy_dt.invokeExact(vars, k[0]);
+            dy_dt.apply(vars, k[0]);
 
             vars[tSlot] = t + h * 0.5;
             for (int j = 0; j < systemSize; j++) {
                 vars[ySlotStart + j] = currentY[j] + h * 0.5 * k[0][j];
             }
-            dy_dt.invokeExact(vars, k[1]);
+            dy_dt.apply(vars, k[1]);
 
             vars[tSlot] = t + h * 0.5;
             for (int j = 0; j < systemSize; j++) {
                 vars[ySlotStart + j] = currentY[j] + h * 0.5 * k[1][j];
             }
-            dy_dt.invokeExact(vars, k[2]);
+            dy_dt.apply(vars, k[2]);
 
             vars[tSlot] = t + h;
             for (int j = 0; j < systemSize; j++) {
                 vars[ySlotStart + j] = currentY[j] + h * k[2][j];
             }
-            dy_dt.invokeExact(vars, k[3]);
+            dy_dt.apply(vars, k[3]);
 
             for (int j = 0; j < systemSize; j++) {
                 currentY[j] += (h / 6.0) * (k[0][j] + 2 * k[1][j] + 2 * k[2][j] + k[3][j]);
@@ -269,32 +246,21 @@ public class DifferentialEquations {
     // ------------------------------------------------------------------
     // RK45 Dormand-Prince (adaptive, direction-aware)
     // ------------------------------------------------------------------
-    public static double[] stepRK45Adaptive(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, double initialH) throws Throwable {
+
+    public static double[] stepRK45Adaptive(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                            int frameSize, double t0, double[] y0, double tEnd, double initialH) {
         return stepRK45AdaptiveCore(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, initialH, NO_OP);
     }
 
     /**
-     * Same as {@link #stepRK45Adaptive}, but records (t, y) at t0 and after
-     * every ACCEPTED step. Because this solver is adaptive, the resulting t
-     * values are irregularly spaced — resample() can be used afterward to
-     * interpolate onto a uniform grid for plotting.
-     *
-     * @param dy_dt
-     * @param tSlot
-     * @param ySlotStart
-     * @param systemSize
-     * @param frameSize
-     * @param t0
-     * @param y0
-     * @param tEnd
-     * @param initialH
-     * @return
-     * @throws Throwable
+     * Same as {@link #stepRK45Adaptive}, but records (t, y) at t0 and after every
+     * ACCEPTED step. Because this solver is adaptive, the resulting t values are
+     * irregularly spaced — resample() can be used afterward to interpolate onto a
+     * uniform grid for plotting.
      */
-    public static double[][] stepRK45AdaptiveWithHistory(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd,
-            double initialH) throws Throwable {
+    public static double[][] stepRK45AdaptiveWithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                                          int frameSize, double t0, double[] y0, double tEnd,
+                                                          double initialH) {
         List<double[]> rows = new ArrayList<>();
         StepListener recorder = (t, y) -> {
             double[] row = new double[1 + systemSize];
@@ -306,9 +272,9 @@ public class DifferentialEquations {
         return rows.toArray(new double[0][]);
     }
 
-    private static double[] stepRK45AdaptiveCore(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd,
-            double initialH, StepListener listener) throws Throwable {
+    private static double[] stepRK45AdaptiveCore(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                                  int frameSize, double t0, double[] y0, double tEnd,
+                                                  double initialH, StepListener listener) {
         validateHandle(dy_dt);
         validateSlots(tSlot, ySlotStart, systemSize, frameSize);
         if (initialH == 0.0) {
@@ -349,43 +315,43 @@ public class DifferentialEquations {
 
             vars[tSlot] = t;
             System.arraycopy(currentY, 0, vars, ySlotStart, systemSize);
-            dy_dt.invokeExact(vars, k[0]);
+            dy_dt.apply(vars, k[0]);
 
             vars[tSlot] = t + DP_C2 * h;
             for (int j = 0; j < systemSize; j++) {
                 vars[ySlotStart + j] = currentY[j] + h * (DP_A21 * k[0][j]);
             }
-            dy_dt.invokeExact(vars, k[1]);
+            dy_dt.apply(vars, k[1]);
 
             vars[tSlot] = t + DP_C3 * h;
             for (int j = 0; j < systemSize; j++) {
                 vars[ySlotStart + j] = currentY[j] + h * (DP_A31 * k[0][j] + DP_A32 * k[1][j]);
             }
-            dy_dt.invokeExact(vars, k[2]);
+            dy_dt.apply(vars, k[2]);
 
             vars[tSlot] = t + DP_C4 * h;
             for (int j = 0; j < systemSize; j++) {
                 vars[ySlotStart + j] = currentY[j] + h * (DP_A41 * k[0][j] + DP_A42 * k[1][j] + DP_A43 * k[2][j]);
             }
-            dy_dt.invokeExact(vars, k[3]);
+            dy_dt.apply(vars, k[3]);
 
             vars[tSlot] = t + DP_C5 * h;
             for (int j = 0; j < systemSize; j++) {
                 vars[ySlotStart + j] = currentY[j] + h * (DP_A51 * k[0][j] + DP_A52 * k[1][j] + DP_A53 * k[2][j] + DP_A54 * k[3][j]);
             }
-            dy_dt.invokeExact(vars, k[4]);
+            dy_dt.apply(vars, k[4]);
 
             vars[tSlot] = t + DP_C6 * h;
             for (int j = 0; j < systemSize; j++) {
                 vars[ySlotStart + j] = currentY[j] + h * (DP_A61 * k[0][j] + DP_A62 * k[1][j] + DP_A63 * k[2][j] + DP_A64 * k[3][j] + DP_A65 * k[4][j]);
             }
-            dy_dt.invokeExact(vars, k[5]);
+            dy_dt.apply(vars, k[5]);
 
             vars[tSlot] = t + h;
             for (int j = 0; j < systemSize; j++) {
                 vars[ySlotStart + j] = currentY[j] + h * (DP_A71 * k[0][j] + DP_A73 * k[2][j] + DP_A74 * k[3][j] + DP_A75 * k[4][j] + DP_A76 * k[5][j]);
             }
-            dy_dt.invokeExact(vars, k[6]);
+            dy_dt.apply(vars, k[6]);
 
             for (int j = 0; j < systemSize; j++) {
                 y5[j] = currentY[j] + h * (DP_B51 * k[0][j] + DP_B53 * k[2][j] + DP_B54 * k[3][j] + DP_B55 * k[4][j] + DP_B56 * k[5][j]);
@@ -426,30 +392,31 @@ public class DifferentialEquations {
     // ------------------------------------------------------------------
     // Implicit Euler
     // ------------------------------------------------------------------
-    public static double[] stepImplicitEuler(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps) throws Throwable {
+
+    public static double[] stepImplicitEuler(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                             int frameSize, double t0, double[] y0, double tEnd, int steps) {
         return stepImplicitEulerCore(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP, null);
     }
 
     /**
      * Same as {@link #stepImplicitEuler}, but replaces the default central-
-     * difference Jacobian with the supplied {@link JacobianStrategy} — e.g. an
-     * AnalyticJacobian for an exact forward-mode-AD Jacobian.
+     * difference Jacobian with the supplied {@link JacobianStrategy} — e.g.
+     * an AnalyticJacobian for an exact forward-mode-AD Jacobian.
      */
-    public static double[] stepImplicitEuler(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps,
-            JacobianStrategy jacobianStrategy) throws Throwable {
+    public static double[] stepImplicitEuler(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                             int frameSize, double t0, double[] y0, double tEnd, int steps,
+                                             JacobianStrategy jacobianStrategy) {
         return stepImplicitEulerCore(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP, jacobianStrategy);
     }
 
-    public static double[][] stepImplicitEulerWithHistory(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps) throws Throwable {
+    public static double[][] stepImplicitEulerWithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                                           int frameSize, double t0, double[] y0, double tEnd, int steps) {
         return stepImplicitEulerWithHistory(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, null);
     }
 
-    public static double[][] stepImplicitEulerWithHistory(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps,
-            JacobianStrategy jacobianStrategy) throws Throwable {
+    public static double[][] stepImplicitEulerWithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                                           int frameSize, double t0, double[] y0, double tEnd, int steps,
+                                                           JacobianStrategy jacobianStrategy) {
         List<double[]> rows = new ArrayList<>(steps + 1);
         StepListener recorder = (t, y) -> {
             double[] row = new double[1 + systemSize];
@@ -461,9 +428,9 @@ public class DifferentialEquations {
         return rows.toArray(new double[0][]);
     }
 
-    private static double[] stepImplicitEulerCore(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
-            int frameSize, double t0, double[] y0, double tEnd, int steps,
-            StepListener listener, JacobianStrategy jacobianStrategyOrNull) throws Throwable {
+    private static double[] stepImplicitEulerCore(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+                                                   int frameSize, double t0, double[] y0, double tEnd, int steps,
+                                                   StepListener listener, JacobianStrategy jacobianStrategyOrNull) {
         validateHandle(dy_dt);
         validateSlots(tSlot, ySlotStart, systemSize, frameSize);
         if (steps <= 0) {
@@ -496,7 +463,7 @@ public class DifferentialEquations {
 
             vars[tSlot] = t;
             System.arraycopy(currentY, 0, vars, ySlotStart, systemSize);
-            dy_dt.invokeExact(vars, f_guess);
+            dy_dt.apply(vars, f_guess);
 
             for (int j = 0; j < systemSize; j++) {
                 nextYGuess[j] = currentY[j] + h * f_guess[j];
@@ -506,7 +473,7 @@ public class DifferentialEquations {
             for (int k = 0; k < MAX_NEWTON_ITER; k++) {
                 vars[tSlot] = nextT;
                 System.arraycopy(nextYGuess, 0, vars, ySlotStart, systemSize);
-                dy_dt.invokeExact(vars, f_guess);
+                dy_dt.apply(vars, f_guess);
 
                 double gNorm = 0.0;
                 for (int j = 0; j < systemSize; j++) {
@@ -556,7 +523,7 @@ public class DifferentialEquations {
      * f_plus/f_minus are captured once per solve, not reallocated per Newton
      * iteration.
      */
-    private static JacobianStrategy finiteDifferenceStrategy(MethodHandle dy_dt, int ySlotStart, int systemSize) {
+    private static JacobianStrategy finiteDifferenceStrategy(ODEFunction dy_dt, int ySlotStart, int systemSize) {
         final double EPSILON = 1e-7;
         final double[] f_plus = new double[systemSize];
         final double[] f_minus = new double[systemSize];
@@ -565,10 +532,10 @@ public class DifferentialEquations {
                 double originalValue = vars[ySlotStart + col];
 
                 vars[ySlotStart + col] = originalValue + EPSILON;
-                dy_dt.invokeExact(vars, f_plus);
+                dy_dt.apply(vars, f_plus);
 
                 vars[ySlotStart + col] = originalValue - EPSILON;
-                dy_dt.invokeExact(vars, f_minus);
+                dy_dt.apply(vars, f_minus);
 
                 vars[ySlotStart + col] = originalValue;
 
@@ -627,12 +594,13 @@ public class DifferentialEquations {
     // fixed-step history (already uniform) or an adaptive RK45 history
     // (irregularly spaced accepted steps).
     // ------------------------------------------------------------------
+
     /**
      * Resamples a [t, y1..yn] history matrix onto `points` uniformly spaced t
      * values spanning history's first and last t, via piecewise-linear
      * interpolation between bracketing rows. history must have at least 2 rows
-     * and be monotonic in t (either increasing or decreasing — matches
-     * whichever integration direction produced it).
+     * and be monotonic in t (either increasing or decreasing — matches whichever
+     * integration direction produced it).
      */
     public static double[][] resample(double[][] history, int points) {
         if (history == null || history.length < 2) {
@@ -665,7 +633,7 @@ public class DifferentialEquations {
             // Advance to the bracketing segment [history[i], history[i+1]] containing targetT.
             while (searchFrom < history.length - 2
                     && (direction > 0 ? history[searchFrom + 1][0] < targetT
-                            : history[searchFrom + 1][0] > targetT)) {
+                                       : history[searchFrom + 1][0] > targetT)) {
                 searchFrom++;
             }
 

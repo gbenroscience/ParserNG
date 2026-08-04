@@ -1,15 +1,12 @@
-package com.github.gbenroscience.math.differentialcalculus.equations;
+package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
 /**
- * Small shared helpers used across the Turbo/Vector/HigherOrder ODE entry
- * points. Package-private: not part of the public ParserNG-facing surface.
+ * Small shared helpers used across the Turbo/Vector/HigherOrder ODE entry points.
+ * Package-private: not part of the public ParserNG-facing surface.
  */
 final class OdeSupport {
 
-    /**
-     * Default output resolution for *Path entry points when the caller doesn't
-     * specify one.
-     */
+    /** Default output resolution for *Path entry points when the caller doesn't specify one. */
     static final int DEFAULT_PATH_POINTS = 100;
 
     private OdeSupport() {

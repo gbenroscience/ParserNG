@@ -112,10 +112,17 @@ public class Declarations {
     public static final String AUTO_DIFF = "autodiff";
     public static final String AUTO_DIFF_N = "autodiffN";
     public static final String INTEGRATION = "intg";
+    
+    
+    
     public static final String DIFF_EQN = "diffeqn"; 
     public static final String DIFF_EQN_PATH = "diffeqnPath";
     public static final String DIFF_EQN_HO = "diffeqnHO";
-    public static final String DIFF_EQN_H0_PATH = "diffeqnPathHO"; 
+    public static final String DIFF_EQN_PATH_HO = "diffeqnPathHO";
+    public static final String DIFF_EQN_LINEAR_HO = "diffeqnLinearHO"; 
+    public static final String DIFF_EQN_PATH_LINEAR_HO = "diffeqnPathLinearHO"; //HO means higher order
+    
+     
 
     public static final String QUADRATIC = "quadratic";
     public static final String TARTAGLIA_ROOTS = "t_root";

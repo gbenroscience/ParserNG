@@ -42,7 +42,7 @@ public class ExpressionSimplifier {
         for(int i=0;i<duplicate.size();i++){
             
             if(duplicate.get(i).equals(")")){
-               int open = Bracket.getComplementIndex(false, i, duplicate);
+               int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, duplicate);
                List<String>subList = duplicate.subList(open, i+1);
                subList.remove(0);//remove the open bracket.
                subList.remove(subList.size()-1);//remove the close bracket.

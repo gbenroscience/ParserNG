@@ -1,6 +1,5 @@
-package com.github.gbenroscience.math.differentialcalculus.equations;
+package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
-import java.lang.invoke.MethodHandle;
 
 /**
  * Vector-system entry points: systemSize is derived directly from y0.length
@@ -15,66 +14,40 @@ public class VectorODE {
     // ------------------------------------------------------------------
     // Endpoint-only system solve
     // ------------------------------------------------------------------
-    /**
-     *
-     * @param dy_dt
-     * @param tSlot
-     * @param ySlotStart
-     * @param frameSize
-     * @param t0
-     * @param y0
-     * @param tEnd
-     * @param initialStep
-     * @param method
-     * @return
-     * @throws Throwable
-     */
-    public static double[] executeVectorODE(MethodHandle dy_dt,
-            int tSlot,
-            int ySlotStart,
-            int frameSize,
-            double t0,
-            double[] y0,
-            double tEnd,
-            double initialStep,
-            DifferentialEquations.ODESolverMethod method) throws Throwable {
+
+    public static double[] executeVectorODE(ODEFunction dy_dt,
+                                             int tSlot,
+                                             int ySlotStart,
+                                             int frameSize,
+                                             double t0,
+                                             double[] y0,
+                                             double tEnd,
+                                             double initialStep,
+                                             DifferentialEquations.ODESolverMethod method) {
         return executeVectorODE(dy_dt, tSlot, ySlotStart, frameSize, t0, y0, tEnd, initialStep, method, null);
     }
 
     /**
      * Same as {@link #executeVectorODE}, but accepts an optional
-     * {@link DifferentialEquations.JacobianStrategy} — e.g. an AnalyticJacobian
-     * built from forward-mode AD — to replace the default central-difference
-     * Jacobian used by the IMPLICIT_EULER path.
+     * {@link DifferentialEquations.JacobianStrategy} — e.g. an
+     * AnalyticJacobian built from forward-mode AD — to replace the default
+     * central-difference Jacobian used by the IMPLICIT_EULER path.
      *
      * jacobianStrategy is only consulted when method is IMPLICIT_EULER; for
      * every other method it is accepted but ignored, since explicit methods
-     * never build a Jacobian. That keeps a single call site workable regardless
-     * of which method a caller ultimately selects.
-     *
-     * @param dy_dt
-     * @param tSlot
-     * @param ySlotStart
-     * @param frameSize
-     * @param t0
-     * @param y0
-     * @param tEnd
-     * @param initialStep
-     * @param method
-     * @param jacobianStrategy
-     * @return
-     * @throws Throwable
+     * never build a Jacobian. That keeps a single call site workable
+     * regardless of which method a caller ultimately selects.
      */
-    public static double[] executeVectorODE(MethodHandle dy_dt,
-            int tSlot,
-            int ySlotStart,
-            int frameSize,
-            double t0,
-            double[] y0,
-            double tEnd,
-            double initialStep,
-            DifferentialEquations.ODESolverMethod method,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
+    public static double[] executeVectorODE(ODEFunction dy_dt,
+                                             int tSlot,
+                                             int ySlotStart,
+                                             int frameSize,
+                                             double t0,
+                                             double[] y0,
+                                             double tEnd,
+                                             double initialStep,
+                                             DifferentialEquations.ODESolverMethod method,
+                                             DifferentialEquations.JacobianStrategy jacobianStrategy) {
 
         if (initialStep <= 0.0) {
             throw new IllegalArgumentException("initialStep must be positive (a magnitude), got " + initialStep);
@@ -112,65 +85,37 @@ public class VectorODE {
     // ------------------------------------------------------------------
     // Trajectory system solve
     // ------------------------------------------------------------------
-    /**
-     *
-     * @param dy_dt
-     * @param tSlot
-     * @param ySlotStart
-     * @param frameSize
-     * @param t0
-     * @param y0
-     * @param tEnd
-     * @param h
-     * @param method
-     * @param points
-     * @return
-     * @throws Throwable
-     */
-    public static double[][] executeVectorODEPath(MethodHandle dy_dt,
-            int tSlot,
-            int ySlotStart,
-            int frameSize,
-            double t0,
-            double[] y0,
-            double tEnd,
-            double h,
-            DifferentialEquations.ODESolverMethod method,
-            int points) throws Throwable {
+
+    public static double[][] executeVectorODEPath(ODEFunction dy_dt,
+                                                   int tSlot,
+                                                   int ySlotStart,
+                                                   int frameSize,
+                                                   double t0,
+                                                   double[] y0,
+                                                   double tEnd,
+                                                   double h,
+                                                   DifferentialEquations.ODESolverMethod method,
+                                                   int points) {
         return executeVectorODEPath(dy_dt, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, null);
     }
 
     /**
      * Same as {@link #executeVectorODEPath}, with an optional
      * {@link DifferentialEquations.JacobianStrategy}, consulted only when
-     * method is IMPLICIT_EULER (see {@link #executeVectorODE} for the same note
-     * on the other methods ignoring it).
-     *
-     * @param dy_dt
-     * @param tSlot
-     * @param ySlotStart
-     * @param frameSize
-     * @param t0
-     * @param y0
-     * @param tEnd
-     * @param h
-     * @param method
-     * @param points
-     * @param jacobianStrategy
-     * @return
-     * @throws Throwable
+     * method is IMPLICIT_EULER (see {@link #executeVectorODE} for the same
+     * note on the other methods ignoring it).
      */
-    public static double[][] executeVectorODEPath(MethodHandle dy_dt,
-            int tSlot,
-            int ySlotStart,
-            int frameSize,
-            double t0,
-            double[] y0,
-            double tEnd,
-            double h,
-            DifferentialEquations.ODESolverMethod method,
-            int points,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
+    public static double[][] executeVectorODEPath(ODEFunction dy_dt,
+                                                   int tSlot,
+                                                   int ySlotStart,
+                                                   int frameSize,
+                                                   double t0,
+                                                   double[] y0,
+                                                   double tEnd,
+                                                   double h,
+                                                   DifferentialEquations.ODESolverMethod method,
+                                                   int points,
+                                                   DifferentialEquations.JacobianStrategy jacobianStrategy) {
 
         if (h <= 0.0) {
             throw new IllegalArgumentException("h must be positive (a magnitude), got " + h);

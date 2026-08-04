@@ -58,7 +58,7 @@ public class DerivativeStructureBuilder {
 					//ty
 					int closeindex = scanner.indexOf(")");
 
-					int openindex = Bracket.getComplementIndex(false, closeindex, scanner);
+					int openindex = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, closeindex, scanner);
 					subList = scanner.subList(openindex+1, closeindex);
 					print("---subList---before simplification---"+subList);
 					if(subList.isEmpty()){break;}
@@ -151,7 +151,7 @@ public class DerivativeStructureBuilder {
 					if(openindex==0){
 						closeindex = scanner.indexOf(")");
 
-						openindex = Bracket.getComplementIndex(false, closeindex, scanner);
+						openindex = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, closeindex, scanner);
 						List<String>sub = scanner.subList(openindex, closeindex+1);
 						Differentiable diff =
 								new Differentiable(generateName(), new ArrayList<>(sub.subList(1, sub.size()-1)));
@@ -162,7 +162,7 @@ public class DerivativeStructureBuilder {
 					if(openindex>0&&isInBuiltMethod(scanner.get(openindex-1))){
 						closeindex = scanner.indexOf(")");
 
-						openindex = Bracket.getComplementIndex(false, closeindex, scanner);
+						openindex = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, closeindex, scanner);
 						Differentiable diff =
 								new Differentiable(generateName(), new ArrayList<>(scanner.subList(openindex-1, closeindex+1)));
 						manager.add(diff);
@@ -174,7 +174,7 @@ public class DerivativeStructureBuilder {
 					else if(openindex>0&&!isInBuiltMethod(scanner.get(openindex-1))){
 						closeindex = scanner.indexOf(")");
 
-						openindex = Bracket.getComplementIndex(false, closeindex, scanner);
+						openindex = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, closeindex, scanner);
 						Differentiable diff =
 								new Differentiable(generateName(), new ArrayList<>(scanner.subList(openindex, closeindex+1)));
 						manager.add(diff);

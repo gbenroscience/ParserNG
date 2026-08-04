@@ -131,11 +131,7 @@ public class MathExpression implements Savable, Solvable {
      */
     private boolean hasFunctionOrVariableInitStatement;
 
-    /**
-     * The VariableManager object that allows an object of this class to
-     * remember its variables.
-     */
-    private transient VariableManager variableManager;
+  
 
     private static final int INIT_POOL_SIZE = 64;
     // A simple pre-allocated array of results to act as a stack
@@ -561,13 +557,10 @@ public class MathExpression implements Savable, Solvable {
      *
      */
     public MathExpression(String input) {
-        this(input, new VariableManager(), true);
+        this(input, true);
     }//end constructor MathExpression
 
-    public MathExpression(String input, boolean foldConstants) {
-        this(input, new VariableManager(), foldConstants);
-    }//end constructor MathExpression
-
+  
     /**
      * Very unsafe API, designed for high speed creation of
      * {@link MathExpression} objects when the scanner output is from a trusted
@@ -633,10 +626,10 @@ public class MathExpression implements Savable, Solvable {
             String prev = data.get(eqIdx - 1);
             String next = data.get(eqIdx + 1);
             if (prev.equals(")")) {// [rot, (, (, t, (, x, ), =, ln, (, x, ), ), ,, (, pi, /,2, ), ,, anon1, ,, anon2, )] 
-                int fnameIndex = Bracket.getComplementIndex(false, eqIdx - 1, data) - 1;
+                int fnameIndex = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, eqIdx - 1, data) - 1;
                 String fnNameToLeftOfEquals = data.get(fnameIndex);
                 int openBracIdxForFnAssignExpression = fnameIndex - 1;
-                int closeBracIdxForFnAssignExpression = Bracket.getComplementIndex(true, openBracIdxForFnAssignExpression, data);
+                int closeBracIdxForFnAssignExpression = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, openBracIdxForFnAssignExpression, data);
                 List<String> l = data.subList(openBracIdxForFnAssignExpression, closeBracIdxForFnAssignExpression + 1);
                 final StringBuilder s = new StringBuilder();
                 l.forEach(new Consumer<String>() {
@@ -656,7 +649,7 @@ public class MathExpression implements Savable, Solvable {
                     data.set(eqIdx + 1, "");//squash consumed token
 
                     if (data.get(eqIdx - 2).equals("(")) {// (, f, =, anon1
-                        int closeBracIdx = Bracket.getComplementIndex(true, eqIdx - 2, data);
+                        int closeBracIdx = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, eqIdx - 2, data);
                         if (closeBracIdx == eqIdx + 2) {// (, f, =, anon1, )
                             data.set(eqIdx - 2, "");//squash consumed token
                             data.set(eqIdx + 2, "");//squash consumed token
@@ -678,14 +671,13 @@ public class MathExpression implements Savable, Solvable {
         return s.toString();
     }
 
-    public MathExpression(String input, VariableManager variableManager, boolean foldConstants) {
+    public MathExpression(String input, boolean foldConstants) {
         this.willFoldConstants = foldConstants;
         this.help = input.equals(Declarations.HELP);
         for (int i = 0; i < INIT_POOL_SIZE; i++) {
             pool[i] = new EvalResult();
         }
-
-        this.variableManager = variableManager;
+ 
 
         Scanner cs = new Scanner(STRING.purifier(input), false, VariableManager.endOfLine);
 
@@ -699,7 +691,7 @@ public class MathExpression implements Savable, Solvable {
                 //process rot function if it contains =
 
                 int openBracIdx = indexOfRot + "rot".length();
-                int idxOfCloseBracForRot = Bracket.getComplementIndex(true, openBracIdx, code);
+                int idxOfCloseBracForRot = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, openBracIdx, code);
                 int eqIdx = code.indexOf("=", indexOfRot);
                 if (eqIdx != -1 && eqIdx < idxOfCloseBracForRot) {//rot(f,=,jjj,....) e.g equals index lies inside rot's bracket contents
                     MathScanner sc = new MathScanner(code.substring(indexOfRot, idxOfCloseBracForRot + 1), this);
@@ -781,7 +773,6 @@ public class MathExpression implements Savable, Solvable {
         log.copyFrom(errorLog);
     }
 
-    
     private void initializing(String expression) {
         computeTreeDepth();
         setCorrectFunction(true);
@@ -789,7 +780,6 @@ public class MathExpression implements Savable, Solvable {
         setNoOfListReturningOperators(0);
         whitespaceremover.add("");
         //Scanner operation
-
         MathScanner opScanner = new MathScanner(expression, this);
 
         this.commaAlias = opScanner.commaAlias;
@@ -1080,14 +1070,9 @@ public class MathExpression implements Savable, Solvable {
         return hasFunctionOrVariableInitStatement;
     }
 
-    public VariableManager getVariableManager() {
-        return variableManager;
-    }
+  
 
-    public void setVariableManager(VariableManager variableManager) {
-        this.variableManager = variableManager;
-    }
-
+   
     public VariableRegistry getRegistry() {
         return registry;
     }
@@ -2104,7 +2089,7 @@ public class MathExpression implements Savable, Solvable {
 
                         EvalResult result = t.action.calc(getNextResult(), arity, args);
                         stack[++ptr] = result;
-                        break; 
+                        break;
                 }
             }
 
@@ -2277,7 +2262,7 @@ public class MathExpression implements Savable, Solvable {
                     default:
                         throw new UnsupportedOperationException("Operator not implemented for booleans: " + op);
                 }
-                return; 
+                return;
             }
 
             // 3. MATRIX AND COMPLEX TYPES PATH...
@@ -3494,6 +3479,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
     }
 
+   
     /**
      * Manual deep copy method that will most certainly outperform the clone
      * method. But needs to be updated whenever the MathExpression object's
@@ -3544,8 +3530,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         clone.slots = new int[slots.length];
         System.arraycopy(slots, 0, clone.slots, 0, slots.length);
         clone.treeStats = new MathExpressionTreeDepth.Result(treeStats.depth, treeStats.binaryOperators, treeStats.divOperators, treeStats.unaryOperators, treeStats.functions);
-        clone.turboCompiled = turboCompiled;
-        clone.variableManager = new VariableManager();
+        clone.turboCompiled = turboCompiled; 
         clone.whitespaceremover = new ArrayList<>(whitespaceremover);
         clone.willFoldConstants = willFoldConstants;
 //        clone.compiledTurbo = new FastCompositeExpression() {

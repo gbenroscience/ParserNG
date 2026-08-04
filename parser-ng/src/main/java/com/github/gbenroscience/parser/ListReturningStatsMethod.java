@@ -8,7 +8,6 @@ import static com.github.gbenroscience.parser.Operator.*;
 import com.github.gbenroscience.parser.methods.Method;
 import com.github.gbenroscience.util.ErrorLog;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -61,7 +60,7 @@ public final class ListReturningStatsMethod implements Validatable {
         this.index = (scan.get(index).equals(name)) ? index : -1;
         this.openBracket = new Bracket("(");
         this.openBracket.setIndex(index + 1);
-        int compIndex = Bracket.getComplementIndex(true, index + 1, scan);
+        int compIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, index + 1, scan);
         closeBracket = new Bracket(")");
         closeBracket.setIndex(compIndex);
         openBracket.setComplement(closeBracket);
@@ -235,7 +234,7 @@ public final class ListReturningStatsMethod implements Validatable {
 
         //Try to get the index of the enclosing bracket of the enclosing operator if one exists.
         if (foundLikelyEncloser) {
-            int compIndex = Bracket.getComplementIndex(true, i + 1, scan);
+            int compIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scan);
 
             if (compIndex > closeBracket.getIndex()) {
                 isEnveloped = true;

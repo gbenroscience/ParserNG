@@ -40,19 +40,16 @@ public class VariableManager {
      * Parses commands used to insert and make Variables loaded into the VARS
      * attribute of objects of this class.
      */
-    private CommandInterpreter commandParser;
+    private static final CommandInterpreter commandParser = new CommandInterpreter();
 
-    public VariableManager() {
-        commandParser = new CommandInterpreter();
+    public VariableManager() { 
     }
 
     public CommandInterpreter getCommandParser() {
         return commandParser;
     }
 
-    public void setCommandParser(CommandInterpreter commandParser) {
-        this.commandParser = commandParser;
-    }
+   
 
     public static String getEndOfLine() {
         return endOfLine;
@@ -118,7 +115,7 @@ public class VariableManager {
      * the variable store for.
      * @return true if it finds a variable by that name in the store.
      */
-    public boolean contains(String variableName) {
+    public static boolean contains(String variableName) {
         return VARIABLES.get(variableName) != null;
     }
 
@@ -165,12 +162,9 @@ public class VariableManager {
      *
      * @param cmd The command string to parse.
      */
-    public final void parseCommand(String cmd) {
-        if (commandParser == null) {
-            commandParser = new CommandInterpreter(cmd);
-        } else {
-            commandParser.setCommand(cmd);
-        }
+    public static final void parseCommand(String cmd) {
+       commandParser.setCommand(cmd);
+        
         if (commandParser.VARS != null) {
             VARIABLES.putAll(commandParser.VARS);
         }
@@ -351,7 +345,7 @@ public class VariableManager {
      *
      *
      */
-    public final class CommandInterpreter {
+    public static final class CommandInterpreter {
 
         final Map<String, Variable> VARS = new HashMap();
         private String command;

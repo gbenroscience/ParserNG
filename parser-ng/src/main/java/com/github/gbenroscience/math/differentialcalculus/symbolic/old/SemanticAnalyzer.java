@@ -57,7 +57,7 @@ public class SemanticAnalyzer {
                                 scanner.add(i + 2, ")");
                                 scanner.add(i + 1, "(");
                             } else {
-                                int close = getComplementIndex(true, i + 2, scanner);
+                                int close = getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 2, scanner);
                                 scanner.add(close + 1, ")");
                                 scanner.add(i + 1, "(");
                             }
@@ -280,7 +280,7 @@ public class SemanticAnalyzer {
                         scanner.add(i, "(");
                         scanner.add(i + 2, "*");
                     } else if (isOpeningBracket(scanner.get(j))) {
-                        int ind = Bracket.getComplementIndex(true, j, scanner);
+                        int ind = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, j, scanner);
                         scanner.add(ind + 1, ")");
                         scanner.add(i, "(");
                         scanner.add(i + 2, "*");
@@ -300,7 +300,7 @@ public class SemanticAnalyzer {
                  */
                 if (isUnaryPreOperatorORDefinedMethod(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
                     if (scanner.get(i).equals("-")) {
-                        List<String> subList = scanner.subList(i - 1, Bracket.getComplementIndex(true, i + 1, scanner) + 1);
+                        List<String> subList = scanner.subList(i - 1, Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner) + 1);
 
                         subList.set(1, "(");
                         subList.add(2, "-1");

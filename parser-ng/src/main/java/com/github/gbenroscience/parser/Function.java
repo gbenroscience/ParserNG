@@ -168,7 +168,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             throw new InputMismatchException(err);
         }
 
-        int computeCloseBracIndex = Bracket.getComplementIndex(true, indexOfOpenBrac, input);//this is the index of the matching close bracket for the args list
+        int computeCloseBracIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, indexOfOpenBrac, input);//this is the index of the matching close bracket for the args list
         if (computeCloseBracIndex != indexOfCloseBrac) {//Is a major structural flaw in the input...e.g f=@(((args))expr, but this is not allowed! only f=@(args)expr is
             String err = "Multiple brackets not allowed on args list e.g: f((x)) is not allowed, only f(x) and f=@((x)) is not allowed";
             log.info(err);
@@ -320,11 +320,11 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         if (indexOfOpenBrac != -1 && indexOfOpenBrac < equalsIndex) {
             if (semiColonIndex == -1) {
                 input = input.substring(0, indexOfOpenBrac)
-                        + "=@" + input.substring(indexOfOpenBrac, Bracket.getComplementIndex(true, indexOfOpenBrac, input) + 1) + "(" + input.substring(equalsIndex + 1) + ")";
+                        + "=@" + input.substring(indexOfOpenBrac, Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, indexOfOpenBrac, input) + 1) + "(" + input.substring(equalsIndex + 1) + ")";
             } else {
                 input = input.substring(0, semiColonIndex);
                 input = input.substring(0, indexOfOpenBrac)
-                        + "=@" + input.substring(indexOfOpenBrac, Bracket.getComplementIndex(true, indexOfOpenBrac, input) + 1) + "(" + input.substring(equalsIndex + 1) + ");";
+                        + "=@" + input.substring(indexOfOpenBrac, Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, indexOfOpenBrac, input) + 1) + "(" + input.substring(equalsIndex + 1) + ");";
             }
 
             //recompute the indexes.
@@ -369,7 +369,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 List<String> scanner = expr.getScanner();
 
                 if (!scanner.isEmpty() && scanner.get(0).equals("(")) {
-                    int compIndex = Bracket.getComplementIndex(true, 0, scanner);
+                    int compIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, 0, scanner);
                     if (compIndex == scanner.size() - 1) {
                         scanner.remove(0);
                         scanner.remove(scanner.size() - 1);
@@ -590,7 +590,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         int firstIndexOfClose = input.indexOf(")");
         int indexOfFirstOpenBrac = input.indexOf("(");
         String vars = input.substring(indexOfFirstOpenBrac + 1, firstIndexOfClose);//GETS x,y,z,w...,t print of @(x,y,z,w...,t)expr
-        String expr = input.substring(Bracket.getComplementIndex(true, indexOfFirstOpenBrac, input) + 1).trim();
+        String expr = input.substring(Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, indexOfFirstOpenBrac, input) + 1).trim();
         List<String> varList = new Scanner(vars, false, ",").scan();
         ArrayList<Variable> indVars = new ArrayList<>(varList.size());
 
@@ -625,7 +625,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         boolean isVector = numCount == varList.size() && numCount == 1;
 
         //Remove bogus enclosing brackets on an expression e.g(((x+2)))
-        while (expr.startsWith("(") && expr.endsWith(")") && Bracket.getComplementIndex(true, 0, expr) == expr.length() - 1) {
+        while (expr.startsWith("(") && expr.endsWith(")") && Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, 0, expr) == expr.length() - 1) {
             expr = expr.substring(1, expr.length() - 1).trim();
         }
 
@@ -1117,7 +1117,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                         mathExpression.setValue(v, Double.parseDouble(l.get(i)));
                     }
                 }//end for 
-                mathExpression.getVariableManager().parseCommand(vars);
+                VariableManager.parseCommand(vars); 
                 return mathExpression.solve();
             }//end if
             else {

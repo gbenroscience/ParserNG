@@ -138,7 +138,7 @@ public class UnaryPostOperator extends Operator implements Validatable {
                     i = j + 1;
                 }//end if
                 else if (isClosingBracket(scan.get(i - 1))) {// e.g. sin,(,9,),²
-                    int openIndex = Bracket.getComplementIndex(false, i - 1, scan);
+                    int openIndex = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i - 1, scan);
                     int j = i;
                     while (isUnaryPostOperator(scan.get(j))) {
                         ++j;

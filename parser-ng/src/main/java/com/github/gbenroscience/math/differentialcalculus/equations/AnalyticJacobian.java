@@ -13,26 +13,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.math.differentialcalculus.autodiff;
+package com.github.gbenroscience.math.differentialcalculus.equations;
+
+import com.github.gbenroscience.math.differentialcalculus.autodiff.SystemAutoDiffEvaluator;
 
 /**
  * Computes an exact n x n Jacobian d f_i / d y_j for a system of ODE RHS
- * expressions, using forward-mode AD ({@link SystemAutoDiffEvaluator})
- * instead of finite differences — the analytic replacement for the
- * central-difference Jacobian in DifferentialEquations.stepImplicitEulerCore.
+ * expressions, using forward-mode AD ({@link SystemAutoDiffEvaluator}) instead
+ * of finite differences — the analytic replacement for the central-difference
+ * Jacobian in DifferentialEquations.stepImplicitEulerCore.
  *
  * componentEvaluators[i] must be the AD evaluator compiled from the i-th RHS
  * expression f_i(t, y_1..y_n), and must share the same frame layout (the same
- * tSlot / ySlotStart assignment) as the solver's vars array — the frame
- * passed to compute() IS that vars array, unmodified.
+ * tSlot / ySlotStart assignment) as the solver's vars array — the frame passed
+ * to compute() IS that vars array, unmodified.
  *
  * <h2>Threading</h2>
  * Not thread-safe: the scratch buffer is reused across calls to avoid
  * per-Newton-iteration allocation. One AnalyticJacobian instance is meant to
  * back exactly one sequential solve, matching the same contract as
- * {@code CompanionSystemHandles}'s per-equation adapter — do not share a
- * single instance across concurrently running solves (e.g. ensemble lanes).
- * Each concurrent solve should build its own AnalyticJacobian from the same
+ * {@code CompanionSystemHandles}'s per-equation adapter — do not share a single
+ * instance across concurrently running solves (e.g. ensemble lanes). Each
+ * concurrent solve should build its own AnalyticJacobian from the same
  * (immutable, safely shareable) SystemAutoDiffEvaluator array.
  */
 public final class AnalyticJacobian {

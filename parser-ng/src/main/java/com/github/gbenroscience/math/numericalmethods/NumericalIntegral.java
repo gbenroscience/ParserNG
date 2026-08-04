@@ -675,7 +675,7 @@ F(x) = sin(x)/2x; intg(F(x),0,2,iterations)
                 if (exists) {
                     for (int i = 3; i < list.size(); i++) {
                         if (Operator.isOpeningBracket(list.get(i))) {
-                            int closeBracket = Bracket.getComplementIndex(true, i, list);
+                            int closeBracket = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i, list);
                             args1 = new MathExpression(LISTS.createStringFrom(list, i, closeBracket + 1)).solve();
                             List l = list.subList(i, closeBracket + 1);
                             l.clear();

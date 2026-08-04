@@ -1213,7 +1213,7 @@ public class MethodRegistry {
             Function f = FunctionManager.lookUp(args[0].textRes);
             String input = f.expressionForm();
             input = input.substring(1);//remove the @
-            int closeBracOfAt = Bracket.getComplementIndex(true, 0, input);
+            int closeBracOfAt = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, 0, input);
             input = input.substring(closeBracOfAt + 1);
             if (input.startsWith("(")) {
                 input = input.substring(1, input.length() - 1);
@@ -1232,7 +1232,7 @@ public class MethodRegistry {
             Function f = FunctionManager.lookUp(args[0].textRes);
             String input = f.expressionForm();
             input = input.substring(1);//remove the @
-            int closeBracOfAt = Bracket.getComplementIndex(true, 0, input);
+            int closeBracOfAt = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, 0, input);
             input = input.substring(closeBracOfAt + 1);
             if (input.startsWith("(")) {
                 input = input.substring(1, input.length() - 1);

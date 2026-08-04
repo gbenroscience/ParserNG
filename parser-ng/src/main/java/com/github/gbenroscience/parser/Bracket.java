@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.InputMismatchException;
 import java.util.List;
-import com.github.gbenroscience.util.VariableManager;
 import java.util.Arrays;
 
 /**
@@ -20,35 +19,91 @@ import java.util.Arrays;
 public class Bracket extends Operator {
 
     /**
-     * the name of the bracket i.e "(" or ")"
-     */
-    private transient String name = "";
-    /**
-     * The index of the bracket in the ArrayList containing the scanned function
+     * The index of the bracketChar in the ArrayList containing the scanned
+     * function
      */
     private int index;
     /**
      * objects of this class keep a record of their counterpart or complementing
-     * bracket.
+     * bracketChar.
      *
      */
     private transient Bracket complement;
+    
+    private BracketMode mode;
+
+    public static enum BracketMode {
+        CIRCULAR_OPEN('('), CIRCULAR_CLOSE(')'), SQUARE_OPEN('['), SQUARE_CLOSE(']'), CURVED_OPEN('{'), CURVED_CLOSE('}'), ANGULAR_OPEN('<'), ANGULAR_CLOSE('>');
+        private final char bracketChar;
+
+        private BracketMode(char bracketChar) {
+            this.bracketChar = bracketChar;
+        }
+
+        public final char getBracket() {
+            return bracketChar;
+        }
+
+        public static final BracketMode fromChar(char op) {
+            switch (op) {
+                case '(':
+                    return CIRCULAR_OPEN;
+                case ')':
+                    return CIRCULAR_CLOSE;
+                case '[':
+                    return SQUARE_OPEN;
+                case ']':
+                    return SQUARE_CLOSE;
+                case '{':
+                    return CURVED_OPEN;
+                case '}':
+                    return CURVED_CLOSE;
+                case '<':
+                    return ANGULAR_OPEN;
+                case '>':
+                    return ANGULAR_CLOSE;
+                default:
+                    throw new RuntimeException("Invalid bracket char spotted: " + Character.toString(op));
+            }
+        }
+
+        public static final BracketMode getComplement(BracketMode bm) {
+            switch (bm.bracketChar) {
+                case '(':
+                    return CIRCULAR_CLOSE;
+                case ')':
+                    return CIRCULAR_OPEN;
+                case '[':
+                    return SQUARE_CLOSE;
+                case ']':
+                    return SQUARE_OPEN;
+                case '{':
+                    return CURVED_CLOSE;
+                case '}':
+                    return CURVED_OPEN;
+                case '<':
+                    return ANGULAR_CLOSE;
+                case '>':
+                    return ANGULAR_OPEN;
+                default:
+                    throw new RuntimeException("Invalid bracket mode spotted: " + Character.toString(bm.bracketChar));
+            }
+        }
+
+    }
+
     /**
-     * Return true if the contents of the bracket have been evaluated
+     * Constructor of this class for creating its objects and initializing their
+     * names with either a (,[,{,< or ),],},>
+     *
+     * @param op
      */
-    private boolean evaluated = false;
-
-    public static final char CIRC_OPEN_BRAC = '(';
-    public static final char CIRC_CLOSE_BRAC = ')';
-
-    public static final char SQUARE_OPEN_BRAC = '[';
-    public static final char SQUARE_CLOSE_BRAC = ']';
-
-    public static final char CURVED_OPEN_BRAC = '{';
-    public static final char CURVED_CLOSE_BRAC = '}';
-
-    public static final char ANGULAR_OPEN_BRAC = '<';
-    public static final char ANGULAR_CLOSE_BRAC = '>';
+    public Bracket(String op) {
+        super(op);
+        if(op.length() == 1){
+            this.mode = BracketMode.fromChar(op.charAt(0));
+        }
+    }
 
     /**
      * Constructor of this class for creating its objects and initializing their
@@ -56,28 +111,27 @@ public class Bracket extends Operator {
      *
      * @param op
      */
-    public Bracket(String op) {
-        super(op);
-        this.name = op;
-
+    public Bracket(char op) {
+        this(Character.toString(op));
     }
-
+    
+     
     /**
-     *
-     * @param evaluated set whether or not this bracket's contents have been
-     * evaluated
+     * 
+     * @param mode The BracketMode
      */
-    public void setEvaluated(boolean evaluated) {
-        this.evaluated = evaluated;
+    public Bracket(BracketMode mode) {
+        this(mode.bracketChar);
     }
 
-    /**
-     *
-     * @return true if this bracket's contents have been evaluated
-     */
-    public boolean isEvaluated() {
-        return evaluated;
+    public static final Bracket fromMode(BracketMode bm) {
+        Bracket b = new Bracket(bm.bracketChar);
+        Bracket comp = new Bracket(BracketMode.getComplement(bm).bracketChar);
+        b.setComplement(comp);
+        return b;
     }
+
+
 
     /**
      * Used to create similar objects that are not equal The object created by
@@ -109,10 +163,7 @@ public class Bracket extends Operator {
      *
      * for(int i=0;i&lt;bracs.length;i++){
      * moreBracs[i]=createTwinBracket(bracs[i]); }
-     *
-     *
-     *
-     *
+     * 
      * Note that this can be applied to all storage objects too e.g Collection
      * objects and so on.
      *
@@ -131,7 +182,7 @@ public class Bracket extends Operator {
      * non-static version of the above method. This one creates a twin for this
      * Bracket object. The one above creates a twin for the specified bracket
      * object.
-     *
+     * 
      * @return a Bracket object that manifests exactly the same attributes as
      * brac but is a distinct object from brac.
      */
@@ -157,23 +208,6 @@ public class Bracket extends Operator {
      */
     public void setIndex(int index) {
         this.index = index;
-    }
-
-    /**
-     *
-     * @return the name of this Bracket either ( or )
-     */
-    public String getName() {
-        return name;
-    }
-
-    /**
-     *
-     * @param name sets the name of this bracket to either ( or )
-     */
-    @Override
-    public void setName(String name) {
-        this.name = name;
     }
 
     /**
@@ -207,9 +241,9 @@ public class Bracket extends Operator {
 
     /**
      *
-     * @param brac the bracket to be checked if or not it is enclosed by this
-     * bracket and its complement.
-     * @return true if the bracket is enclosed by this bracket and its
+     * @param brac the bracketChar to be checked if or not it is enclosed by
+     * this bracketChar and its complement.
+     * @return true if the bracketChar is enclosed by this bracketChar and its
      * counterpart.
      */
     public boolean encloses(Bracket brac) {
@@ -228,8 +262,8 @@ public class Bracket extends Operator {
      *
      * @param brac an ArrayList object containing all brackets found in a
      * function
-     * @return the number of bracket pairs contained between this Bracket object
-     * and its complement
+     * @return the number of bracketChar pairs contained between this Bracket
+     * object and its complement
      */
     public int getNumberOfInternalBrackets(ArrayList<Bracket> brac) {
         int num = 0;
@@ -247,21 +281,22 @@ public class Bracket extends Operator {
     /**
      * @param scan The ArrayList object containing the scanned function.
      * @return true if this Bracket object forms with its complement, a single
-     * bracket pair that is a bracket pair containing no other bracket pairs.
+     * bracketChar pair that is a bracketChar pair containing no other
+     * bracketChar pairs.
      */
     public boolean isSBP(ArrayList<String> scan) {
         int i = this.index;
         int j = this.complement.index;
 
         if (i < j) {
-            ++i;//step away from current bracket and start searching for other brackets.
+            ++i;//step away from current bracketChar and start searching for other brackets.
             for (; i < j; i++) {
                 if (isBracket(scan.get(i))) {
                     return false;
                 }
             }//end for
         } else if (i > j) {
-            ++j;//step away from current bracket and start searching for other brackets.
+            ++j;//step away from current bracketChar and start searching for other brackets.
             for (; j < i; j++) {
                 if (isBracket(scan.get(j))) {
                     return false;
@@ -274,17 +309,21 @@ public class Bracket extends Operator {
     }//end method
 
     /**
-     * @param isOpenBracket boolean variable that should be true if this bracket
-     * object whose complement we seek is an opening bracket i.e (, and should
-     * be set to false if this bracket object whose complement we seek is a
-     * closing bracket i.e )
-     * @param start the index of the given bracket.
+     * @param isOpenBracket boolean variable that should be true if this
+     * bracketChar object whose complement we seek is an opening bracketChar i.e
+     * (, and should be set to false if this bracketChar object whose complement
+     * we seek is a closing bracketChar i.e )
+     * @param mode The {@link BracketMode}
+     * @param start the index of the given bracketChar.
      * @param scan the ArrayList containing the scanned function.
-     * @return the index of the enclosing or complement bracket of this bracket
-     * object
+     * @return the index of the enclosing or complement bracketChar of this
+     * bracketChar object
      */
-    public static int getComplementIndex(boolean isOpenBracket, int start, List<String> scan) {
+    public static int getComplementIndex(boolean isOpenBracket, BracketMode mode, int start, List<String> scan) {
 
+        char openBrac = mode.bracketChar;
+        char closeBrac = BracketMode.getComplement(mode).bracketChar;
+        
         int open = 0;
         int close = 0;
         int stop = 0;
@@ -292,9 +331,9 @@ public class Bracket extends Operator {
             try {
                 for (int i = start; i < scan.size(); i++) {
                     String s = scan.get(i);
-                    if (s.charAt(0) == '(') {
+                    if (s.charAt(0) == openBrac) {
                         open++;
-                    } else if (s.charAt(0) == ')') {
+                    } else if (s.charAt(0) == closeBrac) {
                         close++;
                     }
                     if (open == close) {
@@ -312,9 +351,9 @@ public class Bracket extends Operator {
                 for (int i = start; i >= 0; i--) {
                     try {
                         String s = scan.get(i);
-                        if (s.charAt(0) == '(') {
+                        if (s.charAt(0) == openBrac) {
                             open++;
-                        } else if (s.charAt(0) == ')') {
+                        } else if (s.charAt(0) == closeBrac) {
                             close++;
                         }
                         if (open == close) {
@@ -334,16 +373,20 @@ public class Bracket extends Operator {
     }
 
     /**
-     * @param isOpenBracket boolean variable that should be true if this bracket
-     * object whose complement we seek is an opening bracket i.e (, and should
-     * be set to false if this bracket object whose complement we seek is a
-     * closing bracket i.e )
-     * @param start the index of the given bracket.
+     * @param isOpenBracket boolean variable that should be true if this
+     * bracketChar object whose complement we seek is an opening bracketChar i.e
+     * (, and should be set to false if this bracketChar object whose complement
+     * we seek is a closing bracketChar i.e )
+     * @param mode The {@link BracketMode}
+     * @param start the index of the given bracketChar.
      * @param expr the function string containing the brackets.
-     * @return the index of the enclosing or complement bracket of this bracket
-     * object
+     * @return the index of the enclosing or complement bracketChar of this
+     * bracketChar object
      */
-    public static int getComplementIndex(boolean isOpenBracket, int start, String expr) {
+    public static int getComplementIndex(boolean isOpenBracket, BracketMode mode, int start, String expr) {
+        
+      char openBrac = mode.bracketChar;
+        char closeBrac = BracketMode.getComplement(mode).bracketChar;
         int open = 0;
         int close = 0;
         int stop = 0;
@@ -357,9 +400,9 @@ public class Bracket extends Operator {
             }
             for (int i = start; i < n; i++) {
                 char c = expr.charAt(i);
-                if (c == '(') {
+                if (c == openBrac) {
                     open++;
-                } else if (c == ')') {
+                } else if (c == closeBrac) {
                     close++;
                 }
                 if (open == close) {
@@ -374,9 +417,9 @@ public class Bracket extends Operator {
             }
             for (int i = start; i >= 0; i--) {
                 char c = expr.charAt(i);
-                if (c == '(') {
+                if (c == openBrac) {
                     open++;
-                } else if (c == ')') {
+                } else if (c == closeBrac) {
                     close++;
                 }
                 if (open == close) {
@@ -392,11 +435,11 @@ public class Bracket extends Operator {
      *
      * @param list The list containing the scanned math expression.
      * @param start The point in the list where this algorithm should start
-     * checking the bracket syntax.(inclusive)
+     * checking the bracketChar syntax.(inclusive)
      * @param end The point in the list where this algorithm should stop
-     * checking the bracket syntax.(inclusive)
-     * @return true if the bracket syntax of the scanned expression in the given
-     * range is valid or the expression in the given range is devoid of
+     * checking the bracketChar syntax.(inclusive)
+     * @return true if the bracketChar syntax of the scanned expression in the
+     * given range is valid or the expression in the given range is devoid of
      * brackets.
      */
     public static boolean checkBracketStructure(List<String> list, int start, int end) {
@@ -429,7 +472,7 @@ public class Bracket extends Operator {
     /**
      *
      * @param bracket The String object.
-     * @return true if the String object represents an open bracket
+     * @return true if the String object represents an open bracketChar
      */
     public static boolean isOpenBracket(String bracket) {
         return bracket.equals("(");
@@ -438,7 +481,7 @@ public class Bracket extends Operator {
     /**
      *
      * @param bracket The String object.
-     * @return true if the String object represents a close bracket
+     * @return true if the String object represents a close bracketChar
      */
     public static boolean isCloseBracket(String bracket) {
         return bracket.equals(")");
@@ -494,9 +537,9 @@ public class Bracket extends Operator {
     /**
      *
      * @param scan The ArrayList object containing the scanned function.
-     * @return The contents of this bracket and its complement as a string, the
-     * bracket and its complement are also returned. e.g in 5+(2+3-sin2).. This
-     * method will return (2+3-sin2).
+     * @return The contents of this bracketChar and its complement as a string,
+     * the bracketChar and its complement are also returned. e.g in
+     * 5+(2+3-sin2).. This method will return (2+3-sin2).
      */
     public String getDomainContents(List<String> scan) {
 
@@ -520,11 +563,11 @@ public class Bracket extends Operator {
     }//end method
 
     /**
-     * returns a List containing the contents of a bracket pair,including the
-     * bracket pair itself.
+     * returns a List containing the contents of a bracketChar pair,including
+     * the bracketChar pair itself.
      *
      * @param scan the ArrayList containing the scanner output for a Function
-     * @return the bracket pair and its contents.
+     * @return the bracketChar pair and its contents.
      */
     public List<String> getBracketDomainContents(List<String> scan) {
         if (isOpeningBracket(this.getName())) {
@@ -562,7 +605,7 @@ public class Bracket extends Operator {
                 stack.push(i);
             } else if (")".equals(token)) {
                 if (stack.isEmpty()) {
-                    // unmatched closing bracket -> invalid structure
+                    // unmatched closing bracketChar -> invalid structure
                     return false;
                 }
                 int openIndex = stack.pop();
@@ -614,8 +657,8 @@ public class Bracket extends Operator {
     /**
      * @param scanner The ArrayList containing the scanner output for a Function
      * @param index The index at which the token is to be retrieved. The first
-     * and elements are compulsorily always an open bracket and a close bracket
-     * respectively.
+     * and elements are compulsorily always an open bracketChar and a close
+     * bracketChar respectively.
      */
     public String domainTokenAt(List<String> scanner, int index) {
         List<String> domain = getBracketDomainContents((ArrayList<String>) scanner);
@@ -624,17 +667,16 @@ public class Bracket extends Operator {
 
     public String toString() {
         return String.format(
-                "{\"name\": \"%s\", \"index\": %d, \"evaluated\": %b, \"c_name\": \"%s\", \"c_index\": %d, \"c_evaluated\": %b}",
-                name, index, evaluated, complement.name, complement.index, complement.evaluated
+                "{\"name\": \"%s\", \"index\": %d, \"c_name\": \"%s\", \"c_index\": %d}",
+                name, index, complement.name, complement.index
         );
     }
 
     public static void main(String... args) {
-        
+
         MathExpression me = new MathExpression("4*x^3*sin(x^2)");
-        System.out.println("scanner: "+me.scanner);
-        System.out.println("rpn-tokens: "+Arrays.deepToString(me.getCachedPostfix()));
-        
+        System.out.println("scanner: " + me.scanner);
+        System.out.println("rpn-tokens: " + Arrays.deepToString(me.getCachedPostfix()));
 
         String s1 = "sin(1)+cos(1)+tan(1)+log(10)+sqrt(16)+exp(1)+pow(2,8)+abs(-42)+sum(1,2,3,4,5)+sin(3*12+cos(55))-(4+5)*(2*(9-2)+12*(4-7));";
 

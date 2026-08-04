@@ -17,7 +17,7 @@ public class Operator {
      * The name of the operator object
      */
     protected String name;
-    
+
     public static final String PLUS = OperatorConstant.PLUS.getSymbol();
     public static final String MINUS = OperatorConstant.MINUS.getSymbol();
     public static final String DIVIDE = OperatorConstant.DIVIDE.getSymbol();
@@ -37,6 +37,12 @@ public class Operator {
     public static final String REMAINDER = OperatorConstant.REMAINDER.getSymbol();
     public static final String OPEN_CIRC_BRAC = OperatorConstant.OPEN_CIRC_BRAC.getSymbol();
     public static final String CLOSE_CIRC_BRAC = OperatorConstant.CLOSE_CIRC_BRAC.getSymbol();
+    public static final String OPEN_SQUARE_BRAC = OperatorConstant.OPEN_SQUARE_BRAC.getSymbol();
+    public static final String CLOSE_SQUARE_BRAC = OperatorConstant.CLOSE_SQUARE_BRAC.getSymbol();
+    public static final String OPEN_CURVED_BRAC = OperatorConstant.OPEN_CURVED_BRAC.getSymbol();
+    public static final String CLOSE_CURVED_BRAC = OperatorConstant.CLOSE_CURVED_BRAC.getSymbol();
+    public static final String OPEN_ANGULAR_BRAC = OperatorConstant.OPEN_ANGULAR_BRAC.getSymbol();
+    public static final String CLOSE_ANGULAR_BRAC = OperatorConstant.CLOSE_ANGULAR_BRAC.getSymbol();
     public static final String COMMA = OperatorConstant.COMMA.getSymbol();
     public static final String ROOT = OperatorConstant.ROOT.getSymbol();
     public static final String CUBE_ROOT = OperatorConstant.CUBE_ROOT.getSymbol();
@@ -45,8 +51,6 @@ public class Operator {
     public static final String INVERSE = OperatorConstant.INVERSE.getSymbol();
     public static final String SQUARE = OperatorConstant.SQUARE.getSymbol();
     public static final String CUBE = OperatorConstant.CUBE.getSymbol();
-    public static final String OPEN_SQUARE_BRAC = OperatorConstant.OPEN_SQUARE_BRAC.getSymbol();
-    public static final String CLOSE_SQUARE_BRAC = OperatorConstant.CLOSE_SQUARE_BRAC.getSymbol();
     public static final String COLON = OperatorConstant.COLON.getSymbol();
     public static final String CONST = OperatorConstant.CONST.getSymbol();
     public static final String STORE = OperatorConstant.STORE.getSymbol();
@@ -60,8 +64,10 @@ public class Operator {
      */
     public static final String[] operators
             = new String[]{PLUS, MINUS, DIVIDE, MULTIPLY, FACTORIAL, POWER, LESS_THAN, GREATER_THAN,
-                ASSIGN, EQUALS, NOT_EQUALS, LESS_OR_EQUALS, GREATER_OR_EQUALS, AND, OR, REMAINDER, OPEN_CIRC_BRAC, CLOSE_CIRC_BRAC, COMMA, ROOT, CUBE_ROOT,
-                PERMUTATION, COMBINATION, INVERSE, SQUARE, CUBE, OPEN_SQUARE_BRAC, CLOSE_SQUARE_BRAC, COLON, CONST, STORE, EXIT, SPACE,
+                ASSIGN, EQUALS, NOT_EQUALS, LESS_OR_EQUALS, GREATER_OR_EQUALS, AND, OR, REMAINDER,
+                OPEN_CIRC_BRAC, CLOSE_CIRC_BRAC, OPEN_SQUARE_BRAC, CLOSE_SQUARE_BRAC, OPEN_CURVED_BRAC, CLOSE_CURVED_BRAC, OPEN_ANGULAR_BRAC, CLOSE_ANGULAR_BRAC,
+                COMMA, ROOT, CUBE_ROOT,
+                PERMUTATION, COMBINATION, INVERSE, SQUARE, CUBE, COLON, CONST, STORE, EXIT, SPACE,
                 SEMI_COLON, AT
             };
 
@@ -110,7 +116,7 @@ public class Operator {
     public static boolean isExitCommand(String op) {
         return op.equals(EXIT);
     }
-    
+
     public boolean isSemiColon(String op) {
         if (op.length() != 1) {
             return false;
@@ -118,7 +124,7 @@ public class Operator {
         // 2. Direct character comparison avoids the overhead of the .equals() loop
         return op.charAt(0) == SEMI_COLON.charAt(0);
     }
-    
+
     public static boolean isAtOperator(String op) {
         if (op.length() != 1) {
             return false;
@@ -199,10 +205,10 @@ public class Operator {
         // Case 1: "< > <= >= && || == != " (Length 1)
         if (len == 1) {
             return op.charAt(0) == LESS_THAN.charAt(0) || op.charAt(0) == GREATER_THAN.charAt(0);
-        }        
-        
-          return op.equals(LESS_OR_EQUALS) || op.equals(GREATER_OR_EQUALS) || 
-                    op.equals(OR) || op.equals(AND) || op.equals(EQUALS) || op.equals(NOT_EQUALS);
+        }
+
+        return op.equals(LESS_OR_EQUALS) || op.equals(GREATER_OR_EQUALS)
+                || op.equals(OR) || op.equals(AND) || op.equals(EQUALS) || op.equals(NOT_EQUALS);
     }
 
     /**
@@ -214,18 +220,18 @@ public class Operator {
         if (op.length() != 2) {
             return false;
         }
-        
+
         return op.charAt(0) == EQUALS.charAt(0) && op.charAt(1) == EQUALS.charAt(1);
     }
-    
+
     public static boolean isGreaterThanOperator(String op) {
         if (op.length() != 1) {
             return false;
         }
-        
+
         return op.charAt(0) == GREATER_THAN.charAt(0);
     }
-    
+
     public static boolean isGreaterOrEqualsOperator(String op) {
         int len = op.length();
         if (len == 1) {
@@ -234,18 +240,18 @@ public class Operator {
         if (len == 2) {
             return op.charAt(0) == GREATER_THAN.charAt(0) && op.charAt(1) == ASSIGN.charAt(0);
         }
-        
+
         return false;
     }
-    
+
     public static boolean isLessThanOperator(String op) {
         if (op.length() != 1) {
             return false;
         }
-        
+
         return op.charAt(0) == LESS_THAN.charAt(0);
     }
-    
+
     public static boolean isLessThanOrEqualsOperator(String op) {
         int len = op.length();
         if (len == 1) {
@@ -351,7 +357,20 @@ public class Operator {
         return (op.charAt(0) == POWER.charAt(0));
     }
 
+    public static boolean isGenericBracket(String op) {
+        if (op.length() != 1) {
+            return false;
+        }
+        char c = op.charAt(0);
+        return (c == OPEN_CIRC_BRAC.charAt(0) || c == CLOSE_CIRC_BRAC.charAt(0)
+                || c == OPEN_SQUARE_BRAC.charAt(0) || c == CLOSE_SQUARE_BRAC.charAt(0)
+                || c == OPEN_ANGULAR_BRAC.charAt(0) || c == CLOSE_ANGULAR_BRAC.charAt(0)
+                || c == OPEN_CURVED_BRAC.charAt(0) || c == CLOSE_CURVED_BRAC.charAt(0));
+    }
+
     /**
+     * Applies to circular brackets alone
+     *
      * @param op the String to check
      * @return true if the operator is the OPEN_CIRC_BRAC or the CLOSE_CIRC_BRAC
      * operator
@@ -456,7 +475,7 @@ public class Operator {
      * @return true if the operator is a pre-number operator
      */
     public static boolean isUnaryPreOperator(String op) {
-        
+
         int len = op.length();
 
         // Case 1: "√" (Length 1)
@@ -468,7 +487,7 @@ public class Operator {
         if (len == 2) {
             return op.charAt(0) == CUBE_ROOT.charAt(0) && op.charAt(1) == CUBE_ROOT.charAt(1);
         }
-        
+
         return false;
     }
 
@@ -478,7 +497,7 @@ public class Operator {
      * operator,the factorial,the square and the cube
      */
     public static boolean isUnaryPostOperator(String op) {
-        
+
         int len = op.length();
 
         // Case 1: "!", "²", "³" (Length 1)
@@ -492,7 +511,7 @@ public class Operator {
             // Direct char comparison is faster than .equals(INVERSE)
             return op.charAt(0) == INVERSE.charAt(0) && op.charAt(1) == INVERSE.charAt(1);
         }
-        
+
         return false;
     }
 
@@ -505,7 +524,7 @@ public class Operator {
             return false;
         }
         return op.charAt(0) == COMMA.charAt(0);
-        
+
     }
 
     /**
@@ -516,7 +535,7 @@ public class Operator {
      */
     public static int getPrecedence(String name) {
         int prec = MathExpression.Token.getPrec(MathExpression.Token.getAlias(name));
-        return prec; 
+        return prec;
     }
 
     /**

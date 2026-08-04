@@ -1,6 +1,5 @@
-package com.github.gbenroscience.math.differentialcalculus.equations;
+package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
-import java.lang.invoke.MethodHandle;
 
 /**
  * Scalar "Turbo" entry points over the vectorized ODE solvers — the ParserNG
@@ -16,29 +15,16 @@ public class TurboODE {
     // ------------------------------------------------------------------
     // diffeqn(...) — endpoint-only
     // ------------------------------------------------------------------
-    /**
-     *
-     * @param dy_dt
-     * @param tSlot
-     * @param ySlot
-     * @param frameSize
-     * @param t0
-     * @param y0
-     * @param tEnd
-     * @param initialStep
-     * @param method
-     * @return
-     * @throws Throwable
-     */
-    public static double executeTurboODE(MethodHandle dy_dt,
-            int tSlot,
-            int ySlot,
-            int frameSize,
-            double t0,
-            double y0,
-            double tEnd,
-            double initialStep,
-            DifferentialEquations.ODESolverMethod method) throws Throwable {
+
+    public static double executeTurboODE(ODEFunction dy_dt,
+                                          int tSlot,
+                                          int ySlot,
+                                          int frameSize,
+                                          double t0,
+                                          double y0,
+                                          double tEnd,
+                                          double initialStep,
+                                          DifferentialEquations.ODESolverMethod method) {
         return executeTurboODE(dy_dt, tSlot, ySlot, frameSize, t0, y0, tEnd, initialStep, method, null);
     }
 
@@ -47,30 +33,17 @@ public class TurboODE {
      * {@link DifferentialEquations.JacobianStrategy}, consulted only when
      * method is IMPLICIT_EULER and ignored (accepted, unused) for every other
      * method — see {@link VectorODE#executeVectorODE} for the same note.
-     *
-     * @param dy_dt
-     * @param tSlot
-     * @param ySlot
-     * @param frameSize
-     * @param t0
-     * @param y0
-     * @param tEnd
-     * @param initialStep
-     * @param method
-     * @param jacobianStrategy
-     * @return
-     * @throws Throwable
      */
-    public static double executeTurboODE(MethodHandle dy_dt,
-            int tSlot,
-            int ySlot,
-            int frameSize,
-            double t0,
-            double y0,
-            double tEnd,
-            double initialStep,
-            DifferentialEquations.ODESolverMethod method,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
+    public static double executeTurboODE(ODEFunction dy_dt,
+                                          int tSlot,
+                                          int ySlot,
+                                          int frameSize,
+                                          double t0,
+                                          double y0,
+                                          double tEnd,
+                                          double initialStep,
+                                          DifferentialEquations.ODESolverMethod method,
+                                          DifferentialEquations.JacobianStrategy jacobianStrategy) {
 
         if (initialStep <= 0.0) {
             throw new IllegalArgumentException("initialStep must be positive (a magnitude), got " + initialStep);
@@ -117,31 +90,17 @@ public class TurboODE {
     // ------------------------------------------------------------------
     // diffeqnPath(...) — trajectory output
     // ------------------------------------------------------------------
-    /**
-     *
-     * @param dy_dt
-     * @param tSlot
-     * @param ySlot
-     * @param frameSize
-     * @param t0
-     * @param y0
-     * @param tEnd
-     * @param h
-     * @param method
-     * @param points
-     * @return
-     * @throws Throwable
-     */
-    public static double[][] executeTurboODEPath(MethodHandle dy_dt,
-            int tSlot,
-            int ySlot,
-            int frameSize,
-            double t0,
-            double y0,
-            double tEnd,
-            double h,
-            DifferentialEquations.ODESolverMethod method,
-            int points) throws Throwable {
+
+    public static double[][] executeTurboODEPath(ODEFunction dy_dt,
+                                                  int tSlot,
+                                                  int ySlot,
+                                                  int frameSize,
+                                                  double t0,
+                                                  double y0,
+                                                  double tEnd,
+                                                  double h,
+                                                  DifferentialEquations.ODESolverMethod method,
+                                                  int points) {
         return executeTurboODEPath(dy_dt, tSlot, ySlot, frameSize, t0, y0, tEnd, h, method, points, null);
     }
 
@@ -150,35 +109,22 @@ public class TurboODE {
      * {@link DifferentialEquations.JacobianStrategy}, consulted only when
      * method is IMPLICIT_EULER.
      *
-     *
-     * @param dy_dt
-     * @param tSlot
-     * @param ySlot
-     * @param frameSize
-     * @param t0
-     * @param y0
-     * @param tEnd
-     * @param h integration step (fixed methods) or initial step (rk45). Must be
-     * a positive magnitude.
+     * @param h      integration step (fixed methods) or initial step (rk45). Must be a positive magnitude.
      * @param method solver to use
-     * @param points requested number of uniformly-spaced (t, y) samples in the
-     * output, or less than or equal to 0 to mean "use the solver's natural
-     * steps, no resampling"
-     * @param jacobianStrategy
-     * @return
-     * @throws Throwable
+     * @param points requested number of uniformly-spaced (t, y) samples in the output,
+     *               or less than or equal to 0 to mean "use the solver's natural steps, no resampling"
      */
-    public static double[][] executeTurboODEPath(MethodHandle dy_dt,
-            int tSlot,
-            int ySlot,
-            int frameSize,
-            double t0,
-            double y0,
-            double tEnd,
-            double h,
-            DifferentialEquations.ODESolverMethod method,
-            int points,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
+    public static double[][] executeTurboODEPath(ODEFunction dy_dt,
+                                                  int tSlot,
+                                                  int ySlot,
+                                                  int frameSize,
+                                                  double t0,
+                                                  double y0,
+                                                  double tEnd,
+                                                  double h,
+                                                  DifferentialEquations.ODESolverMethod method,
+                                                  int points,
+                                                  DifferentialEquations.JacobianStrategy jacobianStrategy) {
 
         if (h <= 0.0) {
             throw new IllegalArgumentException("h must be positive (a magnitude), got " + h);

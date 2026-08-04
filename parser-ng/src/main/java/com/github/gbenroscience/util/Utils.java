@@ -180,7 +180,7 @@ public class Utils {
             return;
         }
         if (data.get(0).equals("(")) {
-            int closeIdx = Bracket.getComplementIndex(true, 0, data);
+            int closeIdx = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, 0, data);
             if (closeIdx == data.size() - 1) {
                 data.remove(closeIdx);
                 data.remove(0);
@@ -193,7 +193,7 @@ public class Utils {
             return data;
         }
         if (data.charAt(0) == '(') {
-            int closeIdx = Bracket.getComplementIndex(true, 0, data);
+            int closeIdx = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, 0, data);
             if (closeIdx == data.length() - 1) {
                 data = data.substring(1, closeIdx);
             }
