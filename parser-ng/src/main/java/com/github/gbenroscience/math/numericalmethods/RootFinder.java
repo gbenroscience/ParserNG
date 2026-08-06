@@ -345,7 +345,7 @@ public class RootFinder {
                 boolean exists = FunctionManager.containsAlgebraicFunction(functionName);
                 if (exists) {
                     for (int i = 3; i < list.size(); i++) {
-                        if (Operator.isOpeningBracket(list.get(i))) {
+                        if (Operator.isOpeningCircBracket(list.get(i))) {
                             int closeBracket = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i, list);
                             args1 = new MathExpression(LISTS.createStringFrom(list, i, closeBracket + 1)).solve();
                             List l = list.subList(i, closeBracket + 1);
@@ -370,11 +370,11 @@ public class RootFinder {
             }
 
             if (Number.isNumber(args1)) {
-                if (Operator.isClosingBracket(list.get(5))) {//only one number arg
+                if (Operator.isClosingCircBracket(list.get(5))) {//only one number arg
                     //valid
                 } else {
                     if (Number.isNumber(args2)) {
-                        if (Operator.isClosingBracket(list.get(7))) {//two number args
+                        if (Operator.isClosingCircBracket(list.get(7))) {//two number args
                             //valid
                         } else {
                             if (Number.isNumber(args3)) {//three number args

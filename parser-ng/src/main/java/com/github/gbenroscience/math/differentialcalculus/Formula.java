@@ -968,7 +968,7 @@ public class Formula {
                     sub.addAll(powerPattern);//replace the variable with the original pattern
                     i += powerPattern.size() - 1;
                 }
-            } else if (i + 2 < list.size() && isOpeningBracket(var) && isClosingBracket(list.get(i + 2))) {
+            } else if (i + 2 < list.size() && isOpeningCircBracket(var) && isClosingCircBracket(list.get(i + 2))) {
                 list.remove(i + 2);
                 list.remove(i);
                 i-=2;

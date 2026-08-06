@@ -1,59 +1,77 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.gpu.opencl.llm;
 
 /**
+ * OpenCL C kernel source for the Llama-style decoder -- OpenCL counterpart
+ * of {@code com.github.gbenroscience.gpu.cuda.llm.KernelSource}. Same 23
+ * kernels, same algorithms, translated line-for-line where the two
+ * languages agree and re-derived where they don't. Read this class's
+ * javadoc alongside the CUDA original's -- the algorithmic commentary
+ * there (what "batched" buys you, what this is NOT: not cuBLAS/clBLAS-
+ * tier tiling, attention still three unfused launches per head) applies
+ * unchanged here and is not repeated per kernel.
  *
- * @author GBEMIRO 
- * OpenCL C kernels for GPU-side Llama-style decoder inference, operating on
- * GGUF's native Q8_0 block format (2-byte FP16 scale + 32 INT8 values per
- * block -- see GGUFLoader.calculateTensorBytes case 8, and
- * KernelsInt8.matmul_q8_0_1xN_split_opt, whose exact per-block dequant +
- * dot-product algorithm this kernel ports).
- *
- * DELIBERATELY NOT what LlamaLayerInt8.matmul_q8_1xN expects (flat byte[]
- * weights + one float scale per OUTPUT COLUMN, not per 32-element block) --
- * that format has no GGUFLoader path to produce it from a real model file.
- * This targets the format GGUFLoader.loadQ8_0() actually emits.
- *
- * SCOPE, STATED PLAINLY:
- *  - Single-token decode path only (M=1 GEMV, not batched prefill GEMM).
- *    Prefill/batched prompt processing would need a real GEMM kernel
- *    (tiled, shared-memory blocked) -- out of scope here, and a
- *    meaningfully larger undertaking than what's below.
- *  - Attention is UNFUSED: three kernel launches per forward pass
- *    (scores, softmax, weighted-sum), each looping over heads internally.
- *    Not a fused flash-attention-style kernel -- correctness over cleverness
- *    given this is unverified against real hardware. A fused kernel is a
- *    legitimate future optimization, not attempted here.
- *  - RMSNorm is two-phase: a device kernel produces one partial sum-of-
- *    squares per work-group, the tiny partials array (dim/256-ish elements)
- *    is summed on the HOST, then a second device kernel applies the
- *    normalization. This avoids a single-pass cross-workgroup reduction
- *    (a well-known source of subtle bugs) at the cost of one extra small
- *    host<->device round trip per RMSNorm call -- negligible next to the
- *    GEMV cost it sits beside.
- *  - No kernel here has been run. Ported carefully from your scalar/SIMD
- *    reference implementations, but treat as unverified.
+ * TRANSLATION NOTES (CUDA -> OpenCL C):
+ *   - {@code __global__ void} -> {@code __kernel void}; {@code extern "C"} dropped
+ *     (OpenCL C has no name mangling to begin with).
+ *   - Buffer parameters (raw pointers in CUDA) get an explicit
+ *     {@code __global} address-space qualifier -- OpenCL requires this,
+ *     CUDA does not.
+ *   - {@code blockIdx.x}/{@code blockIdx.y} -> {@code get_group_id(0)}/{@code get_group_id(1)};
+ *     {@code threadIdx.x} -> {@code get_local_id(0)}; {@code blockDim.x} -> {@code get_local_size(0)}.
+ *     Kept as this literal group/local-id mapping (rather than collapsing
+ *     simple 1D kernels to {@code get_global_id(0)}, which would be
+ *     numerically equivalent) so every kernel body stays structurally
+ *     diffable against its CUDA counterpart.
+ *   - {@code __shared__}/{@code extern __shared__} -> {@code __local}. CUDA's dynamic
+ *     shared-memory-size-at-launch mechanism (the 5th cuLaunchKernel
+ *     argument) has NO direct OpenCL equivalent for a plain {@code __kernel}
+ *     parameter list without also threading a {@code __local} pointer
+ *     parameter through every call site. Sidestepped here by declaring
+ *     each shared buffer as a FIXED-SIZE {@code __local} array sized to the
+ *     largest work-group this codebase ever dispatches for that kernel
+ *     (32 for the Q8_0 quantize block, 256 for every RMSNorm/softmax
+ *     reduction -- see QUANTIZE_BLOCK_SIZE/RMSNORM_WORKGROUP_SIZE/
+ *     DEFAULT_BLOCK_SIZE below) -- a reduction only ever touches indices
+ *     {@code [0, get_local_size(0))}, so a fixed array that's >= the actual
+ *     work-group size is correct regardless of how few of its slots a
+ *     smaller launch (e.g. softmax over a short prefix) actually uses.
+ *     This also means the host-side dispatch code needs no dynamic
+ *     local-memory clSetKernelArg call at all -- one fewer moving part
+ *     than the CUDA port's sharedMemBytes plumbing.
+ *   - {@code __syncthreads()} -> {@code barrier(CLK_LOCAL_MEM_FENCE)}.
+ *   - {@code expf/fmaxf/fabsf/rintf/erff} -> OpenCL's type-overloaded builtins
+ *     {@code exp/fmax/fabs/rint/erf} (no f-suffix; OpenCL resolves by argument type).
+ *   - {@code __half2float(__ushort_as_half(...))} / {@code __half_as_ushort(__float2half(...))}:
+ *     CUDA gets these from {@code <cuda_fp16.h>}. OpenCL's core spec has no
+ *     required equivalent that works without the optional cl_khr_fp16
+ *     extension (not guaranteed present on every device -- some older/
+ *     embedded-profile GPUs lack it). Reimplemented here as manual
+ *     IEEE-754 binary16<->binary32 bit conversion (decode_fp16 /
+ *     encode_fp16_bits below) so Q8_0's per-block fp16 scale factor
+ *     works on every OpenCL 1.2+ device unconditionally. encode_fp16_bits
+ *     rounds by truncation+round-bit (round-half-up, not strict
+ *     round-to-nearest-even) -- immaterial here since it only encodes a
+ *     quantization scale factor, not a value whose bit-exactness matters.
+ *   - No pointer arithmetic anywhere in this file takes a {@code __global}
+ *     buffer parameter and offsets its BASE address from the host side
+ *     (impossible in OpenCL -- cl_mem is an opaque handle, not an
+ *     address). Every kernel that needs a sub-region already receives an
+ *     explicit int offset parameter (qHeadOff, kvHeadOff, outHeadOff,
+ *     etc.) and indexes with it internally -- this was already true of
+ *     every kernel in the CUDA original, so no kernel signature changed
+ *     shape to accommodate the port. The two places the CUDA HOST code
+ *     itself did raw pointer-plus-byte-offset arithmetic (extracting one
+ *     row out of a [T,dim] prefill batch buffer, and writing the KV cache
+ *     at a growing per-token offset) are handled in GpuContext/LlamaLayer
+ *     via clEnqueueCopyBuffer's byte-offset parameters instead -- see
+ *     LlamaLayer's class javadoc.
  */
 public final class KernelSource {
 
     private KernelSource() {
     }
 
+    // ---- decode-path kernels (unchanged names from the CUDA original) ----
     public static final String KERNEL_QUANTIZE_I8 = "quantize_i8";
     public static final String KERNEL_QUANTIZE_ACTIVATION_Q8_0 = "quantize_activation_q8_0_blocks";
     public static final String KERNEL_Q8_0_GEMV_SPLIT = "q8_0_gemv_split";
@@ -68,121 +86,166 @@ public final class KernelSource {
     public static final String KERNEL_RESIDUAL_ADD = "residual_add";
     public static final String KERNEL_F32_GEMV = "f32_gemv";
 
-    /** Work-group size used by the RMSNorm partial-sum kernel's local reduction. Must match host dispatch. */
+    // ---- FFN activation alternatives ----
+    public static final String KERNEL_GELU_ACTIVATE = "gelu_activate";
+    public static final String KERNEL_GEGLU_ACTIVATE = "geglu_activate";
+
+    // ---- batched prefill kernels ----
+    public static final String KERNEL_Q8_0_GEMM_TILED = "q8_0_gemm_tiled";
+    public static final String KERNEL_F32_GEMM_TILED = "f32_gemm_tiled";
+    public static final String KERNEL_RMSNORM_PARTIAL_SUMSQ_ROWS = "rmsnorm_partial_sumsq_rows";
+    public static final String KERNEL_RMSNORM_APPLY_ROWS = "rmsnorm_apply_rows";
+    public static final String KERNEL_ROPE_APPLY_PAIRWISE_ROWS = "rope_apply_pairwise_rows";
+    public static final String KERNEL_ATTN_SCORES_CAUSAL_BATCHED = "attn_scores_causal_batched";
+    public static final String KERNEL_SOFTMAX_INPLACE_ROWS = "softmax_inplace_rows";
+    public static final String KERNEL_ATTN_WEIGHTED_SUM_CAUSAL_BATCHED = "attn_weighted_sum_causal_batched";
+
+    /** Work-group size used by both RMSNorm partial-sum kernels' local reduction, AND the fixed __local array size those kernels declare. Must match host dispatch. */
     public static final int RMSNORM_WORKGROUP_SIZE = 256;
 
-    public static final String OPENCL_SOURCE = """
-        #pragma OPENCL EXTENSION cl_khr_fp16 : enable
+    /** Fixed work-group size for quantize_activation_q8_0_blocks -- one work-item per element in a 32-wide Q8_0 group. Also the fixed __local array size that kernel declares. */
+    public static final int QUANTIZE_BLOCK_SIZE = 32;
 
+    /** Default work-group size for the simple bound-checked 1D kernels (GEMVs, RoPE, elementwise ops); also the upper cap nextPow2() uses for softmax's local reduction size, and therefore the __local array size softmax_inplace/softmax_inplace_rows declare. */
+    public static final int DEFAULT_BLOCK_SIZE = 256;
+
+    /** Default column-tile work-group size for the batched GEMM kernels (local_work_size[0]; get_group_id(1) iterates rows). */
+    public static final int GEMM_TILE_N = 128;
+
+    public static final String CL_SOURCE = """
         #define Q8_0_GROUP_SIZE 32
         #define Q8_0_BLOCK_SIZE 34
+        #define DEVICE_FLT_MAX 3.402823466e+38f
 
-        /*
-         * Decodes a GGML fp16 scale (as stored in the first 2 bytes of every
-         * Q8_0 block) to float. Matches KernelsInt8.f16ToF32 exactly --
-         * OpenCL's built-in vload_half/half conversions assume IEEE binary16
-         * laid out the same way GGML stores it, so this can use the native
-         * conversion rather than a hand-rolled bit-twiddle port.
-         */
+        // ---- manual IEEE-754 binary16 <-> binary32 conversion (see class javadoc) ----
+
         inline float decode_fp16(uchar lo, uchar hi) {
-            ushort bits = (ushort)lo | ((ushort)hi << 8);
-            return vload_half(0, (const __global half*)&bits);
+            uint bits = (uint) lo | ((uint) hi << 8);
+            uint sign = (bits >> 15) & 0x1u;
+            uint exp = (bits >> 10) & 0x1Fu;
+            uint mant = bits & 0x3FFu;
+            uint f;
+            if (exp == 0u) {
+                if (mant == 0u) {
+                    f = sign << 31;
+                } else {
+                    uint e = 1u;
+                    while ((mant & 0x400u) == 0u) {
+                        mant <<= 1;
+                        e--;
+                    }
+                    mant &= 0x3FFu;
+                    uint fexp = e - 15u + 127u;
+                    f = (sign << 31) | (fexp << 23) | (mant << 13);
+                }
+            } else if (exp == 0x1Fu) {
+                f = (sign << 31) | (0xFFu << 23) | (mant << 13);
+            } else {
+                uint fexp = exp - 15u + 127u;
+                f = (sign << 31) | (fexp << 23) | (mant << 13);
+            }
+            return as_float(f);
         }
 
-        /*
-         * quantize_i8: FP32 -> INT8 with a single caller-supplied scale.
-         * Direct port of KernelsInt8.quantize_i8's round-and-clamp formula.
-         * One work-item per element.
-         *
-         * NOTE: this produces PLAIN INT8 with one shared scale for the
-         * whole tensor -- it is NOT the format q8_0_gemv_split expects for
-         * its activation input (which needs per-32-block scales, GGUF Q8_0
-         * layout). Use quantize_activation_q8_0_blocks below for that.
-         * Kept here as a correct, standalone, generically useful primitive.
-         */
+        /** Round-half-up float->half bit pattern -- see class javadoc for why exact ties-to-even isn't needed here. */
+        inline ushort encode_fp16_bits(float value) {
+            uint x = as_uint(value);
+            uint sign = (x >> 16) & 0x8000u;
+            uint mantissa = x & 0x007FFFFFu;
+            int exponent = (int) ((x >> 23) & 0xFFu) - 127;
+
+            if (((x >> 23) & 0xFFu) == 0xFFu) {
+                return (ushort) (sign | 0x7C00u | (mantissa != 0u ? 0x200u : 0u));
+            }
+            if (exponent > 15) {
+                return (ushort) (sign | 0x7C00u);
+            }
+            if (exponent < -14) {
+                if (exponent < -24) {
+                    return (ushort) sign;
+                }
+                mantissa |= 0x00800000u;
+                int shift = -14 - exponent; // 1..10
+                uint halfMant = mantissa >> (13 + shift);
+                uint roundBit = (mantissa >> (12 + shift)) & 1u;
+                halfMant += roundBit;
+                return (ushort) (sign | halfMant);
+            }
+            uint halfExp = (uint) (exponent + 15);
+            uint halfMant = mantissa >> 13;
+            uint roundBit = (mantissa >> 12) & 1u;
+            uint rounded = halfMant + roundBit;
+            if (rounded == 0x400u) {
+                rounded = 0u;
+                halfExp += 1u;
+            }
+            return (ushort) (sign | (halfExp << 10) | rounded);
+        }
+
+        inline float gpu_sigmoid_f(float x) {
+            return 1.0f / (1.0f + exp(-x));
+        }
+
+        // Exact-erf GeLU -- see CUDA original's javadoc: matches the
+        // textbook formula, NOT necessarily a specific model's training-
+        // time tanh-approximation. Diff against reference activations
+        // before trusting GeLU-FFN outputs.
+        inline float gpu_gelu_f(float x) {
+            return 0.5f * x * (1.0f + erf(x * 0.70710678f));
+        }
+
+        // =====================================================================
+        // ===================== DECODE-PATH KERNELS ==========================
+        // =====================================================================
+
         __kernel void quantize_i8(
             __global const float* x,
             __global char* x_q8,
             const float invScale)
         {
-            const int i = get_global_id(0);
+            const int i = get_group_id(0) * get_local_size(0) + get_local_id(0);
             float val = x[i] * invScale;
             int q = (int) rint(val);
             q = max(-127, min(127, q));
             x_q8[i] = (char) q;
         }
 
-        /*
-         * quantize_activation_q8_0_blocks: FP32 -> GGUF Q8_0 block format
-         * (2-byte fp16 scale + 32 INT8 values per 32-element block), with a
-         * fresh per-block absmax scale computed on-device. This is the
-         * ACTIVATION-side counterpart to the weight quantization GGUF files
-         * already ship with -- it does not correspond to any method in the
-         * uploaded reference files (llama.cpp/ggml calls the equivalent
-         * operation quantize_row_q8_0; it wasn't among what was shared
-         * here), so it's implemented from the well-defined Q8_0 scheme
-         * itself, using OpenCL's native vstore_half for the FP16 scale
-         * encode (mirroring vload_half used for decode elsewhere in this
-         * file) rather than a hand-rolled bit-manipulation encoder.
-         *
-         * MUST be launched with local_work_size = 32 (one work-item per
-         * element in a block) and global_work_size = numBlocks * 32.
-         */
         __kernel void quantize_activation_q8_0_blocks(
             __global const float* x,
             __global uchar* x_q8_0,
-            __local float* scratch,
             const int len)
         {
+            __local float sh_quant[32];
             const int block = get_group_id(0);
             const int lane = get_local_id(0); // 0..31
             const int blockOff = block * Q8_0_GROUP_SIZE;
             const int outOff = block * Q8_0_BLOCK_SIZE;
 
             float v = x[blockOff + lane];
-            scratch[lane] = fabs(v);
+            sh_quant[lane] = fabs(v);
             barrier(CLK_LOCAL_MEM_FENCE);
 
             for (int stride = 16; stride > 0; stride >>= 1) {
                 if (lane < stride) {
-                    scratch[lane] = fmax(scratch[lane], scratch[lane + stride]);
+                    sh_quant[lane] = fmax(sh_quant[lane], sh_quant[lane + stride]);
                 }
                 barrier(CLK_LOCAL_MEM_FENCE);
             }
-            float absmax = scratch[0];
+            float absmax = sh_quant[0];
             float scale = absmax / 127.0f;
             float invScale = (scale > 0.0f) ? (1.0f / scale) : 0.0f;
 
             int q = (int) rint(v * invScale);
             q = max(-127, min(127, q));
-            x_q8_0[outOff + 2 + lane] = (uchar)(char) q;
+            x_q8_0[outOff + 2 + lane] = (uchar) (char) q;
 
             if (lane == 0) {
-                vstore_half(scale, 0, (__global half*)&x_q8_0[outOff]);
+                ushort bits = encode_fp16_bits(scale);
+                x_q8_0[outOff] = (uchar) (bits & 0xFF);
+                x_q8_0[outOff + 1] = (uchar) ((bits >> 8) & 0xFF);
             }
         }
 
-        /*
-         * q8_0_gemv_split: GGML Q8_0 block-format GEMV, split even/odd
-         * output layout -- exact port of
-         * KernelsInt8.matmul_q8_0_1xN_split_opt's per-block algorithm.
-         *
-         * x_q8_0:  quantized activation, Q8_0 block format, K elements
-         * W_q8_0:  quantized weight matrix, Q8_0 block format,
-         *          [num_heads * head_dim, K] row-major, each row its own
-         *          block sequence (same layout matmul_q8_0_1xN_split_opt
-         *          assumes via B_stride = numBlocks * Q8_0_BLOCK_SIZE)
-         * out_f32_split: output, head_dim elements per head, laid out
-         *          [even-indexed outputs][odd-indexed outputs] per head --
-         *          same split layout the CPU kernel produces, so
-         *          rope_apply_split below (also split-layout-native) needs
-         *          no extra shuffle step in between.
-         *
-         * One work-item per (head, half-dim-index) pair -- i.e. one
-         * work-item computes BOTH the even and odd output for one head's
-         * pair of adjacent dimensions, mirroring the CPU loop's inner body
-         * exactly (which computes n0/n1 = 2*i, 2*i+1 together per iteration).
-         */
         __kernel void q8_0_gemv_split(
             __global const uchar* x_q8_0,
             __global const uchar* W_q8_0,
@@ -192,7 +255,7 @@ public final class KernelSource {
             const int K)
         {
             const int halfDim = head_dim >> 1;
-            const int gid = get_global_id(0); // 0 .. qHeads*halfDim - 1
+            const int gid = get_group_id(0) * get_local_size(0) + get_local_id(0);
             const int h = gid / halfDim;
             const int i = gid % halfDim;
             if (h >= qHeads) return;
@@ -239,15 +302,6 @@ public final class KernelSource {
             out_f32_split[oddOutOff + i] = acc1;
         }
 
-        /*
-         * q8_0_gemv_plain: same Q8_0 block-format GEMV algorithm as
-         * q8_0_gemv_split, but natural contiguous output order --
-         * out_f32[n] for n in [0,N), no even/odd pairing. The split
-         * kernel's pairing is specifically a RoPE optimization for Q/K
-         * projections (adjacent dims get rotated together); it does NOT
-         * apply to the FFN gate/up/down projections, which need plain
-         * contiguous output. One work-item per output column n.
-         */
         __kernel void q8_0_gemv_plain(
             __global const uchar* x_q8_0,
             __global const uchar* W_q8_0,
@@ -255,7 +309,7 @@ public final class KernelSource {
             const int N,
             const int K)
         {
-            const int n = get_global_id(0);
+            const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
             if (n >= N) return;
 
             const int numBlocks = K / Q8_0_GROUP_SIZE;
@@ -282,15 +336,6 @@ public final class KernelSource {
             out_f32[n] = acc;
         }
 
-        /*
-         * rope_apply_split: pairwise rotation on split-layout Q/K buffers.
-         * Exact port of KernelsFloat.rope_inplace_split_ws's formula:
-         *   x0' = x0*cos - x1*sin
-         *   x1' = x0*sin + x1*cos
-         * One work-item per (head, half-dim-index) pair, run once for Q
-         * (qBuf) and once for K (kBuf) -- two separate dispatches from the
-         * host, same kernel, different buffer/headCount args.
-         */
         __kernel void rope_apply_split(
             __global float* buf,
             __global const float* cos_table,
@@ -300,7 +345,7 @@ public final class KernelSource {
             const int cosSinOffset)
         {
             const int halfDim = head_dim >> 1;
-            const int gid = get_global_id(0);
+            const int gid = get_group_id(0) * get_local_size(0) + get_local_id(0);
             const int h = gid / halfDim;
             const int i = gid % halfDim;
             if (h >= heads) return;
@@ -318,47 +363,33 @@ public final class KernelSource {
             buf[oddOff + i] = x0 * s + x1 * c;
         }
 
-        /*
-         * rmsnorm_partial_sumsq: phase 1 of 2 -- one partial sum-of-squares
-         * per work-group via local-memory tree reduction. Host sums the
-         * (small) partials array and computes rms = 1/sqrt(mean+eps) before
-         * calling rmsnorm_apply. Matches rms_norm_fast's sum(x^2) exactly;
-         * only the reduction STRATEGY differs from the CPU's linear
-         * accumulation (order-of-addition floating point differences are
-         * expected and immaterial here).
-         */
         __kernel void rmsnorm_partial_sumsq(
             __global const float* x,
             __global float* partials,
-            __local float* scratch,
             const int features)
         {
-            const int gid = get_global_id(0);
+            __local float sh_rms[256];
+            const int gid = get_group_id(0) * get_local_size(0) + get_local_id(0);
             const int lid = get_local_id(0);
             const int groupId = get_group_id(0);
             const int localSize = get_local_size(0);
 
             float v = (gid < features) ? x[gid] : 0.0f;
-            scratch[lid] = v * v;
+            sh_rms[lid] = v * v;
             barrier(CLK_LOCAL_MEM_FENCE);
 
             for (int stride = localSize / 2; stride > 0; stride >>= 1) {
                 if (lid < stride) {
-                    scratch[lid] += scratch[lid + stride];
+                    sh_rms[lid] += sh_rms[lid + stride];
                 }
                 barrier(CLK_LOCAL_MEM_FENCE);
             }
 
             if (lid == 0) {
-                partials[groupId] = scratch[0];
+                partials[groupId] = sh_rms[0];
             }
         }
 
-        /*
-         * rmsnorm_apply: phase 2 of 2 -- out = x * rms * gamma, where rms
-         * was computed on the host from phase 1's partials. Exact port of
-         * rms_norm_fast's final elementwise step.
-         */
         __kernel void rmsnorm_apply(
             __global const float* x,
             __global const float* gamma,
@@ -366,32 +397,15 @@ public final class KernelSource {
             const float rms,
             const int features)
         {
-            const int i = get_global_id(0);
+            const int i = get_group_id(0) * get_local_size(0) + get_local_id(0);
             if (i >= features) return;
             out[i] = x[i] * rms * gamma[i];
         }
 
-        /*
-         * attn_scores: for one head h and all cache positions j in
-         * [0, pos], score[j] = dot(Q_h, dequant(K_cache_j_h)) * rsqrt_d.
-         * Takes the FULL q_all_heads buffer plus a qHeadOff offset rather
-         * than a pre-sliced per-head buffer -- OpenCL 1.2 has no cheap way
-         * to pass "buffer + offset" without a clCreateSubBuffer binding
-         * this project doesn't otherwise need, so the kernel indexes the
-         * offset itself instead (same pattern rope_apply_split already
-         * uses via cosSinOffset).
-         * K cache is stored FP32 here (dequantized once at cache-write
-         * time on the host side of GpuLlamaLayer -- see its javadoc for
-         * why the CPU reference's re-dequant-every-read approach was not
-         * mirrored 1:1: it would mean K/V get dequantized once per query
-         * position PER HEAD PER STEP on the GPU, which is needlessly
-         * repeated work a device-resident FP32 cache avoids entirely).
-         * One work-item per cache position j.
-         */
         __kernel void attn_scores(
-            __global const float* q_all_heads, // [numHeads * head_dim] -- full buffer, all heads
-            __global const float* k_cache_f32, // [max_seq, kv_dim] dequantized
-            __global float* scores,            // [pos+1]
+            __global const float* q_all_heads,
+            __global const float* k_cache_f32,
+            __global float* scores,
             const int qHeadOff,
             const int head_dim,
             const int kv_dim,
@@ -399,7 +413,7 @@ public final class KernelSource {
             const int posInclusive,
             const float rsqrt_d)
         {
-            const int j = get_global_id(0);
+            const int j = get_group_id(0) * get_local_size(0) + get_local_id(0);
             if (j >= posInclusive) return;
 
             const int kOff = j * kv_dim + kv_head_off;
@@ -410,84 +424,63 @@ public final class KernelSource {
             scores[j] = dot * rsqrt_d;
         }
 
-        /*
-         * softmax_inplace: single work-group, numerically stable 3-pass
-         * softmax over `len` elements -- exact algorithm match to
-         * softmax_row_f32 (max-subtract, exp+sum, normalize). Must be
-         * launched with local size >= len is NOT required; this loops
-         * internally so any local size works, but launching with ONE
-         * work-group (global size == local size) is required since it
-         * uses local-memory reduction for max and sum.
-         */
         __kernel void softmax_inplace(
             __global float* scores,
-            __local float* scratch,
             const int len)
         {
+            __local float sh_softmax[256];
             const int lid = get_local_id(0);
             const int localSize = get_local_size(0);
 
-            // Pass 1: max
-            float localMax = -FLT_MAX;
+            float localMax = -DEVICE_FLT_MAX;
             for (int i = lid; i < len; i += localSize) {
                 localMax = fmax(localMax, scores[i]);
             }
-            scratch[lid] = localMax;
+            sh_softmax[lid] = localMax;
             barrier(CLK_LOCAL_MEM_FENCE);
             for (int stride = localSize / 2; stride > 0; stride >>= 1) {
                 if (lid < stride) {
-                    scratch[lid] = fmax(scratch[lid], scratch[lid + stride]);
+                    sh_softmax[lid] = fmax(sh_softmax[lid], sh_softmax[lid + stride]);
                 }
                 barrier(CLK_LOCAL_MEM_FENCE);
             }
-            float maxVal = scratch[0];
+            float maxVal = sh_softmax[0];
             barrier(CLK_LOCAL_MEM_FENCE);
 
-            // Pass 2: exp(x - max), store back, accumulate sum
             float localSum = 0.0f;
             for (int i = lid; i < len; i += localSize) {
                 float e = exp(scores[i] - maxVal);
                 scores[i] = e;
                 localSum += e;
             }
-            scratch[lid] = localSum;
+            sh_softmax[lid] = localSum;
             barrier(CLK_LOCAL_MEM_FENCE);
             for (int stride = localSize / 2; stride > 0; stride >>= 1) {
                 if (lid < stride) {
-                    scratch[lid] += scratch[lid + stride];
+                    sh_softmax[lid] += sh_softmax[lid + stride];
                 }
                 barrier(CLK_LOCAL_MEM_FENCE);
             }
-            float sumVal = scratch[0];
+            float sumVal = sh_softmax[0];
             barrier(CLK_LOCAL_MEM_FENCE);
 
-            // Pass 3: normalize
             float invSum = 1.0f / sumVal;
             for (int i = lid; i < len; i += localSize) {
                 scores[i] *= invSum;
             }
         }
 
-        /*
-         * attn_weighted_sum: attn_out_all_heads[outHeadOff+d] =
-         * sum_j scores[j] * V_cache[j,h,d]. One work-item per output
-         * dimension d (head_dim work-items). Writes directly into the full
-         * concatenated multi-head output buffer at outHeadOff, so no
-         * host-side per-head gather step is needed before the O-projection
-         * GEMV reads it. Same device-resident-FP32-V-cache rationale as
-         * attn_scores.
-         */
         __kernel void attn_weighted_sum(
-            __global const float* scores,      // [pos+1]
-            __global const float* v_cache_f32, // [max_seq, kv_dim] dequantized
-            __global float* attn_out_all_heads,// [numHeads * head_dim] -- full buffer, all heads
+            __global const float* scores,
+            __global const float* v_cache_f32,
+            __global float* attn_out_all_heads,
             const int outHeadOff,
             const int head_dim,
             const int kv_dim,
             const int kv_head_off,
             const int posInclusive)
         {
-            const int d = get_global_id(0);
+            const int d = get_group_id(0) * get_local_size(0) + get_local_id(0);
             if (d >= head_dim) return;
 
             float acc = 0.0f;
@@ -497,22 +490,13 @@ public final class KernelSource {
             attn_out_all_heads[outHeadOff + d] = acc;
         }
 
-        /*
-         * swiglu_activate: out[h] = gate[h] * sigmoid(gate[h]) * up[h].
-         * Exact port of the SiLU formula in matmul_swiglu_q8, including its
-         * -88 exp-argument clamp for numerical stability at very negative
-         * gate values (exp(88) is close to FLT_MAX; anything more negative
-         * would underflow sigmoid to exactly 0 anyway, so the clamp costs
-         * nothing in practice and avoids a potential exp() overflow path
-         * on some GPU math libraries for extreme inputs).
-         */
         __kernel void swiglu_activate(
             __global const float* gate,
             __global const float* up,
             __global float* out,
             const int hidden)
         {
-            const int h = get_global_id(0);
+            const int h = get_group_id(0) * get_local_size(0) + get_local_id(0);
             if (h >= hidden) return;
 
             float g = gate[h];
@@ -520,26 +504,16 @@ public final class KernelSource {
             out[h] = g * sigmoid * up[h];
         }
 
-        /*
-         * residual_add: x[i] += y[i]. Used for both the attention and FFN
-         * residual connections (steps 1c/2d in forward_layer_q8).
-         */
         __kernel void residual_add(
             __global float* x,
             __global const float* y,
             const int len)
         {
-            const int i = get_global_id(0);
+            const int i = get_group_id(0) * get_local_size(0) + get_local_id(0);
             if (i >= len) return;
             x[i] += y[i];
         }
 
-        /*
-         * f32_gemv: plain FP32 GEMV, out[n] = sum_k a[k] * B[k*N+n].
-         * Used for the O-projection (wo), which LlamaLayerInt8 keeps FP32
-         * ("it's small") rather than quantizing -- exact port of
-         * matmul_bias_f32's no-bias case.
-         */
         __kernel void f32_gemv(
             __global const float* a,
             __global const float* B,
@@ -547,7 +521,7 @@ public final class KernelSource {
             const int K,
             const int N)
         {
-            const int n = get_global_id(0);
+            const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
             if (n >= N) return;
 
             float acc = 0.0f;
@@ -555,6 +529,262 @@ public final class KernelSource {
                 acc += a[k] * B[k * N + n];
             }
             out[n] = acc;
+        }
+
+        // =====================================================================
+        // ===================== FFN ACTIVATION ALTERNATIVES =================
+        // =====================================================================
+
+        __kernel void gelu_activate(
+            __global const float* gate,
+            __global float* out,
+            const int hidden)
+        {
+            const int h = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            if (h >= hidden) return;
+            out[h] = gpu_gelu_f(gate[h]);
+        }
+
+        __kernel void geglu_activate(
+            __global const float* gate,
+            __global const float* up,
+            __global float* out,
+            const int hidden)
+        {
+            const int h = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            if (h >= hidden) return;
+            out[h] = gpu_gelu_f(gate[h]) * up[h];
+        }
+
+        // =====================================================================
+        // ===================== BATCHED PREFILL KERNELS =====================
+        // =====================================================================
+
+        __kernel void q8_0_gemm_tiled(
+            __global const uchar* X_q8_0, // [T, numBlocks*34]
+            __global const uchar* W_q8_0, // [N, numBlocks*34]
+            __global float* out,          // [T, N]
+            const int T,
+            const int N,
+            const int K)
+        {
+            const int t = get_group_id(1);
+            const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            if (t >= T || n >= N) return;
+
+            const int numBlocks = K / Q8_0_GROUP_SIZE;
+            const int rowStride = numBlocks * Q8_0_BLOCK_SIZE;
+            const int xRowOff = t * rowStride;
+            const int wRowOff = n * rowStride;
+
+            float acc = 0.0f;
+            for (int b = 0; b < numBlocks; b++) {
+                const int xBlockOff = xRowOff + b * Q8_0_BLOCK_SIZE;
+                const int wBlockOff = wRowOff + b * Q8_0_BLOCK_SIZE;
+
+                float xScale = decode_fp16(X_q8_0[xBlockOff], X_q8_0[xBlockOff + 1]);
+                float wScale = decode_fp16(W_q8_0[wBlockOff], W_q8_0[wBlockOff + 1]);
+                float scale = xScale * wScale;
+
+                int iacc = 0;
+                for (int j = 0; j < Q8_0_GROUP_SIZE; j++) {
+                    char xv = (char) X_q8_0[xBlockOff + 2 + j];
+                    char wv = (char) W_q8_0[wBlockOff + 2 + j];
+                    iacc += (int) xv * (int) wv;
+                }
+                acc += iacc * scale;
+            }
+            out[t * N + n] = acc;
+        }
+
+        __kernel void f32_gemm_tiled(
+            __global const float* A, // [T, K]
+            __global const float* B, // [K, N]
+            __global float* out,     // [T, N]
+            const int T,
+            const int K,
+            const int N)
+        {
+            const int t = get_group_id(1);
+            const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            if (t >= T || n >= N) return;
+
+            float acc = 0.0f;
+            for (int k = 0; k < K; k++) {
+                acc += A[t * K + k] * B[k * N + n];
+            }
+            out[t * N + n] = acc;
+        }
+
+        __kernel void rmsnorm_partial_sumsq_rows(
+            __global const float* x,       // [T, features]
+            __global float* partials,      // [T, numGroups]
+            const int features,
+            const int numGroups)
+        {
+            __local float sh_rms_rows[256];
+            const int row = get_group_id(1);
+            const int groupId = get_group_id(0);
+            const int lid = get_local_id(0);
+            const int localSize = get_local_size(0);
+            const int idx = groupId * localSize + lid;
+
+            float v = (idx < features) ? x[row * features + idx] : 0.0f;
+            sh_rms_rows[lid] = v * v;
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            for (int stride = localSize / 2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    sh_rms_rows[lid] += sh_rms_rows[lid + stride];
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+
+            if (lid == 0) {
+                partials[row * numGroups + groupId] = sh_rms_rows[0];
+            }
+        }
+
+        __kernel void rmsnorm_apply_rows(
+            __global const float* x,      // [T, features]
+            __global const float* gamma,  // [features]
+            __global float* out,          // [T, features]
+            __global const float* rms,    // [T]
+            const int features)
+        {
+            const int row = get_group_id(1);
+            const int i = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            if (i >= features) return;
+            out[row * features + i] = x[row * features + i] * rms[row] * gamma[i];
+        }
+
+        __kernel void rope_apply_pairwise_rows(
+            __global float* buf,             // [T, heads*head_dim], PLAIN contiguous layout
+            __global const float* cos_table, // [max_seq, halfDim]
+            __global const float* sin_table,
+            const int heads,
+            const int head_dim,
+            __global const int* positions)   // [T] absolute sequence position per row
+        {
+            const int halfDim = head_dim >> 1;
+            const int row = get_group_id(1);
+            const int gid = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            const int h = gid / halfDim;
+            const int i = gid % halfDim;
+            if (h >= heads) return;
+
+            const int pos = positions[row];
+            const int rowOff = row * heads * head_dim;
+            const int pairOff = rowOff + h * head_dim + (i << 1);
+
+            float c = cos_table[pos * halfDim + i];
+            float s = sin_table[pos * halfDim + i];
+            float x0 = buf[pairOff];
+            float x1 = buf[pairOff + 1];
+
+            buf[pairOff] = x0 * c - x1 * s;
+            buf[pairOff + 1] = x0 * s + x1 * c;
+        }
+
+        __kernel void attn_scores_causal_batched(
+            __global const float* q_all,   // [T, qRowStride]
+            __global const float* k_all,   // [T, kRowStride]
+            __global float* scores,        // [T, T]
+            const int qRowStride,
+            const int kRowStride,
+            const int qHeadOff,
+            const int kHeadOff,
+            const int head_dim,
+            const int T,
+            const float rsqrt_d)
+        {
+            const int t = get_group_id(1);
+            const int j = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            if (j >= T) return;
+
+            if (j > t) {
+                scores[t * T + j] = -DEVICE_FLT_MAX;
+                return;
+            }
+
+            const int qOff = t * qRowStride + qHeadOff;
+            const int kOff = j * kRowStride + kHeadOff;
+            float dot = 0.0f;
+            for (int d = 0; d < head_dim; d++) {
+                dot += q_all[qOff + d] * k_all[kOff + d];
+            }
+            scores[t * T + j] = dot * rsqrt_d;
+        }
+
+        __kernel void softmax_inplace_rows(
+            __global float* scores, // [T, T]
+            const int T)
+        {
+            __local float sh_softmax_rows[256];
+            const int row = get_group_id(0);
+            const int lid = get_local_id(0);
+            const int localSize = get_local_size(0);
+            __global float* rowPtr = scores + row * T;
+
+            float localMax = -DEVICE_FLT_MAX;
+            for (int i = lid; i < T; i += localSize) {
+                localMax = fmax(localMax, rowPtr[i]);
+            }
+            sh_softmax_rows[lid] = localMax;
+            barrier(CLK_LOCAL_MEM_FENCE);
+            for (int stride = localSize / 2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    sh_softmax_rows[lid] = fmax(sh_softmax_rows[lid], sh_softmax_rows[lid + stride]);
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+            float maxVal = sh_softmax_rows[0];
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            float localSum = 0.0f;
+            for (int i = lid; i < T; i += localSize) {
+                float e = exp(rowPtr[i] - maxVal);
+                rowPtr[i] = e;
+                localSum += e;
+            }
+            sh_softmax_rows[lid] = localSum;
+            barrier(CLK_LOCAL_MEM_FENCE);
+            for (int stride = localSize / 2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    sh_softmax_rows[lid] += sh_softmax_rows[lid + stride];
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+            float sumVal = sh_softmax_rows[0];
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            float invSum = 1.0f / sumVal;
+            for (int i = lid; i < T; i += localSize) {
+                rowPtr[i] *= invSum;
+            }
+        }
+
+        __kernel void attn_weighted_sum_causal_batched(
+            __global const float* scores,  // [T, T]
+            __global const float* v_all,   // [T, vRowStride]
+            __global float* attn_out,      // [T, outRowStride]
+            const int vRowStride,
+            const int outRowStride,
+            const int vHeadOff,
+            const int outHeadOff,
+            const int head_dim,
+            const int T)
+        {
+            const int t = get_group_id(1);
+            const int d = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            if (d >= head_dim) return;
+
+            __global const float* rowScores = scores + t * T;
+            float acc = 0.0f;
+            for (int j = 0; j <= t; j++) {
+                acc += rowScores[j] * v_all[j * vRowStride + vHeadOff + d];
+            }
+            attn_out[t * outRowStride + outHeadOff + d] = acc;
         }
         """;
 }

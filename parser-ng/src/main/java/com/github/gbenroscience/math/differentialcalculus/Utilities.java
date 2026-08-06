@@ -106,7 +106,7 @@ public class Utilities {
                             if (isMulOrDiv(list.get(j))) {
                                 --j;
                             }//end if
-                            else if (isClosingBracket(list.get(j))) {
+                            else if (isClosingCircBracket(list.get(j))) {
                                 j = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, j, list);
                                 --j;
                             } else if (isNumber(list.get(j))) {
@@ -127,7 +127,7 @@ public class Utilities {
                                 break;
                             }//end else if
                             //...,(,(......)....,*,-1
-                            else if (isOpeningBracket(list.get(j))) {
+                            else if (isOpeningCircBracket(list.get(j))) {
                                 list.add(j + 1, "-");
                                 list.remove(i);
                                 i -= 1;
@@ -142,7 +142,7 @@ public class Utilities {
                             if (isMulOrDiv(list.get(j))) {
                                 ++j;
                             }//end if
-                            else if (isOpeningBracket(list.get(j))) {
+                            else if (isOpeningCircBracket(list.get(j))) {
                                 j = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, j, list);
                                 ++j;
                             } else if (isNumber(list.get(j))) {
@@ -161,7 +161,7 @@ public class Utilities {
                                 break;
                             }//end else if
                             //...,-1,*....,(......,),),
-                            else if (isClosingBracket(list.get(j))) {
+                            else if (isClosingCircBracket(list.get(j))) {
                                 list.add(j + 1, "-");
                                 list.remove(i);
                                 break;
@@ -216,7 +216,7 @@ public class Utilities {
 
         if (list.get(index).equals("0") || list.get(index).equals("0.0")) {
             //(,0,+|-
-            if (isOpeningBracket(list.get(index - 1)) && isPlusOrMinus(list.get(index + 1))) {
+            if (isOpeningCircBracket(list.get(index - 1)) && isPlusOrMinus(list.get(index + 1))) {
                 if (list.get(index + 1).equals("+")) {
                     list.remove(index + 1);
                     list.remove(index);
@@ -230,7 +230,7 @@ public class Utilities {
                 list.subList(index - 1, index + 1).clear();
             }//end else if
             //unbracket the pattern...(,0,)...avoid the pattern sin,(,0,)
-            else if (isOpeningBracket(list.get(index - 1)) && isClosingBracket(list.get(index + 1)) && !isMethodName(list.get(index - 2))) {
+            else if (isOpeningCircBracket(list.get(index - 1)) && isClosingCircBracket(list.get(index + 1)) && !isMethodName(list.get(index - 2))) {
                 list.remove(index + 1);
                 list.remove(index - 1);
                 --index;
@@ -239,16 +239,16 @@ public class Utilities {
             //0,*|/
             else if (isMulOrDiv(list.get(index + 1))) {
                 //0,*,num|var  
-                if (isNumber(list.get(index + 2)) || (isVariableString(list.get(index + 2)) && !isOpeningBracket(list.get(index + 3)))) {
+                if (isNumber(list.get(index + 2)) || (isVariableString(list.get(index + 2)) && !isOpeningCircBracket(list.get(index + 3)))) {
                     list.subList(index + 1, index + 3).clear();
                 }//end if
                 //0,*,sin,(,....,)
-                else if (isVariableString(list.get(index + 2)) && isOpeningBracket(list.get(index + 3))) {
+                else if (isVariableString(list.get(index + 2)) && isOpeningCircBracket(list.get(index + 3))) {
                     int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, index + 3, list);
                     list.subList(index + 1, close + 1).clear();
                 }//end else if
                 //0,*,(,....,)
-                else if (isOpeningBracket(list.get(index + 2))) {
+                else if (isOpeningCircBracket(list.get(index + 2))) {
                     int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, index + 2, list);
                     list.subList(index + 1, close + 1).clear();
                 }//end else if
@@ -268,14 +268,14 @@ public class Utilities {
                         list.subList(index - 2, index).clear();
                         index -= 2;
                     } //(,num|var,*,0
-                    else if (isOpeningBracket(list.get(index - 3))) {
+                    else if (isOpeningCircBracket(list.get(index - 3))) {
                         list.subList(index - 2, index).clear();
                         index -= 2;
                     }
 
                 }//end if
                 //..,),*,0,
-                else if (isClosingBracket(list.get(index - 2))) {
+                else if (isClosingCircBracket(list.get(index - 2))) {
                     int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, index - 2, list);
                     //sin,(,....,),*,0 
                     if (isMethodName(list.get(open - 1))) {
@@ -292,7 +292,7 @@ public class Utilities {
                             temp.clear();
                             index -= sz;
                         } //(,sin,(,.....,),*,0
-                        else if (isOpeningBracket(list.get(open - 2))) {
+                        else if (isOpeningCircBracket(list.get(open - 2))) {
                             List temp = list.subList(open - 1, index);
                             int sz = temp.size();
                             temp.clear();
@@ -315,7 +315,7 @@ public class Utilities {
                             temp.clear();
                             index -= sz;
                         } //(,(,.....,),*,0
-                        else if (isOpeningBracket(list.get(open - 1))) {
+                        else if (isOpeningCircBracket(list.get(open - 1))) {
                             List temp = list.subList(open - 1, index);
                             int sz = temp.size();
                             temp.clear();
@@ -408,7 +408,7 @@ public class Utilities {
 
         for (int i = 0; i < scan.size(); i++) {
             try {
-                if (isClosingBracket(scan.get(i))) {
+                if (isClosingCircBracket(scan.get(i))) {
                     int close = i;
                     int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, close, scan);
                     int j = open + 1;
@@ -419,7 +419,7 @@ public class Utilities {
 
                         }
 
-                        if (isOpeningBracket(scan.get(j))) {
+                        if (isOpeningCircBracket(scan.get(j))) {
                             int closeIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, j, scan);
                             j = closeIndex;
                         }//end if
@@ -427,7 +427,7 @@ public class Utilities {
                             //do nothing
                         }//end if 
                         //...,(,num,*|/,
-                        else if (isNumber(scan.get(j)) && isOpeningBracket(scan.get(j - 1)) && isMulOrDiv(scan.get(j + 1))) {
+                        else if (isNumber(scan.get(j)) && isOpeningCircBracket(scan.get(j - 1)) && isMulOrDiv(scan.get(j + 1))) {
                             value *= Double.parseDouble(scan.get(j));
                             scan.set(j, "");
                         }//end if
@@ -442,7 +442,7 @@ public class Utilities {
                             scan.set(j, "");
                         }//end else if
                         //...,*|/,num,),...
-                        else if (isNumber(scan.get(j)) && isMulOrDiv(scan.get(j - 1)) && isClosingBracket(scan.get(j + 1))) {
+                        else if (isNumber(scan.get(j)) && isMulOrDiv(scan.get(j - 1)) && isClosingCircBracket(scan.get(j + 1))) {
                             if (scan.get(j - 1).equals("*")) {
                                 value *= Double.parseDouble(scan.get(j));
                             } else {
@@ -486,14 +486,14 @@ public class Utilities {
         //print("Before re-arranging tokens--- scan = "+scan);
         for (int i = 0; i < scan.size(); i++) {
             try {
-                if (isClosingBracket(scan.get(i))) {
+                if (isClosingCircBracket(scan.get(i))) {
                     int close = i;
                     int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, close, scan);
                     int j = open + 1;
                     double value = 0;
                     while (j < close) {
 
-                        if (isOpeningBracket(scan.get(j))) {
+                        if (isOpeningCircBracket(scan.get(j))) {
                             int closeIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, j, scan);
                             j = closeIndex;
                         }//end if
@@ -509,13 +509,13 @@ public class Utilities {
 
                         }//end if
                         //...,(,num,+|-,...
-                        else if (isNumber(scan.get(j)) && isOpeningBracket(scan.get(j - 1)) && isPlusOrMinus(scan.get(j + 1))) {
+                        else if (isNumber(scan.get(j)) && isOpeningCircBracket(scan.get(j - 1)) && isPlusOrMinus(scan.get(j + 1))) {
                             value += Double.parseDouble(scan.get(j));
 
                             scan.set(j, "");
                         }//end else if
                         //...,+|-,num,),...
-                        else if (isNumber(scan.get(j)) && isPlusOrMinus(scan.get(j - 1)) && isClosingBracket(scan.get(j + 1))) {
+                        else if (isNumber(scan.get(j)) && isPlusOrMinus(scan.get(j - 1)) && isClosingCircBracket(scan.get(j + 1))) {
                             if (scan.get(j - 1).equals("-")) {
                                 value += -1 * Double.parseDouble(scan.get(j));
                             } else {

@@ -59,8 +59,8 @@ public ArrayList<String> getScanner() {
         for (int i = 0; i < scan.size(); i++) {
 try{
 
-if(isOpeningBracket(scan.get(i))){
-       while(isOpeningBracket(scan.get(i))){
+if(isOpeningCircBracket(scan.get(i))){
+       while(isOpeningCircBracket(scan.get(i))){
         ++i;
     }
        int start = i;
@@ -139,9 +139,9 @@ else if(endsWithDiv){
    i=start+vars.size()-1;
    
 }
-else if(isClosingBracket(scan.get(i))){
+else if(isClosingCircBracket(scan.get(i))){
     int siz = scan.size();
-    while(i<siz&&isClosingBracket(scan.get(i))){
+    while(i<siz&&isClosingCircBracket(scan.get(i))){
         ++i;
     }
     if(isMulOrDiv(scan.get(i))||isPlusOrMinus(scan.get(i))){
@@ -212,10 +212,10 @@ multiplyOutProductBrackets(scan);
     for(int i=0;i<scan.size();i++){
         try{
             
-            if(isMethodName(scan.get(i))&&isOpeningBracket(scan.get(i+1))){
+            if(isMethodName(scan.get(i))&&isOpeningCircBracket(scan.get(i+1))){
                 int initialCloseIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i+1, scan); 
                 //Check for double brackets.
-                if(isOpeningBracket(scan.get(i+2))){
+                if(isOpeningCircBracket(scan.get(i+2))){
                     /**
                      * Check if the inside bracket is really double to the outer one...
                      * Because the pattern is possible...sin((4*x-7)+1) and this is not really double.
@@ -264,7 +264,7 @@ private static void unbracketNumbers(ArrayList<String>scan){
   ////print("Before unbracketNumbers...scan = "+scan);
     for(int i=0;i<scan.size();i++){  
         try{
-        if(isNumber(scan.get(i))&&(isOpeningBracket(scan.get(i-1))&&!isMethodName(scan.get(i-2)) )&&isClosingBracket(scan.get(i+1))){
+        if(isNumber(scan.get(i))&&(isOpeningCircBracket(scan.get(i-1))&&!isMethodName(scan.get(i-2)) )&&isClosingCircBracket(scan.get(i+1))){
             scan.remove(i+1);
             scan.remove(i-1);
             }
@@ -287,11 +287,11 @@ public static void openUpUnnecessaryBrackets(ArrayList<String>scan){
     for(int i=0;i<scan.size();i++){
        
    
-        if(isClosingBracket(scan.get(i))){
+        if(isClosingCircBracket(scan.get(i))){
             int close = i;
             int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, close, scan);
             if(open>0){
-                if(isOpeningBracket(scan.get(open-1))){
+                if(isOpeningCircBracket(scan.get(open-1))){
                     int outerOpen = open-1;
                     int outerClose = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, outerOpen, scan);
                   if(outerClose == close+1){
@@ -329,7 +329,7 @@ private static void bracketVariableProductsAndQuotients(ArrayList<String>scan){
             int start = i;    
            while(isNumber(token)||isMulOrDiv(token)||(isVariableString(token))){ 
         
-           if(isVariableString(token)&&isOpeningBracket(nextToken)){
+           if(isVariableString(token)&&isOpeningCircBracket(nextToken)){
                i=Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN,  i+1, scan);
            }
            ++i;
@@ -355,7 +355,7 @@ catch(IndexOutOfBoundsException boundsException){
             * So even though you find that the sub-expression needs to be bracketed, but has 
             * 
             */ 
-           if((isOpeningBracket(scan.get(start-2))&&scan.subList(start, i).size()<4)||(scan.subList(start, i).size()==1)){
+           if((isOpeningCircBracket(scan.get(start-2))&&scan.subList(start, i).size()<4)||(scan.subList(start, i).size()==1)){
                
            }
            else{
@@ -420,7 +420,7 @@ private static void quicksimplify(ArrayList<String>scan){
                   scan.set(i-1,"");
                   scan.set(i,"");//(,3,^,2,)
        //Open the brackets if not belonging to a function.
-             if(isOpeningBracket(scan.get(i-2))&&isClosingBracket(scan.get(i+2))){
+             if(isOpeningCircBracket(scan.get(i-2))&&isClosingCircBracket(scan.get(i+2))){
                  if(i-3>=0 && !isMethodName(scan.get(i-3))){
                  scan.set(i-2,"");
                  scan.set(i+2,"");
@@ -447,7 +447,7 @@ private static void quicksimplify(ArrayList<String>scan){
                   
                      //If product or quotient was self-contained in a bracket,open the brackets if not belonging to a function.
    //e.g. if sin(,3,/,2) do not open. But if just (3,/,2,)..then open.
-             if(isOpeningBracket(scan.get(i-2))&&isClosingBracket(scan.get(i+2))){
+             if(isOpeningCircBracket(scan.get(i-2))&&isClosingCircBracket(scan.get(i+2))){
                  if(i-3>=0 && !isMethodName(scan.get(i-3))){
                  scan.set(i-2,"");
                  scan.set(i+2,"");
@@ -462,7 +462,7 @@ private static void quicksimplify(ArrayList<String>scan){
                   
                      //If product or quotient was self-contained in a bracket,open the brackets if not belonging to a function.
    //e.g. if sin(,3,/,2) do not open. But if just (3,/,2,)..then open.
-             if(isOpeningBracket(scan.get(i-2))&&isClosingBracket(scan.get(i+2))){
+             if(isOpeningCircBracket(scan.get(i-2))&&isClosingCircBracket(scan.get(i+2))){
                  if(i-3>=0 && !isMethodName(scan.get(i-3))){
                  scan.set(i-2,"");
                  scan.set(i+2,"");
@@ -487,7 +487,7 @@ private static void quicksimplify(ArrayList<String>scan){
                   scan.set(i,"");//(,3,+,2,) 
                      //If product or quotient was self-contained in a bracket,open the brackets if not belonging to a function.
    //e.g. if sin(,3,+,2) do not open. But if just (3,+,2,)..then open.
-             if(isOpeningBracket(scan.get(i-2))&&isClosingBracket(scan.get(i+2))){
+             if(isOpeningCircBracket(scan.get(i-2))&&isClosingCircBracket(scan.get(i+2))){
                  if(i-3>=0 && !isMethodName(scan.get(i-3))){
                  scan.set(i-2,"");
                  scan.set(i+2,"");
@@ -500,7 +500,7 @@ private static void quicksimplify(ArrayList<String>scan){
                   scan.set(i,"");//(,3,-,2,)    
                      //If product or quotient was self-contained in a bracket,open the brackets if not belonging to a function.
    //e.g. if sin(,3,+,2) do not open. But if just (3,-,2,)..then open.
-             if(isOpeningBracket(scan.get(i-2))&&isClosingBracket(scan.get(i+2))){
+             if(isOpeningCircBracket(scan.get(i-2))&&isClosingCircBracket(scan.get(i+2))){
                  if(i-3>=0 && !isMethodName(scan.get(i-3))){
                  scan.set(i-2,"");
                  scan.set(i+2,"");
@@ -534,7 +534,7 @@ private static void multiplyOutProductBrackets(ArrayList<String>scan){
         * Deal with the pattern...),*,(
         * 
         */
-            if(isClosingBracket(scan.get(i-1))&&scan.get(i).equals("*") &&isOpeningBracket(scan.get(i+1))){
+            if(isClosingCircBracket(scan.get(i-1))&&scan.get(i).equals("*") &&isOpeningCircBracket(scan.get(i+1))){
                 int start = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i-1, scan);
                 int end = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i+1, scan);
                 
@@ -550,17 +550,17 @@ private static void multiplyOutProductBrackets(ArrayList<String>scan){
                 for(int j=0;j<leftBrac.size()&&canReduce;j++){
                     try{
                     String str = leftBrac.get(j);
-                    if(j>0&&isClosingBracket(leftBrac.get(j-1))&&isPower(leftBrac.get(j))&&isOpeningBracket(leftBrac.get(j+1))){
+                    if(j>0&&isClosingCircBracket(leftBrac.get(j-1))&&isPower(leftBrac.get(j))&&isOpeningCircBracket(leftBrac.get(j+1))){
                         canReduce = false;
                         break;
                     }//end if
-                    if(j>0&&isClosingBracket(leftBrac.get(j-1))&&isPower(leftBrac.get(j))&&isOpeningBracket(leftBrac.get(j+1))){
+                    if(j>0&&isClosingCircBracket(leftBrac.get(j-1))&&isPower(leftBrac.get(j))&&isOpeningCircBracket(leftBrac.get(j+1))){
                         canReduce = false;
                         break;
                     }//end if
                     
-                    if(isNumber(str)||(isVariableString(str)&&!isOpeningBracket(leftBrac.get(j+1)))||isMulOrDiv(str)
-                            ||isBracket(str)||isPower(str)  ){
+                    if(isNumber(str)||(isVariableString(str)&&!isOpeningCircBracket(leftBrac.get(j+1)))||isMulOrDiv(str)
+                            ||isCircBracket(str)||isPower(str)  ){
                         canReduce=true;
                     }//end if
                     
@@ -577,13 +577,13 @@ private static void multiplyOutProductBrackets(ArrayList<String>scan){
                 for(int j=0;j<rightBrac.size()&&canReduce;j++){
                     try{
                     String str = rightBrac.get(j);
-                    if(j>0&&isClosingBracket(rightBrac.get(j-1))&&isPower(rightBrac.get(j))&&isOpeningBracket(rightBrac.get(j+1))){
+                    if(j>0&&isClosingCircBracket(rightBrac.get(j-1))&&isPower(rightBrac.get(j))&&isOpeningCircBracket(rightBrac.get(j+1))){
                         canReduce = false;
                            break;
                     }//end if
                     
-                    if(isNumber(str)||(isVariableString(str)&&!isOpeningBracket(rightBrac.get(j+1)))||isMulOrDiv(str)
-                            ||isBracket(str)||isPower(str)  ){
+                    if(isNumber(str)||(isVariableString(str)&&!isOpeningCircBracket(rightBrac.get(j+1)))||isMulOrDiv(str)
+                            ||isCircBracket(str)||isPower(str)  ){
                         canReduce=true;
                     }//end if
                     else{
@@ -725,7 +725,7 @@ private static void tokenRearranger(ArrayList<String>scan){
     //print("Before re-arranging tokens--- scan = "+scan);
     for(int i=0;i<scan.size();i++){
    try{
-        if(isClosingBracket(scan.get(i))){
+        if(isClosingCircBracket(scan.get(i))){
             int close = i;
             int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, close, scan);
             List<String>temp= new ArrayList<String>();
@@ -733,7 +733,7 @@ private static void tokenRearranger(ArrayList<String>scan){
           while(j<close){
               
               
-              if(isOpeningBracket(scan.get(j))){
+              if(isOpeningCircBracket(scan.get(j))){
                int closeIndex = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, j, scan);
                j = closeIndex;
               }//end if
@@ -744,7 +744,7 @@ private static void tokenRearranger(ArrayList<String>scan){
                   scan.set(j-1,"");
                   scan.set(j,"");
               }//end if
-              else if( isNumber(scan.get(j)) && isOpeningBracket(scan.get(j-1))&& isPlusOrMinus(scan.get(j+1))){
+              else if( isNumber(scan.get(j)) && isOpeningCircBracket(scan.get(j-1))&& isPlusOrMinus(scan.get(j+1))){
                   temp.add("+");
                   temp.add(scan.get(j));
                   scan.set(j,"");
@@ -786,7 +786,7 @@ private static void cleanUp(ArrayList<String>scan){
         * bottom of the bracket pair.For example,(,3,+,(,sin,(,x,),..),)..becomes (,+,(sin,(,x,),+,3,),)..
         * 
         */
-            if(isOpeningBracket(scan.get(i-1))&&isPlusOrMinus(scan.get(i))&&isOpeningBracket(scan.get(i+1))){
+            if(isOpeningCircBracket(scan.get(i-1))&&isPlusOrMinus(scan.get(i))&&isOpeningCircBracket(scan.get(i+1))){
                 if(scan.get(i).equals("+")){
                     scan.remove(i);
                 }
@@ -797,7 +797,7 @@ private static void cleanUp(ArrayList<String>scan){
                 
             }
             //The pattern...(,+,..or (,-,...
-            else if(isOpeningBracket(scan.get(i))&&isPlusOrMinus(scan.get(i+1))){
+            else if(isOpeningCircBracket(scan.get(i))&&isPlusOrMinus(scan.get(i+1))){
                 if(scan.get(i+1).equals("+")){
                     scan.remove(i+1);
                 }
@@ -843,7 +843,7 @@ private static void cleanUp(ArrayList<String>scan){
  
 ArrayList<String>vars=new ArrayList<String>();
 
-while(i+1<=scan.size() && (isNumber(scan.get(i))||(isVariableString(scan.get(i))&&!isOpeningBracket(scan.get(i+1)))||isMulOrDiv(scan.get(i))||
+while(i+1<=scan.size() && (isNumber(scan.get(i))||(isVariableString(scan.get(i))&&!isOpeningCircBracket(scan.get(i+1)))||isMulOrDiv(scan.get(i))||
         STRING.purifier(scan.get(i)).isEmpty()) ){
 
     /**

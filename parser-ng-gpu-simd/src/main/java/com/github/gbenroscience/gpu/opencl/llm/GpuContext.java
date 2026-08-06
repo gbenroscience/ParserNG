@@ -1,56 +1,57 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.gpu.opencl.llm;
  
 
-import com.github.gbenroscience.gpu.opencl.OpenClBindings;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 
 /**
- * @author GBEMIRO
-Bootstraps and holds the OpenCL context/queue/program/kernels for GPU LLM
-inference. One instance per selected device -- unlike
-OpenClCompositeExpression's per-device registry (which needed to support
-many independently-compiled expressions sharing a device), this class
-only ever compiles ONE fixed program (KernelSource.OPENCL_SOURCE),
-since the LLM kernel set is fixed, not user-expression-driven. Build one
-GpuContext per process and reuse it across every GpuLlamaLayer call.
-
-Device selection reuses the exact same -Dopencl.gpu.vendor /
--Dopencl.platform.index system properties OpenClCompositeExpression
-already established -- see that class if you need to pin a specific GPU
-(e.g. multiple GPUs installed) before constructing this.
-
-UNVERIFIED: no OpenCL driver or GPU available in the environment this was
-written in. Traced carefully against the same FFM call shapes already
-proven out in OpenClCompositeExpression, but treat as an untested first
-draft.
+ * OpenCL counterpart of {@code com.github.gbenroscience.gpu.cuda.llm.GpuContext}.
+ * Bootstraps one platform + one device + one in-order command queue +
+ * one built program, then resolves all 23 kernels KernelSource declares.
+ *
+ * DEVICE SELECTION: honors "opencl.platform.index" and "opencl.device.index"
+ * system properties (default 0 for both), mirroring CUDA GpuContext's
+ * "cuda.device.index" property. Unlike the CUDA port, OpenCL enumerates
+ * platforms FIRST (a machine can have several: NVIDIA's, Intel's, POCL's,
+ * all side by side) -- device index is then relative to the chosen
+ * platform's device list, filtered to CL_DEVICE_TYPE_GPU unless
+ * "opencl.device.type=ALL" is set (useful for testing against a CPU
+ * runtime like PoCL when no GPU is available).
+ *
+ * QUEUE ORDERING: created with properties=0, i.e. the OpenCL-default
+ * IN-ORDER queue (out-of-order execution requires explicitly requesting
+ * CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, which this never does). This is
+ * what LlamaLayer's "no sync between back-to-back kernel launches" sync
+ * discipline depends on -- see LlamaLayer's class javadoc, same rationale
+ * as the CUDA port's default-stream argument.
+ *
+ * BUILD: clBuildProgram compiles AND links KernelSource.CL_SOURCE against
+ * this context's one device in a single call -- there is no OpenCL
+ * equivalent of NVRTC as a separate library; the ICD's own compiler
+ * (whatever the vendor driver ships) does it. Build failures surface the
+ * full compiler log via clGetProgramBuildInfo, same pattern the CUDA port
+ * uses for nvrtcGetProgramLog.
+ *
+ * UNVERIFIED: no OpenCL platform/device was available while writing this
+ * port -- carefully traced against the OpenCL 1.2 spec's exact function
+ * signatures and against the already-working CUDA sibling's structure,
+ * but treat every kernel here as unrun until diffed against known-good
+ * per-layer activations, same standing caveat the CUDA files in this
+ * codebase carry.
  */
 public final class GpuContext implements AutoCloseable {
 
-    public final OpenClBindings cl;
+    public final OpenCLBindings cl;
+
     public final MemorySegment platform;
     public final MemorySegment device;
     public final MemorySegment context;
     public final MemorySegment queue;
     public final MemorySegment program;
 
+    // ---- decode-path kernels ----
     public final MemorySegment kQuantizeI8;
     public final MemorySegment kQuantizeActivationQ8_0;
     public final MemorySegment kQ8_0GemvSplit;
@@ -65,178 +66,229 @@ public final class GpuContext implements AutoCloseable {
     public final MemorySegment kResidualAdd;
     public final MemorySegment kF32Gemv;
 
-    /** Serializes kernel-arg-set + dispatch, same rationale as OpenClCompositeExpression's per-context lock. */
+    // ---- FFN activation alternatives ----
+    public final MemorySegment kGeluActivate;
+    public final MemorySegment kGegluActivate;
+
+    // ---- batched prefill kernels ----
+    public final MemorySegment kQ8_0GemmTiled;
+    public final MemorySegment kF32GemmTiled;
+    public final MemorySegment kRmsnormPartialSumsqRows;
+    public final MemorySegment kRmsnormApplyRows;
+    public final MemorySegment kRopeApplyPairwiseRows;
+    public final MemorySegment kAttnScoresCausalBatched;
+    public final MemorySegment kSoftmaxInplaceRows;
+    public final MemorySegment kAttnWeightedSumCausalBatched;
+
+    /** Serializes kernelArgs-set + enqueue against the shared in-order queue -- same role as the CUDA port's dispatchLock. */
     public final Object dispatchLock = new Object();
 
     public GpuContext() {
-        this.cl = new OpenClBindings();
+        this.cl = new OpenCLBindings();
+
         try (Arena bootstrap = Arena.ofConfined()) {
+            int platformIndex = Integer.getInteger("opencl.platform.index", 0);
+            int deviceIndex = Integer.getInteger("opencl.device.index", 0);
+            String deviceTypeProp = System.getProperty("opencl.device.type", "GPU");
+            long deviceTypeFilter = "ALL".equalsIgnoreCase(deviceTypeProp)
+                    ? OpenCLBindings.CL_DEVICE_TYPE_ALL
+                    : OpenCLBindings.CL_DEVICE_TYPE_GPU;
+
+            this.platform = pickPlatform(bootstrap, platformIndex);
+            this.device = pickDevice(bootstrap, platform, deviceTypeFilter, deviceIndex);
+
+            // cl_context clCreateContext(properties, num_devices, devices, pfn_notify, user_data, errcode_ret)
+            MemorySegment devicesArr = bootstrap.allocate(ValueLayout.ADDRESS, 1);
+            devicesArr.setAtIndex(ValueLayout.ADDRESS, 0, device);
             MemorySegment errBuf = bootstrap.allocate(ValueLayout.JAVA_INT);
-            MemorySegment countBuf = bootstrap.allocate(ValueLayout.JAVA_INT);
-
-            // --- platform/device selection: same properties as OpenClCompositeExpression ---
-            check((int) cl.clGetPlatformIDs.invoke(0, MemorySegment.NULL, countBuf), "clGetPlatformIDs(count)");
-            int platformCount = countBuf.get(ValueLayout.JAVA_INT, 0);
-            if (platformCount < 1) {
-                throw new IllegalStateException("No OpenCL platforms found");
-            }
-            MemorySegment platformArr = bootstrap.allocate(ValueLayout.ADDRESS, platformCount);
-            check((int) cl.clGetPlatformIDs.invoke(platformCount, platformArr, MemorySegment.NULL),
-                    "clGetPlatformIDs(list)");
-
-            MemorySegment chosenPlatform = null;
-            MemorySegment chosenDevice = null;
-            String vendorProp = System.getProperty("opencl.gpu.vendor");
-            String platformIndexProp = System.getProperty("opencl.platform.index");
-
-            outer:
-            for (int p = 0; p < platformCount; p++) {
-                MemorySegment plat = platformArr.getAtIndex(ValueLayout.ADDRESS, p);
-                if (platformIndexProp != null && p != Integer.parseInt(platformIndexProp.trim())) {
-                    continue;
-                }
-                int devStatus = (int) cl.clGetDeviceIDs.invoke(
-                        plat, OpenClBindings.CL_DEVICE_TYPE_GPU, 0, MemorySegment.NULL, countBuf);
-                if (devStatus == OpenClBindings.CL_DEVICE_NOT_FOUND) {
-                    continue;
-                }
-                check(devStatus, "clGetDeviceIDs(count)");
-                int devCount = countBuf.get(ValueLayout.JAVA_INT, 0);
-                if (devCount < 1) {
-                    continue;
-                }
-                MemorySegment devArr = bootstrap.allocate(ValueLayout.ADDRESS, devCount);
-                check((int) cl.clGetDeviceIDs.invoke(plat, OpenClBindings.CL_DEVICE_TYPE_GPU,
-                        devCount, devArr, MemorySegment.NULL), "clGetDeviceIDs(list)");
-
-                for (int d = 0; d < devCount; d++) {
-                    MemorySegment dev = devArr.getAtIndex(ValueLayout.ADDRESS, d);
-                    if (vendorProp == null || vendorProp.isBlank()) {
-                        chosenPlatform = plat;
-                        chosenDevice = dev;
-                        break outer;
-                    }
-                    String vendor = deviceInfoString(bootstrap, dev, OpenClBindings.CL_DEVICE_VENDOR).toLowerCase();
-                    String name = deviceInfoString(bootstrap, dev, OpenClBindings.CL_DEVICE_NAME).toLowerCase();
-                    String needle = vendorProp.trim().toLowerCase();
-                    if (vendor.contains(needle) || name.contains(needle)) {
-                        chosenPlatform = plat;
-                        chosenDevice = dev;
-                        break outer;
-                    }
-                }
-            }
-            if (chosenDevice == null) {
-                throw new IllegalStateException(
-                        "No OpenCL GPU device found matching opencl.gpu.vendor=\"" + vendorProp
-                        + "\" / opencl.platform.index=" + platformIndexProp);
-            }
-            this.platform = chosenPlatform;
-            this.device = chosenDevice;
-
-            // --- context / queue ---
-            MemorySegment devicesForCtx = bootstrap.allocate(ValueLayout.ADDRESS);
-            devicesForCtx.set(ValueLayout.ADDRESS, 0, device);
-            this.context = (MemorySegment) cl.clCreateContext.invoke(
-                    MemorySegment.NULL, 1, devicesForCtx, MemorySegment.NULL, MemorySegment.NULL, errBuf);
+            MemorySegment ctxResult = (MemorySegment) cl.clCreateContext.invoke(
+                    MemorySegment.NULL, 1, devicesArr, MemorySegment.NULL, MemorySegment.NULL, errBuf);
             check(errBuf.get(ValueLayout.JAVA_INT, 0), "clCreateContext");
+            this.context = ctxResult;
 
-            this.queue = (MemorySegment) cl.clCreateCommandQueue.invoke(context, device, 0L, errBuf);
+            errBuf.set(ValueLayout.JAVA_INT, 0, 0);
+            MemorySegment queueResult = (MemorySegment) cl.clCreateCommandQueue.invoke(
+                    context, device, 0L, errBuf); // properties=0 -> in-order queue, see class javadoc
             check(errBuf.get(ValueLayout.JAVA_INT, 0), "clCreateCommandQueue");
+            this.queue = queueResult;
 
-            // --- program: ONE build, all 11 kernels ---
-            MemorySegment src = bootstrap.allocateFrom(KernelSource.OPENCL_SOURCE);
-            MemorySegment srcPtrArr = bootstrap.allocate(ValueLayout.ADDRESS);
-            srcPtrArr.set(ValueLayout.ADDRESS, 0, src);
+            this.program = buildProgram(bootstrap);
 
-            this.program = (MemorySegment) cl.clCreateProgramWithSource.invoke(
-                    context, 1, srcPtrArr, MemorySegment.NULL, errBuf);
-            check(errBuf.get(ValueLayout.JAVA_INT, 0), "clCreateProgramWithSource");
+            this.kQuantizeI8 = createKernel(bootstrap, KernelSource.KERNEL_QUANTIZE_I8);
+            this.kQuantizeActivationQ8_0 = createKernel(bootstrap, KernelSource.KERNEL_QUANTIZE_ACTIVATION_Q8_0);
+            this.kQ8_0GemvSplit = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_SPLIT);
+            this.kQ8_0GemvPlain = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_PLAIN);
+            this.kRopeApplySplit = createKernel(bootstrap, KernelSource.KERNEL_ROPE_APPLY_SPLIT);
+            this.kRmsnormPartialSumsq = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ);
+            this.kRmsnormApply = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_APPLY);
+            this.kAttnScores = createKernel(bootstrap, KernelSource.KERNEL_ATTN_SCORES);
+            this.kSoftmaxInplace = createKernel(bootstrap, KernelSource.KERNEL_SOFTMAX_INPLACE);
+            this.kAttnWeightedSum = createKernel(bootstrap, KernelSource.KERNEL_ATTN_WEIGHTED_SUM);
+            this.kSwigluActivate = createKernel(bootstrap, KernelSource.KERNEL_SWIGLU_ACTIVATE);
+            this.kResidualAdd = createKernel(bootstrap, KernelSource.KERNEL_RESIDUAL_ADD);
+            this.kF32Gemv = createKernel(bootstrap, KernelSource.KERNEL_F32_GEMV);
 
-            int buildStatus = (int) cl.clBuildProgram.invoke(program, 1, devicesForCtx,
-                    MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL);
-            if (buildStatus != OpenClBindings.CL_SUCCESS) {
-                throw new IllegalStateException(
-                        "OpenCL LLM kernel build failed (" + buildStatus + "): " + fetchBuildLog(bootstrap));
-            }
+            this.kGeluActivate = createKernel(bootstrap, KernelSource.KERNEL_GELU_ACTIVATE);
+            this.kGegluActivate = createKernel(bootstrap, KernelSource.KERNEL_GEGLU_ACTIVATE);
 
-            this.kQuantizeI8 = createKernel(bootstrap, KernelSource.KERNEL_QUANTIZE_I8, errBuf);
-            this.kQuantizeActivationQ8_0 = createKernel(bootstrap, KernelSource.KERNEL_QUANTIZE_ACTIVATION_Q8_0, errBuf);
-            this.kQ8_0GemvSplit = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_SPLIT, errBuf);
-            this.kQ8_0GemvPlain = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_PLAIN, errBuf);
-            this.kRopeApplySplit = createKernel(bootstrap, KernelSource.KERNEL_ROPE_APPLY_SPLIT, errBuf);
-            this.kRmsnormPartialSumsq = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ, errBuf);
-            this.kRmsnormApply = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_APPLY, errBuf);
-            this.kAttnScores = createKernel(bootstrap, KernelSource.KERNEL_ATTN_SCORES, errBuf);
-            this.kSoftmaxInplace = createKernel(bootstrap, KernelSource.KERNEL_SOFTMAX_INPLACE, errBuf);
-            this.kAttnWeightedSum = createKernel(bootstrap, KernelSource.KERNEL_ATTN_WEIGHTED_SUM, errBuf);
-            this.kSwigluActivate = createKernel(bootstrap, KernelSource.KERNEL_SWIGLU_ACTIVATE, errBuf);
-            this.kResidualAdd = createKernel(bootstrap, KernelSource.KERNEL_RESIDUAL_ADD, errBuf);
-            this.kF32Gemv = createKernel(bootstrap, KernelSource.KERNEL_F32_GEMV, errBuf);
+            this.kQ8_0GemmTiled = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMM_TILED);
+            this.kF32GemmTiled = createKernel(bootstrap, KernelSource.KERNEL_F32_GEMM_TILED);
+            this.kRmsnormPartialSumsqRows = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ_ROWS);
+            this.kRmsnormApplyRows = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_APPLY_ROWS);
+            this.kRopeApplyPairwiseRows = createKernel(bootstrap, KernelSource.KERNEL_ROPE_APPLY_PAIRWISE_ROWS);
+            this.kAttnScoresCausalBatched = createKernel(bootstrap, KernelSource.KERNEL_ATTN_SCORES_CAUSAL_BATCHED);
+            this.kSoftmaxInplaceRows = createKernel(bootstrap, KernelSource.KERNEL_SOFTMAX_INPLACE_ROWS);
+            this.kAttnWeightedSumCausalBatched = createKernel(bootstrap, KernelSource.KERNEL_ATTN_WEIGHTED_SUM_CAUSAL_BATCHED);
 
-            System.err.println("[ParserNG LLM-GPU] using " + deviceInfoString(bootstrap, device, OpenClBindings.CL_DEVICE_VENDOR)
-                    + " " + deviceInfoString(bootstrap, device, OpenClBindings.CL_DEVICE_NAME));
+            System.err.println("[ParserNG LLM-OpenCL] platform=" + platformIndex
+                    + " device=" + deviceIndex + " (" + deviceName(bootstrap) + ")");
 
         } catch (Throwable t) {
-            throw new RuntimeException("Failed to bootstrap LlmGpuContext", t);
+            throw new RuntimeException("Failed to bootstrap OpenCL GpuContext", t);
         }
     }
 
-    private MemorySegment createKernel(Arena arena, String name, MemorySegment errBuf) throws Throwable {
+    private MemorySegment pickPlatform(Arena arena, int platformIndex) throws Throwable {
+        MemorySegment countBuf = arena.allocate(ValueLayout.JAVA_INT);
+        check((int) cl.clGetPlatformIDs.invoke(0, MemorySegment.NULL, countBuf), "clGetPlatformIDs(count)");
+        int count = countBuf.get(ValueLayout.JAVA_INT, 0);
+        if (count < 1) {
+            throw new IllegalStateException("No OpenCL platforms found -- install a vendor ICD (NVIDIA/AMD/Intel driver, or a CPU runtime like PoCL).");
+        }
+        if (platformIndex < 0 || platformIndex >= count) {
+            throw new IllegalArgumentException("opencl.platform.index=" + platformIndex + " out of range [0," + count + ")");
+        }
+        MemorySegment platforms = arena.allocate(ValueLayout.ADDRESS, count);
+        check((int) cl.clGetPlatformIDs.invoke(count, platforms, MemorySegment.NULL), "clGetPlatformIDs(list)");
+        return platforms.getAtIndex(ValueLayout.ADDRESS, platformIndex);
+    }
+
+    private MemorySegment pickDevice(Arena arena, MemorySegment platform, long deviceTypeFilter, int deviceIndex) throws Throwable {
+        MemorySegment countBuf = arena.allocate(ValueLayout.JAVA_INT);
+        int status = (int) cl.clGetDeviceIDs.invoke(platform, deviceTypeFilter, 0, MemorySegment.NULL, countBuf);
+        int count = (status == OpenCLBindings.CL_SUCCESS) ? countBuf.get(ValueLayout.JAVA_INT, 0) : 0;
+        if (count < 1) {
+            // No devices of the requested type (typically GPU) on this
+            // platform -- fall back to ALL device types rather than
+            // failing outright, since e.g. PoCL exposes only CPU devices.
+            check((int) cl.clGetDeviceIDs.invoke(platform, OpenCLBindings.CL_DEVICE_TYPE_ALL, 0, MemorySegment.NULL, countBuf),
+                    "clGetDeviceIDs(count, fallback ALL)");
+            count = countBuf.get(ValueLayout.JAVA_INT, 0);
+            deviceTypeFilter = OpenCLBindings.CL_DEVICE_TYPE_ALL;
+            if (count < 1) {
+                throw new IllegalStateException("No OpenCL devices of any type found on the selected platform.");
+            }
+        }
+        if (deviceIndex < 0 || deviceIndex >= count) {
+            throw new IllegalArgumentException("opencl.device.index=" + deviceIndex + " out of range [0," + count + ")");
+        }
+        MemorySegment devices = arena.allocate(ValueLayout.ADDRESS, count);
+        check((int) cl.clGetDeviceIDs.invoke(platform, deviceTypeFilter, count, devices, MemorySegment.NULL), "clGetDeviceIDs(list)");
+        return devices.getAtIndex(ValueLayout.ADDRESS, deviceIndex);
+    }
+
+    private String deviceName(Arena arena) throws Throwable {
+        MemorySegment sizeBuf = arena.allocate(ValueLayout.JAVA_LONG);
+        check((int) cl.clGetDeviceInfo.invoke(device, OpenCLBindings.CL_DEVICE_NAME, 0L, MemorySegment.NULL, sizeBuf),
+                "clGetDeviceInfo(CL_DEVICE_NAME, size)");
+        long size = sizeBuf.get(ValueLayout.JAVA_LONG, 0);
+        MemorySegment nameBuf = arena.allocate(size);
+        check((int) cl.clGetDeviceInfo.invoke(device, OpenCLBindings.CL_DEVICE_NAME, size, nameBuf, MemorySegment.NULL),
+                "clGetDeviceInfo(CL_DEVICE_NAME, value)");
+        return nameBuf.getString(0, StandardCharsets.UTF_8);
+    }
+
+    private MemorySegment buildProgram(Arena arena) throws Throwable {
+        MemorySegment src = arena.allocateFrom(KernelSource.CL_SOURCE, StandardCharsets.UTF_8);
+        MemorySegment stringsArr = arena.allocate(ValueLayout.ADDRESS, 1);
+        stringsArr.setAtIndex(ValueLayout.ADDRESS, 0, src);
+        // lengths=NULL -> each string is treated as a NUL-terminated C string, which allocateFrom guarantees.
+        MemorySegment errBuf = arena.allocate(ValueLayout.JAVA_INT);
+        MemorySegment prog = (MemorySegment) cl.clCreateProgramWithSource.invoke(
+                context, 1, stringsArr, MemorySegment.NULL, errBuf);
+        check(errBuf.get(ValueLayout.JAVA_INT, 0), "clCreateProgramWithSource");
+
+        MemorySegment devicesArr = arena.allocate(ValueLayout.ADDRESS, 1);
+        devicesArr.setAtIndex(ValueLayout.ADDRESS, 0, device);
+        int buildStatus = (int) cl.clBuildProgram.invoke(
+                prog, 1, devicesArr, MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL);
+        if (buildStatus != OpenCLBindings.CL_SUCCESS) {
+            throw new IllegalStateException(
+                    "OpenCL build of LLM decoder kernels failed (" + OpenCLBindings.errorString(buildStatus) + "): "
+                            + fetchBuildLog(arena, prog));
+        }
+        return prog;
+    }
+
+    private String fetchBuildLog(Arena arena, MemorySegment prog) throws Throwable {
+        MemorySegment sizeBuf = arena.allocate(ValueLayout.JAVA_LONG);
+        int status = (int) cl.clGetProgramBuildInfo.invoke(
+                prog, device, OpenCLBindings.CL_PROGRAM_BUILD_LOG, 0L, MemorySegment.NULL, sizeBuf);
+        if (status != OpenCLBindings.CL_SUCCESS) {
+            return "(no build log available)";
+        }
+        long size = sizeBuf.get(ValueLayout.JAVA_LONG, 0);
+        if (size <= 1) {
+            return "(empty build log)";
+        }
+        MemorySegment logBuf = arena.allocate(size);
+        cl.clGetProgramBuildInfo.invoke(prog, device, OpenCLBindings.CL_PROGRAM_BUILD_LOG, size, logBuf, MemorySegment.NULL);
+        return logBuf.getString(0, StandardCharsets.UTF_8);
+    }
+
+    private MemorySegment createKernel(Arena arena, String name) throws Throwable {
         MemorySegment nameSeg = arena.allocateFrom(name, StandardCharsets.UTF_8);
+        MemorySegment errBuf = arena.allocate(ValueLayout.JAVA_INT);
         MemorySegment kernel = (MemorySegment) cl.clCreateKernel.invoke(program, nameSeg, errBuf);
         check(errBuf.get(ValueLayout.JAVA_INT, 0), "clCreateKernel(" + name + ")");
         return kernel;
     }
 
-    private String deviceInfoString(Arena arena, MemorySegment dev, int param) throws Throwable {
-        MemorySegment sizeBuf = arena.allocate(ValueLayout.JAVA_LONG);
-        cl.clGetDeviceInfo.invoke(dev, param, 0L, MemorySegment.NULL, sizeBuf);
-        long size = sizeBuf.get(ValueLayout.JAVA_LONG, 0);
-        MemorySegment buf = arena.allocate(Math.max(size, 1));
-        cl.clGetDeviceInfo.invoke(dev, param, size, buf, MemorySegment.NULL);
-        return buf.getString(0, StandardCharsets.UTF_8);
-    }
-
-    private String fetchBuildLog(Arena arena) throws Throwable {
-        MemorySegment sizeRet = arena.allocate(ValueLayout.JAVA_LONG);
-        cl.clGetProgramBuildInfo.invoke(program, device, OpenClBindings.CL_PROGRAM_BUILD_LOG,
-                0L, MemorySegment.NULL, sizeRet);
-        long logSize = sizeRet.get(ValueLayout.JAVA_LONG, 0);
-        if (logSize <= 0) {
-            return "(no build log)";
-        }
-        MemorySegment logBuf = arena.allocate(logSize);
-        cl.clGetProgramBuildInfo.invoke(program, device, OpenClBindings.CL_PROGRAM_BUILD_LOG,
-                logSize, logBuf, MemorySegment.NULL);
-        return logBuf.getString(0, StandardCharsets.UTF_8);
-    }
-
-    private static void check(int status, String call) {
-        if (status != OpenClBindings.CL_SUCCESS) {
-            throw new IllegalStateException("OpenCL error in " + call + ": code " + status);
+    static void check(int status, String call) {
+        if (status != OpenCLBindings.CL_SUCCESS) {
+            throw new IllegalStateException("OpenCL error in " + call + ": " + OpenCLBindings.errorString(status));
         }
     }
 
     @Override
     public void close() {
         try {
-            cl.clReleaseKernel.invoke(kQuantizeI8);
-            cl.clReleaseKernel.invoke(kQuantizeActivationQ8_0);
-            cl.clReleaseKernel.invoke(kQ8_0GemvSplit);
-            cl.clReleaseKernel.invoke(kQ8_0GemvPlain);
-            cl.clReleaseKernel.invoke(kRopeApplySplit);
-            cl.clReleaseKernel.invoke(kRmsnormPartialSumsq);
-            cl.clReleaseKernel.invoke(kRmsnormApply);
-            cl.clReleaseKernel.invoke(kAttnScores);
-            cl.clReleaseKernel.invoke(kSoftmaxInplace);
-            cl.clReleaseKernel.invoke(kAttnWeightedSum);
-            cl.clReleaseKernel.invoke(kSwigluActivate);
-            cl.clReleaseKernel.invoke(kResidualAdd);
-            cl.clReleaseKernel.invoke(kF32Gemv);
+            releaseKernelQuietly(kQuantizeI8);
+            releaseKernelQuietly(kQuantizeActivationQ8_0);
+            releaseKernelQuietly(kQ8_0GemvSplit);
+            releaseKernelQuietly(kQ8_0GemvPlain);
+            releaseKernelQuietly(kRopeApplySplit);
+            releaseKernelQuietly(kRmsnormPartialSumsq);
+            releaseKernelQuietly(kRmsnormApply);
+            releaseKernelQuietly(kAttnScores);
+            releaseKernelQuietly(kSoftmaxInplace);
+            releaseKernelQuietly(kAttnWeightedSum);
+            releaseKernelQuietly(kSwigluActivate);
+            releaseKernelQuietly(kResidualAdd);
+            releaseKernelQuietly(kF32Gemv);
+            releaseKernelQuietly(kGeluActivate);
+            releaseKernelQuietly(kGegluActivate);
+            releaseKernelQuietly(kQ8_0GemmTiled);
+            releaseKernelQuietly(kF32GemmTiled);
+            releaseKernelQuietly(kRmsnormPartialSumsqRows);
+            releaseKernelQuietly(kRmsnormApplyRows);
+            releaseKernelQuietly(kRopeApplyPairwiseRows);
+            releaseKernelQuietly(kAttnScoresCausalBatched);
+            releaseKernelQuietly(kSoftmaxInplaceRows);
+            releaseKernelQuietly(kAttnWeightedSumCausalBatched);
             cl.clReleaseProgram.invoke(program);
             cl.clReleaseCommandQueue.invoke(queue);
             cl.clReleaseContext.invoke(context);
+        } catch (Throwable t) {
+            // best-effort cleanup
+        }
+    }
+
+    private void releaseKernelQuietly(MemorySegment kernel) {
+        try {
+            if (kernel != null) {
+                cl.clReleaseKernel.invoke(kernel);
+            }
         } catch (Throwable t) {
             // best-effort cleanup
         }

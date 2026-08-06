@@ -83,7 +83,7 @@ public class UnaryPostOperator extends Operator implements Validatable {
 
         try {
             //specify valid tokens that can come before a post-number operator
-            if (leftInd >= 0 && !isNumber(prev) && !isClosingBracket(prev)
+            if (leftInd >= 0 && !isNumber(prev) && !isClosingCircBracket(prev)
                     && !isVariableString(prev) && !isUnaryPostOperator(prev)) {
               errorLog.error(
                         "ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
@@ -96,7 +96,7 @@ public class UnaryPostOperator extends Operator implements Validatable {
             if (rightInd < sz && !Method.isUnaryPreOperatorORDefinedMethod(next)
                     && !isBinaryOperator(next) && !isUnaryPostOperator(next)
                     && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)
-                    && !isClosingBracket(next)
+                    && !isClosingCircBracket(next)
                     && !Method.isNumberReturningStatsMethod(next)
                     && !isLogicOperator(next)) {
                 errorLog.error(
@@ -137,7 +137,7 @@ public class UnaryPostOperator extends Operator implements Validatable {
                     scan.add(index, "(");
                     i = j + 1;
                 }//end if
-                else if (isClosingBracket(scan.get(i - 1))) {// e.g. sin,(,9,),²
+                else if (isClosingCircBracket(scan.get(i - 1))) {// e.g. sin,(,9,),²
                     int openIndex = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i - 1, scan);
                     int j = i;
                     while (isUnaryPostOperator(scan.get(j))) {

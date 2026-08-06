@@ -108,7 +108,7 @@ public class LogicOperator extends Operator implements Validatable {
         // if(a<b, a*9, c)
         //specify valid tokens that can come before a logic operator
         if (leftInd >= 0) {
-            if (!isNumber(prev)  && ((!isVariableString(prev) || Method.isDefinedMethod(prev)) || FunctionManager.containsAny(prev)) && !isClosingBracket(prev)
+            if (!isNumber(prev)  && ((!isVariableString(prev) || Method.isDefinedMethod(prev)) || FunctionManager.containsAny(prev)) && !isClosingCircBracket(prev)
                     && !isUnaryPostOperator(prev)) {
                 errorLog.error(
                         "1. ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
@@ -121,7 +121,7 @@ public class LogicOperator extends Operator implements Validatable {
 
         //specify valid tokens that can come after a logic operator
         if (rightInd < sz) {
-            if (!isNumber(next) && !isVariableString(next) && !isOpeningBracket(next)) {
+            if (!isNumber(next) && !isVariableString(next) && !isOpeningCircBracket(next)) {
                 errorLog.error(
                         "2. ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + curr + "\" And \"" + next + "\""
                         + " As You Have Done."

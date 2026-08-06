@@ -553,7 +553,7 @@ public class MathScanner {
             } /**
              * Allow early conversion of )sin(k) into )*sin(k)
              */
-            else if (i + 1 < scanner.size() && isClosingBracket(token) && isVariableString(scanner.get(i + 1))
+            else if (i + 1 < scanner.size() && isClosingCircBracket(token) && isVariableString(scanner.get(i + 1))
                     && !Method.isListReturningStatsMethod(scanner.get(i + 1))) {
                 /**
                  * Check if the bracket owner allows for multiplication.
@@ -562,7 +562,7 @@ public class MathScanner {
                 if (open > 0 && !isAtOperator(scanner.get(open - 1)) && !Method.isListReturningStatsMethod(scanner.get(open - 1))) {
                     scanner.add(i + 1, "*");
                 }
-            } else if (i + 1 < scanner.size() && isNumber(token) && isOpeningBracket(scanner.get(i + 1))) {
+            } else if (i + 1 < scanner.size() && isNumber(token) && isOpeningCircBracket(scanner.get(i + 1))) {
                 scanner.add(i + 1, "*");
             }
         }
@@ -599,7 +599,7 @@ public class MathScanner {
                 int index = scanner.get(i).indexOf("–");
                 scanner.set(i, replace(scanner.get(i), "-", index, index + 1));
             }
-            if (isOpeningBracket(scanner.get(i)) && scanner.get(i + 1).equals("-") && isNumber(scanner.get(i + 2))) {
+            if (isOpeningCircBracket(scanner.get(i)) && scanner.get(i + 1).equals("-") && isNumber(scanner.get(i + 2))) {
 
                 int index = scanner.get(i + 2).indexOf(EN_DASH);
                 if (index != -1) {//In case the number at i+2 containsAlgebraicFunction an EN_DASH, replace it with a minus
@@ -681,7 +681,7 @@ public class MathScanner {
 
                 for (int cursor = op + 1; cursor < cl; cursor++) {
                     String tkn = scanner.get(cursor);
-                    if (isOpeningBracket(tkn)) {
+                    if (isOpeningCircBracket(tkn)) {
                         //skip to bracket close and continue searching for commas
                         cursor = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, cursor, scanner);
                     } else if (isComma(tkn)) {
@@ -730,7 +730,7 @@ public class MathScanner {
                  * too complex to be analyzed here.
                  */
                 boolean canCheckNextToken = i + 1 < scanner.size();
-                if ((Method.isFunctionOperatingMethod(scanner.get(i)) || Method.isStatsMethod(scanner.get(i))) && (canCheckNextToken && isOpeningBracket(scanner.get(i + 1)))) {
+                if ((Method.isFunctionOperatingMethod(scanner.get(i)) || Method.isStatsMethod(scanner.get(i))) && (canCheckNextToken && isOpeningCircBracket(scanner.get(i + 1)))) {
                     i = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                 }//end if
                 
@@ -742,10 +742,10 @@ public class MathScanner {
                  * not a defined method, and is a valid variable name, put a *
                  * between the var and the bracket.
                  */
-                else if ((isNumber(scanner.get(i))) && canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) {
+                else if ((isNumber(scanner.get(i))) && canCheckNextToken && isOpeningCircBracket(scanner.get(i + 1))) {
                     scanner.add(i + 1, "*");
                 }//end if
-                else if ((isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))) && canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) {
+                else if ((isVariableString(scanner.get(i)) && !Method.isDefinedMethod(scanner.get(i))) && canCheckNextToken && isOpeningCircBracket(scanner.get(i + 1))) {
                      if (me != null || VariableManager.lookUp(scanner.get(i)) != null) {
                         scanner.add(i + 1, "*");
                         i++;
@@ -768,7 +768,7 @@ public class MathScanner {
                  * variable or method. Force the user to enter it as
                  * (expr)*number or (expr)*A..
                  */
-                else if (isClosingBracket(scanner.get(i)) && (canCheckNextToken && (isVariableString(scanner.get(i + 1)) || isNumber(scanner.get(i + 1))))) {
+                else if (isClosingCircBracket(scanner.get(i)) && (canCheckNextToken && (isVariableString(scanner.get(i + 1)) || isNumber(scanner.get(i + 1))))) {
                     scanner.add(i + 1, "*");
                     i++;
                 }//end else if
@@ -776,7 +776,7 @@ public class MathScanner {
                  * convert ),( into ),*,( e.g (3+4)(5+6) becomes (3+4)*(5+6)
                  * which both the parser and math understand
                  */
-                else if (isClosingBracket(scanner.get(i)) && canCheckNextToken && isOpeningBracket(scanner.get(i + 1))) {
+                else if (isClosingCircBracket(scanner.get(i)) && canCheckNextToken && isOpeningCircBracket(scanner.get(i + 1))) {
                     scanner.add(i + 1, "*");
                     i++;
                 }
@@ -815,7 +815,7 @@ public class MathScanner {
             if (i + 1 < scanner.size()) {
                 String next = scanner.get(i + 1);
                 Function f = FunctionManager.lookUp(token);
-                if (f != null && f.getType() == TYPE.ALGEBRAIC_EXPRESSION && isOpeningBracket(next)) {
+                if (f != null && f.getType() == TYPE.ALGEBRAIC_EXPRESSION && isOpeningCircBracket(next)) {
 
                     int arity = f.getArity();
                     /**
@@ -1114,10 +1114,11 @@ public class MathScanner {
      * math expressions all the programmer has to do is to take care of the
      * signs where need be(e.g in -2.873*5R+sinh34.2, the scanned view will be
      * [-,2.873,*,5,R,+,sinh,34.2]) To make sense of this, the programmer has to
-     * error minor code to concatenate the - and the 2.873 and so on.
-     *
+     * error minor code to concatenate the - and the 2.873 and so on. 
+     * @param me
+     * @return 
      */
-    private final List<String> scan(MathExpression me) {
+    private List<String> scan(MathExpression me) {
         VariableManager varMan = new VariableManager();
         splitStringOnMethods_Variables_And_Operators(); 
         validateInputAfterSplitOnMethodsAndOps(me); 
@@ -1192,7 +1193,7 @@ public class MathScanner {
              * Skip the methods that deal with Function objects, to allow parser
              * to be able to deal with anonymous functions.
              */
-            if (i + 1 < sz && Method.isFunctionOperatingMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+            if (i + 1 < sz && Method.isFunctionOperatingMethod(scanner.get(i)) && isOpeningCircBracket(scanner.get(i + 1))) {
                 int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                 i = close;
                 continue;
@@ -1206,7 +1207,7 @@ public class MathScanner {
             }
 
             String tk = scanner.get(i);
-            if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningBracket(scanner.get(i + 1))
+            if (i + 1 < sz && Variable.isVariableString(tk) && !isOpeningCircBracket(scanner.get(i + 1))
                     && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)) {
 
                 Variable v = VariableManager.lookUp(tk);
@@ -1253,7 +1254,7 @@ public class MathScanner {
                     }
                 }
             } else {
-                if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningBracket(scanner.get(i + 1)) && !varMan.contains(scanner.get(i))
+                if (i + 1 < sz && Variable.isVariableString(scanner.get(i)) && !isOpeningCircBracket(scanner.get(i + 1)) && !varMan.contains(scanner.get(i))
                         && !FunctionManager.containsAny(scanner.get(i))) {
                     errorLog.info(" Unknown Variable: " + scanner.get(i) + "\n Please Declare And Initialize This Variable Before Using It.\n"
                             + "Use The Command, \'variableName=value\' To Accomplish This.");
@@ -1291,12 +1292,12 @@ public class MathScanner {
              * function would have been initialized and its anonymous expression
              * replaced with a function name.
              */
-            if (isOpeningBracket(scanner.get(indexOfAt + 1))) {
+            if (isOpeningCircBracket(scanner.get(indexOfAt + 1))) {
                 //root(@(x)3*x^2+sin(x)+log(x,2),3,4)
 
                 for (int i = indexOfAt; i < scanner.size(); i++) {
                     String token = scanner.get(i);
-                    if (isOpeningBracket(token)) {
+                    if (isOpeningCircBracket(token)) {
                         i = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i, scanner);
                     } else if (isComma(token)) {
                         Function f = new Function(LISTS.createStringFrom(scanner, indexOfAt, i));
@@ -1305,7 +1306,7 @@ public class MathScanner {
                         sub.clear();
                         sub.add(f.getName());
                         break;
-                    } else if (isClosingBracket(token)) {
+                    } else if (isClosingCircBracket(token)) {
                         int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, scanner);
                         if (open < indexOfAt) {//you have gotten to the end of the enclosing brackets of the function and no comma yet
                             Function f = new Function(LISTS.createStringFrom(scanner, indexOfAt, i));
@@ -1343,7 +1344,7 @@ public class MathScanner {
         int i = 0;
         while (i < scanner.size()) {
             if ("@".equals(scanner.get(i))) {
-                if (i + 1 >= scanner.size() || !isOpeningBracket(scanner.get(i + 1))) {
+                if (i + 1 >= scanner.size() || !isOpeningCircBracket(scanner.get(i + 1))) {
                     String found = i + 1 < scanner.size() ? scanner.get(i + 1) : "end of expression";
                     throw new InputMismatchException("Syntax Error occurred while scanning math expression.\n"
                             + "Reason: The @ symbol is used exclusively to create functions. Expected: `(`, found: `" + found + "`");
@@ -1364,12 +1365,12 @@ public class MathScanner {
 
         for (int i = indexOfAt; i < scanner.size(); i++) {
             String token = scanner.get(i);
-            if (isOpeningBracket(token)) {
+            if (isOpeningCircBracket(token)) {
                 i = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i, scanner);
             } else if (isComma(token)) {
                 replaceWithFunctionName(scanner, indexOfAt, i);
                 return indexOfAt + 1;
-            } else if (isClosingBracket(token)) {
+            } else if (isClosingCircBracket(token)) {
                 int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, scanner);
                 if (open < indexOfAt) {
                     replaceWithFunctionName(scanner, indexOfAt, i);
@@ -1421,9 +1422,9 @@ public class MathScanner {
 
         for (int i = 0; i < scanner.size(); i++) {
 
-            if (isClosingBracket(scanner.get(i))) {
+            if (isClosingCircBracket(scanner.get(i))) {
 
-                if (i + 1 < scanner.size() && isOpeningBracket(scanner.get(i + 1))) {//if the pattern is )(...ignore the closing bracket.
+                if (i + 1 < scanner.size() && isOpeningCircBracket(scanner.get(i + 1))) {//if the pattern is )(...ignore the closing bracket.
                     continue;
                 }
 
@@ -1449,7 +1450,7 @@ public class MathScanner {
 
                 if (i + 1 < scanner.size()) {
 
-                    if (isClosingBracket(scanner.get(i + 1))) {//you have a match for an unnecessary wasted bracket
+                    if (isClosingCircBracket(scanner.get(i + 1))) {//you have a match for an unnecessary wasted bracket
                         int inner_open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, scanner);
                         int outer_open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i + 1, scanner);
 
@@ -1471,10 +1472,11 @@ public class MathScanner {
     }
 
     /**
+     * @deprecated 
      * Analyzes the list and extracts the Function string from it.
      *
      * @param list The list to be analyzed. Direct examples would be:
-     * intg(@sin(x+1),4,7) intg(F,4,7) where F is a function that has been
+     * intg(@(x)sin(x+1),4,7) intg(F,4,7) where F is a function that has been
      * defined before in the workspace.. and so on.
      *
      * Simplifies the list to the form matrix_method(funcName,params)
@@ -1491,10 +1493,10 @@ public class MathScanner {
             //det,(,A,) or matrix_mul,(,A, , ,B,)
 //System.print.println("list: "+list);
             if (sz == 4 || sz == 6) {
-                if (Method.isMatrixMethod(list.get(0)) && isOpeningBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
-                    if (sz == 4 && isClosingBracket(list.get(3))) {
+                if (Method.isMatrixMethod(list.get(0)) && isOpeningCircBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
+                    if (sz == 4 && isClosingCircBracket(list.get(3))) {
                         // Method.run(list, Declarations.degGradRadFromVariable());
-                    } else if (sz == 6 && (isComma(list.get(3)) && Method.isUserDefinedFunction(list.get(4)) || isNumber(list.get(4)) || isVariableString(list.get(4))) && isClosingBracket(list.get(5))) {
+                    } else if (sz == 6 && (isComma(list.get(3)) && Method.isUserDefinedFunction(list.get(4)) || isNumber(list.get(4)) || isVariableString(list.get(4))) && isClosingCircBracket(list.get(5))) {
                         //   Method.run(list, Declarations.degGradRadFromVariable());
                     }
                 }
@@ -1511,7 +1513,7 @@ public class MathScanner {
             }
         } else {
             for (int i = 0; i < list.size(); i++) {
-                if (isClosingBracket(list.get(i))) {
+                if (isClosingCircBracket(list.get(i))) {
                     int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, list);
                     if (open > 0) {
                         String token = list.get(open - 1);
@@ -1600,10 +1602,11 @@ public class MathScanner {
     }//end method
 
     /**
+     * @deprecated 
      * Analyzes the list and extracts the Function string from it.
      *
      * @param list The list to be analyzed. Direct examples would be:
-     * intg(@sin(x+1),4,7) intg(F,4,7) where F is a function that has been
+     * intg(@(x)sin(x+1),4,7) intg(F,4,7) where F is a function that has been
      * defined before in the workspace.. and so on.
      *
      * Simplifies the list to the form matrix_method(funcName,params)
@@ -1620,10 +1623,10 @@ public class MathScanner {
         if (list.indexOf("(") == list.lastIndexOf("(") && list.indexOf(")") == list.lastIndexOf(")")) {
             //det,(,A,) or matrix_mul,(,A,B,)
             if (sz == 4 || sz == 5) {
-                if (Method.isMatrixMethod(list.get(0)) && isOpeningBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
-                    if (sz == 4 && isClosingBracket(list.get(3))) {
+                if (Method.isMatrixMethod(list.get(0)) && isOpeningCircBracket(list.get(1)) && Method.isUserDefinedFunction(list.get(2))) {
+                    if (sz == 4 && isClosingCircBracket(list.get(3))) {
                         Method.run(list, Declarations.degGradRadFromVariable());
-                    } else if (sz == 5 && (Method.isUserDefinedFunction(list.get(3)) || isNumber(list.get(3)) || isVariableString(list.get(3))) && isClosingBracket(list.get(4))) {
+                    } else if (sz == 5 && (Method.isUserDefinedFunction(list.get(3)) || isNumber(list.get(3)) || isVariableString(list.get(3))) && isClosingCircBracket(list.get(4))) {
                         Method.run(list, Declarations.degGradRadFromVariable());
                     }
                 }
@@ -1640,7 +1643,7 @@ public class MathScanner {
             }
         } else {
             for (int i = 0; i < list.size(); i++) {
-                if (isClosingBracket(list.get(i))) {
+                if (isClosingCircBracket(list.get(i))) {
                     int open = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, i, list);
                     if (open > 0) {
                         String token = list.get(open - 1);
@@ -1751,6 +1754,9 @@ public class MathScanner {
      */
     public static void main(String args[]) {//tester method for STRING methods
 
+        MathExpression msc = new MathExpression("diffeqn((3*x^2)*y[4]+(5*sin(x))*y[3]+(5/x)*y[2]-3*y[1]+3*x*y[0])");
+         System.out.println(msc.scanner);
+        
         MathExpression orig = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
         System.out.println("f(3,4,2) = " + orig.solve());
 

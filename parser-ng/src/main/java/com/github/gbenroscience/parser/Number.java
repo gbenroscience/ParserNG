@@ -148,7 +148,7 @@ MathExpression
 
         try {
             //specify valid tokens that can come before a number
-            if (!Operator.isBracket(scan.get(index - 1))
+            if (!Operator.isCircBracket(scan.get(index - 1))
                     && !Operator.isLogicOperator(scan.get(index - 1)) && !Operator.isUnaryPreOperator(scan.get(index - 1))
                     && !Operator.isBinaryOperator(scan.get(index - 1)) && !Operator.isAssignmentOperator(scan.get(index - 1))
                     && !Method.isStatsMethod(scan.get(index - 1)) && !isNumber(scan.get(index - 1)) && !Variable.isVariableString(scan.get(index - 1))) {
@@ -160,7 +160,7 @@ MathExpression
                 scan.clear();
             }//end if
             //specify valid tokens that can come after a number
-            if (!Operator.isBracket(scan.get(index + 1)) && !Operator.isBinaryOperator(scan.get(index + 1))
+            if (!Operator.isCircBracket(scan.get(index + 1)) && !Operator.isBinaryOperator(scan.get(index + 1))
                     && !Operator.isUnaryPostOperator(scan.get(index + 1))
                     && !Operator.isLogicOperator(scan.get(index + 1))
                     && !Operator.isUnaryPreOperator(scan.get(index + 1)) && !Method.isNumberReturningStatsMethod(scan.get(index + 1))

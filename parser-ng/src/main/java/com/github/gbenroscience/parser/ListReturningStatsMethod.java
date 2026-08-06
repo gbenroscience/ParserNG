@@ -84,7 +84,7 @@ public final class ListReturningStatsMethod implements Validatable {
 
         for (int i = index - 1; i > 0; i--) {
             String token = scan.get(i);
-            if (isOpeningBracket(token) && Method.isStatsMethod(scan.get(i - 1))) {
+            if (isOpeningCircBracket(token) && Method.isStatsMethod(scan.get(i - 1))) {
 
             }
         }
@@ -93,7 +93,7 @@ public final class ListReturningStatsMethod implements Validatable {
         loopForwards:
         {
             for (int i = scanStartIndex + 1; i < scan.size(); i++) {
-                if (!isClosingBracket(scan.get(i))) {
+                if (!isClosingCircBracket(scan.get(i))) {
                     rootElement = false;
                     break loopForwards;
                 }
@@ -105,7 +105,7 @@ public final class ListReturningStatsMethod implements Validatable {
         loopBackwards:
         {
             for (int i = index - 1; i > 0; i--) {
-                if (!isOpeningBracket(scan.get(i))) {
+                if (!isOpeningCircBracket(scan.get(i))) {
                     rootElement = false;
                     break loopBackwards;
                 }
@@ -294,7 +294,7 @@ public final class ListReturningStatsMethod implements Validatable {
                     //this logic recognizes the end point of backwards bracket
                     //validation for a given object of this class. A close bracket
                     //indicates the end of data that can affect this object
-                    if (isClosingBracket(scan.get(i)) || Method.isStatsMethod(scan.get(i))) {
+                    if (isClosingCircBracket(scan.get(i)) || Method.isStatsMethod(scan.get(i))) {
                         errorLog.error("Ending Backwards Validation For " + name);
                         break loopBackwards;
                     }//end if
@@ -302,7 +302,7 @@ public final class ListReturningStatsMethod implements Validatable {
                     //this logic (the next two ifs)will disallow binary operations
                     //on encapsulations of objects of this class
                     // and their operands within brackets e.g sort(3,2,4)+((sort(1,3,1,-9,3))
-                    if (!isOpeningBracket(scan.get(i))) {
+                    if (!isOpeningCircBracket(scan.get(i))) {
                         openBracsOnly = false;
                         errorLog.error("MBracket Sequence Established. Trend Finished. Applying Other Validation Techniques.");
                     }

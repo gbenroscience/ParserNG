@@ -99,7 +99,7 @@ boolean correct = true;
        &&!isLogicOperator(scan.get(index-1))&&!isAssignmentOperator(scan.get(index-1))
                  &&!Method.isAntiLogToAnyBase(scan.get(index-1))
                  &&!Method.isLogToAnyBase(scan.get(index-1))&&!isUnaryPreOperator(scan.get(index-1))
-                 &&!isOpeningBracket(scan.get(index-1))
+                 &&!isOpeningCircBracket(scan.get(index-1))
           ){
           errorLog.error(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index-1)+"\" And \""+scan.get(index)+"\""+
@@ -109,7 +109,7 @@ boolean correct = true;
              scan.clear();
          }//end if
        //specify valid tokens that can come after a number returning stats operator
-         if(!isOpeningBracket(scan.get(index+1))&&!isVariableString(scan.get(index+1))
+         if(!isOpeningCircBracket(scan.get(index+1))&&!isVariableString(scan.get(index+1))
          &&!Method.isLogToAnyBase(scan.get(index+1))&&!Method.isAntiLogToAnyBase(scan.get(index+1))
          &&!isUnaryPreOperator(scan.get(index+1))&&!isNumber(scan.get(index+1))
          ){

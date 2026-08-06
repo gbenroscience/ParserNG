@@ -2,8 +2,6 @@ package com.github.gbenroscience.gpu.opencl;
 
 
 import com.github.gbenroscience.gpu.GpuCompositeExpression;
-import com.github.gbenroscience.gpu.opencl.OpenClBindings;
-import com.github.gbenroscience.gpu.opencl.OpenClKernelSource;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;

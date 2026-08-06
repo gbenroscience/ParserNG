@@ -1,20 +1,4 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.gpu.cuda.llm;
- 
 
 import com.github.gbenroscience.gpu.cuda.CudaBindings;
 import com.github.gbenroscience.gpu.cuda.NvrtcBindings;
@@ -24,42 +8,17 @@ import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 
 /**
- * @author GBEMIRO
- * CUDA counterpart of {@code com.github.gbenroscience.gpu.llm.LlmGpuContext}.
-Bootstraps and holds the CUDA primary context / module / kernel-function
-handles for GPU LLM inference. One instance per selected device -- same
-"build one per process, reuse across every GpuLlamaLayer call" contract
-as the OpenCL version.
-
-Follows CudaCompositeExpression's established pattern exactly rather
-than inventing a new one:
-  - cuInit once, device chosen via a system property (here
-    "cuda.device.index", same property name CudaCompositeExpression
-    already reads -- so both this and the interpreter path pick up the
-    same -D flag if a process uses both).
-  - The device's PRIMARY context is retained (cuDevicePrimaryCtxRetain)
-    rather than an explicitly created one, so it stays cheaply shareable
-    across threads via cuCtxSetCurrent -- see CudaCompositeExpression's
-    class javadoc for why.
-  - ONE NVRTC compile of KernelSource.CUDA_SOURCE, targeting the
-    device's actual compute capability (queried via
-    cuDeviceGetAttribute, same as the interpreter path), producing ONE
-    PTX module with all 13 kernel entry points.
-
-DIFFERENCE FROM CudaCompositeExpression: that class holds its CUcontext/
-CUmodule/CUfunction handles as a lazily-initialized static singleton
-shared process-wide, because the interpreter path has no natural
-"owner" object. LlmGpuContext (OpenCL) is instead an explicit,
-caller-managed, closeable instance -- so this mirrors THAT shape:
-instance fields, an explicit close(). Nothing stops an application from
-only ever constructing one, same as the OpenCL version's own
-documented usage.
-
-UNVERIFIED: no CUDA driver, no GPU, and no NVRTC toolchain were
-available in the environment this was written in. Traced against the
-exact FFM call shapes CudaCompositeExpression already uses for the
-interpreter kernels (which share the same NvrtcBindings/CudaBindings),
-but treat as an untested first draft.
+ * CUDA counterpart of {@code com.github.gbenroscience.gpu.llm.LlmGpuContext}
+ * -- v2, extended for KernelSource's larger kernel set (GeLU/GeGLU
+ * activations + the batched prefill path). Bootstrap sequence and
+ * ownership model are unchanged from v1 -- see that version's javadoc for
+ * the full rationale (primary-context retain, single NVRTC compile,
+ * "cuda.device.index" system property). This version just resolves 8
+ * additional CUfunction handles out of the same module.
+ *
+ * UNVERIFIED: no CUDA driver, GPU, or NVRTC toolchain were available
+ * while writing this. Same caveat as v1 and as every kernel file in this
+ * codebase.
  */
 public final class GpuContext implements AutoCloseable {
 
@@ -68,8 +27,9 @@ public final class GpuContext implements AutoCloseable {
 
     public final int device;
     public final MemorySegment context; // CUcontext -- the device's primary context
-    public final MemorySegment module;  // CUmodule -- holds all 13 kernels
+    public final MemorySegment module;  // CUmodule -- holds all kernels
 
+    // ---- decode-path kernels ----
     public final MemorySegment kQuantizeI8;
     public final MemorySegment kQuantizeActivationQ8_0;
     public final MemorySegment kQ8_0GemvSplit;
@@ -84,7 +44,21 @@ public final class GpuContext implements AutoCloseable {
     public final MemorySegment kResidualAdd;
     public final MemorySegment kF32Gemv;
 
-    /** Serializes kernelParams-build + launch against the shared primary context, same rationale as CudaCompositeExpression.DISPATCH_LOCK. */
+    // ---- FFN activation alternatives ----
+    public final MemorySegment kGeluActivate;
+    public final MemorySegment kGegluActivate;
+
+    // ---- batched prefill kernels ----
+    public final MemorySegment kQ8_0GemmTiled;
+    public final MemorySegment kF32GemmTiled;
+    public final MemorySegment kRmsnormPartialSumsqRows;
+    public final MemorySegment kRmsnormApplyRows;
+    public final MemorySegment kRopeApplyPairwiseRows;
+    public final MemorySegment kAttnScoresCausalBatched;
+    public final MemorySegment kSoftmaxInplaceRows;
+    public final MemorySegment kAttnWeightedSumCausalBatched;
+
+    /** Serializes kernelParams-build + launch against the shared primary context. */
     public final Object dispatchLock = new Object();
 
     public GpuContext() {
@@ -121,8 +95,6 @@ public final class GpuContext implements AutoCloseable {
             this.context = ctxBuf.get(ValueLayout.ADDRESS, 0);
             check((int) cu.cuCtxSetCurrent.invoke(context), "cuCtxSetCurrent");
 
-            // ONE NVRTC compile -- the resulting PTX module contains all
-            // 13 LLM decoder kernels (see KernelSource).
             String ptx = compileToPtx(bootstrap, major, minor);
 
             MemorySegment ptxSrc = bootstrap.allocateFrom(ptx);
@@ -144,11 +116,23 @@ public final class GpuContext implements AutoCloseable {
             this.kResidualAdd = getFunction(bootstrap, KernelSource.KERNEL_RESIDUAL_ADD);
             this.kF32Gemv = getFunction(bootstrap, KernelSource.KERNEL_F32_GEMV);
 
+            this.kGeluActivate = getFunction(bootstrap, KernelSource.KERNEL_GELU_ACTIVATE);
+            this.kGegluActivate = getFunction(bootstrap, KernelSource.KERNEL_GEGLU_ACTIVATE);
+
+            this.kQ8_0GemmTiled = getFunction(bootstrap, KernelSource.KERNEL_Q8_0_GEMM_TILED);
+            this.kF32GemmTiled = getFunction(bootstrap, KernelSource.KERNEL_F32_GEMM_TILED);
+            this.kRmsnormPartialSumsqRows = getFunction(bootstrap, KernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ_ROWS);
+            this.kRmsnormApplyRows = getFunction(bootstrap, KernelSource.KERNEL_RMSNORM_APPLY_ROWS);
+            this.kRopeApplyPairwiseRows = getFunction(bootstrap, KernelSource.KERNEL_ROPE_APPLY_PAIRWISE_ROWS);
+            this.kAttnScoresCausalBatched = getFunction(bootstrap, KernelSource.KERNEL_ATTN_SCORES_CAUSAL_BATCHED);
+            this.kSoftmaxInplaceRows = getFunction(bootstrap, KernelSource.KERNEL_SOFTMAX_INPLACE_ROWS);
+            this.kAttnWeightedSumCausalBatched = getFunction(bootstrap, KernelSource.KERNEL_ATTN_WEIGHTED_SUM_CAUSAL_BATCHED);
+
             System.err.println("[ParserNG LLM-CUDA] using device " + device
                     + " (compute capability " + major + "." + minor + ")");
 
         } catch (Throwable t) {
-            throw new RuntimeException("Failed to bootstrap LlmCudaContext", t);
+            throw new RuntimeException("Failed to bootstrap GpuContext", t);
         }
     }
 
@@ -159,7 +143,6 @@ public final class GpuContext implements AutoCloseable {
         return fnBuf.get(ValueLayout.ADDRESS, 0);
     }
 
-    /** Same two-stage NVRTC-then-driver compile CudaCompositeExpression uses, just against KernelSource.CUDA_SOURCE. */
     private String compileToPtx(Arena arena, int major, int minor) throws Throwable {
         MemorySegment src = arena.allocateFrom(KernelSource.CUDA_SOURCE, StandardCharsets.UTF_8);
         MemorySegment name = arena.allocateFrom("llm_decoder_kernels.cu", StandardCharsets.UTF_8);

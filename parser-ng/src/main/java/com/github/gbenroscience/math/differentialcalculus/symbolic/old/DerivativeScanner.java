@@ -138,7 +138,7 @@ return false;
                 scanner.clear();
                 throw new Exception("Syntax Error Found During Scanning");
             }
-            if(count<scanner.size()-1&&isInbuiltMethodName(token)&&!isOpeningBracket(scanner.get(count+1))){
+            if(count<scanner.size()-1&&isInbuiltMethodName(token)&&!isOpeningCircBracket(scanner.get(count+1))){
                 System.out.println("Cannot use an inbuilt method name as a variable name.");
                 scanner.clear();
                 throw new Exception("Syntax Error Found During Scanning");            	
@@ -208,13 +208,13 @@ return false;
             /**
              * Convert the pattern (-x...) to (-1*x....)
              */
-            if(isOpeningBracket(scanner.get(i)) && scanner.get(i+1).equals("-") &&isVariableString(scanner.get(i+2))){
+            if(isOpeningCircBracket(scanner.get(i)) && scanner.get(i+1).equals("-") &&isVariableString(scanner.get(i+2))){
                 scanner.set(i+1,"-1");
                 scanner.add(i+2,"*");
             }
             //x,^,-,x convert to x,^,(,-1,*,x,)...or if x,^,-,sin,(,...,) convert to x,^,(,-1,*,sin,(,.....,),)
             else if(isPower(scanner.get(i))&&scanner.get(i+1).equals("-")&&isVariableString(scanner.get(i+2))){
-                if(isOpeningBracket(scanner.get(i+3))){
+                if(isOpeningCircBracket(scanner.get(i+3))){
                     int close = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i+3, scanner);
                     scanner.add(close,")");
                     scanner.add(i+2,"*");

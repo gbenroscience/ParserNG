@@ -5,7 +5,6 @@
 package com.github.gbenroscience.parser;
 
 import java.util.ArrayDeque;
-import com.github.gbenroscience.util.SimplePoint;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.InputMismatchException;
@@ -29,8 +28,8 @@ public class Bracket extends Operator {
      *
      */
     private transient Bracket complement;
-    
-    private BracketMode mode;
+
+    private final BracketMode mode;
 
     public static enum BracketMode {
         CIRCULAR_OPEN('('), CIRCULAR_CLOSE(')'), SQUARE_OPEN('['), SQUARE_CLOSE(']'), CURVED_OPEN('{'), CURVED_CLOSE('}'), ANGULAR_OPEN('<'), ANGULAR_CLOSE('>');
@@ -67,6 +66,10 @@ public class Bracket extends Operator {
             }
         }
 
+        public BracketMode getComplement() {
+            return getComplement(this);
+        }
+
         public static final BracketMode getComplement(BracketMode bm) {
             switch (bm.bracketChar) {
                 case '(':
@@ -100,8 +103,10 @@ public class Bracket extends Operator {
      */
     public Bracket(String op) {
         super(op);
-        if(op.length() == 1){
+        if (op.length() == 1) {
             this.mode = BracketMode.fromChar(op.charAt(0));
+        }else{
+              throw new RuntimeException("Invalid bracket entry spotted: " + op);
         }
     }
 
@@ -114,10 +119,9 @@ public class Bracket extends Operator {
     public Bracket(char op) {
         this(Character.toString(op));
     }
-    
-     
+
     /**
-     * 
+     *
      * @param mode The BracketMode
      */
     public Bracket(BracketMode mode) {
@@ -130,8 +134,6 @@ public class Bracket extends Operator {
         b.setComplement(comp);
         return b;
     }
-
-
 
     /**
      * Used to create similar objects that are not equal The object created by
@@ -163,7 +165,7 @@ public class Bracket extends Operator {
      *
      * for(int i=0;i&lt;bracs.length;i++){
      * moreBracs[i]=createTwinBracket(bracs[i]); }
-     * 
+     *
      * Note that this can be applied to all storage objects too e.g Collection
      * objects and so on.
      *
@@ -182,7 +184,7 @@ public class Bracket extends Operator {
      * non-static version of the above method. This one creates a twin for this
      * Bracket object. The one above creates a twin for the specified bracket
      * object.
-     * 
+     *
      * @return a Bracket object that manifests exactly the same attributes as
      * brac but is a distinct object from brac.
      */
@@ -192,6 +194,12 @@ public class Bracket extends Operator {
         newBrac.setIndex(getIndex());
         return newBrac;
     }
+
+    public BracketMode getMode() {
+        return mode;
+    }
+    
+    
 
     /**
      *
@@ -280,27 +288,37 @@ public class Bracket extends Operator {
 
     /**
      * @param scan The ArrayList object containing the scanned function.
+     * @param openMode [, (, { or <
      * @return true if this Bracket object forms with its complement, a single
      * bracketChar pair that is a bracketChar pair containing no other
      * bracketChar pairs.
      */
-    public boolean isSBP(ArrayList<String> scan) {
+    public boolean isSBP(ArrayList<String> scan, BracketMode openMode) {
         int i = this.index;
         int j = this.complement.index;
+
+        char open = openMode.bracketChar;
+        char close = openMode.getComplement().bracketChar;
 
         if (i < j) {
             ++i;//step away from current bracketChar and start searching for other brackets.
             for (; i < j; i++) {
-                if (isBracket(scan.get(i))) {
+                String stTkn = scan.get(i);
+                char token = stTkn.length() == 1 ? stTkn.charAt(0) : '\u0000';
+                if (token == open || token == close) {
                     return false;
                 }
             }//end for
         } else if (i > j) {
             ++j;//step away from current bracketChar and start searching for other brackets.
             for (; j < i; j++) {
-                if (isBracket(scan.get(j))) {
+
+                String stTkn = scan.get(j);
+                char token = stTkn.length() == 1 ? stTkn.charAt(0) : '\u0000';
+                if (token == open || token == close) {
                     return false;
                 }
+
             }//end for
         } else if (i == j) {
             throw new InputMismatchException("Open MBracket Cannot Be On The Same Index As Closing MBracket");
@@ -323,7 +341,7 @@ public class Bracket extends Operator {
 
         char openBrac = mode.bracketChar;
         char closeBrac = BracketMode.getComplement(mode).bracketChar;
-        
+
         int open = 0;
         int close = 0;
         int stop = 0;
@@ -384,8 +402,8 @@ public class Bracket extends Operator {
      * bracketChar object
      */
     public static int getComplementIndex(boolean isOpenBracket, BracketMode mode, int start, String expr) {
-        
-      char openBrac = mode.bracketChar;
+
+        char openBrac = mode.bracketChar;
         char closeBrac = BracketMode.getComplement(mode).bracketChar;
         int open = 0;
         int close = 0;
@@ -437,13 +455,16 @@ public class Bracket extends Operator {
      * @param start The point in the list where this algorithm should start
      * checking the bracketChar syntax.(inclusive)
      * @param end The point in the list where this algorithm should stop
-     * checking the bracketChar syntax.(inclusive)
+     * checking the bracketChar syntax.(exclusive — same convention as
+     * {@link List#subList(int, int)}, which is what this method actually used
+     * under the hood before this rewrite).
      * @return true if the bracketChar syntax of the scanned expression in the
      * given range is valid or the expression in the given range is devoid of
      * brackets.
      */
     public static boolean checkBracketStructure(List<String> list, int start, int end) {
-        return validateBracketStructure(list.subList(start, end + 1));
+        return validateBracketStructure(list, start, end,
+                BracketMode.CIRCULAR_OPEN, BracketMode.SQUARE_OPEN, BracketMode.CURVED_OPEN, BracketMode.ANGULAR_OPEN);
     }//end method
 
     /**
@@ -452,15 +473,20 @@ public class Bracket extends Operator {
      * @param start The point in the list where this algorithm should start
      * checking for brackets.(inclusive)
      * @param end The point in the list where this algorithm should stop
-     * checking for brackets.(inclusive)
+     * @param openMode checking for brackets.(inclusive)
      * @return true if the scanned expression contains no brackets in the given
      * range.
      */
-    public static boolean hasBracketsInRange(List<String> list, int start, int end) {
+    public static boolean hasBracketsInRange(List<String> list, int start, int end, BracketMode openMode) {
         int sz = list.size();
         if (start >= 0 && end < sz) {
+
+            char open = openMode.bracketChar;
+            char close = openMode.getComplement().bracketChar;
             for (int i = start; i <= end; i++) {
-                if (isBracket(list.get(i))) {
+                String stTkn = list.get(i);
+                char token = stTkn.length() == 1 ? stTkn.charAt(0) : '\u0000';
+                if (token == open || token == close) {
                     return true;
                 }
             }
@@ -567,59 +593,118 @@ public class Bracket extends Operator {
      * the bracketChar pair itself.
      *
      * @param scan the ArrayList containing the scanner output for a Function
+     * @param openMode 
      * @return the bracketChar pair and its contents.
      */
-    public List<String> getBracketDomainContents(List<String> scan) {
-        if (isOpeningBracket(this.getName())) {
+    public List<String> getBracketDomainContents(List<String> scan, BracketMode openMode) {
+        char open = openMode.bracketChar;
+        char close = openMode.getComplement().bracketChar;
+        if ( open == this.name.charAt(0)) {
             return scan.subList(this.getIndex(), this.getComplement().getIndex() + 1);
-        } else if (isClosingBracket(this.getName())) {
+        } else if (close == this.name.charAt(0)) {
             return scan.subList(this.getComplement().getIndex(), this.getIndex() + 1);
         }
         return null;
     }
 
     /**
-     * Fast, single-pass validation and pairing of parentheses.
+     * Fast, single-pass validation of possibly-interleaved bracket structure
+     * across any number of bracket kinds at once.
      *
-     * - Scans the input once (O(n)). - Uses an index stack to match '(' with
-     * ')'. - Avoids copying the input list and repeated indexOf/prevIndexOf
-     * calls. - Builds the same SimplePoint and Bracket pairs as the original.
+     * Given a set of OPEN {@link BracketMode}s (e.g. CIRCULAR_OPEN,
+     * SQUARE_OPEN, CURVED_OPEN, ANGULAR_OPEN), this scans
+     * {@code list[start, end)} exactly once with a single combined stack,
+     * pushing the expected closing char whenever it meets one of the given
+     * opening chars, and popping/checking it whenever it meets any of the
+     * corresponding closing chars.
      *
-     * Assumes SimplePoint and Bracket classes exist with the same API used
-     * previously.
+     * <p>
+     * This replaces validating each bracket kind independently in separate
+     * passes (the original approach used by
+     * {@link #checkBracketStructure(List, int, int)}), which was strictly worse
+     * on two counts:</p>
+     * <ul>
+     * <li><b>Slower</b>: one O(n) sweep over the token range here, instead of
+     * one O(n) sweep per bracket kind — 4x fewer token visits for the 4-kind
+     * case in {@code checkBracketStructure}, and no
+     * {@link List#subList(int, int)} view is allocated per kind.</li>
+     * <li><b>Less correct</b>: validating each bracket kind in isolation cannot
+     * catch brackets of different kinds that are individually balanced but
+     * incorrectly interleaved with each other, e.g. {@code "(3+[2)]"} — one '('
+     * matches one ')', and one '[' matches one ']', so 4 separate single-kind
+     * passes would wrongly accept it. A single shared stack correctly rejects
+     * it, since the ')' does not match the ']' that the stack expects to close
+     * next.</li>
+     * </ul>
+     *
+     * <p>
+     * Only the OPEN mode of each bracket kind should be supplied — the matching
+     * CLOSE char for each is derived automatically via
+     * {@link BracketMode#getComplement(BracketMode)}, since the closing bracket
+     * is entirely a consequence of whichever opening bracket it must match.
+     * (Passing a CLOSE mode by mistake is tolerated — it is normalized to its
+     * OPEN complement — but only the OPEN modes need ever be passed.)</p>
+     *
+     * @param list the list containing the scanned math expression.
+     * @param start the index in {@code list} to start checking from
+     * (inclusive).
+     * @param end the index in {@code list} to stop checking at (exclusive,
+     * matching {@link List#subList(int, int)} semantics).
+     * @param modes the OPEN bracket modes to validate together in one sweep,
+     * e.g. {@code BracketMode.CIRCULAR_OPEN,
+     *              BracketMode.SQUARE_OPEN}. Passing none is trivially valid, since there is
+     * then nothing to check.
+     * @return true if the bracket syntax across all given bracket kinds is
+     * valid — properly matched AND properly nested/interleaved — in the given
+     * range, or the range contains none of the given bracket kinds at all.
      */
-    private static boolean validateBracketStructure(List<String> scanner) {
-        if (scanner == null) {
+    private static boolean validateBracketStructure(List<String> list, int start, int end, BracketMode... modes) {
+        if (list == null) {
             return false;
         }
+        if (start < 0 || end > list.size() || start > end) {
+            throw new IndexOutOfBoundsException(
+                    "Invalid range [" + start + ", " + end + ") for a list of size " + list.size());
+        }
+        if (modes == null || modes.length == 0) {
+            return true;
+        }
 
-        final int n = scanner.size();
-        // stack of indices of unmatched '('
-        Deque<Integer> stack = new ArrayDeque<>(Math.max(16, n / 4));
-        List<SimplePoint> map = new ArrayList<>();
-        List<Bracket> bracs = new ArrayList<>();
+        int m = modes.length;
+        char[] opens = new char[m];
+        char[] closes = new char[m];
+        for (int k = 0; k < m; k++) {
+            // Normalize to the OPEN mode regardless of what was passed, so
+            // it is always the opening char that gets pushed and its
+            // complement that gets matched against on close.
+            BracketMode open = isCloseMode(modes[k]) ? BracketMode.getComplement(modes[k]) : modes[k];
+            opens[k] = open.getBracket();
+            closes[k] = BracketMode.getComplement(open).getBracket();
+        }
 
-        for (int i = 0; i < n; i++) {
-            String token = scanner.get(i);
-            if ("(".equals(token)) {
-                stack.push(i);
-            } else if (")".equals(token)) {
-                if (stack.isEmpty()) {
-                    // unmatched closing bracketChar -> invalid structure
+        Deque<Character> stack = new ArrayDeque<>(Math.max(16, (end - start) / 4));
+
+        for (int i = start; i < end; i++) {
+            String token = list.get(i);
+            if (token == null || token.isEmpty()) {
+                continue;
+            }
+            char c = token.charAt(0);
+
+            int openIdx = indexOfChar(opens, c);
+            if (openIdx >= 0) {
+                stack.push(closes[openIdx]);
+                continue;
+            }
+
+            int closeIdx = indexOfChar(closes, c);
+            if (closeIdx >= 0) {
+                if (stack.isEmpty() || stack.pop() != c) {
+                    // Either an unmatched closing bracket, or it closes a
+                    // different bracket kind than the one the stack expects
+                    // to close next -- e.g. "(3+[2)]".
                     return false;
                 }
-                int openIndex = stack.pop();
-                map.add(new SimplePoint(openIndex, i));
-
-                Bracket openBrac = new Bracket("(");
-                Bracket closeBrac = new Bracket(")");
-                openBrac.setIndex(openIndex);
-                closeBrac.setIndex(i);
-                openBrac.setComplement(closeBrac);
-                closeBrac.setComplement(openBrac);
-
-                bracs.add(openBrac);
-                bracs.add(closeBrac);
             }
         }
 
@@ -628,11 +713,38 @@ public class Bracket extends Operator {
     }
 
     /**
+     * True if {@code mode} is one of the four CLOSE variants.
+     */
+    private static boolean isCloseMode(BracketMode mode) {
+        switch (mode) {
+            case CIRCULAR_CLOSE:
+            case SQUARE_CLOSE:
+            case CURVED_CLOSE:
+            case ANGULAR_CLOSE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Linear search over a small (bracket-kind-count-sized) char array.
+     */
+    private static int indexOfChar(char[] arr, char c) {
+        for (int i = 0; i < arr.length; i++) {
+            if (arr[i] == c) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
      * @param scanner The ArrayList containing the scanner output for a Function
      * Multiplies the contents of this List by -1.
      */
-    public void multiplyContentsByMinusOne(List<String> scanner) {
-        List<String> domain = getBracketDomainContents((ArrayList<String>) scanner);
+    public void multiplyContentsByMinusOne(List<String> scanner, BracketMode openMode) {
+        List<String> domain = getBracketDomainContents((ArrayList<String>) scanner, openMode);
 
         for (int i = 0; i < domain.size(); i++) {
             if (domain.get(i).equals("+")) {
@@ -660,8 +772,8 @@ public class Bracket extends Operator {
      * and elements are compulsorily always an open bracketChar and a close
      * bracketChar respectively.
      */
-    public String domainTokenAt(List<String> scanner, int index) {
-        List<String> domain = getBracketDomainContents((ArrayList<String>) scanner);
+    public String domainTokenAt(List<String> scanner, int index, BracketMode openMode) {
+        List<String> domain = getBracketDomainContents((ArrayList<String>) scanner, openMode);
         return domain.get(index);
     }
 
@@ -686,7 +798,7 @@ public class Bracket extends Operator {
         double start = System.nanoTime();
         boolean s = false;
         for (int i = 0; i < N; i++) {
-            s = Bracket.validateBracketStructure(m.scanner);
+            s = Bracket.checkBracketStructure(m.scanner, 0, m.scanner.size());
         }
         double interval = (System.nanoTime() - start) / N;
         System.out.println("soln: " + s + ", " + (interval / 1000) + " microns");
@@ -694,7 +806,7 @@ public class Bracket extends Operator {
         start = System.nanoTime();
         s = false;
         for (int i = 0; i < N; i++) {
-            s = Bracket.validateBracketStructure(m.scanner);
+            s = Bracket.checkBracketStructure(m.scanner, 0, m.scanner.size());
         }
         interval = (System.nanoTime() - start) / N;
         System.out.println("soln: " + s + ", " + (interval / 1000) + " microns");

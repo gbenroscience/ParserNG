@@ -104,7 +104,7 @@ public class BinaryOperator extends Operator implements Validatable {
             if (isPlusOrMinus(curr)) {
 
                 if (leftInd >= 0 && !Number.isNumber(prev) && !Variable.isVariableString(prev)
-                        && !isUnaryPostOperator(prev) && !isClosingBracket(prev) && !isOpeningBracket(prev)) {
+                        && !isUnaryPostOperator(prev) && !isClosingCircBracket(prev) && !isOpeningCircBracket(prev)) {
                     errorLog.error(
                             "1 - ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                             + " As You Have Done."
@@ -115,7 +115,7 @@ public class BinaryOperator extends Operator implements Validatable {
                 }
                 //specify valid tokens that can come after a binary operator
                 if (rightInd < sz && !Number.isNumber(next) && !Variable.isVariableString(next)
-                        && !isOpeningBracket(next)
+                        && !isOpeningCircBracket(next)
                         && !Method.isUnaryPreOperatorORDefinedMethod(next) && !Method.isNumberReturningStatsMethod(next)
                         && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
                     errorLog.error(
@@ -129,7 +129,7 @@ public class BinaryOperator extends Operator implements Validatable {
             }//end if
             else if (!isPlusOrMinus(curr)) {
                 if (leftInd >= 0 && !Number.isNumber(prev) && !Variable.isVariableString(prev)
-                        && !isUnaryPostOperator(prev) && !isClosingBracket(prev)) {
+                        && !isUnaryPostOperator(prev) && !isClosingCircBracket(prev)) {
                     errorLog.error(
                             "3 - ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                             + " As You Have Done."
@@ -139,7 +139,7 @@ public class BinaryOperator extends Operator implements Validatable {
                 }//end if
                 //specify valid tokens that can come after a binary operator
                 if (rightInd < sz && !Number.isNumber(next) && !Variable.isVariableString(next)
-                        && !isOpeningBracket(next)
+                        && !isOpeningCircBracket(next)
                         && !Method.isUnaryPreOperatorORDefinedMethod(next) && !Method.isNumberReturningStatsMethod(next)
                         && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {
                     errorLog.error(

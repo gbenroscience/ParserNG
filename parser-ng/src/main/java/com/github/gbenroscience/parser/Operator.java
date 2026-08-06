@@ -368,6 +368,28 @@ public class Operator {
                 || c == OPEN_CURVED_BRAC.charAt(0) || c == CLOSE_CURVED_BRAC.charAt(0));
     }
 
+    public static boolean isGenericCloseBracket(String op) {
+        if (op.length() != 1) {
+            return false;
+        }
+        char c = op.charAt(0);
+        return (c == CLOSE_CIRC_BRAC.charAt(0)
+                || c == CLOSE_SQUARE_BRAC.charAt(0)
+                || c == CLOSE_ANGULAR_BRAC.charAt(0)
+                || c == CLOSE_CURVED_BRAC.charAt(0));
+    }
+
+    public static boolean isGenericOpenBracket(String op) {
+        if (op.length() != 1) {
+            return false;
+        }
+        char c = op.charAt(0);
+        return (c == OPEN_CIRC_BRAC.charAt(0)
+                || c == OPEN_SQUARE_BRAC.charAt(0)
+                || c == OPEN_ANGULAR_BRAC.charAt(0)
+                || c == OPEN_CURVED_BRAC.charAt(0));
+    }
+
     /**
      * Applies to circular brackets alone
      *
@@ -375,7 +397,7 @@ public class Operator {
      * @return true if the operator is the OPEN_CIRC_BRAC or the CLOSE_CIRC_BRAC
      * operator
      */
-    public static boolean isBracket(String op) {
+    public static boolean isCircBracket(String op) {
         if (op.length() != 1) {
             return false;
         }
@@ -383,10 +405,11 @@ public class Operator {
     }
 
     /**
+     * Detects a circular open bracket (
      * @param op the String to check
      * @return true if the operator is the OPEN_CIRC_BRAC operator
      */
-    public static boolean isOpeningBracket(String op) {
+    public static boolean isOpeningCircBracket(String op) {
         if (op.length() != 1) {
             return false;
         }
@@ -394,14 +417,41 @@ public class Operator {
     }
 
     /**
+     * Detects a circular close bracket )
      * @param op the String to check
      * @return true if the operator is the CLOSE_CIRC_BRAC operator
      */
-    public static boolean isClosingBracket(String op) {
+    public static boolean isClosingCircBracket(String op) {
         if (op.length() != 1) {
             return false;
         }
         return op.charAt(0) == CLOSE_CIRC_BRAC.charAt(0);
+    }
+    
+    
+    
+     /**
+     * Detects a square open bracket [
+     * @param op the String to check
+     * @return true if the operator is the OPEN_SQUARE_BRAC operator
+     */
+    public static boolean isOpeningSquareBracket(String op) {
+        if (op.length() != 1) {
+            return false;
+        }
+        return op.charAt(0) == OPEN_SQUARE_BRAC.charAt(0);
+    }
+
+    /**
+     * Detects a square close bracket ]
+     * @param op the String to check
+     * @return true if the operator is the CLOSE_SQUARE_BRAC operator
+     */
+    public static boolean isClosingSquareBracket(String op) {
+        if (op.length() != 1) {
+            return false;
+        }
+        return op.charAt(0) == CLOSE_SQUARE_BRAC.charAt(0);
     }
 
     /**
@@ -541,6 +591,7 @@ public class Operator {
     /**
      *
      * @param scan An ArrayList object containing a scanned function.
+     * @param errorLog
      * @return true if validated
      */
     public static boolean validateAll(List<String> scan, ErrorLog errorLog) {

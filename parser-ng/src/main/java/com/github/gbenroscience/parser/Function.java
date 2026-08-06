@@ -28,6 +28,8 @@ import java.util.logging.Logger;
  * @author JIBOYE OLUWAGBEMIRO OLAOLUWA
  */
 public class Function implements Savable, MethodRegistry.MethodAction {
+    
+     
 
     /**
      * The dependent variable

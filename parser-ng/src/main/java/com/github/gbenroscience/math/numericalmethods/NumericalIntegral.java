@@ -674,7 +674,7 @@ F(x) = sin(x)/2x; intg(F(x),0,2,iterations)
                 boolean exists = FunctionManager.containsAlgebraicFunction(functionName);
                 if (exists) {
                     for (int i = 3; i < list.size(); i++) {
-                        if (Operator.isOpeningBracket(list.get(i))) {
+                        if (Operator.isOpeningCircBracket(list.get(i))) {
                             int closeBracket = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i, list);
                             args1 = new MathExpression(LISTS.createStringFrom(list, i, closeBracket + 1)).solve();
                             List l = list.subList(i, closeBracket + 1);
@@ -695,14 +695,14 @@ F(x) = sin(x)/2x; intg(F(x),0,2,iterations)
 
             if (Number.isNumber(args1) && Number.isNumber(args2)) {//found 2 number args
                 if (Number.isNumber(args3)) {//3rd number arg exists
-                    if (Operator.isClosingBracket(list.get(9))) {//ensure that the next token is a close bracket
+                    if (Operator.isClosingCircBracket(list.get(9))) {//ensure that the next token is a close bracket
                         //valid
                     } else {
                         System.err.println("The next token must be a close bracket after the 3 number arguments supplied to the `" + methodName + "` method");
                         list.clear();
                     }
                 } else if (args3 == null) {//2 number args only---still fair
-                    if (Operator.isClosingBracket(list.get(7))) {//enforce that the next token is a close bracket
+                    if (Operator.isClosingCircBracket(list.get(7))) {//enforce that the next token is a close bracket
                         //valid
                     } else {
                         System.err.println("The next token must be a close bracket after the 2 number arguments supplied to the `" + methodName + "` method");

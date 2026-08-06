@@ -16,10 +16,8 @@ import static com.github.gbenroscience.parser.Number.fastParseDouble;
 import static com.github.gbenroscience.parser.Number.isNumber;
 import static com.github.gbenroscience.parser.Operator.isAssignmentOperator;
 import static com.github.gbenroscience.parser.Operator.isBinaryOperator;
-import static com.github.gbenroscience.parser.Operator.isBracket;
 import static com.github.gbenroscience.parser.Operator.isComma;
 import static com.github.gbenroscience.parser.Operator.isLogicOperator;
-import static com.github.gbenroscience.parser.Operator.isOpeningBracket;
 import static com.github.gbenroscience.parser.Operator.isUnaryPostOperator;
 import static com.github.gbenroscience.parser.Operator.isUnaryPreOperator;
 import static com.github.gbenroscience.parser.Operator.validateAll;
@@ -48,6 +46,8 @@ import java.util.LinkedHashMap;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import static com.github.gbenroscience.parser.Operator.isOpeningCircBracket;
+import static com.github.gbenroscience.parser.Operator.isCircBracket;
 
 /**
  * <p style="font-weight:'bold';color:'red'; font-size:'2em';">
@@ -790,8 +790,8 @@ public class MathExpression implements Savable, Solvable {
             //refixCommas(); 
             statsVerifier();
             refixCommas();
-            mapBrackets();
-            functionComponentsAssociation();
+            mapBrackets();System.out.println("scanner: "+opScanner.getScanner());
+            functionComponentsAssociation();System.out.println("scanner-1: "+opScanner.getScanner());
             compileToPostfix();  // Compile once if not already done 
         }//end if
 
@@ -1177,7 +1177,7 @@ public class MathExpression implements Savable, Solvable {
 
         //determine the presence of list returning statistical operators
         for (int i = 0; i < scanner.size(); i++) {
-            if (Method.isListReturningStatsMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+            if (Method.isListReturningStatsMethod(scanner.get(i)) && isOpeningCircBracket(scanner.get(i + 1))) {
                 noOfListReturningOperators++;
             }//end if
 
@@ -1197,13 +1197,13 @@ public class MathExpression implements Savable, Solvable {
 
                 for (int i = 0; i < scanner.size(); i++) {
                     try {
-                        if (i + 1 < scanner.size() && Method.isPureListReturningStatsMethod(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+                        if (i + 1 < scanner.size() && Method.isPureListReturningStatsMethod(scanner.get(i)) && isOpeningCircBracket(scanner.get(i + 1))) {
                             if (isBinaryOperator(scanner.get(i - 1))) {
                                 errorLog.info("1. Invalid Association Discovered For: \"" + scanner.get(i - 1) + "\" And \"" + scanner.get(i) + "\".\n");
                                 correctFunction = false;
                                 break;
                             }
-                            if (isOpeningBracket(scanner.get(i - 1))
+                            if (isOpeningCircBracket(scanner.get(i - 1))
                                     && !Method.isNumberReturningStatsMethod(scanner.get(i - 2))
                                     && !Method.isListReturningStatsMethod(scanner.get(i - 2))
                                     && !isCommaAlias(scanner.get(i - 2))) {
@@ -1213,7 +1213,7 @@ public class MathExpression implements Savable, Solvable {
                             }
 
                         }//end if
-                    }//end try
+                    }//end try//end try
                     catch (IndexOutOfBoundsException ind) {
                         errorLog.info("Let developer handle the indexing of this checks properly!");
                     }
@@ -1241,12 +1241,14 @@ public class MathExpression implements Savable, Solvable {
      * scanned function.
      * @return a Bracket array that holds related brackets pairs.
      */
-    private Bracket[] mapBrackets(List<String> scanner) {
+    private Bracket[] mapBrackets(List<String> scanner, Bracket.BracketMode mode) {
         for (Iterator<String> it = scanner.iterator(); it.hasNext();) {
             if (" ".equals(it.next())) {
                 it.remove();
             }
         }
+        char op = mode.getBracket();
+        char cl = Bracket.BracketMode.getComplement(mode).getBracket();
 
         ArrayList<Bracket> bracs = new ArrayList<>();
         Deque<Integer> stack = new ArrayDeque<>();
@@ -1254,9 +1256,9 @@ public class MathExpression implements Savable, Solvable {
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
 
-            if ("(".equals(token)) {
+            if (op == token.charAt(0)) {
                 stack.push(i);
-            } else if (")".equals(token)) {
+            } else if (cl == token.charAt(0)) {
                 if (stack.isEmpty()) {
                     String err = "Unmatched closing bracket at index " + i;
                     errorLog.info(err);
@@ -1264,8 +1266,8 @@ public class MathExpression implements Savable, Solvable {
                 }
                 int openIndex = stack.pop();
 
-                Bracket openBrac = new Bracket("(");
-                Bracket closeBrac = new Bracket(")");
+                Bracket openBrac = new Bracket(op);
+                Bracket closeBrac = new Bracket(cl);
                 openBrac.setIndex(openIndex);
                 closeBrac.setIndex(i);
                 openBrac.setComplement(closeBrac);
@@ -1291,7 +1293,9 @@ public class MathExpression implements Savable, Solvable {
      */
     private void mapBrackets() {
         try {
-            mapBrackets(scanner);
+            mapBrackets(scanner, Bracket.BracketMode.CIRCULAR_OPEN);
+            mapBrackets(scanner, Bracket.BracketMode.SQUARE_OPEN);
+            
         }//end method//end method
         catch (InputMismatchException ime) {
             errorLog.error(ime);
@@ -1321,7 +1325,7 @@ public class MathExpression implements Savable, Solvable {
                 if (isVariableString(token) && !Method.isUserDefinedFunction(token) && !Method.isDefinedMethod(token)) {
                     try {
                         //specify valid tokens that can come before a variable
-                        if (i - 1 >= 0 && !isOpeningBracket(scanner.get(i - 1))
+                        if (i - 1 >= 0 && !isOpeningCircBracket(scanner.get(i - 1))
                                 && !isLogicOperator(scanner.get(i - 1)) && !isUnaryPreOperator(scanner.get(i - 1))
                                 && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1))
                                 && !isNumber(scanner.get(i - 1)) && !isVariableString(scanner.get(i - 1)) && !isComma(scanner.get(i - 1))) {
@@ -1332,18 +1336,18 @@ public class MathExpression implements Savable, Solvable {
                             break;
                         }//end if
                         //specify valid tokens that can come after a variable
-                        if (i + 1 < sz && !isBracket(scanner.get(i + 1)) && !isBinaryOperator(scanner.get(i + 1))
+                        if (i + 1 < sz && !isCircBracket(scanner.get(i + 1)) && !isBinaryOperator(scanner.get(i + 1))
                                 && !isUnaryPostOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
                                 && !isLogicOperator(scanner.get(i + 1)) && !isAssignmentOperator(scanner.get(i + 1))
                                 && !isUnaryPreOperator(scanner.get(i + 1)) && !Method.isNumberReturningStatsMethod(scanner.get(i + 1))
                                 && !Method.isLogToAnyBase(scanner.get(i + 1)) && !Method.isAntiLogToAnyBase(scanner.get(i + 1)) && !isNumber(scanner.get(i + 1))
                                 && !isVariableString(scanner.get(i + 1)) && !isComma(scanner.get(i + 1))) {
-                            errorLog.info("2 - ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i) + "\" And \"" + scanner.get(i + 1) + "\"PLUS As You Have Done.\n");
+                            errorLog.info("2 - ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i) + "\" And \"" + scanner.get(i + 1) + "\" As You Have Done.\n");
                             correctFunction = false;
                             scanner.clear();
                             break;
                         }//end if
-                    }//end try
+                    }//end try//end try//end try//end try
                     catch (IndexOutOfBoundsException ind) {
                         errorLog.error(ind);
                         ind.printStackTrace();
@@ -1367,6 +1371,8 @@ public class MathExpression implements Savable, Solvable {
             scanner.clear();
             parser_Result = ParserResult.SYNTAX_ERROR;
         }
+        
+        errorLog.print();
 
     }//end method functionComponentAssociation
 
@@ -1390,7 +1396,7 @@ public class MathExpression implements Savable, Solvable {
 
             try {
                 if (i + 1 < sz) {//a next token exists (at i+1) so check the next token
-                    if (isVariableString(varName) && !isOpeningBracket(scan.get(i + 1))) {
+                    if (isVariableString(varName) && !isOpeningCircBracket(scan.get(i + 1))) {
                         Variable v = registry.lookUp(varName);
                         if (v != null) {
                             scan.set(i, String.valueOf(v.getValue()));
@@ -1406,7 +1412,7 @@ public class MathExpression implements Savable, Solvable {
                     }//end if
                 }
 
-            }//end try
+            }//end try//end try
             catch (IndexOutOfBoundsException ind) {
             }//end catch
 

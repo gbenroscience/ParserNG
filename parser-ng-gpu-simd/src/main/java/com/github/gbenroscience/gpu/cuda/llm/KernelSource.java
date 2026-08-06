@@ -1,74 +1,64 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.gpu.cuda.llm;
 
 /**
+ * CUDA kernel source for the Llama-style decoder -- v2. Extends the
+ * decode-only kernel set (see the per-kernel javadocs below for the 13
+ * kernels carried over unchanged) with:
  *
- * @author GBEMIRO 
- * CUDA C counterpart of {@code com.github.gbenroscience.gpu.llm.LlmKernelSource}
--- the same 13 Llama-decoder kernels, ported from OpenCL C to CUDA C for
-NVRTC compilation, following the exact pattern already established by
-KernelSource (interpreter kernels): one combined source string,
-`extern "C" __global__` entry points so cuModuleGetFunction can find them
-by their un-mangled names, compiled once via NvrtcBindings and loaded via
-CudaBindings.cuModuleLoadData -- see LlmCudaContext.
-
-SCOPE: identical to LlmKernelSource -- single-token decode path only
-(M=1 GEMV per projection, not batched prefill), attention unfused
-(three launches per forward pass), RMSNorm two-phase (device partial
-sums, host reduction, device apply). See LlmKernelSource's javadoc for
-the full rationale; it applies unchanged here, CUDA is just the backend.
-
-STRUCTURAL DIFFERENCES FROM THE OpenCL VERSION, all forced by CUDA's
-shape rather than chosen:
-
-- OpenCL's `__local float* scratch` kernel PARAMETER (caller-sized local
-  memory passed via clSetKernelArg with a NULL host pointer) has no
-  direct CUDA equivalent as a parameter. CUDA's analogous mechanism is
-  dynamic shared memory: an `extern __shared__ float NAME[];` declared
-  at file scope right above the kernel that uses it, sized by the
-  `sharedMemBytes` argument to cuLaunchKernel rather than by a kernel
-  argument. Every kernel that took a `__local` scratch parameter in the
-  OpenCL version therefore has ONE FEWER parameter here -- see each
-  kernel's javadoc below for the exact signature change, and
-  LlmCudaContext's dispatch helpers for the corresponding sharedMemBytes
-  value each launch must pass.
-
-- GGUF Q8_0's FP16 block scale is decoded/encoded with CUDA's built-in
-  __half type (cuda_fp16.h) via __ushort_as_half/__half_as_ushort bit
-  reinterpretation, rather than OpenCL's vload_half/vstore_half. Same
-  IEEE-binary16 assumption, same result -- just the native CUDA
-  equivalent of the same intrinsic.
-
-- `get_global_id(0)` becomes `blockIdx.x * blockDim.x + threadIdx.x`;
-  `get_local_id(0)`/`get_group_id(0)`/`get_local_size(0)` become
-  `threadIdx.x`/`blockIdx.x`/`blockDim.x`; `barrier(CLK_LOCAL_MEM_FENCE)`
-  becomes `__syncthreads()`. Purely mechanical renames, same semantics.
-
-UNVERIFIED, same as the source this was ported from: no CUDA-capable
-GPU or NVRTC toolchain available in the environment this was written
-in. Ported carefully, kernel algorithm and control flow unchanged from
-LlmKernelSource -- but treat as an untested first draft until run
-against real per-layer activations.
+ *   1. GeLU / GeGLU FFN activations (gelu_activate, geglu_activate),
+ *      alongside the existing swiglu_activate -- selectable per model via
+ *      GpuLlamaLayerCuda.Config.activationType.
+ *   2. A real BATCHED PREFILL path: q8_0_gemm_tiled / f32_gemm_tiled
+ *      (T rows at once instead of T sequential GEMV launches),
+ *      rmsnorm_partial_sumsq_rows / rmsnorm_apply_rows (per-row
+ *      normalization, T rows batched), rope_apply_pairwise_rows (per-row
+ *      position), and a causal-masked batched attention triple
+ *      (attn_scores_causal_batched / softmax_inplace_rows /
+ *      attn_weighted_sum_causal_batched).
+ *
+ * WHAT "BATCHED" BUYS YOU, CONCRETELY: the decode-path kernels
+ * (q8_0_gemv_split etc.) parallelize over N output columns for ONE row.
+ * Processing a T-token prompt by calling them T times means T sequential
+ * kernel launches, each only exposing N-wide parallelism, plus T-1 extra
+ * round trips through the launch/sync machinery. The _tiled/_rows/_batched
+ * kernels below instead expose T*N (or T*T for attention) parallelism to
+ * the GPU in ONE launch -- the actual mechanism that makes prefill fast.
+ *
+ * WHAT THIS IS NOT: cuBLAS-grade GEMM. q8_0_gemm_tiled and f32_gemm_tiled
+ * use a straightforward one-thread-per-output-element scheme (2D grid:
+ * blockIdx.y = row t, blockIdx.x/threadIdx.x = column n) with no
+ * multi-level shared-memory blocking, no register tiling, no tensor-core
+ * path. Every thread computing a given (t, n) re-reads the same x-row
+ * bytes as every other thread with the same t -- on real hardware this is
+ * a broadcast read (all threads in a warp/block requesting the same
+ * global address collapse to one transaction), so it is not naive-bad,
+ * but it is not cuBLAS-competitive either. A tiled/blocked GEMM with
+ * shared-memory-resident weight and activation tiles is the natural next
+ * optimization pass and is NOT attempted here -- flagged explicitly
+ * rather than silently left out.
+ *
+ * Attention here is batched but still UNFUSED (three kernel launches:
+ * scores, softmax, weighted-sum) and still one dispatch triple PER HEAD
+ * (grid.y = query row t within that launch) -- not a flash-attention-style
+ * single fused kernel. Causal masking is done by writing -DEVICE_FLT_MAX
+ * for j > t in attn_scores_causal_batched and letting softmax's exp()
+ * naturally zero those out, rather than a separate mask kernel or
+ * skipping the j > t work at the launch-config level.
+ *
+ * UNVERIFIED, same standing caveat as every kernel file in this
+ * codebase: no CUDA GPU, driver, or NVRTC toolchain were available while
+ * writing this. Carefully traced against the decode kernels' already-
+ * established algorithms and extended by the same patterns (bounds
+ * checks, shared-memory tree reductions, Q8_0 block decode) -- but
+ * treat every new kernel here as unrun until diffed against known-good
+ * per-layer activations, same bar as the rest of this file set.
  */
 public final class KernelSource {
 
     private KernelSource() {
     }
 
+    // ---- decode-path kernels (unchanged names/signatures from v1) ----
     public static final String KERNEL_QUANTIZE_I8 = "quantize_i8";
     public static final String KERNEL_QUANTIZE_ACTIVATION_Q8_0 = "quantize_activation_q8_0_blocks";
     public static final String KERNEL_Q8_0_GEMV_SPLIT = "q8_0_gemv_split";
@@ -83,7 +73,21 @@ public final class KernelSource {
     public static final String KERNEL_RESIDUAL_ADD = "residual_add";
     public static final String KERNEL_F32_GEMV = "f32_gemv";
 
-    /** Block size used for the RMSNorm partial-sum kernel's local reduction. Must match host dispatch. */
+    // ---- FFN activation alternatives (new) ----
+    public static final String KERNEL_GELU_ACTIVATE = "gelu_activate";
+    public static final String KERNEL_GEGLU_ACTIVATE = "geglu_activate";
+
+    // ---- batched prefill kernels (new) ----
+    public static final String KERNEL_Q8_0_GEMM_TILED = "q8_0_gemm_tiled";
+    public static final String KERNEL_F32_GEMM_TILED = "f32_gemm_tiled";
+    public static final String KERNEL_RMSNORM_PARTIAL_SUMSQ_ROWS = "rmsnorm_partial_sumsq_rows";
+    public static final String KERNEL_RMSNORM_APPLY_ROWS = "rmsnorm_apply_rows";
+    public static final String KERNEL_ROPE_APPLY_PAIRWISE_ROWS = "rope_apply_pairwise_rows";
+    public static final String KERNEL_ATTN_SCORES_CAUSAL_BATCHED = "attn_scores_causal_batched";
+    public static final String KERNEL_SOFTMAX_INPLACE_ROWS = "softmax_inplace_rows";
+    public static final String KERNEL_ATTN_WEIGHTED_SUM_CAUSAL_BATCHED = "attn_weighted_sum_causal_batched";
+
+    /** Block size used for both RMSNorm partial-sum kernels' local reduction. Must match host dispatch. */
     public static final int RMSNORM_WORKGROUP_SIZE = 256;
 
     /** Fixed block size for quantize_activation_q8_0_blocks -- one thread per element in a 32-wide Q8_0 group. */
@@ -92,39 +96,42 @@ public final class KernelSource {
     /** Default block size for the simple bound-checked 1D kernels (GEMVs, RoPE, elementwise ops). */
     public static final int DEFAULT_BLOCK_SIZE = 256;
 
+    /** Default column-tile block size for the batched GEMM kernels (blockDim.x; blockIdx.y iterates rows). */
+    public static final int GEMM_TILE_N = 128;
+
     public static final String CUDA_SOURCE = """
         #include <cuda_fp16.h>
 
         #define Q8_0_GROUP_SIZE 32
         #define Q8_0_BLOCK_SIZE 34
 
-        // NVRTC has no <cfloat>/<float.h> in its restricted device-code
-        // standard library -- inline the IEEE-754 single-precision max
-        // directly rather than depending on a header that may not resolve.
+        // NVRTC's device-code standard library doesn't reliably expose
+        // <cfloat> -- inline the IEEE-754 single-precision max directly.
         #define DEVICE_FLT_MAX 3.402823466e+38f
 
-        /*
-         * Decodes a GGML fp16 scale (2 bytes, as stored in every Q8_0
-         * block) to float via CUDA's native __half type -- bit-reinterpret
-         * the two bytes as a __half, then widen. Matches the OpenCL
-         * version's vload_half-based decode_fp16 exactly (both assume the
-         * same IEEE binary16 layout GGML stores).
-         */
         __device__ __forceinline__ float decode_fp16(unsigned char lo, unsigned char hi) {
             unsigned short bits = (unsigned short) lo | ((unsigned short) hi << 8);
             return __half2float(__ushort_as_half(bits));
         }
 
-        /*
-         * quantize_i8: FP32 -> INT8 with a single caller-supplied scale.
-         * Direct port -- see LlmKernelSource's quantize_i8 javadoc for the
-         * "not the format q8_0_gemv_split needs" caveat, which applies
-         * unchanged here. NOT bounds-checked (matches the OpenCL original
-         * exactly) -- the caller must launch EXACTLY `len` threads
-         * (gridDim*blockDim == len), or use quantize_activation_q8_0_blocks
-         * below instead, which is what this codebase's dispatch path
-         * actually calls.
-         */
+        __device__ __forceinline__ float gpu_sigmoid_f(float x) {
+            return 1.0f / (1.0f + expf(-x));
+        }
+
+        // Exact-erf GeLU, matching the textbook formula this codebase's
+        // interpreter kernels (CudaKernelSource.gpu_gelu_f) already use --
+        // NOT whatever a specific model's training-time approximation
+        // used; diff against reference activations before trusting GeLU-
+        // FFN outputs, same caveat CudaExpressionBridge already carries
+        // for its own GELU/GEGLU opcodes.
+        __device__ __forceinline__ float gpu_gelu_f(float x) {
+            return 0.5f * x * (1.0f + erff(x * 0.70710678f));
+        }
+
+        // =====================================================================
+        // ===================== DECODE-PATH KERNELS (v1, unchanged) =========
+        // =====================================================================
+
         extern "C" __global__ void quantize_i8(
             const float* x,
             signed char* x_q8,
@@ -137,17 +144,6 @@ public final class KernelSource {
             x_q8[i] = (signed char) q;
         }
 
-        /*
-         * quantize_activation_q8_0_blocks: FP32 -> GGUF Q8_0 block format,
-         * fresh per-block absmax scale computed on-device. Same algorithm
-         * as LlmKernelSource's OpenCL version; the `__local float* scratch`
-         * parameter is gone -- this uses dynamic shared memory instead
-         * (sh_quant below), sized via cuLaunchKernel's sharedMemBytes
-         * argument (QUANTIZE_BLOCK_SIZE * sizeof(float) = 128 bytes).
-         *
-         * MUST be launched with blockDim.x = 32 (one thread per element in
-         * a block) and gridDim.x = numBlocks (len / 32).
-         */
         extern __shared__ float sh_quant[];
         extern "C" __global__ void quantize_activation_q8_0_blocks(
             const float* x,
@@ -184,14 +180,6 @@ public final class KernelSource {
             }
         }
 
-        /*
-         * q8_0_gemv_split: GGML Q8_0 block-format GEMV, split even/odd
-         * output layout -- exact port of the OpenCL version's per-block
-         * algorithm (which itself ports KernelsInt8.matmul_q8_0_1xN_split_opt).
-         * See LlmKernelSource's javadoc for the split-layout rationale
-         * (RoPE optimization for Q/K). Unchanged from OpenCL besides the
-         * index-computation intrinsics.
-         */
         extern "C" __global__ void q8_0_gemv_split(
             const unsigned char* x_q8_0,
             const unsigned char* W_q8_0,
@@ -201,7 +189,7 @@ public final class KernelSource {
             const int K)
         {
             const int halfDim = head_dim >> 1;
-            const int gid = blockIdx.x * blockDim.x + threadIdx.x; // 0 .. qHeads*halfDim - 1
+            const int gid = blockIdx.x * blockDim.x + threadIdx.x;
             const int h = gid / halfDim;
             const int i = gid % halfDim;
             if (h >= qHeads) return;
@@ -248,12 +236,6 @@ public final class KernelSource {
             out_f32_split[oddOutOff + i] = acc1;
         }
 
-        /*
-         * q8_0_gemv_plain: same Q8_0 GEMV algorithm, natural contiguous
-         * output order -- used for the FFN gate/up/down projections
-         * (RoPE's even/odd pairing doesn't apply there). One thread per
-         * output column n.
-         */
         extern "C" __global__ void q8_0_gemv_plain(
             const unsigned char* x_q8_0,
             const unsigned char* W_q8_0,
@@ -288,13 +270,6 @@ public final class KernelSource {
             out_f32[n] = acc;
         }
 
-        /*
-         * rope_apply_split: pairwise rotation on split-layout Q/K buffers.
-         *   x0' = x0*cos - x1*sin
-         *   x1' = x0*sin + x1*cos
-         * One thread per (head, half-dim-index) pair -- run once for Q,
-         * once for K, same kernel, different buffer/headCount args.
-         */
         extern "C" __global__ void rope_apply_split(
             float* buf,
             const float* cos_table,
@@ -322,15 +297,6 @@ public final class KernelSource {
             buf[oddOff + i] = x0 * s + x1 * c;
         }
 
-        /*
-         * rmsnorm_partial_sumsq: phase 1 of 2 -- one partial sum-of-squares
-         * per block via shared-memory tree reduction. Host sums the
-         * (small) partials array and computes rms = 1/sqrt(mean+eps)
-         * before calling rmsnorm_apply. The `__local float* scratch`
-         * parameter is gone -- replaced by dynamic shared memory
-         * (sh_rms), sized via sharedMemBytes = blockDim.x * sizeof(float)
-         * (RMSNORM_WORKGROUP_SIZE * 4 for the standard dispatch).
-         */
         extern __shared__ float sh_rms[];
         extern "C" __global__ void rmsnorm_partial_sumsq(
             const float* x,
@@ -358,10 +324,6 @@ public final class KernelSource {
             }
         }
 
-        /*
-         * rmsnorm_apply: phase 2 of 2 -- out = x * rms * gamma, rms
-         * computed on the host from phase 1's partials.
-         */
         extern "C" __global__ void rmsnorm_apply(
             const float* x,
             const float* gamma,
@@ -374,22 +336,10 @@ public final class KernelSource {
             out[i] = x[i] * rms * gamma[i];
         }
 
-        /*
-         * attn_scores: for one head h and all cache positions j in
-         * [0, pos], score[j] = dot(Q_h, K_cache_j_h) * rsqrt_d. Takes the
-         * FULL q_all_heads buffer plus a qHeadOff offset (same pattern
-         * rope_apply_split uses via cosSinOffset) rather than a pre-sliced
-         * per-head pointer, so no extra device-pointer-arithmetic launch
-         * variant is needed per head.
-         * K cache is FP32 here (dequantized once at cache-write time on
-         * the host side -- see LlmCudaLlamaLayer's class javadoc for why
-         * the CPU/OpenCL re-dequant-every-read approach isn't mirrored).
-         * One thread per cache position j.
-         */
         extern "C" __global__ void attn_scores(
-            const float* q_all_heads, // [numHeads * head_dim] -- full buffer, all heads
-            const float* k_cache_f32, // [max_seq, kv_dim] dequantized
-            float* scores,            // [pos+1]
+            const float* q_all_heads,
+            const float* k_cache_f32,
+            float* scores,
             const int qHeadOff,
             const int head_dim,
             const int kv_dim,
@@ -408,16 +358,6 @@ public final class KernelSource {
             scores[j] = dot * rsqrt_d;
         }
 
-        /*
-         * softmax_inplace: single-block, numerically stable 3-pass softmax
-         * over `len` elements (max-subtract, exp+sum, normalize). MUST be
-         * launched as exactly ONE block (gridDim.x == 1) since it uses
-         * shared-memory reduction for both max and sum; blockDim.x can be
-         * any size (loops internally), sharedMemBytes must be
-         * blockDim.x * sizeof(float). The `__local float* scratch`
-         * parameter is gone -- replaced by dynamic shared memory
-         * (sh_softmax) for the same reason as the other reduction kernels.
-         */
         extern __shared__ float sh_softmax[];
         extern "C" __global__ void softmax_inplace(
             float* scores,
@@ -426,7 +366,6 @@ public final class KernelSource {
             const int lid = threadIdx.x;
             const int localSize = blockDim.x;
 
-            // Pass 1: max
             float localMax = -DEVICE_FLT_MAX;
             for (int i = lid; i < len; i += localSize) {
                 localMax = fmaxf(localMax, scores[i]);
@@ -442,7 +381,6 @@ public final class KernelSource {
             float maxVal = sh_softmax[0];
             __syncthreads();
 
-            // Pass 2: exp(x - max), store back, accumulate sum
             float localSum = 0.0f;
             for (int i = lid; i < len; i += localSize) {
                 float e = expf(scores[i] - maxVal);
@@ -460,25 +398,16 @@ public final class KernelSource {
             float sumVal = sh_softmax[0];
             __syncthreads();
 
-            // Pass 3: normalize
             float invSum = 1.0f / sumVal;
             for (int i = lid; i < len; i += localSize) {
                 scores[i] *= invSum;
             }
         }
 
-        /*
-         * attn_weighted_sum: attn_out_all_heads[outHeadOff+d] =
-         * sum_j scores[j] * V_cache[j,h,d]. One thread per output
-         * dimension d. Writes directly into the full concatenated
-         * multi-head output buffer at outHeadOff, same as the OpenCL
-         * version, so no host-side per-head gather is needed before the
-         * O-projection GEMV reads it.
-         */
         extern "C" __global__ void attn_weighted_sum(
-            const float* scores,      // [pos+1]
-            const float* v_cache_f32, // [max_seq, kv_dim] dequantized
-            float* attn_out_all_heads,// [numHeads * head_dim] -- full buffer, all heads
+            const float* scores,
+            const float* v_cache_f32,
+            float* attn_out_all_heads,
             const int outHeadOff,
             const int head_dim,
             const int kv_dim,
@@ -495,11 +424,6 @@ public final class KernelSource {
             attn_out_all_heads[outHeadOff + d] = acc;
         }
 
-        /*
-         * swiglu_activate: out[h] = gate[h] * sigmoid(gate[h]) * up[h].
-         * Includes the same -88 exp-argument clamp as the OpenCL version
-         * for numerical stability at very negative gate values.
-         */
         extern "C" __global__ void swiglu_activate(
             const float* gate,
             const float* up,
@@ -514,10 +438,6 @@ public final class KernelSource {
             out[h] = g * sigmoid * up[h];
         }
 
-        /*
-         * residual_add: x[i] += y[i]. Used for both the attention and FFN
-         * residual connections.
-         */
         extern "C" __global__ void residual_add(
             float* x,
             const float* y,
@@ -528,11 +448,6 @@ public final class KernelSource {
             x[i] += y[i];
         }
 
-        /*
-         * f32_gemv: plain FP32 GEMV, out[n] = sum_k a[k] * B[k*N+n]. Used
-         * for the O-projection (wo), kept FP32 rather than quantized (same
-         * choice the CPU/OpenCL reference makes -- "it's small").
-         */
         extern "C" __global__ void f32_gemv(
             const float* a,
             const float* B,
@@ -548,6 +463,287 @@ public final class KernelSource {
                 acc += a[k] * B[k * N + n];
             }
             out[n] = acc;
+        }
+
+        // =====================================================================
+        // ===================== FFN ACTIVATION ALTERNATIVES (new) ===========
+        // =====================================================================
+
+        /*
+         * gelu_activate: out[h] = gelu(gate[h]) -- for UNGATED GeLU FFNs
+         * (down(gelu(up_proj(x))), single projection, no separate gate/up
+         * split). Use when Config.activationType == GELU.
+         */
+        extern "C" __global__ void gelu_activate(
+            const float* gate,
+            float* out,
+            const int hidden)
+        {
+            const int h = blockIdx.x * blockDim.x + threadIdx.x;
+            if (h >= hidden) return;
+            out[h] = gpu_gelu_f(gate[h]);
+        }
+
+        /*
+         * geglu_activate: out[h] = gelu(gate[h]) * up[h] -- GATED GeLU,
+         * same shape as swiglu_activate but with GeLU instead of the
+         * SiLU/sigmoid gate. Use when Config.activationType == GEGLU.
+         */
+        extern "C" __global__ void geglu_activate(
+            const float* gate,
+            const float* up,
+            float* out,
+            const int hidden)
+        {
+            const int h = blockIdx.x * blockDim.x + threadIdx.x;
+            if (h >= hidden) return;
+            out[h] = gpu_gelu_f(gate[h]) * up[h];
+        }
+
+        // =====================================================================
+        // ===================== BATCHED PREFILL KERNELS (new) ===============
+        // =====================================================================
+
+        extern "C" __global__ void q8_0_gemm_tiled(
+            const unsigned char* X_q8_0, // [T, numBlocks*34]
+            const unsigned char* W_q8_0, // [N, numBlocks*34]
+            float* out,                  // [T, N]
+            const int T,
+            const int N,
+            const int K)
+        {
+            const int t = blockIdx.y;
+            const int n = blockIdx.x * blockDim.x + threadIdx.x;
+            if (t >= T || n >= N) return;
+
+            const int numBlocks = K / Q8_0_GROUP_SIZE;
+            const int rowStride = numBlocks * Q8_0_BLOCK_SIZE;
+            const int xRowOff = t * rowStride;
+            const int wRowOff = n * rowStride;
+
+            float acc = 0.0f;
+            for (int b = 0; b < numBlocks; b++) {
+                const int xBlockOff = xRowOff + b * Q8_0_BLOCK_SIZE;
+                const int wBlockOff = wRowOff + b * Q8_0_BLOCK_SIZE;
+
+                float xScale = decode_fp16(X_q8_0[xBlockOff], X_q8_0[xBlockOff + 1]);
+                float wScale = decode_fp16(W_q8_0[wBlockOff], W_q8_0[wBlockOff + 1]);
+                float scale = xScale * wScale;
+
+                int iacc = 0;
+                for (int j = 0; j < Q8_0_GROUP_SIZE; j++) {
+                    signed char xv = (signed char) X_q8_0[xBlockOff + 2 + j];
+                    signed char wv = (signed char) W_q8_0[wBlockOff + 2 + j];
+                    iacc += (int) xv * (int) wv;
+                }
+                acc += iacc * scale;
+            }
+            out[t * N + n] = acc;
+        }
+
+        extern "C" __global__ void f32_gemm_tiled(
+            const float* A, // [T, K]
+            const float* B, // [K, N]
+            float* out,     // [T, N]
+            const int T,
+            const int K,
+            const int N)
+        {
+            const int t = blockIdx.y;
+            const int n = blockIdx.x * blockDim.x + threadIdx.x;
+            if (t >= T || n >= N) return;
+
+            float acc = 0.0f;
+            for (int k = 0; k < K; k++) {
+                acc += A[t * K + k] * B[k * N + n];
+            }
+            out[t * N + n] = acc;
+        }
+
+        extern __shared__ float sh_rms_rows[];
+        extern "C" __global__ void rmsnorm_partial_sumsq_rows(
+            const float* x,       // [T, features]
+            float* partials,      // [T, numGroups]
+            const int features,
+            const int numGroups)
+        {
+            const int row = blockIdx.y;
+            const int groupId = blockIdx.x;
+            const int lid = threadIdx.x;
+            const int localSize = blockDim.x;
+            const int idx = groupId * localSize + lid;
+
+            float v = (idx < features) ? x[row * features + idx] : 0.0f;
+            sh_rms_rows[lid] = v * v;
+            __syncthreads();
+
+            for (int stride = localSize / 2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    sh_rms_rows[lid] += sh_rms_rows[lid + stride];
+                }
+                __syncthreads();
+            }
+
+            if (lid == 0) {
+                partials[row * numGroups + groupId] = sh_rms_rows[0];
+            }
+        }
+
+        extern "C" __global__ void rmsnorm_apply_rows(
+            const float* x,      // [T, features]
+            const float* gamma,  // [features]
+            float* out,          // [T, features]
+            const float* rms,    // [T]
+            const int features)
+        {
+            const int row = blockIdx.y;
+            const int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i >= features) return;
+            out[row * features + i] = x[row * features + i] * rms[row] * gamma[i];
+        }
+
+        /*
+         * rope_apply_pairwise_rows: batched RoPE for the ADJACENT-PAIR
+         * layout q8_0_gemm_tiled naturally produces (plain contiguous
+         * output: dims [2i, 2i+1] sit next to each other within each
+         * head's head_dim span), NOT the even/odd-SPLIT layout the
+         * decode-path's q8_0_gemv_split emits. This is a deliberate
+         * layout difference from rope_apply_split, not an inconsistency:
+         * the split layout was specifically an artifact of
+         * q8_0_gemv_split's own output pairing (a RoPE-adjacent
+         * optimization tied to that ONE kernel); q8_0_gemm_tiled has no
+         * such pairing, so its RoPE pass rotates the natural adjacent
+         * pairs directly instead. Each row t has its OWN absolute
+         * sequence position (positions[t] = startPos + t during
+         * prefill), unlike the decode path's single shared position.
+         */
+        extern "C" __global__ void rope_apply_pairwise_rows(
+            float* buf,             // [T, heads*head_dim], PLAIN contiguous layout
+            const float* cos_table, // [max_seq, halfDim]
+            const float* sin_table,
+            const int heads,
+            const int head_dim,
+            const int* positions)   // [T] absolute sequence position per row
+        {
+            const int halfDim = head_dim >> 1;
+            const int row = blockIdx.y;
+            const int gid = blockIdx.x * blockDim.x + threadIdx.x;
+            const int h = gid / halfDim;
+            const int i = gid % halfDim;
+            if (h >= heads) return;
+
+            const int pos = positions[row];
+            const int rowOff = row * heads * head_dim;
+            const int pairOff = rowOff + h * head_dim + (i << 1);
+
+            float c = cos_table[pos * halfDim + i];
+            float s = sin_table[pos * halfDim + i];
+            float x0 = buf[pairOff];
+            float x1 = buf[pairOff + 1];
+
+            buf[pairOff] = x0 * c - x1 * s;
+            buf[pairOff + 1] = x0 * s + x1 * c;
+        }
+
+        extern "C" __global__ void attn_scores_causal_batched(
+            const float* q_all,   // [T, qRowStride]
+            const float* k_all,   // [T, kRowStride]
+            float* scores,        // [T, T]
+            const int qRowStride,
+            const int kRowStride,
+            const int qHeadOff,
+            const int kHeadOff,
+            const int head_dim,
+            const int T,
+            const float rsqrt_d)
+        {
+            const int t = blockIdx.y;
+            const int j = blockIdx.x * blockDim.x + threadIdx.x;
+            if (j >= T) return;
+
+            if (j > t) {
+                scores[t * T + j] = -DEVICE_FLT_MAX;
+                return;
+            }
+
+            const int qOff = t * qRowStride + qHeadOff;
+            const int kOff = j * kRowStride + kHeadOff;
+            float dot = 0.0f;
+            for (int d = 0; d < head_dim; d++) {
+                dot += q_all[qOff + d] * k_all[kOff + d];
+            }
+            scores[t * T + j] = dot * rsqrt_d;
+        }
+
+        extern __shared__ float sh_softmax_rows[];
+        extern "C" __global__ void softmax_inplace_rows(
+            float* scores, // [T, T]
+            const int T)
+        {
+            const int row = blockIdx.x;
+            const int lid = threadIdx.x;
+            const int localSize = blockDim.x;
+            float* rowPtr = scores + row * T;
+
+            float localMax = -DEVICE_FLT_MAX;
+            for (int i = lid; i < T; i += localSize) {
+                localMax = fmaxf(localMax, rowPtr[i]);
+            }
+            sh_softmax_rows[lid] = localMax;
+            __syncthreads();
+            for (int stride = localSize / 2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    sh_softmax_rows[lid] = fmaxf(sh_softmax_rows[lid], sh_softmax_rows[lid + stride]);
+                }
+                __syncthreads();
+            }
+            float maxVal = sh_softmax_rows[0];
+            __syncthreads();
+
+            float localSum = 0.0f;
+            for (int i = lid; i < T; i += localSize) {
+                float e = expf(rowPtr[i] - maxVal);
+                rowPtr[i] = e;
+                localSum += e;
+            }
+            sh_softmax_rows[lid] = localSum;
+            __syncthreads();
+            for (int stride = localSize / 2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    sh_softmax_rows[lid] += sh_softmax_rows[lid + stride];
+                }
+                __syncthreads();
+            }
+            float sumVal = sh_softmax_rows[0];
+            __syncthreads();
+
+            float invSum = 1.0f / sumVal;
+            for (int i = lid; i < T; i += localSize) {
+                rowPtr[i] *= invSum;
+            }
+        }
+
+        extern "C" __global__ void attn_weighted_sum_causal_batched(
+            const float* scores,  // [T, T]
+            const float* v_all,   // [T, vRowStride]
+            float* attn_out,      // [T, outRowStride]
+            const int vRowStride,
+            const int outRowStride,
+            const int vHeadOff,
+            const int outHeadOff,
+            const int head_dim,
+            const int T)
+        {
+            const int t = blockIdx.y;
+            const int d = blockIdx.x * blockDim.x + threadIdx.x;
+            if (d >= head_dim) return;
+
+            const float* rowScores = scores + t * T;
+            float acc = 0.0f;
+            for (int j = 0; j <= t; j++) {
+                acc += rowScores[j] * v_all[j * vRowStride + vHeadOff + d];
+            }
+            attn_out[t * outRowStride + outHeadOff + d] = acc;
         }
         """;
 }

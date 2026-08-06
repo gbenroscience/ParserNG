@@ -30,11 +30,19 @@ import java.util.regex.Pattern;
  *
  * Features: - Handles numbers (integers, decimals, scientific notation like
  * 1.2e-3) - Variables (e.g., x, varName_123) - Binary operators: + - * / ^
- * (power, right-associative) - Unary + - ! √ (square root) - Postfix Unicode
- * superscript exponents, e.g. "x²", "3³", "y²³" (== y^23) - Functions with
- * any number of arguments (e.g., sin(x), max(a, b, c+ d)) - Parentheses for
- * grouping AND for comma-separated literal lists, e.g. matrix data
- * "(3,1,4,7)" - Relational operators: &gt; &lt; &gt;= &lt;= == != - Logical
+ * (power, right-associative) - Unary + - ! √ (square root) - Prefix "nth
+ * root" notation: a run of superscript digits immediately before '√', e.g.
+ * "³√9" (cube root of 9) - Postfix Unicode superscript exponents, e.g.
+ * "x²", "3³", "y²³" (== y^23) - Binary combinatoric operators nPr and nCr,
+ * written as 'Р' (Cyrillic Er, U+0420) and 'Č' (U+010C) respectively, e.g.
+ * "9Р3" and "6Č5" — same precedence tier as '*' and '/' - Functions with any number of arguments
+ * (e.g., sin(x), max(a, b, c+ d)) - Parentheses for grouping AND for
+ * comma-separated literal lists, e.g. matrix data "(3,1,4,7)" - Derivative
+ * index notation "name[n]" (n a non-negative integer literal), e.g. "y[3]"
+ * for y'''(x) — recognized ONLY directly inside a call to one of the four
+ * differential-equation functions diffeqn / diffeqnPath / diffeqnHO /
+ * diffeqnPathHO; '[' is not a general-purpose grouping delimiter and is a
+ * parse error anywhere else - Relational operators: &gt; &lt; &gt;= &lt;= == != - Logical
  * operators: &amp;&amp; || (and the symbolic single &amp; / |), plus the
  * textual keywords OR / AND (word-boundary safe, so identifiers like
  * "orange" or "android" are never mistaken for the keyword) - Anonymous
@@ -105,6 +113,30 @@ public class MathExpressionTreeDepth implements Savable {
     private static final char ROOT_CHAR = '\u221A'; // '√'
 
     /**
+     * Binary "permutation" operator, e.g. {@code 9Р3} (nPr — the number of
+     * ways to arrange 3 items out of 9). This is the Cyrillic capital letter
+     * Er ('Р', U+0420) — visually similar to the Latin 'P' but a distinct
+     * code point — chosen so it never collides with an ordinary identifier
+     * character. Because {@link Character#isLetter(char)} is {@code true}
+     * for this character, it is explicitly excluded from identifier
+     * consumption (see {@link #isReservedOperatorChar(char)} and
+     * {@link #consumeIdentifier()}) so it is always tokenized as this
+     * operator, never folded into a variable name.
+     */
+    private static final char PERMUTATION_CHAR = '\u0420'; // 'Р'
+
+    /**
+     * Binary "combination" operator, e.g. {@code 6Č5} (nCr — the number of
+     * ways to choose 5 items out of 6, order not mattering). This is the
+     * Latin capital letter C with caron ('Č', U+010C). Like
+     * {@link #PERMUTATION_CHAR}, it is a letter as far as
+     * {@link Character#isLetter(char)} is concerned, so it too is excluded
+     * from identifier consumption to guarantee it is always tokenized as
+     * this operator.
+     */
+    private static final char COMBINATION_CHAR = '\u010C'; // 'Č'
+
+    /**
      * All ten Unicode superscript digit characters (⁰¹²³⁴⁵⁶⁷⁸⁹), in the same
      * order as their plain-ASCII counterparts '0'-'9'. A run of one or more
      * of these immediately following a parsed primary/power base is treated
@@ -126,6 +158,14 @@ public class MathExpressionTreeDepth implements Savable {
     // Guards against pathological recursion (nested parens/functions, long
     // unary chains).
     private int nestingDepth = 0;
+
+    // Counts how many diffeqn-family function calls (diffeqn, diffeqnPath,
+    // diffeqnHO, diffeqnPathHO) we are currently lexically inside of. While
+    // this is > 0, "name[n]" derivative-index notation (e.g. "y[3]") is
+    // recognized on a bare variable in parsePrimary(); everywhere else '['
+    // is just an unrecognized character. A counter (rather than a boolean)
+    // so that a diffeqn call nested inside another one still counts as "inside".
+    private int diffEqDepth = 0;
 
     // Guards against reusing a single instance across multiple parses.
     private boolean consumed = false;
@@ -268,6 +308,27 @@ public class MathExpressionTreeDepth implements Savable {
         return SUPERSCRIPT_DIGITS.indexOf(c) >= 0;
     }
 
+    /**
+     * True for a character that is reserved as an operator token despite
+     * {@link Character#isLetter(char)} being {@code true} for it —
+     * currently {@link #PERMUTATION_CHAR} and {@link #COMBINATION_CHAR}.
+     * Both {@link #consumeIdentifier()} and the identifier branch of
+     * {@link #parsePrimary()} check this so these characters are always
+     * tokenized as operators and never absorbed into a variable/function
+     * name.
+     */
+    private static boolean isReservedOperatorChar(char c) {
+        return c == PERMUTATION_CHAR || c == COMBINATION_CHAR;
+    }
+
+    /**
+     * The four differential-equation function names for which the
+     * {@code name[n]} derivative-index notation (see {@link #diffEqDepth})
+     * is recognized inside their argument list.
+     */
+    private static final java.util.Set<String> DIFF_EQ_FUNCTIONS = new java.util.HashSet<>(
+            java.util.Arrays.asList("diffeqn", "diffeqnPath", "diffeqnHO", "diffeqnPathHO"));
+
     private int parseRelationalLogical() {
         int maxDepth = parseAdditive();
 
@@ -384,12 +445,20 @@ public class MathExpressionTreeDepth implements Savable {
         return maxDepth;
     }
 
+    /**
+     * Multiplicative-precedence tier: {@code *}, {@code /}, and the two
+     * combinatoric binary operators {@link #PERMUTATION_CHAR} ({@code Р},
+     * nPr) and {@link #COMBINATION_CHAR} ({@code Č}, nCr) all share this
+     * level, e.g. {@code 9Р3} and {@code 6Č5} bind exactly like {@code *}
+     * and {@code /} do — tighter than {@code +}/{@code -}, looser than
+     * unary/power.
+     */
     private int parseMultiplicative() {
         int maxDepth = parseUnary();
         while (true) {
             skipWhitespace();
             char c = peek();
-            if (c == '*' || c == '/') {
+            if (c == '*' || c == '/' || c == PERMUTATION_CHAR || c == COMBINATION_CHAR) {
                 nextChar();
                 binaryOpCount++;
                 if (c == '/') {
@@ -415,10 +484,44 @@ public class MathExpressionTreeDepth implements Savable {
      * <p>The Unicode root symbol {@code √} is treated as a fourth prefix
      * unary operator alongside {@code + - !}: {@code √9}, {@code -√9}, and
      * {@code √√9} are all handled by the same recursive chain.</p>
+     *
+     * <p>A run of one or more Unicode superscript digits immediately
+     * preceding {@code √} (no whitespace in between) is recognized as an
+     * "nth root" degree prefix, e.g. {@code ³√9} (cube root of 9) or
+     * {@code ²√27} (square root of 27). This is distinct from the postfix
+     * superscript exponent handled in {@link #parsePower()} — that one
+     * follows a primary/power base ({@code x²}); this one precedes the root
+     * symbol itself and is consumed as part of this method's prefix chain,
+     * contributing depth exactly like the bare {@code √} case.</p>
      */
     private int parseUnary() {
         skipWhitespace();
         char c = peek();
+
+        if (isSuperscriptDigit(c)) {
+            int lookahead = pos;
+            while (lookahead < expr.length() && isSuperscriptDigit(expr.charAt(lookahead))) {
+                lookahead++;
+            }
+            if (lookahead < expr.length() && expr.charAt(lookahead) == ROOT_CHAR) {
+                pos = lookahead; // consume the degree digit run
+                nextChar();      // consume '√'
+                unaryOpCount++;
+                enterNesting();
+                try {
+                    int operandHeight = parseUnary();
+                    return 1 + operandHeight;
+                } finally {
+                    exitNesting();
+                }
+            }
+            // A superscript-digit run not immediately followed by '√' is not
+            // valid as a prefix here (postfix superscripts are only ever
+            // recognized after a primary/power base, in parsePower()); fall
+            // through so parsePrimary() reports a precise "unexpected
+            // character" error rather than silently doing nothing with it.
+        }
+
         if (c == '+' || c == '-' || c == '!' || c == ROOT_CHAR) {
             nextChar();
             unaryOpCount++;
@@ -514,18 +617,55 @@ public class MathExpressionTreeDepth implements Savable {
         }
 
         // Variable or function
-        if (Character.isLetter(c)) {
+        if (Character.isLetter(c) && !isReservedOperatorChar(c)) {
             String name = consumeIdentifier();
             skipWhitespace();
             if (peek() == '(') {
                 nextChar(); // (
                 functionCount++;
+                boolean isDiffEq = DIFF_EQ_FUNCTIONS.contains(name);
+                if (isDiffEq) {
+                    diffEqDepth++;
+                }
                 enterNesting();
                 try {
                     return parseCommaListAndClose("Missing closing ')' for function '" + name + "'");
                 } finally {
                     exitNesting();
+                    if (isDiffEq) {
+                        diffEqDepth--;
+                    }
                 }
+            }
+            // "name[n]" derivative-index notation, e.g. "y[3]" for y'''(x),
+            // is recognized ONLY directly inside a call to one of the four
+            // diffeqn-family functions (diffeqn/diffeqnPath/diffeqnHO/
+            // diffeqnPathHO). Outside that context '[' is simply not
+            // consumed here, so it falls through as an unrecognized
+            // character (either "trailing content" or a later
+            // ParseException from a nested parsePrimary()), exactly as
+            // before this feature existed.
+            if (diffEqDepth > 0 && peek() == '[') {
+                nextChar(); // consume '['
+                int digitsStart = pos;
+                while (Character.isDigit(peek())) {
+                    nextChar();
+                }
+                if (pos == digitsStart) {
+                    throw new ParseException(
+                            "Expected a non-negative integer derivative index inside '"
+                            + name + "[...]'", pos);
+                }
+                skipWhitespace();
+                if (peek() != ']') {
+                    throw new ParseException(
+                            "Missing closing ']' for derivative index on '" + name + "'", pos);
+                }
+                nextChar(); // consume ']'
+                // "name[n]" denotes a single distinguished operand (the n-th
+                // derivative of name), not an operation applied to name — it
+                // pushes exactly one stack slot, same as a plain variable.
+                return 1;
             }
             // plain variable pushes 1 item to stack
             return 1;
@@ -687,7 +827,7 @@ public class MathExpressionTreeDepth implements Savable {
 
     private String consumeIdentifier() {
         int start = pos;
-        while (Character.isLetterOrDigit(peek()) || peek() == '_') {
+        while ((Character.isLetterOrDigit(peek()) || peek() == '_') && !isReservedOperatorChar(peek())) {
             nextChar();
         }
         return expr.substring(start, pos);
@@ -911,7 +1051,16 @@ public class MathExpressionTreeDepth implements Savable {
             "2\u00B2+3\u00B3+\u221A9",         // "2²+3³+√9" -- Unicode superscripts + root
             "-\u221A9",                        // "-√9" -- signed root
             "\u221A\u221A9",                   // "√√9" -- nested root
-            "x\u00B2\u00B3"                    // "x²³" -- multi-digit superscript exponent (== x^23)
+            "x\u00B2\u00B3",                   // "x²³" -- multi-digit superscript exponent (== x^23)
+            "\u00B3\u221A9",                   // "³√9" -- prefix cube root
+            "-\u00B3\u221A27 + \u00B2\u221A4",  // "-³√27 + ²√4" -- signed prefix root, mixed with square root
+            "diffeqn((3*x^2)*y[4]+(5*sin(x))*y[3]+(5/x)*y[2]-3*y[1]+3*x*y[0], other_args)",
+            "diffeqnHO(y[2]+y[0], a, b)",       // y[n] also recognized in the other diffeqn-family calls
+            "diffeqn(x[0] + sin(y[3]), 1)",     // y[n] still recognized nested inside sin(...) within the call
+            "9\u04203",                          // "9Р3" -- nPr permutation
+            "6\u010C5",                          // "6Č5" -- nCr combination
+            "5! + 9\u04203 + 6\u010C5",           // the reported crashing expression
+            "(a+b)\u0420(c-d) * 2\u010C1"        // combinatoric operators combined with grouping/multiplication
         };
 
         for (String s : tests) {
@@ -934,7 +1083,12 @@ public class MathExpressionTreeDepth implements Savable {
             "1 2",           // two operands with no operator between them
             "3ORx",          // ambiguous run-together text -> rejected rather than guessed at
             "@x",            // '@' not followed by '('
-            "A=@(2,2)(3,1,4" // missing closing ')' on the data list
+            "A=@(2,2)(3,1,4", // missing closing ')' on the data list
+            "sin[x]",        // '[' is not a general grouping/function delimiter outside diffeqn-family calls
+            "y[3] + 1",      // "name[n]" outside any diffeqn-family call is rejected
+            "diffeqn(y[-1], a)", // negative index is not a non-negative integer
+            "diffeqn(y[3, a)",   // missing closing ']' on the derivative index
+            "\u04203 + 1"        // permutation operator with no left operand
         };
 
         System.out.println("\n-- malformed input (expected to fail cleanly) --");

@@ -72,7 +72,7 @@ public class SemanticAnalyzer {
                 try {
                     if (scanner.get(i).equals("-")) {
                         //the pattern (,-,var|num.. convert to (,-1,*,var|num
-                        if ((isOpeningBracket(scanner.get(i - 1)) || isPower(scanner.get(i - 1)) || isMulOrDiv(scanner.get(i - 1)))
+                        if ((isOpeningCircBracket(scanner.get(i - 1)) || isPower(scanner.get(i - 1)) || isMulOrDiv(scanner.get(i - 1)))
                                 && (isVariableString(scanner.get(i + 1)) || isNumber(scanner.get(i + 1)))) {
 
                             if (isNumber(scanner.get(i + 1))) {
@@ -173,7 +173,7 @@ public class SemanticAnalyzer {
             if (isVariableString(scanner.get(i))) {
                 try {
                     //specify valid tokens that can come before a variable
-                    if (!isOpeningBracket(scanner.get(i - 1))
+                    if (!isOpeningCircBracket(scanner.get(i - 1))
                             && !isLogicOperator(scanner.get(i - 1)) && !isUnaryPreOperatorORDefinedMethod(scanner.get(i - 1))
                             && !isBinaryOperator(scanner.get(i - 1)) && !isAssignmentOperator(scanner.get(i - 1)) && !isNumber(scanner.get(i - 1)) && !isVariableString(scanner.get(i - 1))) {
                         //processLogger.writeLog("ParserNG Does Not Allow "+expression+" To Combine The MathExpression Members \""+scanner.get(i-1)+"\" And \""+scanner.get(i)+"\"\n");
@@ -182,7 +182,7 @@ public class SemanticAnalyzer {
                         break;
                     }//end if
                     //specify valid tokens that can come after a variable
-                    if (!isBracket(scanner.get(i + 1)) && !isBinaryOperator(scanner.get(i + 1))
+                    if (!isCircBracket(scanner.get(i + 1)) && !isBinaryOperator(scanner.get(i + 1))
                             && !isUnaryPostOperator(scanner.get(i + 1)) && !isNumberReturningStatsMethod(scanner.get(i + 1))
                             && !isLogicOperator(scanner.get(i + 1)) && !isAssignmentOperator(scanner.get(i + 1))
                             && !isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))
@@ -232,7 +232,7 @@ public class SemanticAnalyzer {
         for (int i = 0; i < scanner.size(); i++) {
             try {
                 if ((isBinaryOperator(scanner.get(i)) || isUnaryPreOperatorORDefinedMethod(scanner.get(i))
-                        || isOpeningBracket(scanner.get(i))
+                        || isOpeningCircBracket(scanner.get(i))
                         || isLogicOperator(scanner.get(i)) || isAssignmentOperator(scanner.get(i))
                         || isComma(scanner.get(i)) || isStatsMethod(scanner.get(i)))
                         && Operator.isPlusOrMinus(scanner.get(i + 1)) && isNumber(scanner.get(i + 2))) {
@@ -279,7 +279,7 @@ public class SemanticAnalyzer {
                         scanner.add(j + 1, ")");
                         scanner.add(i, "(");
                         scanner.add(i + 2, "*");
-                    } else if (isOpeningBracket(scanner.get(j))) {
+                    } else if (isOpeningCircBracket(scanner.get(j))) {
                         int ind = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, j, scanner);
                         scanner.add(ind + 1, ")");
                         scanner.add(i, "(");
@@ -298,7 +298,7 @@ public class SemanticAnalyzer {
                  * sin(-1*(2+3)). The generic situation is
                  * "preNumberOperator-(expr)"
                  */
-                if (isUnaryPreOperatorORDefinedMethod(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && isOpeningBracket(scanner.get(i + 1))) {
+                if (isUnaryPreOperatorORDefinedMethod(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && isOpeningCircBracket(scanner.get(i + 1))) {
                     if (scanner.get(i).equals("-")) {
                         List<String> subList = scanner.subList(i - 1, Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner) + 1);
 
@@ -322,7 +322,7 @@ public class SemanticAnalyzer {
                  * -1*sin2+3 if this is not done, it would be evaluated as
                  * -(sin2+3)
                  */
-                if (isOpeningBracket(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))) {
+                if (isOpeningCircBracket(scanner.get(i - 1)) && Operator.isPlusOrMinus(scanner.get(i)) && isUnaryPreOperatorORDefinedMethod(scanner.get(i + 1))) {
                     if (scanner.get(i).equals("-")) {
                         scanner.set(i, "-1");
                         scanner.add(i + 1, "*");

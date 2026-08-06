@@ -72,7 +72,7 @@ boolean correct=true;
 
        //specify valid tokens that can come before a LogOrAntiLogToAnyBase operator
    if(!isNumber(scan.get(index-1))&&!isBinaryOperator(scan.get(index-1))&&
-           !isVariableString(scan.get(index-1))&&!isBracket(scan.get(index-1))
+           !isVariableString(scan.get(index-1))&&!isCircBracket(scan.get(index-1))
            ){
               errorLog.error(
             "ParserNG Does Not Allow "+getName()+" To Combine The Function Members \""+scan.get(index-1)+"\" And \""+scan.get(index)+"\""+
@@ -81,7 +81,7 @@ boolean correct=true;
              correct=false;  scan.clear();
          }//end if
        //specify valid tokens that can come after a LogOrAntiLogToAnyBase operator
-         if(!isNumber(scan.get(index+1))&&!isOpeningBracket(scan.get(index+1))&&!Method.isNumberReturningStatsMethod(scan.get(index+1))
+         if(!isNumber(scan.get(index+1))&&!isOpeningCircBracket(scan.get(index+1))&&!Method.isNumberReturningStatsMethod(scan.get(index+1))
             &&!isUnaryPreOperator(scan.get(index+1))
             &&!Method.isLogToAnyBase(scan.get(index+1))&&!Method.isAntiLogToAnyBase(scan.get(index+1))&&!Method.isStatsMethod(scan.get(index+1))
                  ){

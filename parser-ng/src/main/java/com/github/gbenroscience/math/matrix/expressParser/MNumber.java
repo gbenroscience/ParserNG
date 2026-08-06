@@ -176,7 +176,7 @@ public class MNumber {
 
         try {
             //specify valid tokens that can come before a number
-            if (!isBracket(scan.get(index - 1))
+            if (!isCircBracket(scan.get(index - 1))
                     && !isLogicOperator(scan.get(index - 1)) && !isUnaryPreOperator(scan.get(index - 1))
                     && !isBinaryOperator(scan.get(index - 1)) && !isAssignmentOperator(scan.get(index - 1))
                     && !isStatsMethod(scan.get(index - 1)) && !isNumber(scan.get(index - 1)) && !isVariableString(scan.get(index - 1))) {
@@ -188,7 +188,7 @@ public class MNumber {
                 scan.clear();
             }//end if
             //specify valid tokens that can come after a number
-            if (!isBracket(scan.get(index + 1)) && !isBinaryOperator(scan.get(index + 1))
+            if (!isCircBracket(scan.get(index + 1)) && !isBinaryOperator(scan.get(index + 1))
                     && !isUnaryPostOperator(scan.get(index + 1))
                     && !isLogicOperator(scan.get(index + 1))
                     && !isUnaryPreOperator(scan.get(index + 1)) && !isNumberReturningStatsMethod(scan.get(index + 1))

@@ -1,6 +1,5 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
-
 /**
  * Scalar "Turbo" entry points over the vectorized ODE solvers — the ParserNG
  * runtime targets for the diffeqn(...) and diffeqnPath(...) functional forms.
@@ -15,16 +14,15 @@ public class TurboODE {
     // ------------------------------------------------------------------
     // diffeqn(...) — endpoint-only
     // ------------------------------------------------------------------
-
     public static double executeTurboODE(ODEFunction dy_dt,
-                                          int tSlot,
-                                          int ySlot,
-                                          int frameSize,
-                                          double t0,
-                                          double y0,
-                                          double tEnd,
-                                          double initialStep,
-                                          DifferentialEquations.ODESolverMethod method) {
+            int tSlot,
+            int ySlot,
+            int frameSize,
+            double t0,
+            double y0,
+            double tEnd,
+            double initialStep,
+            DifferentialEquations.ODESolverMethod method) {
         return executeTurboODE(dy_dt, tSlot, ySlot, frameSize, t0, y0, tEnd, initialStep, method, null);
     }
 
@@ -33,17 +31,29 @@ public class TurboODE {
      * {@link DifferentialEquations.JacobianStrategy}, consulted only when
      * method is IMPLICIT_EULER and ignored (accepted, unused) for every other
      * method — see {@link VectorODE#executeVectorODE} for the same note.
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlot
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param initialStep
+     * @param method
+     * @param jacobianStrategy
+     * @return
      */
     public static double executeTurboODE(ODEFunction dy_dt,
-                                          int tSlot,
-                                          int ySlot,
-                                          int frameSize,
-                                          double t0,
-                                          double y0,
-                                          double tEnd,
-                                          double initialStep,
-                                          DifferentialEquations.ODESolverMethod method,
-                                          DifferentialEquations.JacobianStrategy jacobianStrategy) {
+            int tSlot,
+            int ySlot,
+            int frameSize,
+            double t0,
+            double y0,
+            double tEnd,
+            double initialStep,
+            DifferentialEquations.ODESolverMethod method,
+            DifferentialEquations.JacobianStrategy jacobianStrategy) {
 
         if (initialStep <= 0.0) {
             throw new IllegalArgumentException("initialStep must be positive (a magnitude), got " + initialStep);
@@ -90,17 +100,16 @@ public class TurboODE {
     // ------------------------------------------------------------------
     // diffeqnPath(...) — trajectory output
     // ------------------------------------------------------------------
-
     public static double[][] executeTurboODEPath(ODEFunction dy_dt,
-                                                  int tSlot,
-                                                  int ySlot,
-                                                  int frameSize,
-                                                  double t0,
-                                                  double y0,
-                                                  double tEnd,
-                                                  double h,
-                                                  DifferentialEquations.ODESolverMethod method,
-                                                  int points) {
+            int tSlot,
+            int ySlot,
+            int frameSize,
+            double t0,
+            double y0,
+            double tEnd,
+            double h,
+            DifferentialEquations.ODESolverMethod method,
+            int points) {
         return executeTurboODEPath(dy_dt, tSlot, ySlot, frameSize, t0, y0, tEnd, h, method, points, null);
     }
 
@@ -109,22 +118,33 @@ public class TurboODE {
      * {@link DifferentialEquations.JacobianStrategy}, consulted only when
      * method is IMPLICIT_EULER.
      *
-     * @param h      integration step (fixed methods) or initial step (rk45). Must be a positive magnitude.
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlot
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param h integration step (fixed methods) or initial step (rk45). Must be
+     * a positive magnitude.
      * @param method solver to use
-     * @param points requested number of uniformly-spaced (t, y) samples in the output,
-     *               or less than or equal to 0 to mean "use the solver's natural steps, no resampling"
+     * @param points requested number of uniformly-spaced (t, y) samples in the
+     * output, or less than or equal to 0 to mean "use the solver's natural
+     * steps, no resampling"
+     * @param jacobianStrategy
+     * @return
      */
     public static double[][] executeTurboODEPath(ODEFunction dy_dt,
-                                                  int tSlot,
-                                                  int ySlot,
-                                                  int frameSize,
-                                                  double t0,
-                                                  double y0,
-                                                  double tEnd,
-                                                  double h,
-                                                  DifferentialEquations.ODESolverMethod method,
-                                                  int points,
-                                                  DifferentialEquations.JacobianStrategy jacobianStrategy) {
+            int tSlot,
+            int ySlot,
+            int frameSize,
+            double t0,
+            double y0,
+            double tEnd,
+            double h,
+            DifferentialEquations.ODESolverMethod method,
+            int points,
+            DifferentialEquations.JacobianStrategy jacobianStrategy) {
 
         if (h <= 0.0) {
             throw new IllegalArgumentException("h must be positive (a magnitude), got " + h);

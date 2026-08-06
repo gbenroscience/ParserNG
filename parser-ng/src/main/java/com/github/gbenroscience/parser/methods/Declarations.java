@@ -81,13 +81,11 @@ public class Declarations {
     public static final String FACT = "fact";
     public static final String COMBINATION = "comb";
     public static final String PERMUTATION = "perm";
-    
-    
-    
-    public static final String ABS = "abs"; 
+
+    public static final String ABS = "abs";
     public static final String FLOOR = "floor";
     public static final String CEIL = "ceil";
-    
+
     public static final String LIST_SUM = "listsum";
     public static final String SUM = "sum";
     public static final String PROD = "prod";
@@ -112,17 +110,11 @@ public class Declarations {
     public static final String AUTO_DIFF = "autodiff";
     public static final String AUTO_DIFF_N = "autodiffN";
     public static final String INTEGRATION = "intg";
-    
-    
-    
-    public static final String DIFF_EQN = "diffeqn"; 
+
+    public static final String DIFF_EQN = "diffeqn";
     public static final String DIFF_EQN_PATH = "diffeqnPath";
     public static final String DIFF_EQN_HO = "diffeqnHO";
     public static final String DIFF_EQN_PATH_HO = "diffeqnPathHO";
-    public static final String DIFF_EQN_LINEAR_HO = "diffeqnLinearHO"; 
-    public static final String DIFF_EQN_PATH_LINEAR_HO = "diffeqnPathLinearHO"; //HO means higher order
-    
-     
 
     public static final String QUADRATIC = "quadratic";
     public static final String TARTAGLIA_ROOTS = "t_root";
@@ -325,7 +317,9 @@ public class Declarations {
             MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED,
             COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE,
             STD_ERR, RANDOM, SORT, PLOT, PRINT, DIFFERENTIATION, AUTO_DIFF, AUTO_DIFF_N,
-            INTEGRATION, DIFF_EQN, QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT,
+            INTEGRATION, 
+            DIFF_EQN, DIFF_EQN_PATH, DIFF_EQN_HO, DIFF_EQN_PATH_HO, 
+            QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT,
             LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX,
             ECHELON_MATRIX, MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD,
             MATRIX_SUBTRACT, MATRIX_POWER, MATRIX_TRANSPOSE, MATRIX_EDIT,
@@ -533,12 +527,20 @@ public class Declarations {
             case AUTO_DIFF:
                 return TYPE.NUMBER.toString();
             case AUTO_DIFF_N:
-                return TYPE.VECTOR.toString(); 
-                
+                return TYPE.VECTOR.toString();
+
             case INTEGRATION:
                 return TYPE.NUMBER.toString();
+
             case DIFF_EQN:
                 return TYPE.NUMBER.toString();
+            case DIFF_EQN_PATH:
+                return TYPE.MATRIX.toString();
+            case DIFF_EQN_HO:
+                return TYPE.NUMBER.toString();
+            case DIFF_EQN_PATH_HO:
+                return TYPE.MATRIX.toString();
+
             case QUADRATIC:
                 return TYPE.VECTOR.toString();
             case TARTAGLIA_ROOTS:

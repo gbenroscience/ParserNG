@@ -91,16 +91,16 @@ public class Differentiable {
 
 
         for(int i=0;i<derivedData.size();i++){
-            if(isOpeningBracket(derivedData.get(i)) ){
+            if(isOpeningCircBracket(derivedData.get(i)) ){
                 int j=i+1;
 
-                while( !isClosingBracket(derivedData.get(j)) && !isOpeningBracket(derivedData.get(j)) ){
+                while( !isClosingCircBracket(derivedData.get(j)) && !isOpeningCircBracket(derivedData.get(j)) ){
                     j++;
                 }
-                if(isClosingBracket(derivedData.get(j))){//Good deal..you have a (...) pattern with no bracket inside! simplify its contents.
+                if(isClosingCircBracket(derivedData.get(j))){//Good deal..you have a (...) pattern with no bracket inside! simplify its contents.
                     try{
                         //Check if the bracket pattern is enclosed directly in another bracket pair. If so unwrap.
-                        if(isOpeningBracket(derivedData.get(i-1)) && isClosingBracket(derivedData.get(j+1))){
+                        if(isOpeningCircBracket(derivedData.get(i-1)) && isClosingCircBracket(derivedData.get(j+1))){
                             derivedData.remove(j+1);
                             derivedData.remove(i-1);
                             i--;//
@@ -113,12 +113,12 @@ public class Differentiable {
         }
         //Look for a imple bracket pair and simplify its contents using the Formula class
         for(int i=0;i<derivedData.size();i++){
-            if(isOpeningBracket(derivedData.get(i)) ){
+            if(isOpeningCircBracket(derivedData.get(i)) ){
                 int j=i+1;
-                while( !isClosingBracket(derivedData.get(j)) && !isOpeningBracket(derivedData.get(j)) ){
+                while( !isClosingCircBracket(derivedData.get(j)) && !isOpeningCircBracket(derivedData.get(j)) ){
                     j++;
                 }
-                if(isClosingBracket(derivedData.get(j))){//Good deal..you have a (...) pattern with no bracket inside! simplify its contents.
+                if(isClosingCircBracket(derivedData.get(j))){//Good deal..you have a (...) pattern with no bracket inside! simplify its contents.
                     List<String>l = derivedData.subList(i+1, j);
                     //Formula.simplify(l);
 
@@ -132,8 +132,8 @@ public class Differentiable {
                 String nextToken = derivedData.get(i+1);
                 String foundToken = derivedData.get(i+2);
 
-                if(isOpeningBracket(nextToken) && (isNumber(foundToken) || isVariableString(foundToken) )
-                        && isClosingBracket(derivedData.get(i+3))){
+                if(isOpeningCircBracket(nextToken) && (isNumber(foundToken) || isVariableString(foundToken) )
+                        && isClosingCircBracket(derivedData.get(i+3))){
                     List subList = derivedData.subList(i+1, i+4);
                     subList.clear();
                     subList.add(foundToken);
@@ -171,7 +171,7 @@ public class Differentiable {
         ArrayList<String>derivedData = new ArrayList<>();
         handleStrangeFormats:{
             //turn (,-,var,) to (,-1,*,var,)
-            if(data.get(0).equals("(")&&data.get(1).equals("-")&&isVariableString(data.get(2))&&isClosingBracket(data.get(3))){
+            if(data.get(0).equals("(")&&data.get(1).equals("-")&&isVariableString(data.get(2))&&isClosingCircBracket(data.get(3))){
                 data.set(1, "-1");
                 data.add(2, "*");
             }
@@ -206,7 +206,7 @@ public class Differentiable {
 
 
         if( sz == 3 ){
-            if( isOpeningBracket(data.get(0)) && isVariableString(data.get(1)) && isClosingBracket(data.get(2)) ){
+            if( isOpeningCircBracket(data.get(0)) && isVariableString(data.get(1)) && isClosingCircBracket(data.get(2)) ){
                 if(d.isBaseVariable(data.get(1))){
                     derivedData.add("1");
                 }
@@ -219,14 +219,14 @@ public class Differentiable {
 
 
             }//end if
-            else if( isOpeningBracket(data.get(0)) && isNumber(data.get(1)) && isClosingBracket(data.get(2)) ){
+            else if( isOpeningCircBracket(data.get(0)) && isNumber(data.get(1)) && isClosingCircBracket(data.get(2)) ){
                 derivedData.add("0");
             }//end if
 
         }
         else if( sz == 4 ){
             //pattern sin,(,var,)
-            if(isMethodName(data.get(0))&&isOpeningBracket(data.get(1))&&isVariableString(data.get(2))&&isClosingBracket(data.get(3))){
+            if(isMethodName(data.get(0))&&isOpeningCircBracket(data.get(1))&&isVariableString(data.get(2))&&isClosingCircBracket(data.get(3))){
                 derivedData.addAll(Methods.getMethodDifferentialUnary(data.get(0), data.get(2),d));
             }//end if
         }//end else if
@@ -235,8 +235,8 @@ public class Differentiable {
         else if( sz == 5 ){
 
 
-            if( isMethodName(data.get(0)) && isOpeningBracket(data.get(1)) && data.get(2).equals("-") && isVariableString(data.get(3))
-                    && isClosingBracket(data.get(4)) ){
+            if( isMethodName(data.get(0)) && isOpeningCircBracket(data.get(1)) && data.get(2).equals("-") && isVariableString(data.get(3))
+                    && isClosingCircBracket(data.get(4)) ){
                 derivedData.add("-1");
                 derivedData.add("*");
                 derivedData.add("(");
@@ -495,8 +495,8 @@ public class Differentiable {
          */
         for(int i=0;i<derivedData.size();i++){
             try{
-                if( derivedData.get(i).equals("diff")&&isOpeningBracket(derivedData.get(i+1))&&
-                        isVariableString(derivedData.get(i+2))&&isClosingBracket(derivedData.get(i+3)) ){
+                if( derivedData.get(i).equals("diff")&&isOpeningCircBracket(derivedData.get(i+1))&&
+                        isVariableString(derivedData.get(i+2))&&isClosingCircBracket(derivedData.get(i+3)) ){
 
                     //print("data---"+data);
                     if(isAutoGenNameFormat(derivedData.get(i+2))){
@@ -513,8 +513,8 @@ public class Differentiable {
                         temp.add("1");
                     }
                 }//end if
-                else if( derivedData.get(i).equals("diff")&&isOpeningBracket(derivedData.get(i+1))&& derivedData.get(i+2).equals("-") &&
-                        isVariableString(derivedData.get(i+3))&&isClosingBracket(derivedData.get(i+4)) ){
+                else if( derivedData.get(i).equals("diff")&&isOpeningCircBracket(derivedData.get(i+1))&& derivedData.get(i+2).equals("-") &&
+                        isVariableString(derivedData.get(i+3))&&isClosingCircBracket(derivedData.get(i+4)) ){
 
                     //print("data---"+data);
                     if(isAutoGenNameFormat(derivedData.get(i+3))){

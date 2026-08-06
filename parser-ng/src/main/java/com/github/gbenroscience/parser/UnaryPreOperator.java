@@ -87,7 +87,7 @@ to.
         try {
             //specify valid tokens that can come before a pre-number operator
             if (leftInd >= 0 && !isBinaryOperator(prev) && !isNumber(prev)
-                    && !isUnaryPreOperator(prev) && !isBracket(prev)
+                    && !isUnaryPreOperator(prev) && !isCircBracket(prev)
                     && !isVariableString(prev) && !isUnaryPostOperator(prev)
                     && !isLogicOperator(prev)
                     && !isAssignmentOperator(prev)) {
@@ -99,7 +99,7 @@ to.
                 scan.clear();
             }//end if
             //specify valid tokens that can come after a pre-number operator
-            if (rightInd < sz && !isOpeningBracket(next) && !isNumber(next)
+            if (rightInd < sz && !isOpeningCircBracket(next) && !isNumber(next)
                     && !Method.isUnaryPreOperatorORDefinedMethod(next)
                     && !isVariableString(next) && !Method.isNumberReturningStatsMethod(next)
                     && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next)) {

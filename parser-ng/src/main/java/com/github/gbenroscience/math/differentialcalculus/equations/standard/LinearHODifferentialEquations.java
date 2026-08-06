@@ -1,8 +1,8 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
 /**
- * Compilation layer backing diffeqnLinearHO(...)/diffeqnPathLinearHO(...) —
- * the ParserNG functional form for a general linear n-th order equation:
+ * Compilation utility backing the coefficient-list form of
+ * diffeqnHO(...)/diffeqnPathHO(...) — the general linear n-th order equation:
  *
  *   A(t)*y_n + B(t)*y_(n-1) + C(t)*y_(n-2) + ... + F(t)*y_0 = g(t)
  *
@@ -10,13 +10,14 @@ package com.github.gbenroscience.math.differentialcalculus.equations.standard;
  * an optional forcing term (omit it, or pass null, for the homogeneous case
  * where the right-hand side is 0).
  *
- * This class does no new numerical work of its own. It divides the equation
- * through by the leading coefficient A(t), builds the resulting top-derivative
- * expression as a single ODEFunction, and hands that straight to the existing
- * HigherOrderODE / CompanionSystemHandles machinery — exactly the same
- * companion-system reduction diffeqnHO already uses. The only thing this
- * class adds is the coefficient-list convenience and the leading-coefficient
- * domain check described in buildTopDerivative's javadoc.
+ * There is no separate diffeqnLinearHO name — a coefficient list is simply a
+ * second way to supply diffeqnHO's top-derivative argument, alongside the
+ * usual lambda. ParserNG's compiler distinguishes the two by the Token kind
+ * at that argument position (MATRIX for a coefficient list, FUNCTION_HANDLE
+ * for a lambda) and, for the MATRIX case, calls buildTopDerivative below to
+ * get the same kind of ODEFunction a lambda would have compiled to — from
+ * that point on, HigherOrderODE/CompanionSystemHandles cannot tell the two
+ * apart, and don't need to.
  *
  * <h2>Coefficient function convention</h2>
  * Each coefficient (and the optional forcing term) is an ODEFunction reading
@@ -29,9 +30,9 @@ package com.github.gbenroscience.math.differentialcalculus.equations.standard;
  * at either endpoint — a mid-interval singular point. buildTopDerivative only
  * ever checks the value actually reached during integration (a division by a
  * near-zero A(t) throws immediately, at the point it happens, with a clear
- * message), and the entry points below additionally pre-check both endpoints
- * before starting. Neither is a substitute for a full interior root scan of
- * A(t) across (t0, tEnd) — that would need something like
+ * message), and checkLeadingCoefficientAtEndpoints additionally pre-checks
+ * both endpoints before starting. Neither is a substitute for a full interior
+ * root scan of A(t) across (t0, tEnd) — that would need something like
  * TaylorGKTurboIntegrator's pole-finder, and is a reasonable next addition if
  * mid-interval singularities turn out to matter for your equations, but is
  * out of scope here.
@@ -49,91 +50,8 @@ public final class LinearHODifferentialEquations {
     }
 
     // ------------------------------------------------------------------
-    // diffeqnLinearHO(...) — endpoint-only
+    // Compilation core
     // ------------------------------------------------------------------
-
-    /**
-     * @param coefficients ordered highest-order first: coefficients(0) is
-     *                      A(t) (the y_n coefficient), coefficients(1) is
-     *                      B(t) (the y_(n-1) coefficient), ..., the last
-     *                      entry is F(t) (the y_0 coefficient). Length must
-     *                      be order+1, where order == y0.length.
-     * @param forcingOrNull g(t) for the non-homogeneous case, or null for
-     *                      the homogeneous case (right-hand side 0)
-     */
-    public static double executeTurboODELinearHO(ODEFunction[] coefficients,
-                                                  ODEFunction forcingOrNull,
-                                                  int tSlot,
-                                                  int ySlotStart,
-                                                  int frameSize,
-                                                  double t0,
-                                                  double[] y0,
-                                                  double tEnd,
-                                                  double initialStep,
-                                                  DifferentialEquations.ODESolverMethod method) {
-        return executeTurboODELinearHO(coefficients, forcingOrNull, tSlot, ySlotStart, frameSize,
-                t0, y0, tEnd, initialStep, method, null);
-    }
-
-    /** Same as {@link #executeTurboODELinearHO}, with an optional analytic Jacobian strategy. */
-    public static double executeTurboODELinearHO(ODEFunction[] coefficients,
-                                                  ODEFunction forcingOrNull,
-                                                  int tSlot,
-                                                  int ySlotStart,
-                                                  int frameSize,
-                                                  double t0,
-                                                  double[] y0,
-                                                  double tEnd,
-                                                  double initialStep,
-                                                  DifferentialEquations.ODESolverMethod method,
-                                                  DifferentialEquations.JacobianStrategy jacobianStrategy) {
-
-        ODEFunction topDerivative = buildTopDerivative(coefficients, forcingOrNull, tSlot, ySlotStart, frameSize, y0.length);
-        checkLeadingCoefficientAtEndpoints(coefficients[0], tSlot, frameSize, t0, tEnd);
-
-        return HigherOrderODE.executeTurboODEHO(
-                topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, initialStep, method, jacobianStrategy);
-    }
-
-    // ------------------------------------------------------------------
-    // diffeqnPathLinearHO(...) — trajectory output, (t, y) only
-    // ------------------------------------------------------------------
-
-    public static double[][] executeTurboODEPathLinearHO(ODEFunction[] coefficients,
-                                                          ODEFunction forcingOrNull,
-                                                          int tSlot,
-                                                          int ySlotStart,
-                                                          int frameSize,
-                                                          double t0,
-                                                          double[] y0,
-                                                          double tEnd,
-                                                          double h,
-                                                          DifferentialEquations.ODESolverMethod method,
-                                                          int points) {
-        return executeTurboODEPathLinearHO(coefficients, forcingOrNull, tSlot, ySlotStart, frameSize,
-                t0, y0, tEnd, h, method, points, null);
-    }
-
-    /** Same as {@link #executeTurboODEPathLinearHO}, with an optional analytic Jacobian strategy. */
-    public static double[][] executeTurboODEPathLinearHO(ODEFunction[] coefficients,
-                                                          ODEFunction forcingOrNull,
-                                                          int tSlot,
-                                                          int ySlotStart,
-                                                          int frameSize,
-                                                          double t0,
-                                                          double[] y0,
-                                                          double tEnd,
-                                                          double h,
-                                                          DifferentialEquations.ODESolverMethod method,
-                                                          int points,
-                                                          DifferentialEquations.JacobianStrategy jacobianStrategy) {
-
-        ODEFunction topDerivative = buildTopDerivative(coefficients, forcingOrNull, tSlot, ySlotStart, frameSize, y0.length);
-        checkLeadingCoefficientAtEndpoints(coefficients[0], tSlot, frameSize, t0, tEnd);
-
-        return HigherOrderODE.executeTurboODEPathHO(
-                topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, jacobianStrategy);
-    }
 
     // ------------------------------------------------------------------
     // Compilation core
@@ -186,9 +104,10 @@ public final class LinearHODifferentialEquations {
      * Pre-flight check at both interval endpoints, run once before
      * integration starts, so a badly chosen interval fails immediately with
      * a clear message instead of after however many steps it takes the
-     * solver to reach the singular point.
+     * solver to reach the singular point. Call this once, right after
+     * buildTopDerivative, before handing the result to HigherOrderODE.
      */
-    private static void checkLeadingCoefficientAtEndpoints(ODEFunction leadingCoefficient,
+    public static void checkLeadingCoefficientAtEndpoints(ODEFunction leadingCoefficient,
                                                             int tSlot,
                                                             int frameSize,
                                                             double t0,

@@ -66,7 +66,7 @@ public class DerivativeStructureBuilder {
 					print("---subList---after simplification---"+subList);
 					handleSingleNumOrVar:{
 						print("---handleSingleNumOrVar---"+subList);
-						if(subList.size()==3 && isOpeningBracket(subList.get(0)) && isClosingBracket(subList.get(2)) ){
+						if(subList.size()==3 && isOpeningCircBracket(subList.get(0)) && isClosingCircBracket(subList.get(2)) ){
 							if(!isVariableString(scanner.get(openindex-1))  ){
 								subList.remove(0);subList.remove(2);
 								Differentiable diff = new Differentiable(generateName(), new ArrayList<>(subList));
