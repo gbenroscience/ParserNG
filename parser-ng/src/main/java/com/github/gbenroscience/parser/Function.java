@@ -28,9 +28,11 @@ import java.util.logging.Logger;
  * @author JIBOYE OLUWAGBEMIRO OLAOLUWA
  */
 public class Function implements Savable, MethodRegistry.MethodAction {
-    
-     
-
+    /**
+     * If it is a derivative of another function, this field specifies what the derivative order is. If 0, then it is the base function, if 1, then y'.
+     * If 2, then y'' etc.
+     */
+     private int order;
     /**
      * The dependent variable
      */
@@ -210,7 +212,16 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             m.updateArgs(x);
         }
     }
+    
+    public void setOrder(int order) {
+        this.order = order;
+    }
 
+    public int getOrder() {
+        return order;
+    }
+
+    
     /**
      * @return the value of the function with these variables set.
      */

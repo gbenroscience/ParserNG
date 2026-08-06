@@ -675,7 +675,7 @@ public class MathScanner {
         //Catch errors like: sin(2,3+4) or cosh(4,9-2) etc
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
-            if (Method.isDefinedMethod(token) && !Method.isStatsMethod(token)) {
+            if (Method.isDefinedMethod(token) && !Method.isMultiArgsMethod(token)) {
                 int op = i + 1;
                 int cl = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, op, scanner);
 
@@ -730,7 +730,7 @@ public class MathScanner {
                  * too complex to be analyzed here.
                  */
                 boolean canCheckNextToken = i + 1 < scanner.size();
-                if ((Method.isFunctionOperatingMethod(scanner.get(i)) || Method.isStatsMethod(scanner.get(i))) && (canCheckNextToken && isOpeningCircBracket(scanner.get(i + 1)))) {
+                if ((Method.isFunctionOperatingMethod(scanner.get(i)) || Method.isMultiArgsMethod(scanner.get(i))) && (canCheckNextToken && isOpeningCircBracket(scanner.get(i + 1)))) {
                     i = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
                 }//end if
                 
@@ -1328,11 +1328,14 @@ public class MathScanner {
     /**
      * Optimized & more correct 2025 version of recognizeAnonymousFunctions
      *
-     * Changes & improvements: • Single linear pass (O(n) instead of repeated
-     * indexOf → much faster) • Cleaner structure with helper methods • Safer
-     * in-place replacement (no risky mutations during iteration) • Exact same
-     * replacement logic & output as your original code • Better readability and
-     * maintainability • Preserves your original bracket/comma detection rules
+     * Changes & improvements:  
+     * Single linear pass (O(n) instead of repeated
+     * indexOf → much faster) 
+     * Cleaner structure with helper methods  
+     * Safer in-place replacement (no risky mutations during iteration) 
+     * Exact same replacement logic & output as your original code 
+     * Better readability and maintainability 
+     * Preserves your original bracket/comma detection rules
      *
      * @param scanner
      */
@@ -1551,7 +1554,7 @@ public class MathScanner {
                             List<String> l = list.subList(open - 1, i + 1);
                             int siz = l.size();
                             String input;
-                            if (Method.isStatsMethod(token)) {
+                            if (Method.isMultiArgsMethod(token)) {
                                 /**
                                  * Pattern is [sum,(, 2, 3, 4, 6, )] We need to
                                  * convert this into: sum(2,3,4,6) Our job is to
@@ -1682,7 +1685,7 @@ public class MathScanner {
                             List<String> l = list.subList(open - 1, i + 1);
                             int siz = l.size();
                             String input;
-                            if (Method.isStatsMethod(token)) {
+                            if (Method.isMultiArgsMethod(token)) {
                                 /**
                                  * Pattern is [sum,(, 2, 3, 4, 6, )] We need to
                                  * convert this into: sum(2,3,4,6) Our job is to
@@ -1754,8 +1757,8 @@ public class MathScanner {
      */
     public static void main(String args[]) {//tester method for STRING methods
 
-        MathExpression msc = new MathExpression("diffeqn((3*x^2)*y[4]+(5*sin(x))*y[3]+(5/x)*y[2]-3*y[1]+3*x*y[0])");
-         System.out.println(msc.scanner);
+        MathExpression msc = new MathExpression("diffeqn((3*x^2)*y[4]+(5*sin(x))*y[3]+(5/x)*y[2]-3*y[1]+3*x*y[0], 1, 0, @(1,3)(2,3,4))");
+         System.out.println(msc.getExpression()+" -> "+msc.scanner);
         
         MathExpression orig = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
         System.out.println("f(3,4,2) = " + orig.solve());

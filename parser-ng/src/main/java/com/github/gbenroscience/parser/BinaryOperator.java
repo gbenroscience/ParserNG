@@ -104,7 +104,7 @@ public class BinaryOperator extends Operator implements Validatable {
             if (isPlusOrMinus(curr)) {
 
                 if (leftInd >= 0 && !Number.isNumber(prev) && !Variable.isVariableString(prev)
-                        && !isUnaryPostOperator(prev) && !isClosingCircBracket(prev) && !isOpeningCircBracket(prev)) {
+                        && !isUnaryPostOperator(prev) && !isClosingCircBracket(prev) && !isOpeningCircBracket(prev) && !isClosingSquareBracket(prev)) {
                     errorLog.error(
                             "1 - ParserNG Does Not Allow " + getName() + " To Combine The Function Members \"" + prev + "\" And \"" + curr + "\""
                             + " As You Have Done."

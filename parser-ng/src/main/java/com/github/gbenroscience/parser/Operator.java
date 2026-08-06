@@ -390,6 +390,21 @@ public class Operator {
                 || c == OPEN_CURVED_BRAC.charAt(0));
     }
 
+        /**
+     * Applies to square brackets alone
+     *
+     * @param op the String to check
+     * @return true if the operator is the OPEN_SQUARE_BRAC or the CLOSE_SQUARE_BRAC
+     * operator
+     */
+    public static boolean isSquareBracket(String op) {
+        if (op.length() != 1) {
+            return false;
+        }
+        return (op.charAt(0) == OPEN_SQUARE_BRAC.charAt(0) || op.charAt(0) == CLOSE_SQUARE_BRAC.charAt(0));
+    }
+
+    
     /**
      * Applies to circular brackets alone
      *

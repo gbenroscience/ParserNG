@@ -234,7 +234,7 @@ public class SemanticAnalyzer {
                 if ((isBinaryOperator(scanner.get(i)) || isUnaryPreOperatorORDefinedMethod(scanner.get(i))
                         || isOpeningCircBracket(scanner.get(i))
                         || isLogicOperator(scanner.get(i)) || isAssignmentOperator(scanner.get(i))
-                        || isComma(scanner.get(i)) || isStatsMethod(scanner.get(i)))
+                        || isComma(scanner.get(i)) || isMultiArgsMethod(scanner.get(i)))
                         && Operator.isPlusOrMinus(scanner.get(i + 1)) && isNumber(scanner.get(i + 2))) {
                     utility.append(scanner.get(i + 1));
                     utility.append(scanner.get(i + 2));

@@ -179,7 +179,7 @@ public class MNumber {
             if (!isCircBracket(scan.get(index - 1))
                     && !isLogicOperator(scan.get(index - 1)) && !isUnaryPreOperator(scan.get(index - 1))
                     && !isBinaryOperator(scan.get(index - 1)) && !isAssignmentOperator(scan.get(index - 1))
-                    && !isStatsMethod(scan.get(index - 1)) && !isNumber(scan.get(index - 1)) && !isVariableString(scan.get(index - 1))) {
+                    && !isMultiArgsMethod(scan.get(index - 1)) && !isNumber(scan.get(index - 1)) && !isVariableString(scan.get(index - 1))) {
                 com.github.gbenroscience.util.Utils.logError(
                         "ParserNG Does Not Allow " + num + " To Combine The Function Members \"" + scan.get(index - 1) + "\" And \"" + scan.get(index) + "\""
                         + " As You Have Done."

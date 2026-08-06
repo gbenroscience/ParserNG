@@ -166,7 +166,8 @@ public class Method {
         return (op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX))
                 || op.equals(MATRIX_MULTIPLY) || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT) || op.equals(MATRIX_POWER)
                 || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES) 
-                || op.equals(SUB_MATRIX) || op.equals(RANDOM_MATRIX) || op.equals(MATRIX_MINOR);
+                || op.equals(SUB_MATRIX) || op.equals(RANDOM_MATRIX) || op.equals(MATRIX_MINOR) 
+                || op.equals(DIFF_EQN_PATH) || op.equals(DIFF_EQN_PATH_HO);
     }
 
     /**
@@ -175,7 +176,7 @@ public class Method {
      * data set and returns a single value: e.g sum(4,3,2,2...)
      */
     public static boolean isNumberReturningStatsMethod(String op) {
-        return isStatsMethod(op) && !isListReturningStatsMethod(op);
+        return isMultiArgsMethod(op) && !isListReturningStatsMethod(op);
     }
 
     /**
@@ -297,13 +298,14 @@ public class Method {
      * included here. e.g
      * sum,prod,min,max,avg,var,rms,cov,s_d,st_err,rng,mrng,med,mode,rnd
      */
-    public static boolean isStatsMethod(String op) {
+    public static boolean isMultiArgsMethod(String op) {
         return (isUserDefinedFunction(op) || isLogOrAntiLogToAnyBase(op) || isBasicNumericalFunction(op)
                 || isMatrixMethod(op) || isHardcodedStatsMethod(op)
                 || op.equals(POW) || op.equals(ATAN2) || op.equals(DIFFERENTIATION) || op.equals(AUTO_DIFF) || op.equals(AUTO_DIFF_N) || op.equals(ROTOR)
                 || op.equals(INTEGRATION) || op.equals(GENERAL_ROOT) || op.equals(QUADRATIC)
                 || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION) 
-                || op.equals(SWIGLU) ||op.equals(GEGLU)
+                || op.equals(SWIGLU) ||op.equals(GEGLU) 
+                || op.equals(DIFF_EQN)  || op.equals(DIFF_EQN_PATH)  || op.equals(DIFF_EQN_HO)  || op.equals(DIFF_EQN_PATH_HO) 
                 || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || op.equals(PRINT));
     }//end method
 
@@ -427,7 +429,7 @@ public class Method {
      */
     private static void quickFixCompoundStructuresInStatsExpression(List<String> list) {
         String methodName = list.get(0);
-        if (!isStatsMethod(methodName)) {
+        if (!isMultiArgsMethod(methodName)) {
             return;
         }
         int sz = list.size();
@@ -476,7 +478,7 @@ public class Method {
         list.remove(list.size() - 1);//remove the closing bracket.
         int sz = list.size();
 
-        if (isStatsMethod(name)) {
+        if (isMultiArgsMethod(name)) {
             for (BasicNumericalMethod basicNumericalMethod : getBasicNumericalMethods()) {
                 if (name.equals(basicNumericalMethod.getName())) {
                     Set set = new Set(list);
@@ -1303,10 +1305,10 @@ public static boolean isMethodNameBuilderChar(char c) {
         int size = scan.size();
         for (int i = 0; i < size; i++) {
             try {
-                if (isStatsMethod(scan.get(i)) && scan.get(i + 1).startsWith("(")) {
+                if (isMultiArgsMethod(scan.get(i)) && scan.get(i + 1).startsWith("(")) {
                     return true;
                 }//end if
-            }//end try
+            }//end try//end try
             catch (IndexOutOfBoundsException boundsException) {
                 return false;
             }

@@ -71,6 +71,13 @@ public final class LinearHODifferentialEquations {
      * thrown immediately, naming the offending t, rather than letting a
      * division blow up into Infinity/NaN and surface three layers down as an
      * opaque Newton non-convergence warning or a thrashing adaptive step size.
+     * @param coefficients
+     * @param forcingOrNull
+     * @param tSlot
+     * @param ySlotStart
+     * @param frameSize
+     * @param order
+     * @return 
      */
     public static ODEFunction buildTopDerivative(ODEFunction[] coefficients,
                                                   ODEFunction forcingOrNull,
@@ -106,6 +113,11 @@ public final class LinearHODifferentialEquations {
      * a clear message instead of after however many steps it takes the
      * solver to reach the singular point. Call this once, right after
      * buildTopDerivative, before handing the result to HigherOrderODE.
+     * @param leadingCoefficient
+     * @param tSlot
+     * @param frameSize
+     * @param t0
+     * @param tEnd 
      */
     public static void checkLeadingCoefficientAtEndpoints(ODEFunction leadingCoefficient,
                                                             int tSlot,

@@ -84,7 +84,7 @@ public final class ListReturningStatsMethod implements Validatable {
 
         for (int i = index - 1; i > 0; i--) {
             String token = scan.get(i);
-            if (isOpeningCircBracket(token) && Method.isStatsMethod(scan.get(i - 1))) {
+            if (isOpeningCircBracket(token) && Method.isMultiArgsMethod(scan.get(i - 1))) {
 
             }
         }
@@ -294,7 +294,7 @@ public final class ListReturningStatsMethod implements Validatable {
                     //this logic recognizes the end point of backwards bracket
                     //validation for a given object of this class. A close bracket
                     //indicates the end of data that can affect this object
-                    if (isClosingCircBracket(scan.get(i)) || Method.isStatsMethod(scan.get(i))) {
+                    if (isClosingCircBracket(scan.get(i)) || Method.isMultiArgsMethod(scan.get(i))) {
                         errorLog.error("Ending Backwards Validation For " + name);
                         break loopBackwards;
                     }//end if
@@ -308,7 +308,7 @@ public final class ListReturningStatsMethod implements Validatable {
                     }
                     
                     String prevToken = scan.get(i - 1);
-                    if (openBracsOnly && isBinaryOperator(prevToken) || (Method.isUnaryPreOperatorORDefinedMethod(prevToken) && !Method.isStatsMethod(prevToken))) {
+                    if (openBracsOnly && isBinaryOperator(prevToken) || (Method.isUnaryPreOperatorORDefinedMethod(prevToken) && !Method.isMultiArgsMethod(prevToken))) {
                         // disallows this: +((sort(1,2,3,-9...)) AND this: sin(sort(1,23,-9...))
                         valid = false;
                         errorLog.error("Bad Syntax For Data Set Returning Operator " + name

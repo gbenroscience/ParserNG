@@ -33,7 +33,7 @@ public class LISTS {
         int index = -1;
         if (start >= 0) {
             for (int i = start - 1; i >= 0; i--) {
-                if (Method.isStatsMethod(list.get(i)) || Method.isAntiLogToAnyBase((list.get(i)))
+                if (Method.isMultiArgsMethod(list.get(i)) || Method.isAntiLogToAnyBase((list.get(i)))
                         || Method.isLogToAnyBase(list.get(i))) {
                     index = i;
                     break;
@@ -64,7 +64,7 @@ public class LISTS {
         int index = -1;
         if (start <= list.size() - 2) {
             for (int i = start + 1; i < list.size(); i++) {
-                if (Method.isStatsMethod(list.get(i)) || Method.isAntiLogToAnyBase(list.get(i))
+                if (Method.isMultiArgsMethod(list.get(i)) || Method.isAntiLogToAnyBase(list.get(i))
                         || Method.isLogToAnyBase(list.get(i))) {
                     index = i;
                     break;
