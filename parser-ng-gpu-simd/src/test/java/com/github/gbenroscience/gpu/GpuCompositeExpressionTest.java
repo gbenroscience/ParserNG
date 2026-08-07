@@ -4,9 +4,12 @@
  */
 package com.github.gbenroscience.gpu;
 
-import com.github.gbenroscience.gpu.opencl.OpenClCompositeExpression;
-import com.github.gbenroscience.gpu.opencl.OpenClExpressionBridge;
-import com.github.gbenroscience.gpu.opencl.OpenClKernelSource;
+import com.github.gbenroscience.gpu.evaluator.GpuBackend;
+import com.github.gbenroscience.gpu.evaluator.GpuCompositeExpression;
+import com.github.gbenroscience.gpu.evaluator.GpuExpressionBridge;
+import com.github.gbenroscience.gpu.evaluator.opencl.OpenClCompositeExpression;
+import com.github.gbenroscience.gpu.evaluator.opencl.OpenClExpressionBridge;
+import com.github.gbenroscience.gpu.evaluator.opencl.OpenClKernelSource;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;

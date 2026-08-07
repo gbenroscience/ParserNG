@@ -86,6 +86,7 @@ public class BinaryOperator extends Operator implements Validatable {
      * correctFunction attribute of the function object un-modified) if the
      * usage of this operator in its immediate environment i.e to its left and
      * right is correct.
+     * @param errorLog
      * @return true if valid
      */
     @Override

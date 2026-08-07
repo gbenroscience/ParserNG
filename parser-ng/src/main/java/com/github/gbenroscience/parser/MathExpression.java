@@ -293,6 +293,8 @@ public class MathExpression implements Savable, Solvable {
 
         /**
          * Constructor for Function Handles.
+         * @param fn
+         * @param defined
          */
         public Token(String fn, boolean defined) {
             this.kind = defined ? FUNCTION_HANDLE : FUNCTION_HANDLE_UNDEFINED;
