@@ -16,7 +16,9 @@
 package com.github.gbenroscience.math.differentialcalculus.bench;
 
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffNEvaluator;
 import com.github.gbenroscience.math.differentialcalculus.autodiff.AutoDiffNEvaluatorOld;
+import com.github.gbenroscience.math.differentialcalculus.autodiff.SystemAutoDiffEvaluator;
 import com.github.gbenroscience.parser.MathExpression;
 
 /**
@@ -25,16 +27,18 @@ import com.github.gbenroscience.parser.MathExpression;
  */
 public class Benchmark {
 
-    public static void main(String[] args) {
+    static final String expr = "x^2*cos(x)-2*x*sin(x)-2*cos(x)";
+    static final double N = 10_000_000;
 
-        String expr = "x^2*cos(x)-2*x*sin(x)-2*cos(x)";
+    public static void check1(String[] args) {
+        System.out.println("OLD VERSION - AutoDiffNEvaluatorOld");
         MathExpression.EvalResult ev = new MathExpression.EvalResult();
 
         double evalPoint = 4;
         int orderOfDiff = 18;
         double[] resultOut = Derivative.ThreadLocalBufferPool.getOrCreateBuffer(orderOfDiff + 1);
         AutoDiffNEvaluatorOld adne = new AutoDiffNEvaluatorOld(new MathExpression(expr), 20);
-        double N = 10_000_000;
+
         double t = System.nanoTime();
         for (int i = 0; i < N; i++) {
             adne.evaluateRPN("x", evalPoint, orderOfDiff, resultOut);
@@ -45,4 +49,50 @@ public class Benchmark {
 
     }
 
+    public static void check2(String[] args) {
+        System.out.println("GENERIC VERSION - AutoDiffNEvaluator");
+ 
+        MathExpression.EvalResult ev = new MathExpression.EvalResult();
+
+        double evalPoint = 4;
+        int orderOfDiff = 18;
+        double[] resultOut = Derivative.ThreadLocalBufferPool.getOrCreateBuffer(orderOfDiff + 1);
+        AutoDiffNEvaluator adne = new AutoDiffNEvaluator(new MathExpression(expr), 20);
+
+        double t = System.nanoTime();
+        for (int i = 0; i < N; i++) {
+            adne.evaluateRPN("x", evalPoint, orderOfDiff, resultOut);
+            ev.wrap(resultOut);
+        }
+        t = (System.nanoTime() - t) / N;
+        System.out.println("res = " + ev + ", \n" + t + "ns");
+
+    }
+
+    public static void check3(String[] args) {
+ 
+        System.out.println("VERSION THAT FLOWS WITH DIFFERENTIAL SOLVERS- SystemAutoDiffEvaluator");
+        MathExpression.EvalResult ev = new MathExpression.EvalResult();
+
+        double evalPoint = 4;
+        int orderOfDiff = 18;
+        double[] resultOut = Derivative.ThreadLocalBufferPool.getOrCreateBuffer(orderOfDiff + 1);
+        SystemAutoDiffEvaluator sade = new SystemAutoDiffEvaluator(new MathExpression(expr), 20);
+        sade.targetExpr.updateSlot(0, evalPoint);
+
+        double t = System.nanoTime();
+        for (int i = 0; i < N; i++) {
+            sade.evaluateDerivatives("x", sade.targetExpr.getExecutionFrame(), orderOfDiff);
+            ev.wrap(resultOut);
+        }
+        t = (System.nanoTime() - t) / N;
+        System.out.println("res = " + ev + ", \n" + t + "ns");
+
+    }
+
+    public static void main(String[] args) {
+        check1(args);
+        check2(args);
+        check3(args);
+    }
 }

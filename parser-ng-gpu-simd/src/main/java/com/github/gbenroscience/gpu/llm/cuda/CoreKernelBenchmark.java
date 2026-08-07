@@ -7,7 +7,7 @@ import java.util.Locale;
 import java.util.Random;
 
 /**
- * CUDA counterpart of {@code com.github.gbenroscience.gpu.opencl.llm.CoreKernelBenchmark}.
+ * CUDA counterpart of {@code com.github.gbenroscience.gpu.llm.opencl.CoreKernelBenchmark}.
  * Same 12 correctness checks, same benchmark sweep, same Q8_0 host codec,
  * same CPU reference implementations, same tolerances -- the OpenCL
  * version's class javadoc (why Q8_0 correctness is checked against
@@ -19,7 +19,7 @@ import java.util.Random;
  * {@code clFinish}.
  *
  * Run with (adjust classpath):
- *   java --enable-preview -cp &lt;your-classpath&gt; com.github.gbenroscience.gpu.cuda.llm.CudaCoreKernelBenchmark
+ *   java --enable-preview -cp &lt;your-classpath&gt; com.github.gbenroscience.gpu.llm.cuda.CoreKernelBenchmark
  */
 public final class CoreKernelBenchmark {
 

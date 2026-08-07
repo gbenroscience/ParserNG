@@ -1,5 +1,5 @@
 package com.github.gbenroscience.gpu.llm.opencl;
-  
+
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -7,22 +7,23 @@ import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 
 /**
- * OpenCL counterpart of {@code com.github.gbenroscience.gpu.cuda.llm.GpuContext}.
+ * OpenCL counterpart of {@code com.github.gbenroscience.gpu.llm.cuda.GpuContext}.
  * Bootstraps one platform + one device + one in-order command queue +
  * one built program, then resolves all 23 kernels KernelSource declares.
  *
- * DEVICE SELECTION: delegates to {@link com.github.gbenroscience.gpu.opencl.OpenClDeviceSelector},
- * the SAME selector the math-expression evaluator's OpenClCompositeExpression
- * uses -- same system properties ("opencl.gpu.vendor", "opencl.platform.index",
- * "opencl.device.index"), same vendor-alias expansion, same precedence. One
- * {@code OpenClDeviceSelector.selectDevice(GpuVendor.AMD)} call (or the
- * equivalent system property) now governs every OpenCL consumer in this
- * codebase, not just this one -- see that class's javadoc for the full
- * precedence rules and the OpenCLBindings/OpenClBindings naming-collision
- * note. This intentionally DROPPED the earlier "opencl.device.type=ALL"
- * CPU-runtime fallback this class used to have on its own, for consistency
- * with the selector everyone else uses -- see OpenClDeviceSelector's javadoc
- * if you need to target a CPU OpenCL runtime like PoCL.
+ * DEVICE SELECTION: delegates to {@link OpenCLDeviceSelector} (this same
+ * package's own copy -- distinct from
+ * {@code com.github.gbenroscience.gpu.evaluator.opencl}'s selector, see
+ * that class's javadoc for why they're kept separate rather than merged).
+ * {@code OpenCLDeviceSelector.selectDevice(GpuVendor.AMD)} (or the
+ * equivalent system property -- "opencl.gpu.vendor", "opencl.platform.index",
+ * "opencl.device.index", "opencl.device.type") governs every device this
+ * class constructs after that call -- see OpenCLDeviceSelector's javadoc
+ * for the full precedence rules, including CPU-device selection via
+ * "opencl.device.type=CPU", which this class now supports (a GpuContext
+ * built against a CPU OpenCL device works exactly the same way as one
+ * built against a GPU -- same kernels, same dispatch code -- just runs on
+ * whatever throughput a CPU OpenCL runtime like Intel's or PoCL provides).
  *
  * QUEUE ORDERING: created with properties=0, i.e. the OpenCL-default
  * IN-ORDER queue (out-of-order execution requires explicitly requesting
@@ -92,6 +93,7 @@ public final class GpuContext implements AutoCloseable {
         this.cl = new OpenCLBindings();
 
         try (Arena bootstrap = Arena.ofConfined()) {
+           // OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.DeviceType.GPU); 
             OpenCLDeviceSelector.SelectedDevice chosen = OpenCLDeviceSelector.resolve();
             this.platform = chosen.platform();
             this.device = chosen.device();

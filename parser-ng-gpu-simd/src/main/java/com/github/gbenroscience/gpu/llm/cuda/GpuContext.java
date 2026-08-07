@@ -1,7 +1,6 @@
 package com.github.gbenroscience.gpu.llm.cuda;
 
 import com.github.gbenroscience.gpu.evaluator.cuda.CudaBindings;
-import com.github.gbenroscience.gpu.evaluator.cuda.CudaDeviceSelector;
 import com.github.gbenroscience.gpu.evaluator.cuda.NvrtcBindings;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -9,16 +8,17 @@ import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 
 /**
- * CUDA counterpart of {@code com.github.gbenroscience.gpu.llm.LlmGpuContext} --
- * v2, extended for KernelSource's larger kernel set (GeLU/GeGLU activations +
- * the batched prefill path). Bootstrap sequence and ownership model are
- * unchanged from v1 -- see that version's javadoc for the full rationale
- * (primary-context retain, single NVRTC compile, "cuda.device.index" system
- * property). This version just resolves 8 additional CUfunction handles out of
- * the same module.
+ * CUDA counterpart of {@code com.github.gbenroscience.gpu.llm.LlmGpuContext}
+ * -- v2, extended for KernelSource's larger kernel set (GeLU/GeGLU
+ * activations + the batched prefill path). Bootstrap sequence and
+ * ownership model are unchanged from v1 -- see that version's javadoc for
+ * the full rationale (primary-context retain, single NVRTC compile,
+ * "cuda.device.index" system property). This version just resolves 8
+ * additional CUfunction handles out of the same module.
  *
- * UNVERIFIED: no CUDA driver, GPU, or NVRTC toolchain were available while
- * writing this. Same caveat as v1 and as every kernel file in this codebase.
+ * UNVERIFIED: no CUDA driver, GPU, or NVRTC toolchain were available
+ * while writing this. Same caveat as v1 and as every kernel file in this
+ * codebase.
  */
 public final class GpuContext implements AutoCloseable {
 
@@ -59,10 +59,7 @@ public final class GpuContext implements AutoCloseable {
     public final MemorySegment kSoftmaxInplaceRows;
     public final MemorySegment kAttnWeightedSumCausalBatched;
 
-    /**
-     * Serializes kernelParams-build + launch against the shared primary
-     * context.
-     */
+    /** Serializes kernelParams-build + launch against the shared primary context. */
     public final Object dispatchLock = new Object();
 
     public GpuContext() {
@@ -146,7 +143,7 @@ public final class GpuContext implements AutoCloseable {
         if (compileStatus != NvrtcBindings.NVRTC_SUCCESS) {
             throw new IllegalStateException(
                     "NVRTC compile of LLM decoder kernels failed (" + compileStatus + "): "
-                    + fetchCompileLog(arena, program));
+                            + fetchCompileLog(arena, program));
         }
 
         MemorySegment ptxSizeBuf = arena.allocate(ValueLayout.JAVA_LONG);

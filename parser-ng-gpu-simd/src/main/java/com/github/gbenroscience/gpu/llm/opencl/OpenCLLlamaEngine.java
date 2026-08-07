@@ -18,9 +18,9 @@ import java.util.NoSuchElementException;
  * without knowing any of these steps individually.
  *
  * Device selection happens exactly as it does for every other OpenCL
- * consumer in this codebase -- see {@link com.github.gbenroscience.gpu.opencl.OpenClDeviceSelector}'s
+ * consumer in this codebase -- see {@link OpenCLDeviceSelector} (this package's own)'s
  * javadoc -- since {@link GpuContext}'s constructor resolves through that
- * selector. Call {@code OpenClDeviceSelector.selectDevice(...)} before
+ * selector. Call {@code OpenCLDeviceSelector.selectDevice(...)} before
  * constructing this (or before {@code LlamaGpuBridge.load(...)}) to target
  * a specific vendor/device.
  */

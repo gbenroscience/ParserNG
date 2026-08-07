@@ -36,7 +36,18 @@ public class VectorODE {
      * jacobianStrategy is only consulted when method is IMPLICIT_EULER; for
      * every other method it is accepted but ignored, since explicit methods
      * never build a Jacobian. That keeps a single call site workable
-     * regardless of which method a caller ultimately selects.
+     * regardless of which method a caller ultimately selects. 
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param initialStep
+     * @param method
+     * @param jacobianStrategy
+     * @return 
      */
     public static double[] executeVectorODE(ODEFunction dy_dt,
                                              int tSlot,
@@ -103,7 +114,19 @@ public class VectorODE {
      * Same as {@link #executeVectorODEPath}, with an optional
      * {@link DifferentialEquations.JacobianStrategy}, consulted only when
      * method is IMPLICIT_EULER (see {@link #executeVectorODE} for the same
-     * note on the other methods ignoring it).
+     * note on the other methods ignoring it      * 
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param h
+     * @param method
+     * @param points
+     * @param jacobianStrategy
+     * @return 
      */
     public static double[][] executeVectorODEPath(ODEFunction dy_dt,
                                                    int tSlot,

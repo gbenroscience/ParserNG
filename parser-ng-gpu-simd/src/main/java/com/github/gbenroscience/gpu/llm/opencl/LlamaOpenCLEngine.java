@@ -7,7 +7,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * OpenCL counterpart of {@code com.github.gbenroscience.gpu.cuda.llm.LlamaCudaEngine}.
+ * OpenCL counterpart of {@code com.github.gbenroscience.gpu.llm.cuda.LlamaCudaEngine}.
  * Same top-level shape: tokenizer -> embedding lookup -> batched prefill
  * (capped at cfg.max_prefill_batch) -> decode-tail fallback for prompt
  * overflow -> per-token decode + sampling loop -> detokenize. See the CUDA

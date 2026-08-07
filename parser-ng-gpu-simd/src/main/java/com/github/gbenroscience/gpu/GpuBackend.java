@@ -1,4 +1,4 @@
-package com.github.gbenroscience.gpu.evaluator;
+package com.github.gbenroscience.gpu;
 
 /**
  * Which GPU compute backend to compile/dispatch an expression against.

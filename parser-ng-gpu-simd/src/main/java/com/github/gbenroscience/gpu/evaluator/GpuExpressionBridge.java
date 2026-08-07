@@ -1,5 +1,6 @@
 package com.github.gbenroscience.gpu.evaluator;
 
+import com.github.gbenroscience.gpu.GpuBackend;
 import com.github.gbenroscience.gpu.evaluator.cuda.CudaCompositeExpression;
 import com.github.gbenroscience.gpu.evaluator.cuda.CudaExpressionBridge;
 import com.github.gbenroscience.gpu.evaluator.opencl.OpenClCompositeExpression;

@@ -1,5 +1,5 @@
 package com.github.gbenroscience.gpu.llm.opencl;
- 
+
 import com.github.gbenroscience.simd.turbo.tools.llm.loader.GGUFLoader;
 
 import java.lang.foreign.Arena;
@@ -8,7 +8,7 @@ import java.lang.foreign.ValueLayout;
 import java.util.NoSuchElementException;
 
 /**
- * OpenCL counterpart of {@code com.github.gbenroscience.gpu.cuda.llm.LlamaLayer}.
+ * OpenCL counterpart of {@code com.github.gbenroscience.gpu.llm.cuda.LlamaLayer}.
  * Same two entry points (forward_layer for one token, prefill_layer for a
  * batch of T prompt positions), same per-layer algorithm, same activation-
  * type dispatch. Read this alongside the CUDA original -- the algorithmic

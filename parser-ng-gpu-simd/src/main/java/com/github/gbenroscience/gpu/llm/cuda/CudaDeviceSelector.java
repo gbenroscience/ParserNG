@@ -1,4 +1,6 @@
-package com.github.gbenroscience.gpu.evaluator.cuda;
+package com.github.gbenroscience.gpu.llm.cuda;
+
+import com.github.gbenroscience.gpu.evaluator.cuda.CudaBindings;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -8,24 +10,39 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Device selection for CUDA. No vendor concept here -- CUDA only ever
- * targets NVIDIA hardware, so "which GPU" reduces entirely to "which
- * index", unlike {@link com.github.gbenroscience.gpu.opencl.OpenClDeviceSelector}'s
- * vendor/alias matching across possibly several installed OpenCL ICDs.
- * Kept as its own class (rather than folded into GpuContext) purely for
- * API symmetry with the OpenCL side and the math evaluator's pattern --
- * {@link #listAvailableDevices()} to see what's there,
- * {@link #selectDevice(int)} to pick one, {@link #clearDeviceSelection()}
- * to go back to the default.
+ * Device selection for the Llama runner's CUDA backend. Distinct from
+ * {@code com.github.gbenroscience.gpu.evaluator.cuda.CudaDeviceSelector}
+ * (the math evaluator's, GPU-only for now) -- this copy additionally
+ * accepts a {@link DeviceType} selection, since the Llama runner's device
+ * selectors are being extended to CPU-awareness first (see class javadoc
+ * on why CPU fails here specifically, and
+ * {@code com.github.gbenroscience.gpu.llm.opencl.OpenCLDeviceSelector} for
+ * where CPU selection actually WORKS).
  *
- * Uses the SAME "cuda.device.index" property the CUDA LLM {@code GpuContext}
- * already read directly before this class existed -- this is a drop-in
- * factoring-out, not a behavior change; anything already setting
- * -Dcuda.device.index continues to work unmodified.
+ * <b>WHY CPU SELECTION FAILS HERE, HONESTLY, RATHER THAN BEING SILENTLY
+ * UNSUPPORTED:</b> the CUDA driver API has no CPU device concept at all --
+ * {@code cuDeviceGetCount}/{@code cuDeviceGet} only ever enumerate NVIDIA
+ * GPUs; there is no CUDA equivalent of OpenCL's {@code CL_DEVICE_TYPE_CPU}.
+ * {@link DeviceType} is accepted here anyway (rather than only existing on
+ * the OpenCL selector) purely for API symmetry with
+ * {@code OpenCLDeviceSelector}, in case calling code is written generically
+ * against "a selector" without caring which backend it's driving. Selecting
+ * {@link DeviceType#CPU} records the request same as any other property
+ * (cheap, no validation), but {@link #resolve()} throws a clear, actionable
+ * {@link UnsupportedOperationException} rather than either quietly falling
+ * back to a GPU (wrong -- ignores what the caller asked for) or quietly
+ * doing nothing (equally wrong -- looks like it worked). If you actually
+ * need CPU execution, select {@code GpuBackend.OPENCL} with an OpenCL CPU
+ * runtime (Intel's, or PoCL) via {@code OpenCLDeviceSelector}, or -- once
+ * it exists -- a CPU-native (non-GPU-API) Llama backend entirely.
  */
 public final class CudaDeviceSelector {
 
     private CudaDeviceSelector() {
+    }
+
+    public enum DeviceType {
+        GPU, CPU
     }
 
     public record SelectedDevice(int deviceIndex, int cuDevice, String name, int major, int minor) {
@@ -44,7 +61,7 @@ public final class CudaDeviceSelector {
         }
     }
 
-    /** Lists every CUDA device this driver can see, with name and compute capability -- call this to find out what index to pass {@link #selectDevice(int)}. */
+    /** Lists every CUDA device this driver can see, with name and compute capability -- call this to find out what index to pass {@link #selectDevice(int)}. Always GPUs -- see class javadoc for why there is no CPU entry to list. */
     public static List<String> listAvailableDevices() {
         try (Arena arena = Arena.ofConfined()) {
             List<SelectedDevice> devices = enumerateDevices(arena);
@@ -58,8 +75,18 @@ public final class CudaDeviceSelector {
         }
     }
 
-    /** Resolves whichever device index is currently selected (default 0), with its name/compute-capability for logging. */
+    /** Resolves whichever device index is currently selected (default 0). Throws {@link UnsupportedOperationException} if {@link DeviceType#CPU} was selected -- see class javadoc. */
     public static SelectedDevice resolve() {
+        String typeProp = System.getProperty("cuda.device.type", "GPU");
+        if ("CPU".equalsIgnoreCase(typeProp.trim())) {
+            throw new UnsupportedOperationException(
+                    "CudaDeviceSelector was asked to select a CPU device, but the CUDA driver API has no "
+                    + "CPU device concept -- cuDeviceGetCount only ever enumerates NVIDIA GPUs. "
+                    + "Select GpuBackend.OPENCL with an OpenCL CPU runtime (via "
+                    + "com.github.gbenroscience.gpu.llm.opencl.OpenCLDeviceSelector.selectDevice(DeviceType.CPU)) "
+                    + "if you need CPU execution.");
+        }
+
         try (Arena arena = Arena.ofConfined()) {
             List<SelectedDevice> devices = enumerateDevices(arena);
             if (devices.isEmpty()) {
@@ -121,13 +148,27 @@ public final class CudaDeviceSelector {
         }
     }
 
-    /** Selects which CUDA device index the NEXT-resolved GpuContext will bind to. Same "set the default for whatever gets constructed next" contract as OpenClDeviceSelector.selectDevice -- see its javadoc. */
+    /** Selects which CUDA device index the NEXT-resolved GpuContext will bind to. */
     public static void selectDevice(int deviceIndex) {
+        System.setProperty("cuda.device.type", "GPU");
         System.setProperty("cuda.device.index", String.valueOf(deviceIndex));
     }
 
-    /** Reverts to the default (device index 0) for anything resolved after this call. */
+    /**
+     * Records a device-TYPE preference. {@link DeviceType#GPU} behaves
+     * exactly as before (the default). {@link DeviceType#CPU} is accepted
+     * -- cheaply, no validation here, same "properties are free, resolve()
+     * does the real work" contract every selector in this codebase
+     * follows -- but {@link #resolve()} will throw when actually invoked.
+     * See class javadoc for why.
+     */
+    public static void selectDevice(DeviceType type) {
+        System.setProperty("cuda.device.type", type.name());
+    }
+
+    /** Reverts to the default (GPU, device index 0) for anything resolved after this call. */
     public static void clearDeviceSelection() {
+        System.clearProperty("cuda.device.type");
         System.clearProperty("cuda.device.index");
     }
 }

@@ -1757,7 +1757,7 @@ public class MathScanner {
      */
     public static void main(String args[]) {//tester method for STRING methods
 
-        MathExpression msc = new MathExpression("diffeqn((3*x^2)*y[4]+(5*sin(x))*y[3]+(5/x)*y[2]-3*y[1]+3*x*y[0], 1, 0, @(1,3)(2,3,4))");
+        MathExpression msc = new MathExpression("diffeqn((3*x^2)*y[4]+(5*sin(x))*sin(y[3])+(5/x)*ln(y[2])-3*y[1]+3*x*y[0], 1, 0, @(1,3)(2,3,4))");
          System.out.println(msc.getExpression()+" -> "+msc.scanner);
         
         MathExpression orig = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");

@@ -10,70 +10,58 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Vendor/device selection for OpenCL, factored out so every OpenCL
- * consumer in this codebase -- the math-expression evaluator's
- * {@code OpenClCompositeExpression} and the Llama runner's
- * {@code com.github.gbenroscience.gpu.opencl.llm.GpuContext} alike -- picks
- * a device the same way, with the same system properties, the same vendor
- * aliasing, and the same enumeration bug fixes (see {@link #matchesAlias}).
+ * Device selection for the Llama runner's OpenCL backend. Distinct from
+ * {@code com.github.gbenroscience.gpu.evaluator.opencl.OpenClBindings}'
+ * device-selection logic in {@code OpenClCompositeExpression} -- separate
+ * package, separate {@link com.github.gbenroscience.gpu.llm.opencl.OpenCLBindings}
+ * copy (see that class's javadoc for why they're kept apart rather than
+ * merged), so its own device selector too.
  *
- * DELIBERATELY REUSES {@code OpenClCompositeExpression}'s property names --
- * {@code opencl.gpu.vendor}, {@code opencl.platform.index},
- * {@code opencl.device.index} -- rather than inventing Llama-specific ones.
- * One {@code -Dopencl.gpu.vendor=AMD}, or one call to
- * {@link #selectDevice(GpuVendor)}, now governs BOTH the math evaluator and
- * the Llama runner's next-constructed instances. That's the point: "which
- * GPU" should be one JVM-wide answer, not a per-feature setting a caller
- * has to remember to set twice.
+ * <b>CPU SELECTION:</b> unlike {@code com.github.gbenroscience.gpu.llm.cuda.CudaDeviceSelector}
+ * (which can only ever target NVIDIA GPUs -- see that class's javadoc for
+ * why CPU selection fails there), OpenCL genuinely supports running
+ * against a CPU device: {@code CL_DEVICE_TYPE_CPU} is a real, standard
+ * OpenCL device type, exposed by e.g. Intel's OpenCL CPU runtime or PoCL.
+ * {@link DeviceType#CPU} here actually works, filtering enumeration to
+ * CPU devices instead of throwing.
  *
- * IMPORTANT NOTE ON BINDINGS: this class calls
- * {@code com.github.gbenroscience.gpu.opencl.OpenCLBindings} (this
- * repository's Llama-port raw FFM bindings). Your math evaluator's
- * {@code OpenClCompositeExpression} already has its own near-identical
- * {@code OpenClBindings} class (note the capitalization difference:
- * "OpenCLBindings" vs "OpenClBindings") in this SAME package, built
- * independently before that file was shared with me. They almost
- * certainly duplicate each other's entire API surface. I'm keeping them
- * separate for now rather than guessing at OpenClBindings' exact method
- * signatures and silently breaking your working math evaluator -- if you
- * want them consolidated onto one binding class, share OpenClBindings.java
- * and I'll merge them and delete the duplicate.
- *
- * Selection precedence (identical to OpenClCompositeExpression's, see its
- * {@code selectCandidate} javadoc for the full rationale):
- *   1. -Dopencl.platform.index=P (+ optional -Dopencl.device.index=D)
- *   2. -Dopencl.gpu.vendor=&lt;substring&gt; (or {@link #selectDevice(GpuVendor)}),
- *      case-insensitive, word-boundary matched, with known alias expansion
- *   3. Default: the first platform that exposes a GPU, first device on it
- *
- * NOTE ON SCOPE vs OpenClCompositeExpression: that class also enumerates
- * only CL_DEVICE_TYPE_GPU with no CPU/ALL fallback -- this class matches
- * that exactly (no "opencl.device.type=ALL" escape hatch), for
- * consistency. If you need to test against a CPU OpenCL runtime (e.g.
- * PoCL) with no GPU installed, pass the exact platform/device index via
- * -Dopencl.platform.index/-Dopencl.device.index once you've located it
- * some other way -- this class's own enumeration will not surface it.
+ * Selection precedence (device-type filter narrows the search space FIRST,
+ * then the same vendor/index precedence
+ * {@code com.github.gbenroscience.gpu.evaluator.opencl}'s selector uses
+ * applies within it):
+ *   1. -Dopencl.platform.index=P (+ optional -Dopencl.device.index=D) --
+ *      an exact pick always wins, regardless of any device-type filter.
+ *   2. -Dopencl.device.type=GPU (default) | CPU | ANY -- narrows which
+ *      devices are even candidates.
+ *   3. -Dopencl.gpu.vendor=&lt;substring&gt; (or {@link #selectDevice(GpuVendor)}),
+ *      case-insensitive, word-boundary matched, with known alias
+ *      expansion -- applied within the type-filtered candidate set.
+ *   4. Default: the first device of the selected type on the first
+ *      platform that has one.
  */
 public final class OpenCLDeviceSelector {
 
     private OpenCLDeviceSelector() {
     }
 
-    /** See OpenClCompositeExpression.GpuVendor's javadoc for why this exists instead of requiring the caller to know the raw driver-reported vendor string. */
     public enum GpuVendor {
         AMD, INTEL, NVIDIA
+    }
+
+    public enum DeviceType {
+        GPU, CPU, ANY
     }
 
     /** One enumerated (platform, device) pair actually resolved for use. */
     public record SelectedDevice(MemorySegment platform, MemorySegment device,
             int platformIndex, int deviceIndex, String platformName,
-            String deviceVendor, String deviceName) {
+            String deviceVendor, String deviceName, boolean isCpu) {
         public String describe() {
             return "[platform " + platformIndex + ": " + platformName + "] "
-                    + "[device " + deviceIndex + ": " + deviceVendor + " " + deviceName + "]";
+                    + "[device " + deviceIndex + ": " + deviceVendor + " " + deviceName
+                    + (isCpu ? " (CPU)" : " (GPU)") + "]";
         }
 
-        /** Stable key for a per-device resource cache, for callers that want one (this class itself caches nothing). */
         public String registryKey() {
             return platformIndex + ":" + deviceIndex;
         }
@@ -81,53 +69,61 @@ public final class OpenCLDeviceSelector {
 
     private static final OpenCLBindings CL = new OpenCLBindings();
 
-    /**
-     * Lists every GPU OpenCL can currently see, across every installed
-     * platform, as human-readable descriptions -- call this to find out
-     * what string to pass {@link #selectDevice(String)}, or which
-     * {@link GpuVendor}/index pair matches your hardware, rather than
-     * guessing. Independent of any device actually being selected or a
-     * context being built -- safe to call any number of times.
-     */
+    /** Lists every OpenCL device (GPU AND CPU, regardless of any currently-set type filter -- this is discovery, not selection) this driver can currently see, across every installed platform. */
     public static List<String> listAvailableDevices() {
         try (Arena arena = Arena.ofConfined()) {
-            List<SelectedDevice> candidates = enumerateGpuCandidates(arena);
+            List<SelectedDevice> candidates = enumerateCandidates(arena, OpenCLBindings.CL_DEVICE_TYPE_ALL);
             List<String> descriptions = new ArrayList<>();
             for (SelectedDevice c : candidates) {
                 descriptions.add(c.describe());
             }
             return descriptions;
         } catch (Throwable t) {
-            throw new RuntimeException("Failed to enumerate OpenCL GPU devices", t);
+            throw new RuntimeException("Failed to enumerate OpenCL devices", t);
         }
     }
 
-    /**
-     * Resolves whichever device the currently-set selection properties
-     * point at. Read fresh every call -- a prior {@link #selectDevice}
-     * only affects resolutions that happen AFTER it's called, never one
-     * already in progress or already resolved.
-     */
+    /** Resolves whichever device the currently-set selection properties point at. Read fresh every call. */
     public static SelectedDevice resolve() {
         try (Arena arena = Arena.ofConfined()) {
-            List<SelectedDevice> candidates = enumerateGpuCandidates(arena);
+            long typeFilter = resolveTypeFilter();
+            List<SelectedDevice> candidates = enumerateCandidates(arena, typeFilter);
             if (candidates.isEmpty()) {
                 throw new IllegalStateException(
-                        "No OpenCL GPU devices found on any platform (ICD loader present but "
-                        + "no platform exposed a GPU device)");
+                        "No OpenCL " + deviceTypeLabel(typeFilter) + " devices found on any platform "
+                        + "(ICD loader present but no platform exposed one)");
             }
             return selectCandidate(candidates);
         } catch (Throwable t) {
             if (t instanceof RuntimeException re) {
                 throw re;
             }
-            throw new RuntimeException("Failed to resolve an OpenCL GPU device", t);
+            throw new RuntimeException("Failed to resolve an OpenCL device", t);
         }
+    }
+
+    private static long resolveTypeFilter() {
+        String typeProp = System.getProperty("opencl.device.type", "GPU").trim().toUpperCase(Locale.ROOT);
+        return switch (typeProp) {
+            case "CPU" -> OpenCLBindings.CL_DEVICE_TYPE_CPU;
+            case "ANY", "ALL" -> OpenCLBindings.CL_DEVICE_TYPE_ALL;
+            default -> OpenCLBindings.CL_DEVICE_TYPE_GPU;
+        };
+    }
+
+    private static String deviceTypeLabel(long typeFilter) {
+        if (typeFilter == OpenCLBindings.CL_DEVICE_TYPE_CPU) {
+            return "CPU";
+        }
+        if (typeFilter == OpenCLBindings.CL_DEVICE_TYPE_ALL) {
+            return "GPU or CPU";
+        }
+        return "GPU";
     }
 
     // ================= enumeration =================
 
-    private static List<SelectedDevice> enumerateGpuCandidates(Arena arena) throws Throwable {
+    private static List<SelectedDevice> enumerateCandidates(Arena arena, long typeFilter) throws Throwable {
         MemorySegment countBuf = arena.allocate(ValueLayout.JAVA_INT);
 
         check((int) CL.clGetPlatformIDs.invoke(0, MemorySegment.NULL, countBuf), "clGetPlatformIDs(count)");
@@ -149,9 +145,9 @@ public final class OpenCLDeviceSelector {
 
             MemorySegment devCountBuf = arena.allocate(ValueLayout.JAVA_INT);
             int deviceCountStatus = (int) CL.clGetDeviceIDs.invoke(
-                    platform, OpenCLBindings.CL_DEVICE_TYPE_GPU, 0, MemorySegment.NULL, devCountBuf);
+                    platform, typeFilter, 0, MemorySegment.NULL, devCountBuf);
             if (deviceCountStatus != OpenCLBindings.CL_SUCCESS) {
-                continue; // this platform has no GPU device (or errored enumerating) -- normal, not fatal
+                continue; // this platform has no device of the requested type -- normal, not fatal
             }
             int deviceCount = devCountBuf.get(ValueLayout.JAVA_INT, 0);
             if (deviceCount < 1) {
@@ -159,18 +155,30 @@ public final class OpenCLDeviceSelector {
             }
 
             MemorySegment deviceArr = arena.allocate(ValueLayout.ADDRESS, deviceCount);
-            check((int) CL.clGetDeviceIDs.invoke(platform, OpenCLBindings.CL_DEVICE_TYPE_GPU,
+            check((int) CL.clGetDeviceIDs.invoke(platform, typeFilter,
                     deviceCount, deviceArr, MemorySegment.NULL), "clGetDeviceIDs(list) on platform " + p);
 
             for (int d = 0; d < deviceCount; d++) {
                 MemorySegment device = deviceArr.getAtIndex(ValueLayout.ADDRESS, d);
                 String vendor = getDeviceInfoString(arena, device, OpenCLBindings.CL_DEVICE_VENDOR);
                 String name = getDeviceInfoString(arena, device, OpenCLBindings.CL_DEVICE_NAME);
-                candidates.add(new SelectedDevice(platform, device, p, d, platformName, vendor, name));
+                boolean isCpu = isCpuDevice(arena, device);
+                candidates.add(new SelectedDevice(platform, device, p, d, platformName, vendor, name, isCpu));
             }
         }
 
         return candidates;
+    }
+
+    /** Distinguishes actual device type in the -Dopencl.device.type=ANY case, where the enumeration itself mixes GPU and CPU devices together and {@code describe()}/downstream logging needs to say which is which. */
+    private static boolean isCpuDevice(Arena arena, MemorySegment device) throws Throwable {
+        MemorySegment typeBuf = arena.allocate(ValueLayout.JAVA_LONG);
+        int status = (int) CL.clGetDeviceInfo.invoke(device, OpenCLBindings.CL_DEVICE_TYPE, 8L, typeBuf, MemorySegment.NULL);
+        if (status != OpenCLBindings.CL_SUCCESS) {
+            return false;
+        }
+        long type = typeBuf.get(ValueLayout.JAVA_LONG, 0);
+        return (type & OpenCLBindings.CL_DEVICE_TYPE_CPU) != 0;
     }
 
     // ================= selection precedence =================
@@ -186,7 +194,7 @@ public final class OpenCLDeviceSelector {
                 }
             }
             throw new IllegalStateException(
-                    "No GPU found at opencl.platform.index=" + platformIndex
+                    "No device found at opencl.platform.index=" + platformIndex
                     + ", opencl.device.index=" + deviceIndex + ". Available devices:\n"
                     + describeAll(candidates));
         }
@@ -205,7 +213,7 @@ public final class OpenCLDeviceSelector {
                 }
             }
             throw new IllegalStateException(
-                    "No GPU matching opencl.gpu.vendor=\"" + vendorProp + "\" found "
+                    "No device matching opencl.gpu.vendor=\"" + vendorProp + "\" found "
                     + "(also tried aliases " + needles + "). Available devices:\n"
                     + describeAll(candidates));
         }
@@ -213,7 +221,6 @@ public final class OpenCLDeviceSelector {
         return candidates.get(0);
     }
 
-    /** See OpenClCompositeExpression.expandVendorAliases' javadoc -- same table, same rationale (e.g. AMD's real vendor string doesn't contain the substring "amd" at all). */
     private static List<String> expandVendorAliases(String needle) {
         List<String> aliases = new ArrayList<>();
         aliases.add(needle);
@@ -226,7 +233,6 @@ public final class OpenCLDeviceSelector {
         return aliases;
     }
 
-    /** See OpenClCompositeExpression.matchesAlias's javadoc -- word-boundary match, not a bare substring check, to avoid e.g. "ati" matching inside "Corporation". */
     private static boolean matchesAlias(String haystackLower, String aliasLower) {
         return Pattern.compile("\\b" + Pattern.quote(aliasLower) + "\\b").matcher(haystackLower).find();
     }
@@ -269,32 +275,37 @@ public final class OpenCLDeviceSelector {
 
     // ================= public selection API =================
 
-    /**
-     * Selects which GPU the NEXT-resolved device (in this codebase: the
-     * next constructed Llama {@code GpuContext}, AND -- since this is the
-     * same {@code opencl.gpu.vendor} property -- the next constructed
-     * {@code OpenClCompositeExpression}) will bind to, by case-insensitive
-     * substring match against the device's vendor or name. See class
-     * javadoc for precedence and the shared-property rationale.
-     */
+    /** Selects which GPU the NEXT-resolved device will bind to, by case-insensitive substring match against the device's vendor or name. Does not change the device-TYPE filter -- combine with {@link #selectDevice(DeviceType)} if you also want to restrict to CPU/GPU/ANY. */
     public static void selectDevice(String vendorOrNameSubstring) {
         System.setProperty("opencl.gpu.vendor", vendorOrNameSubstring);
     }
 
-    /** Typed convenience over {@link #selectDevice(String)} -- see {@link GpuVendor}'s javadoc. */
+    /** Typed convenience over {@link #selectDevice(String)}. */
     public static void selectDevice(GpuVendor vendor) {
         selectDevice(vendor.name());
     }
 
-    /** Exact-index selection -- see {@link #listAvailableDevices()} to find the indices. */
+    /**
+     * Restricts the NEXT-resolved device to the given type -- {@link DeviceType#CPU}
+     * actually works here (see class javadoc), unlike
+     * {@code com.github.gbenroscience.gpu.llm.cuda.CudaDeviceSelector}'s
+     * version of this method. Does not change any vendor/index selection
+     * already set -- combine as needed.
+     */
+    public static void selectDevice(DeviceType type) {
+        System.setProperty("opencl.device.type", type.name());
+    }
+
+    /** Exact-index selection -- see {@link #listAvailableDevices()} to find the indices. Overrides any type/vendor filter. */
     public static void selectDevice(int platformIndex, int deviceIndex) {
         System.setProperty("opencl.platform.index", String.valueOf(platformIndex));
         System.setProperty("opencl.device.index", String.valueOf(deviceIndex));
     }
 
-    /** Reverts to the default (first platform exposing a GPU, first device on it) for anything resolved after this call. */
+    /** Reverts to the default (GPU, first platform that has one, first device on it) for anything resolved after this call. */
     public static void clearDeviceSelection() {
         System.clearProperty("opencl.gpu.vendor");
+        System.clearProperty("opencl.device.type");
         System.clearProperty("opencl.platform.index");
         System.clearProperty("opencl.device.index");
     }

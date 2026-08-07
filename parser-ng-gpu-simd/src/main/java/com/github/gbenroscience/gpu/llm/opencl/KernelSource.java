@@ -2,7 +2,7 @@ package com.github.gbenroscience.gpu.llm.opencl;
 
 /**
  * OpenCL C kernel source for the Llama-style decoder -- OpenCL counterpart
- * of {@code com.github.gbenroscience.gpu.cuda.llm.KernelSource}. Same 23
+ * of {@code com.github.gbenroscience.gpu.llm.cuda.KernelSource}. Same 23
  * kernels, same algorithms, translated line-for-line where the two
  * languages agree and re-derived where they don't. Read this class's
  * javadoc alongside the CUDA original's -- the algorithmic commentary

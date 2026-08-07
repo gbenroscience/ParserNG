@@ -7,7 +7,7 @@ package com.github.gbenroscience.gpu.llm;
  * shape, same field names/defaults as both, so code written against
  * {@link LlamaGpuBridge} never needs to import a backend-specific config
  * class. {@link com.github.gbenroscience.gpu.opencl.llm.OpenClLlamaEngine}/
- * {@link com.github.gbenroscience.gpu.llm.cuda.CudaLlamaEngine} translate
+ * {@link com.github.gbenroscience.gpu.cuda.llm.CudaLlamaEngine} translate
  * this into their own backend's nested types internally.
  *
  * If you need a sampler/generation option that exists on one backend's

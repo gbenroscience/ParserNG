@@ -14,12 +14,8 @@
  * limitations under the License.
  */
 package com.github.gbenroscience.gpu.llm.opencl;
-
-/**
- *
- * @author GBEMIRO
- */
   
+
 import com.github.gbenroscience.simd.turbo.tools.llm.loader.GGUFLoader;
 
 import java.nio.charset.StandardCharsets;

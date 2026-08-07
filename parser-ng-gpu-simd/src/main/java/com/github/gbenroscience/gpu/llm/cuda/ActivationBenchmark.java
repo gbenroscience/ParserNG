@@ -4,7 +4,7 @@ import java.util.Locale;
 import java.util.Random;
 
 /**
- * CUDA counterpart of {@code com.github.gbenroscience.gpu.opencl.llm.ActivationBenchmark}.
+ * CUDA counterpart of {@code com.github.gbenroscience.gpu.llm.opencl.ActivationBenchmark}.
  * Same tests, same tolerance, same benchmark structure -- the OpenCL
  * version's class javadoc (why three timing numbers, why the tolerance
  * isn't zero) applies unchanged here. The only things that changed are
@@ -14,7 +14,7 @@ import java.util.Random;
  * {@code clFinish}.
  *
  * Run with (adjust classpath):
- *   java --enable-preview -cp &lt;your-classpath&gt; com.github.gbenroscience.gpu.cuda.llm.CudaActivationBenchmark
+ *   java --enable-preview -cp &lt;your-classpath&gt; com.github.gbenroscience.gpu.llm.cuda.ActivationBenchmark
  */
 public final class ActivationBenchmark {
 

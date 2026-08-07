@@ -14,7 +14,7 @@ import java.util.List;
  *
  * Placed in {@code com.github.gbenroscience.gpu.opencl} (one package level
  * above {@code .llm}), mirroring where {@code CudaBindings}/
- * {@code NvrtcBindings} sit relative to {@code com.github.gbenroscience.gpu.cuda.llm}
+ * {@code NvrtcBindings} sit relative to {@code com.github.gbenroscience.gpu.llm.cuda}
  * -- see CudaBindings' class javadoc, which already references this class
  * by name. This is a fresh, self-contained implementation (no dependency
  * on an existing OpenCLBindings elsewhere in the tree) so the LLM port is
@@ -51,7 +51,6 @@ public final class OpenCLBindings {
     public static final long CL_DEVICE_TYPE_GPU = 1L << 2;
     public static final long CL_DEVICE_TYPE_ACCELERATOR = 1L << 3;
     public static final long CL_DEVICE_TYPE_ALL = 0xFFFFFFFFL;
-    public static final int CL_DEVICE_VENDOR = 0x102C;
 
     // ---- cl_mem_flags bitfield values used by this codebase ----
     public static final long CL_MEM_READ_WRITE = 1L << 0;
@@ -63,6 +62,8 @@ public final class OpenCLBindings {
 
     // ---- cl_platform_info / cl_device_info queries used for logging ----
     public static final int CL_PLATFORM_NAME = 0x0902;
+    public static final int CL_DEVICE_TYPE = 0x1000;
+    public static final int CL_DEVICE_VENDOR = 0x102C;
     public static final int CL_DEVICE_NAME = 0x102B;
     public static final int CL_DEVICE_MAX_WORK_GROUP_SIZE = 0x1004;
 

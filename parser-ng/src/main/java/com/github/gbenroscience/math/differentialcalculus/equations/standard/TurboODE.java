@@ -14,6 +14,19 @@ public class TurboODE {
     // ------------------------------------------------------------------
     // diffeqn(...) — endpoint-only
     // ------------------------------------------------------------------
+    /**
+     * 
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlot
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param initialStep
+     * @param method
+     * @return 
+     */
     public static double executeTurboODE(ODEFunction dy_dt,
             int tSlot,
             int ySlot,

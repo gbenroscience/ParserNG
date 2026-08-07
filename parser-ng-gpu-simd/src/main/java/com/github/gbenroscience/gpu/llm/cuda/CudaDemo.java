@@ -1,11 +1,30 @@
+/*
+ * Copyright 2026 GBEMIRO.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.github.gbenroscience.gpu.llm.cuda;
+ 
 
 import com.github.gbenroscience.simd.turbo.tools.llm.loader.GGUFLoader;
 
 import java.io.File;
 import java.util.NoSuchElementException;
 
+import java.util.NoSuchElementException;
+
 /**
+ * @author GBEMIRO
  * End-to-end wiring example: GGUF file on disk -> tokenized prompt ->
  * generated text. This is the "how do I actually run this" answer for
  * every other file in this package -- nothing here is new machinery,
@@ -34,7 +53,7 @@ public final class CudaDemo {
 
     public static void main(String[] args) throws Throwable {
         if (args.length < 2) {
-            System.err.println("Usage: CudaDemo <path-to-model.gguf> <prompt>");
+            System.err.println("Usage: LlamaCudaDemo <path-to-model.gguf> <prompt>");
             System.exit(1);
         }
         File ggufPath = new File(args[0]);

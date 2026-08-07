@@ -1,5 +1,5 @@
 package com.github.gbenroscience.gpu.llm.opencl;
- 
+
 import com.github.gbenroscience.simd.turbo.tools.llm.loader.GGUFLoader;
 
 import java.lang.foreign.Arena;
@@ -8,7 +8,7 @@ import java.lang.foreign.ValueLayout;
 import java.util.NoSuchElementException;
 
 /**
- * OpenCL counterpart of {@code com.github.gbenroscience.gpu.cuda.llm.EmbeddingTable}.
+ * OpenCL counterpart of {@code com.github.gbenroscience.gpu.llm.cuda.EmbeddingTable}.
  * Same design and rationale as the CUDA original -- kept HOST-resident (a
  * flat float[] of vocabSize*dim), one row gathered and uploaded per call
  * rather than keeping the whole table device-resident. See the CUDA

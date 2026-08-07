@@ -4,7 +4,6 @@
  */
 package com.github.gbenroscience.gpu;
 
-import com.github.gbenroscience.gpu.evaluator.GpuBackend;
 import com.github.gbenroscience.gpu.evaluator.GpuCompositeExpression;
 import com.github.gbenroscience.gpu.evaluator.GpuExpressionBridge;
 import com.github.gbenroscience.gpu.evaluator.opencl.OpenClCompositeExpression;

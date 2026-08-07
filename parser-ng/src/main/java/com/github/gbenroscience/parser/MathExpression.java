@@ -785,7 +785,7 @@ public class MathExpression implements Savable, Solvable {
         setNoOfListReturningOperators(0);
         whitespaceremover.add("");
         //Scanner operation
-        MathScanner opScanner = new MathScanner(expression, this);System.out.println("scanner:>> "+opScanner.getScanner());
+        MathScanner opScanner = new MathScanner(expression, this); 
 
         this.commaAlias = opScanner.commaAlias;
         scanner = opScanner.getScanner();

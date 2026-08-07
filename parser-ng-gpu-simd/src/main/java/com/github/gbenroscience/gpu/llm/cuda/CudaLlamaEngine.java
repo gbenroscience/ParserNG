@@ -13,13 +13,15 @@ import java.util.NoSuchElementException;
  * instead of a linear main() method, so
  * {@code com.github.gbenroscience.gpu.llm.LlamaGpuBridge} can build one
  * without knowing any of these steps individually. See
- * {@code com.github.gbenroscience.gpu.opencl.llm.OpenClLlamaEngine}'s
+ * {@code com.github.gbenroscience.gpu.llm.opencl.OpenCLLlamaEngine}'s
  * javadoc for the OpenCL counterpart -- identical shape, {@code long}
  * CUdeviceptr values in place of {@code MemorySegment} cl_mem handles.
  *
  * Device selection: {@link GpuContext}'s constructor resolves through
- * {@link com.github.gbenroscience.gpu.cuda.CudaDeviceSelector} -- call
- * {@code CudaDeviceSelector.selectDevice(int)} before constructing this
+ * {@link CudaDeviceSelector} (this package's own -- CPU-selection-aware --
+ * copy, distinct from {@code com.github.gbenroscience.gpu.evaluator.cuda.CudaDeviceSelector},
+ * see that class's javadoc) -- call {@code CudaDeviceSelector.selectDevice(int)}
+ * before constructing this
  * (or before {@code LlamaGpuBridge.load(...)}) to target a specific NVIDIA
  * device index when more than one is installed.
  */

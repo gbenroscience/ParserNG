@@ -20,6 +20,19 @@ public class HigherOrderODE {
     // ------------------------------------------------------------------
     // diffeqnHO(...) — endpoint-only
     // ------------------------------------------------------------------
+    /**
+     * 
+     * @param topDerivative
+     * @param tSlot
+     * @param ySlotStart
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param initialStep
+     * @param method
+     * @return 
+     */
     public static double executeTurboODEHO(ODEFunction topDerivative,
             int tSlot,
             int ySlotStart,

@@ -1,8 +1,8 @@
 package com.github.gbenroscience.gpu.llm;
 
-import com.github.gbenroscience.gpu.evaluator.GpuBackend;
+import com.github.gbenroscience.gpu.GpuBackend;
 import com.github.gbenroscience.gpu.llm.cuda.CudaLlamaEngine;
-import com.github.gbenroscience.gpu.llm.opencl.OpenCLLlamaEngine; 
+import com.github.gbenroscience.gpu.llm.opencl.OpenCLLlamaEngine;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -14,9 +14,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Single entry point for building a GPU-backed Llama engine without the
  * caller needing to know or choose between
- * {@code com.github.gbenroscience.gpu.opencl.llm.OpenClLlamaEngine} and
- * {@code com.github.gbenroscience.gpu.cuda.llm.CudaLlamaEngine}. Direct
- * counterpart of {@link com.github.gbenroscience.gpu.evaluator.GpuExpressionBridge} --
+ * {@code com.github.gbenroscience.gpu.llm.opencl.OpenCLLlamaEngine} and
+ * {@code com.github.gbenroscience.gpu.llm.cuda.CudaLlamaEngine}. Direct
+ * counterpart of {@link com.github.gbenroscience.gpu.GpuExpressionBridge} --
  * same auto-detection model, same caching/probe behavior, same
  * {@code gpu.backend.preference} property (deliberately the SAME property,
  * not a Llama-specific one -- see below). Use this unless a specific

@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 package com.github.gbenroscience.gpu.llm.opencl;
- 
+
+/**
+ *
+ * @author GBEMIRO
+ */ 
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -22,7 +26,6 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * @author GBEMIRO
  * Host-side, pure-Java sampling over the logits GpuLlamaLayerCuda.finalLogits
  * already copied off the device. No GPU work here at all -- vocab-sized
  * arrays (tens of thousands of floats) are cheap to sort/scan on the CPU,

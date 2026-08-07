@@ -39,7 +39,7 @@ import java.util.Random;
  * model size.
  *
  * Run with (adjust classpath):
- *   java --enable-preview -cp &lt;your-classpath&gt; com.github.gbenroscience.gpu.opencl.llm.CoreKernelBenchmark
+ *   java --enable-preview -cp &lt;your-classpath&gt; com.github.gbenroscience.gpu.llm.opencl.CoreKernelBenchmark
  */
 public final class CoreKernelBenchmark {
 
@@ -61,6 +61,7 @@ public final class CoreKernelBenchmark {
     private static final float TOLERANCE_ABS = 1e-2f;
 
     public static void main(String[] args) throws Throwable {
+        OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.GpuVendor.INTEL);
         GpuContext ctx = new GpuContext();
         try {
             // Prime every kernel this file touches before anything is
