@@ -4,10 +4,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * High-performance, JIT-optimized Vectorized Ordinary Differential Equation (ODE) solvers.
- * Supports arbitrary n-th order differential equations by reduction to first-order vector systems.
+ * High-performance, JIT-optimized Vectorized Ordinary Differential Equation
+ * (ODE) solvers. Supports arbitrary n-th order differential equations by
+ * reduction to first-order vector systems.
  *
- * Target ODEFunction signature MUST strictly match: void f(double[] vars, double[] outDerivatives)
+ * Target ODEFunction signature MUST strictly match: void f(double[] vars,
+ * double[] outDerivatives)
  *
  * @author GBEMIRO
  */
@@ -34,37 +36,41 @@ public class DifferentialEquations {
             DP_C5 = 8.0 / 9.0, DP_C6 = 1.0;
 
     public enum ODESolverMethod {
-        EULER,              // Fast, O(h) error. Best for real-time graphics/particles.
-        RK4,                // Classical 4th Order fixed-step system workhorse.
+        EULER, // Fast, O(h) error. Best for real-time graphics/particles.
+        RK4, // Classical 4th Order fixed-step system workhorse.
         RK45_DORMAND_PRINCE,// Adaptive-step size system engine (Industry standard).
         IMPLICIT_EULER      // Backwards implicit setup optimized for stiff vector spaces.
     }
 
     /**
-     * Callback invoked once per accepted state, (t, y). Used to record a trajectory
-     * without forking a second copy of each solver. y is only valid for the duration
-     * of the call — implementations that need to retain it must clone it.
+     * Callback invoked once per accepted state, (t, y). Used to record a
+     * trajectory without forking a second copy of each solver. y is only valid
+     * for the duration of the call — implementations that need to retain it
+     * must clone it.
      */
     @FunctionalInterface
     public interface StepListener {
+
         void onStep(double t, double[] y);
     }
 
     /**
      * Supplies the raw df/dy Jacobian (NOT the Newton "I - h*df/dy" matrix —
-     * the solver applies that transform itself) for the implicit solver.
-     * The default implementation used when none is supplied is central-
-     * difference finite differences; passing an
+     * the solver applies that transform itself) for the implicit solver. The
+     * default implementation used when none is supplied is central- difference
+     * finite differences; passing an
      * {@code com.github.gbenroscience.math.differentialcalculus.autodiff.AnalyticJacobian}-backed
      * strategy replaces that with an exact forward-mode-AD Jacobian.
      */
     @FunctionalInterface
     public interface JacobianStrategy {
+
         /**
-         * @param vars      the current frame — vars[ySlotStart..ySlotStart+systemSize)
-         *                  holds the Newton iterate to differentiate at, vars[tSlot]
-         *                  holds the corresponding evaluation time
-         * @param outDfDy   systemSize x systemSize; fill outDfDy[row][col] = d f_row / d y_col
+         * @param vars the current frame —
+         * vars[ySlotStart..ySlotStart+systemSize) holds the Newton iterate to
+         * differentiate at, vars[tSlot] holds the corresponding evaluation time
+         * @param outDfDy systemSize x systemSize; fill outDfDy[row][col] = d
+         * f_row / d y_col
          */
         void computeDfDy(double[] vars, double[][] outDfDy);
     }
@@ -72,7 +78,6 @@ public class DifferentialEquations {
     // ------------------------------------------------------------------
     // Shared validation helpers
     // ------------------------------------------------------------------
-
     private static void validateHandle(ODEFunction dy_dt) {
         if (dy_dt == null) {
             throw new IllegalArgumentException("dy_dt ODEFunction must not be null");
@@ -111,24 +116,39 @@ public class DifferentialEquations {
         return direction > 0 ? (t >= tEnd) : (t <= tEnd);
     }
 
-    /** Convenience no-op listener used internally so the recording and non-recording paths share one core loop. */
-    private static final StepListener NO_OP = (t, y) -> { };
+    /**
+     * Convenience no-op listener used internally so the recording and
+     * non-recording paths share one core loop.
+     */
+    private static final StepListener NO_OP = (t, y) -> {
+    };
 
     // ------------------------------------------------------------------
     // Euler
     // ------------------------------------------------------------------
-
     public static double[] stepEuler(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                     int frameSize, double t0, double[] y0, double tEnd, int steps) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps) {
         return stepEulerCore(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP);
     }
 
     /**
-     * Same as {@link #stepEuler}, but records (t, y) at t0 and after every step.
-     * Returns a [steps+1][1+systemSize] matrix: column 0 is t, columns 1..systemSize are y.
+     * Same as {@link #stepEuler}, but records (t, y) at t0 and after every
+     * step. Returns a [steps+1][1+systemSize] matrix: column 0 is t, columns
+     * 1..systemSize are y.
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @return
      */
     public static double[][] stepEulerWithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                                  int frameSize, double t0, double[] y0, double tEnd, int steps) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps) {
         List<double[]> rows = new ArrayList<>(steps + 1);
         StepListener recorder = (t, y) -> {
             double[] row = new double[1 + systemSize];
@@ -140,9 +160,23 @@ public class DifferentialEquations {
         return rows.toArray(new double[0][]);
     }
 
+    /**
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @param listener
+     * @return
+     */
     private static double[] stepEulerCore(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                          int frameSize, double t0, double[] y0, double tEnd, int steps,
-                                          StepListener listener) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps,
+            StepListener listener) {
         validateHandle(dy_dt);
         validateSlots(tSlot, ySlotStart, systemSize, frameSize);
         if (steps <= 0) {
@@ -175,14 +209,39 @@ public class DifferentialEquations {
     // ------------------------------------------------------------------
     // RK4
     // ------------------------------------------------------------------
-
+    /**
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @return
+     */
     public static double[] stepRK4(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                   int frameSize, double t0, double[] y0, double tEnd, int steps) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps) {
         return stepRK4Core(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP);
     }
 
+    /**
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @return
+     */
     public static double[][] stepRK4WithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                                int frameSize, double t0, double[] y0, double tEnd, int steps) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps) {
         List<double[]> rows = new ArrayList<>(steps + 1);
         StepListener recorder = (t, y) -> {
             double[] row = new double[1 + systemSize];
@@ -195,8 +254,8 @@ public class DifferentialEquations {
     }
 
     private static double[] stepRK4Core(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                        int frameSize, double t0, double[] y0, double tEnd, int steps,
-                                        StepListener listener) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps,
+            StepListener listener) {
         validateHandle(dy_dt);
         validateSlots(tSlot, ySlotStart, systemSize, frameSize);
         if (steps <= 0) {
@@ -243,24 +302,45 @@ public class DifferentialEquations {
         return currentY;
     }
 
-    // ------------------------------------------------------------------
-    // RK45 Dormand-Prince (adaptive, direction-aware)
-    // ------------------------------------------------------------------
-
+    /**
+     * RK45 Dormand-Prince (adaptive, direction-aware)
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param initialH
+     * @return
+     */
     public static double[] stepRK45Adaptive(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                            int frameSize, double t0, double[] y0, double tEnd, double initialH) {
+            int frameSize, double t0, double[] y0, double tEnd, double initialH) {
         return stepRK45AdaptiveCore(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, initialH, NO_OP);
     }
 
     /**
-     * Same as {@link #stepRK45Adaptive}, but records (t, y) at t0 and after every
-     * ACCEPTED step. Because this solver is adaptive, the resulting t values are
-     * irregularly spaced — resample() can be used afterward to interpolate onto a
-     * uniform grid for plotting.
+     * Same as {@link #stepRK45Adaptive}, but records (t, y) at t0 and after
+     * every ACCEPTED step. Because this solver is adaptive, the resulting t
+     * values are irregularly spaced — resample() can be used afterward to
+     * interpolate onto a uniform grid for plotting.
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param initialH
+     * @return
      */
     public static double[][] stepRK45AdaptiveWithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                                          int frameSize, double t0, double[] y0, double tEnd,
-                                                          double initialH) {
+            int frameSize, double t0, double[] y0, double tEnd,
+            double initialH) {
         List<double[]> rows = new ArrayList<>();
         StepListener recorder = (t, y) -> {
             double[] row = new double[1 + systemSize];
@@ -273,8 +353,8 @@ public class DifferentialEquations {
     }
 
     private static double[] stepRK45AdaptiveCore(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                                  int frameSize, double t0, double[] y0, double tEnd,
-                                                  double initialH, StepListener listener) {
+            int frameSize, double t0, double[] y0, double tEnd,
+            double initialH, StepListener listener) {
         validateHandle(dy_dt);
         validateSlots(tSlot, ySlotStart, systemSize, frameSize);
         if (initialH == 0.0) {
@@ -389,34 +469,83 @@ public class DifferentialEquations {
         return currentY;
     }
 
-    // ------------------------------------------------------------------
-    // Implicit Euler
-    // ------------------------------------------------------------------
-
+    /**
+     * Implicit Euler
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @return
+     */
     public static double[] stepImplicitEuler(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                             int frameSize, double t0, double[] y0, double tEnd, int steps) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps) {
         return stepImplicitEulerCore(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP, null);
     }
 
     /**
      * Same as {@link #stepImplicitEuler}, but replaces the default central-
-     * difference Jacobian with the supplied {@link JacobianStrategy} — e.g.
-     * an AnalyticJacobian for an exact forward-mode-AD Jacobian.
+     * difference Jacobian with the supplied {@link JacobianStrategy} — e.g. an
+     * AnalyticJacobian for an exact forward-mode-AD Jacobian.
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @param jacobianStrategy
+     * @return
      */
     public static double[] stepImplicitEuler(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                             int frameSize, double t0, double[] y0, double tEnd, int steps,
-                                             JacobianStrategy jacobianStrategy) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps,
+            JacobianStrategy jacobianStrategy) {
         return stepImplicitEulerCore(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP, jacobianStrategy);
     }
 
+    /**
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @return
+     */
     public static double[][] stepImplicitEulerWithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                                           int frameSize, double t0, double[] y0, double tEnd, int steps) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps) {
         return stepImplicitEulerWithHistory(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, null);
     }
 
+    /**
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @param jacobianStrategy
+     * @return
+     */
     public static double[][] stepImplicitEulerWithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                                           int frameSize, double t0, double[] y0, double tEnd, int steps,
-                                                           JacobianStrategy jacobianStrategy) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps,
+            JacobianStrategy jacobianStrategy) {
         List<double[]> rows = new ArrayList<>(steps + 1);
         StepListener recorder = (t, y) -> {
             double[] row = new double[1 + systemSize];
@@ -429,8 +558,8 @@ public class DifferentialEquations {
     }
 
     private static double[] stepImplicitEulerCore(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
-                                                   int frameSize, double t0, double[] y0, double tEnd, int steps,
-                                                   StepListener listener, JacobianStrategy jacobianStrategyOrNull) {
+            int frameSize, double t0, double[] y0, double tEnd, int steps,
+            StepListener listener, JacobianStrategy jacobianStrategyOrNull) {
         validateHandle(dy_dt);
         validateSlots(tSlot, ySlotStart, systemSize, frameSize);
         if (steps <= 0) {
@@ -589,18 +718,19 @@ public class DifferentialEquations {
         return true;
     }
 
-    // ------------------------------------------------------------------
-    // Resampling — used to honor a requested `points` count against either a
-    // fixed-step history (already uniform) or an adaptive RK45 history
-    // (irregularly spaced accepted steps).
-    // ------------------------------------------------------------------
-
     /**
-     * Resamples a [t, y1..yn] history matrix onto `points` uniformly spaced t
-     * values spanning history's first and last t, via piecewise-linear
-     * interpolation between bracketing rows. history must have at least 2 rows
-     * and be monotonic in t (either increasing or decreasing — matches whichever
-     * integration direction produced it).
+     * Resampling — used to honor a requested `points` count against either a
+     * fixed-step history (already uniform) or an adaptive RK45 history
+     * (irregularly spaced accepted steps). Resamples a [t, y1..yn] history
+     * matrix onto `points` uniformly spaced t values spanning history's first
+     * and last t, via piecewise-linear interpolation between bracketing rows.
+     * history must have at least 2 rows and be monotonic in t (either
+     * increasing or decreasing — matches whichever integration direction
+     * produced it). 
+     * 
+     * @param history
+     * @param points
+     * @return 
      */
     public static double[][] resample(double[][] history, int points) {
         if (history == null || history.length < 2) {
@@ -633,7 +763,7 @@ public class DifferentialEquations {
             // Advance to the bracketing segment [history[i], history[i+1]] containing targetT.
             while (searchFrom < history.length - 2
                     && (direction > 0 ? history[searchFrom + 1][0] < targetT
-                                       : history[searchFrom + 1][0] > targetT)) {
+                            : history[searchFrom + 1][0] > targetT)) {
                 searchFrom++;
             }
 

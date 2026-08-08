@@ -1532,7 +1532,7 @@ public class MathExpression implements Savable, Solvable {
         }
         return EvalResult.ERROR;
     }
-
+    
     public EvalResult solveGeneric(double... args) {
         this.executionFrame = args;
         return solveGeneric();

@@ -79,7 +79,9 @@ public class DifferentialEquations {
          * vars[ySlotStart..ySlotStart+systemSize) holds the Newton iterate to
          * differentiate at, vars[tSlot] holds the corresponding evaluation time
          * @param outDfDy systemSize x systemSize; fill outDfDy[row][col] = d
-         * f_row / d y_col
+         * f_row / d y_col 
+         *  
+         * @throws Throwable 
          */
         void computeDfDy(double[] vars, double[][] outDfDy) throws Throwable;
     }
@@ -149,7 +151,19 @@ public class DifferentialEquations {
     /**
      * Same as {@link #stepEuler}, but records (t, y) at t0 and after every
      * step. Returns a [steps+1][1+systemSize] matrix: column 0 is t, columns
-     * 1..systemSize are y.
+     * 1..systemSize are y. 
+     * 
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @return
+     * @throws Throwable 
      */
     public static double[][] stepEulerWithHistory(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
             int frameSize, double t0, double[] y0, double tEnd, int steps) throws Throwable {
@@ -434,7 +448,20 @@ public class DifferentialEquations {
     /**
      * Same as {@link #stepImplicitEuler}, but replaces the default central-
      * difference Jacobian with the supplied {@link JacobianStrategy} — e.g. an
-     * AnalyticJacobian for an exact forward-mode-AD Jacobian.
+     * AnalyticJacobian for an exact forward-mode-AD Jacobian. 
+     * 
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @param jacobianStrategy
+     * @return
+     * @throws Throwable 
      */
     public static double[] stepImplicitEuler(MethodHandle dy_dt, int tSlot, int ySlotStart, int systemSize,
             int frameSize, double t0, double[] y0, double tEnd, int steps,
@@ -632,7 +659,11 @@ public class DifferentialEquations {
      * values spanning history's first and last t, via piecewise-linear
      * interpolation between bracketing rows. history must have at least 2 rows
      * and be monotonic in t (either increasing or decreasing — matches
-     * whichever integration direction produced it).
+     * whichever integration direction produced it). 
+     * 
+     * @param history
+     * @param points
+     * @return 
      */
     public static double[][] resample(double[][] history, int points) {
         if (history == null || history.length < 2) {

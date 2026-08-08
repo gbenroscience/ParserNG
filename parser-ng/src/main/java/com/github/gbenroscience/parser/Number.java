@@ -129,6 +129,9 @@ MathExpression
         }
         return verily;
     }
+    public static boolean isOnlyDigits(String num){
+        return STRING.isOnlyDigits(num);
+    }
 
     public static boolean isNegative(String num) {
         return isNumber(num) && num.charAt(0) == '-';

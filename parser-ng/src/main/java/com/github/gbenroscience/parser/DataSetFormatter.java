@@ -38,8 +38,9 @@ public class DataSetFormatter {
     private final List<String> dataset;
 
     public static final String COMMA_MASK = "?";
-    public static final String OPEN_BRACKET_MASK = "<<<<";
-    public static final String CLOSE_BRACKET_MASK = ">>>>";
+    public static final String OPEN_CIRC_BRAC_MASK = "<<<<";
+    public static final String CLOSE_CIRC_BRAC_MASK = ">>>>";
+    
 
     public DataSetFormatter(String text) {
         Objects.requireNonNull(text, "Expression text cannot be null");
@@ -60,7 +61,7 @@ public class DataSetFormatter {
 
     private List<String> processExpression(String expression) {
         Scanner csc = new Scanner(expression, true, Method.getAllFunctions(),
-                Operator.COMMA, Operator.OPEN_CIRC_BRAC, Operator.CLOSE_CIRC_BRAC);
+                COMMA, OPEN_CIRC_BRAC, CLOSE_CIRC_BRAC, OPEN_SQUARE_BRAC, CLOSE_SQUARE_BRAC);
 
         List<String> tokens = csc.scan();
 
@@ -69,8 +70,8 @@ public class DataSetFormatter {
                 int closeIdx = i;
                 int openIdx = Bracket.getComplementIndex(false, Bracket.BracketMode.CIRCULAR_CLOSE, closeIdx, tokens);
 
-                tokens.set(openIdx, OPEN_BRACKET_MASK);
-                tokens.set(closeIdx, CLOSE_BRACKET_MASK);
+                tokens.set(openIdx, OPEN_CIRC_BRAC_MASK);
+                tokens.set(closeIdx, CLOSE_CIRC_BRAC_MASK);
 
                 wrapArgumentsInPlace(tokens, openIdx + 1, closeIdx);
             }
@@ -94,9 +95,9 @@ public class DataSetFormatter {
             if (atEnd || isComma) {
                 if (argStart < i) {
                     if (shouldWrap(tokens, argStart, i)) {
-                        buffer.add(OPEN_BRACKET_MASK);
+                        buffer.add(OPEN_CIRC_BRAC_MASK); 
                         copyTokens(tokens, buffer, argStart, i);
-                        buffer.add(CLOSE_BRACKET_MASK);
+                        buffer.add(CLOSE_CIRC_BRAC_MASK); 
                     } else {
                         copyTokens(tokens, buffer, argStart, i);
                     }
@@ -127,7 +128,8 @@ public class DataSetFormatter {
         return !isAtOperator(first)
                 && !Method.isListReturningStatsMethod(first)
                 && !Method.isFunctionOperatingMethod(first)
-                && (length > 2 || (!validNumber(first) && !isVariableString(first)));
+                && (length > 2 || (!validNumber(first) 
+                && !isVariableString(first)));
     }
 
     private void restoreMasks(List<String> tokens) {
@@ -135,8 +137,8 @@ public class DataSetFormatter {
             String t = tokens.get(i);
             switch (t) {
                 case COMMA_MASK: tokens.set(i, ","); break;
-                case OPEN_BRACKET_MASK: tokens.set(i, "("); break;
-                case CLOSE_BRACKET_MASK: tokens.set(i, ")"); break;
+                case OPEN_CIRC_BRAC_MASK: tokens.set(i, "("); break;
+                case CLOSE_CIRC_BRAC_MASK: tokens.set(i, ")"); break; 
             }
         }
     }

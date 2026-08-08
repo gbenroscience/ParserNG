@@ -2,6 +2,8 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
 
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
+import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import java.util.List;
 
 /**
@@ -117,11 +119,10 @@ public final class ExprNode {
             case NUMBER:
                 return formatNumber(node.numberValue);
 
-            case VARIABLE:
+            case VARIABLE: 
                 return node.isStateVariable()
-                        ? "y[" + node.stateIndex + "]"
+                        ? node.variableName + "[" + node.stateIndex + "]"
                         : node.variableName;
-
             case OP:
                 if (node.funcName != null) {
                     StringBuilder sb = new StringBuilder(node.funcName).append('(');
@@ -154,12 +155,34 @@ public final class ExprNode {
                 throw new IllegalStateException("Unhandled kind: " + node.kind);
         }
     }
-    
-      public static ODEFunction compileStandard(ExprNode expression, String independentVariableName,
-                                               int tSlot, int ySlotStart) {
-       // validate(expression, independentVariableName);
-          MathExpression me = new MathExpression(expression.toExpressionString());
-        return (vars, out) -> out[0] = me.solveGeneric().scalar;//expression, vars, independentVariableName, tSlot, ySlotStart);
+
+    public static ODEFunction compileStandard(ExprNode expression) {
+        MathExpression me = new MathExpression(expression.toExpressionString());
+        MathExpression.Slot[] slots = me.getSlotItems();
+        return (vars, out) -> {
+            for (MathExpression.Slot s : slots) {
+                me.updateSlot(s.getSlot(), vars[s.getSlot()]);
+            }
+            out[0] = me.solveGeneric().scalar;
+        };
+        /**
+         * return (vars, out) -> out[0] =
+         * me.solveGeneric(vars).scalar;//expression, vars,
+         * independentVariableName, tSlot, ySlotStart);
+         */
+    }
+
+    public static ODEFunction compileTurbo(ExprNode expression) throws Throwable {
+        // validate(expression, independentVariableName);
+        MathExpression me = new MathExpression(expression.toExpressionString());
+        MathExpression.Slot[] slots = me.getSlotItems();
+        FastCompositeExpression fce = new ScalarTurboEvaluator1(me).compile();
+        return (vars, out) -> {
+            for (MathExpression.Slot s : slots) {
+                me.updateSlot(s.getSlot(), vars[s.getSlot()]);
+            }
+            out[0] = fce.applyScalar(me.getExecutionFrame());
+        };
     }
 
     private static int precedence(char op) {
@@ -169,6 +192,7 @@ public final class ExprNode {
                 return 1;
             case '*':
             case '/':
+            case '%':
                 return 2;
             case '^':
                 return 3;

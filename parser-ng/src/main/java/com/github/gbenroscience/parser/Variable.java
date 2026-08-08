@@ -35,21 +35,22 @@ public class Variable implements Savable {
      * The full name of the variable
      */
     private String fullName;
-    
+
     /**
-     * This {@link Variable} is stored globally in the {@link VariableManager}'s data
+     * This {@link Variable} is stored globally in the {@link VariableManager}'s
+     * data
      */
     private boolean global;
-    
+
     /**
-     * Globals must have frame index
-     * THE SECRET SAUCE: The Frame Index.
-     * This represents the variable's "Drawer Number" in the execution frame.
+     * Globals must have frame index THE SECRET SAUCE: The Frame Index. This
+     * represents the variable's "Drawer Number" in the execution frame.
      * Initialized to -1 to indicate it hasn't been mapped yet.
      */
     private int frameIndex = -1;
-    
+
     public static MathExpression.EvalResult lastResult = new MathExpression.EvalResult();
+
     static {
         lastResult.wrap(0.0D);
     }
@@ -68,7 +69,6 @@ public class Variable implements Savable {
     public static Variable ans = new Variable("ans", 0.0, false);
 
     public static Variable e = new Variable("e", Math.E, true);
-     
 
     static {
         ans.type = TYPE.NUMBER;
@@ -116,6 +116,7 @@ public class Variable implements Savable {
 
     /**
      * Creates a non-constant Variable
+     *
      * @param name the name of the Variable object e.g A,B...e.t.c
      * @param value the value stored by the Variable object
      */
@@ -159,26 +160,27 @@ public class Variable implements Savable {
     }
 
     public void setGlobal(boolean global) {
-       if(global){
-           frameIndex=-1;
-       }
+        if (global) {
+            frameIndex = -1;
+        }
         this.global = global;
     }
 
     public boolean isGlobal() {
         return global;
     }
-    
-    
-    
-    
+
     /**
-     * High-Speed Handle Method: SET
-     * Use this in your loops to update values without Map lookups.
+     * High-Speed Handle Method: SET Use this in your loops to update values
+     * without Map lookups.
+     *
+     * @param frame
+     * @param newValue
      */
     public void set(double[] frame, double newValue) {
-        if (constant) return; // Protect constants
-        
+        if (constant) {
+            return; // Protect constants
+        }
         if (frameIndex != -1) {
             frame[frameIndex] = newValue; // O(1) Absolute Speed
         } else {
@@ -188,8 +190,10 @@ public class Variable implements Savable {
     }
 
     /**
-     * High-Speed Handle Method: GET
-     * Use this in your evaluator loop.
+     * High-Speed Handle Method: GET Use this in your evaluator loop.
+     *
+     * @param frame
+     * @return
      */
     public double get(double[] frame) {
         if (frameIndex != -1) {
@@ -256,6 +260,16 @@ public class Variable implements Savable {
     }//end method
 
     /**
+     *
+     * @param var
+     * @return true if the variable is a valid Variable starting character
+     */
+    public static boolean isVariableBeginner(char var) {
+        return (!Operator.isPermOrComb(var) && var != 'E' && var != 'π'
+                && (Character.isLetter(var) || isTheta(var) || isPI(var) || isExpNumber(var) || var == '_' || var == '$'));
+    }//end method
+
+    /**
      * If the name is a string of alphabets and is not an operator name, then it
      * is a valid variable name.
      *
@@ -265,40 +279,74 @@ public class Variable implements Savable {
      * @param var the string to check.
      * @return true if the variable is a valid Variable object name.
      */
-    public static boolean isVariableString(String var) {
-
-        if (var.length() == 1) {
+   public static boolean isVariableString(String var) {
+        int len = var.length();
+        if (len == 0) return false;
+        
+        if (len == 1) {
             return isVariableBeginner(var);
-        } else if (var.length() > 1) {
-            if (var.equals("ans")) {
-                return true;
-            }//end if
-            else if (var.equals("var") || var.equals("const") || STRING.purifier(var).equals("")) {
+        }
+
+        // Exact-match keyword checks
+        if (var.equals("ans")) {
+            return true;
+        } else if (var.equals("var") || var.equals("const") || STRING.purifier(var).equals("")) {
+            return false;
+        } else if (Operator.isOperatorString(var)) {
+            return false;
+        }
+
+        int firstOpen = var.indexOf('[');
+        int lastOpen = var.lastIndexOf('[');
+        int firstClose = var.indexOf(']');
+        int lastClose = var.lastIndexOf(']');
+        
+        int nameLen = len;
+
+        // 1. Handle Array/Bracket notation
+        if (firstOpen != -1 || firstClose != -1) {
+            // Reject if missing brackets, multiple brackets, ']' not at end, or ']' before '['
+            if (firstOpen <= 0 || firstOpen != lastOpen || firstClose != lastClose || firstClose != len - 1 || firstOpen >= firstClose) {
                 return false;
-            }//end else if
-            else if (Operator.isOperatorString(var)) {
+            }
+            
+            // Rejects empty "[]"
+            if (firstOpen + 1 == firstClose) {
                 return false;
-            }//end else if
+            }
 
-            if (isVariableBeginner(var.substring(0, 1))) {
-                int sz = var.length();
-                for (int i = 0; i < sz; i++) {
-                    if (!isVariableBuilder(var.substring(i, i + 1))) {
-                        return false;
-                    }//end if
-                }//end for loop
-
-                return true;
-            }//end if
-            else {
+            // Safely use your defined method for the inside check (1 substring allocation)
+            if (!Number.isOnlyDigits(var.substring(firstOpen + 1, firstClose))) {
                 return false;
-            }//end else
+            }
+            
+            nameLen = firstOpen; // Restrict the loop to validate only the text before '['
+        }
 
-        }//end else if
+        // 2. Validate the prefix/name logic
+        // String.valueOf(char) caches standard characters (zero-allocation for Latin-1)
+        if (!isVariableBeginner(String.valueOf(var.charAt(0)))) {
+            return false;
+        }
 
-        return false;
-    }//end method.
+        // 3. Fast-path character loop
+        for (int i = 0; i < nameLen; i++) {
+            char c = var.charAt(i);
+            
+            // Fast primitive check avoids method overhead for standard valid characters
+            boolean isStandardChar = Character.isLetterOrDigit(c) || c == '_' || c == '$' || c == 'θ' || c == 'π';
+            
+            if (!isStandardChar) {
+                // Fallback to your defined method for unusual characters.
+                // String.valueOf(c) is much faster and lighter than var.substring(i, i+1).
+                if (!isVariableBuilder(String.valueOf(c))) {
+                    return false;
+                }
+            }
+        }
 
+        return true;
+    }
     public static boolean isVariableBuilder(String unit) {
         return Character.isLetterOrDigit(unit.charAt(0)) || isTheta(unit)
                 || isPI(unit) || isExpNumber(unit) || unit.equals("_") || unit.equals("$");
@@ -328,7 +376,7 @@ public class Variable implements Savable {
      *
      */
     public static boolean isSystemConstant(String str) {
-        return str.equals("π") ||str.equals("pi") ||str.equals("PI") || str.equals("φ") || str.equals("e");
+        return str.equals("π") || str.equals("pi") || str.equals("PI") || str.equals("φ") || str.equals("e");
     }
 
     /**
@@ -358,10 +406,18 @@ public class Variable implements Savable {
     public static boolean isExpNumber(String str) {
         return str.equals("e");
     }
-        public static boolean isGoldenRatio(String str) {
+
+    public static boolean isExpNumber(char str) {
+        return str == 'e';
+    }
+
+    public static boolean isGoldenRatio(String str) {
         return str.equals("φ");
     }
 
+    public static boolean isGoldenRatio(char str) {
+        return str == 'φ';
+    }
     /**
      *
      * @param str the name of the String variable
@@ -369,23 +425,26 @@ public class Variable implements Savable {
      *
      */
     public static boolean isPI(String str) {
-        return str.equals("pi") || str.equals("PI") ||str.equals("π");
+        return str.equals("pi") || str.equals("PI") || str.equals("π");
     }
-    
+
+    public static boolean isPI(char str) {
+        return str == 'π';
+    }
+
     public static double getConstantValue(String str) {
-        if(isPI(str)){
+        if (isPI(str)) {
             return PI.value;
         }
-        if(isExpNumber(str)){
+        if (isExpNumber(str)) {
             return Variable.e.value;
         }
-        if(isGoldenRatio(str)){
+        if (isGoldenRatio(str)) {
             return Variable.GOLDEN_RATIO.value;
         }
-        
+
         return new MathExpression(str).solveGeneric().scalar;
     }
-    
 
     /**
      *
@@ -395,6 +454,16 @@ public class Variable implements Savable {
      */
     public static boolean isTheta(String str) {
         return str.equals("θ");
+    }
+
+    /**
+     *
+     * @param str the name of the char variable
+     * @return true if the variable is theta
+     *
+     */
+    public static boolean isTheta(char str) {
+        return str == 'θ';
     }
 
     /**
@@ -471,8 +540,8 @@ public class Variable implements Savable {
         if (isPI(name)) {
             return value = Math.PI;
         } else if (isLastEvaluatedAnswer(name)) {
-           value = lastResult != null ? ( (lastResult.type == MathExpression.EvalResult.TYPE_SCALAR) ? lastResult.scalar : 0.0 ) : 0;
-           return value;
+            value = lastResult != null ? ((lastResult.type == MathExpression.EvalResult.TYPE_SCALAR) ? lastResult.scalar : 0.0) : 0;
+            return value;
         } else if (isExpNumber(name)) {
             return value;
         } else if (isConstant()) {
@@ -572,9 +641,9 @@ public class Variable implements Savable {
     public String toString() {
         return this.name + ":" + this.value;
     }
-    
+
     @Override
-    public Variable clone(){
+    public Variable clone() {
         Variable v = new Variable(this.name);
         v.fullName = this.fullName;
         v.value = this.value;
@@ -583,21 +652,20 @@ public class Variable implements Savable {
         v.constant = this.constant;
         v.units = this.units;
         v.type = this.type;
-        
+
         return v;
     }
- 
-    public String toJSON(){
+
+    public String toJSON() {
         return "{\n"
-                + "\"name\": \""+name+"\",\n"
-                + "\"value\": "+value+",\n"
-                + "\"constant\": "+constant+",\n"
-                + "\"frameIndex\": "+frameIndex+",\n"
-                + "\"global\": "+global+",\n"
-                + "\"units\": \""+units+"\",\n"
-                + "\"type\": \""+type.name()+"\"\n" 
+                + "\"name\": \"" + name + "\",\n"
+                + "\"value\": " + value + ",\n"
+                + "\"constant\": " + constant + ",\n"
+                + "\"frameIndex\": " + frameIndex + ",\n"
+                + "\"global\": " + global + ",\n"
+                + "\"units\": \"" + units + "\",\n"
+                + "\"type\": \"" + type.name() + "\"\n"
                 + "}\n";
     }
-  
 
 }//end class Variable

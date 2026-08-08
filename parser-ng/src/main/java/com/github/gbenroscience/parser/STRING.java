@@ -54,7 +54,7 @@ public class STRING {
      * @return true or false depending on if or not the input consists of digits
      * alone or otherwise.
      */
-    public static boolean isOnlyDigits(String h) {
+    public static boolean isOnlyDigitsOld(String h) {
         // 1. Safety check: An empty or null string contains no digits
         if (h == null || h.isEmpty()) {
             return false;
@@ -69,6 +69,93 @@ public class STRING {
             }
         }
         return true;
+    }
+
+    public static boolean isOnlyDigits(String h) {
+        if (h == null || h.length() == 0) {
+            return false;
+        }
+        int len = h.length();
+
+        // ---- Fast path: pure digit string (the common case, e.g. array indices) ----
+        int i = 0;
+        for (; i < len; i++) {
+            char c = h.charAt(i);
+            if (c < '0' || c > '9') {
+                break; // first non-digit — fall through to full parse below
+            }
+        }
+        if (i == len) {
+            return true; // scanned the whole string, all digits
+        }
+
+        // ---- Slow path: dot / exponent handling ----
+        boolean hasDot = false;
+        boolean hasDigit = i > 0; // digits already seen in the fast scan count
+        int decimalDigits = 0;
+        i = 0; // restart; cheap re-scan, only happens for non-pure-digit strings
+
+        for (; i < len; i++) {
+            char c = h.charAt(i);
+            if (c >= '0' && c <= '9') {
+                hasDigit = true;
+                if (hasDot) {
+                    decimalDigits++;
+                }
+            } else if (c == '.') {
+                if (hasDot) {
+                    return false;
+                }
+                hasDot = true;
+            } else if (c == 'e' || c == 'E') {
+                break;
+            } else {
+                return false;
+            }
+        }
+        if (!hasDigit) {
+            return false;
+        }
+
+        if (i == len) {
+            return decimalDigits == 0;
+        }
+
+        // ---- Exponent phase ----
+        i++;
+        if (i == len) {
+            return false;
+        }
+
+        boolean negative = false;
+        char sign = h.charAt(i);
+        if (sign == '+' || sign == '-') {
+            negative = (sign == '-');
+            i++;
+            if (i == len) {
+                return false;
+            }
+        }
+
+        int cap = decimalDigits + 1;
+        int magnitude = 0;
+        boolean hasExpDigit = false;
+        for (; i < len; i++) {
+            char c = h.charAt(i);
+            if (c < '0' || c > '9') {
+                return false;
+            }
+            hasExpDigit = true;
+            if (magnitude < cap) {
+                magnitude = magnitude * 10 + (c - '0');
+            }
+        }
+        if (!hasExpDigit) {
+            return false;
+        }
+
+        int effectiveExponent = negative ? -magnitude : magnitude;
+        return effectiveExponent >= decimalDigits;
     }
 
     /**

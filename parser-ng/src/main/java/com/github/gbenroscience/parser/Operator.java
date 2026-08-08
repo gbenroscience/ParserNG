@@ -325,7 +325,14 @@ public class Operator {
         }
         return (op.charAt(0) == COMBINATION.charAt(0) || op.charAt(0) == PERMUTATION.charAt(0));
     }
-
+    /**
+     * @param op the String to check
+     * @return true if the operator is the permutation operator or is the
+     * combination operator the form is log-¹(num,base)
+     */
+    public static boolean isPermOrComb(char op) {
+         return (op == COMBINATION.charAt(0) || op == PERMUTATION.charAt(0));
+    }
     /**
      * @param op the String to check
      * @return true if the operator is the + operator or is the - operator the

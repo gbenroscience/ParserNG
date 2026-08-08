@@ -59,12 +59,17 @@ public final class ExprParser {
         this.pos = 0;
     }
 
-    /** Auto-detect mode: any identifier may be indexed; each becomes a state-variable leaf under its own name. */
+    /** Auto-detect mode: any identifier may be indexed; each becomes a state-variable leaf under its own name.
+     * @param tokens
+     * @return  */
     public static ExprNode parse(List<String> tokens) {
         return parseInternal(tokens, null);
     }
 
-    /** Restrictive mode: only requiredStateVarName may be indexed; any other indexed identifier is rejected immediately. */
+    /** Restrictive mode: only requiredStateVarName may be indexed; any other indexed identifier is rejected immediately.
+     * @param tokens
+     * @param requiredStateVarName
+     * @return  */
     public static ExprNode parse(List<String> tokens, String requiredStateVarName) {
         if (requiredStateVarName == null) {
             throw new IllegalArgumentException(
