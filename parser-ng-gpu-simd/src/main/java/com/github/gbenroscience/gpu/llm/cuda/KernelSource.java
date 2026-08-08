@@ -448,6 +448,11 @@ public final class KernelSource {
             x[i] += y[i];
         }
 
+        // NOTE (fixed): B is [N, K] row-major -- N=out_features rows,
+        // K=in_features cols, matching GGUF's native Linear-weight layout.
+        // The earlier version read B as [K, N] (B[k*N+n]) -- silently
+        // transposed for wo (K==N==dim, no shape check could catch it) and
+        // for the LM head (K=dim, N=vocab, still in-bounds, still wrong).
         extern "C" __global__ void f32_gemv(
             const float* a,
             const float* B,
@@ -458,9 +463,10 @@ public final class KernelSource {
             const int n = blockIdx.x * blockDim.x + threadIdx.x;
             if (n >= N) return;
 
+            const int rowOff = n * K;
             float acc = 0.0f;
             for (int k = 0; k < K; k++) {
-                acc += a[k] * B[k * N + n];
+                acc += a[k] * B[rowOff + k];
             }
             out[n] = acc;
         }
@@ -541,9 +547,11 @@ public final class KernelSource {
             out[t * N + n] = acc;
         }
 
+        // NOTE (fixed): B is [N, K] row-major, matching GGUF's native
+        // Linear-weight layout -- same fix and rationale as f32_gemv above.
         extern "C" __global__ void f32_gemm_tiled(
             const float* A, // [T, K]
-            const float* B, // [K, N]
+            const float* B, // [N, K]
             float* out,     // [T, N]
             const int T,
             const int K,
@@ -553,9 +561,10 @@ public final class KernelSource {
             const int n = blockIdx.x * blockDim.x + threadIdx.x;
             if (t >= T || n >= N) return;
 
+            const int bRowOff = n * K;
             float acc = 0.0f;
             for (int k = 0; k < K; k++) {
-                acc += A[t * K + k] * B[k * N + n];
+                acc += A[t * K + k] * B[bRowOff + k];
             }
             out[t * N + n] = acc;
         }

@@ -1,71 +1,68 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext;
- 
- 
+
+import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
+import com.github.gbenroscience.parser.MathExpression;
 import java.util.List;
 
 /**
- * @author GBEMIRO
- * Minimal generic expression-tree node used by LinearFormExtractor. This is
- * NOT meant to replace ParserNG's real AST/Token representation — it is a
- * small adapter shape so the extraction algorithm below is concrete and
- * testable without depending on exactly how ParserNG's parser builds its own
- * tree. Wiring this into ParserNG for real means either (a) building one of
- * these from ParserNG's existing postfix Token array (a standard one-pass
- * stack conversion, the same shape as every RPN evaluator in this codebase
- * already uses), or (b) adapting LinearFormExtractor directly onto
- * ParserNG's real node class if one already exists with equivalent
- * information.
+ * Minimal generic expression-tree node used by LinearFormExtractor. This is NOT
+ * meant to replace ParserNG's real AST/Token representation — it is a small
+ * adapter shape so the extraction algorithm below is concrete and testable
+ * without depending on exactly how ParserNG's parser builds its own tree.
+ * Wiring this into ParserNG for real means either (a) building one of these
+ * from ParserNG's existing postfix Token array (a standard one-pass stack
+ * conversion, the same shape as every RPN evaluator in this codebase already
+ * uses), or (b) adapting LinearFormExtractor directly onto ParserNG's real node
+ * class if one already exists with equivalent information.
  *
- * The one piece of ParserNG-specific knowledge this needs and does not
- * assume: how y[k] — an indexed reference to the k-th state derivative — is
- * represented. That is captured by the stateIndex field below: null for
- * every node that is not a state-variable reference, an integer k for a leaf
- * that denotes y[k]. How that gets populated when building the tree from
- * ParserNG's real token stream depends on how indexed access is tokenized —
- * flagged explicitly in LinearFormExtractor's class javadoc as the one open
- * dependency.
+ * The one piece of ParserNG-specific knowledge this needs and does not assume:
+ * how y[k] — an indexed reference to the k-th state derivative — is
+ * represented. That is captured by the stateIndex field below: null for every
+ * node that is not a state-variable reference, an integer k for a leaf that
+ * denotes y[k]. How that gets populated when building the tree from ParserNG's
+ * real token stream depends on how indexed access is tokenized — flagged
+ * explicitly in LinearFormExtractor's class javadoc as the one open dependency.
  */
 public final class ExprNode {
 
-    public enum Kind { NUMBER, VARIABLE, OP }
+    public enum Kind {
+        NUMBER, VARIABLE, OP
+    }
 
     public final Kind kind;
 
-    /** Valid when kind == NUMBER. */
+    /**
+     * Valid when kind == NUMBER.
+     */
     public final double numberValue;
 
-    /** Valid when kind == VARIABLE. The variable's name, e.g. "t". */
+    /**
+     * Valid when kind == VARIABLE. The variable's name, e.g. "t".
+     */
     public final String variableName;
 
     /**
      * Valid when kind == VARIABLE and this leaf denotes a state reference
-     * y[stateIndex]. Null for every other variable (e.g. "t" itself, or a
-     * plain scalar parameter).
+     * y[stateIndex]. Null for every other variable (e.g. "t" itself, or a plain
+     * scalar parameter).
      */
     public final Integer stateIndex;
 
-    /** Valid when kind == OP. '+', '-', '*', '/', '^', or a unary negation marker. */
+    /**
+     * Valid when kind == OP. '+', '-', '*', '/', '^', or a unary negation
+     * marker.
+     */
     public final char opChar;
 
-    /** Valid when kind == OP and this is a named function call, e.g. "sin". Null for plain operators. */
+    /**
+     * Valid when kind == OP and this is a named function call, e.g. "sin". Null
+     * for plain operators.
+     */
     public final String funcName;
 
-    /** Valid when kind == OP. */
+    /**
+     * Valid when kind == OP.
+     */
     public final List<ExprNode> children;
 
     public static ExprNode number(double v) {
@@ -89,7 +86,7 @@ public final class ExprNode {
     }
 
     private ExprNode(Kind kind, double numberValue, String variableName, Integer stateIndex,
-                      char opChar, String funcName, List<ExprNode> children) {
+            char opChar, String funcName, List<ExprNode> children) {
         this.kind = kind;
         this.numberValue = numberValue;
         this.variableName = variableName;
@@ -111,89 +108,84 @@ public final class ExprNode {
         return isOp('*') || isOp('/');
     }
 
-    /**
-     * Renders this node, and its whole subtree, as JSON. Fields that don't
-     * apply to this node's {@link Kind} are omitted rather than emitted as
-     * null, so NUMBER nodes only carry {@code numberValue}, VARIABLE nodes
-     * only carry {@code variableName}/{@code stateIndex}, and OP nodes only
-     * carry {@code opChar}/{@code funcName}/{@code children}.
-     */
+    public String toExpressionString() {
+        return print(this, 0);
+    }
+
+    private static String print(ExprNode node, int parentPrec) {
+        switch (node.kind) {
+            case NUMBER:
+                return formatNumber(node.numberValue);
+
+            case VARIABLE:
+                return node.isStateVariable()
+                        ? "y[" + node.stateIndex + "]"
+                        : node.variableName;
+
+            case OP:
+                if (node.funcName != null) {
+                    StringBuilder sb = new StringBuilder(node.funcName).append('(');
+                    for (int i = 0; i < node.children.size(); i++) {
+                        if (i > 0) {
+                            sb.append(", ");
+                        }
+                        sb.append(print(node.children.get(i), 0));
+                    }
+                    return sb.append(')').toString();
+                }
+
+                // Unary negation: single child, no funcName.
+                if (node.children.size() == 1) {
+                    int unaryPrec = 4;
+                    String s = "-" + print(node.children.get(0), unaryPrec);
+                    return unaryPrec < parentPrec ? "(" + s + ")" : s;
+                }
+
+                // Binary op.
+                int prec = precedence(node.opChar);
+                String left = print(node.children.get(0), prec);
+                // prec + 1 on the right forces parens for non-associative cases
+                // like a - (b - c) or a / (b / c); harmless extra parens on +/*.
+                String right = print(node.children.get(1), prec + 1);
+                String s = left + " " + node.opChar + " " + right;
+                return prec < parentPrec ? "(" + s + ")" : s;
+
+            default:
+                throw new IllegalStateException("Unhandled kind: " + node.kind);
+        }
+    }
+    
+      public static ODEFunction compileStandard(ExprNode expression, String independentVariableName,
+                                               int tSlot, int ySlotStart) {
+       // validate(expression, independentVariableName);
+          MathExpression me = new MathExpression(expression.toExpressionString());
+        return (vars, out) -> out[0] = me.solveGeneric().scalar;//expression, vars, independentVariableName, tSlot, ySlotStart);
+    }
+
+    private static int precedence(char op) {
+        switch (op) {
+            case '+':
+            case '-':
+                return 1;
+            case '*':
+            case '/':
+                return 2;
+            case '^':
+                return 3;
+            default:
+                throw new IllegalArgumentException("Unknown op: " + op);
+        }
+    }
+
+    private static String formatNumber(double v) {
+        if (v == Math.rint(v) && !Double.isInfinite(v)) {
+            return Long.toString((long) v);
+        }
+        return Double.toString(v);
+    }
+
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder();
-        appendJson(sb);
-        return sb.toString();
-    }
-
-    void appendJson(StringBuilder sb) {
-        sb.append("{\"kind\":\"").append(kind).append('"');
-        switch (kind) {
-            case NUMBER:
-                sb.append(",\"numberValue\":").append(numberValue);
-                break;
-            case VARIABLE:
-                sb.append(",\"variableName\":");
-                appendJsonString(sb, variableName);
-                sb.append(",\"stateIndex\":").append(stateIndex == null ? "null" : stateIndex.toString());
-                break;
-            case OP:
-                sb.append(",\"opChar\":");
-                appendJsonString(sb, opChar == '\0' ? null : String.valueOf(opChar));
-                sb.append(",\"funcName\":");
-                appendJsonString(sb, funcName);
-                sb.append(",\"children\":[");
-                if (children != null) {
-                    for (int i = 0; i < children.size(); i++) {
-                        if (i > 0) {
-                            sb.append(',');
-                        }
-                        children.get(i).appendJson(sb);
-                    }
-                }
-                sb.append(']');
-                break;
-        }
-        sb.append('}');
-    }
-
-    /**
-     * Writes {@code s} as a JSON string literal (or the bare token {@code null})
-     * onto {@code sb}, escaping quotes, backslashes, and control characters.
-     * Package-private so {@link CoefficientExtractor}'s result types can reuse
-     * it without duplicating escaping logic.
-     */
-    static void appendJsonString(StringBuilder sb, String s) {
-        if (s == null) {
-            sb.append("null");
-            return;
-        }
-        sb.append('"');
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
-                    if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        sb.append(c);
-                    }
-            }
-        }
-        sb.append('"');
+        return toExpressionString();
     }
 }

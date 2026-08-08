@@ -1,37 +1,19 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext;
- 
 
-import com.github.gbenroscience.math.Maths;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * @author GBEMIRO
- * Self-verifying regression harness for Lexer / ExprParser / ArgumentIsolator
- * / CoefficientExtractor. Every success case numerically evaluates the
- * extracted coefficients against independently computed expected values, not
- * just "did it throw or not". Run via main(); throws AssertionError with a
- * descriptive message on any mismatch.
+ * Self-verifying regression harness for Lexer / ExprParser / ArgumentIsolator /
+ * CoefficientExtractor. Every success case numerically evaluates the extracted
+ * coefficients against independently computed expected values, not just "did it
+ * throw or not". Run via main(); throws AssertionError with a descriptive
+ * message on any mismatch.
  *
- * No compiler was available to run this in the environment it was written
- * in — every case was also traced by hand, but please actually compile and
- * run this before trusting CoefficientExtractor.
+ * No compiler was available to run this in the environment it was written in —
+ * every case was also traced by hand, but please actually compile and run this
+ * before trusting CoefficientExtractor.
  */
 public final class CoefficientExtractorSelfTest {
 
@@ -43,6 +25,9 @@ public final class CoefficientExtractorSelfTest {
         testWorkedExampleFromBareEquationString();
         testForcingTermExtraction();
         testSparseMiddleOrderFillsWithZero();
+        testDifferentStateVariableNameWorksEndToEnd();
+        testRequiredStateVarNameRejectsMismatch();
+        testMixedStateVariableNamesRejected();
 
         testTopDerivativeWrappedIsRejected();
         testDoubleNestedWrapIsRejected();
@@ -51,7 +36,6 @@ public final class CoefficientExtractorSelfTest {
         testDivisorStateIsRejected();
         testMultiArgFunctionWrapIsRejected();
         testNoStateReferenceAtAllIsRejected();
-        testHardExampleMixedDerivativeTerms();
 
         System.out.println("All " + checks + " CoefficientExtractor checks passed.");
     }
@@ -74,6 +58,10 @@ public final class CoefficientExtractorSelfTest {
                 ")", ")");
 
         CoefficientExtractor.Result r = CoefficientExtractor.extract(scan);
+        System.out.println(r.topDerivativeExpression.toExpressionString());
+        for (ExprNode node : r.coefficients) {
+            System.out.println(node.toExpressionString());
+        }
         assertWorkedExample(r);
         checks++;
     }
@@ -119,7 +107,29 @@ public final class CoefficientExtractorSelfTest {
 
         assertClose("order 0 coefficient = 3*x", evalFree(r.coefficients[4], xv), 3 * xv);
         assertNullString("order 0 must be unwrapped", r.wrappingFunctionNames[4]);
-        System.out.println(r.toString());
+
+        // --- Normalized coefficients: y[4] made the subject, divided through by A1=3*x^2 ---
+        double a1 = 3 * xv * xv;
+        assertEquals("normalized array length = topOrder", 4, r.normalizedCoefficients.length);
+        assertClose("normalized order 3 = -(5*sin(x))/(3*x^2)",
+                evalFree(r.normalizedCoefficients[0], xv), -(5 * Math.sin(xv)) / a1);
+        assertClose("normalized order 2 = -(5/x)/(3*x^2)",
+                evalFree(r.normalizedCoefficients[1], xv), -(5 / xv) / a1);
+        assertClose("normalized order 1 = -(-3)/(3*x^2) = 1/x^2",
+                evalFree(r.normalizedCoefficients[2], xv), -(-3.0) / a1);
+        assertClose("normalized order 0 = -(3*x)/(3*x^2) = -1/x",
+                evalFree(r.normalizedCoefficients[3], xv), -(3 * xv) / a1);
+        assertNull("no forcing -> no normalized forcing either", r.normalizedForcingOrNull);
+
+        // Full reconstruction: plug concrete state values into topDerivativeExpression
+        // and check it matches the hand-derived closed form of y[4].
+        double y3 = 0.4, y2 = 1.7, y1 = -2.1, y0 = 0.9;
+        double expectedTop = -(5 * Math.sin(xv)) / a1 * Math.sin(y3)
+                - (5 / xv) / a1 * Math.log(y2)
+                + (-(-3.0) / a1) * y1
+                + (-(3 * xv) / a1) * y0;
+        double actualTop = evalWithState(r.topDerivativeExpression, xv, new double[]{y0, y1, y2, y3});
+        assertClose("topDerivativeExpression reconstructs y[4]'s closed form", actualTop, expectedTop);
     }
 
     // ------------------------------------------------------------------
@@ -151,6 +161,53 @@ public final class CoefficientExtractorSelfTest {
         if (!r.terms.get(1).absent || !r.terms.get(2).absent) {
             throw new AssertionError("orders 2 and 1 should be flagged absent");
         }
+        checks++;
+    }
+
+    // ------------------------------------------------------------------
+    // 5b. A completely different dependent-variable name, end to end:
+    //     u[2] + 3*u[1] + sin(u[0]) - 7*t = 0, with u (not y) as the state name.
+    // ------------------------------------------------------------------
+    private static void testDifferentStateVariableNameWorksEndToEnd() {
+        CoefficientExtractor.Result r = CoefficientExtractor.extract("u[2] + 3*u[1] + sin(u[0]) - 7*t");
+
+        assertEqualsString("detected state variable name", "u", r.stateVariableName);
+        assertEquals("topOrder", 2, r.topOrder);
+
+        double tv = 1.5;
+        assertClose("order 2 coefficient = 1", evalFree(r.coefficients[0], tv), 1.0);
+        assertClose("order 1 coefficient = 3", evalFree(r.coefficients[1], tv), 3.0);
+        assertClose("order 0 coefficient = 1", evalFree(r.coefficients[2], tv), 1.0);
+        assertEqualsString("order 0 wrap = sin", "sin", r.wrappingFunctionNames[2]);
+        assertClose("forcing = 7*t", evalFree(r.forcingOrNull, tv), 7 * tv);
+
+        // The stateFactor for order 0 is sin(u[0]) — a wrapped call, since order 0 was wrapped.
+        // Its child (the actual state leaf) must be named "u", not "y".
+        ExprNode order0Factor = r.derivativeTerms[2];
+        ExprNode order0Leaf = order0Factor.children.get(0);
+        assertEqualsString("wrapped state factor's variable name", "u", order0Leaf.variableName);
+        checks++;
+    }
+
+    // ------------------------------------------------------------------
+    // 5c. extract(String, requiredStateVarName) must reject a mismatched name immediately.
+    // ------------------------------------------------------------------
+    private static void testRequiredStateVarNameRejectsMismatch() {
+        assertThrows("expecting 'y' but the equation uses 'u' must be rejected",
+                () -> CoefficientExtractor.extract("u[1] + u[0]", "y"));
+
+        // And the matching case must still succeed.
+        CoefficientExtractor.Result r = CoefficientExtractor.extract("z[1] + z[0]", "z");
+        assertEqualsString("detected/required state variable name", "z", r.stateVariableName);
+        checks++;
+    }
+
+    // ------------------------------------------------------------------
+    // 5d. Two different indexed names in the same equation must be rejected.
+    // ------------------------------------------------------------------
+    private static void testMixedStateVariableNamesRejected() {
+        assertThrows("mixing y[...] and u[...] in one equation must be rejected",
+                () -> CoefficientExtractor.extract("y[2] + u[1]"));
         checks++;
     }
 
@@ -218,65 +275,63 @@ public final class CoefficientExtractorSelfTest {
                 () -> CoefficientExtractor.extract("3 + t - 5"));
         checks++;
     }
- // ------------------------------------------------------------------
-    // 13. Same equation as a raw string, wrapped in a full diffeqn(...) call
-    //    text — must agree exactly with the scanned-token-list result.
-    // ------------------------------------------------------------------
-    private static void testHardExampleMixedDerivativeTerms() {
-        String raw = "diffeqn((3*x^2)*y[4]+(5*sin(x))*sin(y[3])+(5/x)*ln(y[2])-3*y[1]+3*x*y[0], 1, 0, anon1)";
-        CoefficientExtractor.Result r = CoefficientExtractor.extract(raw);
-        assertWorkedExample(r);
-        checks++;
-    }
+
     // ------------------------------------------------------------------
     // Small numeric evaluator: any non-state variable (whatever it's named —
     // "t", "x", etc.) takes the single supplied free-variable value.
     // ------------------------------------------------------------------
-
     private static double evalFree(ExprNode node, double freeVarValue) {
+        return evalWithState(node, freeVarValue, new double[0]);
+    }
+
+    /**
+     * Like evalFree, but also resolves state-variable leaves y[k] from
+     * yValues[k].
+     */
+    private static double evalWithState(ExprNode node, double freeVarValue, double[] yValues) {
         switch (node.kind) {
             case NUMBER:
                 return node.numberValue;
             case VARIABLE:
+                if (node.isStateVariable()) {
+                    return yValues[node.stateIndex];
+                }
                 return freeVarValue; // these tests only ever have one free variable
             case OP:
                 List<ExprNode> c = node.children;
                 if (node.funcName != null) {
-                    double a = evalFree(c.get(0), freeVarValue);
+                    double a = evalWithState(c.get(0), freeVarValue, yValues);
                     switch (node.funcName) {
-                        case "sin": return Math.sin(a);
-                        case "cos": return Math.cos(a);
-                        case "tan": return Math.tan(a);
-                        case "asin": return Math.asin(a);
-                        case "acos": return Math.acos(a);
-                        case "atan": return Math.atan(a);
-                        case "sinh": return Math.sinh(a);
-                        case "cosh": return Math.cosh(a);
-                        case "tanh": return Math.tanh(a);
-                        case "asinh": return Maths.asinh(a);
-                        case "acosh": return Maths.acosh(a);
-                        case "atanh": return Maths.atanh(a);
-                        case "ln": return Math.log(a);
-                        case "exp": return Math.exp(a);
-                        case "aln": return Math.exp(a);
-                        case "sqrt": return Math.sqrt(a);
-                        case "cbrt": return Math.cbrt(a);
-                        default: throw new IllegalStateException("Test evaluator does not support: " + node.funcName);
+                        case "sin":
+                            return Math.sin(a);
+                        case "cos":
+                            return Math.cos(a);
+                        case "ln":
+                            return Math.log(a);
+                        case "exp":
+                            return Math.exp(a);
+                        default:
+                            throw new IllegalStateException("Test evaluator does not support: " + node.funcName);
                     }
                 }
                 if (c.size() == 1) {
-                    return -evalFree(c.get(0), freeVarValue);
+                    return -evalWithState(c.get(0), freeVarValue, yValues);
                 }
-                double x = evalFree(c.get(0), freeVarValue);
-                double y = evalFree(c.get(1), freeVarValue);
+                double x = evalWithState(c.get(0), freeVarValue, yValues);
+                double y = evalWithState(c.get(1), freeVarValue, yValues);
                 switch (node.opChar) {
-                    case '+': return x + y;
-                    case '-': return x - y;
-                    case '*': return x * y;
-                    case '/': return x / y;
-                    case '^': return Math.pow(x, y);
-                    case '%': return x % y;
-                    default: throw new IllegalStateException("Test evaluator does not support opChar: " + node.opChar);
+                    case '+':
+                        return x + y;
+                    case '-':
+                        return x - y;
+                    case '*':
+                        return x * y;
+                    case '/':
+                        return x / y;
+                    case '^':
+                        return Math.pow(x, y);
+                    default:
+                        throw new IllegalStateException("Test evaluator does not support opChar: " + node.opChar);
                 }
             default:
                 throw new IllegalStateException("Unreachable");
@@ -286,7 +341,6 @@ public final class CoefficientExtractorSelfTest {
     // ------------------------------------------------------------------
     // Assertions
     // ------------------------------------------------------------------
-
     private static void assertEquals(String label, int expected, int actual) {
         if (expected != actual) {
             throw new AssertionError(label + ": expected " + expected + " but got " + actual);

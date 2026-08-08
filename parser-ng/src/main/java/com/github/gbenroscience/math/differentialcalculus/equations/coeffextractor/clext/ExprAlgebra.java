@@ -1,26 +1,9 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext;
- 
 
 import java.util.ArrayList;
 import java.util.List;
 
-/** 
- * @author GBEMIRO
+/**
  * Shared low-level tree operations used by both LinearFormExtractor (strict:
  * every term must be linear) and TopDerivativeExtractor (relaxed: only the
  * single term containing the highest-order state reference must be linear;
@@ -40,7 +23,7 @@ final class ExprAlgebra {
 
     static final class SignedTerm {
         final int sign;
-        final ExprNode node; 
+        final ExprNode node;
 
         SignedTerm(int sign, ExprNode node) {
             this.sign = sign;
@@ -182,6 +165,33 @@ final class ExprAlgebra {
     }
 
     // ------------------------------------------------------------------
+    // State-variable name consistency
+    // ------------------------------------------------------------------
+
+    /**
+     * Confirms every given state-variable leaf shares the same
+     * variableName, returning it (or null if the list is empty). Throws if
+     * more than one distinct name is found — an equation is expected to
+     * have exactly one dependent variable, so e.g. accidentally mixing
+     * y[2] and u[1] in the same equation is a real error worth catching
+     * here rather than letting it silently produce an undefined result.
+     */
+    static String requireSingleStateVariableName(List<ExprNode> stateLeaves) {
+        String name = null;
+        for (ExprNode leaf : stateLeaves) {
+            if (name == null) {
+                name = leaf.variableName;
+            } else if (!name.equals(leaf.variableName)) {
+                throw new IllegalArgumentException(
+                        "Equation references more than one distinct state-variable name ('" + name
+                        + "' and '" + leaf.variableName + "') — only one dependent variable is "
+                        + "supported per equation.");
+            }
+        }
+        return name;
+    }
+
+    // ------------------------------------------------------------------
     // Error-message rendering
     // ------------------------------------------------------------------
 
@@ -195,7 +205,7 @@ final class ExprAlgebra {
             return String.valueOf(node.numberValue);
         }
         if (node.kind == ExprNode.Kind.VARIABLE) {
-            return node.isStateVariable() ? "y[" + node.stateIndex + "]" : node.variableName;
+            return node.isStateVariable() ? node.variableName + "[" + node.stateIndex + "]" : node.variableName;
         }
         String op = node.funcName != null ? node.funcName : String.valueOf(node.opChar);
         StringBuilder sb = new StringBuilder(op).append('(');

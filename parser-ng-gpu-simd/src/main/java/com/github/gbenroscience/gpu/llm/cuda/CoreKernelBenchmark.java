@@ -591,25 +591,29 @@ public final class CoreKernelBenchmark {
         return out;
     }
 
+    /** B is [N, K] row-major -- matches the corrected f32_gemv kernel and GGUF's native Linear-weight layout. */
     private static float[] cpuF32Gemv(float[] a, float[] B, int K, int N) {
         float[] out = new float[N];
         for (int n = 0; n < N; n++) {
+            int rowOff = n * K;
             float acc = 0f;
             for (int k = 0; k < K; k++) {
-                acc += a[k] * B[k * N + n];
+                acc += a[k] * B[rowOff + k];
             }
             out[n] = acc;
         }
         return out;
     }
 
+    /** B is [N, K] row-major -- matches the corrected f32_gemm_tiled kernel. */
     private static float[] cpuF32GemmTiled(float[] A, float[] B, int T, int K, int N) {
         float[] out = new float[T * N];
         for (int t = 0; t < T; t++) {
             for (int n = 0; n < N; n++) {
+                int bRowOff = n * K;
                 float acc = 0f;
                 for (int k = 0; k < K; k++) {
-                    acc += A[t * K + k] * B[k * N + n];
+                    acc += A[t * K + k] * B[bRowOff + k];
                 }
                 out[t * N + n] = acc;
             }

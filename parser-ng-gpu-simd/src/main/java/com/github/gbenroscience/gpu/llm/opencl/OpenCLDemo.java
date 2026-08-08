@@ -43,7 +43,7 @@ public final class OpenCLDemo {
     public static void main(String[] args) throws Throwable {
         if (args.length == 0) {
             args = new String[]{"C:\\Users\\GBEMIRO\\Documents\\NetBeansProjects\\ai-models\\llama-3.2-1b-instruct-q8_0.gguf",
-                "What is 23*34?"};
+                "The capital of France is"};
         }
         if (args.length < 2) {
             System.err.println("Usage: OpenCLDemo <path-to-model.gguf> <prompt>");

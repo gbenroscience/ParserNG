@@ -514,6 +514,15 @@ public final class KernelSource {
             x[i] += y[i];
         }
 
+        // NOTE (fixed): B is [N, K] row-major -- N=out_features rows, K=in_features
+        // cols, matching GGUF's native Linear-weight layout (PyTorch dumps
+        // [out_features, in_features] as-is, no transpose on conversion).
+        // This now matches q8_0_gemv_plain's convention. The earlier version
+        // read B as [K, N] (B[k*N+n]) -- silently transposed for wo (where
+        // K==N==dim, so no shape check could ever catch it) and for the LM
+        // head (K=dim, N=vocab, still in-bounds, still wrong). See
+        // LlamaLayer's/this kernel's git history -- or ask the person who
+        // introduced this fix -- for the full derivation.
         __kernel void f32_gemv(
             __global const float* a,
             __global const float* B,
@@ -524,9 +533,10 @@ public final class KernelSource {
             const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
             if (n >= N) return;
 
+            const int rowOff = n * K;
             float acc = 0.0f;
             for (int k = 0; k < K; k++) {
-                acc += a[k] * B[k * N + n];
+                acc += a[k] * B[rowOff + k];
             }
             out[n] = acc;
         }
@@ -597,9 +607,11 @@ public final class KernelSource {
             out[t * N + n] = acc;
         }
 
+        // NOTE (fixed): B is [N, K] row-major, matching GGUF's native
+        // Linear-weight layout -- same fix and rationale as f32_gemv above.
         __kernel void f32_gemm_tiled(
             __global const float* A, // [T, K]
-            __global const float* B, // [K, N]
+            __global const float* B, // [N, K]
             __global float* out,     // [T, N]
             const int T,
             const int K,
@@ -609,9 +621,10 @@ public final class KernelSource {
             const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
             if (t >= T || n >= N) return;
 
+            const int bRowOff = n * K;
             float acc = 0.0f;
             for (int k = 0; k < K; k++) {
-                acc += A[t * K + k] * B[k * N + n];
+                acc += A[t * K + k] * B[bRowOff + k];
             }
             out[t * N + n] = acc;
         }
