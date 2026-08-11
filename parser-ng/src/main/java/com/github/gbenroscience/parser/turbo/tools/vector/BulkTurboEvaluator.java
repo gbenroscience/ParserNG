@@ -619,7 +619,7 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                             break;
                         case "acot_grad":
                         case "arc_cot_alt_grad":
-                            opcodes[instructionCount] = OP_ARC_COT_GRAD;
+                            opcodes[instructionCount] = OP_ARC_COT_ALT_GRAD;
                             break;
 
                         // Hyperbolic Functions

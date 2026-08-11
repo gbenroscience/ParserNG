@@ -467,7 +467,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         case "acot_deg", "arc_cot_alt_deg" ->
                             OP_ARC_COT_ALT_DEG;
                         case "acot_grad", "arc_cot_alt_grad" ->
-                            OP_ARC_COT_GRAD;
+                            OP_ARC_COT_ALT_GRAD;
 
                         // Hyperbolic Functions
                         case "sinh" ->

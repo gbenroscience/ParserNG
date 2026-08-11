@@ -1,4 +1,4 @@
-package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext;
+package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.old;
 
 import java.util.Arrays;
 import java.util.List;

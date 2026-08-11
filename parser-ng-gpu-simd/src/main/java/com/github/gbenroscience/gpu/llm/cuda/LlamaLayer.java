@@ -78,6 +78,11 @@ public final class LlamaLayer {
         public int max_seq = 4096;
         public double norm_eps = 1e-6;
         public double rope_theta = 10000.0;
+        /** Llama-3/3.1/3.2-style RoPE frequency scaling -- see com.github.gbenroscience.gpu.llm.opencl.LlamaLayer's Config for the full javadoc (identical here). Defaults are all no-ops. */
+        public double rope_scaling_factor = 1.0;
+        public double rope_scaling_low_freq_factor = 1.0;
+        public double rope_scaling_high_freq_factor = 4.0;
+        public double rope_scaling_orig_context_length = 8192.0;
 
         public ActivationType activationType = ActivationType.SWIGLU;
 
@@ -166,6 +171,10 @@ public final class LlamaLayer {
             cfg.max_seq = intMetadata(gguf, arch + ".context_length", cfg.max_seq);
             cfg.norm_eps = doubleMetadata(gguf, arch + ".attention.layer_norm_rms_epsilon", cfg.norm_eps);
             cfg.rope_theta = doubleMetadata(gguf, arch + ".rope.freq_base", cfg.rope_theta);
+            cfg.rope_scaling_factor = doubleMetadata(gguf, arch + ".rope.scaling.factor", cfg.rope_scaling_factor);
+            cfg.rope_scaling_low_freq_factor = doubleMetadata(gguf, arch + ".rope.scaling.low_freq_factor", cfg.rope_scaling_low_freq_factor);
+            cfg.rope_scaling_high_freq_factor = doubleMetadata(gguf, arch + ".rope.scaling.high_freq_factor", cfg.rope_scaling_high_freq_factor);
+            cfg.rope_scaling_orig_context_length = doubleMetadata(gguf, arch + ".rope.scaling.original_context_length", cfg.rope_scaling_orig_context_length);
 
             int keyLength = intMetadata(gguf, arch + ".attention.key_length", -1);
             cfg.head_dim = (keyLength > 0) ? keyLength : (cfg.dim / Math.max(cfg.num_heads, 1));
@@ -308,7 +317,7 @@ public final class LlamaLayer {
             int halfDim = cfg.head_dim / 2;
             float[] cosHost = new float[cfg.max_seq * halfDim];
             float[] sinHost = new float[cfg.max_seq * halfDim];
-            precomputeRope(cosHost, sinHost, cfg.max_seq, cfg.head_dim, cfg.rope_theta);
+            precomputeRope(cosHost, sinHost, cfg.max_seq, cfg.head_dim, cfg.rope_theta, cfg);
             this.cos_table = uploadFloats(ctx, cosHost);
             this.sin_table = uploadFloats(ctx, sinHost);
 
@@ -368,16 +377,37 @@ public final class LlamaLayer {
             return (len / 32) * 34;
         }
 
-        private static void precomputeRope(float[] cosOut, float[] sinOut, int maxSeq, int headDim, double base) {
+        private static void precomputeRope(float[] cosOut, float[] sinOut, int maxSeq, int headDim, double base, Config cfg) {
             int halfDim = headDim / 2;
             for (int p = 0; p < maxSeq; p++) {
                 for (int i = 0; i < halfDim; i++) {
                     double freq = 1.0 / Math.pow(base, (2.0 * i) / headDim);
+                    freq = applyRopeScaling(freq, cfg);
                     double angle = p * freq;
                     cosOut[p * halfDim + i] = (float) Math.cos(angle);
                     sinOut[p * halfDim + i] = (float) Math.sin(angle);
                 }
             }
+        }
+
+        /** Llama-3 NTK-by-parts RoPE frequency correction -- see com.github.gbenroscience.gpu.llm.opencl.LlamaLayer's identical method for the full derivation/javadoc. Identity when rope_scaling_factor==1.0. */
+        private static double applyRopeScaling(double freq, Config cfg) {
+            if (cfg.rope_scaling_factor == 1.0) {
+                return freq;
+            }
+            double lowFreqWavelen = cfg.rope_scaling_orig_context_length / cfg.rope_scaling_low_freq_factor;
+            double highFreqWavelen = cfg.rope_scaling_orig_context_length / cfg.rope_scaling_high_freq_factor;
+            double wavelen = 2.0 * Math.PI / freq;
+
+            if (wavelen < highFreqWavelen) {
+                return freq;
+            }
+            if (wavelen > lowFreqWavelen) {
+                return freq / cfg.rope_scaling_factor;
+            }
+            double smooth = (cfg.rope_scaling_orig_context_length / wavelen - cfg.rope_scaling_low_freq_factor)
+                    / (cfg.rope_scaling_high_freq_factor - cfg.rope_scaling_low_freq_factor);
+            return (1.0 - smooth) * (freq / cfg.rope_scaling_factor) + smooth * freq;
         }
 
         @Override

@@ -513,7 +513,7 @@ public class MathScanner {
     public void splitStringOnMethods_Variables_And_Operators() {
 
         Predicate<String> dynamicRules = word
-                -> (FunctionManager.isAnonymousFormat(word)) || word.startsWith("_");
+                -> (FunctionManager.isAnonymousFormat(word)) || word.startsWith("_") || isVariableString(word);
         Scanner csBuilder = new Scanner.Builder(scannerInput)
                 .includeTokens(true)
                 .ignoreWhitespace(false)
@@ -521,9 +521,12 @@ public class MathScanner {
                 .addTokens(VariableManager.VARIABLES.keySet().toArray(new String[0]))
                 .addTokens(Method.getAllFunctions())
                 .addTokens(operators)
+                .matchDynamicFirst(true)
+                .identifierPartExtra('[', ']')
                 .build();
 
         scanner = csBuilder.scan();
+     
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
 
@@ -1211,6 +1214,7 @@ public class MathScanner {
                     && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)) {
 
                 Variable v = VariableManager.lookUp(tk);
+                 
                 if (me != null) {
                     /**
                      * Do not use saveOrUpdate, so as not to overwrite the gains
@@ -1225,7 +1229,6 @@ public class MathScanner {
                      * registry.saveOrUpdate(v), it will overwrite the value of
                      * r stored in the assignment pass.
                      */
-
                     me.registry.saveIfNotExists(new Variable(tk, v == null ? 0 : v.getValue()));
                 } else {
                     if (v == null) {
@@ -1235,7 +1238,7 @@ public class MathScanner {
             }//end if
             else if (i == sz - 1 && Variable.isVariableString(tk) && !FunctionManager.containsAny(tk) && !Method.isDefinedMethod(tk)) {
                 Variable v = VariableManager.lookUp(tk);
-                if (me != null) {
+                if (me != null) { 
                     me.registry.saveIfNotExists(new Variable(tk, v == null ? 0 : v.getValue()));
                 } else {
                     if (v == null) {
@@ -1756,9 +1759,11 @@ public class MathScanner {
      * @param args Command line args (((2+3)^2))!-------((25))!-------
      */
     public static void main(String args[]) {//tester method for STRING methods
+     
 
         MathExpression msc = new MathExpression("diffeqn((3*x^2)*y[4]+(5*sin(x))*sin(y[3])+(5/x)*ln(y[2])-3*y[1]+3*x*y[0], 1, 0, @(1,3)(2,3,4))");
          System.out.println(msc.getExpression()+" -> "+msc.scanner);
+         System.out.println(msc.getExpression()+" -> "+Arrays.toString(msc.getCachedPostfix()));
         
         MathExpression orig = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
         System.out.println("f(3,4,2) = " + orig.solve());

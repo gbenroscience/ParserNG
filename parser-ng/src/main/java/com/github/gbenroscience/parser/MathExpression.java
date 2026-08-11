@@ -164,7 +164,6 @@ public class MathExpression implements Savable, Solvable {
     private String returnObjectName;
     public static final String SYNTAX_ERROR = "SYNTAX ERROR";
     
-    private MathExpression children[] = new MathExpression[0];
 
     /**
      *

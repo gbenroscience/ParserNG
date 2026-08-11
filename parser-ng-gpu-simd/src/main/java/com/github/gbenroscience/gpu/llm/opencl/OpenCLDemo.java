@@ -43,7 +43,7 @@ public final class OpenCLDemo {
     public static void main(String[] args) throws Throwable {
         if (args.length == 0) {
             args = new String[]{"C:\\Users\\GBEMIRO\\Documents\\NetBeansProjects\\ai-models\\llama-3.2-1b-instruct-q8_0.gguf",
-                "The capital of France is"};
+                "What is 23*34"};
         }
         if (args.length < 2) {
             System.err.println("Usage: OpenCLDemo <path-to-model.gguf> <prompt>");
@@ -95,8 +95,9 @@ OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.GpuVendor.INTEL);
                 finalNormGammaDevice, lmHeadDevice, tokenizer.vocabSize())) {
             System.out.println("Start OpenCL Llama Engine - Done!\n Populating engine config\n");
             LlamaOpenCLEngine.GenerationConfig genCfg = new LlamaOpenCLEngine.GenerationConfig();
-            genCfg.maxNewTokens = 256;
-            genCfg.sampler.temperature = 0.8f;
+            genCfg.maxNewTokens = 1;
+            genCfg.sampler.temperature = 0.0f;
+            //genCfg.sampler.temperature = 0.8f;
             genCfg.sampler.topK = 40;
             genCfg.sampler.topP = 0.95f;
             genCfg.sampler.repetitionPenalty = 1.1f;

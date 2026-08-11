@@ -111,6 +111,22 @@ public final class LlamaLayer {
         public int max_seq = 4096;
         public double norm_eps = 1e-6;
         public double rope_theta = 10000.0;
+        /**
+         * Llama-3/3.1/3.2-style RoPE frequency scaling (NTK-by-parts), read
+         * from "{arch}.rope.scaling.*" GGUF metadata when present. Defaults
+         * below are all no-ops (rope_scaling_factor=1.0 makes the
+         * correction in GpuState.applyRopeScaling an identity regardless of
+         * the other three values) -- a Llama-1/2-shaped GGUF with no such
+         * metadata gets plain RoPE exactly as before. See
+         * GpuState.applyRopeScaling's javadoc for the formula and why this
+         * matters even for short sequences (it's a per-DIMENSION frequency
+         * correction, not a per-position one -- it doesn't only kick in at
+         * long context).
+         */
+        public double rope_scaling_factor = 1.0;
+        public double rope_scaling_low_freq_factor = 1.0;
+        public double rope_scaling_high_freq_factor = 4.0;
+        public double rope_scaling_orig_context_length = 8192.0;
 
         public ActivationType activationType = ActivationType.SWIGLU;
 
@@ -153,6 +169,10 @@ public final class LlamaLayer {
             cfg.max_seq = intMetadata(gguf, arch + ".context_length", cfg.max_seq);
             cfg.norm_eps = doubleMetadata(gguf, arch + ".attention.layer_norm_rms_epsilon", cfg.norm_eps);
             cfg.rope_theta = doubleMetadata(gguf, arch + ".rope.freq_base", cfg.rope_theta);
+            cfg.rope_scaling_factor = doubleMetadata(gguf, arch + ".rope.scaling.factor", cfg.rope_scaling_factor);
+            cfg.rope_scaling_low_freq_factor = doubleMetadata(gguf, arch + ".rope.scaling.low_freq_factor", cfg.rope_scaling_low_freq_factor);
+            cfg.rope_scaling_high_freq_factor = doubleMetadata(gguf, arch + ".rope.scaling.high_freq_factor", cfg.rope_scaling_high_freq_factor);
+            cfg.rope_scaling_orig_context_length = doubleMetadata(gguf, arch + ".rope.scaling.original_context_length", cfg.rope_scaling_orig_context_length);
 
             int keyLength = intMetadata(gguf, arch + ".attention.key_length", -1);
             cfg.head_dim = (keyLength > 0) ? keyLength : (cfg.dim / Math.max(cfg.num_heads, 1));
@@ -290,7 +310,7 @@ public final class LlamaLayer {
             int halfDim = cfg.head_dim / 2;
             float[] cosHost = new float[cfg.max_seq * halfDim];
             float[] sinHost = new float[cfg.max_seq * halfDim];
-            precomputeRope(cosHost, sinHost, cfg.max_seq, cfg.head_dim, cfg.rope_theta);
+            precomputeRope(cosHost, sinHost, cfg.max_seq, cfg.head_dim, cfg.rope_theta, cfg);
             this.cos_table = uploadFloats(ctx, cosHost);
             this.sin_table = uploadFloats(ctx, sinHost);
 
@@ -350,16 +370,56 @@ public final class LlamaLayer {
             return (len / 32) * 34;
         }
 
-        private static void precomputeRope(float[] cosOut, float[] sinOut, int maxSeq, int headDim, double base) {
+        private static void precomputeRope(float[] cosOut, float[] sinOut, int maxSeq, int headDim, double base, Config cfg) {
             int halfDim = headDim / 2;
             for (int p = 0; p < maxSeq; p++) {
                 for (int i = 0; i < halfDim; i++) {
                     double freq = 1.0 / Math.pow(base, (2.0 * i) / headDim);
+                    freq = applyRopeScaling(freq, cfg);
                     double angle = p * freq;
                     cosOut[p * halfDim + i] = (float) Math.cos(angle);
                     sinOut[p * halfDim + i] = (float) Math.sin(angle);
                 }
             }
+        }
+
+        /**
+         * Llama-3/3.1/3.2 "NTK-by-parts" RoPE frequency correction (Meta's
+         * reference formula, from llama-models' apply_scaling): rescales
+         * EACH frequency dimension independently, based on its wavelength
+         * relative to the model's original (pre-extension) context length --
+         * high-frequency (short-wavelength) dimensions are left alone,
+         * low-frequency (long-wavelength) ones are divided by the scaling
+         * factor, and the dimensions in between get a smooth linear blend.
+         * This is a per-DIMENSION correction, computed once here independent
+         * of position p -- NOT a per-position long-context-only effect, so
+         * it changes attention behavior even for short prompts/generations,
+         * which is why skipping it can produce degenerate output (attention
+         * collapsing toward the model's unconditional token prior) well
+         * before you're anywhere near the original context length.
+         *
+         * Identity (returns freq unchanged) when rope_scaling_factor==1.0,
+         * regardless of the other three values -- the default for any GGUF
+         * without "{arch}.rope.scaling.*" metadata, i.e. every Llama-1/2-
+         * shaped model this engine also needs to keep working correctly.
+         */
+        private static double applyRopeScaling(double freq, Config cfg) {
+            if (cfg.rope_scaling_factor == 1.0) {
+                return freq;
+            }
+            double lowFreqWavelen = cfg.rope_scaling_orig_context_length / cfg.rope_scaling_low_freq_factor;
+            double highFreqWavelen = cfg.rope_scaling_orig_context_length / cfg.rope_scaling_high_freq_factor;
+            double wavelen = 2.0 * Math.PI / freq;
+
+            if (wavelen < highFreqWavelen) {
+                return freq;
+            }
+            if (wavelen > lowFreqWavelen) {
+                return freq / cfg.rope_scaling_factor;
+            }
+            double smooth = (cfg.rope_scaling_orig_context_length / wavelen - cfg.rope_scaling_low_freq_factor)
+                    / (cfg.rope_scaling_high_freq_factor - cfg.rope_scaling_low_freq_factor);
+            return (1.0 - smooth) * (freq / cfg.rope_scaling_factor) + smooth * freq;
         }
 
         @Override
