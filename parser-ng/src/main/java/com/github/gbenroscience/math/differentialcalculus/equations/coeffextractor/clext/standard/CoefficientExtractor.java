@@ -2,7 +2,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
 
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNodeCompiler;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.ResolvedEquation;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.EquationDivider; 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.EquationDivider; 
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
 import com.github.gbenroscience.parser.MathExpression.Token;
 

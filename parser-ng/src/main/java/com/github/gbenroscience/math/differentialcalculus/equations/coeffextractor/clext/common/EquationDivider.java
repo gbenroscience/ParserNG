@@ -1,4 +1,4 @@
-package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor;
+package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common;
 
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNode;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.TokenTreeBuilder;

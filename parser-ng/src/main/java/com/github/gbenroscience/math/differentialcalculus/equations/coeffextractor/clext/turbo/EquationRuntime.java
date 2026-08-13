@@ -20,7 +20,7 @@ import com.github.gbenroscience.math.differentialcalculus.equations.coeffextract
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnArgParser;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnCall;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PostfixArgumentIsolator;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.DifferentialEquations;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.HigherOrderODE;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.TurboODE;

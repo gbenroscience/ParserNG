@@ -20,7 +20,6 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
  * @author GBEMIRO
  */ 
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.DifferentialEquations;
 
 /**

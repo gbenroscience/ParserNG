@@ -1,6 +1,6 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
 import java.lang.invoke.MethodHandle;
 
 /**

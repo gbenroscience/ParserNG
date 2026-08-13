@@ -1,6 +1,5 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common;
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.DifferentialEquations;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression.Token;

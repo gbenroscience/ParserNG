@@ -8,7 +8,7 @@ import com.github.gbenroscience.math.differentialcalculus.equations.coeffextract
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnArgParser;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnCall;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PostfixArgumentIsolator;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.DifferentialEquations;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.HigherOrderODE;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
