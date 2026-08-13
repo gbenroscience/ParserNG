@@ -3,6 +3,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
 import com.github.gbenroscience.parser.MathExpression.Token;
 
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -140,7 +141,7 @@ public final class TokenTreeBuilder {
             }
             requireStackSize(stack, 1, "unary '-'");
             ExprNode operand = stack.pop();
-            return ExprNode.op('-', List.of(operand));
+            return ExprNode.op('-', Arrays.asList(operand));
         }
 
         if (t.opChar != '+' && t.opChar != '-' && t.opChar != '*' && t.opChar != '/' && t.opChar != '^') {
@@ -152,7 +153,7 @@ public final class TokenTreeBuilder {
         requireStackSize(stack, 2, "binary '" + t.opChar + "'");
         ExprNode b = stack.pop();
         ExprNode a = stack.pop();
-        return ExprNode.op(t.opChar, List.of(a, b));
+        return ExprNode.op(t.opChar, Arrays.asList(a, b));
     }
 
     private static ExprNode buildFunctionCall(Token t, Deque<ExprNode> stack) {
@@ -161,7 +162,7 @@ public final class TokenTreeBuilder {
         for (int i = t.arity - 1; i >= 0; i--) {
             args[i] = stack.pop();
         }
-        return ExprNode.func(t.name, List.of(args));
+        return ExprNode.func(t.name,  Arrays.asList(args));
     }
 
     private static void requireStackSize(Deque<ExprNode> stack, int needed, String label) {

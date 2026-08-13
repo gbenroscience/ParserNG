@@ -92,8 +92,8 @@ public final class CoefficientExtractor {
         ExprNode topCoefficientSum = sumSigned(topTerms);
         ExprNode remainderSum = sumSigned(remainderTerms);
         ExprNode negatedRemainder = remainderSum == null
-                ? ExprNode.number(0.0) : ExprNode.op('-', List.of(remainderSum));
-        ExprNode divided = ExprNode.op('/', List.of(negatedRemainder, topCoefficientSum));
+                ? ExprNode.number(0.0) : ExprNode.op('-', Arrays.asList(remainderSum));
+        ExprNode divided = ExprNode.op('/', Arrays.asList(negatedRemainder, topCoefficientSum));
 
         int[] canonicalToReal = buildCanonicalToReal(root, order);
         int realFrameSize = computeRealFrameSize(canonicalToReal);
@@ -137,7 +137,7 @@ public final class CoefficientExtractor {
     }
 
     private static ExprNode signed(ExprNode term, boolean negative) {
-        return negative ? ExprNode.op('-', List.of(term)) : term;
+        return negative ? ExprNode.op('-', Arrays.asList(term)) : term;
     }
 
     private static ExprNode sumSigned(List<ExprNode> terms) {
@@ -146,7 +146,7 @@ public final class CoefficientExtractor {
         }
         ExprNode acc = terms.get(0);
         for (int i = 1; i < terms.size(); i++) {
-            acc = ExprNode.op('+', List.of(acc, terms.get(i)));
+            acc = ExprNode.op('+', Arrays.asList(acc, terms.get(i)));
         }
         return acc;
     }
@@ -215,11 +215,11 @@ public final class CoefficientExtractor {
             }
             if (leftHas) {
                 ExprNode newLeft = substituteIfLinear(left, stateIndex);
-                return newLeft == null ? null : ExprNode.op('*', List.of(newLeft, right));
+                return newLeft == null ? null : ExprNode.op('*', Arrays.asList(newLeft, right));
             }
             if (rightHas) {
                 ExprNode newRight = substituteIfLinear(right, stateIndex);
-                return newRight == null ? null : ExprNode.op('*', List.of(left, newRight));
+                return newRight == null ? null : ExprNode.op('*', Arrays.asList(left, newRight));
             }
             return node;
         }
@@ -231,7 +231,7 @@ public final class CoefficientExtractor {
             }
             if (countStateOccurrences(numerator, stateIndex) > 0) {
                 ExprNode newNumerator = substituteIfLinear(numerator, stateIndex);
-                return newNumerator == null ? null : ExprNode.op('/', List.of(newNumerator, denominator));
+                return newNumerator == null ? null : ExprNode.op('/', Arrays.asList(newNumerator, denominator));
             }
             return node;
         }
@@ -244,7 +244,7 @@ public final class CoefficientExtractor {
                 return node;
             }
             ExprNode newChild = substituteIfLinear(child, stateIndex);
-            return newChild == null ? null : ExprNode.op('-', List.of(newChild));
+            return newChild == null ? null : ExprNode.op('-', Arrays.asList(newChild));
         }
         // Any other operator (binary '+', binary '-', '^') -- if the target
         // state variable is anywhere underneath, the path is disqualified;
