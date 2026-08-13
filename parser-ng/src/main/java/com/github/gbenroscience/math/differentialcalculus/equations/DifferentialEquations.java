@@ -36,10 +36,9 @@ public class DifferentialEquations {
     private static final double DP_B51 = 35.0 / 384.0, DP_B53 = 500.0 / 1113.0, DP_B54 = 125.0 / 192.0,
             DP_B55 = -2187.0 / 6784.0, DP_B56 = 11.0 / 84.0;
 
-    // 4th Order Weights
+    // 4th Order Weights 
     private static final double DP_B41 = 5179.0 / 57600.0, DP_B43 = 7571.0 / 16695.0, DP_B44 = 393.0 / 640.0,
-            DP_B45 = -212666291.0 / 524700000.0, DP_B46 = 187.0 / 2100.0, DP_B47 = 1.0 / 40.0;
-
+            DP_B45 = -92097.0 / 339200.0, DP_B46 = 187.0 / 2100.0, DP_B47 = 1.0 / 40.0;
     // Nodes (Time fractions)
     private static final double DP_C2 = 1.0 / 5.0, DP_C3 = 3.0 / 10.0, DP_C4 = 4.0 / 5.0,
             DP_C5 = 8.0 / 9.0, DP_C6 = 1.0;
