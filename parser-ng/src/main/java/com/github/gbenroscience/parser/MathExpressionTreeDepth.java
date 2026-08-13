@@ -37,7 +37,16 @@ import java.util.regex.Pattern;
  * written as 'Р' (Cyrillic Er, U+0420) and 'Č' (U+010C) respectively, e.g.
  * "9Р3" and "6Č5" — same precedence tier as '*' and '/' - Functions with any number of arguments
  * (e.g., sin(x), max(a, b, c+ d)) - Parentheses for grouping AND for
- * comma-separated literal lists, e.g. matrix data "(3,1,4,7)" - Derivative
+ * comma-separated literal lists, e.g. matrix data "(3,1,4,7)" - Implicit
+ * multiplication where a number, ')', identifier, '(', '@', or '√' is
+ * juxtaposed directly against a following identifier, '(', '@', or '√'
+ * with no explicit operator between them, e.g. "3t" == "3*t", "5sin(4)"
+ * == "5*sin(4)", "3(x+1)" == "3*(x+1)", "(x+1)(x-1)" == "(x+1)*(x-1)" —
+ * matching ParserNG's own lenient grammar downstream, at the same
+ * precedence tier as an explicit '*'; deliberately NOT extended to two
+ * bare numbers ("1 2" is still rejected, not read as "1*2") or to any
+ * identifier that could be read as the OR/AND keyword ("3ORx" is still
+ * rejected, not read as "3*ORx") - Derivative
  * index notation "name[n]" (n a non-negative integer literal), e.g. "y[3]"
  * for y'''(x) — recognized ONLY directly inside a call to one of the four
  * differential-equation functions diffeqn / diffeqnPath / diffeqnHO /
@@ -322,6 +331,56 @@ public class MathExpressionTreeDepth implements Savable {
     }
 
     /**
+     * True if {@code c} begins a new primary/unary term reachable with no
+     * explicit operator in between — the trigger for ParserNG's implicit-
+     * multiplication leniency, e.g. {@code "3t"} == {@code "3*t"} and
+     * {@code "5sin(4)"} == {@code "5*sin(4)"}. Applied only from {@link
+     * #parseMultiplicative()}, at exactly the same precedence tier as an
+     * explicit {@code *}, so it composes correctly with every other
+     * operator (e.g. {@code "2+3t"} is {@code 2+(3*t)}, not
+     * {@code (2+3)*t}, matching standard math convention).
+     *
+     * <p>Deliberately conservative in two ways:</p>
+     * <ul>
+     *   <li>A bare digit/{@code '.'} is NOT a trigger, so {@code "1 2"} is
+     *       still rejected as a likely missing operator — exactly as this
+     *       class's own bundled tests document — rather than silently read
+     *       as {@code "1*2"}.</li>
+     *   <li>An identifier that could be read as the textual {@code OR}/
+     *       {@code AND} keyword is excluded via {@link #looksLikeOrAndPrefix()},
+     *       so {@code "3ORx"} remains rejected as "ambiguous run-together
+     *       text" exactly as before, rather than newly guessed at as
+     *       {@code "3*ORx"}.</li>
+     * </ul>
+     */
+    private boolean isImplicitMultiplicationTrigger(char c) {
+        if (c == '(' || c == '@' || c == ROOT_CHAR) {
+            return true;
+        }
+        if (Character.isLetter(c) && !isReservedOperatorChar(c)) {
+            return !looksLikeOrAndPrefix();
+        }
+        return false;
+    }
+
+    /**
+     * True if the next up to three characters, case-insensitively, could be
+     * read as the start of the {@code OR}/{@code AND} textual keyword —
+     * regardless of whether a clean word boundary follows. Deliberately
+     * broader than {@link #matchesWord(String)} (which requires a real word
+     * boundary): this is a leniency-suppression guard, not a keyword match,
+     * so it errs toward rejecting the ambiguous case (an identifier like
+     * "Orbit" or "Andrew" directly after a number with no operator, e.g.
+     * "3Orbit") rather than guessing — consistent with this class's
+     * existing "reject rather than guess" philosophy for run-together text.
+     */
+    private boolean looksLikeOrAndPrefix() {
+        int remaining = expr.length() - pos;
+        String upcoming = expr.substring(pos, pos + Math.min(3, remaining)).toUpperCase();
+        return upcoming.startsWith("OR") || upcoming.startsWith("AND");
+    }
+
+    /**
      * The four differential-equation function names for which the
      * {@code name[n]} derivative-index notation (see {@link #diffEqDepth})
      * is recognized inside their argument list.
@@ -466,6 +525,14 @@ public class MathExpressionTreeDepth implements Savable {
                 }
                 int rightDepth = parseUnary();
                 // 1 slot for the left side, plus the right side's requirement
+                maxDepth = Math.max(maxDepth, 1 + rightDepth);
+            } else if (isImplicitMultiplicationTrigger(c)) {
+                // No operator token to consume here -- e.g. "3t" or "5sin(4)"
+                // -- treated exactly like an explicit '*' at this same
+                // precedence tier. See isImplicitMultiplicationTrigger's
+                // javadoc for what is (and deliberately is not) recognized.
+                binaryOpCount++;
+                int rightDepth = parseUnary();
                 maxDepth = Math.max(maxDepth, 1 + rightDepth);
             } else {
                 break;
@@ -1060,7 +1127,15 @@ public class MathExpressionTreeDepth implements Savable {
             "9\u04203",                          // "9Р3" -- nPr permutation
             "6\u010C5",                          // "6Č5" -- nCr combination
             "5! + 9\u04203 + 6\u010C5",           // the reported crashing expression
-            "(a+b)\u0420(c-d) * 2\u010C1"        // combinatoric operators combined with grouping/multiplication
+            "(a+b)\u0420(c-d) * 2\u010C1",       // combinatoric operators combined with grouping/multiplication
+            "3t",                                 // implicit multiplication: "3t" == "3*t"
+            "5sin(4)",                             // implicit multiplication: "5sin(4)" == "5*sin(4)"
+            "3(x+1)",                              // implicit multiplication: number juxtaposed with a group
+            "(x+1)(x-1)",                          // implicit multiplication between two parenthesized groups
+            "2\u221A9",                            // implicit multiplication: number juxtaposed with '√'
+            "diffeqnHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 0, y0, 20, 0.01, rk4)",
+            "diffeqnHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 0, @(1,5)(1, 0, 0, 0, 0), 20, 0.01, rk4)"
+            // the equation from the reported crash, now accepted via implicit multiplication
         };
 
         for (String s : tests) {

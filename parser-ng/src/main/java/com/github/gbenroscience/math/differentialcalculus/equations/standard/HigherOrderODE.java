@@ -1,5 +1,7 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
+import java.util.Arrays;
+
 /**
  * Higher-order equation entry points — the ParserNG runtime targets for
  * diffeqnHO(...) and diffeqnPathHO(...).
@@ -83,7 +85,7 @@ public class HigherOrderODE {
 
         double[] finalState = VectorODE.executeVectorODE(
                 companion, tSlot, ySlotStart, frameSize, t0, y0, tEnd, initialStep, method, jacobianStrategy);
-
+  
         return finalState[0]; // y(tEnd); finalState[1..] hold y', y'', ... if ever needed
     }
 
@@ -155,10 +157,13 @@ public class HigherOrderODE {
         double[][] fullHistory = VectorODE.executeVectorODEPath(
                 companion, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, jacobianStrategy);
 
-        double[][] path = new double[fullHistory.length][2];
+        double[][] path = new double[fullHistory.length][5];
         for (int i = 0; i < fullHistory.length; i++) {
             path[i][0] = fullHistory[i][0]; // t
-            path[i][1] = fullHistory[i][1]; // y (state component 0)
+            path[i][1] = fullHistory[i][1]; // y (state component 1)
+            path[i][2] = fullHistory[i][2]; // y (state component 2)
+            path[i][3] = fullHistory[i][3]; // y (state component 3)
+            path[i][4] = fullHistory[i][4]; // y (state component 4)
         }
         return path;
     }

@@ -1,5 +1,10 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.STRING;
+import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
+import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import java.util.List;
 
 /**
@@ -187,5 +192,101 @@ public final class ExprNode {
      */
     public boolean isFunctionCall() {
         return kind == Kind.OP && funcName != null;
+    }
+
+    public String toExpressionString() {
+        return print(this, 0);
+    }
+
+    private static String print(ExprNode node, int parentPrec) {
+        switch (node.kind) {
+            case NUMBER:
+                return formatNumber(node.numberValue);
+
+            case VARIABLE:
+                return node.isStateVariable()
+                        ? node.variableName + "[" + node.stateIndex + "]"
+                        : node.variableName;
+            case OP:
+                if (node.funcName != null) {
+                    StringBuilder sb = new StringBuilder(node.funcName).append('(');
+                    for (int i = 0; i < node.children.size(); i++) {
+                        if (i > 0) {
+                            sb.append(", ");
+                        }
+                        sb.append(print(node.children.get(i), 0));
+                    }
+                    return sb.append(')').toString();
+                }
+
+                // Unary negation: single child, no funcName.
+                if (node.children.size() == 1) {
+                    int unaryPrec = 4;
+                    String s = "-" + print(node.children.get(0), unaryPrec);
+                    return unaryPrec < parentPrec ? "(" + s + ")" : s;
+                }
+
+                // Binary op.
+                int prec = precedence(node.opChar);
+                String left = print(node.children.get(0), prec);
+                // prec + 1 on the right forces parens for non-associative cases
+                // like a - (b - c) or a / (b / c); harmless extra parens on +/*.
+                String right = print(node.children.get(1), prec + 1);
+                String s = left + " " + node.opChar + " " + right;
+                return prec < parentPrec ? "(" + s + ")" : s;
+
+            default:
+                throw new IllegalStateException("Unhandled kind: " + node.kind);
+        }
+    }
+
+    private static int precedence(char op) {
+        switch (op) {
+            case '+':
+            case '-':
+                return 1;
+            case '*':
+            case '/':
+            case '%':
+                return 2;
+            case '^':
+                return 3;
+            default:
+                throw new IllegalArgumentException("Unknown op: " + op);
+        }
+    }
+
+    private static String formatNumber(double v) {
+        if (v == Math.rint(v) && !Double.isInfinite(v)) {
+            return Long.toString((long) v);
+        }
+        return Double.toString(v);
+    }
+
+    public static ODEFunction compileStandard(MathExpression me) {  
+        MathExpression.Slot[] slots = me.getSlotItems();
+        return (vars, out) -> {
+            for (MathExpression.Slot s : slots) {
+                me.updateSlot(s.getSlot(), vars[s.getSlot()]);
+            }
+            out[0] = me.solveGeneric().scalar;
+        };
+
+        /**
+         * return (vars, out) -> out[0] =
+         * me.solveGeneric(vars).scalar;//expression, vars,
+         * independentVariableName, tSlot, ySlotStart);
+         */
+    }
+
+    public static ODEFunction compileTurbo(MathExpression me) throws Throwable {  
+        MathExpression.Slot[] slots = me.getSlotItems();
+        FastCompositeExpression fce = new ScalarTurboEvaluator1(me).compile();
+        return (vars, out) -> {
+            for (MathExpression.Slot s : slots) {
+                me.updateSlot(s.getSlot(), vars[s.getSlot()]);
+            }
+            out[0] = fce.applyScalar(me.getExecutionFrame());
+        };
     }
 }

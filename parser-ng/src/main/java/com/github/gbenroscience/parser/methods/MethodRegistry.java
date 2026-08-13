@@ -571,6 +571,19 @@ public class MethodRegistry {
             }
         });
 
+        registerMethod(Declarations.DIFF_EQN_PATH, (ctx, arity, args) -> {
+            return ctx.wrap(Double.NaN);
+        });
+        registerMethod(Declarations.DIFF_EQN_HO, (ctx, arity, args) -> {
+            return ctx.wrap(Double.NaN);
+        });
+        registerMethod(Declarations.DIFF_EQN_PATH_HO, (ctx, arity, args) -> {
+            return ctx.wrap(Double.NaN);
+        });
+        registerMethod(Declarations.DIFF_EQN_HO, (ctx, arity, args) -> {
+            return ctx.wrap(Double.NaN);
+        });
+
         registerMethod(Declarations.ROTOR, (ctx, arity, args) -> {
 
             int sz = args.length;
@@ -761,7 +774,7 @@ public class MethodRegistry {
         });
 
         registerMethod(Declarations.IF, (ctx, arity, args) -> {//if(x > 0.5, x * 2, 0)
-     //       System.out.println("METHOD-NAME - IF, args - " + Arrays.deepToString(args) + ", arity = " + arity);
+            //       System.out.println("METHOD-NAME - IF, args - " + Arrays.deepToString(args) + ", arity = " + arity);
 //            for (MathExpression.EvalResult e : args) {
 //                if (e.type == MathExpression.EvalResult.TYPE_BOOLEAN) {
 //                    System.out.println(e.boolVal);

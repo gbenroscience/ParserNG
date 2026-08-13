@@ -70,6 +70,8 @@ public final class AnalyticJacobian {
     /**
      * Fills outJacobian[i][j] = d f_i / d y_j, evaluated at the given frame.
      * outJacobian must already be allocated as systemSize x systemSize.
+     * @param frame
+     * @param outJacobian
      */
     public void compute(double[] frame, double[][] outJacobian) {
         int n = componentEvaluators.length;

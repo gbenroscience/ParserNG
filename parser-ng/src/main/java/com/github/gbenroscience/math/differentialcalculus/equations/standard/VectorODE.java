@@ -169,7 +169,7 @@ public class VectorODE {
                 naturallyUniform = true;
                 break;
             }
-            case RK45_DORMAND_PRINCE: {
+            case RK45_DORMAND_PRINCE: { 
                 history = DifferentialEquations.stepRK45AdaptiveWithHistory(
                         dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, h);
                 naturallyUniform = false; // accepted steps are irregularly spaced
