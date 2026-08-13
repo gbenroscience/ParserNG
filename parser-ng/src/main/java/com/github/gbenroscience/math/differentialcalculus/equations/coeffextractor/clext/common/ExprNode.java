@@ -1,4 +1,4 @@
-package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext;
+package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common;
 
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
 import com.github.gbenroscience.parser.MathExpression;

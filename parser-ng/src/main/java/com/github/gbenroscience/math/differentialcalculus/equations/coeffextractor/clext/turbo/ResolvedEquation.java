@@ -17,7 +17,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
 
  
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNode;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ExprNode;
 import java.lang.invoke.MethodHandle;
 
 /**

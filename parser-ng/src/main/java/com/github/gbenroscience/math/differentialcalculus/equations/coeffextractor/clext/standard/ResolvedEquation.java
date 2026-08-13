@@ -19,7 +19,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
  *
  * @author GBEMIRO
  */
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNode;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ExprNode;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
 
 /**

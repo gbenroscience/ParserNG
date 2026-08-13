@@ -15,7 +15,7 @@
  */
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo;
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNodeCompiler;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ExprNodeCompiler;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.EquationDivider;
 import com.github.gbenroscience.parser.MathExpression.Token;
 

@@ -11,7 +11,7 @@ import com.github.gbenroscience.interfaces.Solvable;
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.math.Main;
 import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.EquationRuntime;
+import com.github.gbenroscience.math.differentialcalculus.equations.standard.EquationRuntime;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import static com.github.gbenroscience.parser.Number.fastParseDouble;
 import static com.github.gbenroscience.parser.Number.isNumber;

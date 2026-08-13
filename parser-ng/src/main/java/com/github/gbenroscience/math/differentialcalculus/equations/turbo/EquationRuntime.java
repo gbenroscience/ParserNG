@@ -13,14 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo;
+package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
  
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNodeAutoDiffEvaluator;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ExprNodeAutoDiffEvaluator;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.CanonicalFrame;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnArgParser;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnCall;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PostfixArgumentIsolator;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.CoefficientExtractor;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.EquationCoefficientResolver;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.FrameRemapper;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.ResolvedEquation;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.DifferentialEquations;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.HigherOrderODE;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.TurboODE;

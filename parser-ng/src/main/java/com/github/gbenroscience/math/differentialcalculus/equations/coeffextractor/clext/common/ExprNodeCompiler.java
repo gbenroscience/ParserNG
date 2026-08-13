@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext;
+package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common;
 
 /**
  *
@@ -21,7 +21,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
  */
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
 import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.EquationRuntime;
+import com.github.gbenroscience.math.differentialcalculus.equations.standard.EquationRuntime;
 import com.github.gbenroscience.parser.MathExpression;
 
 import java.lang.invoke.MethodHandle;

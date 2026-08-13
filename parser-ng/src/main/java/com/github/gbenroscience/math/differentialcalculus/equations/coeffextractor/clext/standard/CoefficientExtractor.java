@@ -1,6 +1,6 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard;
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNodeCompiler;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ExprNodeCompiler;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.ResolvedEquation;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.EquationDivider; 
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;

@@ -1,7 +1,5 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common;
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNode;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.TokenTreeBuilder;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.CanonicalFrame;
 import com.github.gbenroscience.parser.MathExpression.Token;
 
