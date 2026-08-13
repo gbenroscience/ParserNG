@@ -85,6 +85,7 @@ public final class DiffEqnArgParser {
      *                        token alone, so y0 can be isolated as its own
      *                        real {@code Token} (see class javadoc) rather
      *                        than re-parsed from text.
+     * @return 
      */
     public static DiffEqnCall parse(Token[] fullCallPostfix) {
         Token callToken = fullCallPostfix[fullCallPostfix.length - 1];
@@ -103,13 +104,13 @@ public final class DiffEqnArgParser {
         double tEnd = parseDouble(raw[3], "tEnd");
         System.out.println("args: "+Arrays.toString(raw));
 
-        double h = raw.length > 4 && !raw[4].isBlank() ? parseDouble(raw[4], "h") : DEFAULT_H;
-        DifferentialEquations.ODESolverMethod method = raw.length > 5 && !raw[5].isBlank()
+        double h = raw.length > 4 && !raw[4].isEmpty()? parseDouble(raw[4], "h") : DEFAULT_H;
+        DifferentialEquations.ODESolverMethod method = raw.length > 5 && !raw[5].isEmpty()
                 ? parseMethod(raw[5]) : DEFAULT_METHOD;
 
         int points = -1;
         boolean pathVariant = kind == DiffEqnCall.Kind.DIFFEQN_PATH || kind == DiffEqnCall.Kind.DIFFEQN_PATH_HO;
-        if (pathVariant && raw.length > 6 && !raw[6].isBlank()) {
+        if (pathVariant && raw.length > 6 && !raw[6].isEmpty()) {
             points = (int) parseDouble(raw[6], "points");
         }
 
@@ -168,7 +169,7 @@ public final class DiffEqnArgParser {
         String[] parts = inner.split(",");
         List<Double> values = new ArrayList<>(parts.length);
         for (String part : parts) {
-            if (!part.isBlank()) {
+            if (!part.isEmpty()) {
                 values.add(parseDouble(part, "y0 component"));
             }
         }
