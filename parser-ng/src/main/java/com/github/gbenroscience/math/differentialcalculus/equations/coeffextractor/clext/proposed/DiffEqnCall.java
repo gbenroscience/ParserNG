@@ -20,6 +20,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
  * @author GBEMIRO
  */ 
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.DifferentialEquations;
 
 /**
@@ -47,12 +48,12 @@ public final class DiffEqnCall {
     public final double tEnd;
     /** Step size (fixed methods) or initial step (rk45); {@link DiffEqnArgParser#DEFAULT_H} if omitted. */
     public final double h;
-    public final DifferentialEquations.ODESolverMethod method;
+    public final ODESolverMethod method;
     /** Only meaningful for the *_PATH kinds; <= 0 means "solver's natural steps, no resampling". */
     public final int points;
 
     public DiffEqnCall(Kind kind, String rhsRawText, double t0, double[] y0, double tEnd,
-                        double h, DifferentialEquations.ODESolverMethod method, int points) {
+                        double h, ODESolverMethod method, int points) {
         this.kind = kind;
         this.rhsRawText = rhsRawText;
         this.t0 = t0;

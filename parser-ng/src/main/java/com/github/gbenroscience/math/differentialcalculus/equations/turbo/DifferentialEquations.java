@@ -1,4 +1,4 @@
-package com.github.gbenroscience.math.differentialcalculus.equations;
+package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodType;

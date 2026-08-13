@@ -11,6 +11,7 @@ import com.github.gbenroscience.interfaces.Solvable;
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.math.Main;
 import com.github.gbenroscience.math.Maths;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.EquationRuntime;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import static com.github.gbenroscience.parser.Number.fastParseDouble;
 import static com.github.gbenroscience.parser.Number.isNumber;
@@ -1910,6 +1911,8 @@ public class MathExpression implements Savable, Solvable {
         private final EvalResult[] stack;
         private final EvalResult[][] argCache;
 
+        private boolean isDiffEqn;
+
         public ExpressionSolver clone() {
             ExpressionSolver e = new ExpressionSolver();
             for (int i = 0; i < stack.length; i++) {
@@ -1926,10 +1929,13 @@ public class MathExpression implements Savable, Solvable {
         }
 
         public ExpressionSolver() {
+
             // Allocate stack ONCE, with sufficient capacity
             // Max stack depth is usually cachedPostfix.length, but we pad for safety
             int maxStackDepth = Math.max(cachedPostfix.length * 2, 256);
             this.stack = new EvalResult[maxStackDepth];
+
+          
 
             // CRITICAL: Initialize all stack slots with EvalResult objects
             for (int i = 0; i < stack.length; i++) {
@@ -1944,9 +1950,31 @@ public class MathExpression implements Savable, Solvable {
                     argCache[i][j] = new EvalResult();  // Initialize
                 }
             }
+            
+              int len = cachedPostfix.length;
+            if (len > 0) {
+                Token last = cachedPostfix[cachedPostfix.length - 1];
+                if (last != null && Method.isSupportedDiffEqnMethod(last.name)) {
+                    isDiffEqn = true; 
+                }
+            }
         }
 
         public EvalResult evaluate() {
+
+            if (isDiffEqn) {
+                Object o = EquationRuntime.solve(MathExpression.this);
+                EvalResult out = getNextResult();
+                if (o instanceof double[][]) {
+                    out.wrap(new Matrix((double[][]) o));
+                } else if (o instanceof  double[]) {
+                    out.wrap((double[]) o);
+                } else{ 
+                    out.wrap((double) o);
+                }
+                return out;
+            }
+
             // Just use the pre-allocated stack - no allocation per call
             int ptr = -1;
 

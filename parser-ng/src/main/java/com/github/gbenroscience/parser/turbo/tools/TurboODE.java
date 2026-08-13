@@ -15,7 +15,7 @@
  */
 package com.github.gbenroscience.parser.turbo.tools;
  
-import com.github.gbenroscience.math.differentialcalculus.equations.DifferentialEquations;
+import com.github.gbenroscience.math.differentialcalculus.equations.turbo.DifferentialEquations;
 import java.lang.invoke.MethodHandle;
 
 

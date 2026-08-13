@@ -18,7 +18,7 @@ package com.github.gbenroscience.parser.turbo.tools;
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
-import com.github.gbenroscience.math.differentialcalculus.equations.DifferentialEquations;
+import com.github.gbenroscience.math.differentialcalculus.equations.turbo.DifferentialEquations;
 import com.github.gbenroscience.math.geom.Direction;
 import com.github.gbenroscience.math.geom.Line3D;
 import com.github.gbenroscience.math.geom.Point;

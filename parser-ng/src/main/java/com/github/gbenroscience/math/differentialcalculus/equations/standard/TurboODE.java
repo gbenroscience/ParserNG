@@ -1,5 +1,7 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
+
 /**
  * Scalar "Turbo" entry points over the vectorized ODE solvers — the ParserNG
  * runtime targets for the diffeqn(...) and diffeqnPath(...) functional forms.
@@ -35,7 +37,7 @@ public class TurboODE {
             double y0,
             double tEnd,
             double initialStep,
-            DifferentialEquations.ODESolverMethod method) {
+            ODESolverMethod method) {
         return executeTurboODE(dy_dt, tSlot, ySlot, frameSize, t0, y0, tEnd, initialStep, method, null);
     }
 
@@ -65,7 +67,7 @@ public class TurboODE {
             double y0,
             double tEnd,
             double initialStep,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             DifferentialEquations.JacobianStrategy jacobianStrategy) {
 
         if (initialStep <= 0.0) {
@@ -121,7 +123,7 @@ public class TurboODE {
             double y0,
             double tEnd,
             double h,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             int points) {
         return executeTurboODEPath(dy_dt, tSlot, ySlot, frameSize, t0, y0, tEnd, h, method, points, null);
     }
@@ -155,7 +157,7 @@ public class TurboODE {
             double y0,
             double tEnd,
             double h,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             int points,
             DifferentialEquations.JacobianStrategy jacobianStrategy) {
 

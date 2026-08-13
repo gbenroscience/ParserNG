@@ -36,12 +36,7 @@ public class DifferentialEquations {
     private static final double DP_C2 = 1.0 / 5.0, DP_C3 = 3.0 / 10.0, DP_C4 = 4.0 / 5.0,
             DP_C5 = 8.0 / 9.0, DP_C6 = 1.0;
 
-    public enum ODESolverMethod {
-        EULER, // Fast, O(h) error. Best for real-time graphics/particles.
-        RK4, // Classical 4th Order fixed-step system workhorse.
-        RK45_DORMAND_PRINCE,// Adaptive-step size system engine (Industry standard).
-        IMPLICIT_EULER      // Backwards implicit setup optimized for stiff vector spaces.
-    }
+
 
     /**
      * Callback invoked once per accepted state, (t, y). Used to record a

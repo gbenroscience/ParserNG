@@ -1,4 +1,4 @@
-package com.github.gbenroscience.math.differentialcalculus.equations;
+package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
 
 /**
  * Small shared helpers used across the Turbo/Vector/HigherOrder ODE entry

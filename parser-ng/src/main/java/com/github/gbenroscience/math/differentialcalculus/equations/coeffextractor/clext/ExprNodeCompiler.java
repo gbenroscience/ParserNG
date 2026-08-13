@@ -21,7 +21,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
  */
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
 import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed.EquationRuntime;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.EquationRuntime;
 import com.github.gbenroscience.parser.MathExpression;
 
 import java.lang.invoke.MethodHandle;

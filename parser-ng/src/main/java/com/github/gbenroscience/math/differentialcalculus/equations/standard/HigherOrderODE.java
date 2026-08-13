@@ -1,5 +1,6 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
 import java.util.Arrays;
 
 /**
@@ -43,7 +44,7 @@ public class HigherOrderODE {
             double[] y0,
             double tEnd,
             double initialStep,
-            DifferentialEquations.ODESolverMethod method) {
+            ODESolverMethod method) {
         return executeTurboODEHO(topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, initialStep, method, null);
     }
 
@@ -76,7 +77,7 @@ public class HigherOrderODE {
             double[] y0,
             double tEnd,
             double initialStep,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             DifferentialEquations.JacobianStrategy jacobianStrategy) {
 
         int order = y0.length;
@@ -114,7 +115,7 @@ public class HigherOrderODE {
             double[] y0,
             double tEnd,
             double h,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             int points) {
         return executeTurboODEPathHO(topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, null);
     }
@@ -146,7 +147,7 @@ public class HigherOrderODE {
             double[] y0,
             double tEnd,
             double h,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             int points,
             DifferentialEquations.JacobianStrategy jacobianStrategy) {
 
@@ -157,14 +158,19 @@ public class HigherOrderODE {
         double[][] fullHistory = VectorODE.executeVectorODEPath(
                 companion, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, jacobianStrategy);
 
-        double[][] path = new double[fullHistory.length][5];
-        for (int i = 0; i < fullHistory.length; i++) {
-            path[i][0] = fullHistory[i][0]; // t
-            path[i][1] = fullHistory[i][1]; // y (state component 1)
-            path[i][2] = fullHistory[i][2]; // y (state component 2)
-            path[i][3] = fullHistory[i][3]; // y (state component 3)
-            path[i][4] = fullHistory[i][4]; // y (state component 4)
+        double[][] path = new double[fullHistory.length][fullHistory[0].length];
+         for (int i = 0; i < fullHistory.length; i++) {
+             for(int j=0;j<fullHistory[i].length;j++){
+                 path[i][j] = fullHistory[i][j];
+             }
         }
+//        for (int i = 0; i < fullHistory.length; i++) {
+//            path[i][0] = fullHistory[i][0]; // t
+//            path[i][1] = fullHistory[i][1]; // y (state component 1)
+//            path[i][2] = fullHistory[i][2]; // y (state component 2)
+//            path[i][3] = fullHistory[i][3]; // y (state component 3)
+//            path[i][4] = fullHistory[i][4]; // y (state component 4)
+//        }
         return path;
     }
 }

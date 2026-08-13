@@ -13,20 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed;
+package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed.CanonicalFrame;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
 
 /**
  *
  * @author GBEMIRO
  */
-public final class FrameRemappingODEFunction implements ODEFunction {
+public final class FrameRemapper implements ODEFunction {
  
     private final ODEFunction real;
     private final CanonicalFrame frame;
  
-    public FrameRemappingODEFunction(ODEFunction real, CanonicalFrame frame) {
+    public FrameRemapper(ODEFunction real, CanonicalFrame frame) {
         if (real == null) {
             throw new IllegalArgumentException("real ODEFunction must not be null");
         }

@@ -1,5 +1,6 @@
-package com.github.gbenroscience.math.differentialcalculus.equations;
+package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
 import java.lang.invoke.MethodHandle;
 
 /**
@@ -30,7 +31,7 @@ public class HigherOrderODE {
             double[] y0,
             double tEnd,
             double initialStep,
-            DifferentialEquations.ODESolverMethod method) throws Throwable {
+            ODESolverMethod method) throws Throwable {
         return executeTurboODEHO(topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, initialStep, method, null);
     }
 
@@ -64,7 +65,7 @@ public class HigherOrderODE {
             double[] y0,
             double tEnd,
             double initialStep,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
 
         int order = y0.length;
@@ -103,7 +104,7 @@ public class HigherOrderODE {
             double[] y0,
             double tEnd,
             double h,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             int points) throws Throwable {
         return executeTurboODEPathHO(topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, null);
     }
@@ -136,7 +137,7 @@ public class HigherOrderODE {
             double[] y0,
             double tEnd,
             double h,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             int points,
             DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
 

@@ -13,13 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed;
+package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard;
 
 /**
  *
  * @author GBEMIRO
  */ 
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.ResolvedEquation;
 import com.github.gbenroscience.parser.MathExpression.Token;
 
 /**

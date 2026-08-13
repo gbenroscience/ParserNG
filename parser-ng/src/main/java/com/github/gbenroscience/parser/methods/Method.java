@@ -1315,6 +1315,11 @@ public static boolean isMethodNameBuilderChar(char c) {
         }//end for
         return false;
     }
+    
+    public static boolean isSupportedDiffEqnMethod(String method){
+        return method.equals(Declarations.DIFF_EQN) || method.equals(Declarations.DIFF_EQN_PATH) ||
+                method.equals(Declarations.DIFF_EQN_HO) || method.equals(Declarations.DIFF_EQN_PATH_HO);
+    }
 
     public static void main(String args[]) {
         Method m = new Method("F(x,y,z)");

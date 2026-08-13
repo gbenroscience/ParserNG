@@ -1,7 +1,8 @@
-package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed;
+package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor;
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.*;
-import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNode;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.TokenTreeBuilder;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed.CanonicalFrame;
 import com.github.gbenroscience.parser.MathExpression.Token;
 
 import java.util.ArrayList;
@@ -9,64 +10,73 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Turns one isolated general-form equation (already {@code LHS-RHS},
- * implicitly {@code = 0}) into a {@link ResolvedEquation} — the divided
- * top-derivative expression, its tree, and the real-frame mapping for
- * {@code t} and each {@code y[k]}. This is the {@link
- * EquationCoefficientResolver} implementation {@link EquationRuntime} was
- * built to receive.
+ * The representation-agnostic half of coefficient extraction — term
+ * splitting, linearity checking against the top-order state, coefficient
+ * division, and the canonical/real frame mapping. None of this touches
+ * {@code ODEFunction} or {@code MethodHandle}; it only builds an {@link
+ * ExprNode} tree. Factored out of {@link CoefficientExtractor} so the Turbo
+ * tier ({@code TurboCoefficientExtractor}) can share it exactly rather than
+ * duplicating ~150 lines of identical symbolic logic — the two extractors
+ * differ only in the one line that compiles the resulting tree ({@code
+ * ExprNodeCompiler.compileStandard} vs {@code compileTurbo}).
  *
  * <h2>Algorithm</h2>
- * Two passes over the {@link ExprNode} tree {@link TokenTreeBuilder} builds
- * from the isolated postfix:
+ * Two passes over the tree {@link TokenTreeBuilder} builds from the isolated
+ * postfix:
  * <ol>
  *   <li><b>Split into additive terms.</b> {@link #collectTerms} recursively
  *       walks every top-level {@code +}/binary {@code -}/unary {@code -},
  *       carrying an accumulated sign; anything else (a product, a function
  *       call, a bare variable) is one term, not split further.</li>
  *   <li><b>Classify each term against the top-order state {@code y[order]}.</b>
- *       {@link #countStateOccurrences} counts how many times it appears in
- *       that term:
+ *       {@link #countStateOccurrences} counts how many times it appears:
  *       <ul>
- *         <li><b>Zero</b> — the term is independent of {@code y[order]},
- *             goes into the remainder (which may be arbitrarily nonlinear
- *             in every OTHER state component — the pendulum's {@code
- *             sin(y[0])} is exactly this case).</li>
- *         <li><b>More than one</b> — rejected outright ({@code
- *             y[order]*y[order]} has no linear coefficient).</li>
+ *         <li><b>Zero</b> — independent of {@code y[order]}, goes into the
+ *             remainder (which may be arbitrarily nonlinear in every OTHER
+ *             state component — {@code sin(y[0])} is exactly this case).</li>
+ *         <li><b>More than one</b> — rejected outright.</li>
  *         <li><b>Exactly one</b> — {@link #substituteIfLinear} walks from
- *             the term's root down to that leaf, requiring every operator
- *             on the path to be {@code *} (either side), {@code /} (only as
- *             the numerator), or unary {@code -} (linear — equivalent to
- *             multiplying by -1). Anything else on that path (a power, a
- *             function call, being a divisor, a binary {@code +}/{@code -})
- *             fails the whole extraction rather than guessing. On success,
- *             the leaf is replaced with {@code 1}, yielding the term's own
- *             contribution to the top-order coefficient.</li>
+ *             the term's root down to that leaf, requiring every operator on
+ *             the path to be {@code *} (either side), {@code /} (numerator
+ *             only), or unary {@code -} (linear — equivalent to multiplying
+ *             by -1). Anything else on that path fails the extraction rather
+ *             than guessing. On success the leaf is replaced with {@code 1}.</li>
  *       </ul>
  *       Multiple terms may independently be linear in {@code y[order]}
- *       (e.g. {@code 2*y[3] + 3*y[3]}); their extracted coefficients are
- *       summed, not just the first one used.</li>
+ *       (e.g. {@code 2*y[3] + 3*y[3]}); their coefficients are summed.</li>
  * </ol>
  * The divided result is {@code y[order] = -remainder / topCoefficientSum}.
  *
  * <h2>The frame-ordering fix</h2>
- * {@link #buildCanonicalToReal} is where the frame-ordering bug this
- * pipeline was built around actually gets fixed: it scans the ORIGINAL
- * (undivided) tree for every {@code y[k]} leaf's real, VariableRegistry-
- * assigned frame index — in whatever order they happened to appear in the
- * source text — and reports them keyed by canonical index instead
- * ({@code canonicalToReal[1+k]}). A state index that never appears anywhere
- * in the text gets {@link CanonicalFrame#NO_REAL_SLOT} rather than a
- * fabricated frame index; {@link EquationRuntime}'s Jacobian construction
- * already knows how to treat that as an exact-zero partial derivative.
+ * {@link #buildCanonicalToReal} scans the ORIGINAL (undivided) tree for
+ * every {@code y[k]} leaf's real, VariableRegistry-assigned frame index —
+ * in whatever order they happened to appear in the source text — and
+ * reports them keyed by canonical index instead ({@code canonicalToReal[1+k]}).
+ * A state index that never appears anywhere in the text gets {@link
+ * CanonicalFrame#NO_REAL_SLOT} rather than a fabricated frame index.
  */
-public final class CoefficientExtractor {
+public final class EquationDivider {
 
-    private CoefficientExtractor() {
+    private EquationDivider() {
     }
 
-    public static ResolvedEquation resolve(Token[] equationPostfix, int order) {
+    /** Result of dividing an equation: the y[order] = ... tree, plus its real-frame mapping. */
+   public static final class Divided {
+        public final ExprNode tree;
+        public final int[] canonicalToReal;
+        public final int realFrameSize;
+
+        Divided(ExprNode tree, int[] canonicalToReal, int realFrameSize) {
+            this.tree = tree;
+            this.canonicalToReal = canonicalToReal;
+            this.realFrameSize = realFrameSize;
+        }
+ 
+        
+        
+    }
+
+    public static Divided divide(Token[] equationPostfix, int order) {
         ExprNode root = TokenTreeBuilder.fromPostfix(equationPostfix);
 
         List<TermWithSign> terms = new ArrayList<>();
@@ -92,14 +102,13 @@ public final class CoefficientExtractor {
         ExprNode topCoefficientSum = sumSigned(topTerms);
         ExprNode remainderSum = sumSigned(remainderTerms);
         ExprNode negatedRemainder = remainderSum == null
-                ? ExprNode.number(0.0) : ExprNode.op('-', Arrays.asList(remainderSum));
-        ExprNode divided = ExprNode.op('/', Arrays.asList(negatedRemainder, topCoefficientSum));
+                ? ExprNode.number(0.0) : ExprNode.op('-', List.of(remainderSum));
+        ExprNode divided = ExprNode.op('/', List.of(negatedRemainder, topCoefficientSum));
 
         int[] canonicalToReal = buildCanonicalToReal(root, order);
         int realFrameSize = computeRealFrameSize(canonicalToReal);
 
-        ODEFunction topDerivativeRealFrame = ExprNodeCompiler.compileStandard(divided);
-        return new ResolvedEquation(topDerivativeRealFrame, divided, canonicalToReal, realFrameSize);
+        return new Divided(divided, canonicalToReal, realFrameSize);
     }
 
     // ------------------------------------------------------------------
@@ -137,7 +146,7 @@ public final class CoefficientExtractor {
     }
 
     private static ExprNode signed(ExprNode term, boolean negative) {
-        return negative ? ExprNode.op('-', Arrays.asList(term)) : term;
+        return negative ? ExprNode.op('-', List.of(term)) : term;
     }
 
     private static ExprNode sumSigned(List<ExprNode> terms) {
@@ -146,7 +155,7 @@ public final class CoefficientExtractor {
         }
         ExprNode acc = terms.get(0);
         for (int i = 1; i < terms.size(); i++) {
-            acc = ExprNode.op('+', Arrays.asList(acc, terms.get(i)));
+            acc = ExprNode.op('+', List.of(acc, terms.get(i)));
         }
         return acc;
     }
@@ -215,11 +224,11 @@ public final class CoefficientExtractor {
             }
             if (leftHas) {
                 ExprNode newLeft = substituteIfLinear(left, stateIndex);
-                return newLeft == null ? null : ExprNode.op('*', Arrays.asList(newLeft, right));
+                return newLeft == null ? null : ExprNode.op('*', List.of(newLeft, right));
             }
             if (rightHas) {
                 ExprNode newRight = substituteIfLinear(right, stateIndex);
-                return newRight == null ? null : ExprNode.op('*', Arrays.asList(left, newRight));
+                return newRight == null ? null : ExprNode.op('*', List.of(left, newRight));
             }
             return node;
         }
@@ -231,7 +240,7 @@ public final class CoefficientExtractor {
             }
             if (countStateOccurrences(numerator, stateIndex) > 0) {
                 ExprNode newNumerator = substituteIfLinear(numerator, stateIndex);
-                return newNumerator == null ? null : ExprNode.op('/', Arrays.asList(newNumerator, denominator));
+                return newNumerator == null ? null : ExprNode.op('/', List.of(newNumerator, denominator));
             }
             return node;
         }
@@ -244,7 +253,7 @@ public final class CoefficientExtractor {
                 return node;
             }
             ExprNode newChild = substituteIfLinear(child, stateIndex);
-            return newChild == null ? null : ExprNode.op('-', Arrays.asList(newChild));
+            return newChild == null ? null : ExprNode.op('-', List.of(newChild));
         }
         // Any other operator (binary '+', binary '-', '^') -- if the target
         // state variable is anywhere underneath, the path is disqualified;

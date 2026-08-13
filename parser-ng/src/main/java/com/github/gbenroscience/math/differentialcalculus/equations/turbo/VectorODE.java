@@ -1,26 +1,26 @@
-package com.github.gbenroscience.math.differentialcalculus.equations;
+package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
 import java.lang.invoke.MethodHandle;
 
 /**
- * Scalar "Turbo" entry points over the vectorized ODE solvers — the ParserNG
- * runtime targets for the diffeqn(...) and diffeqnPath(...) functional forms.
+ * Vector-system entry points: systemSize is derived directly from y0.length
+ * (unlike TurboODE's scalar path, no packing into a 1-element array is needed).
  *
- * Both are the degenerate scalar case (systemSize = 1) of the vectorized
- * solvers in {@link DifferentialEquations}. They are NOT ensemble-parallel
- * batch APIs — for SIMD/GPU ensemble dispatch, use systemSize = N (lanes)
- * directly against the vector solvers instead of looping these N times.
+ * Backs diffeqn(...)/diffeqnPath(...) when called with a vector y0 (a genuine
+ * system of ODEs), and is reused by HigherOrderODE to drive the companion
+ * system built from a higher-order equation's top-derivative handle.
  */
-public class TurboODE {
+public class VectorODE {
 
     // ------------------------------------------------------------------
-    // diffeqn(...) — endpoint-only
+    // Endpoint-only system solve
     // ------------------------------------------------------------------
     /**
      *
      * @param dy_dt
      * @param tSlot
-     * @param ySlot
+     * @param ySlotStart
      * @param frameSize
      * @param t0
      * @param y0
@@ -30,27 +30,32 @@ public class TurboODE {
      * @return
      * @throws Throwable
      */
-    public static double executeTurboODE(MethodHandle dy_dt,
+    public static double[] executeVectorODE(MethodHandle dy_dt,
             int tSlot,
-            int ySlot,
+            int ySlotStart,
             int frameSize,
             double t0,
-            double y0,
+            double[] y0,
             double tEnd,
             double initialStep,
-            DifferentialEquations.ODESolverMethod method) throws Throwable {
-        return executeTurboODE(dy_dt, tSlot, ySlot, frameSize, t0, y0, tEnd, initialStep, method, null);
+            ODESolverMethod method) throws Throwable {
+        return executeVectorODE(dy_dt, tSlot, ySlotStart, frameSize, t0, y0, tEnd, initialStep, method, null);
     }
 
     /**
-     * Same as {@link #executeTurboODE}, but accepts an optional
-     * {@link DifferentialEquations.JacobianStrategy}, consulted only when
-     * method is IMPLICIT_EULER and ignored (accepted, unused) for every other
-     * method — see {@link VectorODE#executeVectorODE} for the same note.
+     * Same as {@link #executeVectorODE}, but accepts an optional
+     * {@link DifferentialEquations.JacobianStrategy} — e.g. an AnalyticJacobian
+     * built from forward-mode AD — to replace the default central-difference
+     * Jacobian used by the IMPLICIT_EULER path.
+     *
+     * jacobianStrategy is only consulted when method is IMPLICIT_EULER; for
+     * every other method it is accepted but ignored, since explicit methods
+     * never build a Jacobian. That keeps a single call site workable regardless
+     * of which method a caller ultimately selects.
      *
      * @param dy_dt
      * @param tSlot
-     * @param ySlot
+     * @param ySlotStart
      * @param frameSize
      * @param t0
      * @param y0
@@ -61,67 +66,58 @@ public class TurboODE {
      * @return
      * @throws Throwable
      */
-    public static double executeTurboODE(MethodHandle dy_dt,
+    public static double[] executeVectorODE(MethodHandle dy_dt,
             int tSlot,
-            int ySlot,
+            int ySlotStart,
             int frameSize,
             double t0,
-            double y0,
+            double[] y0,
             double tEnd,
             double initialStep,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
 
         if (initialStep <= 0.0) {
             throw new IllegalArgumentException("initialStep must be positive (a magnitude), got " + initialStep);
         }
         if (t0 == tEnd) {
-            return y0;
+            return y0.clone();
         }
 
-        double[] y0Vector = new double[]{y0};
-        int systemSize = 1;
-        double[] resultVector;
+        int systemSize = y0.length;
 
         switch (method) {
             case EULER: {
                 int steps = OdeSupport.fixedStepCount(t0, tEnd, initialStep);
-                resultVector = DifferentialEquations.stepEuler(
-                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps);
-                break;
+                return DifferentialEquations.stepEuler(
+                        dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps);
             }
             case RK4: {
                 int steps = OdeSupport.fixedStepCount(t0, tEnd, initialStep);
-                resultVector = DifferentialEquations.stepRK4(
-                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps);
-                break;
+                return DifferentialEquations.stepRK4(
+                        dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps);
             }
-            case RK45_DORMAND_PRINCE: {
-                resultVector = DifferentialEquations.stepRK45Adaptive(
-                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, initialStep);
-                break;
-            }
+            case RK45_DORMAND_PRINCE:
+                return DifferentialEquations.stepRK45Adaptive(
+                        dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, initialStep);
             case IMPLICIT_EULER: {
                 int steps = OdeSupport.fixedStepCount(t0, tEnd, initialStep);
-                resultVector = DifferentialEquations.stepImplicitEuler(
-                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps, jacobianStrategy);
-                break;
+                return DifferentialEquations.stepImplicitEuler(
+                        dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, jacobianStrategy);
             }
             default:
                 throw new IllegalArgumentException("Unsupported ODE method: " + method);
         }
-
-        return resultVector[0];
     }
 
     // ------------------------------------------------------------------
-    // diffeqnPath(...) — trajectory output
+    // Trajectory system solve
     // ------------------------------------------------------------------
     /**
      *
      * @param dy_dt
      * @param tSlot
-     * @param ySlot
+     * @param ySlotStart
      * @param frameSize
      * @param t0
      * @param y0
@@ -132,51 +128,48 @@ public class TurboODE {
      * @return
      * @throws Throwable
      */
-    public static double[][] executeTurboODEPath(MethodHandle dy_dt,
+    public static double[][] executeVectorODEPath(MethodHandle dy_dt,
             int tSlot,
-            int ySlot,
+            int ySlotStart,
             int frameSize,
             double t0,
-            double y0,
+            double[] y0,
             double tEnd,
             double h,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             int points) throws Throwable {
-        return executeTurboODEPath(dy_dt, tSlot, ySlot, frameSize, t0, y0, tEnd, h, method, points, null);
+        return executeVectorODEPath(dy_dt, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, null);
     }
 
     /**
-     * Same as {@link #executeTurboODEPath}, with an optional
+     * Same as {@link #executeVectorODEPath}, with an optional
      * {@link DifferentialEquations.JacobianStrategy}, consulted only when
-     * method is IMPLICIT_EULER.
-     *
+     * method is IMPLICIT_EULER (see {@link #executeVectorODE} for the same note
+     * on the other methods ignoring it).
      *
      * @param dy_dt
      * @param tSlot
-     * @param ySlot
+     * @param ySlotStart
      * @param frameSize
      * @param t0
      * @param y0
      * @param tEnd
-     * @param h integration step (fixed methods) or initial step (rk45). Must be
-     * a positive magnitude.
-     * @param method solver to use
-     * @param points requested number of uniformly-spaced (t, y) samples in the
-     * output, or less than or equal to 0 to mean "use the solver's natural
-     * steps, no resampling"
+     * @param h
+     * @param method
+     * @param points
      * @param jacobianStrategy
      * @return
      * @throws Throwable
      */
-    public static double[][] executeTurboODEPath(MethodHandle dy_dt,
+    public static double[][] executeVectorODEPath(MethodHandle dy_dt,
             int tSlot,
-            int ySlot,
+            int ySlotStart,
             int frameSize,
             double t0,
-            double y0,
+            double[] y0,
             double tEnd,
             double h,
-            DifferentialEquations.ODESolverMethod method,
+            ODESolverMethod method,
             int points,
             DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
 
@@ -184,11 +177,13 @@ public class TurboODE {
             throw new IllegalArgumentException("h must be positive (a magnitude), got " + h);
         }
         if (t0 == tEnd) {
-            return new double[][]{{t0, y0}};
+            double[] row0 = new double[1 + y0.length];
+            row0[0] = t0;
+            System.arraycopy(y0, 0, row0, 1, y0.length);
+            return new double[][]{row0};
         }
 
-        double[] y0Vector = new double[]{y0};
-        int systemSize = 1;
+        int systemSize = y0.length;
         double[][] history;
         boolean naturallyUniform;
 
@@ -196,27 +191,27 @@ public class TurboODE {
             case EULER: {
                 int steps = OdeSupport.fixedStepCount(t0, tEnd, h);
                 history = DifferentialEquations.stepEulerWithHistory(
-                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps);
+                        dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps);
                 naturallyUniform = true;
                 break;
             }
             case RK4: {
                 int steps = OdeSupport.fixedStepCount(t0, tEnd, h);
                 history = DifferentialEquations.stepRK4WithHistory(
-                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps);
+                        dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps);
                 naturallyUniform = true;
                 break;
             }
             case RK45_DORMAND_PRINCE: {
                 history = DifferentialEquations.stepRK45AdaptiveWithHistory(
-                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, h);
-                naturallyUniform = false;
+                        dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, h);
+                naturallyUniform = false; // accepted steps are irregularly spaced
                 break;
             }
             case IMPLICIT_EULER: {
                 int steps = OdeSupport.fixedStepCount(t0, tEnd, h);
                 history = DifferentialEquations.stepImplicitEulerWithHistory(
-                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps, jacobianStrategy);
+                        dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, jacobianStrategy);
                 naturallyUniform = true;
                 break;
             }
