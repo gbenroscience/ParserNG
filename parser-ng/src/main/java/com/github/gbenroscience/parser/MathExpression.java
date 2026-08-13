@@ -132,8 +132,6 @@ public class MathExpression implements Savable, Solvable {
      */
     private boolean hasFunctionOrVariableInitStatement;
 
-  
-
     private static final int INIT_POOL_SIZE = 64;
     // A simple pre-allocated array of results to act as a stack
     private EvalResult[] pool = new EvalResult[INIT_POOL_SIZE];
@@ -163,7 +161,6 @@ public class MathExpression implements Savable, Solvable {
      */
     private String returnObjectName;
     public static final String SYNTAX_ERROR = "SYNTAX ERROR";
-    
 
     /**
      *
@@ -292,6 +289,7 @@ public class MathExpression implements Savable, Solvable {
 
         /**
          * Constructor for Function Handles.
+         *
          * @param fn
          * @param defined
          */
@@ -564,7 +562,6 @@ public class MathExpression implements Savable, Solvable {
         this(input, true);
     }//end constructor MathExpression
 
-  
     /**
      * Very unsafe API, designed for high speed creation of
      * {@link MathExpression} objects when the scanner output is from a trusted
@@ -681,7 +678,6 @@ public class MathExpression implements Savable, Solvable {
         for (int i = 0; i < INIT_POOL_SIZE; i++) {
             pool[i] = new EvalResult();
         }
- 
 
         Scanner cs = new Scanner(STRING.purifier(input), false, VariableManager.endOfLine);
 
@@ -784,7 +780,7 @@ public class MathExpression implements Savable, Solvable {
         setNoOfListReturningOperators(0);
         whitespaceremover.add("");
         //Scanner operation
-        MathScanner opScanner = new MathScanner(expression, this); 
+        MathScanner opScanner = new MathScanner(expression, this);
 
         this.commaAlias = opScanner.commaAlias;
         scanner = opScanner.getScanner();
@@ -1074,9 +1070,6 @@ public class MathExpression implements Savable, Solvable {
         return hasFunctionOrVariableInitStatement;
     }
 
-  
-
-   
     public VariableRegistry getRegistry() {
         return registry;
     }
@@ -1299,7 +1292,7 @@ public class MathExpression implements Savable, Solvable {
         try {
             mapBrackets(scanner, Bracket.BracketMode.CIRCULAR_OPEN);
             mapBrackets(scanner, Bracket.BracketMode.SQUARE_OPEN);
-            
+
         }//end method//end method
         catch (InputMismatchException ime) {
             errorLog.error(ime);
@@ -1327,33 +1320,40 @@ public class MathExpression implements Savable, Solvable {
                 String token = scanner.get(i);
                 //Variables
                 if (isVariableString(token) && !Method.isUserDefinedFunction(token) && !Method.isDefinedMethod(token)) {
-                      String prev = scanner.get(i - 1);
+
                     try {
                         //specify valid tokens that can come before a variable
-                        if (i - 1 >= 0 && !isOpeningCircBracket(prev)
-                                && !isLogicOperator(prev) && !isUnaryPreOperator(prev)
-                                && !isBinaryOperator(prev) && !isAssignmentOperator(prev)
-                                && !isNumber(prev) && !isVariableString(prev) && !isComma(prev)) {
-                            errorLog.info("1 - ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + prev
-                                    + "\" And \"" + scanner.get(i) + "\"\n");
-                            correctFunction = false;
-                            scanner.clear();
-                            break;
-                        }//end if
-                        String next = scanner.get(i + 1);
-                        //specify valid tokens that can come after a variable
-                        if (i + 1 < sz && !isCircBracket(next) && !isSquareBracket(next) && !isBinaryOperator(next)
-                                && !isUnaryPostOperator(next) && !Method.isNumberReturningStatsMethod(next)
-                                && !isLogicOperator(next) && !isAssignmentOperator(next)
-                                && !isUnaryPreOperator(next) && !Method.isNumberReturningStatsMethod(next)
-                                && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next) && !isNumber(next)
-                                && !isVariableString(next) && !isComma(next)) {
-                            errorLog.info("2 - ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i) + "\" And \"" + next + "\" As You Have Done.\n");
-                            correctFunction = false;
-                            scanner.clear();
-                            break;
-                        }//end if
-                    }//end try//end try//end try//end try
+
+                        if (i - 1 >= 0) {
+                            String prev = scanner.get(i - 1);
+                            if (!isOpeningCircBracket(prev)
+                                    && !isLogicOperator(prev) && !isUnaryPreOperator(prev)
+                                    && !isBinaryOperator(prev) && !isAssignmentOperator(prev)
+                                    && !isNumber(prev) && !isVariableString(prev) && !isComma(prev)) {
+                                errorLog.info("1 - ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + prev
+                                        + "\" And \"" + scanner.get(i) + "\"\n");
+                                correctFunction = false;
+                                scanner.clear();
+                                break;
+                            }//end if
+                        }
+                        if (i + 1 < sz) {
+                            String next = scanner.get(i + 1);
+                            //specify valid tokens that can come after a variable
+                            if (!isCircBracket(next) && !isSquareBracket(next) && !isBinaryOperator(next)
+                                    && !isUnaryPostOperator(next) && !Method.isNumberReturningStatsMethod(next)
+                                    && !isLogicOperator(next) && !isAssignmentOperator(next)
+                                    && !isUnaryPreOperator(next) && !Method.isNumberReturningStatsMethod(next)
+                                    && !Method.isLogToAnyBase(next) && !Method.isAntiLogToAnyBase(next) && !isNumber(next)
+                                    && !isVariableString(next) && !isComma(next)) {
+                                errorLog.info("2 - ParserNG Does Not Allow " + expression + " To Combine The MathExpression Members \"" + scanner.get(i) + "\" And \"" + next + "\" As You Have Done.\n");
+                                correctFunction = false;
+                                scanner.clear();
+                                break;
+                            }//end if
+                        }
+
+                    }//end try
                     catch (IndexOutOfBoundsException ind) {
                         errorLog.error(ind);
                         ind.printStackTrace();
@@ -1377,7 +1377,6 @@ public class MathExpression implements Savable, Solvable {
             scanner.clear();
             parser_Result = ParserResult.SYNTAX_ERROR;
         }
-         
 
     }//end method functionComponentAssociation
 
@@ -1531,7 +1530,7 @@ public class MathExpression implements Savable, Solvable {
         }
         return EvalResult.ERROR;
     }
-    
+
     public EvalResult solveGeneric(double... args) {
         this.executionFrame = args;
         return solveGeneric();
@@ -3490,7 +3489,6 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
     }
 
-   
     /**
      * Manual deep copy method that will most certainly outperform the clone
      * method. But needs to be updated whenever the MathExpression object's
@@ -3541,7 +3539,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         clone.slots = new int[slots.length];
         System.arraycopy(slots, 0, clone.slots, 0, slots.length);
         clone.treeStats = new MathExpressionTreeDepth.Result(treeStats.depth, treeStats.binaryOperators, treeStats.divOperators, treeStats.unaryOperators, treeStats.functions);
-        clone.turboCompiled = turboCompiled; 
+        clone.turboCompiled = turboCompiled;
         clone.whitespaceremover = new ArrayList<>(whitespaceremover);
         clone.willFoldConstants = willFoldConstants;
 //        clone.compiledTurbo = new FastCompositeExpression() {
