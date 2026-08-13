@@ -15,7 +15,7 @@
  */
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard;
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed.CanonicalFrame;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.CanonicalFrame;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
 
 /**

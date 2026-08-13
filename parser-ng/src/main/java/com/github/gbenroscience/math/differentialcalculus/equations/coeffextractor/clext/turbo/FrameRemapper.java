@@ -15,7 +15,7 @@
  */
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo;
 
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed.CanonicalFrame;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.CanonicalFrame;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;

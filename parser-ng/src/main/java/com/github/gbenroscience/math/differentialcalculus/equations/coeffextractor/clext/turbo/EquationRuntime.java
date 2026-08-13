@@ -16,10 +16,10 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo;
  
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.ExprNodeAutoDiffEvaluator;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed.CanonicalFrame;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed.DiffEqnArgParser;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed.DiffEqnCall;
-import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.proposed.PostfixArgumentIsolator;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.CanonicalFrame;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnArgParser;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnCall;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PostfixArgumentIsolator;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.refactor.ODESolverMethod;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.DifferentialEquations;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.HigherOrderODE;
