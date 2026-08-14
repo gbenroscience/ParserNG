@@ -2,6 +2,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
 
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PresentationStrategy;
 import java.lang.invoke.MethodHandle;
 
 /**
@@ -105,8 +106,8 @@ public class HigherOrderODE {
             double tEnd,
             double h,
             ODESolverMethod method,
-            int points) throws Throwable {
-        return executeTurboODEPathHO(topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, null);
+            int points, PresentationStrategy ps) throws Throwable {
+        return executeTurboODEPathHO(topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, null, ps);
     }
 
     /**
@@ -138,7 +139,7 @@ public class HigherOrderODE {
             double h,
             ODESolverMethod method,
             int points,
-            JacobianStrategy jacobianStrategy) throws Throwable {
+            JacobianStrategy jacobianStrategy, PresentationStrategy ps) throws Throwable {
 
         int order = y0.length;
         MethodHandle companion = CompanionSystemHandles.buildCompanion(
@@ -147,19 +148,21 @@ public class HigherOrderODE {
         double[][] fullHistory = VectorODE.executeVectorODEPath(
                 companion, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, jacobianStrategy);
 
-        double[][] path = new double[fullHistory.length][2];
-        for (int i = 0; i < fullHistory.length; i++) {
-            path[i][0] = fullHistory[i][0]; // t
-            path[i][1] = fullHistory[i][1]; // y (state component 0)
-        }
-        /*
-  double[][] path = new double[fullHistory.length][fullHistory[0].length];
-        for (int i = 0; i < fullHistory.length; i++) {
-            for (int j = 0; j < fullHistory[i].length; j++) {
-                path[i][j] = fullHistory[i][j];// y (state component 0 is at j=1, state component 1 is at j=2 etc)
+        if (ps == PresentationStrategy.STATE) {
+            double[][] path = new double[fullHistory.length][fullHistory[0].length];
+            for (int i = 0; i < fullHistory.length; i++) {
+                for (int j = 0; j < fullHistory[i].length; j++) {
+                    path[i][j] = fullHistory[i][j];// y (state component 0 is at j=1, state component 1 is at j=2 etc)
+                }
             }
+            return path;
+        } else {
+            double[][] path = new double[fullHistory.length][2];
+            for (int i = 0; i < fullHistory.length; i++) {
+                path[i][0] = fullHistory[i][0]; // t
+                path[i][1] = fullHistory[i][1]; // y (state component 0)
+            }
+            return path;
         }
-         */
-        return path;
     }
 }

@@ -2,7 +2,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
-import java.util.Arrays;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PresentationStrategy;
 
 /**
  * Higher-order equation entry points — the ParserNG runtime targets for
@@ -116,8 +116,8 @@ public class HigherOrderODE {
             double tEnd,
             double h,
             ODESolverMethod method,
-            int points) {
-        return executeTurboODEPathHO(topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, null);
+            int points, PresentationStrategy ps) {
+        return executeTurboODEPathHO(topDerivative, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, null, ps);
     }
 
     /**
@@ -136,6 +136,9 @@ public class HigherOrderODE {
      * @param points requested number of uniformly-spaced samples, or less than
      * or equal to 0 for the solver's natural steps
      * @param jacobianStrategy
+     * @param ps How to present the resultant path - as a matrix of all state
+     * variable values or just a matrix of the independent variable and the
+     * y-variable's value
      * @return
      */
     public static double[][] executeTurboODEPathHO(ODEFunction topDerivative,
@@ -148,7 +151,7 @@ public class HigherOrderODE {
             double h,
             ODESolverMethod method,
             int points,
-            JacobianStrategy jacobianStrategy) {
+            JacobianStrategy jacobianStrategy, PresentationStrategy ps) {
 
         int order = y0.length;
         ODEFunction companion = CompanionSystemHandles.buildCompanion(
@@ -157,19 +160,21 @@ public class HigherOrderODE {
         double[][] fullHistory = VectorODE.executeVectorODEPath(
                 companion, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, jacobianStrategy);
 
-        double[][] path = new double[fullHistory.length][2];
-        for (int i = 0; i < fullHistory.length; i++) {
-            path[i][0] = fullHistory[i][0]; // t
-            path[i][1] = fullHistory[i][1]; // y (state component 0)
+        if (ps == PresentationStrategy.STATE) {
+            double[][] path = new double[fullHistory.length][fullHistory[0].length];
+            for (int i = 0; i < fullHistory.length; i++) {
+                for (int j = 0; j < fullHistory[i].length; j++) {
+                    path[i][j] = fullHistory[i][j];// y (state component 0 is at j=1, state component 1 is at j=2 etc)
+                }
+            }
+            return path;
+        } else {
+            double[][] path = new double[fullHistory.length][2];
+            for (int i = 0; i < fullHistory.length; i++) {
+                path[i][0] = fullHistory[i][0]; // t
+                path[i][1] = fullHistory[i][1]; // y (state component 0)
+            }
+            return path;
         }
-        /*
-        double[][] path = new double[fullHistory.length][fullHistory[0].length];
-         for (int i = 0; i < fullHistory.length; i++) {
-             for(int j=0;j<fullHistory[i].length;j++){
-                 path[i][j] = fullHistory[i][j];// y (state component 0 is at j=1, state component 1 is at j=2 etc)
-             }
-        }
-         */
-        return path;
     }
 }

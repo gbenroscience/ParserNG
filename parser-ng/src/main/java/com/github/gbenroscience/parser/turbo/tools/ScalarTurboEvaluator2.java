@@ -19,7 +19,6 @@ import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.EquationRuntime;
-import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.math.numericalmethods.TurboRootFinder;
 import com.github.gbenroscience.math.numericalmethods.taylors.symbolic.SymbolicIntegrator;
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
@@ -28,7 +27,6 @@ import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
 import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.ParserResult;
 import com.github.gbenroscience.parser.TYPE;
 import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
 import static com.github.gbenroscience.parser.TYPE.MATRIX;
@@ -43,8 +41,6 @@ import com.github.gbenroscience.util.Utils;
 import java.lang.invoke.*;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Turbo compiler optimized for PURE SCALAR expressions. Uses widening
@@ -71,6 +67,12 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
     private static final MethodHandle QUAD_HANDLE;
     private static final MethodHandle TARTAGLIA_HANDLE;
 
+    ////////EvalResult Pool params start/////////////
+        private static final int INIT_POOL_SIZE = 64;
+    // A simple pre-allocated array of results to act as a stack
+    private MathExpression.EvalResult[] pool = new MathExpression.EvalResult[INIT_POOL_SIZE];
+    private int poolPointer = 0;
+
     static {
         try {
             QUAD_HANDLE = LOOKUP.findStatic(ScalarTurboEvaluator2.class, "executeQuadraticRoot",
@@ -93,6 +95,30 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         }
         return arr;
     });
+
+    public MathExpression.EvalResult getNextResult() {
+        // 1. Check if we need to expand (using a local copy for thread safety)
+        MathExpression.EvalResult[] currentPool = this.pool;
+        if (poolPointer >= currentPool.length) {
+            synchronized (this) {
+                // Double-check pattern to prevent multi-thread OOM
+                if (poolPointer >= pool.length) {
+                    int newSize = pool.length * 2;
+                    MathExpression.EvalResult[] newPool = new MathExpression.EvalResult[newSize];
+                    System.arraycopy(pool, 0, newPool, 0, pool.length);
+                    for (int i = pool.length; i < newSize; i++) {
+                        newPool[i] = new MathExpression.EvalResult();
+                    }
+                    this.pool = newPool; // Now the pointer won't OOM
+                }
+            }
+        }
+
+        // 2. Fetch and Reset
+        MathExpression.EvalResult result = pool[poolPointer++];
+        result.reset(); // Clear old state (crucial for complex objects!)
+        return result;
+    }
 
     private static final Map<String, MethodHandle> UNARY_MAP = new HashMap<>(128);
     private static final Map<String, MethodHandle> BINARY_MAP = new HashMap<>(32);
@@ -251,6 +277,9 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
     public ScalarTurboEvaluator2(MathExpression me) {
         if (ScalarTurboEvaluator.SUPPORTS_WIDENING) {
+            for (int i = 0; i < INIT_POOL_SIZE; i++) {
+                pool[i] = new MathExpression.EvalResult();
+            }
             this.postfix = me.getCachedPostfix();
             this.willFoldConstants = me.isWillFoldConstants();
             slots = me.getSlots();
@@ -307,25 +336,12 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
         if (len > 0) {
             MathExpression.Token last = postfix[len - 1];
             if (last != null && Method.isSupportedDiffEqnMethod(last.name)) {
-                final MathExpression.EvalResult out = new MathExpression.EvalResult();
                 return new FastCompositeExpression() {
                     @Override
                     public MathExpression.EvalResult apply(double[] variables) {
-                        try {
-                            Object o = EquationRuntime.solve(postfix);
-                            if (o instanceof double[][]) {
-                                out.wrap(new Matrix((double[][]) o));
-                            } else if (o instanceof double[]) {
-                                out.wrap((double[]) o);
-                            } else {
-                                out.wrap((double) o);
-                            }
-                        } catch (Throwable ex) {
-                            Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
-                            out.wrap(ParserResult.INVALID_FUNCTION);
-                        }
+                        MathExpression.EvalResult out = getNextResult();
+                        EquationRuntime.solve(postfix, out);
                         return out;
-
                     }
 
                     @Override

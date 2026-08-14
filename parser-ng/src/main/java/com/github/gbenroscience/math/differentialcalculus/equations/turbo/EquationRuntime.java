@@ -26,11 +26,15 @@ import com.github.gbenroscience.math.differentialcalculus.equations.coeffextract
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.EquationCoefficientResolver;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.FrameRemapper;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.ResolvedEquation;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathExpression.Token;
+import com.github.gbenroscience.parser.ParserResult;
 
 import java.lang.invoke.MethodHandle;
 import java.util.Arrays;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  *
@@ -89,10 +93,9 @@ public final class EquationRuntime {
      *
      * @param me
      * @return
-     * @throws java.lang.Throwable
      */
-    public static Object solve(MathExpression me) throws Throwable {
-        return solve(me.getCachedPostfix());
+    public static MathExpression.EvalResult solve(MathExpression me) {
+        return solve(me.getCachedPostfix(), me.getNextResult());
     }
     /**
      * One-call convenience, the Turbo-tier twin of {@link
@@ -102,12 +105,26 @@ public final class EquationRuntime {
      * }</pre>
      *
      * @param postfix 
+     * @param out 
      * @return
-     * @throws java.lang.Throwable
      */
-    public static Object solve(MathExpression.Token[] postfix) throws Throwable {
-        return new EquationRuntime(CoefficientExtractor::resolve).execute(postfix);
+   public static MathExpression.EvalResult solve(MathExpression.Token[] postfix, MathExpression.EvalResult out) { 
+        try {
+            Object o = new EquationRuntime(CoefficientExtractor::resolve).execute(postfix);
+            if (o instanceof double[][]) {
+                out.wrap(new Matrix((double[][]) o));
+            } else if (o instanceof double[]) {
+                out.wrap((double[]) o);
+            } else {
+                out.wrap((double) o);
+            }
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+            out.wrap(ParserResult.INVALID_FUNCTION);
+        }
+        return out;
     }
+
 
     /**
      * Full pipeline for one call. Returns a {@code Double} for a scalar
@@ -180,7 +197,7 @@ public final class EquationRuntime {
             CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
         JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
         return HigherOrderODE.executeTurboODEPathHO(fn, tSlot, ySlotStart, frameSize,
-                call.t0, call.y0, call.tEnd, call.h, call.method, call.points, jac);
+                call.t0, call.y0, call.tEnd, call.h, call.method, call.points, jac, call.presentationStrategy);
     }
 
     // ------------------------------------------------------------------

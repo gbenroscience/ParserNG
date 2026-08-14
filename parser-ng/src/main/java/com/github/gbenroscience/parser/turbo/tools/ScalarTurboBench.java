@@ -34,7 +34,7 @@ import java.util.logging.Logger;
 public class ScalarTurboBench {
 
     private static final int N = 1000000;
-    private static boolean useWidening = false;
+    private static boolean useWidening = true;
 
     public static void main(String[] args) throws Throwable {
         String rpt = STRING.repeating("=", 80);
@@ -43,6 +43,7 @@ public class ScalarTurboBench {
         System.out.println(rpt);
 
         testODE();
+        testODE1();
         ifExprTestTurbo1();
         testUserDefinedFunctionWidening();
         testUserDefinedFunctionArrayBased();
@@ -1101,8 +1102,7 @@ public class ScalarTurboBench {
             }
         }
     }
-    
-     private static void testODE() throws Throwable {
+       private static void testODE() throws Throwable {
         System.out.println("\n=== DIFFERENTIAL EQUATIONS ===\n");
 
         double N = 1000;
@@ -1125,6 +1125,42 @@ public class ScalarTurboBench {
             evr = compiled.apply(vars);
         }
         double turboDur = System.nanoTime() - start;
+     
+
+        System.out.printf("Expression: %s%n", expr);
+        System.out.printf("(All constants - folds to single value at compile time)%n");
+        System.out.printf("Interpreted:     %.2f ns/op%n", interpretedDur / N);
+        System.out.printf("Turbo:     %.2f ns/op%n", turboDur / N);
+        System.out.printf("Speedup:     %.1fx%n", (double) interpretedDur / turboDur);
+    }
+       
+     private static void testODE1() throws Throwable {
+        System.out.println("\n=== DIFFERENTIAL EQUATIONS ===\n");
+
+        double N = 1000; 
+        String expr = "diffeqn(y[1]+2*y[0], 0, 1, 5)";
+//y' + 2*y, 0, 1, 5
+        MathExpression turbo = new MathExpression(expr);
+        FastCompositeExpression compiled = get(turbo);
+
+        double[] vars = new double[0];
+         MathExpression.EvalResult ev = new MathExpression.EvalResult();
+         MathExpression.EvalResult evr = new MathExpression.EvalResult();
+        long start = System.nanoTime();
+        for (int i = 0; i < N; i++) {
+            ev = turbo.solveGeneric();
+        }
+        double interpretedDur = System.nanoTime() - start; 
+
+        start = System.nanoTime();
+        for (int i = 0; i < N; i++) {
+            evr = compiled.apply(vars);
+        }
+        double turboDur = System.nanoTime() - start;
+        
+         System.out.println("interpreted-ans: "+ev);
+         System.out.println("turbo-ans: "+evr);
+         
      
 
         System.out.printf("Expression: %s%n", expr);

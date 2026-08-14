@@ -275,21 +275,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     @Override
                     public MathExpression.EvalResult apply(double[] variables) {
                         MathExpression.EvalResult out = getNextResult();
-                        try {
-                            Object o = EquationRuntime.solve(postfix);
-                            if (o instanceof double[][]) {
-                                out.wrap(new Matrix((double[][]) o));
-                            } else if (o instanceof double[]) {
-                                out.wrap((double[]) o);
-                            } else {
-                                out.wrap((double) o);
-                            }
-                        } catch (Throwable ex) {
-                            Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
-                            out.wrap(ParserResult.INVALID_FUNCTION);
-                        }
-                        return out;
-
+                        EquationRuntime.solve(postfix, out); 
+                        return out; 
                     }
 
                     @Override

@@ -7,14 +7,20 @@ import com.github.gbenroscience.math.differentialcalculus.equations.coeffextract
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PostfixArgumentIsolator;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PresentationStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.CoefficientExtractor;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.EquationCoefficientResolver;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.FrameRemapper;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.ResolvedEquation;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathExpression.Token;
+import com.github.gbenroscience.parser.ParserResult;
+import com.github.gbenroscience.util.FunctionManager;
 
 import java.util.Arrays;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * ParserNG's single entry point for the diffeqn-family runtime: given the full
@@ -94,8 +100,8 @@ public final class EquationRuntime {
      * postfix is a diffeqn/diffeqnPath/diffeqnHO/diffeqnPathHO call
      * @return
      */
-    public static Object solve(MathExpression me) {
-        return new EquationRuntime(CoefficientExtractor::resolve).execute(me.getCachedPostfix());
+    public static MathExpression.EvalResult solve(MathExpression me) {
+        return solve(me.getCachedPostfix(), me.getNextResult());
     }
 
     /**
@@ -106,11 +112,24 @@ public final class EquationRuntime {
      * }</pre>
      *
      * @param postfix
+     * @param out
      * @return
-     * @throws java.lang.Throwable
      */
-    public static Object solve(MathExpression.Token[] postfix) throws Throwable {
-        return new EquationRuntime(CoefficientExtractor::resolve).execute(postfix);
+    public static MathExpression.EvalResult solve(MathExpression.Token[] postfix, MathExpression.EvalResult out) {
+        try {
+            Object o = new EquationRuntime(CoefficientExtractor::resolve).execute(postfix);
+            if (o instanceof double[][]) {
+                out.wrap(new Matrix((double[][]) o));
+            } else if (o instanceof double[]) {
+                out.wrap((double[]) o);
+            } else {
+                out.wrap((double) o);
+            }
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+            out.wrap(ParserResult.INVALID_FUNCTION);
+        }
+        return out;
     }
 
     /**
@@ -144,7 +163,7 @@ public final class EquationRuntime {
             case DIFFEQN_HO:
                 return executeDiffEqnHO(call, resolved, fn, frame, tSlot, ySlotStart, frameSize);
             case DIFFEQN_PATH_HO:
-                return executeDiffEqnPathHO(call, resolved, fn, frame, tSlot, ySlotStart, frameSize);
+                return executeDiffEqnPathHO(call, resolved, fn, frame, tSlot, ySlotStart, frameSize, call.presentationStrategy);
             default:
                 throw new IllegalStateException("Unreachable");
         }
@@ -183,10 +202,10 @@ public final class EquationRuntime {
     }
 
     private Object executeDiffEqnPathHO(DiffEqnCall call, ResolvedEquation resolved, ODEFunction fn, CanonicalFrame frame,
-            int tSlot, int ySlotStart, int frameSize) {
+            int tSlot, int ySlotStart, int frameSize, PresentationStrategy ps) {
         JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
         return HigherOrderODE.executeTurboODEPathHO(fn, tSlot, ySlotStart, frameSize,
-                call.t0, call.y0, call.tEnd, call.h, call.method, call.points, jac);
+                call.t0, call.y0, call.tEnd, call.h, call.method, call.points, jac, ps);
     }
 
     // ------------------------------------------------------------------
@@ -262,105 +281,35 @@ public final class EquationRuntime {
      */
     public static void main(String[] args) {
 
-        String fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk4)";
-        MathExpression.EvalResult e = new MathExpression(fullCall).solveGeneric();
+        runODE("diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk4)");
 
-        System.out.println("res => " + e);
+        runODE("diffeqnPath((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.1, rk4)");
 
-        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+        runODE("diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk4)");
 
-        fullCall = "diffeqnPath((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.1, rk4)";
-        e = new MathExpression(fullCall).solveGeneric();
+        runODE("diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, implicit_euler)");
 
-        System.out.println("res => " + e);
+        runODE("diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk45)");
 
-        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+        runODE("diffeqnPathHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 1, @(1,4)(1, 0, 0, 0), 20, 0.01, rk4)");
 
-        fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk4)";
-        Object o = solve(new MathExpression(fullCall));
-        if (o instanceof double[][]) {
-            double[][] mat = (double[][]) o;
-            for (double[] d : mat) {
-                System.out.println("res ==> " + Arrays.toString(d));
-            }
-        } else if (o instanceof double[]) {
-            System.out.println("res => " + Arrays.toString(((double[]) o)));
-        } else {
-            System.out.println("res -> " + ((o == null) ? "null" : o.toString()));
-        }
+        runODE("diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, rk45)");
 
-        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-        fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, implicit_euler)";
+        runODE("diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2, state)");
 
-        o = solve(new MathExpression(fullCall));
-        if (o instanceof double[][]) {
-            double[][] mat = (double[][]) o;
-            for (double[] d : mat) {
-                System.out.println("res ==> " + Arrays.toString(d));
-            }
-        } else if (o instanceof double[]) {
-            System.out.println("res => " + Arrays.toString(((double[]) o)));
-        } else {
-            System.out.println("res -> " + ((o == null) ? "null" : o.toString()));
-        }
+        MathExpression me = new MathExpression("A=diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2, state)");
+        me.solve();
+        FunctionManager.lookUp("A").getMatrix().print();
 
-        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-        fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk45)";
+        MathExpression m = new MathExpression("b=diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk45)");
+        m.solve();
+        System.out.println("b = "+m.getValue("b"));
 
-        o = solve(new MathExpression(fullCall));
-        if (o instanceof double[][]) {
-            double[][] mat = (double[][]) o;
-            for (double[] d : mat) {
-                System.out.println("res ==> " + Arrays.toString(d));
-            }
-        } else if (o instanceof double[]) {
-            System.out.println("res => " + Arrays.toString(((double[]) o)));
-        } else {
-            System.out.println("res -> " + ((o == null) ? "null" : o.toString()));
-        }
-
-        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-        fullCall = "diffeqnPathHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 1, @(1,4)(1, 0, 0, 0), 20, 0.01, rk4)";
-
-        o = solve(new MathExpression(fullCall));
-        if (o instanceof double[][]) {
-            double[][] mat = (double[][]) o;
-            for (double[] d : mat) {
-                System.out.println("res ==> " + Arrays.toString(d));
-            }
-        } else if (o instanceof double[]) {
-            System.out.println("res => " + Arrays.toString(((double[]) o)));
-        } else {
-            System.out.println("res -> " + ((o == null) ? "null" : o.toString()));
-        }
-        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-        fullCall = "diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, rk45)";
-
-        o = solve(new MathExpression(fullCall));
-        if (o instanceof double[][]) {
-            double[][] mat = (double[][]) o;
-            for (double[] d : mat) {
-                System.out.println("res ==> " + Arrays.toString(d));
-            }
-        } else if (o instanceof double[]) {
-            System.out.println("res => " + Arrays.toString(((double[]) o)));
-        } else {
-            System.out.println("res -> " + ((o == null) ? "null" : o.toString()));
-        }
-
-        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-        fullCall = "diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2)";
-
-        o = solve(new MathExpression(fullCall));
-        if (o instanceof double[][]) {
-            double[][] mat = (double[][]) o;
-            for (double[] d : mat) {
-                System.out.println("res ==> " + Arrays.toString(d));
-            }
-        } else if (o instanceof double[]) {
-            System.out.println("res => " + Arrays.toString(((double[]) o)));
-        } else {
-            System.out.println("res -> " + ((o == null) ? "null" : o.toString()));
-        }
     }
+
+    public static void runODE(String in) {
+        MathExpression.EvalResult ev = solve(new MathExpression(in));
+        System.out.println(ev + "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+    }
+
 }

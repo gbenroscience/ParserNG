@@ -1891,8 +1891,8 @@ public class MathExpression implements Savable, Solvable {
 
         expressionSolver = new ExpressionSolver();
     }
-    
-    public boolean isDiffEqn(){
+
+    public boolean isDiffEqn() {
         return expressionSolver != null && expressionSolver.diffEqn;
     }
 
@@ -1939,8 +1939,6 @@ public class MathExpression implements Savable, Solvable {
             int maxStackDepth = Math.max(cachedPostfix.length * 2, 256);
             this.stack = new EvalResult[maxStackDepth];
 
-          
-
             // CRITICAL: Initialize all stack slots with EvalResult objects
             for (int i = 0; i < stack.length; i++) {
                 stack[i] = new EvalResult();
@@ -1954,12 +1952,12 @@ public class MathExpression implements Savable, Solvable {
                     argCache[i][j] = new EvalResult();  // Initialize
                 }
             }
-            
-              int len = cachedPostfix.length;
+
+            int len = cachedPostfix.length;
             if (len > 0) {
                 Token last = cachedPostfix[cachedPostfix.length - 1];
                 if (last != null && Method.isSupportedDiffEqnMethod(last.name)) {
-                    diffEqn = true; 
+                    diffEqn = true;
                 }
             }
         }
@@ -1967,27 +1965,11 @@ public class MathExpression implements Savable, Solvable {
         public boolean isDiffEqn() {
             return diffEqn;
         }
-        
-        
 
         public EvalResult evaluate() {
 
             if (diffEqn) {
-                    EvalResult out = getNextResult();
-                try {
-                    Object o = EquationRuntime.solve(cachedPostfix);
-                    if (o instanceof double[][]) {
-                        out.wrap(new Matrix((double[][]) o));
-                    } else if (o instanceof  double[]) {
-                        out.wrap((double[]) o);
-                    } else{
-                        out.wrap((double) o);
-                    }
-                } catch (Throwable ex) {
-                    Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
-                     out.wrap(ParserResult.INVALID_FUNCTION);
-                }
-                    return out;
+                return EquationRuntime.solve(MathExpression.this);
             }
 
             // Just use the pre-allocated stack - no allocation per call

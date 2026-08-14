@@ -50,9 +50,16 @@ public final class DiffEqnCall {
     public final ODESolverMethod method;
     /** Only meaningful for the *_PATH kinds; <= 0 means "solver's natural steps, no resampling". */
     public final int points;
+    /**
+     * {@link PresentationStrategy} field
+     * Determines whether to show a matrix of t, y, y', y''(when this field equals {@link PresentationStrategy#STATE} ) etc 
+     * or just t, y (when this field equals {@link PresentationStrategy#TRAJECTORY} ).
+     * The default is {@link PresentationStrategy#TRAJECTORY}
+     */
+    public final PresentationStrategy presentationStrategy;
 
     public DiffEqnCall(Kind kind, String rhsRawText, double t0, double[] y0, double tEnd,
-                        double h, ODESolverMethod method, int points) {
+                        double h, ODESolverMethod method, int points, PresentationStrategy presentationStrategy) {
         this.kind = kind;
         this.rhsRawText = rhsRawText;
         this.t0 = t0;
@@ -61,6 +68,7 @@ public final class DiffEqnCall {
         this.h = h;
         this.method = method;
         this.points = points;
+        this.presentationStrategy = presentationStrategy;
     }
 
     public boolean isPathVariant() {

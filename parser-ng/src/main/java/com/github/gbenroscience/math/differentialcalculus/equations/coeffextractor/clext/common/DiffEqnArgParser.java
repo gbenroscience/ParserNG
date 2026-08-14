@@ -10,16 +10,17 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Reads the calling-convention arguments (t0, y0, tEnd, h, method, points) off
- * a diffeqn/diffeqnPath/diffeqnHO/diffeqnPathHO call — t0/tEnd/h/method/ points
- * from {@link Token#getRawArgs()} text (the pragmatic path settled on over
- * re-deriving the same information structurally, per the explicit "if too
- * difficult, get it from token.getRawArgs()" fallback), but y0 from the real
- * compiled {@code Token}, since a bracketed vector literal like
- * {@code (1, 0, 0, 0, 0)} compiles to a single {@code MATRIX}-kind token named
- * {@code anonN} rather than staying literal text — re-splitting rawArgs text on
- * commas breaks the moment y0 contains any expression with its own nested comma
- * (a function call, another vector), and doesn't reflect how ParserNG actually
+ * Reads the calling-convention arguments (t0, y0, tEnd, h, method, points,
+ * presentationStrategy) off a diffeqn/diffeqnPath/diffeqnHO/diffeqnPathHO
+ * call — t0/tEnd/h/method/points/presentationStrategy from {@link
+ * Token#getRawArgs()} text (the pragmatic path settled on over re-deriving
+ * the same information structurally, per the explicit "if too difficult, get
+ * it from token.getRawArgs()" fallback), but y0 from the real compiled
+ * {@code Token}, since a bracketed vector literal like {@code (1, 0, 0, 0,
+ * 0)} compiles to a single {@code MATRIX}-kind token named {@code anonN}
+ * rather than staying literal text — re-splitting rawArgs text on commas
+ * breaks the moment y0 contains any expression with its own nested comma (a
+ * function call, another vector), and doesn't reflect how ParserNG actually
  * represents it. The real values are read via
  * {@code FunctionManager.lookUp(name).getMatrix().getFlatArray()}. Bracket
  * text-splitting is kept only as a last-resort fallback for a shape that
@@ -36,13 +37,30 @@ import java.util.List;
  * <h2>Positional argument layout</h2>
  * <pre>
  * diffeqn:        [equation, t0, y0, tEnd, h?, method?]
- * diffeqnPath:     [equation, t0, y0, tEnd, h?, method?, points?]
- * diffeqnHO:       [equation, t0, y0, tEnd, h?, method?]        (y0 always a vector here)
- * diffeqnPathHO:   [equation, t0, y0, tEnd, h?, method?, points?]
- * </pre> h and method are optional per the calling convention; when omitted
- * this class applies a documented default ({@link #DEFAULT_H}, {@link
- * #DEFAULT_METHOD}) rather than silently guessing something else — a caller who
- * cares about the exact solver behavior should always pass both.
+ * diffeqnPath:    [equation, t0, y0, tEnd, h?, method?, points?, presentationStrategy?]
+ * diffeqnHO:      [equation, t0, y0, tEnd, h?, method?]        (y0 always a vector here)
+ * diffeqnPathHO:  [equation, t0, y0, tEnd, h?, method?, points?, presentationStrategy?]
+ * </pre>
+ * h and method are optional for every kind; points and presentationStrategy
+ * are additionally available on the *_PATH kinds only, and each is
+ * INDEPENDENTLY optional — a call may supply neither, just points, just
+ * presentationStrategy, or both. Because of that, the trailing argument at
+ * index 6 is disambiguated by content rather than assumed to always be
+ * points: if it parses as a number it's points (and index 7, if present, is
+ * then presentationStrategy); if it doesn't parse as a number it's read as
+ * presentationStrategy directly, and points is left at its default. This is
+ * what lets {@code diffeqnPathHO(eqn, t0, y0, tEnd, h, method, "state")} work
+ * — points omitted, presentationStrategy supplied — without the parser
+ * trying (and failing) to read "state" as a number.
+ *
+ * All optional arguments fall back to a documented default ({@link
+ * #DEFAULT_H}, {@link #DEFAULT_METHOD}, {@link
+ * #DEFAULT_PRESENTATION_STRATEGY}) when omitted, rather than silently
+ * guessing something else — a caller who cares about the exact solver
+ * behavior should always pass them all explicitly. presentationStrategy is
+ * currently only consumed downstream by diffeqnPathHO; diffeqnPath accepts
+ * and parses it for forward compatibility, but nothing reads it yet for that
+ * kind.
  */
 public final class DiffEqnArgParser {
 
@@ -56,6 +74,12 @@ public final class DiffEqnArgParser {
      */
     public static final ODESolverMethod DEFAULT_METHOD
             = ODESolverMethod.RK4;
+
+    /**
+     * Applied when the call omits the optional presentationStrategy argument.
+     */
+    public static final PresentationStrategy DEFAULT_PRESENTATION_STRATEGY
+            = PresentationStrategy.TRAJECTORY;
 
     private DiffEqnArgParser() {
     }
@@ -107,14 +131,41 @@ public final class DiffEqnArgParser {
         ODESolverMethod method = raw.length > 5 && !raw[5].isEmpty()
                 ? parseMethod(raw[5]) : DEFAULT_METHOD;
 
-        int points = -1;
         boolean pathVariant = kind == DiffEqnCall.Kind.DIFFEQN_PATH || kind == DiffEqnCall.Kind.DIFFEQN_PATH_HO;
-        if (pathVariant && raw.length > 6 && !raw[6].isEmpty()) {
-            points = (int) parseDouble(raw[6], "points");
+
+        int points = -1;
+        PresentationStrategy presentationStrategy = DEFAULT_PRESENTATION_STRATEGY;
+
+        if (pathVariant) {
+            String arg6 = raw.length > 6 ? raw[6] : "";
+            String arg7 = raw.length > 7 ? raw[7] : "";
+
+            if (!arg6.isEmpty()) {
+                Double maybePoints = tryParseDouble(arg6);
+                if (maybePoints != null) {
+                    // arg6 is numeric -> points. presentationStrategy, if present, is arg7.
+                    points = maybePoints.intValue();
+                    if (!arg7.isEmpty()) {
+                        presentationStrategy = parsePresentationStrategy(arg7);
+                    }
+                } else {
+                    // arg6 isn't numeric -> it's presentationStrategy, and points was omitted.
+                    presentationStrategy = parsePresentationStrategy(arg6);
+                    if (!arg7.isEmpty()) {
+                        throw new IllegalArgumentException(
+                                "Unexpected 8th argument '" + arg7 + "' — the 7th argument ('" + arg6
+                                + "') was already read as the presentation strategy, so no further "
+                                + "trailing arguments are expected. If you meant to supply points, "
+                                + "put it before the presentation strategy.");
+                    }
+                }
+            } else if (!arg7.isEmpty()) {
+                // points slot explicitly left empty, but presentationStrategy was still supplied.
+                presentationStrategy = parsePresentationStrategy(arg7);
+            }
         }
 
-  
-        return new DiffEqnCall(kind, rhsText, t0, y0, tEnd, h, method, points);
+        return new DiffEqnCall(kind, rhsText, t0, y0, tEnd, h, method, points, presentationStrategy);
     }
 
     private static double parseDouble(String raw, String argName) {
@@ -122,6 +173,20 @@ public final class DiffEqnArgParser {
             return Double.parseDouble(raw.trim());
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Could not parse " + argName + " as a number: '" + raw + "'", e);
+        }
+    }
+
+    /**
+     * Like {@link #parseDouble}, but never throws — returns null on failure
+     * instead. Used to disambiguate whether a trailing optional argument is
+     * numeric (points) or not (presentationStrategy) without relying on a
+     * fixed position, since the two are independently optional.
+     */
+    private static Double tryParseDouble(String raw) {
+        try {
+            return Double.parseDouble(raw.trim());
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
@@ -200,6 +265,28 @@ public final class DiffEqnArgParser {
                 throw new IllegalArgumentException(
                         "Unrecognized method '" + raw + "' — expected one of "
                         + "\"euler\", \"rk4\", \"rk45\", \"implicit_euler\", \"bdf2\".");
+        }
+    }
+
+    /**
+     * Parses the optional presentationStrategy argument. Accepts an
+     * unquoted or quoted "state"/"trajectory" (case-insensitive), matching
+     * {@link #parseMethod}'s convention for string-valued arguments.
+     */
+    public static PresentationStrategy parsePresentationStrategy(String raw) {
+        String cleaned = raw.trim();
+        if (cleaned.length() >= 2 && cleaned.startsWith("\"") && cleaned.endsWith("\"")) {
+            cleaned = cleaned.substring(1, cleaned.length() - 1);
+        }
+        switch (cleaned.toLowerCase()) {
+            case "trajectory":
+                return PresentationStrategy.TRAJECTORY;
+            case "state":
+                return PresentationStrategy.STATE;
+            default:
+                throw new IllegalArgumentException(
+                        "Unrecognized presentation strategy '" + raw + "' — expected one of "
+                        + "\"trajectory\" or \"state\".");
         }
     }
 }
