@@ -12,4 +12,4 @@ src/main/java/.DS_Store
 parser-ng-pro/*.txt
 .specstory
 ParserNG-brand-image.png
-
+build.sh
