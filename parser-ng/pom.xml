@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>3.0.2</version>
+        <version>3.0.3</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     
@@ -20,6 +20,8 @@
         Features the introduction of native logic processing within the engine: the if(cond, trueVal, falseVal) method, the AND operator and the OR operator;
         automatic differentiation to the nth-order, a brand new symbolic differentiation engine, 
         a symbolic integration backed with a resilient numerical integration engine.
+        Differential Equations solver is the shiny new feature of ParserNG. It is a highly optimized and robust solver that can handle 
+        stiff and non-stiff ODEs, as well as systems of ODEs.
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
     </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
