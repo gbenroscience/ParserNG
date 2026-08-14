@@ -14,64 +14,60 @@
  * limitations under the License.
  */
 package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
- 
+
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ExprNodeAutoDiffEvaluator;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.CanonicalFrame;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnArgParser;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnCall;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PostfixArgumentIsolator;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.CoefficientExtractor;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.EquationCoefficientResolver;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.FrameRemapper;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.turbo.ResolvedEquation;
-import com.github.gbenroscience.math.differentialcalculus.equations.turbo.DifferentialEquations;
-import com.github.gbenroscience.math.differentialcalculus.equations.turbo.HigherOrderODE;
-import com.github.gbenroscience.math.differentialcalculus.equations.turbo.TurboODE;
-import com.github.gbenroscience.math.differentialcalculus.equations.turbo.VectorODE;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathExpression.Token;
 
 import java.lang.invoke.MethodHandle;
 import java.util.Arrays;
+
 /**
  *
- * @author GBEMIRO 
- * Turbo-tier counterpart to {@link EquationRuntime} — identical routing,
- * argument parsing, equation isolation, and canonical-frame logic, wired to
- * the {@code MethodHandle}-based solvers ({@code
+ * @author GBEMIRO Turbo-tier counterpart to {@link EquationRuntime} — identical
+ * routing, argument parsing, equation isolation, and canonical-frame logic,
+ * wired to the {@code MethodHandle}-based solvers ({@code
  * com.github.gbenroscience.math.differentialcalculus.equations.TurboODE/
- * VectorODE/HigherOrderODE}) instead of the {@code ODEFunction}-based
- * Standard tier.
+ * VectorODE/HigherOrderODE}) instead of the {@code ODEFunction}-based Standard
+ * tier.
  *
- * <h2>What's shared vs. what's duplicated</h2>
- * {@link DiffEqnArgParser}, {@link DiffEqnCall}, {@link
+ * <h2>What's shared vs. what's duplicated</h2>  {@link DiffEqnArgParser}, {@link DiffEqnCall}, {@link
  * PostfixArgumentIsolator}, {@link CanonicalFrame}, and {@link
- * EquationDivider} (the actual symbolic term-splitting/linearity-checking
- * core) are all reused verbatim from the Standard-tier pipeline — none of
- * that logic touches {@code ODEFunction} or {@code MethodHandle} at all.
- * What's genuinely tier-specific and duplicated here: the final compile
- * step ({@link TurboCoefficientExtractor} calls {@code
+ * EquationDivider} (the actual symbolic term-splitting/linearity-checking core)
+ * are all reused verbatim from the Standard-tier pipeline — none of that logic
+ * touches {@code ODEFunction} or {@code MethodHandle} at all. What's genuinely
+ * tier-specific and duplicated here: the final compile step
+ * ({@link TurboCoefficientExtractor} calls {@code
  * ExprNodeCompiler.compileTurbo} instead of {@code compileStandard}), the
  * frame-remapping wrapper ({@link FrameRemapper} instead of
  * {@link FrameRemappingODEFunction}), and this class's dispatch — because
- * {@code TurboODE}/{@code VectorODE}/{@code HigherOrderODE} live in a
- * separate package with a separate (structurally identical, but distinct)
- * {@code DifferentialEquations.JacobianStrategy} type, so the ~15-line
- * Jacobian-building lambda can't be shared as a single Java object across
- * both functional-interface types even though the logic is identical.
+ * {@code TurboODE}/{@code VectorODE}/{@code HigherOrderODE} live in a separate
+ * package with a separate (structurally identical, but distinct)
+ * {@code JacobianStrategy} type, so the ~15-line Jacobian-building lambda can't
+ * be shared as a single Java object across both functional-interface types even
+ * though the logic is identical.
  *
  * <h2>Checked exceptions</h2>
  * Every Turbo solver entry point declares {@code throws Throwable} (a
- * {@code MethodHandle.invokeExact} constraint) — propagated here rather
- * than swallowed, so callers see the same signal Standard-tier callers get
- * for free from unchecked exceptions.
+ * {@code MethodHandle.invokeExact} constraint) — propagated here rather than
+ * swallowed, so callers see the same signal Standard-tier callers get for free
+ * from unchecked exceptions.
  *
  * <h2>Known gap</h2>
- * Same as {@link EquationRuntime}: a genuine vector (non-HO) system falls
- * back to the solver's default finite-difference Jacobian rather than
- * failing outright, since the coefficient extractor only isolates one top
- * term per call.
+ * Same as {@link EquationRuntime}: a genuine vector (non-HO) system falls back
+ * to the solver's default finite-difference Jacobian rather than failing
+ * outright, since the coefficient extractor only isolates one top term per
+ * call.
  */
 public final class EquationRuntime {
 
@@ -90,9 +86,27 @@ public final class EquationRuntime {
      * <pre>{@code
      * new TurboEquationRuntime(TurboCoefficientExtractor::resolve).execute(me.getCachedPostfix())
      * }</pre>
+     *
+     * @param me
+     * @return
+     * @throws java.lang.Throwable
      */
     public static Object solve(MathExpression me) throws Throwable {
-        return new EquationRuntime(CoefficientExtractor::resolve).execute(me.getCachedPostfix());
+        return solve(me.getCachedPostfix());
+    }
+    /**
+     * One-call convenience, the Turbo-tier twin of {@link
+     * EquationRuntime#solve(Token[]postfix)}. Equivalent to:
+     * <pre>{@code
+     * new EquationRuntime(CoefficientExtractor::resolve).execute(postfix)
+     * }</pre>
+     *
+     * @param postfix 
+     * @return
+     * @throws java.lang.Throwable
+     */
+    public static Object solve(MathExpression.Token[] postfix) throws Throwable {
+        return new EquationRuntime(CoefficientExtractor::resolve).execute(postfix);
     }
 
     /**
@@ -100,6 +114,10 @@ public final class EquationRuntime {
      * {@code diffeqn} and for {@code diffeqnHO}'s y(tEnd), a {@code
      * double[]} for a vector {@code diffeqn}, or a {@code double[][]} for
      * either *_PATH variant.
+     *
+     * @param fullCallPostfix
+     * @return
+     * @throws java.lang.Throwable
      */
     public Object execute(Token[] fullCallPostfix) throws Throwable {
         DiffEqnCall call = DiffEqnArgParser.parse(fullCallPostfix);
@@ -129,10 +147,9 @@ public final class EquationRuntime {
     // ------------------------------------------------------------------
     // Kind-specific dispatch
     // ------------------------------------------------------------------
-
     private Object executeDiffEqn(DiffEqnCall call, ResolvedEquation resolved, MethodHandle fn,
-                                   CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
-        DifferentialEquations.JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, false);
+            CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
+        JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, false);
         if (call.y0.length == 1) {
             return TurboODE.executeTurboODE(fn, tSlot, ySlotStart, frameSize,
                     call.t0, call.y0[0], call.tEnd, call.h, call.method, jac);
@@ -142,8 +159,8 @@ public final class EquationRuntime {
     }
 
     private Object executeDiffEqnPath(DiffEqnCall call, ResolvedEquation resolved, MethodHandle fn,
-                                       CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
-        DifferentialEquations.JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, false);
+            CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
+        JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, false);
         if (call.y0.length == 1) {
             return TurboODE.executeTurboODEPath(fn, tSlot, ySlotStart, frameSize,
                     call.t0, call.y0[0], call.tEnd, call.h, call.method, call.points, jac);
@@ -153,15 +170,15 @@ public final class EquationRuntime {
     }
 
     private Object executeDiffEqnHO(DiffEqnCall call, ResolvedEquation resolved, MethodHandle fn,
-                                     CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
-        DifferentialEquations.JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
+            CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
+        JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
         return HigherOrderODE.executeTurboODEHO(fn, tSlot, ySlotStart, frameSize,
                 call.t0, call.y0, call.tEnd, call.h, call.method, jac);
     }
 
     private Object executeDiffEqnPathHO(DiffEqnCall call, ResolvedEquation resolved, MethodHandle fn,
-                                         CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
-        DifferentialEquations.JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
+            CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
+        JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
         return HigherOrderODE.executeTurboODEPathHO(fn, tSlot, ySlotStart, frameSize,
                 call.t0, call.y0, call.tEnd, call.h, call.method, call.points, jac);
     }
@@ -169,12 +186,11 @@ public final class EquationRuntime {
     // ------------------------------------------------------------------
     // Analytic Jacobian wiring -- identical logic to EquationRuntime's, just
     // targeting the Turbo tier's own (structurally identical, distinct type)
-    // DifferentialEquations.JacobianStrategy, and reading resolved.topDerivativeTree
+    // JacobianStrategy, and reading resolved.topDerivativeTree
     // (an ExprNode -- representation-agnostic, works unchanged for either tier)
     // through the same ExprNodeAutoDiffEvaluator used by the Standard tier.
     // ------------------------------------------------------------------
-
-    private DifferentialEquations.JacobianStrategy buildJacobianIfNeeded(
+    private JacobianStrategy buildJacobianIfNeeded(
             DiffEqnCall call, ResolvedEquation resolved, CanonicalFrame frame, boolean higherOrder) {
         if (call.method != ODESolverMethod.IMPLICIT_EULER) {
             return null;
@@ -229,7 +245,6 @@ public final class EquationRuntime {
     // ------------------------------------------------------------------
     // Demo
     // ------------------------------------------------------------------
-
     public static void main(String[] args) throws Throwable {
         String fullCall = "diffeqnHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 1, @(1,4)(1, 0, 0, 0), 20, 0.01, rk4)";
 

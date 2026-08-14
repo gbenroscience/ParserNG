@@ -20,8 +20,9 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
  * @author GBEMIRO
  */
 public enum ODESolverMethod {
-    EULER, // Fast, O(h) error. Best for real-time graphics/particles.
-    RK4, // Classical 4th Order fixed-step system workhorse.
-    RK45_DORMAND_PRINCE,// Adaptive-step size system engine (Industry standard).
-    IMPLICIT_EULER      // Backwards implicit setup optimized for stiff vector spaces.
+    EULER,                // Fast, O(h) error. Best for real-time graphics/particles.
+    RK4,                  // Classical 4th Order fixed-step system workhorse.
+    RK45_DORMAND_PRINCE,  // Adaptive-step size system engine (Industry standard).
+    IMPLICIT_EULER,       // L-stable, O(h) error. First choice for stiff systems.
+    BDF2                  // L-stable, O(h^2) error. Higher-accuracy stiff-system option.
 }

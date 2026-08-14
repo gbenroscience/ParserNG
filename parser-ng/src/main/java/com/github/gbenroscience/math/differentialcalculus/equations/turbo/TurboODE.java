@@ -1,5 +1,6 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
 import java.lang.invoke.MethodHandle;
 
@@ -45,9 +46,10 @@ public class TurboODE {
 
     /**
      * Same as {@link #executeTurboODE}, but accepts an optional
-     * {@link DifferentialEquations.JacobianStrategy}, consulted only when
-     * method is IMPLICIT_EULER and ignored (accepted, unused) for every other
-     * method — see {@link VectorODE#executeVectorODE} for the same note.
+     * {@link JacobianStrategy}, consulted only for the implicit methods
+     * (IMPLICIT_EULER and BDF2) and ignored (accepted, unused) for every
+     * other method — see {@link VectorODE#executeVectorODE} for the same
+     * note.
      *
      * @param dy_dt
      * @param tSlot
@@ -71,7 +73,7 @@ public class TurboODE {
             double tEnd,
             double initialStep,
             ODESolverMethod method,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
+            JacobianStrategy jacobianStrategy) throws Throwable {
 
         if (initialStep <= 0.0) {
             throw new IllegalArgumentException("initialStep must be positive (a magnitude), got " + initialStep);
@@ -105,6 +107,12 @@ public class TurboODE {
             case IMPLICIT_EULER: {
                 int steps = OdeSupport.fixedStepCount(t0, tEnd, initialStep);
                 resultVector = DifferentialEquations.stepImplicitEuler(
+                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps, jacobianStrategy);
+                break;
+            }
+            case BDF2: {
+                int steps = OdeSupport.fixedStepCount(t0, tEnd, initialStep);
+                resultVector = DifferentialEquations.stepBDF2(
                         dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps, jacobianStrategy);
                 break;
             }
@@ -148,8 +156,8 @@ public class TurboODE {
 
     /**
      * Same as {@link #executeTurboODEPath}, with an optional
-     * {@link DifferentialEquations.JacobianStrategy}, consulted only when
-     * method is IMPLICIT_EULER.
+     * {@link JacobianStrategy}, consulted only for the implicit methods
+     * (IMPLICIT_EULER and BDF2).
      *
      *
      * @param dy_dt
@@ -179,7 +187,7 @@ public class TurboODE {
             double h,
             ODESolverMethod method,
             int points,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
+            JacobianStrategy jacobianStrategy) throws Throwable {
 
         if (h <= 0.0) {
             throw new IllegalArgumentException("h must be positive (a magnitude), got " + h);
@@ -217,6 +225,13 @@ public class TurboODE {
             case IMPLICIT_EULER: {
                 int steps = OdeSupport.fixedStepCount(t0, tEnd, h);
                 history = DifferentialEquations.stepImplicitEulerWithHistory(
+                        dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps, jacobianStrategy);
+                naturallyUniform = true;
+                break;
+            }
+            case BDF2: {
+                int steps = OdeSupport.fixedStepCount(t0, tEnd, h);
+                history = DifferentialEquations.stepBDF2WithHistory(
                         dy_dt, tSlot, ySlot, systemSize, frameSize, t0, y0Vector, tEnd, steps, jacobianStrategy);
                 naturallyUniform = true;
                 break;

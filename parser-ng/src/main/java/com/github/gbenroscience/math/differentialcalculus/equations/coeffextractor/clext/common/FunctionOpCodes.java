@@ -19,8 +19,6 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
  *
  * @author GBEMIRO
  */
-  
-
 import java.util.HashMap;
 import java.util.Map;
 

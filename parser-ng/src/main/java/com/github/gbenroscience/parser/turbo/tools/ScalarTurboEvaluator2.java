@@ -18,7 +18,8 @@ package com.github.gbenroscience.parser.turbo.tools;
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
-import com.github.gbenroscience.math.numericalmethods.NumericalIntegrator;
+import com.github.gbenroscience.math.differentialcalculus.equations.turbo.EquationRuntime;
+import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.math.numericalmethods.TurboRootFinder;
 import com.github.gbenroscience.math.numericalmethods.taylors.symbolic.SymbolicIntegrator;
 import com.github.gbenroscience.math.quadratic.QuadraticSolver;
@@ -27,6 +28,7 @@ import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
 import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.ParserResult;
 import com.github.gbenroscience.parser.TYPE;
 import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
 import static com.github.gbenroscience.parser.TYPE.MATRIX;
@@ -41,7 +43,8 @@ import com.github.gbenroscience.util.Utils;
 import java.lang.invoke.*;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Turbo compiler optimized for PURE SCALAR expressions. Uses widening
@@ -299,6 +302,62 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
     @Override
     public FastCompositeExpression compile() throws Throwable {
+
+        int len = postfix.length;
+        if (len > 0) {
+            MathExpression.Token last = postfix[len - 1];
+            if (last != null && Method.isSupportedDiffEqnMethod(last.name)) {
+                final MathExpression.EvalResult out = new MathExpression.EvalResult();
+                return new FastCompositeExpression() {
+                    @Override
+                    public MathExpression.EvalResult apply(double[] variables) {
+                        try {
+                            Object o = EquationRuntime.solve(postfix);
+                            if (o instanceof double[][]) {
+                                out.wrap(new Matrix((double[][]) o));
+                            } else if (o instanceof double[]) {
+                                out.wrap((double[]) o);
+                            } else {
+                                out.wrap((double) o);
+                            }
+                        } catch (Throwable ex) {
+                            Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+                            out.wrap(ParserResult.INVALID_FUNCTION);
+                        }
+                        return out;
+
+                    }
+
+                    @Override
+                    public double applyScalar(double[] variables) {
+                        MathExpression.EvalResult er = apply(variables);
+                        if (er.type == MathExpression.EvalResult.TYPE_SCALAR) {
+                            return er.scalar;
+                        }
+                        if (er.type == MathExpression.EvalResult.TYPE_VECTOR) {
+                            return (er.vector == null || er.vector.length != 0) ? er.vector[0] : Double.NaN;
+                        }
+                        if (er.type == MathExpression.EvalResult.TYPE_MATRIX) {
+                            return er.matrix.getFlatArray()[1];
+                        }
+                        return Double.NaN;
+                    }
+
+                    @Override
+                    public String checkErrorLogs() {
+                        String logs = errorLog.getLogs();
+                        errorLog.print();
+                        return logs;
+                    }
+
+                    @Override
+                    public TurboExpressionEvaluator getCompiler() {
+                        return ScalarTurboEvaluator2.this;
+                    }
+                };
+            }
+        }
+
         int varCount = countVariables(postfix); // Counts maxIndex + 1
         boolean foldConstants = this.willFoldConstants;
         try {

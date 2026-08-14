@@ -1,7 +1,7 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -15,6 +15,7 @@ import java.util.List;
  * @author GBEMIRO
  */
 public class DifferentialEquations {
+    
 
     // Dormand-Prince 5(4) Coefficients
     private static final double DP_A21 = 1.0 / 5.0,
@@ -36,8 +37,6 @@ public class DifferentialEquations {
     private static final double DP_C2 = 1.0 / 5.0, DP_C3 = 3.0 / 10.0, DP_C4 = 4.0 / 5.0,
             DP_C5 = 8.0 / 9.0, DP_C6 = 1.0;
 
-
-
     /**
      * Callback invoked once per accepted state, (t, y). Used to record a
      * trajectory without forking a second copy of each solver. y is only valid
@@ -48,27 +47,6 @@ public class DifferentialEquations {
     public interface StepListener {
 
         void onStep(double t, double[] y);
-    }
-
-    /**
-     * Supplies the raw df/dy Jacobian (NOT the Newton "I - h*df/dy" matrix —
-     * the solver applies that transform itself) for the implicit solver. The
-     * default implementation used when none is supplied is central- difference
-     * finite differences; passing an
-     * {@code com.github.gbenroscience.math.differentialcalculus.autodiff.AnalyticJacobian}-backed
-     * strategy replaces that with an exact forward-mode-AD Jacobian.
-     */
-    @FunctionalInterface
-    public interface JacobianStrategy {
-
-        /**
-         * @param vars the current frame —
-         * vars[ySlotStart..ySlotStart+systemSize) holds the Newton iterate to
-         * differentiate at, vars[tSlot] holds the corresponding evaluation time
-         * @param outDfDy systemSize x systemSize; fill outDfDy[row][col] = d
-         * f_row / d y_col
-         */
-        void computeDfDy(double[] vars, double[][] outDfDy);
     }
 
     // ------------------------------------------------------------------
@@ -145,15 +123,21 @@ public class DifferentialEquations {
      */
     public static double[][] stepEulerWithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
             int frameSize, double t0, double[] y0, double tEnd, int steps) {
-        List<double[]> rows = new ArrayList<>(steps + 1);
+        validateHandle(dy_dt);
+        validateSlots(tSlot, ySlotStart, systemSize, frameSize);
+        if (steps <= 0) {
+            throw new IllegalArgumentException("steps must be positive, got " + steps);
+        }
+
+        double[][] history = new double[steps + 1][1 + systemSize];
+        int[] rowIndex = {0};
         StepListener recorder = (t, y) -> {
-            double[] row = new double[1 + systemSize];
+            double[] row = history[rowIndex[0]++];
             row[0] = t;
             System.arraycopy(y, 0, row, 1, systemSize);
-            rows.add(row);
         };
         stepEulerCore(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, recorder);
-        return rows.toArray(new double[0][]);
+        return history;
     }
 
     /**
@@ -580,6 +564,7 @@ public class DifferentialEquations {
         double[][] dfDy = new double[systemSize][systemSize];
         double[][] jacobian = new double[systemSize][systemSize];
         double[] deltaY = new double[systemSize];
+        double[][] linSysScratch = new double[systemSize][systemSize + 1];
 
         listener.onStep(t, currentY);
 
@@ -621,7 +606,7 @@ public class DifferentialEquations {
                     }
                 }
 
-                if (!solveLinearSystem(jacobian, G, deltaY, systemSize)) {
+                if (!solveLinearSystem(jacobian, G, deltaY, systemSize, linSysScratch)) {
                     break;
                 }
 
@@ -642,38 +627,214 @@ public class DifferentialEquations {
         return currentY;
     }
 
+    // ------------------------------------------------------------------
+// BDF2 (2nd-order Backward Differentiation Formula)
+// ------------------------------------------------------------------
     /**
-     * Default JacobianStrategy: central-difference approximation, matching the
-     * original inline implementation exactly (same EPSILON, same formula).
-     * f_plus/f_minus are captured once per solve, not reallocated per Newton
-     * iteration.
+     * BDF2: 2nd-order-accurate, L-stable implicit multistep method. L-stability
+     * makes it damp fast transients cleanly (no oscillation), unlike
+     * Crank-Nicolson — the preferred choice when users report oscillatory
+     * artifacts on very stiff systems with implicit Euler's accuracy no longer
+     * being sufficient.
+     *
+     * The first step is bootstrapped with backward (implicit) Euler, since BDF2
+     * requires both y_n and y_{n-1}; from step 2 onward it uses the full BDF2
+     * formula: y_{n+1} - (4/3)y_n + (1/3)y_{n-1} = (2h/3) f(t_{n+1}, y_{n+1})
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @return
+     */
+    public static double[] stepBDF2(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+            int frameSize, double t0, double[] y0, double tEnd, int steps) {
+        return stepBDF2Core(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP, null);
+    }
+
+    /**
+     * Same as {@link #stepBDF2}, but replaces the default central-difference
+     * Jacobian with the supplied {@link JacobianStrategy} — e.g. an
+     * AnalyticJacobian backed by an nth-order automatic differentiator.
+     *
+     * @param dy_dt
+     * @param tSlot
+     * @param ySlotStart
+     * @param systemSize
+     * @param frameSize
+     * @param t0
+     * @param y0
+     * @param tEnd
+     * @param steps
+     * @param jacobianStrategy
+     * @return
+     */
+    public static double[] stepBDF2(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+            int frameSize, double t0, double[] y0, double tEnd, int steps,
+            JacobianStrategy jacobianStrategy) {
+        return stepBDF2Core(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, NO_OP, jacobianStrategy);
+    }
+
+    public static double[][] stepBDF2WithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+            int frameSize, double t0, double[] y0, double tEnd, int steps) {
+        return stepBDF2WithHistory(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, null);
+    }
+
+    public static double[][] stepBDF2WithHistory(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+            int frameSize, double t0, double[] y0, double tEnd, int steps,
+            JacobianStrategy jacobianStrategy) {
+        List<double[]> rows = new ArrayList<>(steps + 1);
+        StepListener recorder = (t, y) -> {
+            double[] row = new double[1 + systemSize];
+            row[0] = t;
+            System.arraycopy(y, 0, row, 1, systemSize);
+            rows.add(row);
+        };
+        stepBDF2Core(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, recorder, jacobianStrategy);
+        return rows.toArray(new double[0][]);
+    }
+
+    private static double[] stepBDF2Core(ODEFunction dy_dt, int tSlot, int ySlotStart, int systemSize,
+            int frameSize, double t0, double[] y0, double tEnd, int steps,
+            StepListener listener, JacobianStrategy jacobianStrategyOrNull) {
+        validateHandle(dy_dt);
+        validateSlots(tSlot, ySlotStart, systemSize, frameSize);
+        if (steps <= 0) {
+            throw new IllegalArgumentException("steps must be positive, got " + steps);
+        }
+
+        double[] vars = new double[frameSize];
+        double[] prevY = new double[systemSize];    // y_{n-1}, unused until step index 1
+        double[] currentY = y0.clone();              // y_n
+        double h = (tEnd - t0) / steps;
+        double t = t0;
+
+        final int MAX_NEWTON_ITER = 30;
+        final double NEWTON_TOLERANCE = 1e-9;
+
+        JacobianStrategy jacobianStrategy = jacobianStrategyOrNull != null
+                ? jacobianStrategyOrNull
+                : finiteDifferenceStrategy(dy_dt, ySlotStart, systemSize);
+
+        double[] nextYGuess = new double[systemSize];
+        double[] f_guess = new double[systemSize];
+        double[] G = new double[systemSize];
+        double[][] dfDy = new double[systemSize][systemSize];
+        double[][] jacobian = new double[systemSize][systemSize];
+        double[] deltaY = new double[systemSize];
+        double[][] linSysScratch = new double[systemSize][systemSize + 1];
+
+        listener.onStep(t, currentY);
+
+        for (int i = 0; i < steps; i++) {
+            double nextT = t + h;
+            boolean isBootstrapStep = (i == 0);
+
+            vars[tSlot] = t;
+            System.arraycopy(currentY, 0, vars, ySlotStart, systemSize);
+            dy_dt.apply(vars, f_guess);
+            for (int j = 0; j < systemSize; j++) {
+                nextYGuess[j] = currentY[j] + h * f_guess[j];
+            }
+
+            boolean converged = false;
+            for (int k = 0; k < MAX_NEWTON_ITER; k++) {
+                vars[tSlot] = nextT;
+                System.arraycopy(nextYGuess, 0, vars, ySlotStart, systemSize);
+                dy_dt.apply(vars, f_guess);
+
+                double gNorm = 0.0;
+                if (isBootstrapStep) {
+                    for (int j = 0; j < systemSize; j++) {
+                        G[j] = nextYGuess[j] - currentY[j] - h * f_guess[j];
+                        gNorm += G[j] * G[j];
+                    }
+                } else {
+                    for (int j = 0; j < systemSize; j++) {
+                        G[j] = nextYGuess[j] - (4.0 / 3.0) * currentY[j] + (1.0 / 3.0) * prevY[j]
+                                - (2.0 * h / 3.0) * f_guess[j];
+                        gNorm += G[j] * G[j];
+                    }
+                }
+                gNorm = Math.sqrt(gNorm);
+
+                if (gNorm < NEWTON_TOLERANCE) {
+                    converged = true;
+                    break;
+                }
+
+                jacobianStrategy.computeDfDy(vars, dfDy);
+                double jacobianScale = isBootstrapStep ? h : (2.0 * h / 3.0);
+                for (int row = 0; row < systemSize; row++) {
+                    for (int col = 0; col < systemSize; col++) {
+                        jacobian[row][col] = (row == col ? 1.0 : 0.0) - jacobianScale * dfDy[row][col];
+                    }
+                }
+
+                if (!solveLinearSystem(jacobian, G, deltaY, systemSize, linSysScratch)) {
+                    break;
+                }
+
+                for (int j = 0; j < systemSize; j++) {
+                    nextYGuess[j] -= deltaY[j];
+                }
+            }
+
+            if (!converged) {
+                System.err.println("Warning: Newton-Raphson failed to converge at t = " + nextT);
+            }
+
+            System.arraycopy(currentY, 0, prevY, 0, systemSize);
+            System.arraycopy(nextYGuess, 0, currentY, 0, systemSize);
+            t = nextT;
+            listener.onStep(t, currentY);
+        }
+
+        return currentY;
+    }
+
+    /**
+     * Default JacobianStrategy: central-difference approximation with dynamic
+     * epsilon scaling (relative to variable magnitude) for better accuracy
+     * across variables of different scale. f_plus/f_minus are captured once per
+     * solve, not reallocated per Newton iteration.
      */
     private static JacobianStrategy finiteDifferenceStrategy(ODEFunction dy_dt, int ySlotStart, int systemSize) {
-        final double EPSILON = 1e-7;
+        final double BASE_EPSILON = 1e-7;
         final double[] f_plus = new double[systemSize];
         final double[] f_minus = new double[systemSize];
         return (vars, outDfDy) -> {
             for (int col = 0; col < systemSize; col++) {
-                double originalValue = vars[ySlotStart + col];
+                int targetIndex = ySlotStart + col;
+                double originalValue = vars[targetIndex];
+                double epsilon = BASE_EPSILON * Math.max(1.0, Math.abs(originalValue));
+                try {
+                    vars[targetIndex] = originalValue + epsilon;
+                    dy_dt.apply(vars, f_plus);
 
-                vars[ySlotStart + col] = originalValue + EPSILON;
-                dy_dt.apply(vars, f_plus);
+                    vars[targetIndex] = originalValue - epsilon;
+                    dy_dt.apply(vars, f_minus);
 
-                vars[ySlotStart + col] = originalValue - EPSILON;
-                dy_dt.apply(vars, f_minus);
-
-                vars[ySlotStart + col] = originalValue;
-
-                for (int row = 0; row < systemSize; row++) {
-                    outDfDy[row][col] = (f_plus[row] - f_minus[row]) / (2.0 * EPSILON);
+                    double doubleEpsilonInverse = 1.0 / (2.0 * epsilon);
+                    for (int row = 0; row < systemSize; row++) {
+                        outDfDy[row][col] = (f_plus[row] - f_minus[row]) * doubleEpsilonInverse;
+                    }
+                } finally {
+                    // Guarantee vars is restored even if dy_dt.apply throws mid-column,
+                    // so shared state is never left perturbed for the next column/caller.
+                    vars[targetIndex] = originalValue;
                 }
             }
         };
     }
 
-    private static boolean solveLinearSystem(double[][] A, double[] b, double[] x, int n) {
-        double[][] M = new double[n][n + 1];
-
+    private static boolean solveLinearSystem(double[][] A, double[] b, double[] x, int n, double[][] M) {
+        // M is caller-owned scratch space, sized [n][n+1]. No allocation here.
         for (int i = 0; i < n; i++) {
             System.arraycopy(A[i], 0, M[i], 0, n);
             M[i][n] = b[i];

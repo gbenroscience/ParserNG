@@ -1,7 +1,7 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
-
 
 /**
  * Vector-system entry points: systemSize is derived directly from y0.length
@@ -16,29 +16,30 @@ public class VectorODE {
     // ------------------------------------------------------------------
     // Endpoint-only system solve
     // ------------------------------------------------------------------
-
     public static double[] executeVectorODE(ODEFunction dy_dt,
-                                             int tSlot,
-                                             int ySlotStart,
-                                             int frameSize,
-                                             double t0,
-                                             double[] y0,
-                                             double tEnd,
-                                             double initialStep,
-                                             ODESolverMethod method) {
+            int tSlot,
+            int ySlotStart,
+            int frameSize,
+            double t0,
+            double[] y0,
+            double tEnd,
+            double initialStep,
+            ODESolverMethod method) {
         return executeVectorODE(dy_dt, tSlot, ySlotStart, frameSize, t0, y0, tEnd, initialStep, method, null);
     }
 
     /**
      * Same as {@link #executeVectorODE}, but accepts an optional
-     * {@link DifferentialEquations.JacobianStrategy} — e.g. an
-     * AnalyticJacobian built from forward-mode AD — to replace the default
-     * central-difference Jacobian used by the IMPLICIT_EULER path.
+     * {@link JacobianStrategy} — e.g. an AnalyticJacobian built from
+     * forward-mode AD — to replace the default central-difference Jacobian used
+     * by the IMPLICIT_EULER path.
      *
-     * jacobianStrategy is only consulted when method is IMPLICIT_EULER; for
-     * every other method it is accepted but ignored, since explicit methods
-     * never build a Jacobian. That keeps a single call site workable
-     * regardless of which method a caller ultimately selects. 
+     * jacobianStrategy is only consulted for the implicit methods
+     * (IMPLICIT_EULER and BDF2); for every other method it is accepted but
+     * ignored, since explicit methods never build a Jacobian. That keeps a
+     * single call site workable regardless of which method a caller ultimately
+     * selects.
+     *
      * @param dy_dt
      * @param tSlot
      * @param ySlotStart
@@ -49,18 +50,18 @@ public class VectorODE {
      * @param initialStep
      * @param method
      * @param jacobianStrategy
-     * @return 
+     * @return
      */
     public static double[] executeVectorODE(ODEFunction dy_dt,
-                                             int tSlot,
-                                             int ySlotStart,
-                                             int frameSize,
-                                             double t0,
-                                             double[] y0,
-                                             double tEnd,
-                                             double initialStep,
-                                             ODESolverMethod method,
-                                             DifferentialEquations.JacobianStrategy jacobianStrategy) {
+            int tSlot,
+            int ySlotStart,
+            int frameSize,
+            double t0,
+            double[] y0,
+            double tEnd,
+            double initialStep,
+            ODESolverMethod method,
+            JacobianStrategy jacobianStrategy) {
 
         if (initialStep <= 0.0) {
             throw new IllegalArgumentException("initialStep must be positive (a magnitude), got " + initialStep);
@@ -90,6 +91,10 @@ public class VectorODE {
                 return DifferentialEquations.stepImplicitEuler(
                         dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, jacobianStrategy);
             }
+            case BDF2: {
+                int steps = OdeSupport.fixedStepCount(t0, tEnd, initialStep);
+                return DifferentialEquations.stepBDF2(dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, jacobianStrategy);
+            }
             default:
                 throw new IllegalArgumentException("Unsupported ODE method: " + method);
         }
@@ -98,25 +103,26 @@ public class VectorODE {
     // ------------------------------------------------------------------
     // Trajectory system solve
     // ------------------------------------------------------------------
-
     public static double[][] executeVectorODEPath(ODEFunction dy_dt,
-                                                   int tSlot,
-                                                   int ySlotStart,
-                                                   int frameSize,
-                                                   double t0,
-                                                   double[] y0,
-                                                   double tEnd,
-                                                   double h,
-                                                   ODESolverMethod method,
-                                                   int points) {
+            int tSlot,
+            int ySlotStart,
+            int frameSize,
+            double t0,
+            double[] y0,
+            double tEnd,
+            double h,
+            ODESolverMethod method,
+            int points) {
         return executeVectorODEPath(dy_dt, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, null);
     }
 
     /**
-     * Same as {@link #executeVectorODEPath}, with an optional
-     * {@link DifferentialEquations.JacobianStrategy}, consulted only when
-     * method is IMPLICIT_EULER (see {@link #executeVectorODE} for the same
-     * note on the other methods ignoring it      * 
+     ** jacobianStrategy is only consulted for the implicit methods
+     * (IMPLICIT_EULER and BDF2); for every other method it is accepted but
+     * ignored, since explicit methods never build a Jacobian. That keeps a
+     * single call site workable regardless of which method a caller ultimately
+     * selects.
+     *
      * @param dy_dt
      * @param tSlot
      * @param ySlotStart
@@ -128,19 +134,19 @@ public class VectorODE {
      * @param method
      * @param points
      * @param jacobianStrategy
-     * @return 
+     * @return
      */
     public static double[][] executeVectorODEPath(ODEFunction dy_dt,
-                                                   int tSlot,
-                                                   int ySlotStart,
-                                                   int frameSize,
-                                                   double t0,
-                                                   double[] y0,
-                                                   double tEnd,
-                                                   double h,
-                                                   ODESolverMethod method,
-                                                   int points,
-                                                   DifferentialEquations.JacobianStrategy jacobianStrategy) {
+            int tSlot,
+            int ySlotStart,
+            int frameSize,
+            double t0,
+            double[] y0,
+            double tEnd,
+            double h,
+            ODESolverMethod method,
+            int points,
+            JacobianStrategy jacobianStrategy) {
 
         if (h <= 0.0) {
             throw new IllegalArgumentException("h must be positive (a magnitude), got " + h);
@@ -171,7 +177,7 @@ public class VectorODE {
                 naturallyUniform = true;
                 break;
             }
-            case RK45_DORMAND_PRINCE: { 
+            case RK45_DORMAND_PRINCE: {
                 history = DifferentialEquations.stepRK45AdaptiveWithHistory(
                         dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, h);
                 naturallyUniform = false; // accepted steps are irregularly spaced
@@ -181,6 +187,14 @@ public class VectorODE {
                 int steps = OdeSupport.fixedStepCount(t0, tEnd, h);
                 history = DifferentialEquations.stepImplicitEulerWithHistory(
                         dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, jacobianStrategy);
+                naturallyUniform = true;
+                break;
+            }
+            case BDF2: {
+                int steps = OdeSupport.fixedStepCount(t0, tEnd, h);
+                history = DifferentialEquations.stepBDF2WithHistory(
+                        dy_dt, tSlot, ySlotStart, systemSize, frameSize, t0, y0, tEnd, steps, jacobianStrategy);
+
                 naturallyUniform = true;
                 break;
             }

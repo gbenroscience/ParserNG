@@ -18,7 +18,9 @@ package com.github.gbenroscience.parser.turbo.tools;
 import com.github.gbenroscience.interfaces.Savable;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.Derivative;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
 import com.github.gbenroscience.math.differentialcalculus.equations.turbo.DifferentialEquations;
+import com.github.gbenroscience.math.differentialcalculus.equations.turbo.EquationRuntime;
 import com.github.gbenroscience.math.geom.Direction;
 import com.github.gbenroscience.math.geom.Line3D;
 import com.github.gbenroscience.math.geom.Point;
@@ -33,6 +35,7 @@ import com.github.gbenroscience.math.tartaglia.Tartaglia_Equation;
 import com.github.gbenroscience.parser.Bracket;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.ParserResult;
 import com.github.gbenroscience.parser.STRING;
 import com.github.gbenroscience.parser.TYPE;
 import static com.github.gbenroscience.parser.TYPE.ALGEBRAIC_EXPRESSION;
@@ -48,6 +51,8 @@ import com.github.gbenroscience.util.io.ByteArrayBuilder;
 import java.lang.invoke.*;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Turbo compiler optimized for PURE SCALAR expressions. Uses an array based
@@ -221,7 +226,12 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
     /**
      * Hardened production bridge. Zero allocation for arity <= 8. Safely scales
-     * for any arity without crashing.
+     * for any arity without crashing. @param methodId @param argsValues
+     * @r
+     *
+     * e
+     * t
+     * urn
      */
     public static MathExpression.EvalResult invokeRegistryMethod(int methodId, double[] argsValues) {
         MathExpression.EvalResult[] wrappers = WRAPPER_CACHE.get();
@@ -256,6 +266,62 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
     
         @Override
     public FastCompositeExpression compile() throws Throwable {
+
+        int len = postfix.length;
+        if (len > 0) {
+            MathExpression.Token last = postfix[len - 1];
+            if (last != null && Method.isSupportedDiffEqnMethod(last.name)) {
+                return new FastCompositeExpression() {
+                    @Override
+                    public MathExpression.EvalResult apply(double[] variables) {
+                        MathExpression.EvalResult out = getNextResult();
+                        try {
+                            Object o = EquationRuntime.solve(postfix);
+                            if (o instanceof double[][]) {
+                                out.wrap(new Matrix((double[][]) o));
+                            } else if (o instanceof double[]) {
+                                out.wrap((double[]) o);
+                            } else {
+                                out.wrap((double) o);
+                            }
+                        } catch (Throwable ex) {
+                            Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+                            out.wrap(ParserResult.INVALID_FUNCTION);
+                        }
+                        return out;
+
+                    }
+
+                    @Override
+                    public double applyScalar(double[] variables) {
+                        MathExpression.EvalResult er = apply(variables);
+                        if (er.type == MathExpression.EvalResult.TYPE_SCALAR) {
+                            return er.scalar;
+                        }
+                        if (er.type == MathExpression.EvalResult.TYPE_VECTOR) {
+                            return (er.vector == null || er.vector.length != 0) ? er.vector[0] : Double.NaN;
+                        }
+                        if (er.type == MathExpression.EvalResult.TYPE_MATRIX) {
+                            return er.matrix.getFlatArray()[1];
+                        }
+                        return Double.NaN;
+                    }
+
+                    @Override
+                    public String checkErrorLogs() {
+                        String logs = errorLog.getLogs();
+                        errorLog.print();
+                        return logs;
+                    }
+
+                    @Override
+                    public TurboExpressionEvaluator getCompiler() {
+                        return ScalarTurboEvaluator1.this;
+                    }
+                };
+            }
+        }
+
         // 1. The RAW handle: Returns primitive double, accepts double[]
         // Modified via compileScalar to directly target user input array indices.
         final MethodHandle rawScalarHandle = compileScalar(postfix);
@@ -266,7 +332,6 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
         );
 
         return new FastCompositeExpression() {
-            // NOTE: The internal 'args[]' tracking array is completely eliminated!
 
             @Override
             public double applyScalar(double[] variables) {
@@ -2617,7 +2682,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
     public static double executeTurboODE(MethodHandle dy_dt, int tSlot, int ySlot, int frameSize,
             double t0, double y0, double tEnd, double initialStep,
-            DifferentialEquations.ODESolverMethod method) throws Throwable {
+            ODESolverMethod method) throws Throwable {
 
         // 1. Pack the scalar y0 into a 1-element state vector array
         double[] y0Vector = new double[]{y0};

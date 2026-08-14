@@ -2,7 +2,6 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
 
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.STRING;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import java.util.List;
@@ -261,32 +260,5 @@ public final class ExprNode {
             return Long.toString((long) v);
         }
         return Double.toString(v);
-    }
-
-    public static ODEFunction compileStandard(MathExpression me) {  
-        MathExpression.Slot[] slots = me.getSlotItems();
-        return (vars, out) -> {
-            for (MathExpression.Slot s : slots) {
-                me.updateSlot(s.getSlot(), vars[s.getSlot()]);
-            }
-            out[0] = me.solveGeneric().scalar;
-        };
-
-        /**
-         * return (vars, out) -> out[0] =
-         * me.solveGeneric(vars).scalar;//expression, vars,
-         * independentVariableName, tSlot, ySlotStart);
-         */
-    }
-
-    public static ODEFunction compileTurbo(MathExpression me) throws Throwable {  
-        MathExpression.Slot[] slots = me.getSlotItems();
-        FastCompositeExpression fce = new ScalarTurboEvaluator1(me).compile();
-        return (vars, out) -> {
-            for (MathExpression.Slot s : slots) {
-                me.updateSlot(s.getSlot(), vars[s.getSlot()]);
-            }
-            out[0] = fce.applyScalar(me.getExecutionFrame());
-        };
-    }
+    } 
 }

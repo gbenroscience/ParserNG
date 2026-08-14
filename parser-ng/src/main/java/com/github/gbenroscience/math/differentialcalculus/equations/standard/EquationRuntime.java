@@ -4,17 +4,13 @@ import com.github.gbenroscience.math.differentialcalculus.equations.coeffextract
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.CanonicalFrame;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnArgParser;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.DiffEqnCall;
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.PostfixArgumentIsolator;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.CoefficientExtractor;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.EquationCoefficientResolver;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.FrameRemapper;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.standard.ResolvedEquation;
-import com.github.gbenroscience.math.differentialcalculus.equations.standard.DifferentialEquations;
-import com.github.gbenroscience.math.differentialcalculus.equations.standard.HigherOrderODE;
-import com.github.gbenroscience.math.differentialcalculus.equations.standard.ODEFunction;
-import com.github.gbenroscience.math.differentialcalculus.equations.standard.TurboODE;
-import com.github.gbenroscience.math.differentialcalculus.equations.standard.VectorODE;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.MathExpression.Token;
 
@@ -96,9 +92,25 @@ public final class EquationRuntime {
      *
      * @param me an already-constructed {@code MathExpression} whose parsed
      * postfix is a diffeqn/diffeqnPath/diffeqnHO/diffeqnPathHO call
+     * @return
      */
     public static Object solve(MathExpression me) {
         return new EquationRuntime(CoefficientExtractor::resolve).execute(me.getCachedPostfix());
+    }
+
+    /**
+     * One-call convenience, the Turbo-tier twin of {@link
+     * EquationRuntime#solve(Token[]postfix)}. Equivalent to:
+     * <pre>{@code
+     * new EquationRuntime(CoefficientExtractor::resolve).execute(postfix)
+     * }</pre>
+     *
+     * @param postfix
+     * @return
+     * @throws java.lang.Throwable
+     */
+    public static Object solve(MathExpression.Token[] postfix) throws Throwable {
+        return new EquationRuntime(CoefficientExtractor::resolve).execute(postfix);
     }
 
     /**
@@ -111,6 +123,7 @@ public final class EquationRuntime {
      * @param fullCallPostfix the WHOLE parsed postfix, with the diffeqn-family
      * call as its last token (the postfix root) — e.g. {@code
      *                        me.getCachedPostfix()} for a call parsed as the top-level statement
+     * @return
      */
     public Object execute(Token[] fullCallPostfix) {
         DiffEqnCall call = DiffEqnArgParser.parse(fullCallPostfix);
@@ -142,7 +155,7 @@ public final class EquationRuntime {
     // ------------------------------------------------------------------
     private Object executeDiffEqn(DiffEqnCall call, ResolvedEquation resolved, ODEFunction fn, CanonicalFrame frame,
             int tSlot, int ySlotStart, int frameSize) {
-        DifferentialEquations.JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, false);
+        JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, false);
         if (call.y0.length == 1) {
             return TurboODE.executeTurboODE(fn, tSlot, ySlotStart, frameSize,
                     call.t0, call.y0[0], call.tEnd, call.h, call.method, jac);
@@ -153,7 +166,7 @@ public final class EquationRuntime {
 
     private Object executeDiffEqnPath(DiffEqnCall call, ResolvedEquation resolved, ODEFunction fn, CanonicalFrame frame,
             int tSlot, int ySlotStart, int frameSize) {
-        DifferentialEquations.JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, false);
+        JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, false);
         if (call.y0.length == 1) {
             return TurboODE.executeTurboODEPath(fn, tSlot, ySlotStart, frameSize,
                     call.t0, call.y0[0], call.tEnd, call.h, call.method, call.points, jac);
@@ -164,14 +177,14 @@ public final class EquationRuntime {
 
     private Object executeDiffEqnHO(DiffEqnCall call, ResolvedEquation resolved, ODEFunction fn, CanonicalFrame frame,
             int tSlot, int ySlotStart, int frameSize) {
-        DifferentialEquations.JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
+        JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
         return HigherOrderODE.executeTurboODEHO(fn, tSlot, ySlotStart, frameSize,
                 call.t0, call.y0, call.tEnd, call.h, call.method, jac);
     }
 
     private Object executeDiffEqnPathHO(DiffEqnCall call, ResolvedEquation resolved, ODEFunction fn, CanonicalFrame frame,
             int tSlot, int ySlotStart, int frameSize) {
-        DifferentialEquations.JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
+        JacobianStrategy jac = buildJacobianIfNeeded(call, resolved, frame, true);
         return HigherOrderODE.executeTurboODEPathHO(fn, tSlot, ySlotStart, frameSize,
                 call.t0, call.y0, call.tEnd, call.h, call.method, call.points, jac);
     }
@@ -179,7 +192,7 @@ public final class EquationRuntime {
     // ------------------------------------------------------------------
     // Analytic Jacobian wiring
     // ------------------------------------------------------------------
-    private DifferentialEquations.JacobianStrategy buildJacobianIfNeeded(
+    private JacobianStrategy buildJacobianIfNeeded(
             DiffEqnCall call, ResolvedEquation resolved, CanonicalFrame frame, boolean higherOrder) {
         if (call.method != ODESolverMethod.IMPLICIT_EULER) {
             return null;
@@ -249,7 +262,7 @@ public final class EquationRuntime {
      */
     public static void main(String[] args) {
 
-        String fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.1, rk4)";
+        String fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk4)";
         MathExpression.EvalResult e = new MathExpression(fullCall).solveGeneric();
 
         System.out.println("res => " + e);
@@ -263,7 +276,7 @@ public final class EquationRuntime {
 
         System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
 
-        fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.1, rk4)";
+        fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk4)";
         Object o = solve(new MathExpression(fullCall));
         if (o instanceof double[][]) {
             double[][] mat = (double[][]) o;
@@ -277,7 +290,7 @@ public final class EquationRuntime {
         }
 
         System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-        fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.00001, implicit_euler)";
+        fullCall = "diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, implicit_euler)";
 
         o = solve(new MathExpression(fullCall));
         if (o instanceof double[][]) {
@@ -307,7 +320,21 @@ public final class EquationRuntime {
         }
 
         System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-        fullCall = "diffeqnPathHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 1, @(1,4)(1, 0, 0, 0), 20, 0.0001, rk4)";
+        fullCall = "diffeqnPathHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 1, @(1,4)(1, 0, 0, 0), 20, 0.01, rk4)";
+
+        o = solve(new MathExpression(fullCall));
+        if (o instanceof double[][]) {
+            double[][] mat = (double[][]) o;
+            for (double[] d : mat) {
+                System.out.println("res ==> " + Arrays.toString(d));
+            }
+        } else if (o instanceof double[]) {
+            System.out.println("res => " + Arrays.toString(((double[]) o)));
+        } else {
+            System.out.println("res -> " + ((o == null) ? "null" : o.toString()));
+        }
+        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+        fullCall = "diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, rk45)";
 
         o = solve(new MathExpression(fullCall));
         if (o instanceof double[][]) {
@@ -321,5 +348,19 @@ public final class EquationRuntime {
             System.out.println("res -> " + ((o == null) ? "null" : o.toString()));
         }
 
+        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+        fullCall = "diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2)";
+
+        o = solve(new MathExpression(fullCall));
+        if (o instanceof double[][]) {
+            double[][] mat = (double[][]) o;
+            for (double[] d : mat) {
+                System.out.println("res ==> " + Arrays.toString(d));
+            }
+        } else if (o instanceof double[]) {
+            System.out.println("res => " + Arrays.toString(((double[]) o)));
+        } else {
+            System.out.println("res -> " + ((o == null) ? "null" : o.toString()));
+        }
     }
 }

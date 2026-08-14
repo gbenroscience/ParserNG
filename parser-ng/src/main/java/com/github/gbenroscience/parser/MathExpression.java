@@ -1891,6 +1891,10 @@ public class MathExpression implements Savable, Solvable {
 
         expressionSolver = new ExpressionSolver();
     }
+    
+    public boolean isDiffEqn(){
+        return expressionSolver != null && expressionSolver.diffEqn;
+    }
 
     // Helper for isOperator (your custom ops)
     public static final boolean isOperator(String s) {
@@ -1911,7 +1915,7 @@ public class MathExpression implements Savable, Solvable {
         private final EvalResult[] stack;
         private final EvalResult[][] argCache;
 
-        private boolean isDiffEqn;
+        private boolean diffEqn;
 
         public ExpressionSolver clone() {
             ExpressionSolver e = new ExpressionSolver();
@@ -1955,24 +1959,35 @@ public class MathExpression implements Savable, Solvable {
             if (len > 0) {
                 Token last = cachedPostfix[cachedPostfix.length - 1];
                 if (last != null && Method.isSupportedDiffEqnMethod(last.name)) {
-                    isDiffEqn = true; 
+                    diffEqn = true; 
                 }
             }
         }
 
+        public boolean isDiffEqn() {
+            return diffEqn;
+        }
+        
+        
+
         public EvalResult evaluate() {
 
-            if (isDiffEqn) {
-                Object o = EquationRuntime.solve(MathExpression.this);
-                EvalResult out = getNextResult();
-                if (o instanceof double[][]) {
-                    out.wrap(new Matrix((double[][]) o));
-                } else if (o instanceof  double[]) {
-                    out.wrap((double[]) o);
-                } else{ 
-                    out.wrap((double) o);
+            if (diffEqn) {
+                    EvalResult out = getNextResult();
+                try {
+                    Object o = EquationRuntime.solve(cachedPostfix);
+                    if (o instanceof double[][]) {
+                        out.wrap(new Matrix((double[][]) o));
+                    } else if (o instanceof  double[]) {
+                        out.wrap((double[]) o);
+                    } else{
+                        out.wrap((double) o);
+                    }
+                } catch (Throwable ex) {
+                    Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+                     out.wrap(ParserResult.INVALID_FUNCTION);
                 }
-                return out;
+                    return out;
             }
 
             // Just use the pre-allocated stack - no allocation per call

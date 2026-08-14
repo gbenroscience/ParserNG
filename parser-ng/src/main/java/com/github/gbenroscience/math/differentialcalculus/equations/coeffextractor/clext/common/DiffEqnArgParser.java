@@ -102,7 +102,6 @@ public final class DiffEqnArgParser {
         double t0 = parseDouble(raw[1], "t0");
         double[] y0 = resolveY0(fullCallPostfix, raw[2]);
         double tEnd = parseDouble(raw[3], "tEnd");
-        System.out.println("args: " + Arrays.toString(raw));
 
         double h = raw.length > 4 && !raw[4].isEmpty() ? parseDouble(raw[4], "h") : DEFAULT_H;
         ODESolverMethod method = raw.length > 5 && !raw[5].isEmpty()
@@ -114,6 +113,7 @@ public final class DiffEqnArgParser {
             points = (int) parseDouble(raw[6], "points");
         }
 
+  
         return new DiffEqnCall(kind, rhsText, t0, y0, tEnd, h, method, points);
     }
 
@@ -181,7 +181,6 @@ public final class DiffEqnArgParser {
     }
 
     public static ODESolverMethod parseMethod(String raw) {
-        System.out.println("raw: " + raw);
         String cleaned = raw.trim();
         if (cleaned.length() >= 2 && cleaned.startsWith("\"") && cleaned.endsWith("\"")) {
             cleaned = cleaned.substring(1, cleaned.length() - 1);
@@ -195,10 +194,12 @@ public final class DiffEqnArgParser {
                 return ODESolverMethod.RK45_DORMAND_PRINCE;
             case "implicit_euler":
                 return ODESolverMethod.IMPLICIT_EULER;
+            case "bdf2":
+                return ODESolverMethod.BDF2;
             default:
                 throw new IllegalArgumentException(
                         "Unrecognized method '" + raw + "' — expected one of "
-                        + "\"euler\", \"rk4\", \"rk45\", \"implicit_euler\".");
+                        + "\"euler\", \"rk4\", \"rk45\", \"implicit_euler\", \"bdf2\".");
         }
     }
 }

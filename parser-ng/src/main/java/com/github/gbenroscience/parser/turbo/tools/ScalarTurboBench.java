@@ -34,7 +34,7 @@ import java.util.logging.Logger;
 public class ScalarTurboBench {
 
     private static final int N = 1000000;
-    private static boolean useWidening = true;
+    private static boolean useWidening = false;
 
     public static void main(String[] args) throws Throwable {
         String rpt = STRING.repeating("=", 80);
@@ -42,6 +42,7 @@ public class ScalarTurboBench {
         System.out.println("SCALAR TURBO COMPILER BENCHMARKS");
         System.out.println(rpt);
 
+        testODE();
         ifExprTestTurbo1();
         testUserDefinedFunctionWidening();
         testUserDefinedFunctionArrayBased();
@@ -1099,6 +1100,38 @@ public class ScalarTurboBench {
                 throw new RuntimeException("Not correct! Test failed! at i=" + i + " for x = " + val+", got "+res+", expected: "+ans);
             }
         }
+    }
+    
+     private static void testODE() throws Throwable {
+        System.out.println("\n=== DIFFERENTIAL EQUATIONS ===\n");
+
+        double N = 1000;
+        String expr = "diffeqnPathHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 1, @(1,4)(1, 0, 0, 0), 20, 0.01, rk4)";
+
+        MathExpression turbo = new MathExpression(expr);
+        FastCompositeExpression compiled = get(turbo);
+
+        double[] vars = new double[0];
+         MathExpression.EvalResult ev = new MathExpression.EvalResult();
+         MathExpression.EvalResult evr = new MathExpression.EvalResult();
+        long start = System.nanoTime();
+        for (int i = 0; i < N; i++) {
+            ev = turbo.solveGeneric();
+        }
+        double interpretedDur = System.nanoTime() - start; 
+
+        start = System.nanoTime();
+        for (int i = 0; i < N; i++) {
+            evr = compiled.apply(vars);
+        }
+        double turboDur = System.nanoTime() - start;
+     
+
+        System.out.printf("Expression: %s%n", expr);
+        System.out.printf("(All constants - folds to single value at compile time)%n");
+        System.out.printf("Interpreted:     %.2f ns/op%n", interpretedDur / N);
+        System.out.printf("Turbo:     %.2f ns/op%n", turboDur / N);
+        System.out.printf("Speedup:     %.1fx%n", (double) interpretedDur / turboDur);
     }
 
     private static void runVariableStressTest() throws Throwable {

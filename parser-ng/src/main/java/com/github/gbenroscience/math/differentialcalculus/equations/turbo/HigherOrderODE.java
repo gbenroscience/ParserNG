@@ -1,5 +1,6 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
 import java.lang.invoke.MethodHandle;
 
@@ -37,12 +38,11 @@ public class HigherOrderODE {
 
     /**
      * Same as {@link #executeTurboODEHO}, but accepts an optional
-     * {@link DifferentialEquations.JacobianStrategy} for the companion system,
-     * consulted only when method is IMPLICIT_EULER (see
-     * {@link VectorODE#executeVectorODE} for the same note on other methods
-     * ignoring it). Note the Jacobian here is of the companion system, not of
-     * the scalar top-derivative expression directly — its state indices are
-     * ySlotStart through ySlotStart+order-1.
+     * {@link JacobianStrategy} for the companion system, consulted only when
+     * method is IMPLICIT_EULER (see {@link VectorODE#executeVectorODE} for the
+     * same note on other methods ignoring it). Note the Jacobian here is of the
+     * companion system, not of the scalar top-derivative expression directly —
+     * its state indices are ySlotStart through ySlotStart+order-1.
      *
      * @param topDerivative
      * @param tSlot
@@ -66,7 +66,7 @@ public class HigherOrderODE {
             double tEnd,
             double initialStep,
             ODESolverMethod method,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
+            JacobianStrategy jacobianStrategy) throws Throwable {
 
         int order = y0.length;
         MethodHandle companion = CompanionSystemHandles.buildCompanion(
@@ -111,8 +111,7 @@ public class HigherOrderODE {
 
     /**
      * Same as {@link #executeTurboODEPathHO}, with an optional
-     * {@link DifferentialEquations.JacobianStrategy}, consulted only when
-     * method is IMPLICIT_EULER.
+     * {@link JacobianStrategy}, consulted only when method is IMPLICIT_EULER.
      *
      * @param topDerivative
      * @param tSlot
@@ -139,7 +138,7 @@ public class HigherOrderODE {
             double h,
             ODESolverMethod method,
             int points,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) throws Throwable {
+            JacobianStrategy jacobianStrategy) throws Throwable {
 
         int order = y0.length;
         MethodHandle companion = CompanionSystemHandles.buildCompanion(
@@ -153,6 +152,14 @@ public class HigherOrderODE {
             path[i][0] = fullHistory[i][0]; // t
             path[i][1] = fullHistory[i][1]; // y (state component 0)
         }
+        /*
+  double[][] path = new double[fullHistory.length][fullHistory[0].length];
+        for (int i = 0; i < fullHistory.length; i++) {
+            for (int j = 0; j < fullHistory[i].length; j++) {
+                path[i][j] = fullHistory[i][j];// y (state component 0 is at j=1, state component 1 is at j=2 etc)
+            }
+        }
+         */
         return path;
     }
 }

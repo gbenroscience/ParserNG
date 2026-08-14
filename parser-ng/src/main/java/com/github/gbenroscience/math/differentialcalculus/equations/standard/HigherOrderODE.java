@@ -1,5 +1,6 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.standard;
 
+import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.JacobianStrategy;
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ODESolverMethod;
 import java.util.Arrays;
 
@@ -24,7 +25,7 @@ public class HigherOrderODE {
     // diffeqnHO(...) — endpoint-only
     // ------------------------------------------------------------------
     /**
-     * 
+     *
      * @param topDerivative
      * @param tSlot
      * @param ySlotStart
@@ -34,7 +35,7 @@ public class HigherOrderODE {
      * @param tEnd
      * @param initialStep
      * @param method
-     * @return 
+     * @return
      */
     public static double executeTurboODEHO(ODEFunction topDerivative,
             int tSlot,
@@ -50,12 +51,11 @@ public class HigherOrderODE {
 
     /**
      * Same as {@link #executeTurboODEHO}, but accepts an optional
-     * {@link DifferentialEquations.JacobianStrategy} for the companion system,
-     * consulted only when method is IMPLICIT_EULER (see
-     * {@link VectorODE#executeVectorODE} for the same note on other methods
-     * ignoring it). Note the Jacobian here is of the companion system, not of
-     * the scalar top-derivative expression directly — its state indices are
-     * ySlotStart through ySlotStart+order-1.
+     * {@link JacobianStrategy} for the companion system, consulted only when
+     * method is IMPLICIT_EULER (see {@link VectorODE#executeVectorODE} for the
+     * same note on other methods ignoring it). Note the Jacobian here is of the
+     * companion system, not of the scalar top-derivative expression directly —
+     * its state indices are ySlotStart through ySlotStart+order-1.
      *
      * @param topDerivative
      * @param tSlot
@@ -78,7 +78,7 @@ public class HigherOrderODE {
             double tEnd,
             double initialStep,
             ODESolverMethod method,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) {
+            JacobianStrategy jacobianStrategy) {
 
         int order = y0.length;
         ODEFunction companion = CompanionSystemHandles.buildCompanion(
@@ -86,7 +86,7 @@ public class HigherOrderODE {
 
         double[] finalState = VectorODE.executeVectorODE(
                 companion, tSlot, ySlotStart, frameSize, t0, y0, tEnd, initialStep, method, jacobianStrategy);
-  
+
         return finalState[0]; // y(tEnd); finalState[1..] hold y', y'', ... if ever needed
     }
 
@@ -122,8 +122,7 @@ public class HigherOrderODE {
 
     /**
      * Same as {@link #executeTurboODEPathHO}, with an optional
-     * {@link DifferentialEquations.JacobianStrategy}, consulted only when
-     * method is IMPLICIT_EULER.
+     * {@link JacobianStrategy}, consulted only when method is IMPLICIT_EULER.
      *
      * @param topDerivative
      * @param tSlot
@@ -149,7 +148,7 @@ public class HigherOrderODE {
             double h,
             ODESolverMethod method,
             int points,
-            DifferentialEquations.JacobianStrategy jacobianStrategy) {
+            JacobianStrategy jacobianStrategy) {
 
         int order = y0.length;
         ODEFunction companion = CompanionSystemHandles.buildCompanion(
@@ -158,19 +157,19 @@ public class HigherOrderODE {
         double[][] fullHistory = VectorODE.executeVectorODEPath(
                 companion, tSlot, ySlotStart, frameSize, t0, y0, tEnd, h, method, points, jacobianStrategy);
 
+        double[][] path = new double[fullHistory.length][2];
+        for (int i = 0; i < fullHistory.length; i++) {
+            path[i][0] = fullHistory[i][0]; // t
+            path[i][1] = fullHistory[i][1]; // y (state component 0)
+        }
+        /*
         double[][] path = new double[fullHistory.length][fullHistory[0].length];
          for (int i = 0; i < fullHistory.length; i++) {
              for(int j=0;j<fullHistory[i].length;j++){
-                 path[i][j] = fullHistory[i][j];
+                 path[i][j] = fullHistory[i][j];// y (state component 0 is at j=1, state component 1 is at j=2 etc)
              }
         }
-//        for (int i = 0; i < fullHistory.length; i++) {
-//            path[i][0] = fullHistory[i][0]; // t
-//            path[i][1] = fullHistory[i][1]; // y (state component 1)
-//            path[i][2] = fullHistory[i][2]; // y (state component 2)
-//            path[i][3] = fullHistory[i][3]; // y (state component 3)
-//            path[i][4] = fullHistory[i][4]; // y (state component 4)
-//        }
+         */
         return path;
     }
 }
