@@ -84,6 +84,23 @@ import java.util.regex.Pattern;
  *       down the whole batch/bulk evaluation run. As a last line of
  *       defense, any {@link StackOverflowError} that does slip through is
  *       caught and converted into a {@link ParseException} as well.</li>
+ *   <li>The four differential-equation functions {@code diffeqn},
+ *       {@code diffeqnPath}, {@code diffeqnHO}, and {@code diffeqnPathHO}
+ *       may each ONLY appear as the root of the entire input expression —
+ *       i.e. the whole (trimmed) input must be exactly one call to one of
+ *       these functions, optionally wrapped in any number of pure grouping
+ *       parentheses, with nothing else before or after it. This is enforced
+ *       structurally while parsing (not as a post-hoc string scan), so it
+ *       composes correctly with every other feature above.
+ *       {@code diffeqn(...)} is legal, and so is {@code (((diffeqn(...))))}
+ *       (the RPN tokenizer downstream discards pure grouping parens anyway);
+ *       {@code 2+diffeqn(...)}, {@code diffeqn(...)-2},
+ *       {@code sin(diffeqn(...))}, {@code diffeqn(...)*diffeqn(...)}, and
+ *       {@code (diffeqn(...), 2)} (a two-item list, not a pure wrap) are all
+ *       rejected with a {@link ParseException}. (Assignment stripping, e.g.
+ *       {@code "A = diffeqn(...)"} -> {@code "diffeqn(...)"}, is expected
+ *       to have already been handled by a preprocessor before the string
+ *       reaches this class.)</li>
  * </ul>
  *
  * <h2>Thread-safety / reuse</h2>
@@ -174,6 +191,10 @@ public class MathExpressionTreeDepth implements Savable {
     // recognized on a bare variable in parsePrimary(); everywhere else '['
     // is just an unrecognized character. A counter (rather than a boolean)
     // so that a diffeqn call nested inside another one still counts as "inside".
+    // NOTE: a diffeqn call nested inside another diffeqn-family call is now
+    // itself rejected by the root-only rule before this could ever exceed 1
+    // in practice, but the counter is kept as-is since it does no harm and
+    // keeps this field's original meaning intact.
     private int diffEqDepth = 0;
 
     // Guards against reusing a single instance across multiple parses.
@@ -383,10 +404,38 @@ public class MathExpressionTreeDepth implements Savable {
     /**
      * The four differential-equation function names for which the
      * {@code name[n]} derivative-index notation (see {@link #diffEqDepth})
-     * is recognized inside their argument list.
+     * is recognized inside their argument list, and which are subject to
+     * the root-only rule enforced in {@link #parsePrimary()}: a call to one
+     * of these functions may only appear as the entire (trimmed) input
+     * expression — optionally wrapped in any number of pure grouping
+     * parentheses — never nested inside another expression, never combined
+     * with an operator, and never with anything else following it.
      */
     private static final java.util.Set<String> DIFF_EQ_FUNCTIONS = new java.util.HashSet<>(
             java.util.Arrays.asList("diffeqn", "diffeqnPath", "diffeqnHO", "diffeqnPathHO"));
+
+    /**
+     * True if every character in {@code expr[from, to)} is either
+     * whitespace or {@code allowed}. Used by the diffeqn-family root-only
+     * check to confirm that everything surrounding a candidate root call is
+     * nothing but pure grouping parentheses (and whitespace) — the only
+     * thing standing before an identifier at the very start of the
+     * (sub)expression can grammatically be is a chain of grouping '(' opens
+     * (a function call needs a preceding identifier; a list needs a comma
+     * inside), so this check is sufficient to distinguish
+     * "(((diffeqn(...))))" (allowed) from "sin(diffeqn(...))" or
+     * "(diffeqn(...), 2)" (rejected, since 's'/'i'/'n' or ',' would appear
+     * in that span).
+     */
+    private boolean isOnlyWhitespaceAndChar(int from, int to, char allowed) {
+        for (int i = from; i < to; i++) {
+            char c = expr.charAt(i);
+            if (c != allowed && !Character.isWhitespace(c)) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     private int parseRelationalLogical() {
         int maxDepth = parseAdditive();
@@ -685,18 +734,58 @@ public class MathExpressionTreeDepth implements Savable {
 
         // Variable or function
         if (Character.isLetter(c) && !isReservedOperatorChar(c)) {
+            int nameStart = pos;
             String name = consumeIdentifier();
             skipWhitespace();
             if (peek() == '(') {
                 nextChar(); // (
                 functionCount++;
                 boolean isDiffEq = DIFF_EQ_FUNCTIONS.contains(name);
+
+                // ROOT-ONLY RULE for diffeqn / diffeqnPath / diffeqnHO /
+                // diffeqnPathHO: a call to one of these functions may ONLY
+                // appear as the entire (trimmed) input expression, optionally
+                // wrapped in any number of pure grouping parentheses (the RPN
+                // tokenizer downstream discards those anyway). Checked
+                // structurally, right here, rather than as a post-hoc string
+                // scan, so it composes correctly with every other feature.
+                //
+                // Legal:   diffeqn(...)         (((diffeqn(...))))
+                // Illegal: 2+diffeqn(...), diffeqn(...)-2, sin(diffeqn(...)),
+                //          diffeqn(...)*diffeqn(...), (diffeqn(...), 2)
+                //
+                // Any assignment prefix (e.g. "A = diffeqn(...)") is assumed
+                // to have already been stripped by a preprocessor before this
+                // string reaches this class.
+                if (isDiffEq && !isOnlyWhitespaceAndChar(0, nameStart, '(')) {
+                    throw new ParseException(
+                            "A '" + name + "(...)' call must be the root expression "
+                            + "(optionally wrapped in grouping parentheses); "
+                            + "it cannot appear nested inside another expression.",
+                            nameStart);
+                }
+
                 if (isDiffEq) {
                     diffEqDepth++;
                 }
                 enterNesting();
                 try {
-                    return parseCommaListAndClose("Missing closing ')' for function '" + name + "'");
+                    int result = parseCommaListAndClose(
+                            "Missing closing ')' for function '" + name + "'");
+
+                    if (isDiffEq) {
+                        // Only whitespace and closing grouping parens may
+                        // follow the call's own closing ')'.
+                        if (!isOnlyWhitespaceAndChar(pos, expr.length(), ')')) {
+                            throw new ParseException(
+                                    "A '" + name + "(...)' call must be the root expression "
+                                    + "(optionally wrapped in grouping parentheses); "
+                                    + "nothing but closing parentheses may follow the closing ')'.",
+                                    pos);
+                        }
+                    }
+
+                    return result;
                 } finally {
                     exitNesting();
                     if (isDiffEq) {
@@ -1134,8 +1223,14 @@ public class MathExpressionTreeDepth implements Savable {
             "(x+1)(x-1)",                          // implicit multiplication between two parenthesized groups
             "2\u221A9",                            // implicit multiplication: number juxtaposed with '√'
             "diffeqnHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 0, y0, 20, 0.01, rk4)",
-            "diffeqnHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 0, @(1,5)(1, 0, 0, 0, 0), 20, 0.01, rk4)"
+            "diffeqnHO((3t^2)*y[4]+(5*sin(t))*y[3]+(5/t)*y[2]-3*y[1]+3*t*y[0], 0, @(1,5)(1, 0, 0, 0, 0), 20, 0.01, rk4)",
             // the equation from the reported crash, now accepted via implicit multiplication
+            "  diffeqn(y[1]+y[0], a, b)  ",     // legal root call: surrounding whitespace only
+            "(((diffeqn(y[1]+y[0], a, b))))",   // legal: any number of pure grouping parens around the root call
+            "( diffeqn(y[0], a) )",             // legal: single grouping wrap, with inner/outer whitespace
+            "(diffeqn(y[0], a))",               // legal: single grouping wrap, no extra whitespace
+            "diffeqnPathHO(y[2]+y[0], a, b, c)", // the fourth diffeqn-family name, as a bare root call
+            "((diffeqnPathHO(y[2]+y[0], a, b, c)))" // same, wrapped in grouping parens
         };
 
         for (String s : tests) {
@@ -1163,7 +1258,19 @@ public class MathExpressionTreeDepth implements Savable {
             "y[3] + 1",      // "name[n]" outside any diffeqn-family call is rejected
             "diffeqn(y[-1], a)", // negative index is not a non-negative integer
             "diffeqn(y[3, a)",   // missing closing ']' on the derivative index
-            "\u04203 + 1"        // permutation operator with no left operand
+            "\u04203 + 1",        // permutation operator with no left operand
+            "2+diffeqn(y[0]+y[1], a)",          // diffeqn NOT the root: something precedes it
+            "diffeqn(y[0]+y[1], a)-2",          // diffeqn NOT the root: something follows it
+            "sin(diffeqn(y[0], a))",            // diffeqn nested inside another function call
+            "diffeqn(y[0],a)*diffeqnHO(y[1],b)",// two diffeqn-family calls: neither is a lone root
+            "-diffeqn(y[0], a)",                // diffeqn preceded by a unary sign
+            "diffeqnPath(diffeqn(y[0], a), b)", // one diffeqn-family call nested inside another
+            "(diffeqn(y[0], a), 2)",             // a two-item list, NOT a pure grouping wrap
+            "(diffeqn(y[0], a))+1",              // pure-wrapped call still followed by an operator
+            "((diffeqn(y[0], a))",               // unbalanced: extra unmatched leading '('
+            "1+diffeqnPathHO(y[2]+y[0], a, b, c)",       // fourth name, nested (something precedes it)
+            "diffeqnPathHO(y[2]+y[0], a, b, c)-1",       // fourth name, followed by an operator
+            "cos(diffeqnPathHO(y[2]+y[0], a, b, c))"     // fourth name, nested inside another function
         };
 
         System.out.println("\n-- malformed input (expected to fail cleanly) --");

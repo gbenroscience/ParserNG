@@ -12,17 +12,19 @@ Before anything else, the rule that matters most:
 
 That means this is fine:
 
-```text
-diffeqn(y' - 2*y, 0, 1, 5)
+```
+diffeqn(y[1] + 2*y[0], 0, 1, 5)
+
 ```
 
 But none of these are:
 
-```text
-sin(2*x) + diffeqn(y' - 2*y, 0, 1, 5)        ❌ diffeqn is not the root
-diffeqn(y' - 2*y, 0, 1, 5) + 3                ❌ diffeqn is not the root
-sin(diffeqn(y' - 2*y, 0, 1, 5) + 5)            ❌ diffeqn is nested inside sin
+```
+sin(2*x) + diffeqn(y[1] + 2*y[0], 0, 1, 5)        ❌ diffeqn is not the root
+diffeqn(y[1] + 2*y[0], 0, 1, 5) + 3                ❌ diffeqn is not the root
+sin(diffeqn(y[1] + 2*y[0], 0, 1, 5) + 5)            ❌ diffeqn is nested inside sin
 diffeqnPath(...) * diffeqnPath(...)            ❌ two calls, neither is the root alone
+
 ```
 
 Why this restriction exists: solving a differential equation is a fundamentally different kind of computation from evaluating an arithmetic expression. `diffeqn` and its siblings don't return a single number the way `sin(x)` or `2*x+1` do in the ordinary sense - they run an entire numerical integration (potentially producing a whole trajectory of values, or a full system state) and the result has its own shape and its own downstream handling. ParserNG's evaluator needs to recognize "this whole input is a differential-equation solve" up front, before it starts walking the expression tree - it can't discover that fact halfway through evaluating some other, larger expression that happens to have a `diffeqn` call buried inside it.
@@ -41,30 +43,32 @@ A `diffeqn`-family call doesn't have to be a one-off, throwaway evaluation - its
 
 Because a scalar `diffeqn`/`diffeqnHO` call and a trajectory-producing `diffeqnPath`/`diffeqnPathHO` call don't return the same *shape* of result, what you get back on the other end of the assignment differs accordingly:
 
-* **`diffeqn`****/****`diffeqnHO`** with a scalar system returns a single number - assign it and read it back as an ordinary variable's value.
-* **`diffeqnPath`****/****`diffeqnPathHO`**, or any call whose system size is greater than 1, returns a matrix (rows of `t`, `y`, and - depending on `presentationStrategy` - the rest of the state) - assign it and read it back as a matrix.
+- **`diffeqn`****/****`diffeqnHO`** with a scalar system returns a single number - assign it and read it back as an ordinary variable's value.
+- **`diffeqnPath`****/****`diffeqnPathHO`**, or any call whose system size is greater than 1, returns a matrix (rows of `t`, `y[0]`, and - depending on `presentationStrategy` - the rest of the state) - assign it and read it back as a matrix.
 
 ### Example: assigning a trajectory to a matrix
 
-```text
+```
 MathExpression me = new MathExpression(
     "A=diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2, state)");
 me.solve();
 FunctionManager.lookUp("A").getMatrix().print();
+
 ```
 
-Here, `A` is bound to the full trajectory produced by the `diffeqnPathHO` call - since `presentationStrategy` is `state`, each row of the resulting matrix holds `t, y, y', y''`. Once `me.solve()` has run, `A` is a real, addressable name in ParserNG's function/variable table - `FunctionManager.lookUp("A")` retrieves it, `.getMatrix()` gives you the underlying matrix, and `.print()` shows it. From here, `A` behaves like any other matrix-valued variable: it can be indexed, passed to other functions, or referenced in later expressions, entirely independently of the `diffeqnPathHO` call that produced it - that call has already finished and handed off a plain result.
+Here, `A` is bound to the full trajectory produced by the `diffeqnPathHO` call - since `presentationStrategy` is `state`, each row of the resulting matrix holds `t, y[0], y[1], y[2]`. Once `me.solve()` has run, `A` is a real, addressable name in ParserNG's function/variable table - `FunctionManager.lookUp("A")` retrieves it, `.getMatrix()` gives you the underlying matrix, and `.print()` shows it. From here, `A` behaves like any other matrix-valued variable: it can be indexed, passed to other functions, or referenced in later expressions, entirely independently of the `diffeqnPathHO` call that produced it - that call has already finished and handed off a plain result.
 
 ### Example: assigning a scalar endpoint to a variable
 
-```text
+```
 MathExpression m = new MathExpression(
     "b=diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk45)");
 m.solve();
 System.out.println("b = " + m.getValue("b"));
+
 ```
 
-Here, `b` is bound to the single endpoint value `y(10)` that `diffeqn` returns. Since this is a scalar result (not a matrix), it's read back with `m.getValue("b")` rather than through `FunctionManager`'s matrix accessor.
+Here, `b` is bound to the single endpoint value at `t=10` that `diffeqn` returns. Since this is a scalar result (not a matrix), it's read back with `m.getValue("b")` rather than through `FunctionManager`'s matrix accessor.
 
 **The takeaway:** whether you read a `diffeqn`-family result back as a scalar value or as a matrix is entirely determined by what that particular call actually produces - a scalar endpoint solve gives you a scalar, a path/HO/system solve gives you a matrix - not by how you choose to retrieve it afterward. The assignment itself (`name = diffeqn(...)`) is uniform across all four functions; only the shape of what's sitting behind the name differs.
 
@@ -72,14 +76,14 @@ Here, `b` is bound to the single endpoint value `y(10)` that `diffeqn` returns. 
 
 ## 3. The four functions, at a glance
 
-| Function        | Returns                                           | System size      | Use it for                                                     |
-| --------------- | ------------------------------------------------- | ---------------- | -------------------------------------------------------------- |
-| `diffeqn`       | A single endpoint value (or vector, for a system) | Scalar or vector | "What is y at t = tEnd?"                                       |
-| `diffeqnPath`   | A trajectory - many (t, y) rows                   | Scalar or vector | "Show me y over the whole interval."                           |
-| `diffeqnHO`     | A single endpoint state                           | Always a vector  | Higher-order equations (involving y'', y''', …), endpoint only |
-| `diffeqnPathHO` | A trajectory of state vectors                     | Always a vector  | Higher-order equations, full trajectory                        |
+| Function | Returns | System size | Use it for |
+|---|---|---|---|
+| `diffeqn` | A single endpoint value (or vector, for a system) | Scalar or vector | "What is y[0] at t = tEnd?" |
+| `diffeqnPath` | A trajectory - many (t, y[0]) rows | Scalar or vector | "Show me y[0] over the whole interval." |
+| `diffeqnHO` | A single endpoint state | Always a vector | Higher-order equations (involving y[2], y[3], …), endpoint only |
+| `diffeqnPathHO` | A trajectory of state vectors | Always a vector | Higher-order equations, full trajectory |
 
-The `HO` suffix stands for **Higher Order** - it's for equations that involve second derivatives, third derivatives, and so on (`y''`, `y'''`, …), not just `y'`. Internally, ParserNG reduces a higher-order equation to an equivalent *system* of first-order equations (the standard "companion system" technique), and `y0` becomes a vector holding the initial values of `y`, `y'`, `y''`, and so on, up to one less than the equation's order.
+The `HO` suffix stands for **Higher Order** - it's for equations involving `y[2]`, `y[3]`, and higher state components, not just `y[1]`. Internally, ParserNG reduces a higher-order equation to an equivalent *system* of first-order equations (the standard "companion system" technique), and `y0` becomes a vector holding the initial values of `y[0]`, `y[1]`, `y[2]`, and so on, up to one less than the equation's order.
 
 ---
 
@@ -87,42 +91,42 @@ The `HO` suffix stands for **Higher Order** - it's for equations that involve se
 
 ### `diffeqn` and `diffeqnHO`
 
-```text
+```
 diffeqn(equation, t0, y0, tEnd, h?, method?)
 diffeqnHO(equation, t0, y0, tEnd, h?, method?)
+
 ```
 
 ### `diffeqnPath` and `diffeqnPathHO`
 
-```text
+```
 diffeqnPath(equation, t0, y0, tEnd, h?, method?, points?, presentationStrategy?)
 diffeqnPathHO(equation, t0, y0, tEnd, h?, method?, points?, presentationStrategy?)
+
 ```
 
 Arguments marked with `?` are optional and can be left out entirely - if you leave one out, a sensible default is used (see §5). You cannot, however, skip an earlier optional argument and still supply a later one - arguments are positional, so if you want to specify `points`, you must also supply `h` and `method` before it (even if you just want them at their defaults, write them out).
 
 ### What each argument means
 
-**`equation`** The differential equation itself, written as an expression that's already been rearranged so that everything is on one side and the other side is implicitly zero - in other words, write `LHS - RHS`, and drop the `=` sign entirely. For example, the equation `y' = -2y` becomes:
+**`equation`** The differential equation itself, written as an expression that's already been rearranged so that everything is on one side and the other side is implicitly zero - in other words, write `LHS - RHS`, and drop the `=` sign entirely.
+
+For example, `y[1] + 2*y[0]` represents the differential equation
 
 ```text
-y' - (-2*y)
+y' + 2*y = 0
 ```
 
-or more simply:
+Here, ParserNG's `y[1]` notation is the indexed form of the ordinary derivative notation `y'`. Likewise, `y[2]` corresponds to `y''`, `y[3]` to `y'''`, and so forth. The indexed `y[n]` notation is the canonical form used throughout this documentation.
 
-```text
-y' + 2*y
-```
-
-For systems and higher-order equations, individual state components are referenced using `y[0]`, `y[1]`, `y[2]`, and so on - `y[0]` is `y` itself, `y[1]` is `y'`, `y[2]` is `y''`, and so forth. So a third-order equation like `y''' + 3y'' - y' = f(t)` would be written using `y[0]`, `y[1]`, `y[2]`, `y[3]` to refer to `y`, `y'`, `y''`, `y'''` respectively, rearranged onto one side.
+For systems and higher-order equations, individual state components are referenced using `y[0]`, `y[1]`, `y[2]`, and so on - `y[0]` is the dependent variable itself, `y[1]` is its first derivative, `y[2]` is its second derivative, and so forth. So a third-order equation such as `y[3] + 3*y[2] - y[1] = f(t)` is written with `y[3] + 3*y[2] - y[1] - f(t)` on the left-hand side.
 
 **`t0`** The starting value of the independent variable (usually time), where the solve begins. A plain number.
 
-**`y0`** The initial condition(s) - the value(s) of `y` (and its derivatives, for higher-order equations) at `t0`.
+**`y0`** The initial condition(s) - the value(s) of `y[0]` and, for higher-order equations, the corresponding initial state components at `t0`.
 
-* For a **scalar** equation, this is a single number: `1`, `0.5`, `-2`, etc.
-* For a **system or higher-order equation**, this is a vector, written as a bracketed or parenthesized literal, e.g. `(1, 0, 0)` or `@(1,3)(1, 0, 0)` - a vector of length equal to the system size (for `diffeqnHO`/`diffeqnPathHO`, that's the order of the original equation: a 3rd-order equation needs 3 initial values, for `y`, `y'`, and `y''`).
+- For a **scalar** equation, this is a single number: `1`, `0.5`, `-2`, etc.
+- For a **system or higher-order equation**, this is a vector, written as a bracketed or parenthesized literal, e.g. `(1, 0, 0)` or `@(1,3)(1, 0, 0)` - a vector of length equal to the system size (for `diffeqnHO`/`diffeqnPathHO`, that's the order of the original equation: a 3rd-order equation needs 3 initial values, for `y[0]`, `y[1]`, and `y[2]`).
 
 **`tEnd`** The value of the independent variable at which the solve stops. A plain number. `tEnd` can be less than `t0` - ParserNG solves in whichever direction is implied (forward or backward in the independent variable) - but `tEnd` cannot equal `t0` in a way that asks for actual integration; if they're equal, the solve is a no-op that simply hands back `y0`.
 
@@ -130,14 +134,14 @@ For systems and higher-order equations, individual state components are referenc
 
 **`method`** *(optional - default* *`rk4`**)* Which numerical method to use. One of: `euler`, `rk4`, `rk45`, `implicit_euler`, `bdf2`. See §6 for a full breakdown of each, and how to choose.
 
-**`points`** *(optional, path variants only - default: the solver's natural step count, no resampling)* How many (t, y) rows you want back in the trajectory, evenly spaced across `[t0, tEnd]`. If you leave this out, or pass a non-positive number, you get the solver's own natural output - for a fixed-step method, that's exactly one row per step (evenly spaced already); for `rk45`, that's exactly the accepted steps the adaptive algorithm actually took, which will *not* be evenly spaced in general (adaptive solvers take bigger steps where the solution is well-behaved and smaller steps where it changes rapidly). If you specify `points` and the natural output doesn't already match that count, ParserNG resamples the trajectory onto a uniform grid via linear interpolation between the nearest bracketing points.
+**`points`** *(optional, path variants only - default: the solver's natural step count, no resampling)* How many (t, y[0]) rows you want back in the trajectory, evenly spaced across `[t0, tEnd]`. If you leave this out, or pass a non-positive number, you get the solver's own natural output - for a fixed-step method, that's exactly one row per step (evenly spaced already); for `rk45`, that's exactly the accepted steps the adaptive algorithm actually took, which will *not* be evenly spaced in general (adaptive solvers take bigger steps where the solution is well-behaved and smaller steps where it changes rapidly). If you specify `points` and the natural output doesn't already match that count, ParserNG resamples the trajectory onto a uniform grid via linear interpolation between the nearest bracketing points.
 
 **`presentationStrategy`** *(optional, path variants only - default* *`trajectory`**)* One of two literal words: `trajectory` or `state`.
 
-* `trajectory` gives you back just `t` and `y` (the value itself) per row - the classic "plot this" shape.
-* `state` gives you back `t` plus the *entire* internal state vector per row - for a higher-order equation, that means `t, y, y', y'', …` all together, not just `t, y`.
+- `trajectory` gives you back just `t` and `y[0]` (the value itself) per row - the classic "plot this" shape.
+- `state` gives you back `t` plus the *entire* internal state vector per row - for a higher-order equation, that means `t, y[0], y[1], y[2], …` all together, not just `y`.
 
-**`presentationStrategy` is supported by both path variants, `diffeqnPath` and `diffeqnPathHO`.** `trajectory` produces the compact `t, y` representation, while `state` produces `t` plus the complete internal state vector. For higher-order equations, `state` therefore gives you `t, y, y', y'', …` all together.
+**`presentationStrategy` is supported by both path variants, `diffeqnPath` and `diffeqnPathHO`.** `trajectory` produces the compact `t, y[0]` representation, while `state` produces `t` plus the complete internal state vector. For higher-order equations, `state` therefore gives you `t, y[0], y[1], y[2], …` all together.
 
 ---
 
@@ -145,13 +149,14 @@ For systems and higher-order equations, individual state components are referenc
 
 Two arguments have defaults you can lean on:
 
-* **`h`** defaults to `0.01` if omitted.
-* **`method`** defaults to `rk4` if omitted.
+- **`h`** defaults to `0.01` if omitted.
+- **`method`** defaults to `rk4` if omitted.
 
 If your equation is well-behaved and you don't have strong opinions about accuracy or performance, it's entirely reasonable to write:
 
-```text
-diffeqn(y' + 2*y, 0, 1, 5)
+```
+diffeqn(y[1] + 2*y[0], 0, 1, 5)
+
 ```
 
 and let both defaults do their job. But if you care about the exact numerical behavior you're getting - stiffness handling, accuracy order, step-size philosophy - always pass both explicitly. Silently inheriting a default is fine for a quick calculation; it's the wrong call for anything you're going to depend on for correctness.
@@ -196,7 +201,7 @@ Like `euler`, it's only first-order accurate (error shrinks linearly with `h`), 
 
 **Use it for:** stiff systems (chemical kinetics, circuits with widely separated time constants, certain mechanical systems) where stability matters more than squeezing out extra accuracy, or as a safe fallback when you're not sure whether a system is stiff and want something that won't diverge either way.
 
-**A nuance worth knowing:** "it works" on a system doesn't necessarily mean it's giving you tight accuracy - implicit Euler's stability is unconditional for the standard linear stability test equation, but its accuracy is still only first-order. It's entirely possible to get a stable, plausible-looking, but numerically imprecise answer from implicit Euler on a system where a higher-order method (like `bdf2`) would visibly disagree at a tighter step size. If your results need to be trustworthy to more than a rough approximation, don't assume "it runs without blowing up" is the same as "it's accurate" - cross-check against `bdf2` or `rk45` if you're unsure.
+**A nuance worth knowing:** "it works" on a system doesn't necessarily mean it's giving you tight accuracy - implicit Euler's *stability* is unconditional for the standard linear stability test equation, but its *accuracy* is still only first-order. It's entirely possible to get a stable, plausible-looking, but numerically imprecise answer from implicit Euler on a system where a higher-order method (like `bdf2`) would visibly disagree at a tighter tolerance. If your results need to be trustworthy to more than a rough approximation, don't assume "it runs without blowing up" is the same as "it's accurate" - cross-check against `bdf2` or `rk45` if you're unsure.
 
 ### `bdf2` - the higher-accuracy stiff-system option
 
@@ -208,11 +213,11 @@ Second-order Backward Differentiation Formula. Like `implicit_euler`, it's an im
 
 ### Choosing quickly
 
-* **Not stiff, want speed, don't care much about precision:** `euler`
-* **Not stiff, want solid general-purpose accuracy:** `rk4` (the default)
-* **Not stiff, behavior varies a lot across the interval, want automatic step control:** `rk45`
-* **Stiff, want strong stiff stability, first-order accuracy is enough:** `implicit_euler`
-* **Stiff, want strong stiff stability and better accuracy:** `bdf2`
+- **Not stiff, want speed, don't care much about precision:** `euler`
+- **Not stiff, want solid general-purpose accuracy:** `rk4` (the default)
+- **Not stiff, behavior varies a lot across the interval, want automatic step control:** `rk45`
+- **Stiff, want strong stiff stability, first-order accuracy is enough:** `implicit_euler`
+- **Stiff, want strong stiff stability and better accuracy:** `bdf2`
 
 If you're not sure whether your system is stiff: try `rk4` or `rk45` first. If the solution behaves erratically, blows up, or forces you to use an absurdly tiny step size to get a sane answer, that's usually a sign of stiffness - switch to `implicit_euler` or `bdf2`.
 
@@ -222,45 +227,50 @@ If you're not sure whether your system is stiff: try `rk4` or `rk45` first. If t
 
 **A simple scalar decay equation, endpoint only, using defaults:**
 
-```text
-diffeqn(y' + 2*y, 0, 1, 5)
+```
+diffeqn(y[1] + 2*y[0], 0, 1, 5)
+
 ```
 
-Solves `y' = -2y`, `y(0) = 1`, from `t=0` to `t=5`, using `rk4` with `h=0.01` (both defaults). Returns the single value `y(5)`.
+Solves the scalar first-order equation represented by `y[1] + 2*y[0]`, with `y[0] = 1` at `t=0`, from `t=0` to `t=5`, using `rk4` with `h=0.01` (both defaults). Returns the endpoint value at `t=5`.
 
 **The same equation, full trajectory, evenly sampled at 50 points:**
 
-```text
-diffeqnPath(y' + 2*y, 0, 1, 5, 0.01, rk4, 50)
+```
+diffeqnPath(y[1] + 2*y[0], 0, 1, 5, 0.01, rk4, 50)
+
 ```
 
 **A stiff system, solved with BDF2 and an explicit Jacobian-friendly method, adaptive tolerance not needed since it's fixed-step:**
 
-```text
-diffeqn(y' + 1000*y, 0, 1, 2, 0.001, bdf2)
+```
+diffeqn(y[1] + 1000*y[0], 0, 1, 2, 0.001, bdf2)
+
 ```
 
 **A third-order equation, higher-order form, full state trajectory:**
 
-```text
+```
 diffeqnPathHO(3*x*sin(x)*y[3] + 4*x*y[2] + 3*ln(x)*y[1] + 4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2, state)
+
 ```
 
-Here `y0` is the vector `(1, 0, 0)` - initial values for `y, y', y''` - and `points` is omitted (so you get the solver's natural steps), while `presentationStrategy` is set to `state`, so each output row contains `t, y, y', y''`, not just `t, y`.
+Here `y0` is the vector `(1, 0, 0)` - initial values for `y[0], y[1], y[2]` - and `points` is omitted (so you get the solver's natural steps), while `presentationStrategy` is set to `state`, so each output row contains `t, y[0], y[1], y[2]`, not just `t, y[0]`.
 
 **The same call, but capped to 100 evenly spaced points, still with full state:**
 
-```text
+```
 diffeqnPathHO(3*x*sin(x)*y[3] + 4*x*y[2] + 3*ln(x)*y[1] + 4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2, 100, state)
+
 ```
 
 ---
 
 ## 8. Quick troubleshooting
 
-* **"My diffeqn call combined with other math throws an error / doesn't parse."** - See §1. The call has to be the whole expression (assignment, per §2, is the one exception). Solve first, combine the result afterward as a separate step.
-* **"How do I actually get the result back out after solving?"** - See §2: assign it (`name = diffeqn(...)`), then retrieve it via `FunctionManager.lookUp("name").getMatrix()` for a matrix-valued result, or `.getValue("name")` for a scalar one.
-* **"My** **`rk45`** **trajectory isn't evenly spaced."** - Expected behavior; `rk45` is adaptive. Pass `points` if you need a uniform grid.
-* **"My stiff system diverges with** **`rk4`****/****`euler`****/****`rk45`****."** - Switch to `implicit_euler` or `bdf2`.
-* **"My results look stable but seem slightly off compared to a reference."** - If you're using `implicit_euler`, try `bdf2` at the same step size - implicit Euler's stability doesn't guarantee tight accuracy.
-* **"I asked for** **`state`** **on** **`diffeqnPath`** **or** **`diffeqnPathHO`** **and got only `t,y`."** - Check that the final `presentationStrategy` argument is exactly `state`. With `state`, path methods return `t` plus the complete internal state; with `trajectory`, they return only `t,y`.
+- **"My diffeqn call combined with other math throws an error / doesn't parse."** - See §1. The call has to be the whole expression (assignment, per §2, is the one exception). Solve first, combine the result afterward as a separate step.
+- **"How do I actually get the result back out after solving?"** - See §2: assign it (`name = diffeqn(...)`), then retrieve it via `FunctionManager.lookUp("name").getMatrix()` for a matrix-valued result, or `.getValue("name")` for a scalar one.
+- **"My** **`rk45`** **trajectory isn't evenly spaced."** - Expected behavior; `rk45` is adaptive. Pass `points` if you need a uniform grid.
+- **"My stiff system diverges with** **`rk4`****/****`euler`****/****`rk45`****."** - Switch to `implicit_euler` or `bdf2`.
+- **"My results look stable but seem slightly off compared to a reference."** - If you're using `implicit_euler`, try `bdf2` at the same step size - implicit Euler's stability doesn't guarantee tight accuracy.
+- **"I asked for** **`state`** **on** **`diffeqnPath`** **or** **`diffeqnPathHO`** **and got only `t,y[0]`."** - Check that the final `presentationStrategy` argument is exactly `state`. With `state`, path methods return `t` plus the complete internal state; with `trajectory`, they return only `t,y[0]`.

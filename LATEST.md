@@ -1,5 +1,11 @@
 # ParserNG
 
+### ParserNG 3.0.3 is out on maven-central!
+It features a differential equation solver that supports rk4, rk45, euler, implicit_euler, bdf2.
+Incubating in parser-ng-gpu-simd extension is a pure Java Llama model runner which uses the GPU(CUDA and OpenCL)
+to execute Llama models. We will need a lot of feedback from our users on this, as it is in active development.
+
+
 
 ### ParserNG 3.0.2 is out on maven-central!
 ### ParserNG 3.0.1 is out on maven-central!
