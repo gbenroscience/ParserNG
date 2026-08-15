@@ -235,6 +235,49 @@ Full measured breakdowns, including GPU throughput at scale, live in [BENCHMARK_
 
 ---
 
+
+
+---
+
+## 🧮 Solving Differential Equations
+
+ParserNG solves ODEs — single equations, systems, and higher-order equations — as a first-class expression, not a bolted-on API. Four functions cover it: `diffeqn` (endpoint), `diffeqnPath` (full trajectory), `diffeqnHO` and `diffeqnPathHO` (the higher-order equivalents, for equations involving `y''`, `y'''`, and beyond).
+
+Five solver methods are available, spanning the usual accuracy/stiffness tradeoff:
+
+| Method | Order | Stiff-safe? | Use it for |
+| :--- | :--- | :--- | :--- |
+| `euler` | 1st | No | Real-time graphics, particle sims — speed over precision |
+| `rk4` | 4th | No | General-purpose default — solid accuracy, no adaptive bookkeeping |
+| `rk45` | 4th/5th, adaptive | No | Behavior that varies across the interval; industry-standard adaptive stepping |
+| `implicit_euler` | 1st | **Yes** | Stiff systems where stability matters more than tight accuracy |
+| `bdf2` | 2nd | **Yes** | Stiff systems needing better accuracy than `implicit_euler` at the same stability |
+
+```java
+// Endpoint only, using RK4 defaults
+MathExpression me = new MathExpression("diffeqn(y[1] + 2*y[0], 0, 1, 5)");
+me.solve();
+
+// Full trajectory, resampled to 50 evenly-spaced points
+MathExpression path = new MathExpression(
+    "diffeqnPath(y[1] + 2*y[0], 0, 1, 5, 0.01, rk4, 50)");
+path.solve();
+
+// A 3rd-order equation, stiff-safe BDF2, full state trajectory (t, y, y', y'')
+MathExpression ho = new MathExpression(
+    "A=diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2, state)");
+ho.solve();
+FunctionManager.lookUp("A").getMatrix().print();
+```
+
+Results assign to a variable or matrix just like any other ParserNG expression — but a `diffeqn`-family call must always be the *entire* input expression (`A = diffeqn(...)` is fine; `sin(diffeqn(...))` is not — see the docs for why).
+
+Full syntax reference, argument-by-argument breakdown, and per-method accuracy/stability nuances: [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md).
+
+---
+
+
+
 ## 📐 Examples Across Every Backend
 
 Same expression syntax, five different execution tiers. Pick based on how hot the loop is.
@@ -421,6 +464,7 @@ Running any of this in production? Production infrastructures requiring predicta
 * **Deep Dive Benchmarking Logs:** [BENCHMARK_RESULTS.md](parser-ng/BENCHMARK_RESULTS.md) — Comprehensive execution breakdowns versus competitor runtimes.
 * **High-Fidelity Graphical Plotting:** [GRAPHING.md](parser-ng/GRAPHING.md) — Render configuration rules for JavaFX, Swing, and Android surfaces.
 * **Bulk Vectorization Blueprints:** [BULK.md](https://www.google.com/search?q=parser-ng/BULK.md) — Optimization techniques for massive array processing.
+* **Differential Equations:** [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md) — Full `diffeqn`/`diffeqnPath`/`diffeqnHO`/`diffeqnPathHO` syntax, solver selection guide, and result-capture patterns.
 * **Release Artifact Logs:** [LATEST.md](LATEST.md) — Change logs and technical notes for v3.0.3.
 * [MORE.md](MORE.md) — Even more to know
 * [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md) — Original readme for pre-1.0 versions with a lot of, still valid, examples
