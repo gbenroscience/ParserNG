@@ -280,6 +280,8 @@ public final class EquationRuntime {
      * @param args
      */
     public static void main(String[] args) {
+        
+        runODE("diffeqnPathHO(y[2]+3*y[1]-sin(x)*y[0]+3*x^2, 3, @(1,2)(1,0.5), 10, 0.001, rk4, trajectory)");
 
         runODE("diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk4)");
 
