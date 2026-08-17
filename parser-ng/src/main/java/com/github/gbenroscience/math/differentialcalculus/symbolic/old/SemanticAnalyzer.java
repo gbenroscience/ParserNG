@@ -13,10 +13,12 @@ import static com.github.gbenroscience.parser.Variable.*;
 import static com.github.gbenroscience.parser.Operator.*;
 import static com.github.gbenroscience.parser.Bracket.*;
 import static com.github.gbenroscience.math.differentialcalculus.Utilities.*;
+import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.PowerOperator;
 import com.github.gbenroscience.parser.UnaryPostOperator;
 import static com.github.gbenroscience.parser.methods.Method.*;
 import com.github.gbenroscience.util.ErrorLog;
+import com.github.gbenroscience.util.FunctionManager;
 
 import java.util.List;
 
@@ -345,6 +347,9 @@ public class SemanticAnalyzer {
     }
 
     public static void main(String[] args) {
+        Function f = new Function("@(4)(3,1,5,(8+2))");
+        Function ff = new Function("@(4)('3',1,5,(8+2))");
+        System.out.println(FunctionManager.FUNCTIONS);
         try {
             String expression = "2+3*(2*x*x*2*x*x*8*x*7*x*4*y*(3*x)-¹*3*x*x^2*2*3*4^x-5*1/x)";
 

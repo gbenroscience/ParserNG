@@ -1,6 +1,5 @@
-package com.github.gbenroscience.math.parser;
-
-import com.github.gbenroscience.parser.Set;
+package com.github.gbenroscience.parser;
+ 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 

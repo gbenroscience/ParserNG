@@ -50,6 +50,7 @@ import java.util.logging.Logger;
 import static com.github.gbenroscience.parser.Operator.isOpeningCircBracket;
 import static com.github.gbenroscience.parser.Operator.isCircBracket;
 import static com.github.gbenroscience.parser.Operator.isSquareBracket;
+import com.github.gbenroscience.util.StringManager;
 
 /**
  * <p style="font-weight:'bold';color:'red'; font-size:'2em';">
@@ -233,8 +234,9 @@ public class MathExpression implements Savable, Solvable {
         public static final char BIN_OR_DEF = '↕';
 
         private static final long serialVersionUID = 1L;
-        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5, COMMA = 6, MATRIX = 7, VARIABLE = 8, FUNCTION_HANDLE = 9,
-                FUNCTION_HANDLE_UNDEFINED = 10;
+        public static final int NUMBER = 0, OPERATOR = 1, FUNCTION = 2, METHOD = 3, LPAREN = 4, RPAREN = 5, COMMA = 6,
+                MATRIX = 7, VARIABLE = 8, STRING = 9, FUNCTION_HANDLE = 10,
+                FUNCTION_HANDLE_UNDEFINED = 11;
 
         public int kind;
         public double value;
@@ -260,10 +262,25 @@ public class MathExpression implements Savable, Solvable {
         public String assignToName;  // The variable to assign result to (e.g., "vw")
         public boolean isAssignmentTarget = false;
         private String[] rawArgs;
+        /**
+         * ParserNG functions can wrap either user defined functions or matrices
+         * or Vectors(an array of numbers) or Arrays(an array of numbers and
+         * text). The broad token kind is FUNCTION/FUNCTION_HANDLE, but this
+         * field allows us to know the kind of FUNCTION or FUNCTION_HANDLE we
+         * are looking at without further lookups(expensive calls to
+         * FunctionManager.lookup(name)) The default value is VOID, for non
+         * function token types
+         */
+        public final TYPE functionTokenType;
 
         private Token() {
             this.value = 0;
             this.kind = Token.NUMBER;
+            this.functionTokenType = TYPE.VOID;
+        }
+        
+        private Token(TYPE functionTokenType) { 
+            this.functionTokenType = functionTokenType;
         }
 
         // Constructor for Numbers
@@ -272,6 +289,7 @@ public class MathExpression implements Savable, Solvable {
             this.value = value;
             this.precedence = -1;
             this.isRightAssoc = false;
+            this.functionTokenType = TYPE.VOID;
         }
 
         /**
@@ -286,6 +304,21 @@ public class MathExpression implements Savable, Solvable {
             this.v = v;
             this.precedence = -1;
             this.isRightAssoc = false;
+            this.functionTokenType = TYPE.VOID;
+        }
+
+        /**
+         * Constructor for String tokens.
+         *
+         * @param item
+         */
+        public Token(String item) {
+            this.kind = STRING;
+            this.name = item;
+            this.arity = 0; // Explicitly 0: it is an operand, it does not pop arguments
+            this.precedence = -1;
+            this.isRightAssoc = false;
+            this.functionTokenType = TYPE.VOID;
         }
 
         /**
@@ -300,6 +333,8 @@ public class MathExpression implements Savable, Solvable {
             this.arity = 0; // Explicitly 0: it is an operand, it does not pop arguments
             this.precedence = -1;
             this.isRightAssoc = false;
+            Function f = FunctionManager.lookUp(fn);
+            this.functionTokenType = f != null ? f.getType() : TYPE.VOID;
         }
 
         // Constructor for Matrices
@@ -309,6 +344,7 @@ public class MathExpression implements Savable, Solvable {
             this.m = m;
             this.precedence = -1;
             this.isRightAssoc = false;
+            this.functionTokenType = TYPE.VOID;
         }
 
         // Constructor for Operators
@@ -319,6 +355,7 @@ public class MathExpression implements Savable, Solvable {
             this.isRightAssoc = isRightAssoc;
             this.isPostfix = isPostfix;
             this.arity = (isPostfix || opChar == '√' || opChar == CBRT_DEF || opChar == INVERSE_DEF) ? 1 : 2;
+            this.functionTokenType = TYPE.VOID;
         }
 
         // Constructor for Functions/Methods
@@ -331,12 +368,17 @@ public class MathExpression implements Savable, Solvable {
             this.isRightAssoc = false;
             if (id != -1) {
                 this.action = MethodRegistry.getAction(id);
+                this.functionTokenType = TYPE.VOID;
             } else {
                 this.action = FunctionManager.lookUp(this.name);
                 if (this.action == null) {
+                    this.functionTokenType = TYPE.VOID;
                     String err = "Function " + this.name + " not found";
                     log.info(err);
                     throw new RuntimeException(err);
+                } else {
+                    Function f = FunctionManager.lookUp(name);
+                    this.functionTokenType = f != null ? f.getType() : TYPE.VOID;
                 }
             }
         }
@@ -346,6 +388,7 @@ public class MathExpression implements Savable, Solvable {
             this.kind = kind;
             this.precedence = -1;
             this.isRightAssoc = false;
+            this.functionTokenType = TYPE.VOID;
         }
 
         // Constructor for assignment
@@ -356,7 +399,7 @@ public class MathExpression implements Savable, Solvable {
         }
 
         public Token clone() {
-            Token t = new Token();
+            Token t = new Token(functionTokenType);
             t.kind = kind;
             t.value = value;
             t.name = name;
@@ -369,7 +412,7 @@ public class MathExpression implements Savable, Solvable {
             t.isPostfix = isPostfix;
             t.isRightAssoc = isRightAssoc;
             t.opChar = opChar;
-            t.precedence = precedence;
+            t.precedence = precedence; 
             if (rawArgs != null) {
                 t.rawArgs = rawArgs.clone();
             }
@@ -474,6 +517,8 @@ public class MathExpression implements Savable, Solvable {
                     return "MATRIX";
                 case Token.VARIABLE:
                     return "VARIABLE";
+                case Token.STRING:
+                    return "STRING";
                 case Token.FUNCTION_HANDLE:
                     return "FUNCTION_HANDLE";
                 case Token.FUNCTION_HANDLE_UNDEFINED:
@@ -502,6 +547,7 @@ public class MathExpression implements Savable, Solvable {
                     + "\"rawArgs\": " + Arrays.toString(rawArgs) + ",\n"
                     + "\"assignToName\": \"" + assignToName + "\",\n"
                     + "\"isAssignmentTarget\": " + isAssignmentTarget + ",\n"
+                    + "\"functionTokenType\": " + functionTokenType + ",\n"
                     + "\"matrix\": " + (m == null ? "null" : m.toString()) + "\n"
                     + "}\n";
         }
@@ -522,6 +568,7 @@ public class MathExpression implements Savable, Solvable {
                     + "\"rawArgs\": " + Arrays.toString(rawArgs) + ","
                     + "\"assignToName\": \"" + assignToName + "\","
                     + "\"isAssignmentTarget\": " + isAssignmentTarget + ","
+                    + "\"functionTokenType\": " + functionTokenType + ","
                     + "\"matrix\": " + (m == null ? "null" : m.toString()) + ","
                     + "\n\"v\": " + (v == null ? "null" : v.toJSON()) + "\n"
                     + "}";
@@ -1592,6 +1639,7 @@ public class MathExpression implements Savable, Solvable {
         if (isNumber(s)) {
             return new Token(fastParseDouble(s));
         }
+      
 
         //1 - Handle Variables and defined constants
         if (isVariableString(s)) {
@@ -1689,6 +1737,10 @@ public class MathExpression implements Savable, Solvable {
         //8 - Fallback: Treat as undefined function handle
         if (isVariableString(s)) {
             return new Token(s, false);
+        }
+        //Come here for strange bugs that arise from spurious generation of string tokens
+          if (StringManager.hasValue(s)) {
+            return new Token(s);
         }
 
         return null;
@@ -1793,6 +1845,9 @@ public class MathExpression implements Savable, Solvable {
             // ==========================================
             switch (t.kind) {
                 case Token.NUMBER:
+                    postfix[p++] = t;
+                    break;
+                case Token.STRING:
                     postfix[p++] = t;
                     break;
                 case Token.VARIABLE:
@@ -1962,9 +2017,7 @@ public class MathExpression implements Savable, Solvable {
             }
         }
 
-        public boolean isDiffEqn() {
-            return diffEqn;
-        }
+       
 
         public EvalResult evaluate() {
 

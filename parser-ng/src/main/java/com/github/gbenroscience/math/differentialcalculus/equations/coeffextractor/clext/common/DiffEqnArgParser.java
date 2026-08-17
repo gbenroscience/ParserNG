@@ -3,6 +3,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.DifferentialEquations;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression.Token;
+import com.github.gbenroscience.parser.TYPE;
 import com.github.gbenroscience.util.FunctionManager;
 
 import java.util.ArrayList;
@@ -10,36 +11,54 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Reads the calling-convention arguments (t0, y0, tEnd, h, method, points,
- * presentationStrategy) off a diffeqn/diffeqnPath/diffeqnHO/diffeqnPathHO
- * call — t0/tEnd/h/method/points/presentationStrategy from {@link
- * Token#getRawArgs()} text (the pragmatic path settled on over re-deriving
- * the same information structurally, per the explicit "if too difficult, get
- * it from token.getRawArgs()" fallback), but y0 from the real compiled
- * {@code Token}, since a bracketed vector literal like {@code (1, 0, 0, 0,
- * 0)} compiles to a single {@code MATRIX}-kind token named {@code anonN}
- * rather than staying literal text — re-splitting rawArgs text on commas
- * breaks the moment y0 contains any expression with its own nested comma (a
- * function call, another vector), and doesn't reflect how ParserNG actually
- * represents it. The real values are read via
+ * Reads the calling-convention arguments (equation(s), t0, y0, tEnd, h,
+ * method, points, presentationStrategy) off a
+ * diffeqn/diffeqnPath/diffeqnHO/diffeqnPathHO call — t0/tEnd/h/method/
+ * points/presentationStrategy from {@link Token#getRawArgs()} text (the
+ * pragmatic path settled on over re-deriving the same information
+ * structurally, per the explicit "if too difficult, get it from
+ * token.getRawArgs()" fallback), but y0 from the real compiled {@code
+ * Token}, since a bracketed vector literal like {@code (1, 0, 0, 0, 0)}
+ * compiles to a single {@code MATRIX}-kind token named {@code anonN} rather
+ * than staying literal text — re-splitting rawArgs text on commas breaks
+ * the moment y0 contains any expression with its own nested comma (a
+ * function call, another vector), and doesn't reflect how ParserNG
+ * actually represents it. The real values are read via
  * {@code FunctionManager.lookUp(name).getMatrix().getFlatArray()}. Bracket
  * text-splitting is kept only as a last-resort fallback for a shape that
  * somehow isn't a MATRIX or NUMBER token.
  *
+ * <h2>Argument 0: a single equation, or an explicit system</h2>
+ * Argument 0 is either a single equation (the classic form, unquoted,
+ * unwrapped — returned verbatim as text, this class has no opinion on how
+ * it gets isolated or compiled) or an explicit system of equations, given
+ * as {@code @(n)("eq1", ..., "eqN")} — an ARRAY-kind literal whose elements
+ * are quoted equation strings. Equations can't be given as bare (unquoted)
+ * sub-expressions inside the array the way y0's numeric vector elements
+ * can, because y[k]-style symbols in equation text aren't evaluable at
+ * parse time the way constant numbers are — quoting them as strings is
+ * what makes the array a literal, eagerly-resolvable value ParserNG can
+ * compile up front, exactly like y0's vector literal already is. Each
+ * equation in the array is written LHS-RHS with {@code = 0} omitted, and
+ * always divides out the symbol {@code y[n]} where n == the system's
+ * component count (== y0.length) — constant across every equation in the
+ * system, the same convention a single diffeqn/diffeqnHO equation already
+ * uses for its own order. See {@link EquationCoefficientResolver}'s javadoc
+ * for how each equation is actually compiled.
+ *
  * <h2>What this does NOT parse</h2>
- * rawArgs[0] — the raw equation itself, already rearranged to {@code
- * LHS-RHS} with the {@code =} sign omitted — is returned verbatim, as text.
- * This class has no opinion on how it gets isolated or compiled into an
+ * The equation text(s) themselves are returned verbatim, as text. This
+ * class has no opinion on how they get isolated or compiled into an
  * ODEFunction; that is entirely {@link EquationRuntime}'s job, via {@link
  * PostfixArgumentIsolator} and {@link EquationCoefficientResolver} — see the
  * latter's javadoc for why it's the one open dependency in this pipeline.
  *
  * <h2>Positional argument layout</h2>
  * <pre>
- * diffeqn:        [equation, t0, y0, tEnd, h?, method?]
- * diffeqnPath:    [equation, t0, y0, tEnd, h?, method?, points?, presentationStrategy?]
- * diffeqnHO:      [equation, t0, y0, tEnd, h?, method?]        (y0 always a vector here)
- * diffeqnPathHO:  [equation, t0, y0, tEnd, h?, method?, points?, presentationStrategy?]
+ * diffeqn:        [equation | @(n)("eq1",...,"eqN"), t0, y0, tEnd, h?, method?]
+ * diffeqnPath:    [equation | @(n)("eq1",...,"eqN"), t0, y0, tEnd, h?, method?, points?, presentationStrategy?]
+ * diffeqnHO:      [equation, t0, y0, tEnd, h?, method?]        (y0 always a vector here; array form not accepted)
+ * diffeqnPathHO:  [equation, t0, y0, tEnd, h?, method?, points?, presentationStrategy?]  (array form not accepted)
  * </pre>
  * h and method are optional for every kind; points and presentationStrategy
  * are additionally available on the *_PATH kinds only, and each is
@@ -49,9 +68,9 @@ import java.util.List;
  * points: if it parses as a number it's points (and index 7, if present, is
  * then presentationStrategy); if it doesn't parse as a number it's read as
  * presentationStrategy directly, and points is left at its default. This is
- * what lets {@code diffeqnPathHO(eqn, t0, y0, tEnd, h, method, "state")} work
- * — points omitted, presentationStrategy supplied — without the parser
- * trying (and failing) to read "state" as a number.
+ * what lets {@code diffeqnPathHO(eqn, t0, y0, tEnd, h, method, "state")}
+ * work — points omitted, presentationStrategy supplied — without the
+ * parser trying (and failing) to read "state" as a number.
  *
  * All optional arguments fall back to a documented default ({@link
  * #DEFAULT_H}, {@link #DEFAULT_METHOD}, {@link
@@ -59,8 +78,8 @@ import java.util.List;
  * guessing something else — a caller who cares about the exact solver
  * behavior should always pass them all explicitly. presentationStrategy is
  * currently only consumed downstream by diffeqnPathHO; diffeqnPath accepts
- * and parses it for forward compatibility, but nothing reads it yet for that
- * kind.
+ * and parses it for forward compatibility, but nothing reads it yet for
+ * that kind.
  */
 public final class DiffEqnArgParser {
 
@@ -107,25 +126,39 @@ public final class DiffEqnArgParser {
     /**
      * @param fullCallPostfix the WHOLE parsed postfix, with the diffeqn-family
      * call as its last token (the postfix root) — needed, not just the call
-     * token alone, so y0 can be isolated as its own real {@code Token} (see
-     * class javadoc) rather than re-parsed from text.
+     * token alone, so y0 and argument 0 (equation or equation array) can each
+     * be isolated as their own real {@code Token}(s) (see class javadoc)
+     * rather than re-parsed from text.
      * @return
      */
     public static DiffEqnCall parse(Token[] fullCallPostfix) {
         Token callToken = fullCallPostfix[fullCallPostfix.length - 1];
         DiffEqnCall.Kind kind = classify(callToken);
         String[] raw = callToken.getRawArgs();
-        int minArgs = 4; // equation, t0, y0, tEnd
+        int minArgs = 4; // equation(s), t0, y0, tEnd
         if (raw == null || raw.length < minArgs) {
             throw new IllegalArgumentException(
-                    kind + " call needs at least " + minArgs + " arguments (equation, t0, y0, tEnd), got "
+                    kind + " call needs at least " + minArgs + " arguments (equation(s), t0, y0, tEnd), got "
                     + (raw == null ? 0 : raw.length));
         }
 
-        String rhsText = raw[0];
+        EquationResolution eqRes = resolveEquations(fullCallPostfix, raw[0]);
+
         double t0 = parseDouble(raw[1], "t0");
         double[] y0 = resolveY0(fullCallPostfix, raw[2]);
         double tEnd = parseDouble(raw[3], "tEnd");
+
+        boolean higherOrderKind = kind == DiffEqnCall.Kind.DIFFEQN_HO || kind == DiffEqnCall.Kind.DIFFEQN_PATH_HO;
+        if (higherOrderKind && eqRes.fromArray) {
+            throw new IllegalArgumentException(
+                    kind + " takes a single higher-order equation, not an equation array — use diffeqn/"
+                    + "diffeqnPath with @(n)(\"eq1\", ..., \"eqN\") for an explicit system instead.");
+        }
+        if (eqRes.fromArray && eqRes.texts.length != y0.length) {
+            throw new IllegalArgumentException(
+                    "Equation array has " + eqRes.texts.length + " equation(s) but y0 has " + y0.length
+                    + " component(s) — for an explicit system these must match one-to-one.");
+        }
 
         double h = raw.length > 4 && !raw[4].isEmpty() ? parseDouble(raw[4], "h") : DEFAULT_H;
         ODESolverMethod method = raw.length > 5 && !raw[5].isEmpty()
@@ -165,7 +198,7 @@ public final class DiffEqnArgParser {
             }
         }
 
-        return new DiffEqnCall(kind, rhsText, t0, y0, tEnd, h, method, points, presentationStrategy);
+        return new DiffEqnCall(kind, eqRes.texts, eqRes.fromArray, t0, y0, tEnd, h, method, points, presentationStrategy);
     }
 
     private static double parseDouble(String raw, String argName) {
@@ -188,6 +221,40 @@ public final class DiffEqnArgParser {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /** Holds argument 0's resolved equation text(s), plus whether the array syntax was used. */
+    private static final class EquationResolution {
+        final String[] texts;
+        final boolean fromArray;
+
+        EquationResolution(String[] texts, boolean fromArray) {
+            this.texts = texts;
+            this.fromArray = fromArray;
+        }
+    }
+
+    /**
+     * Resolves argument 0 into one or more equation strings. If it's a single
+     * ARRAY-kind token (the @(n)("eq1", ..., "eqN") system syntax), its
+     * elements are read back via FunctionManager — the same technique
+     * already used for y0's numeric vector literal — since each equation is
+     * a quoted string (expression trees can't be eagerly evaluated at parse
+     * time the way constant numbers can, so quoting is what makes the array
+     * a literal ParserNG can resolve up front). Otherwise falls back to the
+     * classic single unquoted-equation form, unchanged.
+     */
+    private static EquationResolution resolveEquations(Token[] fullCallPostfix, String rawText) {
+        Token[] eq0Tokens = PostfixArgumentIsolator.isolateArgument(fullCallPostfix, 0);
+        if (eq0Tokens.length == 1 && (eq0Tokens[0].kind == Token.FUNCTION || eq0Tokens[0].kind == Token.FUNCTION_HANDLE) && eq0Tokens[0].functionTokenType == TYPE.ARRAY) {
+            Function handle = FunctionManager.lookUp(eq0Tokens[0].name);
+            String[] texts = handle.getArray();
+            if (texts == null || texts.length == 0) {
+                throw new IllegalArgumentException("Equation array must contain at least one equation.");
+            }
+            return new EquationResolution(texts, true);
+        }
+        return new EquationResolution(new String[]{rawText}, false);
     }
 
     /**

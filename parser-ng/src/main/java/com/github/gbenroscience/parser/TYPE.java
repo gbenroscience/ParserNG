@@ -13,5 +13,15 @@ import java.io.Serializable;
  * @author JIBOYE Oluwagbemiro Olaoluwa
  */
 public enum TYPE implements Serializable{
-    MATRIX, VECTOR, NUMBER, STRING, VOID, ALGEBRAIC_EXPRESSION, ERROR, BOOLEAN
+    /**
+     * MATRIX is a 2D store of numbers
+     * VECTOR is a 1D store of numbers
+     * ARRAY is a 1D store of numbers and text
+     * STRING is textual data
+     * VOID is no data
+     * ALGEBRAIC_EXPRESSION is textual data that is math and may be given properties in the future(may map to MathExpression)
+     * ERROR is an error type
+     * BOOLEAN is logic
+     */
+    MATRIX, VECTOR, ARRAY, NUMBER, STRING, VOID, ALGEBRAIC_EXPRESSION, ERROR, BOOLEAN
 }

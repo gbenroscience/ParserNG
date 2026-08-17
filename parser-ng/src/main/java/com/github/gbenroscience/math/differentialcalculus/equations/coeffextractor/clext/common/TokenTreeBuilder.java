@@ -1,6 +1,7 @@
 package com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common;
 
 import com.github.gbenroscience.parser.MathExpression.Token;
+import com.github.gbenroscience.util.FunctionManager;
 
 import java.util.ArrayDeque;
 import java.util.Arrays;
@@ -96,6 +97,8 @@ public final class TokenTreeBuilder {
                     break;
                 }
                 default:
+                    System.out.println(" Peek - token.name - "+t.name);
+                    System.out.println(" Peek - "+FunctionManager.lookUp(t.name).toString());
                     throw new IllegalArgumentException(
                             "Unsupported token kind in postfix stream for equation compilation: "
                             + Token.getKind(t.kind) + " (name=" + t.name + ") — only NUMBER, VARIABLE, "

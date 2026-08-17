@@ -31,6 +31,7 @@ import static com.github.gbenroscience.parser.TYPE.MATRIX;
 import static com.github.gbenroscience.parser.TYPE.NUMBER;
 import static com.github.gbenroscience.parser.TYPE.VECTOR;
 import com.github.gbenroscience.util.ErrorLog;
+import com.github.gbenroscience.util.StringManager;
 import java.util.function.Predicate;
 
 /**
@@ -517,6 +518,8 @@ public class MathScanner {
         Scanner csBuilder = new Scanner.Builder(scannerInput)
                 .includeTokens(true)
                 .ignoreWhitespace(false)
+                .addDelimitedRegion("\"", "\"")
+                .addDelimitedRegion("'", "'")
                 .withDynamicMatcher(dynamicRules)
                 .addTokens(VariableManager.VARIABLES.keySet().toArray(new String[0]))
                 .addTokens(Method.getAllFunctions())
@@ -526,10 +529,18 @@ public class MathScanner {
                 .build();
 
         scanner = csBuilder.scan();
-     
+        
+        
         for (int i = 0; i < scanner.size(); i++) {
             String token = scanner.get(i);
+            int len = token.length();
+            if( (token.charAt(0)=='"' && token.charAt(len-1)=='"') || (token.charAt(0)=='\'' && token.charAt(len-1)=='\'') ){
+                token = token.substring(1, len-1);
+                StringManager.add(token);
+                scanner.set(i, token);
+            }
 
+                
             if (isNumber(token) && !validNumber(token)) {
 
                 for (int j = 0; j < token.length(); j++) {//3.4567A
@@ -1760,7 +1771,11 @@ public class MathScanner {
      */
     public static void main(String args[]) {//tester method for STRING methods
      
+        MathExpression m = new MathExpression("arr = @(10)(4,1,5,8,yy, 32, 22, 2.2, ox, \"1.xxx\")");
+        System.out.println(Arrays.toString(FunctionManager.lookUp("arr").getArray()));
 
+        MathExpression m1 = new MathExpression("@(10)(4,1,5,8,yy, 32, 22, 2.2, ox, \"1.xxx\")");
+        System.out.println(FunctionManager.FUNCTIONS);
         MathExpression msc = new MathExpression("diffeqn((3*x^2)*y[4]+(5*sin(x))*sin(y[3])+(5/x)*ln(y[2])-3*y[1]+3*x*y[0], 1, 0, @(1,3)(2,3,4))");
          System.out.println(msc.getExpression()+" -> "+msc.scanner);
          System.out.println(msc.getExpression()+" -> "+Arrays.toString(msc.getCachedPostfix()));

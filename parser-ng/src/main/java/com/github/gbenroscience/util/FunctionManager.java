@@ -7,7 +7,6 @@ package com.github.gbenroscience.util;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.Function;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.STRING;
 import com.github.gbenroscience.parser.TYPE;
 import com.github.gbenroscience.parser.Variable;
 import com.github.gbenroscience.parser.turbo.QuickTime;
@@ -17,7 +16,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
@@ -315,7 +313,7 @@ public class FunctionManager {
     }
 
     public static final boolean isAnonymousFormat(String fName) {
-        if (fName == null || fName.length() < 5 || !fName.startsWith("anon")) {
+        if ( (fName == null) || (fName.length() < (ANON_PREFIX.length()+1)) || !fName.startsWith(ANON_PREFIX)  ) { 
             return false;
         }
 

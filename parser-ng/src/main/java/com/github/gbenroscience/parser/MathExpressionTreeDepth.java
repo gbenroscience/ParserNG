@@ -29,7 +29,9 @@ import java.util.regex.Pattern;
  * pre-size a stack-based evaluator before it runs.
  *
  * Features: - Handles numbers (integers, decimals, scientific notation like
- * 1.2e-3) - Variables (e.g., x, varName_123) - Binary operators: + - * / ^
+ * 1.2e-3) - Variables (e.g., x, varName_123) - String literals, single- or
+ * double-quoted, e.g. 'hello' or "hello" (see {@link #consumeStringLiteral})
+ * - Binary operators: + - * / ^
  * (power, right-associative) - Unary + - ! √ (square root) - Prefix "nth
  * root" notation: a run of superscript digits immediately before '√', e.g.
  * "³√9" (cube root of 9) - Postfix Unicode superscript exponents, e.g.
@@ -38,11 +40,13 @@ import java.util.regex.Pattern;
  * "9Р3" and "6Č5" — same precedence tier as '*' and '/' - Functions with any number of arguments
  * (e.g., sin(x), max(a, b, c+ d)) - Parentheses for grouping AND for
  * comma-separated literal lists, e.g. matrix data "(3,1,4,7)" - Implicit
- * multiplication where a number, ')', identifier, '(', '@', or '√' is
- * juxtaposed directly against a following identifier, '(', '@', or '√'
+ * multiplication where a number, ')', identifier, '(', '@', '√', or a
+ * string-literal quote is juxtaposed directly against a following
+ * identifier, '(', '@', '√', or quote
  * with no explicit operator between them, e.g. "3t" == "3*t", "5sin(4)"
- * == "5*sin(4)", "3(x+1)" == "3*(x+1)", "(x+1)(x-1)" == "(x+1)*(x-1)" —
- * matching ParserNG's own lenient grammar downstream, at the same
+ * == "5*sin(4)", "3(x+1)" == "3*(x+1)", "(x+1)(x-1)" == "(x+1)*(x-1)",
+ * "3'x'" == "3*'x'" — matching ParserNG's own lenient grammar downstream,
+ * at the same
  * precedence tier as an explicit '*'; deliberately NOT extended to two
  * bare numbers ("1 2" is still rejected, not read as "1*2") or to any
  * identifier that could be read as the OR/AND keyword ("3ORx" is still
@@ -57,9 +61,11 @@ import java.util.regex.Pattern;
  * "orange" or "android" are never mistaken for the keyword) - Anonymous
  * function and matrix definitions via '@', e.g. "@(x)sin(x)",
  * "@(x,y,z)=2*x+3*y+4*z", "@(2,2)(3,1,4,7)" - No external libraries,
- * single-pass O(n) parsing - Spaces are ignored
+ * single-pass O(n) parsing - Spaces are ignored (except inside string
+ * literals, where they are preserved as ordinary content)
  *
- * Tree depth definition: - Leaf (number or variable) = 1 - Binary operator
+ * Tree depth definition: - Leaf (number, variable, or string literal) = 1 -
+ * Binary operator
  * node = 1 + max(left depth, right depth) - Unary operator node (prefix
  * +/-/!/√, or a postfix Unicode superscript exponent run) = 1 + operand
  * depth - Function node (named call, parenthesized comma-list, or anonymous
@@ -139,6 +145,20 @@ public class MathExpressionTreeDepth implements Savable {
     private static final char ROOT_CHAR = '\u221A'; // '√'
 
     /**
+     * Double-quote string literal delimiter, e.g. {@code "hello"}.
+     *
+     * @see #consumeStringLiteral(char)
+     */
+    private static final char DOUBLE_QUOTE = '"';
+
+    /**
+     * Single-quote string literal delimiter, e.g. {@code 'hello'}.
+     *
+     * @see #consumeStringLiteral(char)
+     */
+    private static final char SINGLE_QUOTE = '\'';
+
+    /**
      * Binary "permutation" operator, e.g. {@code 9Р3} (nPr — the number of
      * ways to arrange 3 items out of 9). This is the Cyrillic capital letter
      * Er ('Р', U+0420) — visually similar to the Latin 'P' but a distinct
@@ -209,9 +229,11 @@ public class MathExpressionTreeDepth implements Savable {
      * (e.g. "orange", "android"). Whitespace is instead skipped lazily, at
      * each point where the parser is deciding what token comes next (see
      * {@link #skipWhitespace()}), while the low-level token consumers
-     * ({@link #consumeNumber()}, {@link #consumeIdentifier()}) deliberately
+     * ({@link #consumeNumber()}, {@link #consumeIdentifier()}, {@link
+     * #consumeStringLiteral(char)}) deliberately
      * use the raw, non-skipping {@link #peek()}/{@link #nextChar()} so that
-     * whitespace still correctly terminates a number or identifier.
+     * whitespace still correctly terminates a number or identifier, and is
+     * preserved verbatim as content inside a string literal.
      */
     public MathExpressionTreeDepth(String expression) {
         this.expr = expression == null ? "" : expression;
@@ -221,7 +243,8 @@ public class MathExpressionTreeDepth implements Savable {
     /**
      * Thrown for any structurally invalid, incomplete, or unsupported
      * expression: unknown characters, unclosed parentheses/functions,
-     * malformed numeric literals, trailing unparsed content, or excessive
+     * malformed numeric literals, unterminated string literals, trailing
+     * unparsed content, or excessive
      * nesting. Unchecked, so a bulk evaluator can catch it per-expression
      * without forcing a checked-exception signature everywhere.
      */
@@ -320,9 +343,11 @@ public class MathExpressionTreeDepth implements Savable {
     /**
      * Advances {@link #pos} past any run of whitespace. Called only at
      * "decision points" (where the parser is about to look at {@link #peek()}
-     * to decide what comes next) — never from inside {@link #consumeNumber()}
-     * or {@link #consumeIdentifier()}, which rely on whitespace to correctly
-     * terminate the token they're consuming.
+     * to decide what comes next) — never from inside {@link #consumeNumber()},
+     * {@link #consumeIdentifier()}, or {@link #consumeStringLiteral(char)},
+     * which rely on whitespace to correctly terminate (or, for a string
+     * literal, to be preserved as ordinary content within) the token
+     * they're consuming.
      */
     private void skipWhitespace() {
         while (pos < expr.length() && Character.isWhitespace(expr.charAt(pos))) {
@@ -354,8 +379,9 @@ public class MathExpressionTreeDepth implements Savable {
     /**
      * True if {@code c} begins a new primary/unary term reachable with no
      * explicit operator in between — the trigger for ParserNG's implicit-
-     * multiplication leniency, e.g. {@code "3t"} == {@code "3*t"} and
-     * {@code "5sin(4)"} == {@code "5*sin(4)"}. Applied only from {@link
+     * multiplication leniency, e.g. {@code "3t"} == {@code "3*t"},
+     * {@code "5sin(4)"} == {@code "5*sin(4)"}, and {@code "3'x'"} ==
+     * {@code "3*'x'"}. Applied only from {@link
      * #parseMultiplicative()}, at exactly the same precedence tier as an
      * explicit {@code *}, so it composes correctly with every other
      * operator (e.g. {@code "2+3t"} is {@code 2+(3*t)}, not
@@ -373,9 +399,15 @@ public class MathExpressionTreeDepth implements Savable {
      *       text" exactly as before, rather than newly guessed at as
      *       {@code "3*ORx"}.</li>
      * </ul>
+     *
+     * <p>A string literal's opening quote ({@code '} or {@code "}) is also a
+     * trigger, on the same footing as {@code '('} or {@code '@'}: a string
+     * is just another primary value, so {@code 3'x'}, {@code (x+1)"y"}, and
+     * {@code 'a'x} are all read as implicit multiplication exactly like
+     * their numeric/identifier counterparts.</p>
      */
     private boolean isImplicitMultiplicationTrigger(char c) {
-        if (c == '(' || c == '@' || c == ROOT_CHAR) {
+        if (c == '(' || c == '@' || c == ROOT_CHAR || c == SINGLE_QUOTE || c == DOUBLE_QUOTE) {
             return true;
         }
         if (Character.isLetter(c) && !isReservedOperatorChar(c)) {
@@ -576,9 +608,9 @@ public class MathExpressionTreeDepth implements Savable {
                 // 1 slot for the left side, plus the right side's requirement
                 maxDepth = Math.max(maxDepth, 1 + rightDepth);
             } else if (isImplicitMultiplicationTrigger(c)) {
-                // No operator token to consume here -- e.g. "3t" or "5sin(4)"
-                // -- treated exactly like an explicit '*' at this same
-                // precedence tier. See isImplicitMultiplicationTrigger's
+                // No operator token to consume here -- e.g. "3t", "5sin(4)",
+                // or "3'x'" -- treated exactly like an explicit '*' at this
+                // same precedence tier. See isImplicitMultiplicationTrigger's
                 // javadoc for what is (and deliberately is not) recognized.
                 binaryOpCount++;
                 int rightDepth = parseUnary();
@@ -704,6 +736,14 @@ public class MathExpressionTreeDepth implements Savable {
             int start = pos;
             consumeNumber();
             validateNumberToken(start, pos);
+            return 1;
+        }
+
+        // String literal (single- or double-quoted), e.g. 'hello' or
+        // "hello". A leaf exactly like a number or variable -- contributes
+        // depth 1. See consumeStringLiteral() for escaping/termination rules.
+        if (c == SINGLE_QUOTE || c == DOUBLE_QUOTE) {
+            consumeStringLiteral(c);
             return 1;
         }
 
@@ -981,6 +1021,67 @@ public class MathExpressionTreeDepth implements Savable {
         }
     }
 
+    /**
+     * Consumes a string literal starting at the current position, which
+     * must be positioned exactly on the opening quote character
+     * {@code quoteChar} (either {@link #SINGLE_QUOTE} or
+     * {@link #DOUBLE_QUOTE}). Advances {@link #pos} to just past the
+     * matching, unescaped closing quote of the SAME kind — a single-quoted
+     * string may freely contain unescaped double quotes and vice versa,
+     * e.g. {@code "it's"} or {@code 'she said "hi"'}.
+     *
+     * <p>Backslash escaping is supported inside the literal: {@code \}
+     * followed by any character is consumed as a single two-character unit
+     * (so {@code \'}, {@code \"}, and {@code \\} all do what you'd expect,
+     * and an escape of any other character is simply taken literally —
+     * the backslash-escape pair is skipped over rather than rejected, the
+     * same "don't guess, but don't gratuitously reject" balance the rest
+     * of this grammar uses for run-together text). In particular this
+     * guarantees a {@code \} immediately before the closing quote (e.g.
+     * {@code "it\\"}, a literal trailing backslash) is handled correctly:
+     * that backslash escapes itself, not the quote that follows it.</p>
+     *
+     * <p>An unescaped newline, or reaching end-of-input, before the
+     * matching closing quote is found throws a {@link ParseException}
+     * pointing at the opening quote — a string literal must be complete
+     * and confined to a single line, exactly like every other token this
+     * class recognizes (there is no multi-line/triple-quoted form).</p>
+     *
+     * @param quoteChar {@link #SINGLE_QUOTE} or {@link #DOUBLE_QUOTE};
+     *                  whichever one opened this literal
+     */
+    private void consumeStringLiteral(char quoteChar) {
+        int start = pos;
+        nextChar(); // consume opening quote
+        while (true) {
+            char c = peek();
+            if (c == '\0') {
+                throw new ParseException(
+                        "Unterminated string literal: missing closing " + quoteChar, start);
+            }
+            if (c == '\n' || c == '\r') {
+                throw new ParseException(
+                        "Unterminated string literal: unescaped line break before closing "
+                        + quoteChar, start);
+            }
+            if (c == '\\') {
+                nextChar(); // consume the backslash
+                if (peek() == '\0') {
+                    throw new ParseException(
+                            "Unterminated string literal: dangling '\\' before end of input",
+                            start);
+                }
+                nextChar(); // consume the escaped character, whatever it is
+                continue;
+            }
+            if (c == quoteChar) {
+                nextChar(); // consume closing quote
+                return;
+            }
+            nextChar(); // ordinary content character, including the OTHER quote kind
+        }
+    }
+
     private String consumeIdentifier() {
         int start = pos;
         while ((Character.isLetterOrDigit(peek()) || peek() == '_') && !isReservedOperatorChar(peek())) {
@@ -1020,11 +1121,18 @@ public class MathExpressionTreeDepth implements Savable {
      * <p>Simulation rules (kept in lockstep with the char-based
      * {@link #calculate()} above):
      * <ul>
-     *   <li>NUMBER / VARIABLE / MATRIX / FUNCTION_HANDLE(_UNDEFINED) — push depth 1.
-     *       Anonymous '@' function/matrix definitions are expected to already
+     *   <li>NUMBER / VARIABLE / MATRIX / STRING / FUNCTION_HANDLE(_UNDEFINED) — push
+     *       depth 1. Anonymous '@' function/matrix definitions are expected to already
      *       be compiled down to one of these leaf kinds by the tokenizer by
      *       the time they reach the bulk evaluator, the same way METHOD calls
-     *       arrive with their {@code rawArgs} already resolved.</li>
+     *       arrive with their {@code rawArgs} already resolved.
+     *       <b>NOTE:</b> this assumes {@code MathExpression.Token} exposes a
+     *       {@code STRING} kind constant, parallel to {@code NUMBER}/
+     *       {@code VARIABLE}/{@code MATRIX}, that the compiler emits for a
+     *       single- or double-quoted string literal. Add that constant to
+     *       {@code MathExpression.Token} alongside this change if it does not
+     *       already exist — a string leaf otherwise has no way to be
+     *       represented in the compiled postfix stream.</li>
      *   <li>OPERATOR with arity 1 (prefix or postfix unary, e.g. {@code -x}, {@code x!},
      *       {@code √x}, or a compiled Unicode-superscript power) —
      *       pop 1 depth {@code d}, push {@code 1 + d}.</li>
@@ -1083,6 +1191,7 @@ public class MathExpressionTreeDepth implements Savable {
                 case MathExpression.Token.NUMBER:
                 case MathExpression.Token.VARIABLE:
                 case MathExpression.Token.MATRIX:
+                case MathExpression.Token.STRING:
                 case MathExpression.Token.FUNCTION_HANDLE:
                 case MathExpression.Token.FUNCTION_HANDLE_UNDEFINED:
                     stack[sp++] = 1;
@@ -1230,7 +1339,20 @@ public class MathExpressionTreeDepth implements Savable {
             "( diffeqn(y[0], a) )",             // legal: single grouping wrap, with inner/outer whitespace
             "(diffeqn(y[0], a))",               // legal: single grouping wrap, no extra whitespace
             "diffeqnPathHO(y[2]+y[0], a, b, c)", // the fourth diffeqn-family name, as a bare root call
-            "((diffeqnPathHO(y[2]+y[0], a, b, c)))" // same, wrapped in grouping parens
+            "((diffeqnPathHO(y[2]+y[0], a, b, c)))", // same, wrapped in grouping parens
+            "'hello'",                          // bare single-quoted string literal
+            "\"hello\"",                        // bare double-quoted string literal
+            "concat('a', \"b\")",               // string literals as function arguments, mixed quote styles
+            "'it''s complicated'",              // a double single-quote is just two adjacent characters, not an escape
+            "'it\\'s escaped'",                 // backslash-escaped single quote inside a single-quoted string
+            "\"she said \\\"hi\\\"\"",           // backslash-escaped double quote inside a double-quoted string
+            "'she said \"hi\" inline'",         // unescaped double quotes freely nested inside a single-quoted string
+            "\"trailing backslash: \\\\\"",      // literal trailing backslash, correctly not escaping the closing quote
+            "'' + \"\"",                         // two empty string literals, added together
+            "3'x'",                              // implicit multiplication: number juxtaposed with a string
+            "'a'x",                              // implicit multiplication: string juxtaposed with an identifier
+            "(x+1)'y'",                          // implicit multiplication: group juxtaposed with a string
+            "len('hello') + len(\"world\")",     // strings as args to two different function calls, then summed
         };
 
         for (String s : tests) {
@@ -1270,7 +1392,11 @@ public class MathExpressionTreeDepth implements Savable {
             "((diffeqn(y[0], a))",               // unbalanced: extra unmatched leading '('
             "1+diffeqnPathHO(y[2]+y[0], a, b, c)",       // fourth name, nested (something precedes it)
             "diffeqnPathHO(y[2]+y[0], a, b, c)-1",       // fourth name, followed by an operator
-            "cos(diffeqnPathHO(y[2]+y[0], a, b, c))"     // fourth name, nested inside another function
+            "cos(diffeqnPathHO(y[2]+y[0], a, b, c))",    // fourth name, nested inside another function
+            "'unterminated",                     // missing closing single quote
+            "\"unterminated",                    // missing closing double quote
+            "'bad escape at end\\",              // dangling backslash right before end of input
+            "'line\nbreak'",                     // unescaped newline inside a string literal
         };
 
         System.out.println("\n-- malformed input (expected to fail cleanly) --");

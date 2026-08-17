@@ -13,11 +13,14 @@ import java.util.function.Predicate;
  * <p>
  * This scanner breaks down mathematical expressions and source code strings into
  * distinct tokens using a longest-match (Max Munch) prefix strategy. It supports
- * static token dictionaries, dynamic identifier matching (via Predicates), and
+ * static token dictionaries, dynamic identifier matching (via Predicates),
+ * generic delimited regions (e.g. quoted strings, block comments), and
  * optional whitespace stripping.
  * <p>
- * <b>Match ordering:</b> by default, static tokens are tried before the dynamic
- * identifier predicate ("static-first"). This can be flipped to "dynamic-first"
+ * <b>Match ordering:</b> delimited regions are always checked first, since they
+ * represent a "don't tokenize inside here" zone rather than a token in their own
+ * right. After that, static tokens are tried before the dynamic identifier
+ * predicate ("static-first") by default. This can be flipped to "dynamic-first"
  * via {@link Builder#matchDynamicFirst(boolean)}, which mirrors how many real
  * lexers treat keywords as a special case of identifiers rather than the other
  * way around. Note that in dynamic-first mode, a predicate that matches a string
@@ -32,9 +35,12 @@ public class Scanner {
     private final boolean includeTokensInOutput;
     private final boolean ignoreWhitespace;
     private final boolean dynamicMatchFirst;
+    private final boolean stripDelimiterMarkers;
+    private final UnterminatedDelimiterPolicy unterminatedDelimiterPolicy;
     private final Map<Character, List<String>> tokensByFirstChar;
     private final Predicate<String> dynamicTokenMatcher;
     private final HashSet<Character> extraIdentifierParts;
+    private final Map<Character, List<Delimiter>> delimitersByFirstChar;
 
     // Lazily computed, cached since the scanner is fully immutable post-construction.
     private List<String> cachedResult;
@@ -83,6 +89,8 @@ public class Scanner {
         this.ignoreWhitespace = builder.ignoreWhitespace;
         this.dynamicTokenMatcher = builder.dynamicTokenMatcher;
         this.dynamicMatchFirst = builder.dynamicMatchFirst;
+        this.stripDelimiterMarkers = builder.stripDelimiterMarkers;
+        this.unterminatedDelimiterPolicy = builder.unterminatedDelimiterPolicy;
         this.extraIdentifierParts = builder.extraIdentifierParts.isEmpty()
                 ? new HashSet<>()
                 : new HashSet<>(builder.extraIdentifierParts);
@@ -100,6 +108,17 @@ public class Scanner {
         }
 
         this.tokensByFirstChar = Collections.unmodifiableMap(map);
+
+        Map<Character, List<Delimiter>> delimMap = new HashMap<>();
+        for (Delimiter d : builder.delimiters) {
+            delimMap.computeIfAbsent(d.start.charAt(0), k -> new ArrayList<>()).add(d);
+        }
+        // Longest start-marker first, so e.g. "\"\"\"" (triple-quote) is preferred
+        // over "\"" when both are registered and both match at the same cursor.
+        for (List<Delimiter> list : delimMap.values()) {
+            list.sort((a, b) -> Integer.compare(b.start.length(), a.start.length()));
+        }
+        this.delimitersByFirstChar = Collections.unmodifiableMap(delimMap);
     }
 
     // =========================================================================
@@ -135,6 +154,19 @@ public class Scanner {
 
                 literalStart = cursor;
                 continue;
+            }
+
+            // 2. Delimited-region fast-forwarding (quoted strings, block comments, etc.)
+            // Deliberately checked before static/dynamic matching: a delimited region
+            // means "don't tokenize inside here", so nothing downstream should ever
+            // get a look at its interior.
+            if (!delimitersByFirstChar.isEmpty()) {
+                int consumed = tryDelimitedMatch(output, literalStart, cursor, length, currentChar);
+                if (consumed > 0) {
+                    cursor += consumed;
+                    literalStart = cursor;
+                    continue;
+                }
             }
 
             // Precompute the identifier-shaped run starting here, if any.
@@ -196,6 +228,166 @@ public class Scanner {
         flushLiteral(output, literalStart, length);
         cachedResult = output;
         return cachedResult;
+    }
+
+    /**
+     * Attempts a delimited-region match at {@code cursor}: if a registered start
+     * marker matches here, scans forward for its corresponding end marker
+     * (honoring that delimiter's escape character, if any) and emits the whole
+     * span — including nested static/dynamic-token-shaped text — as a single
+     * opaque literal.
+     * <p>
+     * If the end marker is never found before the input runs out, the region is
+     * treated as unterminated and consumes through the end of the input; this is
+     * a deliberate, permissive choice (rather than throwing) so a single stray
+     * quote doesn't blow up the whole scan — callers who want strictness can
+     * detect this by checking whether the last output token ends with the
+     * expected end marker.
+     *
+     * @return number of characters consumed (> 0) if a delimiter started here, otherwise 0.
+     */
+    private int tryDelimitedMatch(List<String> output, int literalStart, int cursor, int length, char currentChar) {
+        List<Delimiter> candidates = delimitersByFirstChar.getOrDefault(currentChar, Collections.emptyList());
+        if (candidates.isEmpty()) {
+            return 0;
+        }
+
+        for (Delimiter d : candidates) {
+            int startLen = d.start.length();
+            if (startLen <= length - cursor && input.regionMatches(cursor, d.start, 0, startLen)) {
+                int contentStart = cursor + startLen;
+                DelimiterEnd end = findDelimiterEnd(d, contentStart, length);
+
+                if (!end.terminated) {
+                    switch (unterminatedDelimiterPolicy) {
+                        case THROW:
+                            throw new UnterminatedDelimiterException(d.start, d.end, cursor);
+                        case TREAT_AS_NO_MATCH:
+                            // Don't consume anything for this candidate; let the normal
+                            // static/dynamic/literal machinery handle the start marker
+                            // as ordinary text instead. Try the next candidate delimiter
+                            // (if any) before giving up entirely.
+                            continue;
+                        case CONSUME_TO_END:
+                        default:
+                            // Fall through to normal emission below, using `end` as-is
+                            // (index == length, terminated == false).
+                            break;
+                    }
+                }
+
+                flushLiteral(output, literalStart, cursor);
+
+                int spanStart = stripDelimiterMarkers ? contentStart : cursor;
+                int spanEnd = (stripDelimiterMarkers && end.terminated)
+                        ? end.index - d.end.length()
+                        : end.index;
+                output.add(input.substring(spanStart, spanEnd));
+
+                return end.index - cursor;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Scans forward from {@code from} looking for delimiter {@code d}'s end marker,
+     * skipping escaped characters.
+     */
+    private DelimiterEnd findDelimiterEnd(Delimiter d, int from, int length) {
+        int endLen = d.end.length();
+        int i = from;
+        while (i < length) {
+            if (d.escapeChar != '\0' && input.charAt(i) == d.escapeChar && i + 1 < length) {
+                i += 2; // skip the escaped character, whatever it is
+                continue;
+            }
+            if (endLen <= length - i && input.regionMatches(i, d.end, 0, endLen)) {
+                return new DelimiterEnd(i + endLen, true);
+            }
+            i++;
+        }
+        return new DelimiterEnd(length, false);
+    }
+
+    /** Index immediately after a delimiter's end marker, plus whether it was actually found. */
+    private static final class DelimiterEnd {
+        final int index;
+        final boolean terminated;
+
+        DelimiterEnd(int index, boolean terminated) {
+            this.index = index;
+            this.terminated = terminated;
+        }
+    }
+
+    /**
+     * What to do when a delimited region's start marker is found but its end
+     * marker never appears before the input runs out (e.g. {@code foo("hello}
+     * with no closing quote).
+     */
+    public enum UnterminatedDelimiterPolicy {
+        /**
+         * Consume through the end of input and emit whatever was found as one
+         * token, as if it had been properly closed. Silent and permissive —
+         * this is the default, preserving the scanner's original behavior for
+         * anyone who registers delimiters without setting a policy explicitly.
+         * A single malformed quote can swallow the rest of the input; callers
+         * who need to detect this can inspect whether the last emitted token
+         * ends with the delimiter's end marker.
+         */
+        CONSUME_TO_END,
+
+        /**
+         * Throw {@link UnterminatedDelimiterException} immediately. Use this
+         * when a missing closing marker should be treated as a hard lexical
+         * error rather than silently absorbed into a token.
+         */
+        THROW,
+
+        /**
+         * Treat the start marker as if it were never a delimiter at all: don't
+         * consume it here, and let normal static/dynamic/literal matching
+         * handle that character as ordinary text. The scanner will keep
+         * scanning; if the same start marker text appears again later with a
+         * proper matching end marker, that later occurrence is still eligible
+         * to open a valid region.
+         */
+        TREAT_AS_NO_MATCH
+    }
+
+    /**
+     * Thrown by the scanner when {@link UnterminatedDelimiterPolicy#THROW} is
+     * configured and a delimited region's start marker is found without a
+     * matching end marker before the input ends.
+     */
+    public static class UnterminatedDelimiterException extends RuntimeException {
+        private final String delimiterStart;
+        private final String delimiterEnd;
+        private final int position;
+
+        UnterminatedDelimiterException(String delimiterStart, String delimiterEnd, int position) {
+            super("Unterminated delimited region starting with '" + delimiterStart + "' at position "
+                    + position + " (expected closing '" + delimiterEnd + "')");
+            this.delimiterStart = delimiterStart;
+            this.delimiterEnd = delimiterEnd;
+            this.position = position;
+        }
+
+        /** The start marker text (e.g. {@code "\""}) whose region was left unclosed. */
+        public String getDelimiterStart() {
+            return delimiterStart;
+        }
+
+        /** The end marker text that was expected but never found. */
+        public String getDelimiterEnd() {
+            return delimiterEnd;
+        }
+
+        /** The input index where the unterminated region's start marker began. */
+        public int getPosition() {
+            return position;
+        }
     }
 
     /**
@@ -273,6 +465,34 @@ public class Scanner {
     }
 
     // =========================================================================
+    // DELIMITER
+    // =========================================================================
+
+    /**
+     * A configurable "don't tokenize inside here" region, bounded by a start
+     * marker and an end marker (which may be the same string, as with quotes).
+     * Not a plain Java record, to keep the class compatible with older Java
+     * targets — this file otherwise avoids Java 16+ syntax.
+     */
+    private static final class Delimiter {
+        final String start;
+        final String end;
+        final char escapeChar; // '\0' means "no escaping"
+
+        Delimiter(String start, String end, char escapeChar) {
+            if (start == null || start.isEmpty()) {
+                throw new IllegalArgumentException("Delimiter start marker must be non-empty");
+            }
+            if (end == null || end.isEmpty()) {
+                throw new IllegalArgumentException("Delimiter end marker must be non-empty");
+            }
+            this.start = start;
+            this.end = end;
+            this.escapeChar = escapeChar;
+        }
+    }
+
+    // =========================================================================
     // BUILDER
     // =========================================================================
 
@@ -281,9 +501,12 @@ public class Scanner {
         private boolean includeTokensInOutput = true;
         private boolean ignoreWhitespace = false;
         private boolean dynamicMatchFirst = false;
+        private boolean stripDelimiterMarkers = false;
+        private UnterminatedDelimiterPolicy unterminatedDelimiterPolicy = UnterminatedDelimiterPolicy.CONSUME_TO_END;
         private Predicate<String> dynamicTokenMatcher = s -> false;
         private final List<String> allTokens = new ArrayList<>();
-        private final HashSet<Character> extraIdentifierParts =  new HashSet<>(); 
+        private final HashSet<Character> extraIdentifierParts =  new HashSet<>();
+        private final List<Delimiter> delimiters = new ArrayList<>();
 
         public Builder(String input) {
             this.input = Objects.requireNonNull(input, "Input string cannot be null");
@@ -357,6 +580,84 @@ public class Scanner {
                     this.allTokens.addAll(Arrays.asList(array));
                 }
             }
+            return this;
+        }
+
+        /**
+         * Registers a generic delimited region: everything from {@code start}
+         * (inclusive) through the next occurrence of {@code end} (inclusive) is
+         * emitted as one opaque token, completely bypassing static and dynamic
+         * matching for its interior. No escape character.
+         * <p>
+         * Use this for anything where "don't tokenize inside here" applies:
+         * quoted strings ({@code addDelimitedRegion("\"", "\"")}), block comments
+         * ({@code addDelimitedRegion("/*", "*&#47;")}), custom bracketed raw
+         * blocks ({@code addDelimitedRegion("{{", "}}")}), etc.
+         * <p>
+         * If two registered regions could start at the same position, the one
+         * with the longer start marker wins (so a triple-quote marker takes
+         * priority over a single-quote marker starting with the same character).
+         * @param start
+         * @param end
+         * @return 
+         */
+        public Builder addDelimitedRegion(String start, String end) {
+            return addDelimitedRegion(start, end, '\0');
+        }
+
+        /**
+         * Like {@link #addDelimitedRegion(String, String)}, but treats
+         * {@code escapeChar} as an escape marker inside the region: the character
+         * immediately following {@code escapeChar} is always skipped when
+         * searching for {@code end}, so it can never prematurely terminate the
+         * region. E.g. with {@code addDelimitedRegion("\"", "\"", '\\')}, the
+         * input {@code "a \"b\" c"} is consumed as a single token instead of
+         * terminating at the escaped inner quote.
+         * <p>
+         * Pass {@code '\0'} for no escaping (equivalent to the two-arg overload).
+         * @param start
+         * @param end
+         * @param escapeChar
+         * @return 
+         */
+        public Builder addDelimitedRegion(String start, String end, char escapeChar) {
+            this.delimiters.add(new Delimiter(start, end, escapeChar));
+            return this;
+        }
+
+        /**
+         * Controls whether the start/end markers themselves are kept in the
+         * emitted token ({@code false}, the default — {@code "hello"} is emitted
+         * as {@code "hello"} including the quote characters) or stripped
+         * ({@code true} — emitted as just {@code hello}).
+         * <p>
+         * This is a single global switch covering all registered delimited
+         * regions, not a per-region setting.
+         * @param strip
+         * @return 
+         */
+        public Builder stripDelimiterMarkers(boolean strip) {
+            this.stripDelimiterMarkers = strip;
+            return this;
+        }
+
+        /**
+         * Controls what happens when a delimited region's start marker is found
+         * but its end marker never appears before the input ends (e.g.
+         * {@code foo("hello} with no closing quote).
+         * <p>
+         * Defaults to {@link UnterminatedDelimiterPolicy#CONSUME_TO_END} — the
+         * scanner's original permissive behavior, preserved for anyone who
+         * doesn't call this method. Callers who want a missing closing marker
+         * to be a hard error should pass {@link UnterminatedDelimiterPolicy#THROW};
+         * callers who'd rather the stray start marker just be treated as
+         * ordinary text should pass {@link UnterminatedDelimiterPolicy#TREAT_AS_NO_MATCH}.
+         * <p>
+         * This is a single global policy covering all registered delimited
+         * regions, not a per-region setting.
+         */
+        public Builder onUnterminatedDelimiter(UnterminatedDelimiterPolicy policy) {
+            this.unterminatedDelimiterPolicy = policy != null ? policy : UnterminatedDelimiterPolicy.CONSUME_TO_END;
             return this;
         }
 
@@ -435,5 +736,68 @@ public class Scanner {
                 .identifierPartExtra('[', ']')
                 .build();
         System.out.println("With identifierPartExtra('[', ']'): " + withExtra.scan());
+
+        // 6. Delimited-region demo: quoted strings stay intact, even containing
+        // characters that are registered as static tokens (',', '+', etc).
+        String quotedInput = "foo(\"hello + world\", 'a,b,c') + x";
+        String[] quotedTokens = {"foo", "(", ")", ",", "+"};
+
+        Scanner quoteAware = new Scanner.Builder(quotedInput)
+                .ignoreWhitespace(true)
+                .addTokens(quotedTokens)
+                .addDelimitedRegion("\"", "\"")
+                .addDelimitedRegion("'", "'")
+                .build();
+        System.out.println("Quote-aware (markers kept): " + quoteAware.scan());
+
+        Scanner quoteAwareStripped = new Scanner.Builder(quotedInput)
+                .ignoreWhitespace(true)
+                .addTokens(quotedTokens)
+                .addDelimitedRegion("\"", "\"")
+                .addDelimitedRegion("'", "'")
+                .stripDelimiterMarkers(true)
+                .build();
+        System.out.println("Quote-aware (markers stripped): " + quoteAwareStripped.scan());
+
+        // 7. Escaped-quote demo: an escaped inner quote must not terminate the region early.
+        String escapedInput = "say(\"a \\\"b\\\" c\")";
+        Scanner escapeAware = new Scanner.Builder(escapedInput)
+                .ignoreWhitespace(true)
+                .addTokens(new String[]{"say", "(", ")"})
+                .addDelimitedRegion("\"", "\"", '\\')
+                .build();
+        System.out.println("Escape-aware: " + escapeAware.scan());
+
+        // 8. Unterminated-delimiter policy demo.
+        String unterminatedInput = "foo(\"hello + x * y";
+        String[] unterminatedTokens = {"foo", "(", ")", "+", "*"};
+
+        Scanner consumeToEnd = new Scanner.Builder(unterminatedInput)
+                .ignoreWhitespace(true)
+                .addTokens(unterminatedTokens)
+                .addDelimitedRegion("\"", "\"")
+                .onUnterminatedDelimiter(Scanner.UnterminatedDelimiterPolicy.CONSUME_TO_END) // default
+                .build();
+        System.out.println("Unterminated, CONSUME_TO_END (default): " + consumeToEnd.scan());
+
+        Scanner treatAsNoMatch = new Scanner.Builder(unterminatedInput)
+                .ignoreWhitespace(true)
+                .addTokens(unterminatedTokens)
+                .addDelimitedRegion("\"", "\"")
+                .onUnterminatedDelimiter(Scanner.UnterminatedDelimiterPolicy.TREAT_AS_NO_MATCH)
+                .build();
+        System.out.println("Unterminated, TREAT_AS_NO_MATCH: " + treatAsNoMatch.scan());
+
+        Scanner throwsOnUnterminated = new Scanner.Builder(unterminatedInput)
+                .ignoreWhitespace(true)
+                .addTokens(unterminatedTokens)
+                .addDelimitedRegion("\"", "\"")
+                .onUnterminatedDelimiter(Scanner.UnterminatedDelimiterPolicy.THROW)
+                .build();
+        try {
+            throwsOnUnterminated.scan();
+        } catch (Scanner.UnterminatedDelimiterException e) {
+            System.out.println("Unterminated, THROW: caught -> " + e.getMessage());
+        }
     }
 }
