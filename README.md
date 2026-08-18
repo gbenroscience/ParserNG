@@ -13,7 +13,18 @@
 **ParserNG** is an ultra-high-performance mathematical runtime built for modern JVM workloads — real-time plotting pipelines, financial modeling, and deep learning activation functions (SwiGLU, GELU, and the rest of the Transformer toolkit). By adopting a hardware-aligned, fast-interpreted memory model instead of risky dynamic bytecode generation, ParserNG eliminates classloader bloat, protects your runtime from native segmentation faults, and dramatically simplifies your Software Bill of Materials (SBOM) compliance posture.
 
 Five execution tiers, one parser, one syntax. Pick the tier that matches how hot your loop is — you never rewrite the expression to move up a tier.
+ 
+---
 
+## 🏢 Globally Trusted
+
+ParserNG powers mission-critical math visualization, analytical pipelines, and platform tooling at **167 organizations** around the globe.
+
+### Need Enterprise-Grade Confidence?
+
+Book a **free 30-minute introductory call** to discuss your production needs. Ongoing consulting, custom development, and support engagements are available after the initial conversation.
+
+**[Schedule a call →](https://calendly.com/gbenroscience/30min)**
 ---
 
 ## 🔥 Start here: GPU, SIMDEngineEvaluator, SIMDVectorTurboEvaluator
