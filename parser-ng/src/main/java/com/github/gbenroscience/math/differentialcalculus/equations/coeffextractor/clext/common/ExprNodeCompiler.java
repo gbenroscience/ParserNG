@@ -520,7 +520,7 @@ public final class ExprNodeCompiler {
         }
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Throwable {
         // Corrected per feedback: MathExpression only vets y[k]-style names
         // inside one of the four recognized call forms (diffeqn/diffeqnPath/
         // diffeqnHO/diffeqnPathHO) — it cannot parse the bare equation on its

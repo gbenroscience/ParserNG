@@ -76,7 +76,7 @@ Here, `b` is bound to the single endpoint value `y(10)` that `diffeqn` returns. 
 
 | Function | Returns | Handles | Use it for |
 |---|---|---|---|
-| `diffeqn` | A single endpoint value, or a vector for a system | One first-order equation, or an explicit system of them | "What is the state at t = tEnd?" |
+| `diffeqn` | A single endpoint value, or a vector for a system | One first-order equation, or an explicit system of them | "What is y at t = tEnd?" |
 | `diffeqnPath` | A trajectory — many rows | Same as `diffeqn`, over the whole interval | "Show me y over the whole interval." |
 | `diffeqnHO` | A single endpoint state | Exactly one higher-order equation, order ≥ 2 | Second/third/... order equations — endpoint only |
 | `diffeqnPathHO` | A trajectory of state vectors | Same as `diffeqnHO`, over the whole interval | Second/third/... order equations — full trajectory |

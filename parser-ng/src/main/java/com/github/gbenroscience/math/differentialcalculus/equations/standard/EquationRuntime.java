@@ -100,7 +100,7 @@ public final class EquationRuntime {
      * postfix is a diffeqn/diffeqnPath/diffeqnHO/diffeqnPathHO call
      * @return
      */
-    public static MathExpression.EvalResult solve(MathExpression me) {
+    public static MathExpression.EvalResult solve(MathExpression me) throws Throwable {
         return solve(me.getCachedPostfix(), me.getNextResult());
     }
 
@@ -115,7 +115,7 @@ public final class EquationRuntime {
      * @param out
      * @return
      */
-    public static MathExpression.EvalResult solve(MathExpression.Token[] postfix, MathExpression.EvalResult out) {
+    public static MathExpression.EvalResult solve(MathExpression.Token[] postfix, MathExpression.EvalResult out) throws Throwable{
         try {
             Object o = new EquationRuntime(CoefficientExtractor::resolve).execute(postfix);
             if (o instanceof double[][]) {
@@ -128,6 +128,7 @@ public final class EquationRuntime {
         } catch (Throwable ex) {
             Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
             out.wrap(ParserResult.INVALID_FUNCTION);
+            throw ex;
         }
         return out;
     }
@@ -361,7 +362,7 @@ public final class EquationRuntime {
     // ------------------------------------------------------------------
     // Demo
     // ------------------------------------------------------------------
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Throwable {
 
         runODE("diffeqnPathHO(y[2]+3*y[1]-sin(x)*y[0]+3*x^2, 3, @(1,2)(1,0.5), 10, 0.001, rk4, trajectory)");
         runODE("diffeqn((3t^2)*y[1]+(5*sin(t))*y[0]+(5/t)*sin(t), 1, 3, 10, 0.01, rk4)");
@@ -377,7 +378,7 @@ public final class EquationRuntime {
         runODE("diffeqn(@(2)(\"y[2]-(0.6*y[0]-0.03*y[0]*y[1])\", \"y[2]-(-0.9*y[1]+0.02*y[0]*y[1])\"), 0, @(1,2)(30, 4), 20, 0.01, rk4)");
         
         System.out.println("VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV");
-        runODE("diffeqnHO(y[2] + (9.81/2.5)*sin(y[0]), 0, @(1,2)(0.5, 0.5), 30, 0.001, rk4)");
+        runODE("diffeqnHO(y[2] + (9.81/2.5)*sin(y[0]), 0, @(1,2)(0.5, 0.5), 30, 0.0001, rk4)");
 
         MathExpression me = new MathExpression("A=diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2, state)");
         me.solve();
@@ -389,9 +390,12 @@ public final class EquationRuntime {
 
         //runODE("diffeqn(@(4)(\"y[2]-y[1]\",\"y[2]-(-2*y[0]+y[2])\",\"y[2]-y[3]\",\"y[2]-(y[0]-2*y[2])\"), 0, @(1,4)(1,0,0,1), 10, 0.01, rk4)");
         runODE("diffeqn(@(4)(\"y[4]-y[1]\",\"y[4]-(-2*y[0]+y[2])\",\"y[4]-2*sin(t)*y[3]\",\"y[4]-(y[0]-2*y[2])\"), 0, @(1,4)(1,0,0,1), 10, 0.01, rk4)");
+        
+        
+        runODE("diffeqn(y[1] + 2*y[0], 0, 1, 5, rk4)");
     }
 
-    public static void runODE(String in) {
+    public static void runODE(String in) throws Throwable {
         MathExpression.EvalResult ev = solve(new MathExpression(in));
         System.out.println(ev + "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
     }

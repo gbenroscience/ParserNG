@@ -69,8 +69,9 @@ public class MathScanner {
     /**
      *
      * @param scannerInput the input of this Scanner object
+     * @param me
      */
-    public MathScanner(String scannerInput, MathExpression me) {
+    public MathScanner(String scannerInput, MathExpression me) throws InputMismatchException{
 
         //±–
         /**
@@ -511,7 +512,7 @@ public class MathScanner {
      *
      * Split the {@link MathScanner#scannerInput} String on the operators.
      */
-    public void splitStringOnMethods_Variables_And_Operators() {
+    public void splitStringOnMethods_Variables_And_Operators() throws InputMismatchException{
 
         Predicate<String> dynamicRules = word
                 -> (FunctionManager.isAnonymousFormat(word)) || word.startsWith("_") || isVariableString(word);
@@ -1132,7 +1133,7 @@ public class MathScanner {
      * @param me
      * @return 
      */
-    private List<String> scan(MathExpression me) {
+    private List<String> scan(MathExpression me) throws InputMismatchException{
         VariableManager varMan = new VariableManager();
         splitStringOnMethods_Variables_And_Operators(); 
         validateInputAfterSplitOnMethodsAndOps(me); 
@@ -1353,7 +1354,7 @@ public class MathScanner {
      *
      * @param scanner
      */
-    public static void recognizeAnonymousFunctions(List<String> scanner) {
+    public static void recognizeAnonymousFunctions(List<String> scanner) throws InputMismatchException{
         if (scanner == null || scanner.isEmpty()) {
             return;
         }
@@ -1378,7 +1379,7 @@ public class MathScanner {
      * with the generated function name (e.g. anon1, anon2...). Returns the
      * index to continue scanning from after replacement.
      */
-    private static int processOneAnonymousFunction(List<String> scanner, int indexOfAt) {
+    private static int processOneAnonymousFunction(List<String> scanner, int indexOfAt) throws InputMismatchException{
 
         for (int i = indexOfAt; i < scanner.size(); i++) {
             String token = scanner.get(i);
@@ -1404,7 +1405,7 @@ public class MathScanner {
      * Creates the Function, registers it, and replaces the range with
      * f.getName()
      */
-    private static void replaceWithFunctionName(List<String> scanner, int start, int end) {
+    private static void replaceWithFunctionName(List<String> scanner, int start, int end) throws InputMismatchException{
         String functionText = LISTS.createStringFrom(scanner, start, end);
         Function f = new Function(functionText);
         FunctionManager.add(f);

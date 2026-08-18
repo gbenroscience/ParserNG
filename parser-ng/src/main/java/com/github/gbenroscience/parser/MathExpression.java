@@ -278,8 +278,8 @@ public class MathExpression implements Savable, Solvable {
             this.kind = Token.NUMBER;
             this.functionTokenType = TYPE.VOID;
         }
-        
-        private Token(TYPE functionTokenType) { 
+
+        private Token(TYPE functionTokenType) {
             this.functionTokenType = functionTokenType;
         }
 
@@ -412,7 +412,7 @@ public class MathExpression implements Savable, Solvable {
             t.isPostfix = isPostfix;
             t.isRightAssoc = isRightAssoc;
             t.opChar = opChar;
-            t.precedence = precedence; 
+            t.precedence = precedence;
             if (rawArgs != null) {
                 t.rawArgs = rawArgs.clone();
             }
@@ -590,7 +590,7 @@ public class MathExpression implements Savable, Solvable {
      * function which has the value 0;
      *
      */
-    public MathExpression() {
+    public MathExpression() throws InputMismatchException{
         this("(0.0)");
     }
 
@@ -606,7 +606,7 @@ public class MathExpression implements Savable, Solvable {
      * end with a semicolon.
      *
      */
-    public MathExpression(String input) {
+    public MathExpression(String input) throws InputMismatchException{
         this(input, true);
     }//end constructor MathExpression
 
@@ -720,7 +720,7 @@ public class MathExpression implements Savable, Solvable {
         return s.toString();
     }
 
-    public MathExpression(String input, boolean foldConstants) {
+    public MathExpression(String input, boolean foldConstants) throws InputMismatchException{
         this.willFoldConstants = foldConstants;
         this.help = input.equals(Declarations.HELP);
         for (int i = 0; i < INIT_POOL_SIZE; i++) {
@@ -790,7 +790,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      * @param expression The expression
      */
-    public final void setExpression(String expression) {
+    public final void setExpression(String expression) throws InputMismatchException{
         if (!expression.equals(this.expression)) {
             invalidateTurbo();  // Clear turbo cache
             scanner.clear();
@@ -821,7 +821,7 @@ public class MathExpression implements Savable, Solvable {
         log.copyFrom(errorLog);
     }
 
-    private void initializing(String expression) {
+    private void initializing(String expression) throws InputMismatchException{
         computeTreeDepth();
         setCorrectFunction(true);
         setHasListReturningOperators(false);
@@ -1561,7 +1561,7 @@ public class MathExpression implements Savable, Solvable {
         return returnType;
     }
 
-    public EvalResult solveGeneric() {
+    public EvalResult solveGenericWithThrows() throws Throwable {
         if (help) {
             EvalResult res = new EvalResult();
             res.wrap(Help.getHelp());
@@ -1579,6 +1579,28 @@ public class MathExpression implements Savable, Solvable {
         return EvalResult.ERROR;
     }
 
+    public EvalResult solveGeneric() {
+        if (help) {
+            EvalResult res = new EvalResult();
+            res.wrap(Help.getHelp());
+            return res;
+        }
+        if (cachedPostfix != null) {
+            resetPool(); 
+            try {
+                EvalResult r = Variable.lastResult = expressionSolver.evaluate();
+                returnType = r.getType();
+                return r;
+            } catch (Throwable ex) {
+                Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+            }
+        }
+        if (scanner == null || scanner.isEmpty() || !correctFunction || parser_Result != ParserResult.VALID) {
+            return EvalResult.ERROR;
+        }
+        return EvalResult.ERROR;
+    }
+
     public EvalResult solveGeneric(double... args) {
         this.executionFrame = args;
         return solveGeneric();
@@ -1587,6 +1609,10 @@ public class MathExpression implements Savable, Solvable {
     @Override
     public String solve() {
         return solveGeneric().toString();
+    }//end method solve()
+
+    public String solveWithThrows() throws Throwable {
+        return solveGenericWithThrows().toString();
     }//end method solve()
 
     public String solve(double... args) {
@@ -1639,7 +1665,6 @@ public class MathExpression implements Savable, Solvable {
         if (isNumber(s)) {
             return new Token(fastParseDouble(s));
         }
-      
 
         //1 - Handle Variables and defined constants
         if (isVariableString(s)) {
@@ -1739,7 +1764,7 @@ public class MathExpression implements Savable, Solvable {
             return new Token(s, false);
         }
         //Come here for strange bugs that arise from spurious generation of string tokens
-          if (StringManager.hasValue(s)) {
+        if (StringManager.hasValue(s)) {
             return new Token(s);
         }
 
@@ -2017,12 +2042,15 @@ public class MathExpression implements Savable, Solvable {
             }
         }
 
-       
-
-        public EvalResult evaluate() {
+        public EvalResult evaluate() throws Throwable {
 
             if (diffEqn) {
-                return EquationRuntime.solve(MathExpression.this);
+                try {
+                    return EquationRuntime.solve(MathExpression.this);
+                } catch (Throwable ex) {
+                    Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+                    throw ex;
+                }
             }
 
             // Just use the pre-allocated stack - no allocation per call
@@ -2204,7 +2232,7 @@ public class MathExpression implements Savable, Solvable {
             return stack[0];
         }
 
-        public EvalResult evaluate(double... arguments) {
+        public EvalResult evaluate(double... arguments) throws Throwable {
             MathExpression.this.executionFrame = arguments;
             return evaluate();
         }
