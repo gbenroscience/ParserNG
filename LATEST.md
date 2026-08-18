@@ -1,5 +1,20 @@
 # ParserNG
 
+### ParserNG 3.0.4 is out on maven-central!
+This update strengthens the differential equation engine by adding systems solving capability explicitly
+in the `diffeqn` and `diffeqnPath` paths. The engine has also been given a battery of tests, 120 in number
+to check the engine for correctness and to give users an insight into the usage.
+Equally important in this release is the emergence of the `ARRAY` type in ParserNG.
+This is the piece that made the systems solving ability possible in ParserNG.
+Pre-dating the ARRAY type was the `VECTOR` type which was simply and array of numbers.
+The `ARRAY` type allows one to store both numbers, strings etc.
+It is also bound to the `Function` class. Soa a Funciton in ParserNG may be a VECTOR(a 1D matrix), a MATRIX, an ARRAY, or an ALGEBRAIC_EXPRESSION. You may acces it with the getArray() method on the Fucntion object.
+
+
+More methods are layered on the MathExpression object such as `solveGenericWithThrows` and
+`solveWithThrows`, which throw java.lang.Throwable`, if the expression errors out during evaluation.
+There may be a slight breaking change also with the MathExpression constructor which now throws an InputMismatchException.
+
 ### ParserNG 3.0.3 is out on maven-central!
 It features a differential equation solver that supports rk4, rk45, euler, implicit_euler, bdf2.
 Incubating in parser-ng-gpu-simd extension is a pure Java Llama model runner which uses the GPU(CUDA and OpenCL)
