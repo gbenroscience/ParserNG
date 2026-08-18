@@ -132,6 +132,7 @@ public final class PostfixArgumentIsolator {
             case Token.NUMBER:
             case Token.VARIABLE:
             case Token.MATRIX:
+            case Token.STRING:
             case Token.FUNCTION_HANDLE:
             case Token.FUNCTION_HANDLE_UNDEFINED:
                 return 0;

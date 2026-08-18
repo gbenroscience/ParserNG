@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import com.github.gbenroscience.parser.methods.Declarations;
-import com.github.gbenroscience.parser.methods.ext.Utils;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 import com.github.gbenroscience.parser.turbo.tools.MatrixTurboEvaluator;
 import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;

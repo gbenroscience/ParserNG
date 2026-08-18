@@ -20,6 +20,7 @@ package com.github.gbenroscience.math.differentialcalculus.equations.coeffextrac
  * @author GBEMIRO
  */ 
 import com.github.gbenroscience.math.differentialcalculus.autodiff.SystemAutoDiffEvaluator;
+import com.github.gbenroscience.util.FunctionManager;
 
 import java.util.HashMap;
 import java.util.Map;

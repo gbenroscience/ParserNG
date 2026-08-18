@@ -799,9 +799,16 @@ public class MethodRegistry {
                                     ctx.wrap(f.toString());
                                     break;
                                 case MATRIX:
+                                case VECTOR:
                                     System.out.println(f.getName() + "=" + f.getMatrix().toString());
                                     ctx.wrap(f.getName() + "=" + f.getMatrix().toString());
                                     break;
+
+                                case ARRAY:
+                                    System.out.println(f.getName() + "=" + Arrays.toString(f.getArray()));
+                                    ctx.wrap(f.getName() + "=" + Arrays.toString(f.getArray()));
+                                    break;
+
                                 default:
                                     System.out.println(f.toString());
                                     ctx.wrap(f.toString());

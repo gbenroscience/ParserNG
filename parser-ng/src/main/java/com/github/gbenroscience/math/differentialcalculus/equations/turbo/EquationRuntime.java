@@ -1,18 +1,3 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.math.differentialcalculus.equations.turbo;
 
 import com.github.gbenroscience.math.differentialcalculus.equations.coeffextractor.clext.common.ExprNodeAutoDiffEvaluator;
@@ -45,33 +30,18 @@ import java.util.logging.Logger;
  * VectorODE/HigherOrderODE}) instead of the {@code ODEFunction}-based Standard
  * tier.
  *
- * <h2>What's shared vs. what's duplicated</h2>  {@link DiffEqnArgParser}, {@link DiffEqnCall}, {@link
- * PostfixArgumentIsolator}, {@link CanonicalFrame}, and {@link
- * EquationDivider} (the actual symbolic term-splitting/linearity-checking core)
- * are all reused verbatim from the Standard-tier pipeline — none of that logic
- * touches {@code ODEFunction} or {@code MethodHandle} at all. What's genuinely
- * tier-specific and duplicated here: the final compile step
- * ({@link TurboCoefficientExtractor} calls {@code
- * ExprNodeCompiler.compileTurbo} instead of {@code compileStandard}), the
- * frame-remapping wrapper ({@link FrameRemapper} instead of
- * {@link FrameRemappingODEFunction}), and this class's dispatch — because
- * {@code TurboODE}/{@code VectorODE}/{@code HigherOrderODE} live in a separate
- * package with a separate (structurally identical, but distinct)
- * {@code JacobianStrategy} type, so the ~15-line Jacobian-building lambda can't
- * be shared as a single Java object across both functional-interface types even
- * though the logic is identical.
+ * <h2>Explicit systems</h2>
+ * Argument 0 may be {@code @(n)("eq1", ..., "eqN")} — an explicit system, one
+ * equation per state component, each independently parsed and compiled. See the
+ * Standard tier's {@code EquationRuntime#executeSystem} javadoc for the full
+ * explanation (identical design, {@code MethodHandle} substituted for
+ * {@code ODEFunction} throughout).
  *
  * <h2>Checked exceptions</h2>
  * Every Turbo solver entry point declares {@code throws Throwable} (a
  * {@code MethodHandle.invokeExact} constraint) — propagated here rather than
  * swallowed, so callers see the same signal Standard-tier callers get for free
  * from unchecked exceptions.
- *
- * <h2>Known gap</h2>
- * Same as {@link EquationRuntime}: a genuine vector (non-HO) system falls back
- * to the solver's default finite-difference Jacobian rather than failing
- * outright, since the coefficient extractor only isolates one top term per
- * call.
  */
 public final class EquationRuntime {
 
@@ -97,6 +67,7 @@ public final class EquationRuntime {
     public static MathExpression.EvalResult solve(MathExpression me) {
         return solve(me.getCachedPostfix(), me.getNextResult());
     }
+
     /**
      * One-call convenience, the Turbo-tier twin of {@link
      * EquationRuntime#solve(Token[]postfix)}. Equivalent to:
@@ -104,11 +75,11 @@ public final class EquationRuntime {
      * new EquationRuntime(CoefficientExtractor::resolve).execute(postfix)
      * }</pre>
      *
-     * @param postfix 
-     * @param out 
+     * @param postfix
+     * @param out
      * @return
      */
-   public static MathExpression.EvalResult solve(MathExpression.Token[] postfix, MathExpression.EvalResult out) { 
+    public static MathExpression.EvalResult solve(MathExpression.Token[] postfix, MathExpression.EvalResult out) {
         try {
             Object o = new EquationRuntime(CoefficientExtractor::resolve).execute(postfix);
             if (o instanceof double[][]) {
@@ -125,12 +96,11 @@ public final class EquationRuntime {
         return out;
     }
 
-
     /**
      * Full pipeline for one call. Returns a {@code Double} for a scalar
      * {@code diffeqn} and for {@code diffeqnHO}'s y(tEnd), a {@code
-     * double[]} for a vector {@code diffeqn}, or a {@code double[][]} for
-     * either *_PATH variant.
+     * double[]} for a vector {@code diffeqn} (or an explicit system's endpoint
+     * state), or a {@code double[][]} for either *_PATH variant.
      *
      * @param fullCallPostfix
      * @return
@@ -138,6 +108,11 @@ public final class EquationRuntime {
      */
     public Object execute(Token[] fullCallPostfix) throws Throwable {
         DiffEqnCall call = DiffEqnArgParser.parse(fullCallPostfix);
+
+        if (call.equationArraySyntax) {
+            return executeSystem(call);
+        }
+
         Token[] equationPostfix = PostfixArgumentIsolator.isolateArgument(fullCallPostfix, 0);
         ResolvedEquation resolved = coefficientResolver.resolve(equationPostfix, call.y0.length);
         CanonicalFrame frame = new CanonicalFrame(resolved.canonicalToReal, resolved.realFrameSize);
@@ -162,7 +137,7 @@ public final class EquationRuntime {
     }
 
     // ------------------------------------------------------------------
-    // Kind-specific dispatch
+    // Kind-specific dispatch (single equation / HO — unchanged)
     // ------------------------------------------------------------------
     private Object executeDiffEqn(DiffEqnCall call, ResolvedEquation resolved, MethodHandle fn,
             CanonicalFrame frame, int tSlot, int ySlotStart, int frameSize) throws Throwable {
@@ -201,11 +176,80 @@ public final class EquationRuntime {
     }
 
     // ------------------------------------------------------------------
-    // Analytic Jacobian wiring -- identical logic to EquationRuntime's, just
-    // targeting the Turbo tier's own (structurally identical, distinct type)
-    // JacobianStrategy, and reading resolved.topDerivativeTree
-    // (an ExprNode -- representation-agnostic, works unchanged for either tier)
-    // through the same ExprNodeAutoDiffEvaluator used by the Standard tier.
+    // Explicit system dispatch — see Standard-tier EquationRuntime#executeSystem
+    // for the full design rationale (identical here, MethodHandle throughout).
+    // ------------------------------------------------------------------
+    private Object executeSystem(DiffEqnCall call) throws Throwable {
+        int n = call.equationTexts.length;
+
+        ResolvedEquation[] resolved = new ResolvedEquation[n];
+        CanonicalFrame[] frames = new CanonicalFrame[n];
+        MethodHandle[] perEquationFn = new MethodHandle[n];
+        System.out.println("-----------------------------"+Arrays.toString(call.equationTexts));
+// turbo tier, executeSystem — identical reasoning:
+        for (int i = 0; i < n; i++) {
+            MathExpression synthetic = new MathExpression("diffeqn(" + call.equationTexts[i] + ", 0, 0, 1)");
+            Token[] eqPostfix = PostfixArgumentIsolator.isolateArgument(synthetic.getCachedPostfix(), 0);
+            resolved[i] = coefficientResolver.resolve(eqPostfix, n);
+            frames[i] = new CanonicalFrame(resolved[i].canonicalToReal, resolved[i].realFrameSize);
+            perEquationFn[i] = FrameRemapper.wrap(resolved[i].topDerivativeRealFrame, frames[i]);
+        }
+        MethodHandle fn = SystemFunctionHandles.buildSystem(perEquationFn, n);
+
+        int tSlot = 0;
+        int ySlotStart = 1;
+        int frameSize = 1 + n;
+
+        JacobianStrategy jac = buildSystemJacobianIfNeeded(call, resolved, frames);
+
+        switch (call.kind) {
+            case DIFFEQN:
+                return VectorODE.executeVectorODE(fn, tSlot, ySlotStart, frameSize,
+                        call.t0, call.y0, call.tEnd, call.h, call.method, jac);
+            case DIFFEQN_PATH:
+                return VectorODE.executeVectorODEPath(fn, tSlot, ySlotStart, frameSize,
+                        call.t0, call.y0, call.tEnd, call.h, call.method, call.points, jac);
+            default:
+                // DIFFEQN_HO / DIFFEQN_PATH_HO already rejected in DiffEqnArgParser.parse.
+                throw new IllegalStateException("Unreachable");
+        }
+    }
+
+    /**
+     * Per-row Jacobian for an explicit system — see the Standard tier's
+     * equivalent method for the full rationale.
+     */
+    private JacobianStrategy buildSystemJacobianIfNeeded(
+            DiffEqnCall call, ResolvedEquation[] resolved, CanonicalFrame[] frames) {
+        if (call.method != ODESolverMethod.IMPLICIT_EULER && call.method != ODESolverMethod.BDF2) {
+            return null;
+        }
+
+        int n = resolved.length;
+        ExprNodeAutoDiffEvaluator[] rowEvaluators = new ExprNodeAutoDiffEvaluator[n];
+        for (int i = 0; i < n; i++) {
+            rowEvaluators[i] = new ExprNodeAutoDiffEvaluator(resolved[i].topDerivativeTree, 1);
+        }
+        double[] scratch = new double[2];
+
+        return (canonicalVars, outDfDy) -> {
+            for (int row = 0; row < n; row++) {
+                double[] realVarsForRow = frames[row].toReal(canonicalVars);
+                for (int col = 0; col < n; col++) {
+                    int realSlot = resolved[row].canonicalToReal[1 + col];
+                    if (realSlot == CanonicalFrame.NO_REAL_SLOT) {
+                        outDfDy[row][col] = 0.0;
+                    } else {
+                        rowEvaluators[row].taylorCoefficients(realVarsForRow, realSlot, 1, scratch);
+                        outDfDy[row][col] = scratch[1];
+                    }
+                }
+            }
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // Analytic Jacobian wiring (single equation / HO — unchanged)
     // ------------------------------------------------------------------
     private JacobianStrategy buildJacobianIfNeeded(
             DiffEqnCall call, ResolvedEquation resolved, CanonicalFrame frame, boolean higherOrder) {
@@ -216,8 +260,6 @@ public final class EquationRuntime {
         int order = call.y0.length;
 
         if (!higherOrder && order != 1) {
-            // Genuine vector system -- see class javadoc "Known gap". Falls back to
-            // the solver's own finite-difference Jacobian rather than failing the call.
             return null;
         }
 
@@ -274,5 +316,11 @@ public final class EquationRuntime {
 
         Object result = solve(me);
         System.out.println("Result: " + result);
+
+        // NEW: explicit system.
+        MathExpression sys = new MathExpression(
+                "diffeqn(@(2)(\"y[2]-(0.6*y[0]-0.03*y[0]*y[1])\", \"y[2]-(-0.9*y[1]+0.02*y[0]*y[1])\"), "
+                + "0, @(1,2)(30, 4), 20, 0.01, rk4)");
+        System.out.println("System result: " + solve(sys));
     }
 }

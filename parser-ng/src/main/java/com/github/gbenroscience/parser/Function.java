@@ -11,6 +11,7 @@ import java.util.InputMismatchException;
 import java.util.List;
 
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
+import static com.github.gbenroscience.parser.TYPE.VECTOR;
 import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.parser.methods.MethodRegistry;
 import com.github.gbenroscience.parser.turbo.tools.*;
@@ -20,6 +21,7 @@ import static com.github.gbenroscience.util.FunctionManager.*;
 import com.github.gbenroscience.util.Serializer;
 import com.github.gbenroscience.util.Utils;
 import com.github.gbenroscience.util.VariableManager;
+import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -28,11 +30,13 @@ import java.util.logging.Logger;
  * @author JIBOYE OLUWAGBEMIRO OLAOLUWA
  */
 public class Function implements Savable, MethodRegistry.MethodAction {
+
     /**
-     * If it is a derivative of another function, this field specifies what the derivative order is. If 0, then it is the base function, if 1, then y'.
+     * If it is a derivative of another function, this field specifies what the
+     * derivative order is. If 0, then it is the base function, if 1, then y'.
      * If 2, then y'' etc.
      */
-     private int order;
+    private int order;
     /**
      * The dependent variable
      */
@@ -59,6 +63,8 @@ public class Function implements Savable, MethodRegistry.MethodAction {
      * If the object is a {@link Matrix} its data is stored here.
      */
     private Matrix matrix;
+
+    private String[] array;
 
     ErrorLog errorLog = new ErrorLog();
 
@@ -212,7 +218,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             m.updateArgs(x);
         }
     }
-    
+
     public void setOrder(int order) {
         this.order = order;
     }
@@ -221,7 +227,6 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         return order;
     }
 
-    
     /**
      * @return the value of the function with these variables set.
      */
@@ -635,7 +640,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         }
         boolean isMathExpr = varCount == varList.size();
         boolean isMatrix = numCount == varList.size() && numCount == 2;
-        boolean isVector = numCount == varList.size() && numCount == 1;
+        boolean isVector = numCount == varList.size() && numCount == 1; 
 
         //Remove bogus enclosing brackets on an expression e.g(((x+2)))
         while (expr.startsWith("(") && expr.endsWith(")") && Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, 0, expr) == expr.length() - 1) {
@@ -683,33 +688,60 @@ public class Function implements Savable, MethodRegistry.MethodAction {
             anonFn.type = TYPE.MATRIX;
             //FunctionManager.update(anonFn); 
         } else if (isVector) {
-            int rows = Integer.parseInt(varList.get(0));
-            List<String> entries = new Scanner(expr, false, "(", ")", ",").scan();
-            int sz = entries.size();
+            int rows = Integer.parseInt(varList.get(0)); 
+           // List<String> entries = new Scanner(expr, false, "(", ")", ",").scan();
+             Scanner csBuilder = new Scanner.Builder(expr)
+                .includeTokens(false)
+                .ignoreWhitespace(false)
+                .addTokens(new String[]{","})
+                .addDelimitedRegion("\"", "\"")
+                .addDelimitedRegion("'", "'")  
+                .build();
+            List<String> entries =  csBuilder.scan();
+            int sz = entries.size(); 
 
             if (rows != sz) {
-                String err = "Invalid matrix! rows x cols must be equal to items supplied in matrix list. Expected: " + (rows) + ", Found: " + sz + " items";
+               String err = "Invalid matrix! rows x cols must be equal to items supplied in matrix list. Expected: " + (rows) + ", Found: " + sz + " items";
                 errorLog.info(err);
                 throw new RuntimeException(err);
             }
             double[] flatArray = new double[sz];
-            try {
-                for (int i = 0; i < sz; i++) {
-                    flatArray[i] = Double.parseDouble(entries.get(i));
+
+            boolean isArray = false;
+
+            for (int i = 0; i < sz; i++) {
+                String e = entries.get(i);
+
+                try {
+                    if (!Number.isNumber(e)) {
+                        flatArray = null;
+                        array = entries.toArray(new String[0]);
+                        anonFn = FunctionManager.lockDownAnon(varList.toArray(new String[0]));
+                        String dependentVar = anonFn.getName();
+                        anonFn.setDependentVariable(new Variable(dependentVar));
+                        anonFn.array = entries.toArray(new String[0]);
+                        anonFn.type = TYPE.ARRAY;
+                        isArray = true;
+                        break;
+                    }
+                    flatArray[i] = Double.parseDouble(e);
+                } catch (Exception ee) {
+                    String err = "Elements of a vector must be numbers!";
+                    errorLog.info(err);
+                    throw new RuntimeException(err);
                 }
-            } catch (Exception e) {
-                String err = "Elements of a vector must be numbers!";
-                errorLog.info(err);
-                throw new RuntimeException(err);
+
             }
-            Matrix m = new Matrix(flatArray, 1, sz);
-            anonFn = FunctionManager.lockDownAnon(varList.toArray(new String[0]));
-            m.setName(anonFn.getName());
-            String dependentVar = anonFn.getName();
-            anonFn.setDependentVariable(new Variable(dependentVar));
-            anonFn.matrix = m;
-            anonFn.type = TYPE.VECTOR;
-            // FunctionManager.update(anonFn);
+
+            if (!isArray) {
+                Matrix m = new Matrix(flatArray, 1, sz);
+                anonFn = FunctionManager.lockDownAnon(varList.toArray(new String[0]));
+                m.setName(anonFn.getName());
+                String dependentVar = anonFn.getName();
+                anonFn.setDependentVariable(new Variable(dependentVar));
+                anonFn.matrix = m;
+                anonFn.type = TYPE.VECTOR;
+            }
 
         } else {
             String err = "SYNTAX ERROR IN FUNCTION";
@@ -923,6 +955,12 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         return matrix;
     }
 
+    public String[] getArray() {
+        return array;
+    }
+    
+    
+
     /**
      *
      * @param name The name of the variable.
@@ -1130,7 +1168,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                         mathExpression.setValue(v, Double.parseDouble(l.get(i)));
                     }
                 }//end for 
-                VariableManager.parseCommand(vars); 
+                VariableManager.parseCommand(vars);
                 return mathExpression.solve();
             }//end if
             else {
@@ -1428,6 +1466,10 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 return getName() + "=@" + paramList + "(" + matrixToCommaList(matrix) + ")";
             case VECTOR:
                 return getName() + "=@" + paramList + "(" + matrixToCommaList(matrix) + ")";
+            case ARRAY:
+                String txt = Arrays.toString(array);
+                txt = txt.substring(1, txt.length()-1);
+                return getName() + "=@" + paramList + "(" + txt + ")";
             default:
                 return "";
         }
@@ -1446,6 +1488,8 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 return f.matrix.getName().startsWith(FunctionManager.ANON_PREFIX);
             case VECTOR:
                 return f.matrix.getName().startsWith(FunctionManager.ANON_PREFIX);
+            case ARRAY:
+                return f.dependentVariable.getName().startsWith(FunctionManager.ANON_PREFIX);
             default:
                 return false;
         }
@@ -1487,6 +1531,8 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                 return getName() + "(" + matrix.getRows() + "," + matrix.getCols() + ")";
             case VECTOR:
                 return getName() + "(" + matrix.getRows() + "," + matrix.getCols() + ")";
+             case ARRAY:
+                return getName() + "(" + array.length + ")";
             default:
                 return "";
         }
@@ -1500,6 +1546,8 @@ public class Function implements Savable, MethodRegistry.MethodAction {
     public String getName() {
         switch (type) {
             case ALGEBRAIC_EXPRESSION:
+                return dependentVariable == null ? null : dependentVariable.getName();
+            case ARRAY:
                 return dependentVariable == null ? null : dependentVariable.getName();
             case MATRIX:
             case VECTOR:
