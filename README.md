@@ -246,46 +246,25 @@ Full measured breakdowns, including GPU throughput at scale, live in [BENCHMARK_
 
 ---
 
+## 🗃️ New in 3.0.4: the `ARRAY` type
 
-
----
-
-## 🧮 Solving Differential Equations
-
-ParserNG solves ODEs — single equations, systems, and higher-order equations — as a first-class expression, not a bolted-on API. Four functions cover it: `diffeqn` (endpoint), `diffeqnPath` (full trajectory), `diffeqnHO` and `diffeqnPathHO` (the higher-order equivalents, for equations involving `y''`, `y'''`, and beyond).
-
-Five solver methods are available, spanning the usual accuracy/stiffness tradeoff:
-
-| Method | Order | Stiff-safe? | Use it for |
-| :--- | :--- | :--- | :--- |
-| `euler` | 1st | No | Real-time graphics, particle sims — speed over precision |
-| `rk4` | 4th | No | General-purpose default — solid accuracy, no adaptive bookkeeping |
-| `rk45` | 4th/5th, adaptive | No | Behavior that varies across the interval; industry-standard adaptive stepping |
-| `implicit_euler` | 1st | **Yes** | Stiff systems where stability matters more than tight accuracy |
-| `bdf2` | 2nd | **Yes** | Stiff systems needing better accuracy than `implicit_euler` at the same stability |
+ParserNG has always had `@(dim)(...)` vector/matrix literals — but those are strictly numeric, backed by a `Matrix`. 3.0.4 adds a sibling: the **`ARRAY`** type, using the exact same `@(dim)(...)` syntax, but able to hold a genuine *mix* of content — numbers and strings side by side, not just numbers.
 
 ```java
-// Endpoint only, using RK4 defaults
-MathExpression me = new MathExpression("diffeqn(y[1] + 2*y[0], 0, 1, 5)");
-me.solve();
+MathExpression m = new MathExpression("a=@(4)('3.14', 5, \"I am here\", 32.34)");
+m.solve();
 
-// Full trajectory, resampled to 50 evenly-spaced points
-MathExpression path = new MathExpression(
-    "diffeqnPath(y[1] + 2*y[0], 0, 1, 5, 0.01, rk4, 50)");
-path.solve();
-
-// A 3rd-order equation, stiff-safe BDF2, full state trajectory (t, y, y', y'')
-MathExpression ho = new MathExpression(
-    "A=diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2, state)");
-ho.solve();
-FunctionManager.lookUp("A").getMatrix().print();
+String[] array = FunctionManager.lookUp("a").getArray();
+// array = ["3.14", "5", "I am here", "32.34"]
 ```
 
-Results assign to a variable or matrix just like any other ParserNG expression — but a `diffeqn`-family call must always be the *entire* input expression (`A = diffeqn(...)` is fine; `sin(diffeqn(...))` is not — see the docs for why).
+An array literal accepts both single- and double-quoted strings (`'3.14'` and `"I am here"` are equally valid) alongside bare numeric literals — ParserNG figures out on its own whether the whole `@(dim)(...)` is a pure numeric `VECTOR` (still `Matrix`-backed, unchanged from before) or a mixed `ARRAY`, and compiles it accordingly. Like every other named function-valued literal, an `ARRAY` is registered with `FunctionManager` under its assigned name and retrieved the same way any `Function` is — `getArray()` sits right alongside the existing `getMatrix()` accessor, always returning `String[]`, since that's the one representation that can hold whatever mix of numbers and strings the literal contained.
 
-Full syntax reference, argument-by-argument breakdown, and per-method accuracy/stability nuances: [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md).
+**This is what makes the differential-equation engine's system-solving support possible.** Each equation in an explicit system (see above) is a full algebraic expression — not a constant, and not something ParserNG can evaluate eagerly the way a plain number can. Wrapping the set of equations in an `ARRAY` of quoted strings is what lets ParserNG treat "here are N equations" as a single, ordinary, eagerly-resolvable literal argument — the same trick that already worked for a numeric `y0` vector, extended to a type that can hold text.
 
 ---
+
+
 
 
 

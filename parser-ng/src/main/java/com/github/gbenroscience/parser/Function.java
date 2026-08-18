@@ -837,6 +837,10 @@ public class Function implements Savable, MethodRegistry.MethodAction {
         if (type == TYPE.VECTOR) {
             return 1;
         }
+        if (type == TYPE.ARRAY) {
+            return 1;
+        }
+        
         if (type == TYPE.MATRIX) {
             return 2;
         }
