@@ -1,6 +1,6 @@
 # ParserNG
 
-**ParserNG** is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. Its latest release on maven-central (version 3.0.4) adds a full differential equation engine — single equations, coupled systems, and higher-order equations, all expressed using ParserNG's own expression syntax — on top of the GPU bulk evaluation, SIMD/Vector API acceleration, and 2D graphing capabilities introduced in earlier releases. It works seamlessly on all Java platforms, and is used globally by 618 organizations to power mission-critical math visualization, analytical pipelines, and platform tooling.
+**ParserNG** is a powerful open-source math tool that parses and evaluates algebraic expressions and also knows how to handle a lot of mathematical expressions. Its latest release on maven-central (version 3.0.4) adds a full differential equation engine — single equations, coupled systems, and higher-order equations, all expressed using ParserNG's own expression syntax — on top of the GPU bulk evaluation, SIMD/Vector API acceleration, and 2D graphing capabilities introduced in earlier releases. It works seamlessly on all Java platforms, and is used globally by 165+(changing) organizations to power mission-critical math visualization, analytical pipelines, and platform tooling.
 
 I started this project 2009 ending and have been upgrading it since then. Please consider sponsoring me. That would be very helpful. Click the Sponsor button to do this.
 
