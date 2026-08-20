@@ -11,7 +11,9 @@ import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.Bat
 import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.lang.ref.Cleaner;
+import java.nio.ByteOrder;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import jdk.incubator.vector.*;
@@ -460,13 +462,24 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
             final boolean[] stackIsConst;
             final double[] stackConstVals;
             final double[] scratch;
+            final MemorySegment scratchSegment; // cached wrapper of `scratch`, for lazy segment->scratch materialization
             int sp = 0;
 
             double[] flatVariables;
             double[][] _2DVariables;
             int dataSize;
             int blockStart;
+
+            // NEW: true zero-copy MemorySegment-backed stack support — one segment per
+            // variable (e.g. one per Arrow ValueVector's data buffer). OP_LOAD points a
+            // stack slot directly here instead of copying into segmentBlockVars below.
+            MemorySegment[] segVariables;
+            long segBlockStart;
+            final MemorySegment[] stackSegments;
+            final long[] stackSegOffsets;
+            final boolean[] stackIsSegment;
             
+            // Legacy staged-copy targets (still used by the single-concatenated-segment path)
             final double[][] segmentBlockVars;
             final MemorySegment[] segmentBlockVarsMem;
 
@@ -476,6 +489,11 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
                 stackIsConst = new boolean[maxStackDepth];
                 stackConstVals = new double[maxStackDepth];
                 scratch = new double[maxStackDepth * blockSize];
+                scratchSegment = MemorySegment.ofArray(scratch);
+
+                stackSegments = new MemorySegment[maxStackDepth];
+                stackSegOffsets = new long[maxStackDepth];
+                stackIsSegment = new boolean[maxStackDepth];
                 
                 // Zero-allocation pre-cached memory segment loading targets
                 segmentBlockVars = new double[varCount][blockSize];
@@ -489,8 +507,22 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
                 this.sp = 0;
                 this.flatVariables = flat;
                 this._2DVariables = _2D;
+                this.segVariables = null;
                 this.dataSize = size;
                 this.blockStart = bStart;
+            }
+
+            /**
+             * NEW: initializes this context for a block whose variables are read
+             * directly from off-heap MemorySegments — no staging copy. Each element of
+             * {@code segVars} is one variable's full-length backing segment.
+             */
+            void initForBlockSegments(MemorySegment[] segVars, long bStart) {
+                this.sp = 0;
+                this.flatVariables = null;
+                this._2DVariables = null;
+                this.segVariables = segVars;
+                this.segBlockStart = bStart;
             }
         }
 
@@ -565,21 +597,27 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
             for (long blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
                 final int currentBlockSize = (int) Math.min((long) BLOCK_SIZE, endIdx - blockStart);
 
-                // Zero-allocation blit data straight into our threaded context primitive arrays.
-                // Unlike the single-segment overload, each variable has its own
-                // segment, so the source offset is simply blockStart * 8L —
-                // no (v * dataSize) term is needed since segments are not concatenated.
-                for (int v = 0; v < varCount; v++) {
-                    long srcOffsetBytes = blockStart * 8L;
-                    MemorySegment.copy(variables[v], srcOffsetBytes, ctx.segmentBlockVarsMem[v], 0L, currentBlockSize * 8L);
-                }
-
-                ctx.initForBlock(null, ctx.segmentBlockVars, currentBlockSize, 0);
+                // TRUE zero-copy: no staging copy here at all. Each OP_LOAD reads its
+                // variable directly out of variables[slotIdx] at ctx.segBlockStart via
+                // DoubleVector.fromMemorySegment / MemorySegment.getAtIndex. A variable
+                // is only ever copied into on-heap scratch if some op that needs dense
+                // array access (a transcendental function, POW, a comparison, IF/AND/OR,
+                // VMA) actually consumes it — see materialize(). Pure +,-,*,/ chains over
+                // loaded variables never touch scratch for their operands at all.
+                ctx.initForBlockSegments(variables, blockStart);
                 try {
                     executeInstructions(ctx, currentBlockSize);
+                    if (ctx.stackIsSegment[0]) {
+                        // Edge case: the entire expression is a bare variable (e.g. "x"),
+                        // so OP_LOAD's segment-backed push was never consumed by any op
+                        // that would otherwise force materialization. Materialize it now
+                        // so the output copy below has a valid on-heap source.
+                        materialize(ctx, 0, currentBlockSize);
+                    }
                 } finally {
                     ctx.sp = 0;
                     java.util.Arrays.fill(ctx.stackIsConst, false);
+                    java.util.Arrays.fill(ctx.stackIsSegment, false);
                 }
 
                 // Push evaluated vector outputs directly back out to foreign memory space
@@ -609,6 +647,18 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
                 ctx.stackArrays[targetSp] = ctx.scratch;
                 ctx.stackOffsets[targetSp] = destOff;
                 ctx.stackIsConst[targetSp] = false;
+                ctx.stackIsSegment[targetSp] = false;
+            } else if (ctx.stackIsSegment[targetSp]) {
+                // NEW: on-demand copy of off-heap segment data into scratch — only paid
+                // by ops that actually need dense array access (functions, comparisons,
+                // POW, IF/AND/OR, VMA). Pure +,-,*,/ chains never reach this branch at
+                // all; see doAdd/doSub/doMul/doDiv's segment-native fast paths below.
+                int destOff = targetSp * BLOCK_SIZE;
+                long srcOffsetBytes = ctx.stackSegOffsets[targetSp] * 8L;
+                MemorySegment.copy(ctx.stackSegments[targetSp], srcOffsetBytes, ctx.scratchSegment, (long) destOff * 8L, (long) n * 8L);
+                ctx.stackArrays[targetSp] = ctx.scratch;
+                ctx.stackOffsets[targetSp] = destOff;
+                ctx.stackIsSegment[targetSp] = false;
             } else if (ctx.stackArrays[targetSp] != ctx.scratch) {
                 int destOff = targetSp * BLOCK_SIZE;
                 System.arraycopy(ctx.stackArrays[targetSp], ctx.stackOffsets[targetSp], ctx.scratch, destOff, n);
@@ -633,20 +683,31 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
                 switch (opcode) {
                     case OP_CONST -> {
                         ctx.stackIsConst[ctx.sp] = true;
+                        ctx.stackIsSegment[ctx.sp] = false;
                         ctx.stackConstVals[ctx.sp] = literalConstants[instIdx];
                         ctx.sp++;
                     }
 
                     case OP_LOAD -> {
                         final int slotIdx = targetSlots[instIdx];
-                        if (ctx.flatVariables != null) {
+                        if (ctx.segVariables != null) {
+                            // NEW: true zero-copy read — point the stack slot directly at the
+                            // off-heap segment for this variable; no staging copy performed.
+                            ctx.stackSegments[ctx.sp] = ctx.segVariables[slotIdx];
+                            ctx.stackSegOffsets[ctx.sp] = ctx.segBlockStart;
+                            ctx.stackIsSegment[ctx.sp] = true;
+                            ctx.stackIsConst[ctx.sp] = false;
+                        } else if (ctx.flatVariables != null) {
                             ctx.stackArrays[ctx.sp] = ctx.flatVariables;
                             ctx.stackOffsets[ctx.sp] = (slotIdx * ctx.dataSize) + ctx.blockStart;
+                            ctx.stackIsSegment[ctx.sp] = false;
+                            ctx.stackIsConst[ctx.sp] = false;
                         } else {
                             ctx.stackArrays[ctx.sp] = ctx._2DVariables[slotIdx];
                             ctx.stackOffsets[ctx.sp] = ctx.blockStart;
+                            ctx.stackIsSegment[ctx.sp] = false;
+                            ctx.stackIsConst[ctx.sp] = false;
                         }
-                        ctx.stackIsConst[ctx.sp] = false;
                         ctx.sp++;
                     }
 
@@ -1184,27 +1245,80 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
         private void doAdd(EvaluationContext ctx, int n) {
             final int rSp = --ctx.sp;
             final boolean rIsConst = ctx.stackIsConst[rSp];
+            final boolean rIsSeg = ctx.stackIsSegment[rSp];
             final double[] rArr = ctx.stackArrays[rSp];
             final int rOff = ctx.stackOffsets[rSp];
             final double rVal = ctx.stackConstVals[rSp];
+            final MemorySegment rSeg = ctx.stackSegments[rSp];
+            final long rSegOff = ctx.stackSegOffsets[rSp];
 
             final int lSp = --ctx.sp;
             final boolean lIsConst = ctx.stackIsConst[lSp];
+            final boolean lIsSeg = ctx.stackIsSegment[lSp];
             final double[] lArr = ctx.stackArrays[lSp];
             final int lOff = ctx.stackOffsets[lSp];
             final double lVal = ctx.stackConstVals[lSp];
+            final MemorySegment lSeg = ctx.stackSegments[lSp];
+            final long lSegOff = ctx.stackSegOffsets[lSp];
 
             final int resOffset = ctx.sp * BLOCK_SIZE;
             ctx.stackArrays[ctx.sp] = ctx.scratch;
             ctx.stackOffsets[ctx.sp] = resOffset;
             ctx.stackIsConst[ctx.sp] = false;
+            ctx.stackIsSegment[ctx.sp] = false;
             ctx.sp++;
 
             int k = 0;
             final int vl = SPECIES.length();
             final int limit = SPECIES.loopBound(n);
 
-            if (!lIsConst && !rIsConst) {
+            if (lIsSeg && rIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .add(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) + rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (lIsSeg && rIsConst) {
+                final DoubleVector rbVec = DoubleVector.broadcast(SPECIES, rVal);
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .add(rbVec)
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) + rVal;
+                }
+            } else if (lIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .add(DoubleVector.fromArray(SPECIES, rArr, rOff + k))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) + rArr[rOff + k];
+                }
+            } else if (rIsSeg && lIsConst) {
+                final DoubleVector laVec = DoubleVector.broadcast(SPECIES, lVal);
+                for (; k < limit; k += vl) {
+                    laVec.add(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lVal + rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (rIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromArray(SPECIES, lArr, lOff + k)
+                            .add(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lArr[lOff + k] + rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (!lIsConst && !rIsConst) {
                 for (; k < limit; k += vl) {
                     DoubleVector.fromArray(SPECIES, lArr, lOff + k)
                             .add(DoubleVector.fromArray(SPECIES, rArr, rOff + k))
@@ -1243,27 +1357,80 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
         private void doSub(EvaluationContext ctx, int n) {
             final int rSp = --ctx.sp;
             final boolean rIsConst = ctx.stackIsConst[rSp];
+            final boolean rIsSeg = ctx.stackIsSegment[rSp];
             final double[] rArr = ctx.stackArrays[rSp];
             final int rOff = ctx.stackOffsets[rSp];
             final double rVal = ctx.stackConstVals[rSp];
+            final MemorySegment rSeg = ctx.stackSegments[rSp];
+            final long rSegOff = ctx.stackSegOffsets[rSp];
 
             final int lSp = --ctx.sp;
             final boolean lIsConst = ctx.stackIsConst[lSp];
+            final boolean lIsSeg = ctx.stackIsSegment[lSp];
             final double[] lArr = ctx.stackArrays[lSp];
             final int lOff = ctx.stackOffsets[lSp];
             final double lVal = ctx.stackConstVals[lSp];
+            final MemorySegment lSeg = ctx.stackSegments[lSp];
+            final long lSegOff = ctx.stackSegOffsets[lSp];
 
             final int resOffset = ctx.sp * BLOCK_SIZE;
             ctx.stackArrays[ctx.sp] = ctx.scratch;
             ctx.stackOffsets[ctx.sp] = resOffset;
             ctx.stackIsConst[ctx.sp] = false;
+            ctx.stackIsSegment[ctx.sp] = false;
             ctx.sp++;
 
             int k = 0;
             final int vl = SPECIES.length();
             final int limit = SPECIES.loopBound(n);
 
-            if (!lIsConst && !rIsConst) {
+            if (lIsSeg && rIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .sub(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) - rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (lIsSeg && rIsConst) {
+                final DoubleVector rbVec = DoubleVector.broadcast(SPECIES, rVal);
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .sub(rbVec)
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) - rVal;
+                }
+            } else if (lIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .sub(DoubleVector.fromArray(SPECIES, rArr, rOff + k))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) - rArr[rOff + k];
+                }
+            } else if (rIsSeg && lIsConst) {
+                final DoubleVector laVec = DoubleVector.broadcast(SPECIES, lVal);
+                for (; k < limit; k += vl) {
+                    laVec.sub(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lVal - rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (rIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromArray(SPECIES, lArr, lOff + k)
+                            .sub(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lArr[lOff + k] - rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (!lIsConst && !rIsConst) {
                 for (; k < limit; k += vl) {
                     DoubleVector.fromArray(SPECIES, lArr, lOff + k)
                             .sub(DoubleVector.fromArray(SPECIES, rArr, rOff + k))
@@ -1302,27 +1469,80 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
         private void doMul(EvaluationContext ctx, int n) {
             final int rSp = --ctx.sp;
             final boolean rIsConst = ctx.stackIsConst[rSp];
+            final boolean rIsSeg = ctx.stackIsSegment[rSp];
             final double[] rArr = ctx.stackArrays[rSp];
             final int rOff = ctx.stackOffsets[rSp];
             final double rVal = ctx.stackConstVals[rSp];
+            final MemorySegment rSeg = ctx.stackSegments[rSp];
+            final long rSegOff = ctx.stackSegOffsets[rSp];
 
             final int lSp = --ctx.sp;
             final boolean lIsConst = ctx.stackIsConst[lSp];
+            final boolean lIsSeg = ctx.stackIsSegment[lSp];
             final double[] lArr = ctx.stackArrays[lSp];
             final int lOff = ctx.stackOffsets[lSp];
             final double lVal = ctx.stackConstVals[lSp];
+            final MemorySegment lSeg = ctx.stackSegments[lSp];
+            final long lSegOff = ctx.stackSegOffsets[lSp];
 
             final int resOffset = ctx.sp * BLOCK_SIZE;
             ctx.stackArrays[ctx.sp] = ctx.scratch;
             ctx.stackOffsets[ctx.sp] = resOffset;
             ctx.stackIsConst[ctx.sp] = false;
+            ctx.stackIsSegment[ctx.sp] = false;
             ctx.sp++;
 
             int k = 0;
             final int vl = SPECIES.length();
             final int limit = SPECIES.loopBound(n);
 
-            if (!lIsConst && !rIsConst) {
+            if (lIsSeg && rIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .mul(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) * rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (lIsSeg && rIsConst) {
+                final DoubleVector rbVec = DoubleVector.broadcast(SPECIES, rVal);
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .mul(rbVec)
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) * rVal;
+                }
+            } else if (lIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .mul(DoubleVector.fromArray(SPECIES, rArr, rOff + k))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) * rArr[rOff + k];
+                }
+            } else if (rIsSeg && lIsConst) {
+                final DoubleVector laVec = DoubleVector.broadcast(SPECIES, lVal);
+                for (; k < limit; k += vl) {
+                    laVec.mul(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lVal * rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (rIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromArray(SPECIES, lArr, lOff + k)
+                            .mul(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lArr[lOff + k] * rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (!lIsConst && !rIsConst) {
                 for (; k < limit; k += vl) {
                     DoubleVector.fromArray(SPECIES, lArr, lOff + k)
                             .mul(DoubleVector.fromArray(SPECIES, rArr, rOff + k))
@@ -1361,27 +1581,80 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
         private void doDiv(EvaluationContext ctx, int n) {
             final int rSp = --ctx.sp;
             final boolean rIsConst = ctx.stackIsConst[rSp];
+            final boolean rIsSeg = ctx.stackIsSegment[rSp];
             final double[] rArr = ctx.stackArrays[rSp];
             final int rOff = ctx.stackOffsets[rSp];
             final double rVal = ctx.stackConstVals[rSp];
+            final MemorySegment rSeg = ctx.stackSegments[rSp];
+            final long rSegOff = ctx.stackSegOffsets[rSp];
 
             final int lSp = --ctx.sp;
             final boolean lIsConst = ctx.stackIsConst[lSp];
+            final boolean lIsSeg = ctx.stackIsSegment[lSp];
             final double[] lArr = ctx.stackArrays[lSp];
             final int lOff = ctx.stackOffsets[lSp];
             final double lVal = ctx.stackConstVals[lSp];
+            final MemorySegment lSeg = ctx.stackSegments[lSp];
+            final long lSegOff = ctx.stackSegOffsets[lSp];
 
             final int resOffset = ctx.sp * BLOCK_SIZE;
             ctx.stackArrays[ctx.sp] = ctx.scratch;
             ctx.stackOffsets[ctx.sp] = resOffset;
             ctx.stackIsConst[ctx.sp] = false;
+            ctx.stackIsSegment[ctx.sp] = false;
             ctx.sp++;
 
             int k = 0;
             final int vl = SPECIES.length();
             final int limit = SPECIES.loopBound(n);
 
-            if (!lIsConst && !rIsConst) {
+            if (lIsSeg && rIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .div(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) / rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (lIsSeg && rIsConst) {
+                final DoubleVector rbVec = DoubleVector.broadcast(SPECIES, rVal);
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .div(rbVec)
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) / rVal;
+                }
+            } else if (lIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromMemorySegment(SPECIES, lSeg, (lSegOff + k) * 8L, ByteOrder.nativeOrder())
+                            .div(DoubleVector.fromArray(SPECIES, rArr, rOff + k))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, lSegOff + k) / rArr[rOff + k];
+                }
+            } else if (rIsSeg && lIsConst) {
+                final DoubleVector laVec = DoubleVector.broadcast(SPECIES, lVal);
+                for (; k < limit; k += vl) {
+                    laVec.div(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lVal / rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (rIsSeg) {
+                for (; k < limit; k += vl) {
+                    DoubleVector.fromArray(SPECIES, lArr, lOff + k)
+                            .div(DoubleVector.fromMemorySegment(SPECIES, rSeg, (rSegOff + k) * 8L, ByteOrder.nativeOrder()))
+                            .intoArray(ctx.scratch, resOffset + k);
+                }
+                for (; k < n; k++) {
+                    ctx.scratch[resOffset + k] = lArr[lOff + k] / rSeg.getAtIndex(ValueLayout.JAVA_DOUBLE, rSegOff + k);
+                }
+            } else if (!lIsConst && !rIsConst) {
                 for (; k < limit; k += vl) {
                     DoubleVector.fromArray(SPECIES, lArr, lOff + k)
                             .div(DoubleVector.fromArray(SPECIES, rArr, rOff + k))
