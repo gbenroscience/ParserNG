@@ -67,7 +67,7 @@ import org.openjdk.jmh.runner.options.TimeValue;
     "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"
 })
 @Threads(1)
-public class ParserNgBench {
+public class ShowBench {
 
     public static interface JaninoMathFunction {
 
@@ -261,7 +261,7 @@ public class ParserNgBench {
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public void janinoAoS(Blackhole bh) {
+    public void janino(Blackhole bh) {
         final int limit = dataSize;
         // Read from a completely static scenario index
         final double[][] inputAoS = janinoDataSink[benchmarkScenario];
@@ -274,7 +274,7 @@ public class ParserNgBench {
 
     
     @Benchmark
-    public void janinoAoSParallel(Blackhole bh) {
+    public void janinoParallel(Blackhole bh) {
         final double[][] inputAoS = janinoDataSink[benchmarkScenario];
         final JaninoMathFunction evaluator = this.fastEvaluator;
         final int limit = dataSize;
@@ -311,82 +311,11 @@ public class ParserNgBench {
             bh.consume(mSink[i]);
         }
     }
-
-     @Benchmark
-    @BenchmarkMode(Mode.AverageTime)
-    @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public void janinoSoA(Blackhole bh) {
-        final int limit = dataSize;
-        final int stride = varCount;
-
-        // Read from the static iteration-level scenario to ensure perfect JIT loop unrolling
-        final double[][] input = dataSink[benchmarkScenario];
-        final double[] localVars = this.vars;
-        final JaninoMathFunction evaluator = this.fastEvaluator;
-
-        for (int i = 0; i < limit; i++) {
-            // Linear access: read each variable for the current sample 'i'
-            for (int j = 0; j < stride; j++) {
-                localVars[j] = input[j][i];
-            }
-            bh.consume(evaluator.apply(localVars));
-        }
-    }
-    @Benchmark
-    public void janinoSoAParallel(Blackhole bh) {
-        final double[][] input = dataSink[benchmarkScenario];
-        final int stride = varCount;
-        final int limit = dataSize;
-        final int mid = limit / 2;
-        
-        // Pin configurations to isolated array handles
-        final double[] lvWorker = this.workerLocalVars;
-        final double[] lvMaster = this.masterLocalVars;
-        final double[] wSink = this.workerResultSink;
-        final double[] mSink = this.masterResultSink;
-        
-        final JaninoMathFunction evaluator = this.fastEvaluator;
-
-        janinoParallelExecutor.execute(() -> {
-            try {
-                for (int i = 0; i < mid; i++) {
-                    for (int j = 0; j < stride; j++) {
-                        lvWorker[j] = input[j][i];
-                    }
-                    wSink[i] = evaluator.apply(lvWorker);
-                }
-            } finally {
-                barrier.arriveAndAwaitAdvance();
-            }
-        });
-
-        // Master Thread Processing Segment
-        for (int i = mid; i < limit; i++) {
-            for (int j = 0; j < stride; j++) {
-                lvMaster[j] = input[j][i];
-            }
-            mSink[i - mid] = evaluator.apply(lvMaster);
-        }
-
-        // Structural Thread Rendezvous Barrier
-        barrier.arriveAndAwaitAdvance();
-
-        // Linearized single-threaded Blackhole consumption phase
-        for (int i = 0; i < mid; i++) {
-            bh.consume(wSink[i]);
-        }
-        for (int i = 0; i < mSink.length; i++) {
-            bh.consume(mSink[i]);
-        }
-    }
   
-
-
-
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public void simdVec(Blackhole bh) {
+    public void parserNGSimdVec(Blackhole bh) {
         // Read from the same stable scenario index—zero cursor modifications inside!
         final double[][] input = dataSink[benchmarkScenario];
         final double[] res = result;
@@ -399,7 +328,7 @@ public class ParserNgBench {
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public void simdVecParallel(Blackhole bh) {
+    public void parserNGSimdVecParallel(Blackhole bh) {
         // Read from the same stable scenario index—zero cursor modifications inside!
         final double[][] input = dataSink[benchmarkScenario];
         final double[] res = result;
@@ -414,7 +343,7 @@ public class ParserNgBench {
              //simdVec = SIMDVectorTurboEvaluator.getEvaluator(me, 2);
                simdVec = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me.copy()).compile();
         } catch (Throwable ex) {
-            System.getLogger(ParserNgBench.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+            System.getLogger(ShowBench.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }
     }
 
@@ -552,7 +481,7 @@ public class ParserNgBench {
         try {
             OptionsBuilder opt = new OptionsBuilder();
   
-            opt.include(ParserNgBench.class.getSimpleName());
+            opt.include(ShowBench.class.getSimpleName());
 
             System.out.println("\n⚔️  MATCH MATCHUP: Janino vs ParserNG");
             System.out.println("🚀 LET THE GAMES BEGIN!\n");
@@ -575,7 +504,7 @@ public class ParserNgBench {
         } catch (NumberFormatException e) {
             System.err.println("Error: Input contains non-numeric characters inside the parser selections.");
         } catch (RunnerException ex) {
-            System.getLogger(ParserNgBench.class.getName()).log(System.Logger.Level.ERROR, "JMH Execution failed", ex);
+            System.getLogger(ShowBench.class.getName()).log(System.Logger.Level.ERROR, "JMH Execution failed", ex);
         }
     }
 

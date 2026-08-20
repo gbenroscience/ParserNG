@@ -26,6 +26,7 @@
         <module>parser-ng-simd</module>
         <module>parser-ng-bench</module>
         <module>parser-ng-gpu-simd</module>
+        <module>parser-ng-arrow</module>
     </modules>
 
     <properties>

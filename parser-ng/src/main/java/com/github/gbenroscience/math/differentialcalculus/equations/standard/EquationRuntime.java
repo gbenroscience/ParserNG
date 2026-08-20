@@ -376,8 +376,7 @@ public final class EquationRuntime {
         // NEW: explicit system, Lotka-Volterra — each equation divides out y[2]
         // (n = 2, the system's own component count), independently parsed:
         runODE("diffeqn(@(2)(\"y[2]-(0.6*y[0]-0.03*y[0]*y[1])\", \"y[2]-(-0.9*y[1]+0.02*y[0]*y[1])\"), 0, @(1,2)(30, 4), 20, 0.01, rk4)");
-        
-        System.out.println("VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV");
+         
         runODE("diffeqnHO(y[2] + (9.81/2.5)*sin(y[0]), 0, @(1,2)(0.5, 0.5), 30, 0.0001, rk4)");
 
         MathExpression me = new MathExpression("A=diffeqnPathHO(3*x*sin(x)*y[3]+4*x*y[2]+3*ln(x)*y[1]+4*y[0], 1, @(1,3)(1, 0, 0), 3, 0.01, bdf2, state)");
@@ -392,7 +391,8 @@ public final class EquationRuntime {
         runODE("diffeqn(@(4)(\"y[4]-y[1]\",\"y[4]-(-2*y[0]+y[2])\",\"y[4]-2*sin(t)*y[3]\",\"y[4]-(y[0]-2*y[2])\"), 0, @(1,4)(1,0,0,1), 10, 0.01, rk4)");
         
         
-        runODE("diffeqn(y[1] + 2*y[0], 0, 1, 5, rk4)");
+        runODE("diffeqn(y[1] + 2*y[0], 0, 1, 5, 0.001, rk4)");
+        runODE("diffeqnPathHO(y[2] + 0.5*y[1] + 1*sin(y[0]) - 1.2*cos((2/3)*t), 0, @(1,2)(0.2, 0), 100, 0.0001, rk45, 2000, state)");
     }
 
     public static void runODE(String in) throws Throwable {

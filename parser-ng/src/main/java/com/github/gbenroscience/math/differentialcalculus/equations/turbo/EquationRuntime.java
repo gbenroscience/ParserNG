@@ -322,5 +322,20 @@ public final class EquationRuntime {
                 "diffeqn(@(2)(\"y[2]-(0.6*y[0]-0.03*y[0]*y[1])\", \"y[2]-(-0.9*y[1]+0.02*y[0]*y[1])\"), "
                 + "0, @(1,2)(30, 4), 20, 0.01, rk4)");
         System.out.println("System result: " + solve(sys));
+        
+        
+        
+        MathExpression mz = new MathExpression("diffeqn(@(2)( \"y[2]+y[0]\", \"y[2]-y[0]\" ),0, @(1,2)(1,0), 10, 0.01, rk4)");
+        System.out.println("------------"+mz.solve());
+        
+        MathExpression mzz = new MathExpression("diffeqnPathHO(y[2] + 9.81*sin(y[0]), 0, @(1,2)(0.5, 0), 10, 0.001, rk4, 500, trajectory)");
+         System.out.println("SIMPLE-PENDULUM------------"+mzz.solve());
+        
+        
     }
 }
+/*
+------------103043.08662101434
+------------165600.66356249657
+------------227482.4757648183
+*/

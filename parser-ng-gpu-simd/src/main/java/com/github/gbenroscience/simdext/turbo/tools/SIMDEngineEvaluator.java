@@ -1,6 +1,5 @@
 package com.github.gbenroscience.simdext.turbo.tools;
 
-
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
@@ -162,6 +161,7 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
             double[] output;
             
             MemorySegment varsSegment;
+            MemorySegment[] varsSegmentArray; // NEW: one segment per variable/column (e.g. one per Arrow ValueVector)
             MemorySegment outputSegment;
             long totalSamplesLong;
             
@@ -178,6 +178,7 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
                 this.vars2D = null;
                 this.vars1D = null;
                 this.varsSegment = null;
+                this.varsSegmentArray = null; // NEW
                 this.output = null;
                 this.outputSegment = null;
                 this.masterThread = null;
@@ -217,7 +218,17 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
                     }
 
                     try {
-                        if (sharedCtx.varsSegment != null) {
+                        if (sharedCtx.varsSegmentArray != null) {
+                            // NEW: per-column MemorySegment path (e.g. Arrow ValueVector buffers)
+                            long numSamplesL = sharedCtx.totalSamplesLong;
+                            long chunkSizeL = numSamplesL / totalThreads;
+                            long startIdxL = id * chunkSizeL;
+                            long lengthL = (id == totalThreads - 1) ? (numSamplesL - startIdxL) : chunkSizeL;
+
+                            if (lengthL > 0) {
+                                applyBulkInternal(sharedCtx.varsSegmentArray, evalContext, numSamplesL, sharedCtx.outputSegment, startIdxL, lengthL);
+                            }
+                        } else if (sharedCtx.varsSegment != null) {
                             long numSamplesL = sharedCtx.totalSamplesLong;
                             long chunkSizeL = numSamplesL / totalThreads;
                             long startIdxL = id * chunkSizeL;
@@ -274,6 +285,29 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
 
         private void executeParallelProcessing(MemorySegment varsSegment, MemorySegment outputSegment, long numSamples) {
             coordinationContext.varsSegment = varsSegment;
+            coordinationContext.outputSegment = outputSegment;
+            coordinationContext.totalSamplesLong = numSamples;
+            coordinationContext.masterThread = Thread.currentThread();
+            coordinationContext.completionLatch.set(NUM_WORKERS);
+
+            // Trigger execution via explicit atomic state updates
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                coordinationContext.workerSignals[i].set(1);
+                LockSupport.unpark(workerPool[i]);
+            }
+
+            while (coordinationContext.completionLatch.get() > 0) {
+                LockSupport.park();
+            }
+            coordinationContext.clearPayload();
+        }
+
+        /**
+         * NEW: Parallel dispatch for the per-column MemorySegment[] path
+         * (one segment per variable, e.g. one per Arrow ValueVector buffer).
+         */
+        private void executeParallelProcessing(MemorySegment[] varsSegmentArray, MemorySegment outputSegment, long numSamples) {
+            coordinationContext.varsSegmentArray = varsSegmentArray;
             coordinationContext.outputSegment = outputSegment;
             coordinationContext.totalSamplesLong = numSamples;
             coordinationContext.masterThread = Thread.currentThread();
@@ -369,6 +403,52 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
              }
              executeParallelProcessing(variables, output, numSamples);
         }
+
+        // =========================================================================
+        // NEW: Multi-Segment (per-column) MemorySegment API — for zero-copy
+        // integration with columnar sources like Apache Arrow, where each
+        // variable/column lives in its OWN MemorySegment (e.g. one per
+        // Arrow ValueVector's data buffer) rather than being concatenated
+        // into a single flat segment.
+        // =========================================================================
+
+        /**
+         * Evaluate this expression over columnar data where each variable is
+         * backed by its own {@link MemorySegment} (e.g. one per Arrow
+         * {@code Float8Vector}'s data buffer), writing results directly into
+         * {@code output}. No intermediate copy into a combined segment or
+         * on-heap array is performed by this entry point.
+         *
+         * @param variables one MemorySegment per variable, in variable/slot
+         *                  order; each must hold at least {@code numSamples}
+         *                  contiguous doubles
+         * @param output    destination segment; its byte size determines
+         *                  {@code numSamples} (byteSize() / 8)
+         */
+        public void applyBulk(MemorySegment[] variables, MemorySegment output) {
+            if (variables == null || variables.length == 0 || output == null) {
+                return;
+            }
+            long numSamples = output.byteSize() / 8L;
+            applyBulkInternal(variables, masterEvalContext.get(), numSamples, output, 0L, numSamples);
+        }
+
+        /**
+         * Parallel counterpart of {@link #applyBulk(MemorySegment[], MemorySegment)}.
+         * Falls back to single-threaded execution when no worker pool is
+         * available or the batch is below {@code PARALLEL_OPS_THRESHOLD}.
+         */
+        public void applyBulkParallel(MemorySegment[] variables, MemorySegment output) {
+            if (variables == null || variables.length == 0 || output == null) {
+                return;
+            }
+            long numSamples = output.byteSize() / 8L;
+            if (NUM_WORKERS <= 0 || numSamples < PARALLEL_OPS_THRESHOLD) {
+                applyBulkInternal(variables, masterEvalContext.get(), numSamples, output, 0L, numSamples);
+                return;
+            }
+            executeParallelProcessing(variables, output, numSamples);
+        }
         
         // =========================================================================
         // Internal Primitive State Engine Implementation
@@ -453,6 +533,45 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
                 for (int v = 0; v < varCount; v++) {
                     long srcOffsetBytes = ((v * dataSize) + blockStart) * 8L;
                     MemorySegment.copy(variables, srcOffsetBytes, ctx.segmentBlockVarsMem[v], 0L, currentBlockSize * 8L);
+                }
+
+                ctx.initForBlock(null, ctx.segmentBlockVars, currentBlockSize, 0);
+                try {
+                    executeInstructions(ctx, currentBlockSize);
+                } finally {
+                    ctx.sp = 0;
+                    java.util.Arrays.fill(ctx.stackIsConst, false);
+                }
+
+                // Push evaluated vector outputs directly back out to foreign memory space
+                long destOffsetBytes = blockStart * 8L;
+                MemorySegment.copy(MemorySegment.ofArray(ctx.stackArrays[0]), ctx.stackOffsets[0] * 8L, output, destOffsetBytes, currentBlockSize * 8L);
+            }
+        }
+
+        /**
+         * NEW: Per-column MemorySegment[] variant of the bulk internal loop.
+         * Identical block-staging strategy to the single-segment overload
+         * above, except each variable is read from its own segment at
+         * {@code blockStart * 8L} rather than from a computed offset within
+         * one large concatenated segment. This is the entry point intended
+         * for zero-copy Arrow integration: each element of {@code variables}
+         * can point directly at one Arrow {@code ValueVector}'s data buffer,
+         * and {@code output} can point directly at a pre-allocated output
+         * vector's buffer.
+         */
+        private void applyBulkInternal(MemorySegment[] variables, EvaluationContext ctx, long dataSize, MemorySegment output, long startIdx, long length) {
+            final long endIdx = startIdx + length;
+            for (long blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
+                final int currentBlockSize = (int) Math.min((long) BLOCK_SIZE, endIdx - blockStart);
+
+                // Zero-allocation blit data straight into our threaded context primitive arrays.
+                // Unlike the single-segment overload, each variable has its own
+                // segment, so the source offset is simply blockStart * 8L —
+                // no (v * dataSize) term is needed since segments are not concatenated.
+                for (int v = 0; v < varCount; v++) {
+                    long srcOffsetBytes = blockStart * 8L;
+                    MemorySegment.copy(variables[v], srcOffsetBytes, ctx.segmentBlockVarsMem[v], 0L, currentBlockSize * 8L);
                 }
 
                 ctx.initForBlock(null, ctx.segmentBlockVars, currentBlockSize, 0);
