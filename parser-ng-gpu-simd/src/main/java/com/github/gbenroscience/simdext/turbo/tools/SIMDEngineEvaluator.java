@@ -163,7 +163,7 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
             double[] output;
             
             MemorySegment varsSegment;
-            MemorySegment[] varsSegmentArray; // NEW: one segment per variable/column (e.g. one per Arrow ValueVector)
+            MemorySegment[] varsSegmentArray; // THIS IS NEW: one segment per variable/column (e.g. in the context of parser-ng-arrow - one per Arrow ValueVector)
             MemorySegment outputSegment;
             long totalSamplesLong;
             
@@ -180,7 +180,7 @@ public class SIMDEngineEvaluator extends VectorTurboEvaluator {
                 this.vars2D = null;
                 this.vars1D = null;
                 this.varsSegment = null;
-                this.varsSegmentArray = null; // NEW
+                this.varsSegmentArray = null; // ALSO NEW
                 this.output = null;
                 this.outputSegment = null;
                 this.masterThread = null;
