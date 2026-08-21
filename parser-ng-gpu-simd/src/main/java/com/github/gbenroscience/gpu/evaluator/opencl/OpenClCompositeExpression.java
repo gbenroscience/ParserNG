@@ -666,6 +666,75 @@ public final class OpenClCompositeExpression implements GpuCompositeExpression {
         MemorySegment.copy(outSlice, ValueLayout.JAVA_DOUBLE, 0, out, 0, out.length);
     }
 
+    /**
+     * True zero-copy, multi-variable double path -- see
+     * GpuCompositeExpression's interface javadoc. {@code in[slot]} is
+     * already native memory, so unlike applyBulk(double[][], double[])
+     * there is no Java-heap-crossing staging copy here: each slot is
+     * written straight from its own segment into its slice of the device
+     * input buffer via a separate clEnqueueWriteBuffer at the matching
+     * offset. varCount == 1 is special-cased to skip straight to the
+     * existing single-segment dispatch() path (no loop, no per-slot
+     * offset math needed when there's only one slot to begin with).
+     */
+    @Override
+    public void applyBulk(MemorySegment[] in, MemorySegment out) throws Throwable {
+        if (in.length != varCount) {
+            throw new IllegalArgumentException(
+                    "Expected " + varCount + " variable segments, got " + in.length);
+        }
+        long dataSize = out.byteSize() / ValueLayout.JAVA_DOUBLE.byteSize();
+        long rowBytes = dataSize * ValueLayout.JAVA_DOUBLE.byteSize();
+        for (int slot = 0; slot < in.length; slot++) {
+            if (in[slot].byteSize() != rowBytes) {
+                throw new IllegalArgumentException(
+                        "Variable segment " + slot + " has " + in[slot].byteSize()
+                                + " bytes, expected " + rowBytes + " (dataSize=" + dataSize + ")");
+            }
+        }
+        if (varCount == 1) {
+            dispatch(in[0], out, (int) dataSize);
+            return;
+        }
+        dispatchScatter(in, out, rowBytes, (int) dataSize);
+    }
+
+    private void dispatchScatter(MemorySegment[] in, MemorySegment out, long rowBytes, int dataSize) throws Throwable {
+        synchronized (ctx.dispatchLock) {
+            ensureDeviceBuffers((long) varCount * rowBytes, out.byteSize());
+
+            try {
+                for (int slot = 0; slot < varCount; slot++) {
+                    long offset = (long) slot * rowBytes;
+                    check((int) cl.clEnqueueWriteBuffer.invoke(ctx.queue, inputDevice,
+                            OpenClBindings.CL_TRUE, offset, rowBytes, in[slot], 0,
+                            MemorySegment.NULL, MemorySegment.NULL),
+                            "clEnqueueWriteBuffer(in[" + slot + "])");
+                }
+
+                setKernelArgs(ctx.kernelF64, literalConstantsDevice, inputDevice, outputDevice, dataSize);
+
+                try (Arena tmp = Arena.ofConfined()) {
+                    MemorySegment globalWorkSize = tmp.allocate(ValueLayout.JAVA_LONG);
+                    globalWorkSize.set(ValueLayout.JAVA_LONG, 0, (long) dataSize);
+
+                    check((int) cl.clEnqueueNDRangeKernel.invoke(ctx.queue, ctx.kernelF64,
+                            1, MemorySegment.NULL, globalWorkSize, MemorySegment.NULL,
+                            0, MemorySegment.NULL, MemorySegment.NULL),
+                            "clEnqueueNDRangeKernel(interpret, scatter)");
+                }
+
+                check((int) cl.clEnqueueReadBuffer.invoke(ctx.queue, outputDevice,
+                        OpenClBindings.CL_TRUE, 0L, out.byteSize(), out, 0, MemorySegment.NULL, MemorySegment.NULL),
+                        "clEnqueueReadBuffer(out, scatter)");
+
+                check((int) cl.clFinish.invoke(ctx.queue), "clFinish");
+            } catch (Throwable t) {
+                throw new RuntimeException("GPU dispatch failed (scatter)", t);
+            }
+        }
+    }
+
     private void dispatch(MemorySegment in, MemorySegment out, int dataSize) throws Throwable {
         synchronized (ctx.dispatchLock) {
             ensureDeviceBuffers(in.byteSize(), out.byteSize());
@@ -732,6 +801,70 @@ public final class OpenClCompositeExpression implements GpuCompositeExpression {
         MemorySegment outSlice = stagingOutF32.asSlice(0, (long) dataSize * ValueLayout.JAVA_FLOAT.byteSize());
         dispatchF32(inSlice, outSlice, dataSize);
         MemorySegment.copy(outSlice, ValueLayout.JAVA_FLOAT, 0, out, 0, out.length);
+    }
+
+    /**
+     * True zero-copy, multi-variable float32 path -- float32 counterpart
+     * of {@link #applyBulk(MemorySegment[], MemorySegment)}. See that
+     * method's javadoc; same contract, just float throughout.
+     */
+    @Override
+    public void applyBulkF32(MemorySegment[] in, MemorySegment out) throws Throwable {
+        if (in.length != varCount) {
+            throw new IllegalArgumentException(
+                    "Expected " + varCount + " variable segments, got " + in.length);
+        }
+        long dataSize = out.byteSize() / ValueLayout.JAVA_FLOAT.byteSize();
+        long rowBytes = dataSize * ValueLayout.JAVA_FLOAT.byteSize();
+        for (int slot = 0; slot < in.length; slot++) {
+            if (in[slot].byteSize() != rowBytes) {
+                throw new IllegalArgumentException(
+                        "Variable segment " + slot + " has " + in[slot].byteSize()
+                                + " bytes, expected " + rowBytes + " (dataSize=" + dataSize + ")");
+            }
+        }
+        if (varCount == 1) {
+            dispatchF32(in[0], out, (int) dataSize);
+            return;
+        }
+        dispatchScatterF32(in, out, rowBytes, (int) dataSize);
+    }
+
+    private void dispatchScatterF32(MemorySegment[] in, MemorySegment out, long rowBytes, int dataSize) throws Throwable {
+        synchronized (ctx.dispatchLock) {
+            ensureDeviceBuffersF32((long) varCount * rowBytes, out.byteSize());
+
+            try {
+                for (int slot = 0; slot < varCount; slot++) {
+                    long offset = (long) slot * rowBytes;
+                    check((int) cl.clEnqueueWriteBuffer.invoke(ctx.queue, inputDeviceF32,
+                            OpenClBindings.CL_TRUE, offset, rowBytes, in[slot], 0,
+                            MemorySegment.NULL, MemorySegment.NULL),
+                            "clEnqueueWriteBuffer(in[" + slot + "], f32)");
+                }
+
+                setKernelArgs(ctx.kernelF32, literalConstantsDeviceF32,
+                        inputDeviceF32, outputDeviceF32, dataSize);
+
+                try (Arena tmp = Arena.ofConfined()) {
+                    MemorySegment globalWorkSize = tmp.allocate(ValueLayout.JAVA_LONG);
+                    globalWorkSize.set(ValueLayout.JAVA_LONG, 0, (long) dataSize);
+
+                    check((int) cl.clEnqueueNDRangeKernel.invoke(ctx.queue, ctx.kernelF32,
+                            1, MemorySegment.NULL, globalWorkSize, MemorySegment.NULL,
+                            0, MemorySegment.NULL, MemorySegment.NULL),
+                            "clEnqueueNDRangeKernel(interpretF32, scatter)");
+                }
+
+                check((int) cl.clEnqueueReadBuffer.invoke(ctx.queue, outputDeviceF32,
+                        OpenClBindings.CL_TRUE, 0L, out.byteSize(), out, 0, MemorySegment.NULL, MemorySegment.NULL),
+                        "clEnqueueReadBuffer(out, f32, scatter)");
+
+                check((int) cl.clFinish.invoke(ctx.queue), "clFinish");
+            } catch (Throwable t) {
+                throw new RuntimeException("GPU dispatch failed (f32, scatter)", t);
+            }
+        }
     }
 
     private void dispatchF32(MemorySegment in, MemorySegment out, int dataSize) throws Throwable {

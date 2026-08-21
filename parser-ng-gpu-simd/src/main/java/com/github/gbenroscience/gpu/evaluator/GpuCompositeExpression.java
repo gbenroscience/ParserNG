@@ -37,7 +37,26 @@ import java.lang.foreign.MemorySegment;
  *     methods above.
  *   - double[][] / float[][] overloads: one row per variable slot,
  *     flattened internally into the same column-major layout the kernels
- *     expect.
+ *     expect. Because a double[]/float[] row lives on the Java heap, this
+ *     flattening necessarily crosses the heap/native boundary once per
+ *     row -- there's no way around that copy for on-heap callers.
+ *   - MemorySegment[] / MemorySegment overloads (applyBulk(MemorySegment[], MemorySegment)
+ *     and applyBulkF32(MemorySegment[], MemorySegment)): the TRUE zero-copy
+ *     entry point for multi-variable input. Each element of the array is
+ *     one variable slot's data, already resident in native memory (e.g.
+ *     produced by a prior native computation stage, or a pinned/mapped
+ *     buffer) -- unlike the double[][]/float[][] overloads, there is no
+ *     Java-heap staging step here at all: each slot's segment is
+ *     transferred (scattered) straight into its slice of the device input
+ *     buffer, one native-to-device transfer per variable, with no
+ *     intermediate host-side flatten/staging buffer. This is strictly
+ *     less copying than applyBulk(MemorySegment, MemorySegment) requires
+ *     of a caller who currently has to flatten N native buffers into one
+ *     contiguous MemorySegment themselves before calling it -- that
+ *     caller-side flatten is exactly the copy these two methods eliminate.
+ *     Every element must be exactly dataSize elements long (dataSize is
+ *     derived from out's size), and the array length must equal the
+ *     expression's variable count, same contract as double[][]/float[][].
  *
  * Extends AutoCloseable because every implementation owns off-heap/device
  * resources (device buffers, a staging Arena) that must be released
@@ -45,11 +64,39 @@ import java.lang.foreign.MemorySegment;
  */
 public interface GpuCompositeExpression extends AutoCloseable {
 
-    /** Double-precision MemorySegment path. See class javadoc: assumes the segment holds doubles. */
+    /** Double-precision MemorySegment path. See class javadoc: assumes the segment holds doubles.
+     * @param in
+     * @param out
+     * @throws java.lang.Throwable */
     void applyBulk(MemorySegment in, MemorySegment out) throws Throwable;
 
-    /** Float32-precision MemorySegment path. See class javadoc for why this can't just be an applyBulk overload. */
+    /** Float32-precision MemorySegment path. See class javadoc for why this can't just be an applyBulk overload.
+     * @param in
+     * @param out
+     * @throws java.lang.Throwable */
     void applyBulkF32(MemorySegment in, MemorySegment out) throws Throwable;
+
+    /**
+     * True zero-copy, multi-variable double path. {@code in[slot]} is the
+     * native-memory buffer for variable slot {@code slot}, exactly
+     * {@code dataSize} doubles long (dataSize derived from out); {@code
+     * in.length} must equal this expression's variable count. Each slot is
+     * transferred directly from its own segment into the device input
+     * buffer -- no host-side flatten/staging copy, unlike the
+     * double[][] overload below.
+     * @param in
+     * @param out
+     * @throws java.lang.Throwable */
+    void applyBulk(MemorySegment[] in, MemorySegment out) throws Throwable;
+
+    /**
+     * True zero-copy, multi-variable float32 path. Same contract as
+     * {@link #applyBulk(MemorySegment[], MemorySegment)}, just float32
+     * throughout -- see that method and the class javadoc.
+     * @param in
+     * @param out
+     * @throws java.lang.Throwable */
+    void applyBulkF32(MemorySegment[] in, MemorySegment out) throws Throwable;
 
     void applyBulk(double[] in, double[] out) throws Throwable;
 

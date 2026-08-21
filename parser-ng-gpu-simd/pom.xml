@@ -8,19 +8,19 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>3.0.4</version>
+        <version>3.0.5</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-gpu-simd</artifactId>
-    <version>3.0.4</version>
+    <version>3.0.5</version>
     <packaging>jar</packaging>
     <name>parser-ng-gpu-simd</name>
     <description>
         Hardware-accelerated, scalable(scalability of SIMD tested on Linux-(Centos tested)) SIMD vector and GPU calculation pipelines for ParserNG.
         Fastest Java math evaluator in the world period
         Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.(e.g. JNI) 
-        Version 3.0.4 features GPU bulk evaluation for OpenCL(tested) and CUDA. It also features the SIMDEnginvEvaluator and SIMDCommandTurboEvaluator, both
+        Version 3.0.5 features the addition of parser-ng-arrow, our integration with Apache Arrow, and other prior features like GPU bulk evaluation for OpenCL(tested) and CUDA. It also features the SIMDEnginvEvaluator and SIMDCommandTurboEvaluator, both
         of which benefit from CPU Pinning to minimize cache thrashing and other stories. This leads to highly efficient worker-count to output velocity conversion. 
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
     </description>

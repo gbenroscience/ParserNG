@@ -3,29 +3,28 @@
   <parent>
     <artifactId>parser-ng-parent</artifactId>
     <groupId>com.github.gbenroscience</groupId>
-    <version>3.0.4</version>
+    <version>3.0.5</version>
   </parent>
   <modelVersion>4.0.0</modelVersion>
   <artifactId>parser-ng-arrow</artifactId>
   <name>parser-ng-arrow</name>
-  <description>Hardware-accelerated SIMD vector calculation pipelines for ParserNG
-        Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.(e.g. JNI) 
+  <description>ParserNg's integration with Apache Arrow - setting our sights on Big Data
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034</description>
   <url>https://github.com/gbenroscience/ParserNG</url>
   <build>
+    <extensions>
+      <extension>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>os-maven-plugin</artifactId>
+        <version>1.7.1</version>
+      </extension>
+    </extensions>
     <plugins>
       <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.11.0</version>
+        <version>3.13.0</version>
         <configuration>
-          <release>21</release>
-          <annotationProcessorPaths>
-            <path>
-              <groupId>org.openjdk.jmh</groupId>
-              <artifactId>jmh-generator-annprocess</artifactId>
-              <version>1.37</version>
-            </path>
-          </annotationProcessorPaths>
+          <release>${maven.compiler.release}</release>
           <compilerArgs>
             <arg>--add-modules</arg>
             <arg>jdk.incubator.vector</arg>
@@ -34,9 +33,13 @@
       </plugin>
       <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.2.5</version>
+        <version>3.3.1</version>
         <configuration>
-          <argLine>--add-modules jdk.incubator.vector</argLine>
+          <argLine>--add-modules=jdk.incubator.vector
+                        --enable-native-access=ALL-UNNAMED
+                        --add-opens=java.base/java.nio=ALL-UNNAMED
+                        --add-opens=java.base/java.util=ALL-UNNAMED
+                        --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED</argLine>
         </configuration>
       </plugin>
       <plugin>
@@ -147,6 +150,7 @@
     </dependency>
   </dependencies>
   <properties>
-    <maven.compiler.release>21</maven.compiler.release>
+    <maven.compiler.release>22</maven.compiler.release>
+    <arrow.version>19.0.0</arrow.version>
   </properties>
 </project>

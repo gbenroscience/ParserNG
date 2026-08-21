@@ -8,24 +8,23 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>3.0.4</version>
+        <version>3.0.5</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>parser-ng-arrow</artifactId>
     <packaging>jar</packaging>
-    <name>parser-ng-arrow</name>
+    <name>parser-ng-arrow</name> 
     <description>
-        Hardware-accelerated SIMD vector calculation pipelines for ParserNG
-        Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.(e.g. JNI) 
+        ParserNg's integration with Apache Arrow - setting our sights on Big Data
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
     </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
 
     <properties>
         <!-- This module requires Java 21+ because of Vector API -->
-        <maven.compiler.release>21</maven.compiler.release>
-        <arrow.version>25.0.0</arrow.version>
+        <maven.compiler.release>22</maven.compiler.release>
+        <arrow.version>19.0.0</arrow.version>
 
     </properties>
 
@@ -54,8 +53,7 @@
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-memory-netty</artifactId>
-            <version>${arrow.version}</version>
-            <runtime>true</runtime>
+            <version>${arrow.version}</version> 
         </dependency>
 
 
@@ -109,41 +107,28 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <argLine>
-                        --add-opens=java.base/java.nio=ALL-UNNAMED
-                        --add-opens=java.base/java.util=ALL-UNNAMED
-                    </argLine>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version> <!-- Updated to newer version -->
+                <version>3.13.0</version>
                 <configuration>
-                    <release>21</release>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.openjdk.jmh</groupId>
-                            <artifactId>jmh-generator-annprocess</artifactId>
-                            <version>1.37</version>
-                        </path>
-                    </annotationProcessorPaths>
+                    <release>${maven.compiler.release}</release>
                     <compilerArgs>
+                        <!-- SIMDEngineEvaluator uses jdk.incubator.vector -->
                         <arg>--add-modules</arg>
                         <arg>jdk.incubator.vector</arg>
                     </compilerArgs>
                 </configuration>
             </plugin>
-
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.2.5</version>
+                <version>3.3.1</version>
                 <configuration>
                     <argLine>
-                        --add-modules jdk.incubator.vector
+                        --add-modules=jdk.incubator.vector
+                        --enable-native-access=ALL-UNNAMED
+                        --add-opens=java.base/java.nio=ALL-UNNAMED
+                        --add-opens=java.base/java.util=ALL-UNNAMED
+                        --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
                     </argLine>
                 </configuration>
             </plugin>

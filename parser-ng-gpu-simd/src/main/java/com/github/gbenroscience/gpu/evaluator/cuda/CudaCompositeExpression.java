@@ -276,6 +276,77 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
         MemorySegment.copy(outSlice, ValueLayout.JAVA_DOUBLE, 0, out, 0, out.length);
     }
 
+    /**
+     * True zero-copy, multi-variable double path -- see
+     * GpuCompositeExpression's interface javadoc. {@code in[slot]} is
+     * already native memory, so unlike applyBulk(double[][], double[])
+     * there is no Java-heap-crossing staging copy here: each slot is
+     * copied straight from its own segment to its slice of the device
+     * input buffer -- CUDA device pointers are plain {@code long} handles,
+     * so "its slice" is just {@code inputDevice + slot*rowBytes}, no
+     * separate offset-write call shape needed the way OpenCL's
+     * clEnqueueWriteBuffer requires. varCount == 1 is special-cased to
+     * skip straight to the existing single-segment dispatch() path.
+     */
+    public void applyBulk(MemorySegment[] in, MemorySegment out) throws Throwable {
+        if (in.length != varCount) {
+            throw new IllegalArgumentException(
+                    "Expected " + varCount + " variable segments, got " + in.length);
+        }
+        long dataSize = out.byteSize() / ValueLayout.JAVA_DOUBLE.byteSize();
+        long rowBytes = dataSize * ValueLayout.JAVA_DOUBLE.byteSize();
+        for (int slot = 0; slot < in.length; slot++) {
+            if (in[slot].byteSize() != rowBytes) {
+                throw new IllegalArgumentException(
+                        "Variable segment " + slot + " has " + in[slot].byteSize()
+                                + " bytes, expected " + rowBytes + " (dataSize=" + dataSize + ")");
+            }
+        }
+        if (varCount == 1) {
+            dispatch(in[0], out, (int) dataSize);
+            return;
+        }
+        dispatchScatter(in, out, rowBytes, (int) dataSize);
+    }
+
+    private void dispatchScatter(MemorySegment[] in, MemorySegment out, long rowBytes, int dataSize) throws Throwable {
+        synchronized (DISPATCH_LOCK) {
+            ensureDeviceBuffers((long) varCount * rowBytes, out.byteSize());
+
+            try {
+                check((int) cu.cuCtxSetCurrent.invoke(CudaContext.CONTEXT), "cuCtxSetCurrent");
+
+                for (int slot = 0; slot < varCount; slot++) {
+                    long offset = (long) slot * rowBytes;
+                    check((int) cu.cuMemcpyHtoD.invoke(inputDevice + offset, in[slot], rowBytes),
+                            "cuMemcpyHtoD(in[" + slot + "])");
+                }
+
+                try (Arena tmp = Arena.ofConfined()) {
+                    MemorySegment kernelParams = buildKernelParams(tmp,
+                            literalConstantsDevice, inputDevice, outputDevice, dataSize);
+
+                    int gridDimX = (dataSize + DEFAULT_BLOCK_SIZE - 1) / DEFAULT_BLOCK_SIZE;
+                    check((int) cu.cuLaunchKernel.invoke(
+                            CudaContext.FUNCTION_F64,
+                            gridDimX, 1, 1,
+                            DEFAULT_BLOCK_SIZE, 1, 1,
+                            0,
+                            MemorySegment.NULL,   // default stream
+                            kernelParams,
+                            MemorySegment.NULL),
+                            "cuLaunchKernel(interpret, scatter)");
+                }
+
+                check((int) cu.cuCtxSynchronize.invoke(), "cuCtxSynchronize");
+
+                check((int) cu.cuMemcpyDtoH.invoke(out, outputDevice, out.byteSize()), "cuMemcpyDtoH(out, scatter)");
+            } catch (Throwable t) {
+                throw new RuntimeException("GPU dispatch failed (scatter)", t);
+            }
+        }
+    }
+
     private void dispatch(MemorySegment in, MemorySegment out, int dataSize) throws Throwable {
         synchronized (DISPATCH_LOCK) {
             ensureDeviceBuffers(in.byteSize(), out.byteSize());
@@ -346,6 +417,71 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
         MemorySegment outSlice = stagingOutF32.asSlice(0, (long) dataSize * ValueLayout.JAVA_FLOAT.byteSize());
         dispatchF32(inSlice, outSlice, dataSize);
         MemorySegment.copy(outSlice, ValueLayout.JAVA_FLOAT, 0, out, 0, out.length);
+    }
+
+    /**
+     * True zero-copy, multi-variable float32 path -- float32 counterpart
+     * of {@link #applyBulk(MemorySegment[], MemorySegment)}. See that
+     * method's javadoc; same contract, just float throughout.
+     */
+    @Override
+    public void applyBulkF32(MemorySegment[] in, MemorySegment out) throws Throwable {
+        if (in.length != varCount) {
+            throw new IllegalArgumentException(
+                    "Expected " + varCount + " variable segments, got " + in.length);
+        }
+        long dataSize = out.byteSize() / ValueLayout.JAVA_FLOAT.byteSize();
+        long rowBytes = dataSize * ValueLayout.JAVA_FLOAT.byteSize();
+        for (int slot = 0; slot < in.length; slot++) {
+            if (in[slot].byteSize() != rowBytes) {
+                throw new IllegalArgumentException(
+                        "Variable segment " + slot + " has " + in[slot].byteSize()
+                                + " bytes, expected " + rowBytes + " (dataSize=" + dataSize + ")");
+            }
+        }
+        if (varCount == 1) {
+            dispatchF32(in[0], out, (int) dataSize);
+            return;
+        }
+        dispatchScatterF32(in, out, rowBytes, (int) dataSize);
+    }
+
+    private void dispatchScatterF32(MemorySegment[] in, MemorySegment out, long rowBytes, int dataSize) throws Throwable {
+        synchronized (DISPATCH_LOCK) {
+            ensureDeviceBuffersF32((long) varCount * rowBytes, out.byteSize());
+
+            try {
+                check((int) cu.cuCtxSetCurrent.invoke(CudaContext.CONTEXT), "cuCtxSetCurrent");
+
+                for (int slot = 0; slot < varCount; slot++) {
+                    long offset = (long) slot * rowBytes;
+                    check((int) cu.cuMemcpyHtoD.invoke(inputDeviceF32 + offset, in[slot], rowBytes),
+                            "cuMemcpyHtoD(in[" + slot + "], f32)");
+                }
+
+                try (Arena tmp = Arena.ofConfined()) {
+                    MemorySegment kernelParams = buildKernelParams(tmp,
+                            literalConstantsDeviceF32, inputDeviceF32, outputDeviceF32, dataSize);
+
+                    int gridDimX = (dataSize + DEFAULT_BLOCK_SIZE - 1) / DEFAULT_BLOCK_SIZE;
+                    check((int) cu.cuLaunchKernel.invoke(
+                            CudaContext.FUNCTION_F32,
+                            gridDimX, 1, 1,
+                            DEFAULT_BLOCK_SIZE, 1, 1,
+                            0,
+                            MemorySegment.NULL,   // default stream
+                            kernelParams,
+                            MemorySegment.NULL),
+                            "cuLaunchKernel(interpretF32, scatter)");
+                }
+
+                check((int) cu.cuCtxSynchronize.invoke(), "cuCtxSynchronize");
+
+                check((int) cu.cuMemcpyDtoH.invoke(out, outputDeviceF32, out.byteSize()), "cuMemcpyDtoH(out, f32, scatter)");
+            } catch (Throwable t) {
+                throw new RuntimeException("GPU dispatch failed (f32, scatter)", t);
+            }
+        }
     }
 
     private void dispatchF32(MemorySegment in, MemorySegment out, int dataSize) throws Throwable {

@@ -13,11 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.parser.ng.arrow;
+package com.github.gbenroscience.arrow;
 
 import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
 import java.util.Arrays;
 import java.util.Random;
+import org.apache.arrow.vector.Float8Vector;
 
 /**
  *
@@ -29,7 +30,7 @@ public class ParserNgArrow {
         SIMDEngineEvaluator.SIMDVectorCompositeExpression see = SIMDEngineEvaluator.getEvaluator("3*x^2+sin(x^3)");
         double[] in = new double[10000];
         double[] out = new double[10000];
-
+ 
         Random r = new Random(System.currentTimeMillis());
         for (int i = 0; i < in.length; i++) {
             in[i] = r.nextDouble();

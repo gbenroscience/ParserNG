@@ -36,7 +36,8 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * 1. LOW-LEVEL / PLUMBING tests (basicCorrectness, the BUG#1-3 regressions,
  * deeplyNestedExpressionRejectedBeforeTouchingGpu, the two
- * memorySegmentOverloadMatches* tests) construct
+ * memorySegmentOverloadMatches* tests, and the scatter* tests added
+ * alongside them) construct
  * {@link OpenClCompositeExpression} directly and go through
  * {@link OpenClExpressionBridge} explicitly. They're testing concrete
  * OpenCL-backend internals (buffer growth, kernel-arg races, staging slicing)
@@ -320,6 +321,351 @@ public class GpuCompositeExpressionTest {
     }
 
     // =====================================================================
+    // Scatter overloads: applyBulk(MemorySegment[], MemorySegment) and
+    // applyBulkF32(MemorySegment[], MemorySegment) -- the "true zero-copy"
+    // multi-variable entry points added alongside double[][]/float[][].
+    // Unlike double[][]/float[][], which must copy every row out of the
+    // Java heap into a staging arena on every call, these two overloads
+    // assume the caller ALREADY has each variable's data as native memory
+    // and write each segment straight into its slice of the device input
+    // buffer -- no host-side flatten/staging copy at all. The tests below
+    // both check correctness (same output as the existing multi-variable
+    // paths) and time the scatter overloads against the two paths they're
+    // meant to improve on: double[][]/float[][] (heap-crossing row copy)
+    // and the "caller flattens N native segments by hand, then calls
+    // applyBulk(MemorySegment, MemorySegment)" pattern a caller with
+    // already-native per-variable buffers previously had no alternative to.
+    // =====================================================================
+    /**
+     * Correctness + timing: applyBulk(MemorySegment[], MemorySegment) against
+     * applyBulk(double[][], double[]) for the same multi-variable expression
+     * and identical underlying data. Both must produce bit-for-bit identical
+     * output (same GPU dispatch underneath, just a different staging path),
+     * and the scatter overload -- which skips the double[][] path's per-row
+     * Java-heap-to-native copy entirely, since its input is already native --
+     * must not be slower. Each path is warmed up once first (device-buffer
+     * allocation and JIT warmup would otherwise pollute the first measured
+     * call) and then averaged over several iterations to smooth out
+     * scheduling noise.
+     */
+    @Test
+    void scatterMemorySegmentOverloadMatchesDoubleArrayOfArraysOverload() throws Throwable {
+        MathExpression me = new MathExpression("x^2+y^2-2*x*y*cos(x-y)");
+        VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
+
+        try (OpenClCompositeExpression gpu = (OpenClCompositeExpression) OpenClExpressionBridge.from(vte);
+                Arena arena = Arena.ofConfined()) {
+
+            int dataSize = 1_000_000;
+            int varCount = vte.getVarCount();
+            double[] flat = buildSafeSamples(me, new String[]{"x", "y"},
+                    new double[][]{{-8, 8}, {-8, 8}}, dataSize, varCount);
+            double[][] rows = toRowsDouble(flat, varCount, dataSize);
+            MemorySegment[] segs = toSegmentsDouble(arena, rows);
+            MemorySegment outSeg = arena.allocate((long) dataSize * ValueLayout.JAVA_DOUBLE.byteSize());
+            double[] outViaRows = new double[dataSize];
+
+            // warmup: allocates device buffers and lets the JIT settle
+            // before either path is timed for real.
+            gpu.applyBulk(rows, outViaRows);
+            gpu.applyBulk(segs, outSeg);
+
+            int iterations = 5;
+            long tRows = 0;
+            long tScatter = 0;
+            for (int i = 0; i < iterations; i++) {
+                long t0 = System.nanoTime();
+                gpu.applyBulk(rows, outViaRows);
+                tRows += System.nanoTime() - t0;
+
+                long t1 = System.nanoTime();
+                gpu.applyBulk(segs, outSeg);
+                tScatter += System.nanoTime() - t1;
+            }
+            tRows /= iterations;
+            tScatter /= iterations;
+
+            double[] outViaScatter = new double[dataSize];
+            MemorySegment.copy(outSeg, ValueLayout.JAVA_DOUBLE, 0, outViaScatter, 0, dataSize);
+
+            assertArrayEquals(outViaRows, outViaScatter, 0.0,
+                    "double[][] and MemorySegment[] overloads diverged for identical input -- bug is in "
+                    + "the staging/copy layer, not the kernel");
+
+            System.out.printf("double[][] path: %,d us | MemorySegment[] (scatter) path: %,d us%n",
+                    tRows / 1000, tScatter / 1000);
+            assertTrue(tScatter <= tRows * 1.1,
+                    "applyBulk(MemorySegment[], MemorySegment) skips the per-row Java-heap-crossing copy "
+                    + "that applyBulk(double[][], double[]) requires on every call, so on identical "
+                    + "native input it should not be slower (allowing a small margin for scheduling noise)");
+        }
+    }
+
+    /**
+     * Float32 counterpart of scatterMemorySegmentOverloadMatchesDoubleArrayOfArraysOverload
+     * -- applyBulkF32(MemorySegment[], MemorySegment) against
+     * applyBulk(float[][], float[]), same rationale.
+     */
+    @Test
+    void scatterMemorySegmentOverloadMatchesFloatArrayOfArraysOverload() throws Throwable {
+        MathExpression me = new MathExpression("x^2+y^2-2*x*y*cos(x-y)");
+        VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
+
+        try (OpenClCompositeExpression gpu = (OpenClCompositeExpression) OpenClExpressionBridge.from(vte);
+                Arena arena = Arena.ofConfined()) {
+
+            int dataSize = 1_000_000;
+            int varCount = vte.getVarCount();
+            double[] flatD = buildSafeSamples(me, new String[]{"x", "y"},
+                    new double[][]{{-8, 8}, {-8, 8}}, dataSize, varCount);
+            float[] flat = new float[flatD.length];
+            for (int i = 0; i < flatD.length; i++) {
+                flat[i] = (float) flatD[i];
+            }
+            float[][] rows = toRowsFloat(flat, varCount, dataSize);
+            MemorySegment[] segs = toSegmentsFloat(arena, rows);
+            MemorySegment outSeg = arena.allocate((long) dataSize * ValueLayout.JAVA_FLOAT.byteSize());
+            float[] outViaRows = new float[dataSize];
+
+            gpu.applyBulk(rows, outViaRows);
+            gpu.applyBulkF32(segs, outSeg);
+
+            int iterations = 5;
+            long tRows = 0;
+            long tScatter = 0;
+            for (int i = 0; i < iterations; i++) {
+                long t0 = System.nanoTime();
+                gpu.applyBulk(rows, outViaRows);
+                tRows += System.nanoTime() - t0;
+
+                long t1 = System.nanoTime();
+                gpu.applyBulkF32(segs, outSeg);
+                tScatter += System.nanoTime() - t1;
+            }
+            tRows /= iterations;
+            tScatter /= iterations;
+
+            float[] outViaScatter = new float[dataSize];
+            MemorySegment.copy(outSeg, ValueLayout.JAVA_FLOAT, 0, outViaScatter, 0, dataSize);
+
+            assertArrayEquals(outViaRows, outViaScatter, 0.0f,
+                    "float[][] and MemorySegment[] (applyBulkF32) overloads diverged for identical input "
+                    + "-- bug is in the staging/copy layer, not the kernel");
+
+            System.out.printf("float[][] path: %,d us | MemorySegment[] (scatter, f32) path: %,d us%n",
+                    tRows / 1000, tScatter / 1000);
+            assertTrue(tScatter <= tRows * 1.1,
+                    "applyBulkF32(MemorySegment[], MemorySegment) skips the per-row Java-heap-crossing "
+                    + "copy that applyBulk(float[][], float[]) requires on every call, so on identical "
+                    + "native input it should not be slower (allowing a small margin for scheduling noise)");
+        }
+    }
+
+    /**
+     * The actual motivation for applyBulk(MemorySegment[], MemorySegment): a
+     * caller who already has one native MemorySegment per variable previously
+     * had no choice but to flatten them into a single contiguous MemorySegment
+     * BY HAND (a full host-side copy) before calling
+     * applyBulk(MemorySegment, MemorySegment). The scatter overload reaches
+     * the same device-side layout without that host-side flatten step at all
+     * -- each native segment goes straight to its slice of the device buffer.
+     * This times "caller flattens by hand, then calls the single-segment
+     * overload" against "caller just calls the scatter overload directly" on
+     * identical data and confirms the latter is faster: it is doing strictly
+     * less work (one fewer full-buffer host-side copy per call).
+     */
+    @Test
+    void scatterAvoidsHostSideFlattenCopyDouble() throws Throwable {
+        MathExpression me = new MathExpression("x^2+y^2-2*x*y*cos(x-y)");
+        VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
+
+        try (OpenClCompositeExpression gpu = (OpenClCompositeExpression) OpenClExpressionBridge.from(vte);
+                Arena arena = Arena.ofConfined()) {
+
+            int dataSize = 1_000_000;
+            int varCount = vte.getVarCount();
+            double[] flat = buildSafeSamples(me, new String[]{"x", "y"},
+                    new double[][]{{-8, 8}, {-8, 8}}, dataSize, varCount);
+            double[][] rows = toRowsDouble(flat, varCount, dataSize);
+            MemorySegment[] segs = toSegmentsDouble(arena, rows);
+
+            long rowBytes = (long) dataSize * ValueLayout.JAVA_DOUBLE.byteSize();
+            MemorySegment manualFlat = arena.allocate((long) varCount * rowBytes);
+            MemorySegment outManual = arena.allocate((long) dataSize * ValueLayout.JAVA_DOUBLE.byteSize());
+            MemorySegment outScatter = arena.allocate((long) dataSize * ValueLayout.JAVA_DOUBLE.byteSize());
+
+            // warmup
+            flattenInto(segs, manualFlat, rowBytes);
+            gpu.applyBulk(manualFlat, outManual);
+            gpu.applyBulk(segs, outScatter);
+
+            int iterations = 5;
+            long tManual = 0;
+            long tScatter = 0;
+            for (int i = 0; i < iterations; i++) {
+                long t0 = System.nanoTime();
+                flattenInto(segs, manualFlat, rowBytes);   // the copy a caller would otherwise have to do
+                gpu.applyBulk(manualFlat, outManual);
+                tManual += System.nanoTime() - t0;
+
+                long t1 = System.nanoTime();
+                gpu.applyBulk(segs, outScatter);
+                tScatter += System.nanoTime() - t1;
+            }
+            tManual /= iterations;
+            tScatter /= iterations;
+
+            double[] outViaManual = new double[dataSize];
+            MemorySegment.copy(outManual, ValueLayout.JAVA_DOUBLE, 0, outViaManual, 0, dataSize);
+            double[] outViaScatter = new double[dataSize];
+            MemorySegment.copy(outScatter, ValueLayout.JAVA_DOUBLE, 0, outViaScatter, 0, dataSize);
+            assertArrayEquals(outViaManual, outViaScatter, 0.0,
+                    "manual-flatten-then-dispatch and the scatter overload diverged for identical input");
+
+            System.out.printf("manual host-flatten + applyBulk(MemorySegment,...): %,d us | "
+                    + "applyBulk(MemorySegment[],...) scatter: %,d us%n", tManual / 1000, tScatter / 1000);
+            assertTrue(tScatter < tManual,
+                    "applyBulk(MemorySegment[], MemorySegment) eliminates the caller-side host-flatten "
+                    + "copy that applyBulk(MemorySegment, MemorySegment) requires of a caller holding "
+                    + "separate native per-variable buffers -- it should be strictly faster on the same "
+                    + "data/hardware");
+        }
+    }
+
+    /**
+     * Float32 counterpart of scatterAvoidsHostSideFlattenCopyDouble.
+     */
+    @Test
+    void scatterAvoidsHostSideFlattenCopyFloat() throws Throwable {
+        MathExpression me = new MathExpression("x^2+y^2-2*x*y*cos(x-y)");
+        VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
+
+        try (OpenClCompositeExpression gpu = (OpenClCompositeExpression) OpenClExpressionBridge.from(vte);
+                Arena arena = Arena.ofConfined()) {
+
+            int dataSize = 1_000_000;
+            int varCount = vte.getVarCount();
+            double[] flatD = buildSafeSamples(me, new String[]{"x", "y"},
+                    new double[][]{{-8, 8}, {-8, 8}}, dataSize, varCount);
+            float[] flat = new float[flatD.length];
+            for (int i = 0; i < flatD.length; i++) {
+                flat[i] = (float) flatD[i];
+            }
+            float[][] rows = toRowsFloat(flat, varCount, dataSize);
+            MemorySegment[] segs = toSegmentsFloat(arena, rows);
+
+            long rowBytes = (long) dataSize * ValueLayout.JAVA_FLOAT.byteSize();
+            MemorySegment manualFlat = arena.allocate((long) varCount * rowBytes);
+            MemorySegment outManual = arena.allocate((long) dataSize * ValueLayout.JAVA_FLOAT.byteSize());
+            MemorySegment outScatter = arena.allocate((long) dataSize * ValueLayout.JAVA_FLOAT.byteSize());
+
+            // warmup
+            flattenInto(segs, manualFlat, rowBytes);
+            gpu.applyBulkF32(manualFlat, outManual);
+            gpu.applyBulkF32(segs, outScatter);
+
+            int iterations = 5;
+            long tManual = 0;
+            long tScatter = 0;
+            for (int i = 0; i < iterations; i++) {
+                long t0 = System.nanoTime();
+                flattenInto(segs, manualFlat, rowBytes);   // the copy a caller would otherwise have to do
+                gpu.applyBulkF32(manualFlat, outManual);
+                tManual += System.nanoTime() - t0;
+
+                long t1 = System.nanoTime();
+                gpu.applyBulkF32(segs, outScatter);
+                tScatter += System.nanoTime() - t1;
+            }
+            tManual /= iterations;
+            tScatter /= iterations;
+
+            float[] outViaManual = new float[dataSize];
+            MemorySegment.copy(outManual, ValueLayout.JAVA_FLOAT, 0, outViaManual, 0, dataSize);
+            float[] outViaScatter = new float[dataSize];
+            MemorySegment.copy(outScatter, ValueLayout.JAVA_FLOAT, 0, outViaScatter, 0, dataSize);
+            assertArrayEquals(outViaManual, outViaScatter, 0.0f,
+                    "manual-flatten-then-dispatch and the scatter overload (f32) diverged for identical input");
+
+            System.out.printf("manual host-flatten + applyBulkF32(MemorySegment,...): %,d us | "
+                    + "applyBulkF32(MemorySegment[],...) scatter: %,d us%n", tManual / 1000, tScatter / 1000);
+            assertTrue(tScatter < tManual,
+                    "applyBulkF32(MemorySegment[], MemorySegment) eliminates the caller-side host-flatten "
+                    + "copy that applyBulkF32(MemorySegment, MemorySegment) requires of a caller holding "
+                    + "separate native per-variable buffers -- it should be strictly faster on the same "
+                    + "data/hardware");
+        }
+    }
+
+    /**
+     * varCount == 1 is special-cased in both scatter overloads to skip
+     * straight to the existing single-segment dispatch()/dispatchF32() path
+     * rather than looping over a single slot -- this confirms that fast path
+     * produces exactly the same output as the plain double[] overload on the
+     * expression already used for the low-level plumbing tests above.
+     */
+    @Test
+    void singleVariableScatterMatchesDoubleArrayOverload() throws Throwable {
+        try (OpenClCompositeExpression expr = xPlusOne(); Arena arena = Arena.ofConfined()) {
+            double[] in = {1, 2, 3, 4, 5};
+            double[] outViaArray = new double[5];
+            expr.applyBulk(in, outViaArray);
+
+            MemorySegment inSeg = arena.allocate((long) in.length * ValueLayout.JAVA_DOUBLE.byteSize());
+            MemorySegment.copy(in, 0, inSeg, ValueLayout.JAVA_DOUBLE, 0, in.length);
+            MemorySegment outSeg = arena.allocate((long) in.length * ValueLayout.JAVA_DOUBLE.byteSize());
+
+            expr.applyBulk(new MemorySegment[]{inSeg}, outSeg);
+
+            double[] outViaScatter = new double[5];
+            MemorySegment.copy(outSeg, ValueLayout.JAVA_DOUBLE, 0, outViaScatter, 0, 5);
+
+            assertArrayEquals(outViaArray, outViaScatter, 0.0);
+        }
+    }
+
+    /**
+     * applyBulk(MemorySegment[], MemorySegment) must reject an array whose
+     * length doesn't match the expression's variable count -- same contract
+     * as applyBulk(double[][], double[]) -- rather than silently reading past
+     * the array or under-filling the device buffer.
+     */
+    @Test
+    void scatterRejectsWrongVariableCount() throws Throwable {
+        try (OpenClCompositeExpression expr = xPlusOne(); Arena arena = Arena.ofConfined()) {
+            MemorySegment[] wrongCount = {
+                arena.allocate((long) 4 * ValueLayout.JAVA_DOUBLE.byteSize()),
+                arena.allocate((long) 4 * ValueLayout.JAVA_DOUBLE.byteSize())
+            }; // expr has varCount == 1
+            MemorySegment out = arena.allocate((long) 4 * ValueLayout.JAVA_DOUBLE.byteSize());
+
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> expr.applyBulk(wrongCount, out));
+            assertTrue(ex.getMessage().contains("variable segments"),
+                    "exception should explain WHY the call was rejected, not just that it was");
+        }
+    }
+
+    /**
+     * Every element of the MemorySegment[] must be exactly dataSize elements
+     * long (dataSize derived from out) -- a mismatched slot segment must be
+     * rejected loudly rather than partially transferred or silently
+     * misaligned against the device buffer's per-slot offsets.
+     */
+    @Test
+    void scatterRejectsMismatchedSegmentLength() throws Throwable {
+        try (OpenClCompositeExpression expr = xPlusOne(); Arena arena = Arena.ofConfined()) {
+            MemorySegment out = arena.allocate((long) 4 * ValueLayout.JAVA_DOUBLE.byteSize()); // dataSize=4
+            MemorySegment[] badRow = {arena.allocate((long) 3 * ValueLayout.JAVA_DOUBLE.byteSize())}; // wrong length
+
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> expr.applyBulk(badRow, out));
+            assertTrue(ex.getMessage().contains("bytes, expected"),
+                    "exception should explain WHY the call was rejected, not just that it was");
+        }
+    }
+
+    // =====================================================================
     // CPU (SIMD, double) vs GPU. Backend-agnostic from here down: goes
     // through GpuExpressionBridge.from(vte), which auto-selects CUDA or
     // OpenCL depending on what's actually available on the machine running
@@ -530,6 +876,44 @@ public class GpuCompositeExpressionTest {
     }
 
     /**
+     * Backend-agnostic correctness check for the scatter overload: same
+     * expression/domain as multiVariableExpressionParity, but supplies input
+     * as one native MemorySegment per variable via
+     * applyBulk(MemorySegment[], MemorySegment) rather than a single flat
+     * double[], and checks against the CPU SIMD reference -- exercises
+     * whichever backend (CUDA or OpenCL) GpuExpressionBridge actually
+     * resolves on the machine running the tests, not just OpenCL
+     * specifically.
+     */
+    @Test
+    void multiVariableScatterParityBackendAgnostic() throws Throwable {
+        MathExpression me = new MathExpression("x^2+y^2-2*x*y*cos(x-y)");
+        VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
+        SIMDCompositeExpression cpu = vte.compile();
+
+        try (GpuCompositeExpression gpu = GpuExpressionBridge.from(vte); Arena arena = Arena.ofConfined()) {
+            int dataSize = 250_000; // e.g. a 500x500 grid, flattened
+            int varCount = vte.getVarCount();
+            double[] flat = buildSafeSamples(me, new String[]{"x", "y"},
+                    new double[][]{{-8, 8}, {-8, 8}}, dataSize, varCount);
+
+            double[] cpuOut = new double[dataSize];
+            cpu.applyBulk(flat, cpuOut);
+
+            double[][] rows = toRowsDouble(flat, varCount, dataSize);
+            MemorySegment[] segs = toSegmentsDouble(arena, rows);
+            MemorySegment outSeg = arena.allocate((long) dataSize * ValueLayout.JAVA_DOUBLE.byteSize());
+
+            gpu.applyBulk(segs, outSeg);
+
+            double[] gpuOut = new double[dataSize];
+            MemorySegment.copy(outSeg, ValueLayout.JAVA_DOUBLE, 0, gpuOut, 0, dataSize);
+
+            assertParity("x^2+y^2-2xy*cos(x-y) (scatter, backend-agnostic)", cpuOut, gpuOut, 1e-6);
+        }
+    }
+
+    /**
      * Informational, not a correctness gate: confirms the GPU path is actually
      * faster once dataSize is large enough to amortize dispatch overhead. No
      * hard assertion on speedup ratio -- CI hardware varies too much for that
@@ -688,6 +1072,73 @@ public class GpuCompositeExpressionTest {
             return nearestHalfPi + (x >= nearestHalfPi ? 0.02 : -0.02);
         }
         return x;
+    }
+
+    /**
+     * Reshapes a flat, column-major sample buffer (as produced by
+     * buildSafeSamples -- varCount blocks of dataSize contiguous elements)
+     * into the varCount-rows-of-dataSize-elements shape applyBulk(double[][], double[])
+     * and the scatter overloads both expect. Since buildSafeSamples already
+     * lays its output out as exactly that concatenation, this is a plain
+     * slice per row, not a transpose.
+     */
+    private static double[][] toRowsDouble(double[] flat, int varCount, int dataSize) {
+        double[][] rows = new double[varCount][dataSize];
+        for (int slot = 0; slot < varCount; slot++) {
+            System.arraycopy(flat, slot * dataSize, rows[slot], 0, dataSize);
+        }
+        return rows;
+    }
+
+    /** Float32 counterpart of toRowsDouble. */
+    private static float[][] toRowsFloat(float[] flat, int varCount, int dataSize) {
+        float[][] rows = new float[varCount][dataSize];
+        for (int slot = 0; slot < varCount; slot++) {
+            System.arraycopy(flat, slot * dataSize, rows[slot], 0, dataSize);
+        }
+        return rows;
+    }
+
+    /**
+     * Copies each on-heap row into its own freshly-allocated native
+     * MemorySegment -- this one-time per-row heap-to-native copy is exactly
+     * what the resulting MemorySegment[] lets applyBulk(MemorySegment[], MemorySegment)
+     * skip on every subsequent call, since from here on the data is already
+     * native.
+     */
+    private static MemorySegment[] toSegmentsDouble(Arena arena, double[][] rows) {
+        MemorySegment[] segs = new MemorySegment[rows.length];
+        for (int i = 0; i < rows.length; i++) {
+            MemorySegment seg = arena.allocate((long) rows[i].length * ValueLayout.JAVA_DOUBLE.byteSize());
+            MemorySegment.copy(rows[i], 0, seg, ValueLayout.JAVA_DOUBLE, 0, rows[i].length);
+            segs[i] = seg;
+        }
+        return segs;
+    }
+
+    /** Float32 counterpart of toSegmentsDouble. */
+    private static MemorySegment[] toSegmentsFloat(Arena arena, float[][] rows) {
+        MemorySegment[] segs = new MemorySegment[rows.length];
+        for (int i = 0; i < rows.length; i++) {
+            MemorySegment seg = arena.allocate((long) rows[i].length * ValueLayout.JAVA_FLOAT.byteSize());
+            MemorySegment.copy(rows[i], 0, seg, ValueLayout.JAVA_FLOAT, 0, rows[i].length);
+            segs[i] = seg;
+        }
+        return segs;
+    }
+
+    /**
+     * Simulates what a caller holding separate native per-variable segments
+     * previously had to do by hand before calling
+     * applyBulk(MemorySegment, MemorySegment): copy each row segment into its
+     * slice of one contiguous destination segment. This is exactly the
+     * host-side copy applyBulk(MemorySegment[], MemorySegment) eliminates --
+     * see scatterAvoidsHostSideFlattenCopyDouble/Float.
+     */
+    private static void flattenInto(MemorySegment[] rows, MemorySegment dest, long rowBytes) {
+        for (int i = 0; i < rows.length; i++) {
+            MemorySegment.copy(rows[i], 0, dest, (long) i * rowBytes, rowBytes);
+        }
     }
 
     /**
