@@ -22,6 +22,10 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         super(me);
     }
 
+    public SIMDVectorTurboEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        super(me, numWorkers);
+    }
+
     public static final SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
         return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
     }
@@ -31,11 +35,11 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
     }
 
     public static final SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
-        return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me).compile();
+        return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(me, numWorkers).compile();
     }
 
     public static final SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
-        return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(new MathExpression(expr)).compile();
+        return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(new MathExpression(expr), numWorkers).compile();
     }
 
     @Override
@@ -73,11 +77,10 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         private volatile int simdCurrentDataSize;
 
         /**
-         * Private worker used exclusively by the SIMD worker ring. Spins
-         * parked until the master publishes work into the volatile
-         * registers above, executes its slice via the existing
-         * applyBulkInternal(...) overloads (which already do the SIMD/Vector
-         * API work), then parks again.
+         * Private worker used exclusively by the SIMD worker ring. Spins parked
+         * until the master publishes work into the volatile registers above,
+         * executes its slice via the existing applyBulkInternal(...) overloads
+         * (which already do the SIMD/Vector API work), then parks again.
          */
         private final class SIMDWorkerThread extends Thread {
 
@@ -2564,30 +2567,8 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
             return p.mul(twoK);
         }
 
-        private static DoubleVector vectorizedErf(DoubleVector x) {
-            DoubleVector absX = x.abs();
-
-            VectorMask<Double> maskLow = absX.compare(VectorOperators.LE, THRESHOLD_LOW);
-            VectorMask<Double> maskHigh = absX.compare(VectorOperators.LE, THRESHOLD_HIGH);
-
-            DoubleVector xSq = absX.mul(absX);
-            DoubleVector p = xSq.mul(0.260194122534674).add(30.59022585250011).mul(xSq)
-                    .add(573.9507736045833).mul(xSq).add(2801.752391065013).mul(xSq).add(3204.677458505002);
-            DoubleVector q = xSq.add(159.0884090976454).mul(xSq).add(1422.080683811422).mul(xSq)
-                    .add(4423.613442045816).mul(xSq).add(3204.677458506958);
-
-            DoubleVector resLow = x.mul(p.div(q));
-
-            // Note: Assumes VectorizedCodyMath is available in your classpath
-            DoubleVector resMed = VectorizedCodyMath.evaluateMediumVector(x, absX, maskHigh);
-            DoubleVector resHigh = VectorizedCodyMath.evaluateLargeVector(x, absX, maskHigh.not());
-            DoubleVector erfcVal = resMed.blend(resHigh, maskHigh.not());
-
-            DoubleVector resMidHigh = V_ONE.sub(erfcVal);
-            VectorMask<Double> isNegative = x.compare(VectorOperators.LT, 0.0);
-            resMidHigh = resMidHigh.blend(resMidHigh.neg(), isNegative);
-
-            return resMidHigh.blend(resLow, maskLow);
+        static DoubleVector vectorizedErf(DoubleVector x) {
+            return VectorizedCodyMath.erf(x);
         }
 
         // ===================== Stirling's Factorial Approximation =====================

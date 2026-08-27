@@ -1,4 +1,4 @@
-package com.github.gbenroscience.arrow.tools.box2;
+package com.github.gbenroscience.arrow.tools.box;
 
 /**
  * Thrown when an {@link ArrowBulkEvaluator} cannot bind a compiled

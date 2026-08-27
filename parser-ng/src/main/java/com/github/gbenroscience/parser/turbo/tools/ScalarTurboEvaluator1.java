@@ -50,9 +50,7 @@ import com.github.gbenroscience.util.Utils;
 import com.github.gbenroscience.util.io.ByteArrayBuilder;
 import java.lang.invoke.*;
 import java.util.*;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.util.concurrent.ThreadLocalRandom; 
 
 /**
  * Turbo compiler optimized for PURE SCALAR expressions. Uses an array based

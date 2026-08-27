@@ -317,6 +317,7 @@ public class MethodRegistry {
         registerMethod(Declarations.ARC_COTH_ALT, (ctx, arity, args) -> ctx.wrap(Maths.acoth(args[0].scalar)));
 
         registerMethod(Declarations.ERF, (ctx, arity, args) -> ctx.wrap(Maths.erf(args[0].scalar)));
+        registerMethod(Declarations.ERFC, (ctx, arity, args) -> ctx.wrap(Maths.erfc(args[0].scalar)));
         registerMethod(Declarations.GELU, (ctx, arity, args) -> ctx.wrap(Maths.gelu(args[0].scalar)));
         registerMethod(Declarations.FAST_GELU, (ctx, arity, args) -> ctx.wrap(Maths.fastGelu(args[0].scalar)));
 

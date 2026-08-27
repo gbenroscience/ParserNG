@@ -29,6 +29,15 @@ import com.github.gbenroscience.gpu.evaluator.GpuCompositeExpression;
  *       cuda.applyBulk(flatVariables, output);        // double[] overload
  *       cuda.applyBulk(inMemorySegment, outSegment);   // MemorySegment overload
  *   }
+ *
+ * To choose which GPU device runs the expression, call
+ * {@link CudaCompositeExpression#selectDevice(int)} or
+ * {@link CudaCompositeExpression#selectDevice(String)} before calling
+ * {@link #from(VectorTurboEvaluator)} -- see
+ * {@link CudaCompositeExpression#listAvailableDevices()} to see what's
+ * installed, and that class's "DEVICE BINDING MODEL" javadoc section for
+ * the full selection/caching contract. Selection is resolved fresh on
+ * every call to this bridge, not fixed once for the whole JVM.
  */
 public final class CudaExpressionBridge {
 
@@ -40,6 +49,8 @@ public final class CudaExpressionBridge {
      * VectorTurboEvaluator, reusing its compiled program without recompiling
      * or re-parsing anything.
      *
+     * @param vte
+     * @return 
      * @throws IllegalArgumentException if the expression's stack depth
      *         exceeds CudaKernelSource.MAX_STACK. Same rationale as the
      *         OpenCL bridge: the kernel's per-thread stack is a fixed-size
@@ -69,6 +80,9 @@ public final class CudaExpressionBridge {
      * Convenience one-shot: parses/compiles straight from a MathExpression,
      * skipping the intermediate VectorTurboEvaluator variable if the caller
      * doesn't need it for anything else.
+     * @param me
+     * @return 
+     * @throws java.lang.Throwable
      */
     public static GpuCompositeExpression compile(MathExpression me) throws Throwable {
         return from(new VectorTurboEvaluator(me));

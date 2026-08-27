@@ -1,5 +1,6 @@
-package com.github.gbenroscience.simdext.turbo.tools;
+package com.github.gbenroscience.simdext.turbo.tools.command;
 
+import com.github.gbenroscience.simdext.turbo.tools.*;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
@@ -8,8 +9,9 @@ import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
+
 import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
-import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath;
+import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath; 
 import java.lang.ref.Cleaner;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,30 +33,30 @@ import jdk.incubator.vector.*;
  * 
  *
  */
-public class SIMDCommandEvaluator extends VectorTurboEvaluator {
+public class SIMDCommandF64 extends VectorTurboEvaluator {
 
-    public SIMDCommandEvaluator(MathExpression me) throws Throwable {
+    public SIMDCommandF64(MathExpression me) throws Throwable {
         super(me);
     }
 
-    public SIMDCommandEvaluator(MathExpression me, int numWorkers) throws Throwable {
+    public SIMDCommandF64(MathExpression me, int numWorkers) throws Throwable {
         super(me, numWorkers);
     }
  
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me).compile();
+    public static final SIMDCommandF64.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
+        return (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(me).compile();
     }
 
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(new MathExpression(expr)).compile();
+    public static final SIMDCommandF64.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
+        return (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(new MathExpression(expr)).compile();
     }
 
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me, numWorkers).compile();
+    public static final SIMDCommandF64.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        return (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(me, numWorkers).compile();
     }
 
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(new MathExpression(expr), numWorkers).compile();
+    public static final SIMDCommandF64.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
+        return (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(new MathExpression(expr), numWorkers).compile();
     }
 
     // 1. Updated Command Interface
@@ -868,5 +870,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             }
         }
     }
- 
+
+    
+
 }

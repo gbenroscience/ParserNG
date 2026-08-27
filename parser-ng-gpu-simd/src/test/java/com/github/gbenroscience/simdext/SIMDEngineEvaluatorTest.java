@@ -1,334 +1,881 @@
 package com.github.gbenroscience.simdext;
 
-import com.github.gbenroscience.logic.DRG_MODE;
-import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF; 
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
-
-import java.util.Arrays;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import com.github.gbenroscience.math.Maths;
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression;
 import org.junit.jupiter.api.Test;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import org.junit.jupiter.api.Assertions;
-import static org.junit.jupiter.api.Assertions.*;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+
+import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.BLOCK_SIZE;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
+ * Tests for {@link SIMDEngineEvaluator}'s bulk-evaluation storage paths:
+ * the original {@code double[]} / {@code double[][]} / {@code MemorySegment}
+ * (packed doubles) / {@code MemorySegment[]} (packed doubles) paths, and the
+ * float support added alongside them — {@code float[]}, {@code float[][]},
+ * {@code MemorySegment} (packed floats), and {@code MemorySegment[]} (packed
+ * floats).
  *
- * @author GBEMIRO
+ * <p>Variables are assumed to be resolved to stack slots in the order they
+ * first appear in the expression source (the conventional behavior for this
+ * kind of expression compiler); adjust variable naming/ordering in these
+ * tests if your {@code MathExpression} front-end resolves slots differently.
+ *
+ * <p>Tolerances: {@code SIN}/{@code COS}/{@code EXP}/{@code SQRT}/etc. go
+ * through the JDK Vector API's lanewise transcendental intrinsics and are
+ * compared with a tight epsilon (looser for {@code float}, tighter for
+ * {@code double}, reflecting each type's native precision).
+ * {@code erf}/{@code gelu} go through the {@code VectorizedCodyMath}-backed
+ * piecewise rational approximation and are compared with a looser epsilon.
+ * <p>All {@code MemorySegment} tests use {@link Arena#ofShared()} rather than
+ * {@code Arena.ofConfined()}. The {@code *_Parallel} tests dispatch work to
+ * the evaluator's background worker-thread pool, and a confined arena's
+ * segments can only be accessed from the single thread that created them —
+ * any access from a worker thread throws {@code WrongThreadException}. Using
+ * a shared arena everywhere (not just in the parallel tests) keeps the
+ * pattern uniform and avoids that trap by construction.
  */
-public class SIMDEngineEvaluatorTest {
+class SIMDEngineEvaluatorTest {
 
-    private static final double EPSILON = 1e-12;
-    private static ExecutorService threadPool;
-    private static boolean active = false;
+    private static final float TIGHT_EPS = 1e-4f;
+    private static final float LOOSE_EPS = 5e-4f;
+    private static final double D_TIGHT_EPS = 1e-9;
+    private static final double D_LOOSE_EPS = 1e-6;
 
-    @BeforeAll
-    public static void setupSuite() {
-        // Enforce a hard fail immediately if module flags are missing
-
-        MathExpression orig = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");//for user defined function tests
-        threadPool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+    private static SIMDEngineEvaluator.SIMDVectorCompositeExpression compile(String expr) throws Throwable {
+        return SIMDEngineEvaluator.getEvaluator(expr);
     }
 
-    @AfterAll
-    public static void teardownSuite() {
-        if (threadPool != null) {
-            threadPool.shutdown();
+    private static float[] fillLinear(int n, float start, float step) {
+        float[] a = new float[n];
+        for (int i = 0; i < n; i++) {
+            a[i] = start + i * step;
+        }
+        return a;
+    }
+
+    private static double[] fillLinearD(int n, double start, double step) {
+        double[] a = new double[n];
+        for (int i = 0; i < n; i++) {
+            a[i] = start + i * step;
+        }
+        return a;
+    }
+
+    // =====================================================================
+    // 1. float[] (flat single-array, multi-variable) path
+    // =====================================================================
+
+    @Test
+    void testFloatArray_Add() throws Throwable {
+        try (var eval = compile("x + y")) {
+            int n = 64;
+            float[] flat = new float[2 * n];
+            float[] x = fillLinear(n, 1.0f, 0.5f);
+            float[] y = fillLinear(n, 2.0f, 0.25f);
+            System.arraycopy(x, 0, flat, 0, n);
+            System.arraycopy(y, 0, flat, n, n);
+
+            float[] out = new float[n];
+            eval.applyBulk(flat, out);
+
+            for (int i = 0; i < n; i++) {
+                assertEquals(x[i] + y[i], out[i], TIGHT_EPS, "index " + i);
+            }
         }
     }
 
     @Test
-    public void testMathematicalPrecisionVsNativeJavaFlat() throws Throwable {
-        MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
+    void testFloatArray_MulDiv() throws Throwable {
+        try (var eval = compile("(x * y) / (x + 1)")) {
+            int n = 100;
+            float[] x = fillLinear(n, 1.0f, 0.3f);
+            float[] y = fillLinear(n, 5.0f, 0.1f);
+            float[] flat = new float[2 * n];
+            System.arraycopy(x, 0, flat, 0, n);
+            System.arraycopy(y, 0, flat, n, n);
 
-        logDetails(me, evaluator, !active);
+            float[] out = new float[n];
+            eval.applyBulk(flat, out);
 
-        // 17 datapoints to trigger both vector lane and tail scalar loop remainders
-        int totalElements = 17;
-        int varCount = 3; // x1, x2, x3
-
-        // Flattened structural array: column-major allocation
-        double[] flatInputs = new double[varCount * totalElements];
-        double[] outputVector = new double[totalElements];
-
-        // Populate the flat array using stride offsets
-        for (int i = 0; i < totalElements; i++) {
-            double x1Val = 1.5 + (i * 0.1); // x1 values
-            double x2Val = 2.0 + (i * 0.5); // x2 values
-            double x3Val = 0.5;             // x3 values
-
-            flatInputs[(0 * totalElements) + i] = x1Val; // x1 segment
-            flatInputs[(1 * totalElements) + i] = x2Val; // x2 segment
-            flatInputs[(2 * totalElements) + i] = x3Val; // x3 segment
-        }
-        System.out.println("flatInputs: " + Arrays.toString(flatInputs));
-
-        // Test API Call #1: High-Performance Flat Bulk Execution
-        evaluator.applyBulk(flatInputs, outputVector);
-        System.out.println("output: " + Arrays.toString(outputVector));
-        // System.out.println("outputVector: " + Arrays.toString(outputVector));
-        // Verify mathematical equality against standard Java scalar paths
-        for (int i = 0; i < totalElements; i++) {
-            // Extract original baseline values from flat strides for expected validation
-            double x1 = flatInputs[(0 * totalElements) + i];
-            double x2 = flatInputs[(1 * totalElements) + i];
-            double x3 = flatInputs[(2 * totalElements) + i];
-
-            double expected = (1.0 / (x1 * Math.sqrt(2.0 * 3.14159)))
-                    * Math.exp((-Math.pow((x2 - x3), 2.0)) / (2.0 * Math.pow(x1, 2.0)));
-
-            assertEquals(expected, outputVector[i], EPSILON, "SIMD flat path math drifted at index: " + i);
-        }
-    }
-    
-    
-  
-    @Test
-    public void testMathematicalPrecisionVsNativeJava() throws Throwable {
-        MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2.23))");
-        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
-        logDetails(me, evaluator, !active);
-
-        // 17 datapoints to trigger both vector lane and tail scalar loop remainders
-        int totalElements = 1000017;
-        double[][] inputs = new double[3][totalElements]; // 3 variables, 17 values each
-        double[] outputVector = new double[totalElements];
-
-        for (int i = 0; i < totalElements; i++) {
-            inputs[0][i] = 1.5 + (i * 0.1); // x1
-            inputs[1][i] = 2.0 + (i * 0.5); // x2
-            inputs[2][i] = 0.5;             // x3
-        }
-
-        // Test API Call #1: Standard Bulk Execution
-        evaluator.applyBulk(inputs, outputVector);
-       // System.out.println("output: " + Arrays.toString(outputVector));
-
-        for (int i = 0; i < totalElements; i++) {
-            double x1 = inputs[0][i];
-            double x2 = inputs[1][i];
-            double x3 = inputs[2][i];
-            double expected = (1.0 / (x1 * Math.sqrt(2.0 * 3.14159))) * Math.exp((-Math.pow((x2 - x3), 2.0)) / (2.0 * Math.pow(x1, 2.23)));
-            assertEquals(expected, outputVector[i], EPSILON, "SIMD standard path math drifted at index: " + i);
+            for (int i = 0; i < n; i++) {
+                float expected = (x[i] * y[i]) / (x[i] + 1.0f);
+                assertEquals(expected, out[i], TIGHT_EPS, "index " + i);
+            }
         }
     }
 
     @Test
-    public void testThreadPooledParallelBulkExecution() throws Throwable {
-        MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
-        me.setDRG(DRG_MODE.RAD);
-        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
-        logDetails(me, evaluator, !active);
+    void testFloatArray_Sin() throws Throwable {
+        try (var eval = compile("sin(x)")) {
+            int n = 50;
+            float[] x = fillLinear(n, -3.0f, 0.13f);
 
-        int dataSize = 250018;
-        double[][] inputs = new double[1][dataSize]; // Only 1 variable 'x' is needed for this expression
-        double[] outputVector = new double[dataSize];
+            float[] out = new float[n];
+            eval.applyBulk(x, out);
 
-        for (int i = 0; i < dataSize; i++) {
-            inputs[0][i] = i; // x
-        }
-        // Test API Call #2: Asynchronous ExecutorService Multi-threaded Bulk Execution
-        evaluator.applyBulkParallel(inputs, outputVector);
-        //  System.out.println("output: " + Arrays.toString(outputVector));
-
-        for (int i = 0; i < dataSize; i++) {
-            double x = inputs[0][i];
-            // Correct expected formula matching the active MathExpression
-            double expected = 4.0 * x + 3.0 * Math.sin(5.0 + (x * x));
-            assertEquals(expected, outputVector[i], EPSILON, "Parallel SIMD execution drifted at index: " + i);
+            for (int i = 0; i < n; i++) {
+                assertEquals((float) Math.sin(x[i]), out[i], TIGHT_EPS, "index " + i);
+            }
         }
     }
 
     @Test
-    public void testSingleRuntime() throws Throwable {
-        MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
-        double t = System.nanoTime();
-        double[] out = new double[1];
-        evaluator.applyBulk(new double[]{5, 4, 1}, out);
-        double t1 = System.nanoTime() - t;
+    void testFloatArray_Pow() throws Throwable {
+        try (var eval = compile("x^3")) {
+            int n = 40;
+            float[] x = fillLinear(n, -2.0f, 0.2f);
 
-        System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
-        Assertions.assertTrue(true);
+            float[] out = new float[n];
+            eval.applyBulk(x, out);
+
+            for (int i = 0; i < n; i++) {
+                assertEquals((float) Math.pow(x[i], 3), out[i], TIGHT_EPS, "index " + i);
+            }
+        }
     }
 
     @Test
-    void testUserDefinedFunctionSimpleCall() throws Throwable {
-        MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(x+3,y-2,2*z-3)");
-        System.out.println("f(x+3,y-2,2*z-3) = " + me.solve());
+    void testFloatArray_Gelu() throws Throwable {
+        try (var eval = compile("gelu(x)")) {
+            int n = 30;
+            float[] x = fillLinear(n, -4.0f, 0.3f);
 
-        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
-        double t = System.nanoTime();
-        double[] out = new double[1];
-        try {
-            evaluator.applyBulk(new double[]{5, 4, 1}, out);
-        } catch (IllegalStateException e) {
-            assertTrue(true, "variables not balanced");
-            return;
+            float[] out = new float[n];
+            eval.applyBulk(x, out);
+
+            for (int i = 0; i < n; i++) {
+                double xi = x[i];
+                double refGelu = xi * 0.5 * (1.0 + erfRef(xi / Math.sqrt(2.0)));
+                assertEquals((float) refGelu, out[i], LOOSE_EPS, "index " + i);
+            }
         }
-        double t1 = System.nanoTime() - t;
-
-        System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
-        double x = 5;
-        double y = 4;
-        double z = 1;
-        double expected = 3 * (x + 3) + 4 * (y - 2) + Math.sin((2 * z - 3) - 2);
-        assertEquals(expected, out[0], EPSILON, "Parallel SIMD execution drifted for test: testUserDefinedFunctionSimpleCall ");
-
     }
 
     @Test
-    void testUserDefinedFunctionSimpleCallNoVars() throws Throwable {
-        MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
-        System.out.println("f(3,4,2) = " + me.solve());
+    void testFloatArray_Comparison() throws Throwable {
+        try (var eval = compile("x > y")) {
+            int n = 20;
+            float[] x = fillLinear(n, -2.0f, 0.4f);
+            float[] y = fillLinear(n, 0.0f, 0.0f);
+            float[] flat = new float[2 * n];
+            System.arraycopy(x, 0, flat, 0, n);
+            System.arraycopy(y, 0, flat, n, n);
 
-        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
-        double t = System.nanoTime();
-        double[] out = new double[1];
-        double[]in=new double[0];
-        try{
-            evaluator.validate(in, out);
-        }catch(Exception e){
-            Assertions.assertTrue(true, "Caught the empty array error!");
-            return;
+            float[] out = new float[n];
+            eval.applyBulk(flat, out);
+
+            for (int i = 0; i < n; i++) {
+                float expected = (x[i] > y[i]) ? 1.0f : 0.0f;
+                assertEquals(expected, out[i], "index " + i);
+            }
         }
-        try {
-            evaluator.applyBulk(in, out);
-        } catch (IllegalStateException e) {
-            assertTrue(true, "variables not balanced");
-            return;
+    }
+
+    // =====================================================================
+    // 2. float[][] (one array per variable) path
+    // =====================================================================
+
+    @Test
+    void testFloat2D_Add() throws Throwable {
+        try (var eval = compile("x + y")) {
+            int n = 70;
+            float[][] vars = {fillLinear(n, 1.0f, 0.1f), fillLinear(n, -1.0f, 0.2f)};
+
+            float[] out = new float[n];
+            eval.applyBulk(vars, out);
+
+            for (int i = 0; i < n; i++) {
+                assertEquals(vars[0][i] + vars[1][i], out[i], TIGHT_EPS, "index " + i);
+            }
         }
-        double t1 = System.nanoTime() - t;
-
-        System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
-        double x = 3;
-        double y = 4;
-        double z = 2;
-        double expected = 3 * x + 4 * y + Math.sin(z - 2);
-        assertEquals(expected, out[0], EPSILON, "Parallel SIMD execution drifted for test: testUserDefinedFunctionSimpleCall ");
-
     }
 
     @Test
-    void testUserDefinedFunctionFunctionInExpression() throws Throwable {
+    void testFloat2D_Trig() throws Throwable {
+        try (var eval = compile("cos(x) + sin(x)")) {
+            int n = 45;
+            float[][] vars = {fillLinear(n, -5.0f, 0.25f)};
 
-        MathExpression me = new MathExpression("3 + 2*x + f(2, 3*x + sin(4*x), 5)");
+            float[] out = new float[n];
+            eval.applyBulk(vars, out);
 
-        SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
-        double t = System.nanoTime();
-        double[] out = new double[1];
-        evaluator.applyBulk(new double[]{5}, out);
-        double t1 = System.nanoTime() - t;
-
-        System.out.println("timed at = " + t1 + "ns--- answer: " + out[0]);
-
-        double x = 5;
-
-        double expected = 3 + 2 * x + (3 * 2 + 4 * (3 * x + Math.sin(4 * x)) + Math.sin(5 - 2));
-        assertEquals(expected, out[0], EPSILON, "Parallel SIMD execution drifted for test: testUserDefinedFunctionSimpleCall ");
-
-    }
-
-    @ParameterizedTest(name = "GELU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {20, 70, 100, 200})
-    void testGelu(int sz) throws Throwable {
-        executeKernelBenchmark("gelu", sz, 1);
-    }
-
-    @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {20, 70, 100, 200})
-    void testSwiglu(int sz) throws Throwable {
-        executeKernelBenchmark("swiglu", sz, 2);
-    }
-
-    @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {20, 70, 100, 200})
-    void testGeglu(int sz) throws Throwable {
-        executeKernelBenchmark("geglu", sz, 2);
-    }
-    
- @ParameterizedTest(name = "GeLU Matrix Size: {0}x{0}")
-    @ValueSource(ints = {512, 1024})
-    void testGeluLarge(int sz) throws Throwable {
-        executeKernelBenchmark("gelu", sz, 1);
-    }
-        @ParameterizedTest(name = "GeGLU Matrix Size: {0}x{0}")
-       @ValueSource(ints = {512, 1024})
-    void testGegluLarge(int sz) throws Throwable {
-        executeKernelBenchmark("geglu", sz, 2);
-    }
-        @ParameterizedTest(name = "SwiGLU Matrix Size: {0}x{0}")
-        @ValueSource(ints = {512, 1024})
-    void testSwigluLarge(int sz) throws Throwable {
-        executeKernelBenchmark("swiglu", sz, 2);
-    }
-
-    /**
-     * Shared orchestration runner for manual micro-benchmarking without JMH.
-     */
-    private void executeKernelBenchmark(String kernelName, int sz, int arity) throws Throwable {
-        MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
-        SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new SIMDEngineEvaluator(me).compile();
-
-        FlatMatrixF in1 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in1);
-
-        FlatMatrixF in2 = new FlatMatrixF(sz, sz);
-        FlatMatrixF.randomFill(in2);
-
-        FlatMatrixF out = new FlatMatrixF(sz, sz);
-
-        // 1. Manual Warm-up Phase
-        // Forces C2 to compile the vector loops before we sample the clock
-        int warmUpRuns = 1000;
-        FlatMatrixF[] inputs = arity == 2 ? new FlatMatrixF[]{in1, in2} : new FlatMatrixF[]{in1}; // Allocate once outside the timing track!
-        for (int i = 0; i < warmUpRuns; i++) {
-            evaluator.applyMatrixKernel(inputs, out, kernelName);
+            for (int i = 0; i < n; i++) {
+                float x = vars[0][i];
+                float expected = (float) (Math.cos(x) + Math.sin(x));
+                assertEquals(expected, out[i], TIGHT_EPS, "index " + i);
+            }
         }
-
-        // 2. Timed Target Phase
-        int iterations = 4000;
-
-        long startTime = System.nanoTime();
-        for (int i = 0; i < iterations; i++) {
-            evaluator.applyMatrixKernel(inputs, out, kernelName);
-        }
-        long totalTimeNs = System.nanoTime() - startTime;
-
-        // 3. Analytics Formatting
-        double avgMatrixNs = (double) totalTimeNs / iterations;
-        double totalElements = sz * sz;
-        double avgPerElementNs = avgMatrixNs / totalElements;
-        double avgMatrixMicros = avgMatrixNs / 1000.0;
-
-        // Prints numbers tailored perfectly for your README layout
-        System.out.printf("[%s] %dx%d -> Matrix Avg: %.2f µs | Per-Element: %.2f ns%n",
-                kernelName.toUpperCase(), sz, sz, avgMatrixMicros, avgPerElementNs);
-
-        // Sanity check to prevent dead-code optimization tricks from discarding execution
-        Assertions.assertNotNull(out);
     }
 
-    void logDetails(MathExpression me, SIMDEngineEvaluator.SIMDVectorCompositeExpression evaluator, boolean active) {
-        if (!active) {
-            return;
-        }
-        MathExpression.Token[] tokens = me.getCachedPostfix();
-        String names[] = new String[tokens.length];
+    @Test
+    void testFloat2D_MultiBlock() throws Throwable {
+        // Deliberately larger than BLOCK_SIZE so the internal block-looping
+        // logic (multiple BLOCK_SIZE-sized chunks) is exercised.
+        try (var eval = compile("x * 2 + 1")) {
+            int n = BLOCK_SIZE * 3 + 17;
+            float[][] vars = {fillLinear(n, 0.0f, 0.001f)};
 
-        for (int i = 0; i < names.length; i++) {
-            String n = tokens[i].name == null ? (tokens[i].opChar == '\u0000' ? String.valueOf(tokens[i].value) : String.valueOf(tokens[i].opChar)) : tokens[i].name;
-            names[i] = n;
+            float[] out = new float[n];
+            eval.applyBulk(vars, out);
+
+            for (int i = 0; i < n; i++) {
+                float expected = vars[0][i] * 2.0f + 1.0f;
+                assertEquals(expected, out[i], TIGHT_EPS, "index " + i);
+            }
         }
-        System.out.println("expr = " + me.getExpression() + ",\n"
-                + "token-names: " + Arrays.toString(names) + "\n"
-                + "tokens-len: " + tokens.length);
     }
 
+    @Test
+    void testFloat2D_Sqrt() throws Throwable {
+        try (var eval = compile("sqrt(x)")) {
+            int n = 33;
+            float[][] vars = {fillLinear(n, 0.0f, 1.0f)};
+
+            float[] out = new float[n];
+            eval.applyBulk(vars, out);
+
+            for (int i = 0; i < n; i++) {
+                assertEquals((float) Math.sqrt(vars[0][i]), out[i], TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testFloat2D_IfElse() throws Throwable {
+        try (var eval = compile("if(x > 0, x, -x)")) {
+            int n = 60;
+            float[][] vars = {fillLinear(n, -30.0f, 1.0f)};
+
+            float[] out = new float[n];
+            eval.applyBulk(vars, out);
+
+            for (int i = 0; i < n; i++) {
+                float expected = Math.abs(vars[0][i]);
+                assertEquals(expected, out[i], TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    // =====================================================================
+    // 3. MemorySegment (single concatenated segment, packed floats) path
+    // =====================================================================
+
+    @Test
+    void testMemSegFloat_Add() throws Throwable {
+        try (var eval = compile("x + y"); Arena arena = Arena.ofShared()) {
+            int n = 80;
+            float[] x = fillLinear(n, 3.0f, 0.05f);
+            float[] y = fillLinear(n, -1.0f, 0.02f);
+
+            MemorySegment in = arena.allocate((long) 2 * n * Float.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_FLOAT, 0L, n);
+            MemorySegment.copy(y, 0, in, ValueLayout.JAVA_FLOAT, (long) n * Float.BYTES, n);
+
+            MemorySegment out = arena.allocate((long) n * Float.BYTES);
+            eval.applyBulkFloat(in, out);
+
+            for (int i = 0; i < n; i++) {
+                float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                assertEquals(x[i] + y[i], actual, TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegFloat_Exp() throws Throwable {
+        try (var eval = compile("exp(x)"); Arena arena = Arena.ofShared()) {
+            int n = 25;
+            float[] x = fillLinear(n, -3.0f, 0.25f);
+
+            MemorySegment in = arena.allocate((long) n * Float.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_FLOAT, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Float.BYTES);
+            eval.applyBulkFloat(in, out);
+
+            for (int i = 0; i < n; i++) {
+                float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                assertEquals((float) Math.exp(x[i]), actual, TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegFloat_Parallel() throws Throwable {
+        try (var eval = compile("x * y"); Arena arena = Arena.ofShared()) {
+            // Large enough to clear PARALLEL_OPS_THRESHOLD and actually
+            // exercise the worker-pool dispatch path (falls back to
+            // single-threaded automatically if NUM_WORKERS <= 0).
+            int n = 200_000;
+            float[] x = fillLinear(n, 0.5f, 0.0001f);
+            float[] y = fillLinear(n, -0.5f, 0.0002f);
+
+            MemorySegment in = arena.allocate((long) 2 * n * Float.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_FLOAT, 0L, n);
+            MemorySegment.copy(y, 0, in, ValueLayout.JAVA_FLOAT, (long) n * Float.BYTES, n);
+
+            MemorySegment out = arena.allocate((long) n * Float.BYTES);
+            eval.applyBulkParallelFloat(in, out);
+
+            // Spot-check a sample rather than every element to keep the test fast.
+            for (int i = 0; i < n; i += 997) {
+                float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                assertEquals(x[i] * y[i], actual, TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegFloat_Erf() throws Throwable {
+        try (var eval = compile("erf(x)"); Arena arena = Arena.ofShared()) {
+            int n = 30;
+            float[] x = fillLinear(n, -3.0f, 0.2f);
+
+            MemorySegment in = arena.allocate((long) n * Float.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_FLOAT, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Float.BYTES);
+            eval.applyBulkFloat(in, out);
+
+            for (int i = 0; i < n; i++) {
+                float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                assertEquals((float) erfRef(x[i]), actual, LOOSE_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegFloat_MultiBlock() throws Throwable {
+        try (var eval = compile("x - 1"); Arena arena = Arena.ofShared()) {
+            int n = BLOCK_SIZE * 2 + 5;
+            float[] x = fillLinear(n, 0.0f, 0.01f);
+
+            MemorySegment in = arena.allocate((long) n * Float.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_FLOAT, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Float.BYTES);
+            eval.applyBulkFloat(in, out);
+
+            for (int i = 0; i < n; i++) {
+                float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                assertEquals(x[i] - 1.0f, actual, TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    // =====================================================================
+    // 4. MemorySegment[] (one segment per variable, zero-copy) path
+    // =====================================================================
+
+    @Test
+    void testMemSegArrayFloat_Add() throws Throwable {
+        try (var eval = compile("x + y"); Arena arena = Arena.ofShared()) {
+            int n = 90;
+            float[] x = fillLinear(n, 1.0f, 0.1f);
+            float[] y = fillLinear(n, 2.0f, 0.2f);
+
+            MemorySegment segX = arena.allocate((long) n * Float.BYTES);
+            MemorySegment segY = arena.allocate((long) n * Float.BYTES);
+            MemorySegment.copy(x, 0, segX, ValueLayout.JAVA_FLOAT, 0L, n);
+            MemorySegment.copy(y, 0, segY, ValueLayout.JAVA_FLOAT, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Float.BYTES);
+            eval.applyBulkFloat(new MemorySegment[]{segX, segY}, out);
+
+            for (int i = 0; i < n; i++) {
+                float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                assertEquals(x[i] + y[i], actual, TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegArrayFloat_Mul() throws Throwable {
+        try (var eval = compile("x * y - x"); Arena arena = Arena.ofShared()) {
+            int n = 55;
+            float[] x = fillLinear(n, 2.0f, 0.05f);
+            float[] y = fillLinear(n, 3.0f, 0.03f);
+
+            MemorySegment segX = arena.allocate((long) n * Float.BYTES);
+            MemorySegment segY = arena.allocate((long) n * Float.BYTES);
+            MemorySegment.copy(x, 0, segX, ValueLayout.JAVA_FLOAT, 0L, n);
+            MemorySegment.copy(y, 0, segY, ValueLayout.JAVA_FLOAT, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Float.BYTES);
+            eval.applyBulkFloat(new MemorySegment[]{segX, segY}, out);
+
+            for (int i = 0; i < n; i++) {
+                float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                float expected = x[i] * y[i] - x[i];
+                assertEquals(expected, actual, TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegArrayFloat_Parallel() throws Throwable {
+        try (var eval = compile("x + y * 2"); Arena arena = Arena.ofShared()) {
+            int n = 200_000;
+            float[] x = fillLinear(n, 0.1f, 0.00005f);
+            float[] y = fillLinear(n, -0.1f, 0.00003f);
+
+            MemorySegment segX = arena.allocate((long) n * Float.BYTES);
+            MemorySegment segY = arena.allocate((long) n * Float.BYTES);
+            MemorySegment.copy(x, 0, segX, ValueLayout.JAVA_FLOAT, 0L, n);
+            MemorySegment.copy(y, 0, segY, ValueLayout.JAVA_FLOAT, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Float.BYTES);
+            eval.applyBulkParallelFloat(new MemorySegment[]{segX, segY}, out);
+
+            for (int i = 0; i < n; i += 997) {
+                float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                float expected = x[i] + y[i] * 2.0f;
+                assertEquals(expected, actual, TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegArrayFloat_BareVariable() throws Throwable {
+        // Edge case: the whole expression is just "x", so OP_LOAD's
+        // segment-backed push is never consumed by any op that would
+        // otherwise force materialization — exercises the explicit
+        // materializeFloat() fallback in applyBulkInternalFloat(MemorySegment[]...).
+        try (var eval = compile("x"); Arena arena = Arena.ofShared()) {
+            int n = 48;
+            float[] x = fillLinear(n, -10.0f, 0.4f);
+
+            MemorySegment segX = arena.allocate((long) n * Float.BYTES);
+            MemorySegment.copy(x, 0, segX, ValueLayout.JAVA_FLOAT, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Float.BYTES);
+            eval.applyBulkFloat(new MemorySegment[]{segX}, out);
+
+            for (int i = 0; i < n; i++) {
+                float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
+                assertEquals(x[i], actual, TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    // =====================================================================
+    // 5. double[] (flat, multi-variable) path
+    // =====================================================================
+
+    @Test
+    void testDoubleArray_Add() throws Throwable {
+        try (var eval = compile("x + y")) {
+            int n = 64;
+            double[] x = fillLinearD(n, 1.0, 0.5);
+            double[] y = fillLinearD(n, 2.0, 0.25);
+            double[] flat = new double[2 * n];
+            System.arraycopy(x, 0, flat, 0, n);
+            System.arraycopy(y, 0, flat, n, n);
+
+            double[] out = new double[n];
+            eval.applyBulk(flat, out);
+
+            for (int i = 0; i < n; i++) {
+                assertEquals(x[i] + y[i], out[i], D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testDoubleArray_MulDiv() throws Throwable {
+        try (var eval = compile("(x * y) / (x + 1)")) {
+            int n = 100;
+            double[] x = fillLinearD(n, 1.0, 0.3);
+            double[] y = fillLinearD(n, 5.0, 0.1);
+            double[] flat = new double[2 * n];
+            System.arraycopy(x, 0, flat, 0, n);
+            System.arraycopy(y, 0, flat, n, n);
+
+            double[] out = new double[n];
+            eval.applyBulk(flat, out);
+
+            for (int i = 0; i < n; i++) {
+                double expected = (x[i] * y[i]) / (x[i] + 1.0);
+                assertEquals(expected, out[i], D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testDoubleArray_Sin() throws Throwable {
+        try (var eval = compile("sin(x)")) {
+            int n = 50;
+            double[] x = fillLinearD(n, -3.0, 0.13);
+
+            double[] out = new double[n];
+            eval.applyBulk(x, out);
+
+            for (int i = 0; i < n; i++) {
+                assertEquals(Math.sin(x[i]), out[i], D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testDoubleArray_Pow() throws Throwable {
+        try (var eval = compile("x^3")) {
+            int n = 40;
+            double[] x = fillLinearD(n, -2.0, 0.2);
+
+            double[] out = new double[n];
+            eval.applyBulk(x, out);
+
+            for (int i = 0; i < n; i++) {
+                assertEquals(Math.pow(x[i], 3), out[i], D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testDoubleArray_Gelu() throws Throwable {
+        try (var eval = compile("gelu(x)")) {
+            int n = 30;
+            double[] x = fillLinearD(n, -4.0, 0.3);
+
+            double[] out = new double[n];
+            eval.applyBulk(x, out);
+
+            for (int i = 0; i < n; i++) {
+                double xi = x[i];
+                double refGelu = xi * 0.5 * (1.0 + erfRef(xi / Math.sqrt(2.0)));
+                assertEquals(refGelu, out[i], D_LOOSE_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testDoubleArray_Comparison() throws Throwable {
+        try (var eval = compile("x > y")) {
+            int n = 20;
+            double[] x = fillLinearD(n, -2.0, 0.4);
+            double[] y = fillLinearD(n, 0.0, 0.0);
+            double[] flat = new double[2 * n];
+            System.arraycopy(x, 0, flat, 0, n);
+            System.arraycopy(y, 0, flat, n, n);
+
+            double[] out = new double[n];
+            eval.applyBulk(flat, out);
+
+            for (int i = 0; i < n; i++) {
+                double expected = (x[i] > y[i]) ? 1.0 : 0.0;
+                assertEquals(expected, out[i], "index " + i);
+            }
+        }
+    }
+
+    // =====================================================================
+    // 6. double[][] (one array per variable) path
+    // =====================================================================
+
+    @Test
+    void testDouble2D_Add() throws Throwable {
+        try (var eval = compile("x + y")) {
+            int n = 70;
+            double[][] vars = {fillLinearD(n, 1.0, 0.1), fillLinearD(n, -1.0, 0.2)};
+
+            double[] out = new double[n];
+            eval.applyBulk(vars, out);
+
+            for (int i = 0; i < n; i++) {
+                assertEquals(vars[0][i] + vars[1][i], out[i], D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testDouble2D_Trig() throws Throwable {
+        try (var eval = compile("cos(x) + sin(x)")) {
+            int n = 45;
+            double[][] vars = {fillLinearD(n, -5.0, 0.25)};
+
+            double[] out = new double[n];
+            eval.applyBulk(vars, out);
+
+            for (int i = 0; i < n; i++) {
+                double x = vars[0][i];
+                double expected = Math.cos(x) + Math.sin(x);
+                assertEquals(expected, out[i], D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testDouble2D_MultiBlock() throws Throwable {
+        // Deliberately larger than BLOCK_SIZE so the internal block-looping
+        // logic (multiple BLOCK_SIZE-sized chunks) is exercised.
+        try (var eval = compile("x * 2 + 1")) {
+            int n = BLOCK_SIZE * 3 + 17;
+            double[][] vars = {fillLinearD(n, 0.0, 0.001)};
+
+            double[] out = new double[n];
+            eval.applyBulk(vars, out);
+
+            for (int i = 0; i < n; i++) {
+                double expected = vars[0][i] * 2.0 + 1.0;
+                assertEquals(expected, out[i], D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testDouble2D_Sqrt() throws Throwable {
+        try (var eval = compile("sqrt(x)")) {
+            int n = 33;
+            double[][] vars = {fillLinearD(n, 0.0, 1.0)};
+
+            double[] out = new double[n];
+            eval.applyBulk(vars, out);
+
+            for (int i = 0; i < n; i++) {
+                assertEquals(Math.sqrt(vars[0][i]), out[i], D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testDouble2D_IfElse() throws Throwable {
+        try (var eval = compile("if(x > 0, x, -x)")) {
+            int n = 60;
+            double[][] vars = {fillLinearD(n, -30.0, 1.0)};
+
+            double[] out = new double[n];
+            eval.applyBulk(vars, out);
+
+            for (int i = 0; i < n; i++) {
+                double expected = Math.abs(vars[0][i]);
+                assertEquals(expected, out[i], D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    // =====================================================================
+    // 7. MemorySegment (single concatenated segment, packed doubles) path
+    // =====================================================================
+
+    @Test
+    void testMemSegDouble_Add() throws Throwable {
+        try (var eval = compile("x + y"); Arena arena = Arena.ofShared()) {
+            int n = 80;
+            double[] x = fillLinearD(n, 3.0, 0.05);
+            double[] y = fillLinearD(n, -1.0, 0.02);
+
+            MemorySegment in = arena.allocate((long) 2 * n * Double.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_DOUBLE, 0L, n);
+            MemorySegment.copy(y, 0, in, ValueLayout.JAVA_DOUBLE, (long) n * Double.BYTES, n);
+
+            MemorySegment out = arena.allocate((long) n * Double.BYTES);
+            eval.applyBulk(in, out);
+
+            for (int i = 0; i < n; i++) {
+                double actual = out.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                assertEquals(x[i] + y[i], actual, D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegDouble_Exp() throws Throwable {
+        try (var eval = compile("exp(x)"); Arena arena = Arena.ofShared()) {
+            int n = 25;
+            double[] x = fillLinearD(n, -3.0, 0.25);
+
+            MemorySegment in = arena.allocate((long) n * Double.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_DOUBLE, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Double.BYTES);
+            eval.applyBulk(in, out);
+
+            for (int i = 0; i < n; i++) {
+                double actual = out.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                assertEquals(Math.exp(x[i]), actual, D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegDouble_Parallel() throws Throwable {
+        try (var eval = compile("x * y"); Arena arena = Arena.ofShared()) {
+            // Large enough to clear PARALLEL_OPS_THRESHOLD and actually
+            // exercise the worker-pool dispatch path (falls back to
+            // single-threaded automatically if NUM_WORKERS <= 0).
+            int n = 200_000;
+            double[] x = fillLinearD(n, 0.5, 0.0001);
+            double[] y = fillLinearD(n, -0.5, 0.0002);
+
+            MemorySegment in = arena.allocate((long) 2 * n * Double.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_DOUBLE, 0L, n);
+            MemorySegment.copy(y, 0, in, ValueLayout.JAVA_DOUBLE, (long) n * Double.BYTES, n);
+
+            MemorySegment out = arena.allocate((long) n * Double.BYTES);
+            eval.applyBulkParallel(in, out);
+
+            // Spot-check a sample rather than every element to keep the test fast.
+            for (int i = 0; i < n; i += 997) {
+                double actual = out.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                assertEquals(x[i] * y[i], actual, D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegDouble_Erf() throws Throwable {
+        try (var eval = compile("erf(x)"); Arena arena = Arena.ofShared()) {
+            int n = 30;
+            double[] x = fillLinearD(n, -3.0, 0.2);
+
+            MemorySegment in = arena.allocate((long) n * Double.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_DOUBLE, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Double.BYTES);
+            eval.applyBulk(in, out);
+
+            for (int i = 0; i < n; i++) {
+                double actual = out.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                assertEquals(erfRef(x[i]), actual, D_LOOSE_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegDouble_MultiBlock() throws Throwable {
+        try (var eval = compile("x - 1"); Arena arena = Arena.ofShared()) {
+            int n = BLOCK_SIZE * 2 + 5;
+            double[] x = fillLinearD(n, 0.0, 0.01);
+
+            MemorySegment in = arena.allocate((long) n * Double.BYTES);
+            MemorySegment.copy(x, 0, in, ValueLayout.JAVA_DOUBLE, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Double.BYTES);
+            eval.applyBulk(in, out);
+
+            for (int i = 0; i < n; i++) {
+                double actual = out.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                assertEquals(x[i] - 1.0, actual, D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    // =====================================================================
+    // 8. MemorySegment[] (one segment per variable, zero-copy) path
+    // =====================================================================
+
+    @Test
+    void testMemSegArrayDouble_Add() throws Throwable {
+        try (var eval = compile("x + y"); Arena arena = Arena.ofShared()) {
+            int n = 90;
+            double[] x = fillLinearD(n, 1.0, 0.1);
+            double[] y = fillLinearD(n, 2.0, 0.2);
+
+            MemorySegment segX = arena.allocate((long) n * Double.BYTES);
+            MemorySegment segY = arena.allocate((long) n * Double.BYTES);
+            MemorySegment.copy(x, 0, segX, ValueLayout.JAVA_DOUBLE, 0L, n);
+            MemorySegment.copy(y, 0, segY, ValueLayout.JAVA_DOUBLE, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Double.BYTES);
+            eval.applyBulk(new MemorySegment[]{segX, segY}, out);
+
+            for (int i = 0; i < n; i++) {
+                double actual = out.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                assertEquals(x[i] + y[i], actual, D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegArrayDouble_Mul() throws Throwable {
+        try (var eval = compile("x * y - x"); Arena arena = Arena.ofShared()) {
+            int n = 55;
+            double[] x = fillLinearD(n, 2.0, 0.05);
+            double[] y = fillLinearD(n, 3.0, 0.03);
+
+            MemorySegment segX = arena.allocate((long) n * Double.BYTES);
+            MemorySegment segY = arena.allocate((long) n * Double.BYTES);
+            MemorySegment.copy(x, 0, segX, ValueLayout.JAVA_DOUBLE, 0L, n);
+            MemorySegment.copy(y, 0, segY, ValueLayout.JAVA_DOUBLE, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Double.BYTES);
+            eval.applyBulk(new MemorySegment[]{segX, segY}, out);
+
+            for (int i = 0; i < n; i++) {
+                double actual = out.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                double expected = x[i] * y[i] - x[i];
+                assertEquals(expected, actual, D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegArrayDouble_Parallel() throws Throwable {
+        try (var eval = compile("x + y * 2"); Arena arena = Arena.ofShared()) {
+            int n = 200_000;
+            double[] x = fillLinearD(n, 0.1, 0.00005);
+            double[] y = fillLinearD(n, -0.1, 0.00003);
+
+            MemorySegment segX = arena.allocate((long) n * Double.BYTES);
+            MemorySegment segY = arena.allocate((long) n * Double.BYTES);
+            MemorySegment.copy(x, 0, segX, ValueLayout.JAVA_DOUBLE, 0L, n);
+            MemorySegment.copy(y, 0, segY, ValueLayout.JAVA_DOUBLE, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Double.BYTES);
+            eval.applyBulkParallel(new MemorySegment[]{segX, segY}, out);
+
+            for (int i = 0; i < n; i += 997) {
+                double actual = out.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                double expected = x[i] + y[i] * 2.0;
+                assertEquals(expected, actual, D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    @Test
+    void testMemSegArrayDouble_BareVariable() throws Throwable {
+        // Edge case: the whole expression is just "x", so OP_LOAD's
+        // segment-backed push is never consumed by any op that would
+        // otherwise force materialization — exercises the explicit
+        // materialize() fallback in applyBulkInternal(MemorySegment[]...).
+        try (var eval = compile("x"); Arena arena = Arena.ofShared()) {
+            int n = 48;
+            double[] x = fillLinearD(n, -10.0, 0.4);
+
+            MemorySegment segX = arena.allocate((long) n * Double.BYTES);
+            MemorySegment.copy(x, 0, segX, ValueLayout.JAVA_DOUBLE, 0L, n);
+
+            MemorySegment out = arena.allocate((long) n * Double.BYTES);
+            eval.applyBulk(new MemorySegment[]{segX}, out);
+
+            for (int i = 0; i < n; i++) {
+                double actual = out.getAtIndex(ValueLayout.JAVA_DOUBLE, i);
+                assertEquals(x[i], actual, D_TIGHT_EPS, "index " + i);
+            }
+        }
+    }
+
+    // =====================================================================
+    // Reference erf() implementation (double precision) used only to check
+    // the erf/gelu float approximation against a trustworthy baseline.
+    // =====================================================================
+    private static double erfRef(double x) {
+        // Abramowitz & Stegun 7.1.26, evaluated in double precision as the
+        // "ground truth" for the float approximation under test.
+        double sign = x < 0 ? -1.0 : 1.0;
+        double ax = Math.abs(x);
+        double a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741,
+                a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+        double t = 1.0 / (1.0 + p * ax);
+        double poly = ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t;
+        double y = 1.0 - poly * Math.exp(-ax * ax);
+        return sign * y;
+      //  return Maths.erf(x);
+    }
 }

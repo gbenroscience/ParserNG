@@ -1,4 +1,4 @@
-package com.github.gbenroscience.arrow.tools.box2;
+package com.github.gbenroscience.arrow.tools.box;
 
 /**
  * Controls how {@link ArrowBulkEvaluator} handles Arrow validity (null)

@@ -1,4 +1,4 @@
-package com.github.gbenroscience.arrow.tools.box2;
+package com.github.gbenroscience.arrow.tools.box;
 
 import org.apache.arrow.memory.ArrowBuf;
 
@@ -65,6 +65,34 @@ public final class ArrowMemoryBridge {
             throw new IllegalArgumentException(
                 "ArrowBuf capacity (" + buf.capacity() + " bytes) is smaller than the requested "
                     + elementCount + " doubles (" + byteSize + " bytes)");
+        }
+        return MemorySegment.ofAddress(buf.memoryAddress()).reinterpret(byteSize);
+    }
+
+    /**
+     * Wraps the first {@code elementCount} {@code float} elements of
+     * {@code buf} as a zero-copy {@link MemorySegment}.
+     *
+     * @param buf          the Arrow buffer to wrap; must not be null
+     * @param elementCount the number of {@code float} elements to expose,
+     *                     starting at byte offset 0 of {@code buf}
+     * @return a MemorySegment aliasing {@code buf}'s memory — no copy is made
+     * @throws NullPointerException     if {@code buf} is null
+     * @throws IllegalArgumentException if {@code elementCount} is negative or
+     *                                  {@code buf} does not have enough capacity
+     */
+    public static MemorySegment wrapFloats(ArrowBuf buf, long elementCount) {
+        if (buf == null) {
+            throw new NullPointerException("buf must not be null");
+        }
+        if (elementCount < 0) {
+            throw new IllegalArgumentException("elementCount must not be negative, got " + elementCount);
+        }
+        long byteSize = elementCount * Float.BYTES;
+        if (buf.capacity() < byteSize) {
+            throw new IllegalArgumentException(
+                "ArrowBuf capacity (" + buf.capacity() + " bytes) is smaller than the requested "
+                    + elementCount + " floats (" + byteSize + " bytes)");
         }
         return MemorySegment.ofAddress(buf.memoryAddress()).reinterpret(byteSize);
     }

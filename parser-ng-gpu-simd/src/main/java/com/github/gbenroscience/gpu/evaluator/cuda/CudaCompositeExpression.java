@@ -1,11 +1,12 @@
 package com.github.gbenroscience.gpu.evaluator.cuda;
 
 
+import com.github.gbenroscience.gpu.evaluator.GpuCompositeExpression;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
-import com.github.gbenroscience.gpu.evaluator.GpuCompositeExpression;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * CUDA-backed evaluator for a single compiled expression -- the CUDA
@@ -20,6 +21,23 @@ import com.github.gbenroscience.gpu.evaluator.GpuCompositeExpression;
  * that's what makes the float path a genuine throughput win (half the
  * PCIe/memory traffic per element, full-rate execution even on consumer
  * GPUs where fp64 throughput is deliberately capped well below fp32).
+ *
+ * DEVICE BINDING MODEL: each {@link CudaCompositeExpression} instance is
+ * bound, at construction time, to whichever device {@link #selectDevice}
+ * currently resolves to. That binding is fixed for the instance's whole
+ * lifetime -- an in-flight expression's GPU never changes under it. The
+ * underlying per-device resources (primary context, loaded PTX module,
+ * both kernel functions) are cached in a small registry keyed by device
+ * index and shared by every instance bound to that device, so switching
+ * selection back and forth (e.g. across test methods) does NOT rebuild or
+ * recompile anything after the first time each distinct device is used.
+ * This mirrors {@code OpenClCompositeExpression}'s registry exactly, and is
+ * the direct fix for device selection previously being a one-shot,
+ * JVM-wide decision baked into a static initializer: now it's "which
+ * device will the NEXT constructed instance use", not "which device may
+ * this JVM ever use, once, forever". The {@code cuda.device.index} system
+ * property keeps working exactly as before for anyone already using it --
+ * it's just read fresh on every construction now instead of once.
  *
  * Structural differences from the OpenCL version, all forced by the CUDA
  * driver API's shape rather than by choice:
@@ -42,56 +60,290 @@ import com.github.gbenroscience.gpu.evaluator.GpuCompositeExpression;
  *   context (cuDevicePrimaryCtxRetain) rather than an explicitly created
  *   one specifically so it can be shared: cuCtxSetCurrent(sameContext) is
  *   cheap and thread-safe to call from any thread, unlike juggling
- *   independently-created contexts across threads.
+ *   independently-created contexts across threads. Every dispatch call
+ *   re-asserts its own instance's context as current on the calling thread
+ *   before touching the driver, which is what makes per-instance/per-device
+ *   binding safe even when one thread interleaves calls across instances
+ *   bound to different devices.
+ *
+ * - CUDA has no OpenCL-style "platform" layer -- devices are just indexed
+ *   0..N-1 by the driver directly, so {@link #selectDevice(int)} takes a
+ *   single device index rather than a (platform, device) pair, and there
+ *   is no vendor-selection overload (every CUDA device is, definitionally,
+ *   NVIDIA hardware).
  */
 public final class CudaCompositeExpression implements GpuCompositeExpression {
 
+    /** One enumerated CUDA device with its human-readable identity. */
+    private record CudaDeviceCandidate(int deviceIndex, int deviceHandle, String deviceName,
+            int major, int minor) {
+        String describe() {
+            return "[cuda device " + deviceIndex + "] " + deviceName
+                    + " (compute capability " + major + "." + minor + ")";
+        }
+    }
+
+    /**
+     * Lists every CUDA device this process can currently see, as plain
+     * human-readable descriptions -- e.g. {@code "[cuda device 0] NVIDIA
+     * GeForce RTX 4080 (compute capability 8.9)"}. Call this first, before
+     * guessing at a name substring or index to pass to {@link #selectDevice}.
+     *
+     * Deliberately independent of the context registry: this method does
+     * its own lightweight device enumeration and never retains a primary
+     * context, compiles PTX, or touches the registry -- safe to call any
+     * number of times, at any point, purely for inspection.
+     */
+    public static java.util.List<String> listAvailableDevices() {
+        try (Arena arena = Arena.ofConfined()) {
+            java.util.List<CudaDeviceCandidate> candidates = enumerateDevices(arena);
+            java.util.List<String> descriptions = new java.util.ArrayList<>();
+            for (CudaDeviceCandidate c : candidates) {
+                descriptions.add(c.describe());
+            }
+            return descriptions;
+        } catch (Throwable t) {
+            throw new RuntimeException("Failed to enumerate CUDA devices", t);
+        }
+    }
+
+    private static java.util.List<CudaDeviceCandidate> enumerateDevices(Arena arena) throws Throwable {
+        check((int) CU.cuInit.invoke(0), "cuInit");
+
+        MemorySegment countBuf = arena.allocate(ValueLayout.JAVA_INT);
+        check((int) CU.cuDeviceGetCount.invoke(countBuf), "cuDeviceGetCount");
+        int count = countBuf.get(ValueLayout.JAVA_INT, 0);
+
+        java.util.List<CudaDeviceCandidate> candidates = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            MemorySegment deviceBuf = arena.allocate(ValueLayout.JAVA_INT);
+            check((int) CU.cuDeviceGet.invoke(deviceBuf, i), "cuDeviceGet");
+            int device = deviceBuf.get(ValueLayout.JAVA_INT, 0);
+
+            MemorySegment nameBuf = arena.allocate(256);
+            check((int) CU.cuDeviceGetName.invoke(nameBuf, 256, device), "cuDeviceGetName");
+            String name = nameBuf.getString(0, StandardCharsets.UTF_8);
+
+            MemorySegment majorBuf = arena.allocate(ValueLayout.JAVA_INT);
+            MemorySegment minorBuf = arena.allocate(ValueLayout.JAVA_INT);
+            check((int) CU.cuDeviceGetAttribute.invoke(majorBuf,
+                    CudaBindings.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device),
+                    "cuDeviceGetAttribute(major)");
+            check((int) CU.cuDeviceGetAttribute.invoke(minorBuf,
+                    CudaBindings.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device),
+                    "cuDeviceGetAttribute(minor)");
+            int major = majorBuf.get(ValueLayout.JAVA_INT, 0);
+            int minor = minorBuf.get(ValueLayout.JAVA_INT, 0);
+
+            candidates.add(new CudaDeviceCandidate(i, device, name, major, minor));
+        }
+        return candidates;
+    }
+
+    private static String describeAll(java.util.List<CudaDeviceCandidate> candidates) {
+        StringBuilder sb = new StringBuilder();
+        for (CudaDeviceCandidate c : candidates) {
+            sb.append("  ").append(c.describe()).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Selection precedence, most to least specific -- read fresh every
+     * time a context is resolved (see {@link #resolveContext()}), which is
+     * what makes {@link #selectDevice} affect only instances constructed
+     * after it's called, rather than a single JVM-wide decision:
+     *   1. {@code -Dcuda.device.index=N} (or {@link #selectDevice(int)}) --
+     *      exact device index. This is the same property this class has
+     *      always honored; it's just re-read on every construction now
+     *      instead of once, ever, in a static initializer.
+     *   2. {@code -Dcuda.gpu.name=<substring>} (or
+     *      {@link #selectDevice(String)}) -- case-insensitive substring
+     *      match against the device's name (e.g. "4080", "A100").
+     *   3. Default: device 0 -- the "just work on whatever's there"
+     *      behavior for a single-GPU machine.
+     */
+    private static CudaDeviceCandidate selectCandidate(java.util.List<CudaDeviceCandidate> candidates) {
+        String indexProp = System.getProperty("cuda.device.index");
+        if (indexProp != null && !indexProp.isBlank()) {
+            int deviceIndex = Integer.parseInt(indexProp.trim());
+            for (CudaDeviceCandidate c : candidates) {
+                if (c.deviceIndex() == deviceIndex) {
+                    return c;
+                }
+            }
+            throw new IllegalStateException(
+                    "No CUDA device at cuda.device.index=" + deviceIndex + ". Available devices:\n"
+                    + describeAll(candidates));
+        }
+
+        String nameProp = System.getProperty("cuda.gpu.name");
+        if (nameProp != null && !nameProp.isBlank()) {
+            String needle = nameProp.trim().toLowerCase(java.util.Locale.ROOT);
+            for (CudaDeviceCandidate c : candidates) {
+                if (c.deviceName().toLowerCase(java.util.Locale.ROOT).contains(needle)) {
+                    return c;
+                }
+            }
+            throw new IllegalStateException(
+                    "No CUDA device matching cuda.gpu.name=\"" + nameProp + "\" found. Available devices:\n"
+                    + describeAll(candidates));
+        }
+
+        return candidates.get(0);
+    }
+
+    // ================= device selection =================
+
+    /**
+     * Selects, by exact device index, which GPU the NEXT constructed
+     * {@link CudaCompositeExpression} (or the next
+     * {@link CudaExpressionBridge}/{@code GpuExpressionBridge} call) will
+     * bind to. Use once you've already seen the available devices (e.g.
+     * via {@link #listAvailableDevices()}).
+     *
+     * Safe to call as many times as you like, at any point in a JVM's
+     * lifetime -- selection is resolved fresh on every construction, not
+     * locked in once and forever. The FIRST time a given device index is
+     * selected, its primary context and PTX module are built and cached;
+     * every later {@code selectDevice} call back to that same index reuses
+     * the cached context rather than rebuilding it.
+     *
+     * What this does NOT do: change the device an ALREADY-CONSTRUCTED
+     * instance is using. Device binding is fixed per-instance at
+     * construction time and never changes afterward -- an in-flight
+     * expression's GPU never moves under it. This also isn't a per-call or
+     * per-thread setting: it's a plain JVM system property under the hood
+     * (the same {@code cuda.device.index} property this class has always
+     * read), so don't call it concurrently from one thread while another
+     * thread is mid-construction expecting a different device -- treat it
+     * as "set the default for whatever gets constructed next", called from
+     * one thread at a time.
+     */
+    public static void selectDevice(int deviceIndex) {
+        System.clearProperty("cuda.gpu.name");
+        System.setProperty("cuda.device.index", String.valueOf(deviceIndex));
+    }
+
+    /**
+     * Selects, by case-insensitive substring match against the device
+     * name (e.g. "4080", "A100", "RTX"), which GPU the NEXT constructed
+     * instance will use. Same rules as {@link #selectDevice(int)} apply.
+     * Use {@link #listAvailableDevices()} first if you're not sure what
+     * substring to pass.
+     */
+    public static void selectDevice(String nameSubstring) {
+        System.clearProperty("cuda.device.index");
+        System.setProperty("cuda.gpu.name", nameSubstring);
+    }
+
+    /**
+     * Clears any explicit selection previously set via {@link #selectDevice},
+     * reverting to the default (device 0) for instances constructed after
+     * this call. Existing instances are unaffected either way -- their
+     * device binding was already fixed at their own construction time.
+     */
+    public static void clearDeviceSelection() {
+        System.clearProperty("cuda.device.index");
+        System.clearProperty("cuda.gpu.name");
+    }
+
+    // ================= per-device context registry =================
+
+    /**
+     * FFM bindings, shared by every instance and every device -- nothing
+     * device-specific here, just resolved function pointers into the
+     * driver/NVRTC libraries.
+     */
+    private static final CudaBindings CU = new CudaBindings();
+    private static final NvrtcBindings NVRTC = new NvrtcBindings();
+
+    /**
+     * The GPU context registry: one entry per distinct device index
+     * actually used so far, built the FIRST time that device is selected
+     * and reused (primary context, loaded PTX module, both kernel
+     * functions) by every instance bound to it afterward. This is what
+     * makes repeated {@link #selectDevice} calls cheap after the first use
+     * of each device -- switching back to a previously-used device never
+     * recompiles anything.
+     */
+    private static final ConcurrentHashMap<Integer, CudaContext> CONTEXT_REGISTRY =
+            new ConcurrentHashMap<>();
+
+    /**
+     * Resolves (building and caching if necessary) the CudaContext for
+     * whichever device {@link #selectCandidate} currently points at.
+     * Called once per {@link CudaCompositeExpression} construction -- the
+     * resolved context is then fixed for that instance's entire lifetime.
+     */
+    private static CudaContext resolveContext() {
+        try (Arena arena = Arena.ofConfined()) {
+            java.util.List<CudaDeviceCandidate> candidates = enumerateDevices(arena);
+            if (candidates.isEmpty()) {
+                throw new IllegalStateException("No CUDA devices found");
+            }
+            CudaDeviceCandidate chosen = selectCandidate(candidates);
+            return CONTEXT_REGISTRY.computeIfAbsent(chosen.deviceIndex(), k -> buildContext(chosen));
+        } catch (Throwable t) {
+            if (t instanceof RuntimeException re) {
+                throw re;
+            }
+            throw new RuntimeException("Failed to resolve a CUDA context", t);
+        }
+    }
+
+    private static CudaContext buildContext(CudaDeviceCandidate chosen) {
+        try {
+            return new CudaContext(chosen);
+        } catch (Throwable t) {
+            throw new RuntimeException("Failed to bootstrap CUDA context for " + chosen.describe(), t);
+        }
+    }
+
+    /**
+     * Everything needed to dispatch against ONE specific CUDA device: the
+     * retained primary context, the loaded PTX module, both kernel
+     * functions, and a dispatch lock scoped to just this device. Previously
+     * a JVM-wide singleton built once in a static initializer (one
+     * CudaContext, ever, for the whole process); now one instance per
+     * distinct device index actually used, cached in {@link #CONTEXT_REGISTRY}
+     * and shared by every {@link CudaCompositeExpression} bound to that
+     * device -- exactly mirroring {@code OpenClCompositeExpression}'s
+     * {@code GpuContext}.
+     */
     private static final class CudaContext {
 
-        static final CudaBindings CU = new CudaBindings();
-        static final NvrtcBindings NVRTC = new NvrtcBindings();
+        final int device;
+        final MemorySegment CONTEXT;   // CUcontext (opaque handle)
+        final MemorySegment MODULE;    // CUmodule -- holds BOTH kernels
+        final MemorySegment FUNCTION_F64; // CUfunction "interpret"
+        final MemorySegment FUNCTION_F32; // CUfunction "interpretF32"
+        final String selectedDeviceDescription;
 
-        static final int DEVICE;
-        static final MemorySegment CONTEXT;   // CUcontext (opaque handle)
-        static final MemorySegment MODULE;    // CUmodule -- holds BOTH kernels
-        static final MemorySegment FUNCTION_F64; // CUfunction "interpret"
-        static final MemorySegment FUNCTION_F32; // CUfunction "interpretF32"
+        // CudaContext instances are shared by every CudaCompositeExpression
+        // bound to the same device. cuCtxSynchronize() blocks until ALL
+        // preceding work on this context has completed (context-wide, not
+        // stream- or caller-specific), so kernel dispatch against a shared
+        // context must be serialized per-device -- same rationale as the
+        // OpenCL path's per-GpuContext dispatchLock. Scoped per-CudaContext
+        // (not one global lock across every device) so dispatches to
+        // DIFFERENT devices don't serialize against each other unnecessarily.
+        final Object dispatchLock = new Object();
 
-        static {
+        CudaContext(CudaDeviceCandidate chosen) throws Throwable {
             try (Arena bootstrap = Arena.ofConfined()) {
-                check((int) CU.cuInit.invoke(0), "cuInit");
-
-                MemorySegment countBuf = bootstrap.allocate(ValueLayout.JAVA_INT);
-                check((int) CU.cuDeviceGetCount.invoke(countBuf), "cuDeviceGetCount");
-                if (countBuf.get(ValueLayout.JAVA_INT, 0) < 1) {
-                    throw new IllegalStateException("No CUDA devices found");
-                }
-
-                int deviceIndex = Integer.getInteger("cuda.device.index", 0);
-                MemorySegment deviceBuf = bootstrap.allocate(ValueLayout.JAVA_INT);
-                check((int) CU.cuDeviceGet.invoke(deviceBuf, deviceIndex), "cuDeviceGet");
-                DEVICE = deviceBuf.get(ValueLayout.JAVA_INT, 0);
-
-                MemorySegment majorBuf = bootstrap.allocate(ValueLayout.JAVA_INT);
-                MemorySegment minorBuf = bootstrap.allocate(ValueLayout.JAVA_INT);
-                check((int) CU.cuDeviceGetAttribute.invoke(majorBuf,
-                        CudaBindings.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, DEVICE),
-                        "cuDeviceGetAttribute(major)");
-                check((int) CU.cuDeviceGetAttribute.invoke(minorBuf,
-                        CudaBindings.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, DEVICE),
-                        "cuDeviceGetAttribute(minor)");
-                int major = majorBuf.get(ValueLayout.JAVA_INT, 0);
-                int minor = minorBuf.get(ValueLayout.JAVA_INT, 0);
+                this.device = chosen.deviceHandle();
+                this.selectedDeviceDescription = chosen.describe();
 
                 MemorySegment ctxBuf = bootstrap.allocate(ValueLayout.ADDRESS);
-                check((int) CU.cuDevicePrimaryCtxRetain.invoke(ctxBuf, DEVICE),
+                check((int) CU.cuDevicePrimaryCtxRetain.invoke(ctxBuf, device),
                         "cuDevicePrimaryCtxRetain");
                 CONTEXT = ctxBuf.get(ValueLayout.ADDRESS, 0);
                 check((int) CU.cuCtxSetCurrent.invoke(CONTEXT), "cuCtxSetCurrent");
 
                 // ONE NVRTC compile -- the resulting PTX module contains
                 // BOTH "interpret" and "interpretF32" (see CudaKernelSource).
-                String ptx = compileToPtx(bootstrap, major, minor);
+                String ptx = compileToPtx(bootstrap, chosen.major(), chosen.minor());
 
                 MemorySegment ptxSrc = bootstrap.allocateFrom(ptx);
                 MemorySegment moduleBuf = bootstrap.allocate(ValueLayout.ADDRESS);
@@ -112,8 +364,12 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
                         "cuModuleGetFunction(interpretF32)");
                 FUNCTION_F32 = fnBufF32.get(ValueLayout.ADDRESS, 0);
 
-            } catch (Throwable t) {
-                throw new ExceptionInInitializerError(t);
+                // Printed once per DISTINCT device the first time it's
+                // built (not once per instance -- computeIfAbsent in
+                // resolveContext ensures this constructor only runs once
+                // per registry key), so it's obvious from program output
+                // which of possibly several installed GPUs is in play.
+                System.err.println("[ParserNG GPU] CUDA using " + selectedDeviceDescription);
             }
         }
 
@@ -160,32 +416,36 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
             NVRTC.nvrtcGetProgramLog.invoke(program, logBuf);
             return logBuf.getString(0, StandardCharsets.UTF_8);
         }
+    }
 
-        private static void check(int status, String call) {
-            if (status != CudaBindings.CUDA_SUCCESS) {
-                throw new IllegalStateException("CUDA error in " + call + ": code " + status);
-            }
-        }
-
-        private static void checkNvrtc(int status, String call) {
-            if (status != NvrtcBindings.NVRTC_SUCCESS) {
-                throw new IllegalStateException("NVRTC error in " + call + ": code " + status);
-            }
+    private static void check(int status, String call) {
+        if (status != CudaBindings.CUDA_SUCCESS) {
+            throw new IllegalStateException("CUDA error in " + call + ": code " + status);
         }
     }
 
-    // CudaContext.FUNCTION_F64/FUNCTION_F32/CONTEXT are static singletons
-    // shared by every instance and thread. Setting up kernelParams and
-    // launching against a shared function is a check-then-act sequence
-    // that must be serialized -- same rationale as the OpenCL path's
-    // DISPATCH_LOCK. One lock covers both precisions (see that class's
-    // javadoc for the same tradeoff note): simpler, at the cost of
-    // serializing double- and float-path dispatches against each other too.
-    private static final Object DISPATCH_LOCK = new Object();
+    private static void checkNvrtc(int status, String call) {
+        if (status != NvrtcBindings.NVRTC_SUCCESS) {
+            throw new IllegalStateException("NVRTC error in " + call + ": code " + status);
+        }
+    }
 
     private static final int DEFAULT_BLOCK_SIZE = 256;
 
-    private final CudaBindings cu = CudaContext.CU;
+    /**
+     * A human-readable description of the exact CUDA device this instance
+     * is bound to -- e.g. {@code "[cuda device 0] NVIDIA GeForce RTX 4080
+     * (compute capability 8.9)"}. Fixed for this instance's whole lifetime
+     * (see class javadoc's "DEVICE BINDING MODEL"); confirms which device
+     * a prior {@link #selectDevice} call actually resolved to.
+     * @return
+     */
+    public String getDeviceDescription() {
+        return ctx.selectedDeviceDescription;
+    }
+
+    private final CudaContext ctx;
+    private final CudaBindings cu = CU;
 
     private final Arena arena = Arena.ofShared();
     private final long opcodesDevice;
@@ -221,6 +481,9 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
             int instructionCount, int varCount) {
         this.instructionCount = instructionCount;
         this.varCount = varCount;
+        // Resolved ONCE, here, and fixed for this instance's whole
+        // lifetime -- see class javadoc's "DEVICE BINDING MODEL".
+        this.ctx = resolveContext();
 
         try {
             this.opcodesDevice = uploadIntArray(opcodes);
@@ -310,11 +573,11 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
     }
 
     private void dispatchScatter(MemorySegment[] in, MemorySegment out, long rowBytes, int dataSize) throws Throwable {
-        synchronized (DISPATCH_LOCK) {
+        synchronized (ctx.dispatchLock) {
             ensureDeviceBuffers((long) varCount * rowBytes, out.byteSize());
 
             try {
-                check((int) cu.cuCtxSetCurrent.invoke(CudaContext.CONTEXT), "cuCtxSetCurrent");
+                check((int) cu.cuCtxSetCurrent.invoke(ctx.CONTEXT), "cuCtxSetCurrent");
 
                 for (int slot = 0; slot < varCount; slot++) {
                     long offset = (long) slot * rowBytes;
@@ -328,7 +591,7 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
 
                     int gridDimX = (dataSize + DEFAULT_BLOCK_SIZE - 1) / DEFAULT_BLOCK_SIZE;
                     check((int) cu.cuLaunchKernel.invoke(
-                            CudaContext.FUNCTION_F64,
+                            ctx.FUNCTION_F64,
                             gridDimX, 1, 1,
                             DEFAULT_BLOCK_SIZE, 1, 1,
                             0,
@@ -348,11 +611,11 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
     }
 
     private void dispatch(MemorySegment in, MemorySegment out, int dataSize) throws Throwable {
-        synchronized (DISPATCH_LOCK) {
+        synchronized (ctx.dispatchLock) {
             ensureDeviceBuffers(in.byteSize(), out.byteSize());
 
             try {
-                check((int) cu.cuCtxSetCurrent.invoke(CudaContext.CONTEXT), "cuCtxSetCurrent");
+                check((int) cu.cuCtxSetCurrent.invoke(ctx.CONTEXT), "cuCtxSetCurrent");
 
                 check((int) cu.cuMemcpyHtoD.invoke(inputDevice, in, in.byteSize()), "cuMemcpyHtoD(in)");
 
@@ -362,7 +625,7 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
 
                     int gridDimX = (dataSize + DEFAULT_BLOCK_SIZE - 1) / DEFAULT_BLOCK_SIZE;
                     check((int) cu.cuLaunchKernel.invoke(
-                            CudaContext.FUNCTION_F64,
+                            ctx.FUNCTION_F64,
                             gridDimX, 1, 1,
                             DEFAULT_BLOCK_SIZE, 1, 1,
                             0,
@@ -447,11 +710,11 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
     }
 
     private void dispatchScatterF32(MemorySegment[] in, MemorySegment out, long rowBytes, int dataSize) throws Throwable {
-        synchronized (DISPATCH_LOCK) {
+        synchronized (ctx.dispatchLock) {
             ensureDeviceBuffersF32((long) varCount * rowBytes, out.byteSize());
 
             try {
-                check((int) cu.cuCtxSetCurrent.invoke(CudaContext.CONTEXT), "cuCtxSetCurrent");
+                check((int) cu.cuCtxSetCurrent.invoke(ctx.CONTEXT), "cuCtxSetCurrent");
 
                 for (int slot = 0; slot < varCount; slot++) {
                     long offset = (long) slot * rowBytes;
@@ -465,7 +728,7 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
 
                     int gridDimX = (dataSize + DEFAULT_BLOCK_SIZE - 1) / DEFAULT_BLOCK_SIZE;
                     check((int) cu.cuLaunchKernel.invoke(
-                            CudaContext.FUNCTION_F32,
+                            ctx.FUNCTION_F32,
                             gridDimX, 1, 1,
                             DEFAULT_BLOCK_SIZE, 1, 1,
                             0,
@@ -485,11 +748,11 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
     }
 
     private void dispatchF32(MemorySegment in, MemorySegment out, int dataSize) throws Throwable {
-        synchronized (DISPATCH_LOCK) {
+        synchronized (ctx.dispatchLock) {
             ensureDeviceBuffersF32(in.byteSize(), out.byteSize());
 
             try {
-                check((int) cu.cuCtxSetCurrent.invoke(CudaContext.CONTEXT), "cuCtxSetCurrent");
+                check((int) cu.cuCtxSetCurrent.invoke(ctx.CONTEXT), "cuCtxSetCurrent");
 
                 check((int) cu.cuMemcpyHtoD.invoke(inputDeviceF32, in, in.byteSize()), "cuMemcpyHtoD(in, f32)");
 
@@ -499,7 +762,7 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
 
                     int gridDimX = (dataSize + DEFAULT_BLOCK_SIZE - 1) / DEFAULT_BLOCK_SIZE;
                     check((int) cu.cuLaunchKernel.invoke(
-                            CudaContext.FUNCTION_F32,
+                            ctx.FUNCTION_F32,
                             gridDimX, 1, 1,
                             DEFAULT_BLOCK_SIZE, 1, 1,
                             0,
@@ -701,12 +964,7 @@ public final class CudaCompositeExpression implements GpuCompositeExpression {
             return device;
         }
     }
-
-    private static void check(int status, String call) {
-        if (status != CudaBindings.CUDA_SUCCESS) {
-            throw new IllegalStateException("CUDA error in " + call + ": code " + status);
-        }
-    }
+   
 
     @Override
     public void close() {

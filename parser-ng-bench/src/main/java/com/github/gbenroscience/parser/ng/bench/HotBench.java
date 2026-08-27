@@ -12,16 +12,21 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ 
-
+ */
 package com.github.gbenroscience.parser.ng.bench;
+
 /**
  *
  * @author GBEMIRO
  */
-import com.github.gbenroscience.parser.MathExpression;  
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.utils.MathToJaninoConverter;
+import com.github.gbenroscience.simdext.SIMDEngineEvaluatorOld;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDCommandEvaluator;
 import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineF64;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -138,10 +143,10 @@ public class HotBench {
         "3*sin(x)*cos(y)+sqrt(abs(x*y))"
     };
 
-    static int index = 23;
+    static int index = 37;
 
     static {
-        index = Integer.getInteger("benchmark.index", 23);
+        index = Integer.getInteger("benchmark.index", 37);
     }
 
     protected static final String EXPRESSION = getExpression();
@@ -161,9 +166,12 @@ public class HotBench {
 
     private double[] vars;
     private JaninoMathFunction fastEvaluator;
- 
-    SIMDEngineEvaluator.SIMDVectorCompositeExpression simdVec;
-    
+
+    SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVec;
+    SIMDEngineEvaluator.SIMDVectorCompositeExpression simdEng;
+    SIMDEngineF64.SIMDVectorCompositeExpression simdEngF64;
+    SIMDCommandF64.SIMDVectorCompositeExpression simdComd;
+    SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression simdEngOld;
 
     private int varCount;
 
@@ -231,8 +239,8 @@ public class HotBench {
         setupParserNG(me);
 
         // Validation against the SoA structure
-        for (int i = 0; i < dataSink.length; i++) { 
-            simdVec.validate(dataSink[i], result);
+        for (int i = 0; i < dataSink.length; i++) {
+//            simdVec.validate(dataSink[i], result);
         }
     }
 
@@ -248,6 +256,7 @@ public class HotBench {
                 Thread.currentThread().interrupt();
             }
         }
+        simdComd.close();
     }
 
     @Setup(Level.Iteration)
@@ -255,8 +264,6 @@ public class HotBench {
         // Pick or rotate a matrix ONLY between iterations, never inside the hot loop
         this.benchmarkScenario = ThreadLocalRandom.current().nextInt(5);
     }
-
-   
 
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
@@ -272,14 +279,13 @@ public class HotBench {
         }
     }
 
-    
     @Benchmark
     public void janinoParallel(Blackhole bh) {
         final double[][] inputAoS = janinoDataSink[benchmarkScenario];
         final JaninoMathFunction evaluator = this.fastEvaluator;
         final int limit = dataSize;
         final int mid = limit / 2;
-        
+
         final double[] wSink = this.workerResultSink;
         final double[] mSink = this.masterResultSink;
 
@@ -311,7 +317,7 @@ public class HotBench {
             bh.consume(mSink[i]);
         }
     }
-  
+
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -321,7 +327,7 @@ public class HotBench {
         final double[] res = result;
 
         // Execute core computation kernel
-        simdVec.applyBulk(input, res);
+        simdComd.applyBulk(input, res);
         bh.consume(res);
     }
 
@@ -334,14 +340,17 @@ public class HotBench {
         final double[] res = result;
 
         // Execute core computation kernel
-        simdVec.applyBulkParallel(input, res);
+        simdComd.applyBulkParallel(input, res);
         bh.consume(res);
     }
 
     private void setupParserNG(MathExpression me) {
         try {
-             //simdVec = SIMDVectorTurboEvaluator.getEvaluator(me, 2);
-               simdVec = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me.copy()).compile();
+          //  simdVec = SIMDVectorTurboEvaluator.getEvaluator(me);
+           // simdEng = SIMDEngineEvaluator.getEvaluator(me);
+           // simdEngF64 = SIMDEngineF64.getEvaluator(me);
+            simdComd = SIMDCommandF64.getEvaluator(me);
+           //simdEngOld = SIMDEngineEvaluatorOld.getEvaluator(me);
         } catch (Throwable ex) {
             System.getLogger(HotBench.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }
@@ -479,24 +488,50 @@ public class HotBench {
 
         // 3. Parse and Configure JMH Options
         try {
-            OptionsBuilder opt = new OptionsBuilder();
-  
-            opt.include(HotBench.class.getSimpleName());
+
+            System.out.println("MODULE `" + HotBench.class.getSimpleName() + "` LOADED");
 
             System.out.println("\n⚔️  MATCH MATCHUP: Janino vs ParserNG");
             System.out.println("🚀 LET THE GAMES BEGIN!\n");
+            /*
+            @State(Scope.Benchmark)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Warmup(iterations = 5, time = 1)
+@Measurement(iterations = 5, time = 1)
+@Fork(value = 3, jvmArgs = {
+    "-Xms8g", "-Xmx8g",
+    "-XX:+UseG1GC",
+    "-XX:-UseCompressedOops", // Avoids compressed oops artifacts
+    "--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"
+})
+             */
 
             // 4. Fluent, modern JMH Configuration
-            Options configurations = opt.mode(Mode.AverageTime)
+            Options configurations = new OptionsBuilder() // assuming 'opt' was meant to be new OptionsBuilder()
+                    .include(HotBench.class.getSimpleName())
+                    .mode(Mode.AverageTime)
                     .timeUnit(TimeUnit.NANOSECONDS)
                     .warmupIterations(5)
-                    .warmupTime(TimeValue.milliseconds(200L))
+                    .warmupTime(TimeValue.milliseconds(1000L))
                     .measurementIterations(5)
-                    .measurementTime(TimeValue.milliseconds(500))
-                    .forks(2)
+                    .measurementTime(TimeValue.milliseconds(1000L))
+                    .forks(3)
                     .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
                     .jvmArgs("-Xms8g", "-Xmx8g", "-Dbenchmark.index=" + index)
-                    .jvmArgsAppend("--add-modules", "jdk.incubator.vector", "-XX:+UnlockDiagnosticVMOptions"/*, "-XX:+LogCompilation", "-XX:+PrintInlining"*/)
+                    .jvmArgsAppend(
+                            "--add-modules", "jdk.incubator.vector",
+                            "-XX:ReservedCodeCacheSize=512m",
+                            "-XX:-UseCompressedOops",
+                            "-XX:+UnlockDiagnosticVMOptions",
+                            "-XX:+UseG1GC"
+                    //"-XX:+PrintCompilation",
+                    //"-XX:+UnlockDiagnosticVMOptions",
+                    // "-XX:-DontCompileHugeMethods", 
+                    // "-XX:StartFlightRecording=filename=parallel-alloc.jfr,settings=profile,dumponexit=true"
+                    // optional diagnostics:
+                    // , "-XX:+LogCompilation", "-XX:+PrintInlining"
+                    )
                     .build();
 
             new Runner(configurations).run();

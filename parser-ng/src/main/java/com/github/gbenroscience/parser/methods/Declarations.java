@@ -153,6 +153,7 @@ public class Declarations {
     public static final String VMA = "vma";// vma(A, B, C) -> A * B + C
     public static final String IF = "if";//if(x > 0.5, x * 2, 0)
     public static final String ERF = "erf";
+    public static final String ERFC = "erfc";
     public static final String GELU = "gelu";
     public static final String FAST_GELU = "fast_gelu";
     public static final String SWIGLU = "swiglu";
@@ -312,7 +313,7 @@ public class Declarations {
             ARC_COT_ALT, ARC_SECH_ALT, ARC_COSECH_ALT, ARC_COTH_ALT,
             LN_INV_ALT, LG_INV_ALT, LOG_INV_ALT, SQRT, CBRT, INVERSE,
             ABS, CEIL, FLOOR, IF,
-            ERF, GELU, GEGLU, SWIGLU, FAST_GELU,
+            ERF, ERFC, GELU, GEGLU, SWIGLU, FAST_GELU,
             SQUARE, CUBE, POW, ATAN2, FACT, COMBINATION, PERMUTATION, SUM, LIST_SUM, PROD,
             MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED,
             COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE,
@@ -473,6 +474,8 @@ public class Declarations {
             case FACT:
                 return TYPE.NUMBER.toString();
             case ERF:
+                return TYPE.NUMBER.toString();
+            case ERFC:
                 return TYPE.NUMBER.toString();
             case GELU:
                 return TYPE.NUMBER.toString();

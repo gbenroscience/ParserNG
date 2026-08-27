@@ -2,6 +2,7 @@ package com.github.gbenroscience.simd.turbo.tools;
 
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.parser.MathExpression.VariableRegistry;
 import com.github.gbenroscience.parser.MathExpressionTreeDepth;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.simd.turbo.tools.utils.HardwareDetector;
@@ -552,6 +553,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         return stackDepth;
     }
 
+    public VariableRegistry getVariableRegistry() {
+        return registry;
+    }
+
     @Override
     public SIMDCompositeExpression compile() throws Throwable {
         return new BatchedVectorCompositeExpression(compiledScalarHandle, opcodes, targetSlots,
@@ -565,7 +570,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * will kick in at this value
          */
         public static final int PARALLEL_OPS_THRESHOLD = 1024;
-        // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (2048 * 8 bytes = 16KB)
+        // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (1024 * 8 bytes = 8KB)
         public static final int BLOCK_SIZE = 1024;
         public static final int BLOCK_SIZE_256 = 256;
         public static final int BLOCK_SIZE_512 = 512;
@@ -632,25 +637,36 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
             return dcores;
         }
 
+        // Public constructor used when creating BatchedVectorCompositeExpression directly
         public BatchedVectorCompositeExpression(MethodHandle handle, int[] ops, int[] targetSlots,
                 double[] consts, int count, int varCount) {
+            this(handle, ops, targetSlots, consts, count, varCount, true);
+        }
+
+// Protected constructor for subclasses to control worker initialization
+        protected BatchedVectorCompositeExpression(MethodHandle handle, int[] ops, int[] targetSlots,
+                double[] consts, int count, int varCount,
+                boolean startWorkers) {
             this.scalarHandle = handle;
-            // DEFENSIVE: Make copies to isolate from VectorTurboEvaluator mutations
             this.opcodes = Arrays.copyOf(ops, ops.length);
             this.targetSlots = Arrays.copyOf(targetSlots, targetSlots.length);
             this.literalConstants = Arrays.copyOf(consts, consts.length);
             this.instructionCount = count;
             this.varCount = varCount;
 
-            // Initialize the dedicated worker threads ONCE when this expression is compiled/created
+            if (startWorkers) {
+                initWorkerThreads();
+            }
+        }
+
+        private void initWorkerThreads() {
             int dcores = HardwareDetector.detectPhysicalCores();
-            // Optional: cap to logical in case override lies
             this.cores = Math.min(dcores, Runtime.getRuntime().availableProcessors());
             this.workers = new WorkerThread[cores];
 
             for (int i = 0; i < cores; i++) {
                 workers[i] = new WorkerThread(i);
-                workers[i].setDaemon(true); // Ensures the JVM can shutdown cleanly
+                workers[i].setDaemon(true);
                 workers[i].start();
             }
         }
@@ -724,6 +740,38 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                     state = STATE_FINISHED;
                     LockSupport.unpark(masterThread);
                 }
+            }
+        }
+
+        public void validate(float[][] variables, float[] output) {
+            // 1. Fail fast, avoid String.format unless throwing
+            if (variables == null || output == null) {
+                throw new IllegalArgumentException("Null input");
+            }
+
+            // 2. Cache values to local variables to avoid multiple array lookups
+            final int varLen = variables.length;
+            final int outLen = output.length;
+
+            if (varLen != this.varCount) {
+                throw new IllegalArgumentException("Stride mismatch");
+            }
+
+            // 3. Optional: Only check inner length if you really need absolute safety
+            // Only perform this if the performance impact of O(varCount) is acceptable.
+            for (int i = 0; i < varLen; i++) {
+                if (variables[i] == null || variables[i].length < outLen) {
+                    throw new IllegalArgumentException("Jagged array or size mismatch");
+                }
+            }
+        }
+
+        public void validate(float[] flatVariables, float[] output) {
+            int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0 ? flatVariables.length : -1;
+            int stride = this.varCount;
+            if (totalSamples != stride * output.length) {
+                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]",
+                        totalSamples, stride * output.length));
             }
         }
 

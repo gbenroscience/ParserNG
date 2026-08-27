@@ -1446,6 +1446,9 @@ public class Maths {                       //3.14159265358979323846;
         // Re-apply the original sign of x natively
         return Math.copySign(absErf, x);
     }
+    
+    
+    
 
     public static double erf(double x) {
         return CodyMath.erf(x);
@@ -1455,6 +1458,13 @@ public class Maths {                       //3.14159265358979323846;
         return CodyMath.erfc(x);
     }
 
+    public static float erf(float x) {
+        return CodyMathFloat.erf(x);
+    }
+
+    public static float erfc(float x) {
+        return CodyMathFloat.erfc(x);
+    }
     // Assumed to exist in your class:
     // public static double erf(double x) { ... }
     // public static double fastErf(double x) { ... }

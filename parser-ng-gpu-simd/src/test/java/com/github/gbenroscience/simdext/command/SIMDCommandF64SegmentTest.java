@@ -13,12 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.simdext;
+package com.github.gbenroscience.simdext.command;
 
 /**
  *
  * @author GBEMIRO
  */
+import com.github.gbenroscience.simdext.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -35,8 +36,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
+import com.github.gbenroscience.parser.MathExpression;  
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandSegmentF64;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -69,10 +70,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * used here with high confidence.
  * =====================================================================================
  */
-class SIMDEngineEvaluatorZeroCopyTest {
+class SIMDCommandF64SegmentTest {
 
     private static final long SEED = 42L;
-    private final List<SIMDEngineEvaluator.SIMDVectorCompositeExpression> openEvaluators = new ArrayList<>();
+    private final List<SIMDCommandSegmentF64.SIMDVectorCompositeExpression> openEvaluators = new ArrayList<>();
 
     @AfterEach
     void closeEvaluators() {
@@ -88,14 +89,14 @@ class SIMDEngineEvaluatorZeroCopyTest {
     // =====================================================================
     // Helpers
     // =====================================================================
-    private SIMDEngineEvaluator.SIMDVectorCompositeExpression compile(String expr) throws Throwable {
-        var evaluator = SIMDEngineEvaluator.getEvaluator(expr);
+    private SIMDCommandSegmentF64.SIMDVectorCompositeExpression compile(String expr) throws Throwable {
+        var evaluator = SIMDCommandSegmentF64.getEvaluator(expr);
         openEvaluators.add(evaluator);
         return evaluator;
     }
 
-    private SIMDEngineEvaluator.SIMDVectorCompositeExpression compileParallel(String expr, int workers) throws Throwable {
-        var evaluator = (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(new MathExpression(expr), workers).compile();
+    private SIMDCommandSegmentF64.SIMDVectorCompositeExpression compileParallel(String expr, int workers) throws Throwable {
+        var evaluator = (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(new MathExpression(expr), workers).compile();
         openEvaluators.add(evaluator);
         return evaluator;
     }
@@ -306,14 +307,19 @@ class SIMDEngineEvaluatorZeroCopyTest {
         // constant. This test documents that behavior explicitly so it can't regress
         // silently, and flags it as something parser-ng-arrow's binding layer should
         // special-case (e.g. detect varCount == 0 and fill the output column directly)
-        // rather than something to "fix" inside SIMDEngineEvaluator without more thought
+        // rather than something to "fix" inside SIMDEngineF64Evaluator without more thought
         // about what callers currently depend on.
         var evaluator = compile("42.0");
         double[] out = new double[100];
         java.util.Arrays.fill(out, -999.0); // sentinel so we can detect a no-op
         MemorySegment outSeg = MemorySegment.ofArray(out);
+        try{
         evaluator.applyBulk(new MemorySegment[0], outSeg);
-
+            assertTrue(false, "Index exception should have been thrown for missing variable slots since expression is a constant one");
+        }catch(IndexOutOfBoundsException e){
+            assertTrue(true, "constant expression does not need to be evaluated on a bulk scale");
+            return;
+        }
         for (double v : out) {
             assertEquals(-999.0, v, 0.0,
                     "Expected current no-op behavior for varCount==0 expressions — "
@@ -435,7 +441,7 @@ class SIMDEngineEvaluatorZeroCopyTest {
         for (int i = 0; i < 20; i++) {
             double[][] vars = randomVars(2, n, SEED + i);
             double[] expected = new double[n];
-            SIMDEngineEvaluator.getEvaluator("x+y").applyBulk(vars, expected); // fresh instance as ground truth
+            SIMDCommandSegmentF64.getEvaluator("x+y").applyBulk(vars, expected); // fresh instance as ground truth
 
             double[] actual = new double[n];
             evaluator.applyBulk(toSegments(vars), MemorySegment.ofArray(actual));
@@ -470,7 +476,7 @@ class SIMDEngineEvaluatorZeroCopyTest {
                         double[][] vars = randomVars(2, n, seed);
 
                         double[] expected = new double[n];
-                        SIMDEngineEvaluator.getEvaluator("x*y+sin(x)-cos(y)").applyBulk(vars, expected);
+                        SIMDCommandSegmentF64.getEvaluator("x*y+sin(x)-cos(y)").applyBulk(vars, expected);
 
                         double[] actual = new double[n];
                         evaluator.applyBulk(toSegments(vars), MemorySegment.ofArray(actual));

@@ -15,7 +15,6 @@
  */
 package com.github.gbenroscience.simd.turbo.tools.utils;
 
-
 import jdk.incubator.vector.ByteVector;
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.FloatVector;
@@ -28,25 +27,22 @@ import jdk.incubator.vector.VectorSpecies;
  * @author GBEMIRO
  */
 public final class VectorConfig {
+
     // Single source of truth for the entire engine
     public static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
     public static final VectorSpecies<Float> F_SPECIES = FloatVector.SPECIES_PREFERRED;
-    
-    
+
     public static final VectorSpecies<Byte> B_SPECIES = ByteVector.SPECIES_PREFERRED;
     public static final VectorSpecies<Integer> I_SPECIES = IntVector.SPECIES_PREFERRED;
 
     public static final VectorSpecies<Short> S_SPECIES = ShortVector.SPECIES_PREFERRED;
-    
+
     // Derived constants for quick inline compilation references
     public static final int VLEN = SPECIES.length();
     // Derived constants for quick inline compilation references
     public static final int VF_LEN = F_SPECIES.length();
-    
-    
-    
-    
-    
-    
-    private VectorConfig() {} // Non-instantiable
+
+
+    private VectorConfig() {
+    } // Non-instantiable
 }

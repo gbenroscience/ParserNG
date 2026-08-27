@@ -1,8 +1,8 @@
 package com.github.gbenroscience.parser.ng.bench;
 
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.turbo.tools.vector.SIMDCompositeExpression;
-import com.github.gbenroscience.parser.turbo.tools.vector.matrix.FlatMatrixF; 
+import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
+import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
 import org.openjdk.jmh.annotations.*; 
 import org.openjdk.jmh.infra.Blackhole;
@@ -19,7 +19,7 @@ import org.openjdk.jmh.runner.options.TimeValue;
  * Use this to build in the parser-ng-pro directory: mvn clean install -Dgpg.skip
 Use this to run the benchmarks:
 
-java -jar target/benchmarks.jar ActivationBench -prof perfasm
+java -jar target/benchmarks.jar ActivationBenchmarks -prof perfasm
  *
  * @author GBEMIRO
  */
@@ -33,8 +33,8 @@ java -jar target/benchmarks.jar ActivationBench -prof perfasm
 })
 @Warmup(iterations = 5, time = 2)
 @Measurement(iterations = 5, time = 2)
-@OperationsPerInvocation(ActivationBench.N) // Tells JMH to divide total time by N to output ns/element
-public class ActivationBench {
+@OperationsPerInvocation(ActivationBenchmarks.N) // Tells JMH to divide total time by N to output ns/element
+public class ActivationBenchmarks {
 
     // Must be a compile-time constant to be used in the annotation above.
     // 16,777,216 elements represents a square matrix of 4096 x 4096.
@@ -93,7 +93,7 @@ public class ActivationBench {
     }
    public static void main(String[] args) throws RunnerException {
         OptionsBuilder opt = new OptionsBuilder();
-        opt.include(ActivationBench.class.getSimpleName());
+        opt.include(ActivationBenchmarks.class.getSimpleName());
 
         Options configurations = opt.mode(Mode.AverageTime)
                 .timeUnit(TimeUnit.NANOSECONDS)

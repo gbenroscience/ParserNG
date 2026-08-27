@@ -102,9 +102,27 @@
             <artifactId>parser-ng-gpu-simd</artifactId>
             <version>${project.version}</version>
         </dependency>
-        
-        
- 
+        <dependency>
+            <groupId>com.github.gbenroscience</groupId>
+            <artifactId>parser-ng-arrow</artifactId>
+            <version>3.0.5</version>
+        </dependency>        
+        <dependency>
+            <groupId>org.apache.arrow.gandiva</groupId>
+            <artifactId>arrow-gandiva</artifactId>
+            <version>19.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-netty</artifactId>
+            <version>19.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-unsafe</artifactId>
+            <version>19.0.0</version>
+            <scope>runtime</scope>
+        </dependency>
         <!--Parsii-->
         <dependency>
             <groupId>com.scireum</groupId>

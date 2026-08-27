@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simdext.turbo.tools;
+package com.github.gbenroscience.simdext.turbo.tools.command;
 
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.parser.MathExpression;
@@ -9,8 +9,12 @@ import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.Bat
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
+
 import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.lang.ref.Cleaner;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -31,30 +35,30 @@ import jdk.incubator.vector.*;
  * 
  *
  */
-public class SIMDCommandEvaluator extends VectorTurboEvaluator {
+public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
 
-    public SIMDCommandEvaluator(MathExpression me) throws Throwable {
+    public SIMDCommandSegmentF64(MathExpression me) throws Throwable {
         super(me);
     }
 
-    public SIMDCommandEvaluator(MathExpression me, int numWorkers) throws Throwable {
+    public SIMDCommandSegmentF64(MathExpression me, int numWorkers) throws Throwable {
         super(me, numWorkers);
     }
  
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me).compile();
+    public static final SIMDCommandSegmentF64.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
+        return (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(me).compile();
     }
 
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(new MathExpression(expr)).compile();
+    public static final SIMDCommandSegmentF64.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
+        return (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(new MathExpression(expr)).compile();
     }
 
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me, numWorkers).compile();
+    public static final SIMDCommandSegmentF64.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        return (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(me, numWorkers).compile();
     }
 
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(new MathExpression(expr), numWorkers).compile();
+    public static final SIMDCommandSegmentF64.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
+        return (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(new MathExpression(expr), numWorkers).compile();
     }
 
     // 1. Updated Command Interface
@@ -70,6 +74,11 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
         final double[] scratch;
         double[] flatVariables;
         double[][] _2DVariables;
+        // MemorySegment-backed variable sources (off-heap / zero-copy path).
+        // Mutually exclusive with the double[] / double[][] fields above -
+        // whichever init method was called last clears the other pair.
+        MemorySegment flatVariablesSeg;
+        MemorySegment[] _2DVariablesSeg;
         int dataSize;
         int blockStart;
 
@@ -81,6 +90,17 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
         void initForBlock(double[] flat, double[][] _2D, int size, int bStart) {
             this.flatVariables = flat;
             this._2DVariables = _2D;
+            this.flatVariablesSeg = null;
+            this._2DVariablesSeg = null;
+            this.dataSize = size;
+            this.blockStart = bStart;
+        }
+
+        void initForBlockSeg(MemorySegment flatSeg, MemorySegment[] _2DSeg, int size, int bStart) {
+            this.flatVariables = null;
+            this._2DVariables = null;
+            this.flatVariablesSeg = flatSeg;
+            this._2DVariablesSeg = _2DSeg;
             this.dataSize = size;
             this.blockStart = bStart;
         }
@@ -110,8 +130,15 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             if (ctx.flatVariables != null) {
                 int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
                 System.arraycopy(ctx.flatVariables, srcOff, ctx.scratch, destOff, n);
-            } else {
+            } else if (ctx._2DVariables != null) {
                 System.arraycopy(ctx._2DVariables[slotIdx], ctx.blockStart, ctx.scratch, destOff, n);
+            } else if (ctx.flatVariablesSeg != null) {
+                long srcOff = ((long) slotIdx * ctx.dataSize) + ctx.blockStart;
+                MemorySegment.copy(ctx.flatVariablesSeg, ValueLayout.JAVA_DOUBLE, srcOff * ValueLayout.JAVA_DOUBLE.byteSize(),
+                        ctx.scratch, destOff, n);
+            } else {
+                MemorySegment.copy(ctx._2DVariablesSeg[slotIdx], ValueLayout.JAVA_DOUBLE,
+                        (long) ctx.blockStart * ValueLayout.JAVA_DOUBLE.byteSize(), ctx.scratch, destOff, n);
             }
         }
     }
@@ -661,6 +688,10 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             private double[][] vars2D;
             private double[] vars1D;
             private double[] output;
+            // MemorySegment-backed task inputs/output (off-heap / zero-copy path)
+            private MemorySegment[] vars2DSeg;
+            private MemorySegment vars1DSeg;
+            private MemorySegment outputSeg;
             private int dataSize;
             private int startIdx;
             private int length;
@@ -678,7 +709,10 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             public void submitTask2D(double[][] vars, double[] output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars2D = vars;
                 this.vars1D = null;
+                this.vars2DSeg = null;
+                this.vars1DSeg = null;
                 this.output = output;
+                this.outputSeg = null;
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
@@ -690,7 +724,40 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             public void submitTask1D(double[] vars, double[] output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars1D = vars;
                 this.vars2D = null;
+                this.vars2DSeg = null;
+                this.vars1DSeg = null;
                 this.output = output;
+                this.outputSeg = null;
+                this.dataSize = dataSize;
+                this.startIdx = startIdx;
+                this.length = length;
+                this.masterThread = master;
+                this.taskState = 1;
+                LockSupport.unpark(this);
+            }
+
+            public void submitTaskSeg2D(MemorySegment[] vars, MemorySegment output, int dataSize, int startIdx, int length, Thread master) {
+                this.vars2DSeg = vars;
+                this.vars1DSeg = null;
+                this.vars2D = null;
+                this.vars1D = null;
+                this.outputSeg = output;
+                this.output = null;
+                this.dataSize = dataSize;
+                this.startIdx = startIdx;
+                this.length = length;
+                this.masterThread = master;
+                this.taskState = 1;
+                LockSupport.unpark(this);
+            }
+
+            public void submitTaskSeg1D(MemorySegment vars, MemorySegment output, int dataSize, int startIdx, int length, Thread master) {
+                this.vars1DSeg = vars;
+                this.vars2DSeg = null;
+                this.vars1D = null;
+                this.vars2D = null;
+                this.outputSeg = output;
+                this.output = null;
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
@@ -722,12 +789,19 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                         applyBulkInternal(vars2D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
                     } else if (vars1D != null) {
                         applyBulkInternal(vars1D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
+                    } else if (vars2DSeg != null) {
+                        applyBulkInternalSeg(vars2DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
+                    } else if (vars1DSeg != null) {
+                        applyBulkInternalSeg(vars1DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
                     }
 
                     this.taskState = 0;
                     this.vars2D = null;
                     this.vars1D = null;
                     this.output = null;
+                    this.vars2DSeg = null;
+                    this.vars1DSeg = null;
+                    this.outputSeg = null;
 
                     if (reuseLatch.decrementAndGet() == 0 && masterThread != null) {
                         LockSupport.unpark(masterThread);
@@ -821,6 +895,71 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             }
         }
 
+        // --- MemorySegment (off-heap / zero-copy) entry points ---
+        // Same public contract as the double[] / double[][] variants above,
+        // reusing the same masterEvalContext / workerPool / reuseLatch machinery.
+        public void applyBulk(MemorySegment[] variables, MemorySegment output) {
+            int numSamples = (int) (variables[0].byteSize() / ValueLayout.JAVA_DOUBLE.byteSize());
+            applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
+        }
+
+        public void applyBulkParallel(MemorySegment[] variables, MemorySegment output) {
+            if (variables == null || variables.length == 0 || output == null) {
+                return;
+            }
+            int numSamples = (int) (variables[0].byteSize() / ValueLayout.JAVA_DOUBLE.byteSize());
+
+            if (NUM_WORKERS <= 0 || numSamples < PARALLEL_OPS_THRESHOLD) {
+                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
+                return;
+            }
+
+            Thread masterThread = Thread.currentThread();
+            int chunkSize = numSamples / NUM_WORKERS;
+            reuseLatch.set(NUM_WORKERS);
+
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                int startIdx = i * chunkSize;
+                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
+                workerPool[i].submitTaskSeg2D(variables, output, numSamples, startIdx, length, masterThread);
+            }
+
+            while (reuseLatch.get() > 0) {
+                LockSupport.park();
+            }
+        }
+
+        public void applyBulk(MemorySegment variables, MemorySegment output) {
+            int numSamples = (int) (output.byteSize() / ValueLayout.JAVA_DOUBLE.byteSize());
+            applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
+        }
+
+        public void applyBulkParallel(MemorySegment variables, MemorySegment output) {
+            if (variables == null || output == null) {
+                return;
+            }
+            int numSamples = (int) (output.byteSize() / ValueLayout.JAVA_DOUBLE.byteSize());
+
+            if (NUM_WORKERS <= 0 || numSamples < PARALLEL_OPS_THRESHOLD) {
+                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
+                return;
+            }
+
+            Thread masterThread = Thread.currentThread();
+            int chunkSize = numSamples / NUM_WORKERS;
+            reuseLatch.set(NUM_WORKERS);
+
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                int startIdx = i * chunkSize;
+                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
+                workerPool[i].submitTaskSeg1D(variables, output, numSamples, startIdx, length, masterThread);
+            }
+
+            while (reuseLatch.get() > 0) {
+                LockSupport.park();
+            }
+        }
+
         // --- Core Internal Hot-Loops with Vectorized Copy Defenses ---
         private static void applyBulkInternal(double[] flatVariables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, double[] output, int startIdx, int length) {
             final int endIdx = startIdx + length;
@@ -867,6 +1006,57 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                 }
             }
         }
+
+        // --- MemorySegment Core Internal Hot-Loops (mirrors the double[] / double[][] loops above) ---
+        private static void applyBulkInternalSeg(MemorySegment flatVariablesSeg, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, MemorySegment output, int startIdx, int length) {
+            final int endIdx = startIdx + length;
+            final long elemBytes = ValueLayout.JAVA_DOUBLE.byteSize();
+            double[] s = ctx.scratch;
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
+                final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
+                ctx.initForBlockSeg(flatVariablesSeg, null, dataSize, blockStart);
+
+                for (int i = 0; i < executionPlan.length; i++) {
+                    executionPlan[i].execute(ctx, currentBlockSize);
+                }
+
+                // Vectorized output write back (assumes result is at scratch offset 0)
+                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, s, k)
+                            .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < currentBlockSize; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_DOUBLE, blockStart + k, s[k]);
+                }
+            }
+        }
+
+        private static void applyBulkInternalSeg(MemorySegment[] variablesSeg, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, MemorySegment output, int startIdx, int length) {
+            final int endIdx = startIdx + length;
+            final long elemBytes = ValueLayout.JAVA_DOUBLE.byteSize();
+            double[] s = ctx.scratch;
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
+                final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
+                ctx.initForBlockSeg(null, variablesSeg, dataSize, blockStart);
+
+                for (int i = 0; i < executionPlan.length; i++) {
+                    executionPlan[i].execute(ctx, currentBlockSize);
+                }
+
+                // Vectorized output write back
+                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, s, k)
+                            .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < currentBlockSize; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_DOUBLE, blockStart + k, s[k]);
+                }
+            }
+        }
     }
- 
+
+    
+
 }

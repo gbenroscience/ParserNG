@@ -3593,6 +3593,27 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
             return vr;
         }
 
+        /**
+         * Returns every declared variable's name paired with its assigned
+         * frame slot, in ascending slot order — the same left-to-right,
+         * first-appearance order {@link #getSlot(String)} assigned it in.
+         * {@link #getVariables()}, {@link #getSlots()}, and {@link
+         * #getVarsAndSlots()} track the same thing but are private internal
+         * helpers; this is the public surface for callers that need to
+         * reconstruct variable order without re-parsing the expression
+         * string themselves — e.g. ArrowBulkEvaluator, which binds Arrow
+         * columns directly to slots and needs to know which column goes in
+         * which slot.
+         */
+        public Map<String, Integer> getSlotAssignments() {
+            List<Map.Entry<String, Integer>> entries = new ArrayList<>(nameToSlot.entrySet());
+            entries.sort(Map.Entry.comparingByValue());
+            Map<String, Integer> sorted = new LinkedHashMap<>();
+            for (Map.Entry<String, Integer> e : entries) {
+                sorted.put(e.getKey(), e.getValue());
+            }
+            return Collections.unmodifiableMap(sorted);
+        }
     }
 
     /**

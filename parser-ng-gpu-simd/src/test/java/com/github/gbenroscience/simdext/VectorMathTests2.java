@@ -16,7 +16,7 @@
 package com.github.gbenroscience.simdext;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDCommandEvaluator.VectorMath;
+import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath;
 import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import static org.junit.jupiter.api.Assertions.assertEquals;
