@@ -1,16 +1,17 @@
-package com.github.gbenroscience.simdext.turbo.tools;
-
-import com.github.gbenroscience.math.Maths;
+package com.github.gbenroscience.simdext.turbo.tools.command.v2;
+ 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*; 
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
-import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*;
-import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
+import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*; 
 
 import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
-import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath;
+import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMathF;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.lang.ref.Cleaner;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -31,30 +32,36 @@ import jdk.incubator.vector.*;
  * 
  *
  */
-public class SIMDCommandEvaluator extends VectorTurboEvaluator {
+public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
 
-    public SIMDCommandEvaluator(MathExpression me) throws Throwable {
+    // NOTE: VectorConfig's statically-imported SPECIES is a VectorSpecies<Double>.
+    // This class-local SPECIES shadows it for every float-based command/record below,
+    // so the parallelism architecture and everything else pulled in from
+    // VectorTurboEvaluator / VectorConfig is left completely untouched.
+    private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+
+    public SIMDCommandSegmentF32(MathExpression me) throws Throwable {
         super(me);
     }
 
-    public SIMDCommandEvaluator(MathExpression me, int numWorkers) throws Throwable {
+    public SIMDCommandSegmentF32(MathExpression me, int numWorkers) throws Throwable {
         super(me, numWorkers);
     }
  
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me).compile();
+    public static final SIMDCommandSegmentF32.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
+        return (SIMDCommandSegmentF32.SIMDVectorCompositeExpression) new SIMDCommandSegmentF32(me).compile();
     }
 
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(new MathExpression(expr)).compile();
+    public static final SIMDCommandSegmentF32.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
+        return (SIMDCommandSegmentF32.SIMDVectorCompositeExpression) new SIMDCommandSegmentF32(new MathExpression(expr)).compile();
     }
 
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(me, numWorkers).compile();
+    public static final SIMDCommandSegmentF32.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        return (SIMDCommandSegmentF32.SIMDVectorCompositeExpression) new SIMDCommandSegmentF32(me, numWorkers).compile();
     }
 
-    public static final SIMDCommandEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
-        return (SIMDCommandEvaluator.SIMDVectorCompositeExpression) new SIMDCommandEvaluator(new MathExpression(expr), numWorkers).compile();
+    public static final SIMDCommandSegmentF32.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
+        return (SIMDCommandSegmentF32.SIMDVectorCompositeExpression) new SIMDCommandSegmentF32(new MathExpression(expr), numWorkers).compile();
     }
 
     // 1. Updated Command Interface
@@ -67,33 +74,49 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 // 2. Ultra-lean Context (Zero dynamic stack allocation)
     private static final class EvaluationContext {
 
-        final double[] scratch;
-        double[] flatVariables;
-        double[][] _2DVariables;
+        final float[] scratch;
+        float[] flatVariables;
+        float[][] _2DVariables;
+        // MemorySegment-backed variable sources (off-heap / zero-copy path).
+        // Mutually exclusive with the float[] / float[][] fields above -
+        // whichever init method was called last clears the other pair.
+        MemorySegment flatVariablesSeg;
+        MemorySegment[] _2DVariablesSeg;
         int dataSize;
         int blockStart;
 
         EvaluationContext(int maxStackDepth, int blockSize) {
             // Only one flat scratch pad is needed!
-            scratch = new double[maxStackDepth * blockSize];
+            scratch = new float[maxStackDepth * blockSize];
         }
 
-        void initForBlock(double[] flat, double[][] _2D, int size, int bStart) {
+        void initForBlock(float[] flat, float[][] _2D, int size, int bStart) {
             this.flatVariables = flat;
             this._2DVariables = _2D;
+            this.flatVariablesSeg = null;
+            this._2DVariablesSeg = null;
+            this.dataSize = size;
+            this.blockStart = bStart;
+        }
+
+        void initForBlockSeg(MemorySegment flatSeg, MemorySegment[] _2DSeg, int size, int bStart) {
+            this.flatVariables = null;
+            this._2DVariables = null;
+            this.flatVariablesSeg = flatSeg;
+            this._2DVariablesSeg = _2DSeg;
             this.dataSize = size;
             this.blockStart = bStart;
         }
     }
 // --- Memory Operations ---
 
-    record ConstCommand(double value, int destOff) implements VectorCommand {
+    record ConstCommand(float value, int destOff) implements VectorCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             int k = 0, limit = SPECIES.loopBound(n);
-            DoubleVector v = DoubleVector.broadcast(SPECIES, value);
+            FloatVector v = FloatVector.broadcast(SPECIES, value);
             for (; k < limit; k += SPECIES.length()) {
                 v.intoArray(s, destOff + k);
             }
@@ -110,8 +133,15 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             if (ctx.flatVariables != null) {
                 int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
                 System.arraycopy(ctx.flatVariables, srcOff, ctx.scratch, destOff, n);
-            } else {
+            } else if (ctx._2DVariables != null) {
                 System.arraycopy(ctx._2DVariables[slotIdx], ctx.blockStart, ctx.scratch, destOff, n);
+            } else if (ctx.flatVariablesSeg != null) {
+                long srcOff = ((long) slotIdx * ctx.dataSize) + ctx.blockStart;
+                MemorySegment.copy(ctx.flatVariablesSeg, ValueLayout.JAVA_FLOAT, srcOff * ValueLayout.JAVA_FLOAT.byteSize(),
+                        ctx.scratch, destOff, n);
+            } else {
+                MemorySegment.copy(ctx._2DVariablesSeg[slotIdx], ValueLayout.JAVA_FLOAT,
+                        (long) ctx.blockStart * ValueLayout.JAVA_FLOAT.byteSize(), ctx.scratch, destOff, n);
             }
         }
     }
@@ -121,11 +151,11 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             int k = 0, limit = SPECIES.loopBound(n);
             for (; k < limit; k += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, lOff + k)
-                        .add(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .add(FloatVector.fromArray(SPECIES, s, rOff + k))
                         .intoArray(s, destOff + k);
             }
             for (; k < n; k++) {
@@ -138,11 +168,11 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             int k = 0, limit = SPECIES.loopBound(n);
             for (; k < limit; k += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, lOff + k)
-                        .sub(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .sub(FloatVector.fromArray(SPECIES, s, rOff + k))
                         .intoArray(s, destOff + k);
             }
             for (; k < n; k++) {
@@ -155,11 +185,11 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             int k = 0, limit = SPECIES.loopBound(n);
             for (; k < limit; k += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, lOff + k)
-                        .mul(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .mul(FloatVector.fromArray(SPECIES, s, rOff + k))
                         .intoArray(s, destOff + k);
             }
             for (; k < n; k++) {
@@ -172,11 +202,11 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             int k = 0, limit = SPECIES.loopBound(n);
             for (; k < limit; k += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, lOff + k)
-                        .div(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .div(FloatVector.fromArray(SPECIES, s, rOff + k))
                         .intoArray(s, destOff + k);
             }
             for (; k < n; k++) {
@@ -189,7 +219,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            VectorMath.executePowerBlended(ctx.scratch, lOff, rOff, n);
+            VectorMathF.executePowerBlended(ctx.scratch, lOff, rOff, n);
             // Note: executePowerBlended writes to lOff. If dest != lOff, we must copy.
             // The compiler guarantees dest == lOff by reusing stack slots.
         }
@@ -199,7 +229,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             for (int k = 0; k < n; k++) {
                 s[destOff + k] = s[lOff + k] % s[rOff + k];
             }
@@ -211,7 +241,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             int l = lOff;
             int r = rOff;
             int d = destOff;
@@ -219,43 +249,43 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             switch (opcode) {
                 case OP_GT -> {
                     for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] > s[r + k]) ? 1.0 : 0.0;
+                        s[d + k] = (s[l + k] > s[r + k]) ? 1.0f : 0.0f;
                     }
                 }
                 case OP_LT -> {
                     for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] < s[r + k]) ? 1.0 : 0.0;
+                        s[d + k] = (s[l + k] < s[r + k]) ? 1.0f : 0.0f;
                     }
                 }
                 case OP_EQ -> {
                     for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] == s[r + k]) ? 1.0 : 0.0;
+                        s[d + k] = (s[l + k] == s[r + k]) ? 1.0f : 0.0f;
                     }
                 }
                 case OP_NE -> {
                     for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] != s[r + k]) ? 1.0 : 0.0;
+                        s[d + k] = (s[l + k] != s[r + k]) ? 1.0f : 0.0f;
                     }
                 }
                 case OP_GE -> {
                     for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] >= s[r + k]) ? 1.0 : 0.0;
+                        s[d + k] = (s[l + k] >= s[r + k]) ? 1.0f : 0.0f;
                     }
                 }
                 case OP_LE -> {
                     for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] <= s[r + k]) ? 1.0 : 0.0;
+                        s[d + k] = (s[l + k] <= s[r + k]) ? 1.0f : 0.0f;
                     }
                 }
                 // Standard C-style floating-point truthiness: non-zero is true
                 case OP_AND -> {
                     for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] != 0.0 && s[r + k] != 0.0) ? 1.0 : 0.0;
+                        s[d + k] = (s[l + k] != 0.0f && s[r + k] != 0.0f) ? 1.0f : 0.0f;
                     }
                 }
                 case OP_OR -> {
                     for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] != 0.0 || s[r + k] != 0.0) ? 1.0 : 0.0;
+                        s[d + k] = (s[l + k] != 0.0f || s[r + k] != 0.0f) ? 1.0f : 0.0f;
                     }
                 }
                 default ->
@@ -269,19 +299,19 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             int k = 0, bound = SPECIES.loopBound(n);
             for (; k < bound; k += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, aOff + k)
-                        .fma(DoubleVector.fromArray(SPECIES, s, bOff + k),
-                                DoubleVector.fromArray(SPECIES, s, cOff + k))
+                FloatVector.fromArray(SPECIES, s, aOff + k)
+                        .fma(FloatVector.fromArray(SPECIES, s, bOff + k),
+                                FloatVector.fromArray(SPECIES, s, cOff + k))
                         .intoArray(s, destOff + k);
             }
             if (k < n) {
                 var mask = SPECIES.indexInRange(k, n);
-                DoubleVector.fromArray(SPECIES, s, aOff + k, mask)
-                        .fma(DoubleVector.fromArray(SPECIES, s, bOff + k, mask),
-                                DoubleVector.fromArray(SPECIES, s, cOff + k, mask))
+                FloatVector.fromArray(SPECIES, s, aOff + k, mask)
+                        .fma(FloatVector.fromArray(SPECIES, s, bOff + k, mask),
+                                FloatVector.fromArray(SPECIES, s, cOff + k, mask))
                         .intoArray(s, destOff + k, mask);
             }
         }
@@ -291,9 +321,9 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             for (int k = 0; k < n; k++) {
-                s[destOff + k] = (s[condOff + k] != 0.0) ? s[trueOff + k] : s[falseOff + k];
+                s[destOff + k] = (s[condOff + k] != 0.0f) ? s[trueOff + k] : s[falseOff + k];
             }
         }
     }
@@ -302,7 +332,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
     @FunctionalInterface
     interface UnaryMathOp {
 
-        void apply(int base, int n, double[] scratch);
+        void apply(int base, int n, float[] scratch);
     }
 
     record UnaryMathCommand(UnaryMathOp op, int baseOff) implements VectorCommand {
@@ -316,7 +346,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
     @FunctionalInterface
     interface BinaryMathOp {
 
-        void apply(int lOff, int rOff, int destOff, int n, double[] scratch);
+        void apply(int lOff, int rOff, int destOff, int n, float[] scratch);
     }
 
     record BinaryMathCommand(BinaryMathOp op, int lOff, int rOff, int destOff) implements VectorCommand {
@@ -342,7 +372,9 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             switch (opcode) {
                 case OP_CONST -> {
                     int dest = sp * BLOCK_SIZE;
-                    plan.add(new ConstCommand(literalConstants[i], dest));
+                    // literalConstants is an inherited double[] field from VectorTurboEvaluator (untouched);
+                    // narrow to float here at the boundary of our float-only command stream.
+                    plan.add(new ConstCommand((float) literalConstants[i], dest));
                     virtualStack[sp++] = dest;
                 }
                 case OP_LOAD -> {
@@ -385,9 +417,9 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
                     BinaryMathOp mathOp = switch (opcode) {
                         case OP_SWIGLU_2 ->
-                            VectorMath::swiglu2;
+                            VectorMathF::swiglu2;
                         case OP_GEGLU_2 ->
-                            VectorMath::geglu2;
+                            VectorMathF::geglu2;
                         default ->
                             throw new IllegalStateException();
                     };
@@ -431,127 +463,127 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                     UnaryMathOp mathOp = switch (opcode) {
 
                         case OP_SQRT ->
-                            VectorMath::sqrt;
+                            VectorMathF::sqrt;
                         case OP_CBRT -> 
-                            VectorMath::cbrt;
+                            VectorMathF::cbrt;
 
                         case OP_GELU ->
-                            VectorMath::gelu;
+                            VectorMathF::gelu;
 
                         case OP_GELU_FAST ->
-                            VectorMath::geluFast;
+                            VectorMathF::geluFast;
                         case OP_SWIGLU ->
-                            VectorMath::swiglu;
+                            VectorMathF::swiglu;
                         case OP_GEGLU ->
-                            VectorMath::gegluUnary;
+                            VectorMathF::gegluUnary;
                         case OP_ERF ->
-                            VectorMath::erf;
+                            VectorMathF::erf;
                         case OP_ABS ->
-                            VectorMath::abs;
+                            VectorMathF::abs;
 
                         // Standard Trig
                         case OP_SIN ->
-                            VectorMath::sin;
+                            VectorMathF::sin;
                         case OP_COS ->
-                            VectorMath::cos;
+                            VectorMathF::cos;
                         case OP_TAN ->
-                            VectorMath::tan;
+                            VectorMathF::tan;
 
                         // Degree Variants
                         case OP_SIN_DEG ->
-                            VectorMath::sinDeg;
+                            VectorMathF::sinDeg;
                         case OP_COS_DEG ->
-                            VectorMath::cosDeg;
+                            VectorMathF::cosDeg;
                         case OP_TAN_DEG ->
-                            VectorMath::tanDeg;
+                            VectorMathF::tanDeg;
 
                         case OP_SIN_GRAD ->
-                            VectorMath::sinGrad;
+                            VectorMathF::sinGrad;
                         case OP_COS_GRAD ->
-                            VectorMath::cosGrad;
+                            VectorMathF::cosGrad;
                         case OP_TAN_GRAD ->
-                            VectorMath::tanGrad;
+                            VectorMathF::tanGrad;
 
                         // Standard Inverse
                         case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT ->
-                            VectorMath::asin;
+                            VectorMathF::asin;
                         case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT ->
-                            VectorMath::acos;
+                            VectorMathF::acos;
                         case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT ->
-                            VectorMath::atan;
+                            VectorMathF::atan;
 
                         case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG ->
-                            VectorMath::asinDeg;
+                            VectorMathF::asinDeg;
                         case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG ->
-                            VectorMath::acosDeg;
+                            VectorMathF::acosDeg;
                         case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG ->
-                            VectorMath::atanDeg;
+                            VectorMathF::atanDeg;
 
                         case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD ->
-                            VectorMath::asinGrad;
+                            VectorMathF::asinGrad;
                         case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD ->
-                            VectorMath::acosGrad;
+                            VectorMathF::acosGrad;
                         case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD ->
-                            VectorMath::atanGrad;
+                            VectorMathF::atanGrad;
 
                         // Degree Variants
                         case OP_SEC_DEG ->
-                            VectorMath::secDeg;
+                            VectorMathF::secDeg;
                         case OP_COSEC_DEG ->
-                            VectorMath::cscDeg;
+                            VectorMathF::cscDeg;
                         case OP_COT_DEG ->
-                            VectorMath::cotDeg;
+                            VectorMathF::cotDeg;
 
                         case OP_SEC_GRAD ->
-                            VectorMath::secGrad;
+                            VectorMathF::secGrad;
                         case OP_COSEC_GRAD ->
-                            VectorMath::cscGrad;
+                            VectorMathF::cscGrad;
                         case OP_COT_GRAD ->
-                            VectorMath::cotGrad;
+                            VectorMathF::cotGrad;
 
                         // Standard Inverse
                         case OP_ARC_SEC, OP_ARC_SEC_ALT ->
-                            VectorMath::asec;
+                            VectorMathF::asec;
                         case OP_ARC_COSEC, OP_ARC_COSEC_ALT ->
-                            VectorMath::acsc;
+                            VectorMathF::acsc;
                         case OP_ARC_COT, OP_ARC_COT_ALT ->
-                            VectorMath::acot;
+                            VectorMathF::acot;
 
                         case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG ->
-                            VectorMath::asecDeg;
+                            VectorMathF::asecDeg;
                         case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD ->
-                            VectorMath::asecGrad;
+                            VectorMathF::asecGrad;
 
                         case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG ->
-                            VectorMath::acscDeg;
+                            VectorMathF::acscDeg;
                         case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD ->
-                            VectorMath::acscGrad;
+                            VectorMathF::acscGrad;
 
                         case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG ->
-                            VectorMath::acotDeg;
+                            VectorMathF::acotDeg;
                         case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD ->
-                            VectorMath::acotGrad;
+                            VectorMathF::acotGrad;
 
                         case OP_SINH ->
-                            VectorMath::sinh;
+                            VectorMathF::sinh;
                         case OP_COSH ->
-                            VectorMath::cosh;
+                            VectorMathF::cosh;
                         case OP_TANH ->
-                            VectorMath::tanh;
+                            VectorMathF::tanh;
                         case OP_ASINH, OP_ASINH_ALT ->
-                            VectorMath::asinh;
+                            VectorMathF::asinh;
                         case OP_ACOSH, OP_ACOSH_ALT ->
-                            VectorMath::acosh;
+                            VectorMathF::acosh;
                         case OP_ATANH, OP_ATANH_ALT ->
-                            VectorMath::atanh;
+                            VectorMathF::atanh;
 
                         // Exp/Log
                         case OP_EXP ->
-                            VectorMath::exp;
+                            VectorMathF::exp;
                         case OP_LOG ->
-                            VectorMath::ln;
+                            VectorMathF::ln;
                         case OP_LOG10 ->
-                            VectorMath::log10;
+                            VectorMathF::log10;
 
                         default ->
                             throw new UnsupportedOperationException("Unmapped opcode: " + opcode);
@@ -575,8 +607,10 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
         private final VectorCommand[] executionPlan;
         private final ThreadLocal<EvaluationContext> masterEvalContext;
         private final Cleaner.Cleanable cleanable;
+        private final int masterPinTarget; // -1 = don't pin the master thread
 
         private volatile boolean isClosed = false;
+        private final ThreadLocal<Boolean> masterPinned = ThreadLocal.withInitial(() -> false);
 
         private static final class ThreadPoolShutdownAction implements Runnable {
 
@@ -618,8 +652,23 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                 this.workerPool = new WorkerThread[NUM_WORKERS];
                 this.reuseLatch = new AtomicInteger(0);
 
+                // Query real physical-core topology instead of assuming logical CPUs
+                // are interleaved by core. Each element of coreGroups is one physical
+                // core's set of SMT-sibling logical indices; using group[i % groups.length][0]
+                // as the pin target for worker i guarantees distinct physical cores
+                // whenever enough exist, regardless of how the OS numbers hyperthread
+                // siblings. The master gets its own reserved group beyond the workers'.
+                int[][] coreGroups = CPUPinner.detectPhysicalCoreGroups();
+                if (coreGroups == null || coreGroups.length == 0) {
+                    // Degraded path: pin everyone to logical CPU 0 rather than
+                    // NPE'ing construction when /sys topology is unreadable.
+                    coreGroups = new int[][]{{0}};
+                }
+                this.masterPinTarget = coreGroups[NUM_WORKERS % coreGroups.length][0];
+
                 for (int i = 0; i < NUM_WORKERS; i++) {
-                    workerPool[i] = new WorkerThread(i, reuseLatch, executionPlan, stackDepth, blockSize);
+                    int pinTarget = coreGroups[i % coreGroups.length][0];
+                    workerPool[i] = new WorkerThread(i, pinTarget, reuseLatch, executionPlan, stackDepth, blockSize);
                 }
 
                 for (int i = 0; i < NUM_WORKERS; i++) {
@@ -630,7 +679,23 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             } else {
                 this.workerPool = null;
                 this.reuseLatch = null;
+                this.masterPinTarget = -1;
                 this.cleanable = null;
+            }
+        }
+
+        /**
+         * Pins the calling (master) thread to its reserved physical core, if
+         * one was available at construction time (see masterPinTarget). Cheap
+         * to call on every dispatch — SetThreadAffinityMask/sched_setaffinity
+         * are idempotent single syscalls, and the calling thread can differ
+         * across invocations (e.g. different application threads driving the
+         * same expression), so we can't just pin once in the constructor.
+         */
+        private void pinMasterIfNeeded() {
+            if (masterPinTarget >= 0 && !masterPinned.get()) {
+                CPUPinner.pinCurrentThread(masterPinTarget);
+                masterPinned.set(true);
             }
         }
 
@@ -649,6 +714,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
         private static final class WorkerThread extends Thread {
 
             private final int workerId;
+            private final int pinTarget;
             private final AtomicInteger reuseLatch;
             private final EvaluationContext evalContext;
             private final VectorCommand[] executionPlan;
@@ -658,15 +724,20 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             private volatile int taskState = 0;
             private volatile Thread masterThread;
 
-            private double[][] vars2D;
-            private double[] vars1D;
-            private double[] output;
+            private float[][] vars2D;
+            private float[] vars1D;
+            private float[] output;
+            // MemorySegment-backed task inputs/output (off-heap / zero-copy path)
+            private MemorySegment[] vars2DSeg;
+            private MemorySegment vars1DSeg;
+            private MemorySegment outputSeg;
             private int dataSize;
             private int startIdx;
             private int length;
 
-            public WorkerThread(int workerId, AtomicInteger reuseLatch, VectorCommand[] executionPlan, int stackDepth, int blockSize) {
+            public WorkerThread(int workerId, int pinTarget, AtomicInteger reuseLatch, VectorCommand[] executionPlan, int stackDepth, int blockSize) {
                 this.workerId = workerId;
+                this.pinTarget = pinTarget;
                 this.reuseLatch = reuseLatch;
                 this.executionPlan = executionPlan;
                 this.blockSize = blockSize;
@@ -675,10 +746,13 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                 this.setName("ParserNG-SIMD-Worker-" + workerId);
             }
 
-            public void submitTask2D(double[][] vars, double[] output, int dataSize, int startIdx, int length, Thread master) {
+            public void submitTask2D(float[][] vars, float[] output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars2D = vars;
                 this.vars1D = null;
+                this.vars2DSeg = null;
+                this.vars1DSeg = null;
                 this.output = output;
+                this.outputSeg = null;
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
@@ -687,10 +761,43 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                 LockSupport.unpark(this);
             }
 
-            public void submitTask1D(double[] vars, double[] output, int dataSize, int startIdx, int length, Thread master) {
+            public void submitTask1D(float[] vars, float[] output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars1D = vars;
                 this.vars2D = null;
+                this.vars2DSeg = null;
+                this.vars1DSeg = null;
                 this.output = output;
+                this.outputSeg = null;
+                this.dataSize = dataSize;
+                this.startIdx = startIdx;
+                this.length = length;
+                this.masterThread = master;
+                this.taskState = 1;
+                LockSupport.unpark(this);
+            }
+
+            public void submitTaskSeg2D(MemorySegment[] vars, MemorySegment output, int dataSize, int startIdx, int length, Thread master) {
+                this.vars2DSeg = vars;
+                this.vars1DSeg = null;
+                this.vars2D = null;
+                this.vars1D = null;
+                this.outputSeg = output;
+                this.output = null;
+                this.dataSize = dataSize;
+                this.startIdx = startIdx;
+                this.length = length;
+                this.masterThread = master;
+                this.taskState = 1;
+                LockSupport.unpark(this);
+            }
+
+            public void submitTaskSeg1D(MemorySegment vars, MemorySegment output, int dataSize, int startIdx, int length, Thread master) {
+                this.vars1DSeg = vars;
+                this.vars2DSeg = null;
+                this.vars1D = null;
+                this.vars2D = null;
+                this.outputSeg = output;
+                this.output = null;
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
@@ -706,7 +813,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
 
             @Override
             public void run() {
-                CPUPinner.pinCurrentThread(this.workerId);
+                CPUPinner.pinCurrentThread(this.pinTarget);
                 while (isRunning) {
                     while (taskState == 0 && isRunning) {
                         LockSupport.park();
@@ -722,12 +829,19 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                         applyBulkInternal(vars2D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
                     } else if (vars1D != null) {
                         applyBulkInternal(vars1D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
+                    } else if (vars2DSeg != null) {
+                        applyBulkInternalSeg(vars2DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
+                    } else if (vars1DSeg != null) {
+                        applyBulkInternalSeg(vars1DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
                     }
 
                     this.taskState = 0;
                     this.vars2D = null;
                     this.vars1D = null;
                     this.output = null;
+                    this.vars2DSeg = null;
+                    this.vars1DSeg = null;
+                    this.outputSeg = null;
 
                     if (reuseLatch.decrementAndGet() == 0 && masterThread != null) {
                         LockSupport.unpark(masterThread);
@@ -736,14 +850,14 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             }
         }
 
-        @Override
-        public void applyBulk(double[][] variables, double[] output) {
+  
+        public void applyBulk(float[][] variables, float[] output) {
             int numSamples = variables[0].length;
             applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
         }
 
-        @Override
-        public void applyBulkParallel(double[][] variables, double[] output) {
+
+        public void applyBulkParallel(float[][] variables, float[] output) {
             if (variables == null || variables.length == 0 || output == null) {
                 return;
             }
@@ -754,14 +868,24 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                 return;
             }
 
+            pinMasterIfNeeded();
             Thread masterThread = Thread.currentThread();
-            int chunkSize = numSamples / NUM_WORKERS;
+            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
+            // participants, instead of sitting idle in park() while the pool
+            // does all the work.
+            final int totalParticipants = NUM_WORKERS + 1;
+            int chunkSize = numSamples / totalParticipants;
             reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
                 int startIdx = i * chunkSize;
-                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
-                workerPool[i].submitTask2D(variables, output, numSamples, startIdx, length, masterThread);
+                workerPool[i].submitTask2D(variables, output, numSamples, startIdx, chunkSize, masterThread);
+            }
+
+            int masterStartIdx = NUM_WORKERS * chunkSize;
+            int masterLength = numSamples - masterStartIdx;
+            if (masterLength > 0) {
+                applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
             }
 
             while (reuseLatch.get() > 0) {
@@ -769,8 +893,8 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             }
         }
 
-        @Override
-        public void applyBulkParallel(double[] flatVariables, double[] output) {
+         
+        public void applyBulkParallel(float[] flatVariables, float[] output) {
             if (flatVariables == null || output == null) {
                 return;
             }
@@ -781,14 +905,24 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                 return;
             }
 
+            pinMasterIfNeeded();
             Thread masterThread = Thread.currentThread();
-            int chunkSize = numSamples / NUM_WORKERS;
+            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
+            // participants, instead of sitting idle in park() while the pool
+            // does all the work.
+            final int totalParticipants = NUM_WORKERS + 1;
+            int chunkSize = numSamples / totalParticipants;
             reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
                 int startIdx = i * chunkSize;
-                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
-                workerPool[i].submitTask1D(flatVariables, output, numSamples, startIdx, length, masterThread);
+                workerPool[i].submitTask1D(flatVariables, output, numSamples, startIdx, chunkSize, masterThread);
+            }
+
+            int masterStartIdx = NUM_WORKERS * chunkSize;
+            int masterLength = numSamples - masterStartIdx;
+            if (masterLength > 0) {
+                applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
             }
 
             while (reuseLatch.get() > 0) {
@@ -796,8 +930,8 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             }
         }
 
-        @Override
-        public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
+        
+        public void applyBulkBatched(float[][] variables, float[] output, int batchSize) {
             EvaluationContext ctx = masterEvalContext.get();
             int numSamples = variables[0].length;
             for (int start = 0; start < numSamples; start += batchSize) {
@@ -806,13 +940,13 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             }
         }
 
-        @Override
-        public void applyBulk(double[] flatVariables, double[] output) {
+       
+        public void applyBulk(float[] flatVariables, float[] output) {
             applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, output.length, output, 0, output.length);
         }
 
-        @Override
-        public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
+ 
+        public void applyBulkBatched(float[] flatVariables, float[] output, int batchSize) {
             EvaluationContext ctx = masterEvalContext.get();
             int numSamples = output.length;
             for (int start = 0; start < numSamples; start += batchSize) {
@@ -821,10 +955,95 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             }
         }
 
+        // --- MemorySegment (off-heap / zero-copy) entry points ---
+        // Same public contract as the float[] / float[][] variants above,
+        // reusing the same masterEvalContext / workerPool / reuseLatch machinery.
+        public void applyBulk(MemorySegment[] variables, MemorySegment output) {
+            int numSamples = (int) (variables[0].byteSize() / ValueLayout.JAVA_FLOAT.byteSize());
+            applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
+        }
+
+        public void applyBulkParallel(MemorySegment[] variables, MemorySegment output) {
+            if (variables == null || variables.length == 0 || output == null) {
+                return;
+            }
+            int numSamples = (int) (variables[0].byteSize() / ValueLayout.JAVA_FLOAT.byteSize());
+
+            if (NUM_WORKERS <= 0 || numSamples < PARALLEL_OPS_THRESHOLD) {
+                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
+                return;
+            }
+
+            pinMasterIfNeeded();
+            Thread masterThread = Thread.currentThread();
+            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
+            // participants, instead of sitting idle in park() while the pool
+            // does all the work.
+            final int totalParticipants = NUM_WORKERS + 1;
+            int chunkSize = numSamples / totalParticipants;
+            reuseLatch.set(NUM_WORKERS);
+
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                int startIdx = i * chunkSize;
+                workerPool[i].submitTaskSeg2D(variables, output, numSamples, startIdx, chunkSize, masterThread);
+            }
+
+            int masterStartIdx = NUM_WORKERS * chunkSize;
+            int masterLength = numSamples - masterStartIdx;
+            if (masterLength > 0) {
+                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
+            }
+
+            while (reuseLatch.get() > 0) {
+                LockSupport.park();
+            }
+        }
+
+        public void applyBulk(MemorySegment variables, MemorySegment output) {
+            int numSamples = (int) (output.byteSize() / ValueLayout.JAVA_FLOAT.byteSize());
+            applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
+        }
+
+        public void applyBulkParallel(MemorySegment variables, MemorySegment output) {
+            if (variables == null || output == null) {
+                return;
+            }
+            int numSamples = (int) (output.byteSize() / ValueLayout.JAVA_FLOAT.byteSize());
+
+            if (NUM_WORKERS <= 0 || numSamples < PARALLEL_OPS_THRESHOLD) {
+                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
+                return;
+            }
+
+            pinMasterIfNeeded();
+            Thread masterThread = Thread.currentThread();
+            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
+            // participants, instead of sitting idle in park() while the pool
+            // does all the work.
+            final int totalParticipants = NUM_WORKERS + 1;
+            int chunkSize = numSamples / totalParticipants;
+            reuseLatch.set(NUM_WORKERS);
+
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                int startIdx = i * chunkSize;
+                workerPool[i].submitTaskSeg1D(variables, output, numSamples, startIdx, chunkSize, masterThread);
+            }
+
+            int masterStartIdx = NUM_WORKERS * chunkSize;
+            int masterLength = numSamples - masterStartIdx;
+            if (masterLength > 0) {
+                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
+            }
+
+            while (reuseLatch.get() > 0) {
+                LockSupport.park();
+            }
+        }
+
         // --- Core Internal Hot-Loops with Vectorized Copy Defenses ---
-        private static void applyBulkInternal(double[] flatVariables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, double[] output, int startIdx, int length) {
+        private static void applyBulkInternal(float[] flatVariables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, float[] output, int startIdx, int length) {
             final int endIdx = startIdx + length;
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
                 ctx.initForBlock(flatVariables, null, dataSize, blockStart);
@@ -836,7 +1055,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                 // Vectorized output write back (assumes result is at scratch offset 0)
                 int k = 0, limit = SPECIES.loopBound(currentBlockSize);
                 for (; k < limit; k += SPECIES.length()) {
-                    DoubleVector.fromArray(SPECIES, s, k)
+                    FloatVector.fromArray(SPECIES, s, k)
                             .intoArray(output, blockStart + k);
                 }
                 for (; k < currentBlockSize; k++) {
@@ -845,9 +1064,9 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
             }
         }
 
-        private static void applyBulkInternal(double[][] variables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, double[] output, int startIdx, int length) {
+        private static void applyBulkInternal(float[][] variables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, float[] output, int startIdx, int length) {
             final int endIdx = startIdx + length;
-            double[] s = ctx.scratch;
+            float[] s = ctx.scratch;
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
                 ctx.initForBlock(null, variables, dataSize, blockStart);
@@ -859,7 +1078,7 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                 // Vectorized output write back
                 int k = 0, limit = SPECIES.loopBound(currentBlockSize);
                 for (; k < limit; k += SPECIES.length()) {
-                    DoubleVector.fromArray(SPECIES, s, k)
+                    FloatVector.fromArray(SPECIES, s, k)
                             .intoArray(output, blockStart + k);
                 }
                 for (; k < currentBlockSize; k++) {
@@ -867,6 +1086,56 @@ public class SIMDCommandEvaluator extends VectorTurboEvaluator {
                 }
             }
         }
+
+        // --- MemorySegment Core Internal Hot-Loops (mirrors the float[] / float[][] loops above) ---
+        private static void applyBulkInternalSeg(MemorySegment flatVariablesSeg, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, MemorySegment output, int startIdx, int length) {
+            final int endIdx = startIdx + length;
+            final long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            float[] s = ctx.scratch;
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
+                final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
+                ctx.initForBlockSeg(flatVariablesSeg, null, dataSize, blockStart);
+
+                for (int i = 0; i < executionPlan.length; i++) {
+                    executionPlan[i].execute(ctx, currentBlockSize);
+                }
+
+                // Vectorized output write back (assumes result is at scratch offset 0)
+                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, s, k)
+                            .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < currentBlockSize; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, blockStart + k, s[k]);
+                }
+            }
+        }
+
+        private static void applyBulkInternalSeg(MemorySegment[] variablesSeg, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, MemorySegment output, int startIdx, int length) {
+            final int endIdx = startIdx + length;
+            final long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            float[] s = ctx.scratch;
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
+                final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
+                ctx.initForBlockSeg(null, variablesSeg, dataSize, blockStart);
+
+                for (int i = 0; i < executionPlan.length; i++) {
+                    executionPlan[i].execute(ctx, currentBlockSize);
+                }
+
+                // Vectorized output write back
+                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, s, k)
+                            .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < currentBlockSize; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, blockStart + k, s[k]);
+                }
+            }
+        }
     }
  
+
 }

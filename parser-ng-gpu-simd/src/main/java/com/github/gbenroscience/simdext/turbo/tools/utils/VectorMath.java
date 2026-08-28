@@ -17,7 +17,7 @@ package com.github.gbenroscience.simdext.turbo.tools.utils;
 
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineF64;
+import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineF64;
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.LongVector;
 import jdk.incubator.vector.VectorMask;

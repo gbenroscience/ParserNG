@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simdext.turbo.tools;
+package com.github.gbenroscience.simdext.turbo.tools.junk;
 
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.parser.MathExpression;

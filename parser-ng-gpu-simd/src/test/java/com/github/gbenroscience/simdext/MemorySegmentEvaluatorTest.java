@@ -5,8 +5,8 @@ package com.github.gbenroscience.simdext;
  * @author oluwagbemirojiboye
  */
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineF64;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineSegmentF64;
+import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineF64;
+import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineSegmentF64;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

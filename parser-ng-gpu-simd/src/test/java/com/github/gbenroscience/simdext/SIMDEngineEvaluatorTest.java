@@ -9,7 +9,7 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.BLOCK_SIZE;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineEvaluator;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 

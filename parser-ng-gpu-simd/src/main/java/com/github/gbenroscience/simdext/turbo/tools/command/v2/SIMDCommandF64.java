@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simdext.turbo.tools.command;
+package com.github.gbenroscience.simdext.turbo.tools.command.v2;
 
 
 import com.github.gbenroscience.parser.MathExpression;
@@ -576,8 +576,10 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
         private final VectorCommand[] executionPlan;
         private final ThreadLocal<EvaluationContext> masterEvalContext;
         private final Cleaner.Cleanable cleanable;
+        private final int masterPinTarget; // -1 = don't pin the master thread
 
         private volatile boolean isClosed = false;
+        private final ThreadLocal<Boolean> masterPinned = ThreadLocal.withInitial(() -> false);
 
         private static final class ThreadPoolShutdownAction implements Runnable {
 
@@ -619,8 +621,23 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                 this.workerPool = new WorkerThread[NUM_WORKERS];
                 this.reuseLatch = new AtomicInteger(0);
 
+                // Query real physical-core topology instead of assuming logical CPUs
+                // are interleaved by core. Each element of coreGroups is one physical
+                // core's set of SMT-sibling logical indices; using group[i % groups.length][0]
+                // as the pin target for worker i guarantees distinct physical cores
+                // whenever enough exist, regardless of how the OS numbers hyperthread
+                // siblings. The master gets its own reserved group beyond the workers'.
+                int[][] coreGroups = CPUPinner.detectPhysicalCoreGroups();
+                if (coreGroups == null || coreGroups.length == 0) {
+                    // Degraded path: pin everyone to logical CPU 0 rather than
+                    // NPE'ing construction when /sys topology is unreadable.
+                    coreGroups = new int[][]{{0}};
+                }
+                this.masterPinTarget = coreGroups[NUM_WORKERS % coreGroups.length][0];
+
                 for (int i = 0; i < NUM_WORKERS; i++) {
-                    workerPool[i] = new WorkerThread(i, reuseLatch, executionPlan, stackDepth, blockSize);
+                    int pinTarget = coreGroups[i % coreGroups.length][0];
+                    workerPool[i] = new WorkerThread(i, pinTarget, reuseLatch, executionPlan, stackDepth, blockSize);
                 }
 
                 for (int i = 0; i < NUM_WORKERS; i++) {
@@ -631,7 +648,23 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
             } else {
                 this.workerPool = null;
                 this.reuseLatch = null;
+                this.masterPinTarget = -1;
                 this.cleanable = null;
+            }
+        }
+
+        /**
+         * Pins the calling (master) thread to its reserved physical core, if
+         * one was available at construction time (see masterPinTarget). Cheap
+         * to call on every dispatch — SetThreadAffinityMask/sched_setaffinity
+         * are idempotent single syscalls, and the calling thread can differ
+         * across invocations (e.g. different application threads driving the
+         * same expression), so we can't just pin once in the constructor.
+         */
+        private void pinMasterIfNeeded() {
+            if (masterPinTarget >= 0 && !masterPinned.get()) {
+                CPUPinner.pinCurrentThread(masterPinTarget);
+                masterPinned.set(true);
             }
         }
 
@@ -650,6 +683,7 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
         private static final class WorkerThread extends Thread {
 
             private final int workerId;
+            private final int pinTarget;
             private final AtomicInteger reuseLatch;
             private final EvaluationContext evalContext;
             private final VectorCommand[] executionPlan;
@@ -666,8 +700,9 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
             private int startIdx;
             private int length;
 
-            public WorkerThread(int workerId, AtomicInteger reuseLatch, VectorCommand[] executionPlan, int stackDepth, int blockSize) {
+            public WorkerThread(int workerId, int pinTarget, AtomicInteger reuseLatch, VectorCommand[] executionPlan, int stackDepth, int blockSize) {
                 this.workerId = workerId;
+                this.pinTarget = pinTarget;
                 this.reuseLatch = reuseLatch;
                 this.executionPlan = executionPlan;
                 this.blockSize = blockSize;
@@ -707,7 +742,7 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
 
             @Override
             public void run() {
-                CPUPinner.pinCurrentThread(this.workerId);
+                CPUPinner.pinCurrentThread(this.pinTarget);
                 while (isRunning) {
                     while (taskState == 0 && isRunning) {
                         LockSupport.park();
@@ -755,14 +790,24 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                 return;
             }
 
+            pinMasterIfNeeded();
             Thread masterThread = Thread.currentThread();
-            int chunkSize = numSamples / NUM_WORKERS;
+            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
+            // participants, instead of sitting idle in park() while the pool
+            // does all the work.
+            final int totalParticipants = NUM_WORKERS + 1;
+            int chunkSize = numSamples / totalParticipants;
             reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
                 int startIdx = i * chunkSize;
-                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
-                workerPool[i].submitTask2D(variables, output, numSamples, startIdx, length, masterThread);
+                workerPool[i].submitTask2D(variables, output, numSamples, startIdx, chunkSize, masterThread);
+            }
+
+            int masterStartIdx = NUM_WORKERS * chunkSize;
+            int masterLength = numSamples - masterStartIdx;
+            if (masterLength > 0) {
+                applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
             }
 
             while (reuseLatch.get() > 0) {
@@ -782,14 +827,24 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                 return;
             }
 
+            pinMasterIfNeeded();
             Thread masterThread = Thread.currentThread();
-            int chunkSize = numSamples / NUM_WORKERS;
+            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
+            // participants, instead of sitting idle in park() while the pool
+            // does all the work.
+            final int totalParticipants = NUM_WORKERS + 1;
+            int chunkSize = numSamples / totalParticipants;
             reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
                 int startIdx = i * chunkSize;
-                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
-                workerPool[i].submitTask1D(flatVariables, output, numSamples, startIdx, length, masterThread);
+                workerPool[i].submitTask1D(flatVariables, output, numSamples, startIdx, chunkSize, masterThread);
+            }
+
+            int masterStartIdx = NUM_WORKERS * chunkSize;
+            int masterLength = numSamples - masterStartIdx;
+            if (masterLength > 0) {
+                applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
             }
 
             while (reuseLatch.get() > 0) {

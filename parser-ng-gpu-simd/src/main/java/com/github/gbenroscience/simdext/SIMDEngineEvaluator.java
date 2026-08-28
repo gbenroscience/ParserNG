@@ -11,7 +11,6 @@ import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.Bat
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.PARALLEL_OPS_THRESHOLD;
 import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
-import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinnerOld;
 import java.lang.foreign.MemorySegment;
 import java.lang.ref.Cleaner;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -19,6 +18,11 @@ import java.util.concurrent.locks.LockSupport;
 import jdk.incubator.vector.*;
 
 /**
+ * @deprecated Do not use this class again.
+ * The sheer size of its methods make escape analysis fail(by the JVM) and its otherwise
+ * blazing speeds is lost when this happens.
+ * Use the classes of the {@link com.github.gbenroscience.simdext.turbo.tools.command.v2} package.
+ * You will find float32 and float64 evaluators and MemorySegment evaluators of the float32 AND FLOAT64 KIND
  * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
  * with a zero-allocation primitive stack interpreter. Completely eliminates the
  * scalar parser overhead and task object allocations on the hot path.
@@ -32,30 +36,30 @@ import jdk.incubator.vector.*;
  * 
  *
  */
-public class SIMDEngineEvaluatorOld extends VectorTurboEvaluator { 
+public class SIMDEngineEvaluator extends VectorTurboEvaluator { 
 
-    public SIMDEngineEvaluatorOld(MathExpression me) throws Throwable {
+    public SIMDEngineEvaluator(MathExpression me) throws Throwable {
         super(me);
     }
 
-    public SIMDEngineEvaluatorOld(MathExpression me, int numWorkers) throws Throwable {
+    public SIMDEngineEvaluator(MathExpression me, int numWorkers) throws Throwable {
         super(me, numWorkers);
     }
 
-    public static final SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
-        return (SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression) new SIMDEngineEvaluatorOld(me).compile();
+    public static final SIMDEngineEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
+        return (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
     }
 
-    public static final SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
-        return (SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression) new SIMDEngineEvaluatorOld(new MathExpression(expr)).compile();
+    public static final SIMDEngineEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
+        return (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(new MathExpression(expr)).compile();
     }
 
-    public static final SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
-        return (SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression) new SIMDEngineEvaluatorOld(me).compile();
+    public static final SIMDEngineEvaluator.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        return (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(me).compile();
     }
 
-    public static final SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
-        return (SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression) new SIMDEngineEvaluatorOld(new MathExpression(expr)).compile();
+    public static final SIMDEngineEvaluator.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
+        return (SIMDEngineEvaluator.SIMDVectorCompositeExpression) new SIMDEngineEvaluator(new MathExpression(expr)).compile();
     }
 
     @Override
@@ -203,7 +207,7 @@ public class SIMDEngineEvaluatorOld extends VectorTurboEvaluator {
 
             @Override
             public void run() {
-                CPUPinnerOld.pinCurrentThread(workerId);
+                CPUPinner.pinCurrentThread(workerId);
                 final CoordinationContext sharedCtx = this.ctx;
                 final int id = this.workerId;
                 final int totalThreads = this.totalWorkers;

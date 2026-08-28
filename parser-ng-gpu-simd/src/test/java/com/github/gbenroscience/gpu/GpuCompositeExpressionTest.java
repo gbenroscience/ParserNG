@@ -11,7 +11,7 @@ import com.github.gbenroscience.gpu.evaluator.opencl.OpenClExpressionBridge;
 import com.github.gbenroscience.gpu.evaluator.opencl.OpenClKernelSource;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineF64;
+import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineF64;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator; 
 
 import org.junit.jupiter.api.Test;

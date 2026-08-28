@@ -22,10 +22,6 @@ package com.github.gbenroscience.parser.ng.bench;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.utils.MathToJaninoConverter;
-import com.github.gbenroscience.simdext.SIMDEngineEvaluatorOld;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDCommandEvaluator;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineF64;
 import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -81,10 +77,7 @@ public class HotBench {
 
     private ExecutorService janinoParallelExecutor;
     private Phaser barrier;
-
-    // Thread-confined variable cache lines
-    private double[] workerLocalVars;
-    private double[] masterLocalVars;
+ 
 
     // Zero-allocation side-effect sinks to prevent JIT dead-code elimination
     private double[] workerResultSink;
@@ -167,11 +160,7 @@ public class HotBench {
     private double[] vars;
     private JaninoMathFunction fastEvaluator;
 
-    SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression simdVec;
-    SIMDEngineEvaluator.SIMDVectorCompositeExpression simdEng;
-    SIMDEngineF64.SIMDVectorCompositeExpression simdEngF64;
-    SIMDCommandF64.SIMDVectorCompositeExpression simdComd;
-    SIMDEngineEvaluatorOld.SIMDVectorCompositeExpression simdEngOld;
+    SIMDCommandF64.SIMDVectorCompositeExpression simdComd; 
 
     private int varCount;
 
@@ -218,10 +207,7 @@ public class HotBench {
 
         // Exactly 2 permanent parties: 1 Master JMH thread + 1 Dedicated Background Worker
         this.barrier = new Phaser(2);
-
-        // Pinned state blocks to isolate L1 data caches
-        this.workerLocalVars = new double[varCount];
-        this.masterLocalVars = new double[varCount];
+ 
 
         // Result sinks sized exactly to the split data constraints
         final int mid = dataSize / 2;
@@ -343,14 +329,13 @@ public class HotBench {
         simdComd.applyBulkParallel(input, res);
         bh.consume(res);
     }
+    
+   
+ 
 
     private void setupParserNG(MathExpression me) {
         try {
-          //  simdVec = SIMDVectorTurboEvaluator.getEvaluator(me);
-           // simdEng = SIMDEngineEvaluator.getEvaluator(me);
-           // simdEngF64 = SIMDEngineF64.getEvaluator(me);
-            simdComd = SIMDCommandF64.getEvaluator(me);
-           //simdEngOld = SIMDEngineEvaluatorOld.getEvaluator(me);
+            simdComd = SIMDCommandF64.getEvaluator(me); 
         } catch (Throwable ex) {
             System.getLogger(HotBench.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }

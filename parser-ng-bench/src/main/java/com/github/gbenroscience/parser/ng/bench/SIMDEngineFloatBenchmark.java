@@ -1,6 +1,9 @@
 package com.github.gbenroscience.parser.ng.bench;
 
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF32;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandSegmentF32;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandSegmentF64;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.runner.Runner;
@@ -14,30 +17,29 @@ import java.lang.foreign.ValueLayout;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JMH benchmark comparing every storage path {@link SIMDEngineEvaluator}
- * now supports, on two representative expressions:
+ * JMH benchmark comparing every storage path {@link SIMDEngineEvaluator} now
+ * supports, on two representative expressions:
  *
  * <ul>
- *   <li><b>EXPR_ARITH</b> = {@code (x * y + x) / (y + 1)} — pure arithmetic,
- *       no transcendentals; mainly stresses load/store and the vectorized
- *       add/sub/mul/div fast paths.</li>
- *   <li><b>EXPR_TRIG</b> = {@code sin(x) * cos(y) + sqrt(x * x + y * y)} —
- *       exercises the transcendental (SVML/lanewise) paths in
- *       {@code VectorMath}/{@code VectorMathF}.</li>
+ * <li><b>EXPR_ARITH</b> = {@code (x * y + x) / (y + 1)} — pure arithmetic, no
+ * transcendentals; mainly stresses load/store and the vectorized
+ * add/sub/mul/div fast paths.</li>
+ * <li><b>EXPR_TRIG</b> = {@code sin(x) * cos(y) + sqrt(x * x + y * y)} —
+ * exercises the transcendental (SVML/lanewise) paths in
+ * {@code VectorMath}/{@code VectorMathF}.</li>
  * </ul>
  *
- * For each expression, all seven storage paths are benchmarked:
- * {@code float[]}, {@code double[]}, {@code double[][]}, {@code float[][]},
+ * For each expression, all seven storage paths are benchmarked:  {@code float[]}, {@code double[]}, {@code double[][]}, {@code float[][]},
  * {@code MemorySegment} of packed floats, {@code MemorySegment} of packed
- * doubles, {@code MemorySegment[]} of packed floats (one segment per
- * variable), and {@code MemorySegment[]} of packed doubles.
+ * doubles, {@code MemorySegment[]} of packed floats (one segment per variable),
+ * and {@code MemorySegment[]} of packed doubles.
  *
- * <p>Run standalone with:
+ * <p>
+ * Run standalone with:
  * <pre>
  *   java -jar benchmarks.jar SIMDEngineEvaluatorBenchmark
- * </pre>
- * or via the {@code main} method below, or wire it into your existing JMH
- * build (annotation processor requires the {@code jmh-generator-annprocess}
+ * </pre> or via the {@code main} method below, or wire it into your existing
+ * JMH build (annotation processor requires the {@code jmh-generator-annprocess}
  * dependency on the compile classpath).
  */
 @BenchmarkMode(Mode.AverageTime)
@@ -46,8 +48,8 @@ import java.util.concurrent.TimeUnit;
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 1, jvmArgs = {
-        "--add-modules=jdk.incubator.vector",
-        "--enable-preview"
+    "--add-modules=jdk.incubator.vector",
+    "--enable-preview"
 })
 public class SIMDEngineFloatBenchmark {
 
@@ -59,8 +61,8 @@ public class SIMDEngineFloatBenchmark {
      * per-call overhead and to land comfortably above
      * {@code PARALLEL_OPS_THRESHOLD}, but the benchmarks below deliberately
      * call the single-threaded {@code applyBulk*} entry points (not
-     * {@code applyBulkParallel*}) so the comparison isolates the
-     * storage-format cost rather than thread-pool scheduling. Change to
+     * {@code applyBulkParallel*}) so the comparison isolates the storage-format
+     * cost rather than thread-pool scheduling. Change to
      * {@code applyBulkParallel*} calls if you want to benchmark the
      * multi-threaded dispatch instead.
      */
@@ -70,8 +72,17 @@ public class SIMDEngineFloatBenchmark {
     // Compiled evaluators — one instance per expression, reused across all
     // storage-format benchmarks for that expression to avoid recompilation
     // overhead skewing results.
-    private SIMDEngineEvaluator.SIMDVectorCompositeExpression arithEval;
-    private SIMDEngineEvaluator.SIMDVectorCompositeExpression trigEval;
+    private SIMDCommandF64.SIMDVectorCompositeExpression arithEvalD;
+    private SIMDCommandF64.SIMDVectorCompositeExpression trigEvalD;
+
+    private SIMDCommandSegmentF64.SIMDVectorCompositeExpression arithEvalSegD;
+    private SIMDCommandSegmentF64.SIMDVectorCompositeExpression trigEvalSegD;
+
+    private SIMDCommandF32.SIMDVectorCompositeExpression arithEvalF;
+    private SIMDCommandF32.SIMDVectorCompositeExpression trigEvalF;
+
+    private SIMDCommandSegmentF32.SIMDVectorCompositeExpression arithEvalSegF;
+    private SIMDCommandSegmentF32.SIMDVectorCompositeExpression trigEvalSegF;
 
     private Arena arena;
 
@@ -109,8 +120,17 @@ public class SIMDEngineFloatBenchmark {
 
     @Setup(Level.Trial)
     public void setup() throws Throwable {
-        arithEval = SIMDEngineEvaluator.getEvaluator(EXPR_ARITH);
-        trigEval = SIMDEngineEvaluator.getEvaluator(EXPR_TRIG);
+        arithEvalD = SIMDCommandF64.getEvaluator(EXPR_ARITH);
+        trigEvalD = SIMDCommandF64.getEvaluator(EXPR_TRIG);
+
+        arithEvalF = SIMDCommandF32.getEvaluator(EXPR_ARITH);
+        trigEvalF = SIMDCommandF32.getEvaluator(EXPR_TRIG);
+
+        arithEvalSegF = SIMDCommandSegmentF32.getEvaluator(EXPR_ARITH);
+        trigEvalSegF = SIMDCommandSegmentF32.getEvaluator(EXPR_TRIG);
+
+        arithEvalSegD = SIMDCommandSegmentF64.getEvaluator(EXPR_ARITH);
+        trigEvalSegD = SIMDCommandSegmentF64.getEvaluator(EXPR_TRIG);
 
         arena = Arena.ofShared();
 
@@ -177,11 +197,11 @@ public class SIMDEngineFloatBenchmark {
 
     @TearDown(Level.Trial)
     public void tearDown() {
-        if (arithEval != null) {
-            arithEval.close();
+        if (arithEvalD != null) {
+            arithEvalD.close();
         }
-        if (trigEval != null) {
-            trigEval.close();
+        if (trigEvalD != null) {
+            trigEvalD.close();
         }
         if (arena != null) {
             arena.close();
@@ -191,104 +211,102 @@ public class SIMDEngineFloatBenchmark {
     // =====================================================================
     // EXPR_ARITH: (x * y + x) / (y + 1)
     // =====================================================================
-
     @Benchmark
     public void arith_floatArray(Blackhole bh) {
-        arithEval.applyBulk(flatF, outF);
+        arithEvalF.applyBulk(flatF, outF);
         bh.consume(outF);
     }
 
     @Benchmark
     public void arith_doubleArray(Blackhole bh) {
-        arithEval.applyBulk(flatD, outD);
+        arithEvalD.applyBulk(flatD, outD);
         bh.consume(outD);
     }
 
     @Benchmark
     public void arith_doubleArray2D(Blackhole bh) {
-        arithEval.applyBulk(vars2D, out2D);
+        arithEvalD.applyBulk(vars2D, out2D);
         bh.consume(out2D);
     }
 
     @Benchmark
     public void arith_floatArray2D(Blackhole bh) {
-        arithEval.applyBulk(vars2DF, out2DF);
+        arithEvalF.applyBulk(vars2DF, out2DF);
         bh.consume(out2DF);
     }
 
     @Benchmark
     public void arith_memSegFloat(Blackhole bh) {
-        arithEval.applyBulkFloat(segFlatF, segOutF);
+        arithEvalSegF.applyBulk(segFlatF, segOutF);
         bh.consume(segOutF);
     }
 
     @Benchmark
     public void arith_memSegDouble(Blackhole bh) {
-        arithEval.applyBulk(segFlatD, segOutD);
+        arithEvalSegD.applyBulk(segFlatD, segOutD);
         bh.consume(segOutD);
     }
 
     @Benchmark
     public void arith_memSegArrayFloat(Blackhole bh) {
-        arithEval.applyBulkFloat(segArrF, segArrOutF);
+        arithEvalSegF.applyBulk(segArrF, segArrOutF);
         bh.consume(segArrOutF);
     }
 
     @Benchmark
     public void arith_memSegArrayDouble(Blackhole bh) {
-        arithEval.applyBulk(segArrD, segArrOutD);
+        arithEvalSegD.applyBulk(segArrD, segArrOutD);
         bh.consume(segArrOutD);
     }
 
     // =====================================================================
     // EXPR_TRIG: sin(x) * cos(y) + sqrt(x * x + y * y)
     // =====================================================================
-
     @Benchmark
     public void trig_floatArray(Blackhole bh) {
-        trigEval.applyBulk(flatF, outF);
+        trigEvalF.applyBulk(flatF, outF);
         bh.consume(outF);
     }
 
     @Benchmark
     public void trig_doubleArray(Blackhole bh) {
-        trigEval.applyBulk(flatD, outD);
+        trigEvalD.applyBulk(flatD, outD);
         bh.consume(outD);
     }
 
     @Benchmark
     public void trig_doubleArray2D(Blackhole bh) {
-        trigEval.applyBulk(vars2D, out2D);
+        trigEvalD.applyBulk(vars2D, out2D);
         bh.consume(out2D);
     }
 
     @Benchmark
     public void trig_floatArray2D(Blackhole bh) {
-        trigEval.applyBulk(vars2DF, out2DF);
+        trigEvalF.applyBulk(vars2DF, out2DF);
         bh.consume(out2DF);
     }
 
     @Benchmark
     public void trig_memSegFloat(Blackhole bh) {
-        trigEval.applyBulkFloat(segFlatF, segOutF);
+        trigEvalSegF.applyBulk(segFlatF, segOutF);
         bh.consume(segOutF);
     }
 
     @Benchmark
     public void trig_memSegDouble(Blackhole bh) {
-        trigEval.applyBulk(segFlatD, segOutD);
+        trigEvalSegD.applyBulk(segFlatD, segOutD);
         bh.consume(segOutD);
     }
 
     @Benchmark
     public void trig_memSegArrayFloat(Blackhole bh) {
-        trigEval.applyBulkFloat(segArrF, segArrOutF);
+        trigEvalSegF.applyBulk(segArrF, segArrOutF);
         bh.consume(segArrOutF);
     }
 
     @Benchmark
     public void trig_memSegArrayDouble(Blackhole bh) {
-        trigEval.applyBulk(segArrD, segArrOutD);
+        trigEvalSegD.applyBulk(segArrD, segArrOutD);
         bh.consume(segArrOutD);
     }
 

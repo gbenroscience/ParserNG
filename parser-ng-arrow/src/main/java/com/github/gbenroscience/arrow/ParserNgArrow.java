@@ -15,11 +15,9 @@
  */
 package com.github.gbenroscience.arrow;
 
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineF64;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64; 
 import java.util.Arrays;
 import java.util.Random;
-import org.apache.arrow.vector.Float8Vector;
-
 /**
  *
  * @author GBEMIRO
@@ -27,7 +25,7 @@ import org.apache.arrow.vector.Float8Vector;
 public class ParserNgArrow {
 
     public static void main(String[] args) throws Throwable {
-        SIMDEngineF64.SIMDVectorCompositeExpression see = SIMDEngineF64.getEvaluator("3*x^2+sin(x^3)");
+        SIMDCommandF64.SIMDVectorCompositeExpression see = SIMDCommandF64.getEvaluator("3*x^2+sin(x^3)");
         double[] in = new double[10000];
         double[] out = new double[10000];
  

@@ -15,20 +15,15 @@
  */
 package com.github.gbenroscience.parser.ng.bench;
 
-import com.github.gbenroscience.arrow.tools.box.ArrowBulkEvaluator; 
+import com.github.gbenroscience.arrow.tools.box.ArrowBulkEvaluator;
+import com.github.gbenroscience.arrow.tools.box.ArrowGpuBulkEvaluator;
 import com.github.gbenroscience.arrow.tools.box.NullPolicy;
-import org.apache.arrow.gandiva.expression.ExpressionTree;
 import org.apache.arrow.gandiva.expression.TreeBuilder;
 import org.apache.arrow.gandiva.expression.TreeNode;
-import org.apache.arrow.gandiva.evaluator.Projector;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.Float8Vector;
-import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.types.pojo.ArrowType;
-import org.apache.arrow.vector.types.pojo.Field;
-import org.apache.arrow.vector.types.pojo.FieldType;
-import org.apache.arrow.vector.types.pojo.Schema;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -47,15 +42,12 @@ import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.concurrent.TimeUnit;
-import org.apache.arrow.gandiva.exceptions.GandivaException;
-import org.apache.arrow.vector.types.FloatingPointPrecision;
+import java.util.concurrent.TimeUnit; 
 
 /**
  *
@@ -114,7 +106,7 @@ import org.apache.arrow.vector.types.FloatingPointPrecision;
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 8, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(value = 2)
-public class GandivaVsParserNGArrowBenchmark {
+public class ParserNGArrowVSGPUBenchmark {
 
     /*
      * -------------------------------------------------------------------------
@@ -128,22 +120,13 @@ public class GandivaVsParserNGArrowBenchmark {
     public static final class ExpressionDef {
 
         public final String name;
-        public final String parserExpr;
-        public final GandivaTreeBuilder gandivaBuilder;
+        public final String parserExpr; 
 
-        public ExpressionDef(String name, String parserExpr, GandivaTreeBuilder gandivaBuilder) {
+        public ExpressionDef(String name, String parserExpr) {
             this.name = name;
-            this.parserExpr = parserExpr;
-            this.gandivaBuilder = gandivaBuilder;
+            this.parserExpr = parserExpr; 
         }
-    }
-
-    @FunctionalInterface
-    public interface GandivaTreeBuilder {
-
-        TreeNode build(TreeNode x1, TreeNode x2, TreeNode x3, ArrowType.FloatingPoint doubleType);
-    }
-
+    } 
     // ---- small helpers so the 30 builders below read like the expressions they encode ----
     private static TreeNode add(TreeNode a, TreeNode b, ArrowType.FloatingPoint t) {
         return TreeBuilder.makeFunction("add", List.of(a, b), t);
@@ -203,72 +186,36 @@ public class GandivaVsParserNGArrowBenchmark {
      * {@link #main}.
      */
     public static final ExpressionDef[] EXPRESSIONS = new ExpressionDef[]{
-        new ExpressionDef("DISTANCE", "sin(sqrt(x1*x1 + x2*x2 + x3*x3))",
-        (x1, x2, x3, t) -> sinFn(sqrtFn(add(add(mul(x1, x1, t), mul(x2, x2, t), t), mul(x3, x3, t), t), t), t)),
-        new ExpressionDef("POLY", "(x1+x2)*(x1-x2) + x3*x3*x3",
-        (x1, x2, x3, t) -> add(mul(add(x1, x2, t), sub(x1, x2, t), t), mul(mul(x3, x3, t), x3, t), t)),
-        new ExpressionDef("LOG_EXP", "ln(x1*x1 + 1) + exp(x2*0.001) - x3",
-        (x1, x2, x3, t) -> sub(add(lnFn(add(mul(x1, x1, t), lit(1.0), t), t), expFn(mul(x2, lit(0.001), t), t), t), x3, t)),
-        new ExpressionDef("TRIG_CHAIN", "sin(x1)*cos(x2) + tan(x3*0.1) - sin(x1*x2*0.0001) + sqrt(abs(x3)+1)",
-        (x1, x2, x3, t) -> add(
-        sub(add(mul(sinFn(x1, t), cosFn(x2, t), t), tanFn(mul(x3, lit(0.1), t), t), t),
-        sinFn(mul(mul(x1, x2, t), lit(0.0001), t), t), t),
-        sqrtFn(add(absFn(x3, t), lit(1.0), t), t), t)),
-        new ExpressionDef("VARIABLE_POWER", "(x1+11.0)^(x2*0.0001 + 1.0)",
-        (x1, x2, x3, t) -> pow(add(x1, lit(11.0), t), add(mul(x2, lit(0.0001), t), lit(1.0), t), t)),
-        new ExpressionDef("SIMPLE_SUM", "x1 + x2 + x3",
-        (x1, x2, x3, t) -> add(add(x1, x2, t), x3, t)),
-        new ExpressionDef("SIMPLE_PRODUCT", "x1*x2*x3",
-        (x1, x2, x3, t) -> mul(mul(x1, x2, t), x3, t)),
-        new ExpressionDef("QUADRATIC", "x1*x1 + x2*x2 + x3*x3",
-        (x1, x2, x3, t) -> add(add(mul(x1, x1, t), mul(x2, x2, t), t), mul(x3, x3, t), t)),
-        new ExpressionDef("CUBIC", "x1*x1*x1 + x2*x2*x2 + x3*x3*x3",
-        (x1, x2, x3, t) -> add(add(mul(mul(x1, x1, t), x1, t), mul(mul(x2, x2, t), x2, t), t), mul(mul(x3, x3, t), x3, t), t)),
-        new ExpressionDef("DIVIDE_CHAIN", "(x1+x2) / (x3+1)",
-        (x1, x2, x3, t) -> div(add(x1, x2, t), add(x3, lit(1.0), t), t)),
-        new ExpressionDef("ABS_DIFF", "abs(x1-x2) + abs(x2-x3)",
-        (x1, x2, x3, t) -> add(absFn(sub(x1, x2, t), t), absFn(sub(x2, x3, t), t), t)),
-        new ExpressionDef("SQRT_SUM", "sqrt(x1*x1+x2*x2) + sqrt(x2*x2+x3*x3)",
-        (x1, x2, x3, t) -> add(sqrtFn(add(mul(x1, x1, t), mul(x2, x2, t), t), t), sqrtFn(add(mul(x2, x2, t), mul(x3, x3, t), t), t), t)),
-        new ExpressionDef("SIN_PRODUCT", "sin(x1)*sin(x2)*sin(x3)",
-        (x1, x2, x3, t) -> mul(mul(sinFn(x1, t), sinFn(x2, t), t), sinFn(x3, t), t)),
-        new ExpressionDef("COS_SUM", "cos(x1) + cos(x2) + cos(x3)",
-        (x1, x2, x3, t) -> add(add(cosFn(x1, t), cosFn(x2, t), t), cosFn(x3, t), t)),
-        new ExpressionDef("TAN_RATIO", "tan(x1*0.01) / (tan(x2*0.01) + 1)",
-        (x1, x2, x3, t) -> div(tanFn(mul(x1, lit(0.01), t), t), add(tanFn(mul(x2, lit(0.01), t), t), lit(1.0), t), t)),
-        new ExpressionDef("LOG_CHAIN", "ln(x1*x1 + x2*x2 + 1)",
-        (x1, x2, x3, t) -> lnFn(add(add(mul(x1, x1, t), mul(x2, x2, t), t), lit(1.0), t), t)),
-        new ExpressionDef("EXP_CHAIN", "exp(x1*0.0001) * exp(x2*0.0001)",
-        (x1, x2, x3, t) -> mul(expFn(mul(x1, lit(0.0001), t), t), expFn(mul(x2, lit(0.0001), t), t), t)),
-        new ExpressionDef("POWER_SQUARE", "(x1+5.0)^2.0",
-        (x1, x2, x3, t) -> pow(add(x1, lit(5.0), t), lit(2.0), t)),
-        new ExpressionDef("POWER_CUBE", "(x2+3.0)^3.0",
-        (x1, x2, x3, t) -> pow(add(x2, lit(3.0), t), lit(3.0), t)),
-        new ExpressionDef("POWER_MIXED", "(x1+2.0)^(x2*0.0001 + 0.5)",
-        (x1, x2, x3, t) -> pow(add(x1, lit(2.0), t), add(mul(x2, lit(0.0001), t), lit(0.5), t), t)),
-        new ExpressionDef("MIXED_TRIG_LOG", "sin(x1) * ln(x2*x2+1)",
-        (x1, x2, x3, t) -> mul(sinFn(x1, t), lnFn(add(mul(x2, x2, t), lit(1.0), t), t), t)),
-        new ExpressionDef("MIXED_EXP_TRIG", "exp(x1*0.0001) * cos(x2)",
-        (x1, x2, x3, t) -> mul(expFn(mul(x1, lit(0.0001), t), t), cosFn(x2, t), t)),
-        new ExpressionDef("NESTED_SQRT", "sqrt(sqrt(x1*x1+x2*x2)+1)",
-        (x1, x2, x3, t) -> sqrtFn(add(sqrtFn(add(mul(x1, x1, t), mul(x2, x2, t), t), t), lit(1.0), t), t)),
-        new ExpressionDef("DEEP_CHAIN", "sin(cos(x1*0.001)) + tan(x2*0.001)",
-        (x1, x2, x3, t) -> add(sinFn(cosFn(mul(x1, lit(0.001), t), t), t), tanFn(mul(x2, lit(0.001), t), t), t)),
-        new ExpressionDef("WEIGHTED_SUM", "0.3*x1 + 0.5*x2 + 0.2*x3",
-        (x1, x2, x3, t) -> add(add(mul(lit(0.3), x1, t), mul(lit(0.5), x2, t), t), mul(lit(0.2), x3, t), t)),
-        new ExpressionDef("NORMALIZED_DIFF", "(x1-x2) / (abs(x1)+abs(x2)+1)",
-        (x1, x2, x3, t) -> div(sub(x1, x2, t), add(add(absFn(x1, t), absFn(x2, t), t), lit(1.0), t), t)),
-        new ExpressionDef("HARMONIC", "1/(x1*x1+1) + 1/(x2*x2+1)",
-        (x1, x2, x3, t) -> add(div(lit(1.0), add(mul(x1, x1, t), lit(1.0), t), t), div(lit(1.0), add(mul(x2, x2, t), lit(1.0), t), t), t)),
-        new ExpressionDef("LOG_RATIO", "ln(x1*x1+1) / ln(x2*x2+2)",
-        (x1, x2, x3, t) -> div(lnFn(add(mul(x1, x1, t), lit(1.0), t), t), lnFn(add(mul(x2, x2, t), lit(2.0), t), t), t)),
-        new ExpressionDef("TRIG_POLY", "sin(x1)*x2 + cos(x2)*x3 - tan(x3*0.01)*x1",
-        (x1, x2, x3, t) -> sub(add(mul(sinFn(x1, t), x2, t), mul(cosFn(x2, t), x3, t), t), mul(tanFn(mul(x3, lit(0.01), t), t), x1, t), t)),
-        new ExpressionDef("COMPOSITE", "sqrt(abs(x1*x2*x3)) + sin(x1+x2+x3) / exp(0.0001*abs(x3))",
-        (x1, x2, x3, t) -> add(
-        sqrtFn(absFn(mul(mul(x1, x2, t), x3, t), t), t),
-        div(sinFn(add(add(x1, x2, t), x3, t), t), expFn(mul(lit(0.0001), absFn(x3, t), t), t), t),
-        t))
+        new ExpressionDef("DISTANCE", "sin(sqrt(x1*x1 + x2*x2 + x3*x3))"),
+        new ExpressionDef("POLY", "(x1+x2)*(x1-x2) + x3*x3*x3"),
+        new ExpressionDef("LOG_EXP", "ln(x1*x1 + 1) + exp(x2*0.001) - x3"),
+        new ExpressionDef("TRIG_CHAIN", "sin(x1)*cos(x2) + tan(x3*0.1) - sin(x1*x2*0.0001) + sqrt(abs(x3)+1)"),
+        new ExpressionDef("VARIABLE_POWER", "(x1+11.0)^(x2*0.0001 + 1.0)"),
+        new ExpressionDef("SIMPLE_SUM", "x1 + x2 + x3"),
+        new ExpressionDef("SIMPLE_PRODUCT", "x1*x2*x3"),
+        new ExpressionDef("QUADRATIC", "x1*x1 + x2*x2 + x3*x3"),
+        new ExpressionDef("CUBIC", "x1*x1*x1 + x2*x2*x2 + x3*x3*x3"),
+        new ExpressionDef("DIVIDE_CHAIN", "(x1+x2) / (x3+1)"),
+        new ExpressionDef("ABS_DIFF", "abs(x1-x2) + abs(x2-x3)"),
+        new ExpressionDef("SQRT_SUM", "sqrt(x1*x1+x2*x2) + sqrt(x2*x2+x3*x3)"),
+        new ExpressionDef("SIN_PRODUCT", "sin(x1)*sin(x2)*sin(x3)"),
+        new ExpressionDef("COS_SUM", "cos(x1) + cos(x2) + cos(x3)"),
+        new ExpressionDef("TAN_RATIO", "tan(x1*0.01) / (tan(x2*0.01) + 1)"),
+        new ExpressionDef("LOG_CHAIN", "ln(x1*x1 + x2*x2 + 1)"),
+        new ExpressionDef("EXP_CHAIN", "exp(x1*0.0001) * exp(x2*0.0001)"),
+        new ExpressionDef("POWER_SQUARE", "(x1+5.0)^2.0"),
+        new ExpressionDef("POWER_CUBE", "(x2+3.0)^3.0"),
+        new ExpressionDef("POWER_MIXED", "(x1+2.0)^(x2*0.0001 + 0.5)"),
+        new ExpressionDef("MIXED_TRIG_LOG", "sin(x1) * ln(x2*x2+1)"),
+        new ExpressionDef("MIXED_EXP_TRIG", "exp(x1*0.0001) * cos(x2)"),
+        new ExpressionDef("NESTED_SQRT", "sqrt(sqrt(x1*x1+x2*x2)+1)"),
+        new ExpressionDef("DEEP_CHAIN", "sin(cos(x1*0.001)) + tan(x2*0.001)"),
+        new ExpressionDef("WEIGHTED_SUM", "0.3*x1 + 0.5*x2 + 0.2*x3"),
+        new ExpressionDef("NORMALIZED_DIFF", "(x1-x2) / (abs(x1)+abs(x2)+1)"),
+        new ExpressionDef("HARMONIC", "1/(x1*x1+1) + 1/(x2*x2+1)"),
+        new ExpressionDef("LOG_RATIO", "ln(x1*x1+1) / ln(x2*x2+2)"),
+        new ExpressionDef("TRIG_POLY", "sin(x1)*x2 + cos(x2)*x3 - tan(x3*0.01)*x1"),
+        new ExpressionDef("COMPOSITE", "sqrt(abs(x1*x2*x3)) + sin(x1+x2+x3) / exp(0.0001*abs(x3))")
     };
 
     private static final Map<String, ExpressionDef> EXPRESSIONS_BY_NAME;
@@ -315,18 +262,14 @@ public class GandivaVsParserNGArrowBenchmark {
     private Float8Vector x2;
     private Float8Vector x3;
 
-    private Float8Vector parserOutput;
-    private Float8Vector gandivaOutput;
+    private Float8Vector parserOutput; 
 
     private Map<String, Float8Vector> parserColumns;
 
-    private ArrowBulkEvaluator parserSIMDEvaluator; 
-
-    private Projector gandivaProjector;
-
-    private List<org.apache.arrow.memory.ArrowBuf> gandivaInputBuffers;
-    private List<ValueVector> gandivaOutputVectors;
-    private Schema gandivaSchema;
+    private ArrowBulkEvaluator parserSIMDEvaluator;
+    private ArrowGpuBulkEvaluator parserGpuEvaluator;
+ 
+ 
 
     /*
      * -------------------------------------------------------------------------
@@ -345,11 +288,15 @@ public class GandivaVsParserNGArrowBenchmark {
         try {
             parserSIMDEvaluator = ArrowBulkEvaluator.compile(def.parserExpr);
         } catch (Throwable ex) {
-            System.getLogger(GandivaVsParserNGArrowBenchmark.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+            System.getLogger(ParserNGArrowVSGPUBenchmark.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+        }
+
+        try {
+            parserGpuEvaluator = ArrowGpuBulkEvaluator.compile(def.parserExpr);
+        } catch (Throwable ex) {
+            System.getLogger(ParserNGArrowVSGPUBenchmark.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }
  
-
-        gandivaProjector = buildGandivaProjector(def);
     }
 
     @Setup(Level.Iteration)
@@ -361,23 +308,10 @@ public class GandivaVsParserNGArrowBenchmark {
                 "parser_ng_result",
                 size
         );
-
-        gandivaOutput = new Float8Vector("gandiva_result", allocator);
-        gandivaOutput.allocateNew(size);
-        gandivaOutput.setValueCount(size);
+ 
 
         parserColumns = Map.of("x1", x1, "x2", x2, "x3", x3);
-
-        gandivaInputBuffers = Arrays.asList(
-                x1.getValidityBuffer(),
-                x1.getDataBuffer(),
-                x2.getValidityBuffer(),
-                x2.getDataBuffer(),
-                x3.getValidityBuffer(),
-                x3.getDataBuffer()
-        );
-
-        gandivaOutputVectors = List.of(gandivaOutput);
+ 
     }
 
     /*
@@ -405,33 +339,7 @@ public class GandivaVsParserNGArrowBenchmark {
         x2.setValueCount(size);
         x3.setValueCount(size);
     }
-
-    /*
-     * -------------------------------------------------------------------------
-     * Gandiva expression construction
-     * -------------------------------------------------------------------------
-     */
-    private Projector buildGandivaProjector(ExpressionDef def) throws Exception {
-
-        ArrowType.FloatingPoint doubleType = new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE);
-
-        Field x1Field = new Field("x1", FieldType.nullable(doubleType), null);
-        Field x2Field = new Field("x2", FieldType.nullable(doubleType), null);
-        Field x3Field = new Field("x3", FieldType.nullable(doubleType), null);
-        Field resultField = new Field("result", FieldType.nullable(doubleType), null);
-
-        TreeNode x1Node = TreeBuilder.makeField(x1Field);
-        TreeNode x2Node = TreeBuilder.makeField(x2Field);
-        TreeNode x3Node = TreeBuilder.makeField(x3Field);
-
-        TreeNode root = def.gandivaBuilder.build(x1Node, x2Node, x3Node, doubleType);
-
-        ExpressionTree expressionTree = TreeBuilder.makeExpression(root, resultField);
-
-        gandivaSchema = new Schema(List.of(x1Field, x2Field, x3Field));
-
-        return Projector.make(gandivaSchema, List.of(expressionTree));
-    }
+ 
 
     /*
      * -------------------------------------------------------------------------
@@ -448,17 +356,17 @@ public class GandivaVsParserNGArrowBenchmark {
         );
         bh.consume(parserOutput);
     }
- 
 
     @Benchmark
-    public void gandiva(Blackhole bh) throws Exception {
-        gandivaProjector.evaluate(
-                size,
-                gandivaInputBuffers,
-                gandivaOutputVectors
+    public void parserNGGPU(Blackhole bh) {
+        parserGpuEvaluator.evaluate(
+                parserColumns,
+                parserOutput,
+                NullPolicy.IGNORE
         );
-        bh.consume(gandivaOutput);
+        bh.consume(parserOutput);
     }
+ 
 
     @Benchmark
     public void parserNGParallel(Blackhole bh) {
@@ -471,59 +379,7 @@ public class GandivaVsParserNGArrowBenchmark {
         bh.consume(parserOutput);
     }
 
-    /*
-     * -------------------------------------------------------------------------
-     * Correctness check
-     * -------------------------------------------------------------------------
-     */
-    private void verifyCorrectness(ExpressionDef def) throws Exception {
-        parserSIMDEvaluator.evaluate(parserColumns, parserOutput, NullPolicy.IGNORE, false);
-        gandivaProjector.evaluate(size, gandivaInputBuffers, gandivaOutputVectors);
-
-        double maxAbs = 0.0;
-        double maxRel = 0.0;
-        int mismatches = 0;
-        int nanMismatches = 0;
-
-        for (int i = 0; i < size; i++) {
-            double a = parserOutput.get(i);
-            double b = gandivaOutput.get(i);
-
-            boolean aNaN = Double.isNaN(a);
-            boolean bNaN = Double.isNaN(b);
-            if (aNaN || bNaN) {
-                if (aNaN != bNaN) {
-                    nanMismatches++;
-                }
-                continue;
-            }
-
-            double abs = Math.abs(a - b);
-            double denominator = Math.max(Math.max(Math.abs(a), Math.abs(b)), 1e-15);
-            double rel = abs / denominator;
-
-            maxAbs = Math.max(maxAbs, abs);
-            maxRel = Math.max(maxRel, rel);
-
-            if (abs > 1e-12 && rel > 1e-12) {
-                mismatches++;
-            }
-        }
-
-        System.out.println("\n============================================================");
-        System.out.println("Correctness");
-        System.out.println("============================================================");
-        System.out.println("Expression name  : " + def.name);
-        System.out.println("Expression       : " + def.parserExpr);
-        System.out.println("Rows             : " + size);
-        System.out.printf(Locale.ROOT, "maxAbs           : %.17g%n", maxAbs);
-        System.out.printf(Locale.ROOT, "maxRel           : %.17g%n", maxRel);
-        System.out.println("mismatches       : " + mismatches);
-        System.out.println("NaN mismatches   : " + nanMismatches
-                + " (one side NaN, other not -- always worth investigating)");
-        System.out.println("============================================================\n");
-    }
-
+ 
     /*
      * -------------------------------------------------------------------------
      * Teardown
@@ -535,10 +391,7 @@ public class GandivaVsParserNGArrowBenchmark {
             parserOutput.close();
             parserOutput = null;
         }
-        if (gandivaOutput != null) {
-            gandivaOutput.close();
-            gandivaOutput = null;
-        }
+ 
         if (x1 != null) {
             x1.close();
             x1 = null;
@@ -559,49 +412,13 @@ public class GandivaVsParserNGArrowBenchmark {
             parserSIMDEvaluator.close();
             parserSIMDEvaluator = null;
         }
-        if (gandivaProjector != null) {
-            try {
-                gandivaProjector.close();
-            } catch (GandivaException ex) {
-                /* ignored */ }
-            gandivaProjector = null;
-        }
         if (allocator != null) {
             allocator.close();
             allocator = null;
         }
     }
 
-    /*
-     * -------------------------------------------------------------------------
-     * Correctness-check runner -- checks EVERY expression in EXPRESSIONS in
-     * one pass, independent of JMH. Run this FIRST, before trusting any
-     * throughput number below, via:
-     *
-     *   java --add-modules=jdk.incubator.vector \
-     *        --add-opens=java.base/java.nio=ALL-UNNAMED \
-     *        --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-     *        -Darrow.allocation.manager.type=Unsafe \
-     *        -cp target/benchmarks.jar \
-     *        com.github.gbenroscience.parser.ng.bench.GandivaVsParserNGArrowBenchmark
-     * -------------------------------------------------------------------------
-     */
-    public static void runAllCorrectnessChecks() throws Exception {
-        for (ExpressionDef def : EXPRESSIONS) {
-            GandivaVsParserNGArrowBenchmark benchmark = new GandivaVsParserNGArrowBenchmark();
-            benchmark.exprName = def.name;
-            benchmark.size = 1_000_000;
-            benchmark.setupTrial();
-            benchmark.setupIteration();
-
-            try {
-                benchmark.verifyCorrectness(def);
-            } finally {
-                benchmark.teardownIteration();
-                benchmark.teardownTrial();
-            }
-        }
-    }
+ 
 
     /*
      * -------------------------------------------------------------------------
@@ -672,7 +489,7 @@ public class GandivaVsParserNGArrowBenchmark {
         System.out.println("\nRunning JMH for: " + String.join(", ", selectedNames) + "\n");
 
         Options opt = new OptionsBuilder()
-                .include(GandivaVsParserNGArrowBenchmark.class.getSimpleName())
+                .include(ParserNGArrowVSGPUBenchmark.class.getSimpleName())
                 .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
                 .param("exprName", selectedNames)
                 .jvmArgsAppend(

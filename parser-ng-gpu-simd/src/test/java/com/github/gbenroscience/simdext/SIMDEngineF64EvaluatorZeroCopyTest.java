@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.github.gbenroscience.parser.MathExpression; 
-import com.github.gbenroscience.simdext.turbo.tools.SIMDEngineSegmentF64;
+import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineSegmentF64;
 
 import static org.junit.jupiter.api.Assertions.*;
 
