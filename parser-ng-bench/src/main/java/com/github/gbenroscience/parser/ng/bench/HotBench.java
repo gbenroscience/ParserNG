@@ -19,10 +19,9 @@ package com.github.gbenroscience.parser.ng.bench;
  *
  * @author GBEMIRO
  */
-import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.utils.MathToJaninoConverter;
-import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
+import com.github.gbenroscience.parser.MathExpression; 
+import com.github.gbenroscience.simd.turbo.tools.utils.MathToJaninoConverter; 
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64; 
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -133,7 +132,9 @@ public class HotBench {
         "0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))",
         "(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)-2)/(2*x1-2))",
         "(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)",
-        "3*sin(x)*cos(y)+sqrt(abs(x*y))"
+        "3*sin(x)*cos(y)+sqrt(abs(x*y))",
+        "(x1+x2)*(x1-x2) + x3*x3*x3",
+        "sqrt(sqrt(x1*x1+x2*x2)+1)"
     };
 
     static int index = 37;
@@ -154,13 +155,14 @@ public class HotBench {
 
     double[] result;
 
-    @Param({"1000000"})
+    @Param({"8388608"})
     private int dataSize;
 
     private double[] vars;
     private JaninoMathFunction fastEvaluator;
 
     SIMDCommandF64.SIMDVectorCompositeExpression simdComd; 
+    com.github.gbenroscience.simdext.turbo.tools.command.fused.SIMDCommandF64.SIMDVectorCompositeExpression simdComdFused; 
 
     private int varCount;
 
@@ -307,7 +309,7 @@ public class HotBench {
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public void parserNGSimdVec(Blackhole bh) {
+    public void simdComd(Blackhole bh) {
         // Read from the same stable scenario index—zero cursor modifications inside!
         final double[][] input = dataSink[benchmarkScenario];
         final double[] res = result;
@@ -320,7 +322,7 @@ public class HotBench {
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public void parserNGSimdVecParallel(Blackhole bh) {
+    public void simdComdParallel(Blackhole bh) {
         // Read from the same stable scenario index—zero cursor modifications inside!
         final double[][] input = dataSink[benchmarkScenario];
         final double[] res = result;
@@ -330,12 +332,40 @@ public class HotBench {
         bh.consume(res);
     }
     
+    
+    @Benchmark
+    @BenchmarkMode(Mode.AverageTime)
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    public void simdComdFused(Blackhole bh) {
+        // Read from the same stable scenario index—zero cursor modifications inside!
+        final double[][] input = dataSink[benchmarkScenario];
+        final double[] res = result;
+
+        // Execute core computation kernel
+        simdComdFused.applyBulk(input, res);
+        bh.consume(res);
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.AverageTime)
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    public void simdComdFusedParallel(Blackhole bh) {
+        // Read from the same stable scenario index—zero cursor modifications inside!
+        final double[][] input = dataSink[benchmarkScenario];
+        final double[] res = result;
+
+        // Execute core computation kernel
+        simdComdFused.applyBulkParallel(input, res);
+        bh.consume(res);
+    }
+    
    
  
 
     private void setupParserNG(MathExpression me) {
         try {
             simdComd = SIMDCommandF64.getEvaluator(me); 
+            simdComdFused = com.github.gbenroscience.simdext.turbo.tools.command.fused.SIMDCommandF64.getEvaluator(me); 
         } catch (Throwable ex) {
             System.getLogger(HotBench.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }
@@ -397,6 +427,8 @@ public class HotBench {
             43====(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)-2)/(2*x1-2))
             44====(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)
             45====(3*sin(x1)*cos(x2)+sqrt(abs(x1*x2)))
+            46====(x1+x2)*(x1-x2) + x3*x3*x3
+            47====sqrt(sqrt(x1*x1+x2*x2)+1)  
             """;
 
     public static final StringBuilder EXPR_MAP = new StringBuilder();

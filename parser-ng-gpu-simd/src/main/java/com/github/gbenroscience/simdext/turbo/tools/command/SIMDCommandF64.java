@@ -186,6 +186,153 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
         }
     }
 
+    // --- Fused Leaf Commands: Load(var) OP Load(var) ---
+    // When both operands of a binary op are plain variable loads (the most
+    // common shape for shallow expressions like a+b), compiling them as two
+    // separate LoadCommands + one BinaryOp forces both operands through an
+    // extra round-trip into ctx.scratch before the op even runs, and the op
+    // itself writes a third copy back into scratch. These fused commands read
+    // straight from the source arrays (flatVariables / _2DVariables) and skip
+    // that intermediate materialization entirely. Selected at compile() time
+    // via peephole-fusion over the emitted plan — see tryFuseLoadLoad().
+    // Numerically identical to LoadCommand+LoadCommand+BinaryOp: same IEEE
+    // op, same operand order, just a different source array.
+    record LoadLoadAddCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .add(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] + flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .add(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] + r[base + k];
+                }
+            }
+        }
+    }
+
+    record LoadLoadSubCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .sub(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] - flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .sub(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] - r[base + k];
+                }
+            }
+        }
+    }
+
+    record LoadLoadMulCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .mul(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] * flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .mul(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] * r[base + k];
+                }
+            }
+        }
+    }
+
+    record LoadLoadDivCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .div(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] / flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .div(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] / r[base + k];
+                }
+            }
+        }
+    }
+
     record PowCommand(int lOff, int rOff, int destOff) implements VectorCommand {
 
         @Override
@@ -358,23 +505,36 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                     int lOff = virtualStack[--sp];
                     int destOff = lOff; // Reuse left slot to save space
 
-                    plan.add(switch (opcode) {
-                        case OP_ADD ->
-                            new AddCommand(lOff, rOff, destOff);
-                        case OP_SUB ->
-                            new SubCommand(lOff, rOff, destOff);
-                        case OP_MUL ->
-                            new MulCommand(lOff, rOff, destOff);
-                        case OP_DIV ->
-                            new DivCommand(lOff, rOff, destOff);
-                        case OP_REM ->
-                            new RemCommand(lOff, rOff, destOff);
-                        case OP_POW ->
-                            new PowCommand(lOff, rOff, destOff);
+                    VectorCommand fused = tryFuseLoadLoad(plan, opcode, lOff, rOff, destOff);
+                    if (fused != null) {
+                        // Both LoadCommands are dead after this point: codegen is
+                        // a strict LIFO stack machine, so lOff/rOff cannot be
+                        // referenced by anything else once this op consumes them.
+                        // Removing them skips materializing both operands into
+                        // ctx.scratch - the fused command reads straight from
+                        // flatVariables/_2DVariables instead.
+                        plan.remove(plan.size() - 1);
+                        plan.remove(plan.size() - 1);
+                        plan.add(fused);
+                    } else {
+                        plan.add(switch (opcode) {
+                            case OP_ADD ->
+                                new AddCommand(lOff, rOff, destOff);
+                            case OP_SUB ->
+                                new SubCommand(lOff, rOff, destOff);
+                            case OP_MUL ->
+                                new MulCommand(lOff, rOff, destOff);
+                            case OP_DIV ->
+                                new DivCommand(lOff, rOff, destOff);
+                            case OP_REM ->
+                                new RemCommand(lOff, rOff, destOff);
+                            case OP_POW ->
+                                new PowCommand(lOff, rOff, destOff);
 
-                        default ->
-                            throw new IllegalStateException();
-                    });
+                            default ->
+                                throw new IllegalStateException();
+                        });
+                    }
                     virtualStack[sp++] = destOff;
                 }
 
@@ -564,6 +724,42 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
         }
 
         return new SIMDVectorCompositeExpression(plan.toArray(new VectorCommand[0]), stackDepth, BLOCK_SIZE);
+    }
+
+    /**
+     * Peephole fusion: when both operands of a binary arithmetic op are
+     * plain variable loads - i.e. the last two entries in the plan are
+     * LoadCommands feeding directly into this op and nothing else - collapse
+     * them into a single fused command that reads straight from the source
+     * arrays instead of round-tripping both operands through ctx.scratch.
+     * Returns null (no fusion) for anything that doesn't match that exact
+     * shape, including OP_REM (not vectorized regardless) and OP_POW
+     * (routes through VectorMath.executePowerBlended, not a plain lane op).
+     */
+    private static VectorCommand tryFuseLoadLoad(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 2) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof LoadCommand rLoad) || rLoad.destOff() != rOff) {
+            return null;
+        }
+        if (!(plan.get(size - 2) instanceof LoadCommand lLoad) || lLoad.destOff() != lOff) {
+            return null;
+        }
+
+        return switch (opcode) {
+            case OP_ADD ->
+                new LoadLoadAddCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_SUB ->
+                new LoadLoadSubCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_MUL ->
+                new LoadLoadMulCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_DIV ->
+                new LoadLoadDivCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            default ->
+                null;
+        };
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression implements AutoCloseable {

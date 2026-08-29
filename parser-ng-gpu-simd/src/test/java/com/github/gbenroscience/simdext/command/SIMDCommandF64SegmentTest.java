@@ -18,8 +18,7 @@ package com.github.gbenroscience.simdext.command;
 /**
  *
  * @author GBEMIRO
- */
-import com.github.gbenroscience.simdext.*;
+ */ 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

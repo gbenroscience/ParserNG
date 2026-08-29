@@ -1152,7 +1152,7 @@ import jdk.incubator.vector.VectorSpecies;
                 s[base + k] = Maths.swiglu(s[base + k]);
             }
         }
-
+   
         public static void gelu(int base, int n, double[] s) {
             int limit = SPECIES.loopBound(n);
             int k = 0;
@@ -1304,5 +1304,649 @@ import jdk.incubator.vector.VectorSpecies;
                     .mul(V_HALF);
             return result.blend(V_NAN, valid.not());
         }
+
+        // ========================================================================
+        // Fused Load-Unary Variants (added for LoadUnaryMathCommand fusion)
+        // ========================================================================
+        // Each method below is the exact same computation as its in-place
+        // counterpart above, but reads from an arbitrary (src, srcBase) and
+        // writes to an arbitrary (dest, destBase) instead of operating on `s`
+        // in place. This lets SIMDCommandF64 read straight out of
+        // flatVariables/_2DVariables for a bare-variable unary call, skipping
+        // the load->scratch->read round trip - the same idea as
+        // LoadLoadAddCommand, generalized to one operand.
+        //
+        // Deliberately additive: nothing above this line was modified, so the
+        // existing in-place methods (and anything that depends on their exact
+        // behavior) are untouched. Each formula below was copied verbatim from
+        // its in-place counterpart - same vector op sequence, same scalar
+        // fallback - so it should be bit-identical, but please still run it
+        // through your correctness harness before trusting it in production;
+        // I can't run that harness from here.
+
+        public static void sinFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.SIN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.sin(src[srcBase + i]);
+            }
+        }
+
+        public static void cosFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.COS)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.cos(src[srcBase + i]);
+            }
+        }
+
+        public static void tanFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.TAN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.tan(src[srcBase + i]);
+            }
+        }
+
+        public static void sinDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.SIN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.sin(Math.toRadians(src[srcBase + i]));
+            }
+        }
+
+        public static void cosDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.COS)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.cos(Math.toRadians(src[srcBase + i]));
+            }
+        }
+
+        public static void tanDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.TAN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.tan(Math.toRadians(src[srcBase + i]));
+            }
+        }
+
+        public static void sinGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.SIN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.sin(src[srcBase + i] * GRAD_TO_RAD);
+            }
+        }
+
+        public static void cosGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.COS)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.cos(src[srcBase + i] * GRAD_TO_RAD);
+            }
+        }
+
+        public static void tanGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.TAN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.tan(src[srcBase + i] * GRAD_TO_RAD);
+            }
+        }
+
+        public static void secDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.COS))
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = 1.0 / Math.cos(Math.toRadians(src[srcBase + i]));
+            }
+        }
+
+        public static void cscDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_DEG_TO_RAD)
+                        .lanewise(VectorOperators.SIN))
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = 1.0 / Math.sin(Math.toRadians(src[srcBase + i]));
+            }
+        }
+
+        public static void cotDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_DEG_TO_RAD);
+                v.lanewise(VectorOperators.COS)
+                        .div(v.lanewise(VectorOperators.SIN))
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = 1.0 / Math.tan(Math.toRadians(src[srcBase + i]));
+            }
+        }
+
+        public static void secGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.COS))
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = 1.0 / Math.cos(src[srcBase + i] * GRAD_TO_RAD);
+            }
+        }
+
+        public static void cscGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_GRAD_TO_RAD)
+                        .lanewise(VectorOperators.SIN))
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = 1.0 / Math.sin(src[srcBase + i] * GRAD_TO_RAD);
+            }
+        }
+
+        public static void cotGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .mul(V_GRAD_TO_RAD);
+                v.lanewise(VectorOperators.COS)
+                        .div(v.lanewise(VectorOperators.SIN))
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = 1.0 / Math.tan(src[srcBase + i] * GRAD_TO_RAD);
+            }
+        }
+
+        public static void asinFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ASIN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.asin(src[srcBase + i]);
+            }
+        }
+
+        public static void acosFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ACOS)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.acos(src[srcBase + i]);
+            }
+        }
+
+        public static void atanFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ATAN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.atan(src[srcBase + i]);
+            }
+        }
+
+        public static void asinDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ASIN)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.toDegrees(Math.asin(src[srcBase + i]));
+            }
+        }
+
+        public static void acosDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ACOS)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.toDegrees(Math.acos(src[srcBase + i]));
+            }
+        }
+
+        public static void atanDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ATAN)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.toDegrees(Math.atan(src[srcBase + i]));
+            }
+        }
+
+        public static void asinGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ASIN)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.asin(src[srcBase + i]) * RAD_TO_GRAD;
+            }
+        }
+
+        public static void acosGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ACOS)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.acos(src[srcBase + i]) * RAD_TO_GRAD;
+            }
+        }
+
+        public static void atanGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ATAN)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.atan(src[srcBase + i]) * RAD_TO_GRAD;
+            }
+        }
+
+        public static void acscFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .lanewise(VectorOperators.ASIN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.asin(1.0 / src[srcBase + i]);
+            }
+        }
+
+        public static void asecFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .lanewise(VectorOperators.ACOS)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.acos(1.0 / src[srcBase + i]);
+            }
+        }
+
+        public static void acotFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .lanewise(VectorOperators.ATAN)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.atan(1.0 / src[srcBase + i]);
+            }
+        }
+
+        public static void acscDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .lanewise(VectorOperators.ASIN)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.toDegrees(Math.asin(1.0 / src[srcBase + i]));
+            }
+        }
+
+        public static void asecDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .lanewise(VectorOperators.ACOS)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.toDegrees(Math.acos(1.0 / src[srcBase + i]));
+            }
+        }
+
+        public static void acotDegFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .lanewise(VectorOperators.ATAN)
+                        .mul(V_RAD_TO_DEG)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.toDegrees(Math.atan(1.0 / src[srcBase + i]));
+            }
+        }
+
+        public static void acscGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .lanewise(VectorOperators.ASIN)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.asin(1.0 / src[srcBase + i]) * RAD_TO_GRAD;
+            }
+        }
+
+        public static void asecGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .lanewise(VectorOperators.ACOS)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.acos(1.0 / src[srcBase + i]) * RAD_TO_GRAD;
+            }
+        }
+
+        public static void acotGradFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                V_ONE.div(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .lanewise(VectorOperators.ATAN)
+                        .mul(V_RAD_TO_GRAD)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.atan(1.0 / src[srcBase + i]) * RAD_TO_GRAD;
+            }
+        }
+
+        public static void sinhFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.SINH)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.sinh(src[srcBase + i]);
+            }
+        }
+
+        public static void coshFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.COSH)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.cosh(src[srcBase + i]);
+            }
+        }
+
+        public static void tanhFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.TANH)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.tanh(src[srcBase + i]);
+            }
+        }
+
+        public static void asinhFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                vectorAsinhImpl(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                double x = src[srcBase + i];
+                dest[destBase + i] = Math.log(x + Math.sqrt(x * x + 1.0));
+            }
+        }
+
+        public static void acoshFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                vectorAcoshImpl(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                double x = src[srcBase + i];
+                dest[destBase + i] = x < 1.0 ? Double.NaN : Math.log(x + Math.sqrt(x * x - 1.0));
+            }
+        }
+
+        public static void atanhFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                vectorAtanhImpl(DoubleVector.fromArray(SPECIES, src, srcBase + i))
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                double x = src[srcBase + i];
+                dest[destBase + i] = 0.5 * Math.log((1.0 + x) / (1.0 - x));
+            }
+        }
+
+        public static void sqrtFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.SQRT)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.sqrt(src[srcBase + i]);
+            }
+        }
+
+        public static void cbrtFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.CBRT)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.cbrt(src[srcBase + i]);
+            }
+        }
+
+        public static void expFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.EXP)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.exp(src[srcBase + i]);
+            }
+        }
+
+        public static void lnFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.LOG)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.log(src[srcBase + i]);
+            }
+        }
+
+        public static void log10Fused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.LOG10)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.log10(src[srcBase + i]);
+            }
+        }
+
+        public static void absFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, src, srcBase + i)
+                        .lanewise(VectorOperators.ABS)
+                        .intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Math.abs(src[srcBase + i]);
+            }
+        }
+
+        public static void erfFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector x = DoubleVector.fromArray(SPECIES, src, srcBase + i);
+                vectorizedErf(x).intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Maths.erf(src[srcBase + i]);
+            }
+        }
+
+        public static void swigluFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector x = DoubleVector.fromArray(SPECIES, src, srcBase + i);
+                DoubleVector expNegX = fastVectorExp(x.neg());
+                x.div(expNegX.add(ONE)).intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Maths.swiglu(src[srcBase + i]);
+            }
+        }
+
+        public static void geluFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
+            final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+            final DoubleVector INV_SQRT_2 = DoubleVector.broadcast(SPECIES, 0.7071067811865476);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector x = DoubleVector.fromArray(SPECIES, src, srcBase + i);
+                x.mul(HALF).mul(vectorizedErf(x.mul(INV_SQRT_2)).add(ONE)).intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Maths.gelu(src[srcBase + i]);
+            }
+        }
+
+        public static void geluFastFused(double[] src, int srcBase, double[] dest, int destBase, int n) {
+            int i = 0, limit = SPECIES.loopBound(n);
+            final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
+            final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+            final DoubleVector TWO = DoubleVector.broadcast(SPECIES, 2.0);
+            final DoubleVector SQRT_2_OVER_PI = DoubleVector.broadcast(SPECIES, 0.7978845608028654);
+            final DoubleVector COEF = DoubleVector.broadcast(SPECIES, 0.044715);
+            for (; i < limit; i += SPECIES.length()) {
+                DoubleVector x = DoubleVector.fromArray(SPECIES, src, srcBase + i);
+                DoubleVector x3 = x.mul(x).mul(x);
+                DoubleVector z = x3.mul(COEF).add(x).mul(SQRT_2_OVER_PI);
+                DoubleVector exp2z = fastVectorExp(z.mul(TWO));
+                DoubleVector tanhZ = exp2z.sub(ONE).div(exp2z.add(ONE));
+                x.mul(HALF).mul(tanhZ.add(ONE)).intoArray(dest, destBase + i);
+            }
+            for (; i < n; i++) {
+                dest[destBase + i] = Maths.fastGelu(src[srcBase + i]);
+            }
+        }
+
 
     }

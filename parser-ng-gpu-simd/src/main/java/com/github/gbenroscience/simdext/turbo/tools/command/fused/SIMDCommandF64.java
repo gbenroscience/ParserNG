@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simdext.turbo.tools.command.v2;
+package com.github.gbenroscience.simdext.turbo.tools.command.fused;
 
 
 import com.github.gbenroscience.parser.MathExpression;
@@ -8,12 +8,10 @@ import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
+
 import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
-import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath;
-import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
+import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath; 
 import java.lang.ref.Cleaner;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,30 +32,30 @@ import jdk.incubator.vector.*;
  * 
  *
  */
-public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
+public class SIMDCommandF64 extends VectorTurboEvaluator {
 
-    public SIMDCommandSegmentF64(MathExpression me) throws Throwable {
+    public SIMDCommandF64(MathExpression me) throws Throwable {
         super(me);
     }
 
-    public SIMDCommandSegmentF64(MathExpression me, int numWorkers) throws Throwable {
+    public SIMDCommandF64(MathExpression me, int numWorkers) throws Throwable {
         super(me, numWorkers);
     }
  
-    public static final SIMDCommandSegmentF64.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
-        return (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(me).compile();
+    public static final SIMDCommandF64.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
+        return (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(me).compile();
     }
 
-    public static final SIMDCommandSegmentF64.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
-        return (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(new MathExpression(expr)).compile();
+    public static final SIMDCommandF64.SIMDVectorCompositeExpression getEvaluator(String expr) throws Throwable {
+        return (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(new MathExpression(expr)).compile();
     }
 
-    public static final SIMDCommandSegmentF64.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
-        return (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(me, numWorkers).compile();
+    public static final SIMDCommandF64.SIMDVectorCompositeExpression getEvaluator(MathExpression me, int numWorkers) throws Throwable {
+        return (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(me, numWorkers).compile();
     }
 
-    public static final SIMDCommandSegmentF64.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
-        return (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(new MathExpression(expr), numWorkers).compile();
+    public static final SIMDCommandF64.SIMDVectorCompositeExpression getEvaluator(String expr, int numWorkers) throws Throwable {
+        return (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(new MathExpression(expr), numWorkers).compile();
     }
 
     // 1. Updated Command Interface
@@ -73,11 +71,6 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
         final double[] scratch;
         double[] flatVariables;
         double[][] _2DVariables;
-        // MemorySegment-backed variable sources (off-heap / zero-copy path).
-        // Mutually exclusive with the double[] / double[][] fields above -
-        // whichever init method was called last clears the other pair.
-        MemorySegment flatVariablesSeg;
-        MemorySegment[] _2DVariablesSeg;
         int dataSize;
         int blockStart;
 
@@ -89,17 +82,6 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
         void initForBlock(double[] flat, double[][] _2D, int size, int bStart) {
             this.flatVariables = flat;
             this._2DVariables = _2D;
-            this.flatVariablesSeg = null;
-            this._2DVariablesSeg = null;
-            this.dataSize = size;
-            this.blockStart = bStart;
-        }
-
-        void initForBlockSeg(MemorySegment flatSeg, MemorySegment[] _2DSeg, int size, int bStart) {
-            this.flatVariables = null;
-            this._2DVariables = null;
-            this.flatVariablesSeg = flatSeg;
-            this._2DVariablesSeg = _2DSeg;
             this.dataSize = size;
             this.blockStart = bStart;
         }
@@ -129,15 +111,8 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
             if (ctx.flatVariables != null) {
                 int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
                 System.arraycopy(ctx.flatVariables, srcOff, ctx.scratch, destOff, n);
-            } else if (ctx._2DVariables != null) {
-                System.arraycopy(ctx._2DVariables[slotIdx], ctx.blockStart, ctx.scratch, destOff, n);
-            } else if (ctx.flatVariablesSeg != null) {
-                long srcOff = ((long) slotIdx * ctx.dataSize) + ctx.blockStart;
-                MemorySegment.copy(ctx.flatVariablesSeg, ValueLayout.JAVA_DOUBLE, srcOff * ValueLayout.JAVA_DOUBLE.byteSize(),
-                        ctx.scratch, destOff, n);
             } else {
-                MemorySegment.copy(ctx._2DVariablesSeg[slotIdx], ValueLayout.JAVA_DOUBLE,
-                        (long) ctx.blockStart * ValueLayout.JAVA_DOUBLE.byteSize(), ctx.scratch, destOff, n);
+                System.arraycopy(ctx._2DVariables[slotIdx], ctx.blockStart, ctx.scratch, destOff, n);
             }
         }
     }
@@ -207,6 +182,153 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
             }
             for (; k < n; k++) {
                 s[destOff + k] = s[lOff + k] / s[rOff + k];
+            }
+        }
+    }
+
+    // --- Fused Leaf Commands: Load(var) OP Load(var) ---
+    // When both operands of a binary op are plain variable loads (the most
+    // common shape for shallow expressions like a+b), compiling them as two
+    // separate LoadCommands + one BinaryOp forces both operands through an
+    // extra round-trip into ctx.scratch before the op even runs, and the op
+    // itself writes a third copy back into scratch. These fused commands read
+    // straight from the source arrays (flatVariables / _2DVariables) and skip
+    // that intermediate materialization entirely. Selected at compile() time
+    // via peephole-fusion over the emitted plan — see tryFuseLoadLoad().
+    // Numerically identical to LoadCommand+LoadCommand+BinaryOp: same IEEE
+    // op, same operand order, just a different source array.
+    record LoadLoadAddCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .add(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] + flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .add(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] + r[base + k];
+                }
+            }
+        }
+    }
+
+    record LoadLoadSubCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .sub(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] - flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .sub(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] - r[base + k];
+                }
+            }
+        }
+    }
+
+    record LoadLoadMulCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .mul(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] * flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .mul(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] * r[base + k];
+                }
+            }
+        }
+    }
+
+    record LoadLoadDivCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .div(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] / flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .div(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] / r[base + k];
+                }
             }
         }
     }
@@ -339,6 +461,39 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
         }
     }
 
+    // --- Fused Leaf Command: Load(var) -> UnaryMathOp ---
+    // Same idea as LoadLoadAddCommand, generalized to one operand: when the
+    // argument to a unary math op (sqrt, sin, erf, ...) is a plain variable
+    // load, this skips the load->scratch write followed immediately by the
+    // op's own read of that same scratch slot. Reads straight from
+    // flatVariables/_2DVariables and writes the result directly to the
+    // destination scratch slot. Selected at compile() time via peephole
+    // fusion - see tryFuseLoadUnary(). Numerically identical to
+    // LoadCommand + UnaryMathCommand: same op, same operand, just a
+    // different source array. Only wired up for ops whose VectorMath
+    // function is a pure single-vector-in/single-vector-out map (see the
+    // *Fused methods added to VectorMath.java) - anything without a fused
+    // variant (e.g. OP_GEGLU, whose vectorized path currently does nothing)
+    // falls back to the existing unfused UnaryMathCommand.
+    @FunctionalInterface
+    interface UnaryMathOpFused {
+
+        void apply(double[] src, int srcBase, double[] dest, int destBase, int n);
+    }
+
+    record LoadUnaryMathCommand(UnaryMathOpFused op, int slotIdx, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            if (ctx.flatVariables != null) {
+                int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
+                op.apply(ctx.flatVariables, srcOff, ctx.scratch, destOff, n);
+            } else {
+                op.apply(ctx._2DVariables[slotIdx], ctx.blockStart, ctx.scratch, destOff, n);
+            }
+        }
+    }
+
     @FunctionalInterface
     interface BinaryMathOp {
 
@@ -383,23 +538,36 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                     int lOff = virtualStack[--sp];
                     int destOff = lOff; // Reuse left slot to save space
 
-                    plan.add(switch (opcode) {
-                        case OP_ADD ->
-                            new AddCommand(lOff, rOff, destOff);
-                        case OP_SUB ->
-                            new SubCommand(lOff, rOff, destOff);
-                        case OP_MUL ->
-                            new MulCommand(lOff, rOff, destOff);
-                        case OP_DIV ->
-                            new DivCommand(lOff, rOff, destOff);
-                        case OP_REM ->
-                            new RemCommand(lOff, rOff, destOff);
-                        case OP_POW ->
-                            new PowCommand(lOff, rOff, destOff);
+                    VectorCommand fused = tryFuseLoadLoad(plan, opcode, lOff, rOff, destOff);
+                    if (fused != null) {
+                        // Both LoadCommands are dead after this point: codegen is
+                        // a strict LIFO stack machine, so lOff/rOff cannot be
+                        // referenced by anything else once this op consumes them.
+                        // Removing them skips materializing both operands into
+                        // ctx.scratch - the fused command reads straight from
+                        // flatVariables/_2DVariables instead.
+                        plan.remove(plan.size() - 1);
+                        plan.remove(plan.size() - 1);
+                        plan.add(fused);
+                    } else {
+                        plan.add(switch (opcode) {
+                            case OP_ADD ->
+                                new AddCommand(lOff, rOff, destOff);
+                            case OP_SUB ->
+                                new SubCommand(lOff, rOff, destOff);
+                            case OP_MUL ->
+                                new MulCommand(lOff, rOff, destOff);
+                            case OP_DIV ->
+                                new DivCommand(lOff, rOff, destOff);
+                            case OP_REM ->
+                                new RemCommand(lOff, rOff, destOff);
+                            case OP_POW ->
+                                new PowCommand(lOff, rOff, destOff);
 
-                        default ->
-                            throw new IllegalStateException();
-                    });
+                            default ->
+                                throw new IllegalStateException();
+                        });
+                    }
                     virtualStack[sp++] = destOff;
                 }
 
@@ -583,12 +751,156 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                             throw new UnsupportedOperationException("Unmapped opcode: " + opcode);
                     };
 
-                    plan.add(new UnaryMathCommand(mathOp, baseOff));
+                    // Fused counterpart, if this opcode's VectorMath function is a
+                    // pure single-vector-in/single-vector-out map (see VectorMath's
+                    // *Fused methods). null for anything without one - e.g.
+                    // OP_GEGLU, whose vectorized path is currently a no-op, so
+                    // there's nothing safe to fuse against.
+                    UnaryMathOpFused fusedOp = switch (opcode) {
+                        case OP_SQRT -> VectorMath::sqrtFused;
+                        case OP_CBRT -> VectorMath::cbrtFused;
+                        case OP_GELU -> VectorMath::geluFused;
+                        case OP_GELU_FAST -> VectorMath::geluFastFused;
+                        case OP_SWIGLU -> VectorMath::swigluFused;
+                        case OP_ERF -> VectorMath::erfFused;
+                        case OP_ABS -> VectorMath::absFused;
+
+                        case OP_SIN -> VectorMath::sinFused;
+                        case OP_COS -> VectorMath::cosFused;
+                        case OP_TAN -> VectorMath::tanFused;
+
+                        case OP_SIN_DEG -> VectorMath::sinDegFused;
+                        case OP_COS_DEG -> VectorMath::cosDegFused;
+                        case OP_TAN_DEG -> VectorMath::tanDegFused;
+
+                        case OP_SIN_GRAD -> VectorMath::sinGradFused;
+                        case OP_COS_GRAD -> VectorMath::cosGradFused;
+                        case OP_TAN_GRAD -> VectorMath::tanGradFused;
+
+                        case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT -> VectorMath::asinFused;
+                        case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT -> VectorMath::acosFused;
+                        case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT -> VectorMath::atanFused;
+
+                        case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG -> VectorMath::asinDegFused;
+                        case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG -> VectorMath::acosDegFused;
+                        case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG -> VectorMath::atanDegFused;
+
+                        case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD -> VectorMath::asinGradFused;
+                        case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD -> VectorMath::acosGradFused;
+                        case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD -> VectorMath::atanGradFused;
+
+                        case OP_SEC_DEG -> VectorMath::secDegFused;
+                        case OP_COSEC_DEG -> VectorMath::cscDegFused;
+                        case OP_COT_DEG -> VectorMath::cotDegFused;
+
+                        case OP_SEC_GRAD -> VectorMath::secGradFused;
+                        case OP_COSEC_GRAD -> VectorMath::cscGradFused;
+                        case OP_COT_GRAD -> VectorMath::cotGradFused;
+
+                        case OP_ARC_SEC, OP_ARC_SEC_ALT -> VectorMath::asecFused;
+                        case OP_ARC_COSEC, OP_ARC_COSEC_ALT -> VectorMath::acscFused;
+                        case OP_ARC_COT, OP_ARC_COT_ALT -> VectorMath::acotFused;
+
+                        case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG -> VectorMath::asecDegFused;
+                        case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD -> VectorMath::asecGradFused;
+
+                        case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG -> VectorMath::acscDegFused;
+                        case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD -> VectorMath::acscGradFused;
+
+                        case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG -> VectorMath::acotDegFused;
+                        case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD -> VectorMath::acotGradFused;
+
+                        case OP_SINH -> VectorMath::sinhFused;
+                        case OP_COSH -> VectorMath::coshFused;
+                        case OP_TANH -> VectorMath::tanhFused;
+                        case OP_ASINH, OP_ASINH_ALT -> VectorMath::asinhFused;
+                        case OP_ACOSH, OP_ACOSH_ALT -> VectorMath::acoshFused;
+                        case OP_ATANH, OP_ATANH_ALT -> VectorMath::atanhFused;
+
+                        case OP_EXP -> VectorMath::expFused;
+                        case OP_LOG -> VectorMath::lnFused;
+                        case OP_LOG10 -> VectorMath::log10Fused;
+
+                        // OP_GEGLU (gegluUnary) intentionally excluded: its
+                        // vectorized path is currently a no-op, unlike every
+                        // other op here, so there's no safe fused form to emit.
+                        default -> null;
+                    };
+
+                    VectorCommand fusedCmd = tryFuseLoadUnary(plan, fusedOp, baseOff, baseOff);
+                    if (fusedCmd != null) {
+                        // The LoadCommand is dead after this point for the same
+                        // LIFO-stack reason as tryFuseLoadLoad: nothing else can
+                        // reference this operand once this op consumes it.
+                        plan.remove(plan.size() - 1);
+                        plan.add(fusedCmd);
+                    } else {
+                        plan.add(new UnaryMathCommand(mathOp, baseOff));
+                    }
                 }
             }
         }
 
         return new SIMDVectorCompositeExpression(plan.toArray(new VectorCommand[0]), stackDepth, BLOCK_SIZE);
+    }
+
+    /**
+     * Peephole fusion: when both operands of a binary arithmetic op are
+     * plain variable loads - i.e. the last two entries in the plan are
+     * LoadCommands feeding directly into this op and nothing else - collapse
+     * them into a single fused command that reads straight from the source
+     * arrays instead of round-tripping both operands through ctx.scratch.
+     * Returns null (no fusion) for anything that doesn't match that exact
+     * shape, including OP_REM (not vectorized regardless) and OP_POW
+     * (routes through VectorMath.executePowerBlended, not a plain lane op).
+     */
+    private static VectorCommand tryFuseLoadLoad(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 2) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof LoadCommand rLoad) || rLoad.destOff() != rOff) {
+            return null;
+        }
+        if (!(plan.get(size - 2) instanceof LoadCommand lLoad) || lLoad.destOff() != lOff) {
+            return null;
+        }
+
+        return switch (opcode) {
+            case OP_ADD ->
+                new LoadLoadAddCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_SUB ->
+                new LoadLoadSubCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_MUL ->
+                new LoadLoadMulCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_DIV ->
+                new LoadLoadDivCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            default ->
+                null;
+        };
+    }
+
+    /**
+     * Peephole fusion for unary math ops: if the immediately preceding plan
+     * entry is a bare LoadCommand feeding this op's operand and nothing
+     * else, collapse them into a LoadUnaryMathCommand that reads straight
+     * from the source arrays. Mirrors tryFuseLoadLoad() but for one
+     * operand. Returns null (no fusion) when fusedOp is null - i.e. this
+     * opcode has no *Fused counterpart in VectorMath - or when the operand
+     * isn't a bare load.
+     */
+    private static VectorCommand tryFuseLoadUnary(List<VectorCommand> plan, UnaryMathOpFused fusedOp, int baseOff, int destOff) {
+        if (fusedOp == null) {
+            return null;
+        }
+        int size = plan.size();
+        if (size < 1) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof LoadCommand load) || load.destOff() != baseOff) {
+            return null;
+        }
+        return new LoadUnaryMathCommand(fusedOp, load.slotIdx(), destOff);
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression implements AutoCloseable {
@@ -601,10 +913,8 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
         private final VectorCommand[] executionPlan;
         private final ThreadLocal<EvaluationContext> masterEvalContext;
         private final Cleaner.Cleanable cleanable;
-        private final int masterPinTarget; // -1 = don't pin the master thread
 
         private volatile boolean isClosed = false;
-        private final ThreadLocal<Boolean> masterPinned = ThreadLocal.withInitial(() -> false);
 
         private static final class ThreadPoolShutdownAction implements Runnable {
 
@@ -646,23 +956,8 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                 this.workerPool = new WorkerThread[NUM_WORKERS];
                 this.reuseLatch = new AtomicInteger(0);
 
-                // Query real physical-core topology instead of assuming logical CPUs
-                // are interleaved by core. Each element of coreGroups is one physical
-                // core's set of SMT-sibling logical indices; using group[i % groups.length][0]
-                // as the pin target for worker i guarantees distinct physical cores
-                // whenever enough exist, regardless of how the OS numbers hyperthread
-                // siblings. The master gets its own reserved group beyond the workers'.
-                int[][] coreGroups = CPUPinner.detectPhysicalCoreGroups();
-                if (coreGroups == null || coreGroups.length == 0) {
-                    // Degraded path: pin everyone to logical CPU 0 rather than
-                    // NPE'ing construction when /sys topology is unreadable.
-                    coreGroups = new int[][]{{0}};
-                }
-                this.masterPinTarget = coreGroups[NUM_WORKERS % coreGroups.length][0];
-
                 for (int i = 0; i < NUM_WORKERS; i++) {
-                    int pinTarget = coreGroups[i % coreGroups.length][0];
-                    workerPool[i] = new WorkerThread(i, pinTarget, reuseLatch, executionPlan, stackDepth, blockSize);
+                    workerPool[i] = new WorkerThread(i, reuseLatch, executionPlan, stackDepth, blockSize);
                 }
 
                 for (int i = 0; i < NUM_WORKERS; i++) {
@@ -673,23 +968,7 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
             } else {
                 this.workerPool = null;
                 this.reuseLatch = null;
-                this.masterPinTarget = -1;
                 this.cleanable = null;
-            }
-        }
-
-        /**
-         * Pins the calling (master) thread to its reserved physical core, if
-         * one was available at construction time (see masterPinTarget). Cheap
-         * to call on every dispatch — SetThreadAffinityMask/sched_setaffinity
-         * are idempotent single syscalls, and the calling thread can differ
-         * across invocations (e.g. different application threads driving the
-         * same expression), so we can't just pin once in the constructor.
-         */
-        private void pinMasterIfNeeded() {
-            if (masterPinTarget >= 0 && !masterPinned.get()) {
-                CPUPinner.pinCurrentThread(masterPinTarget);
-                masterPinned.set(true);
             }
         }
 
@@ -708,7 +987,6 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
         private static final class WorkerThread extends Thread {
 
             private final int workerId;
-            private final int pinTarget;
             private final AtomicInteger reuseLatch;
             private final EvaluationContext evalContext;
             private final VectorCommand[] executionPlan;
@@ -721,17 +999,12 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
             private double[][] vars2D;
             private double[] vars1D;
             private double[] output;
-            // MemorySegment-backed task inputs/output (off-heap / zero-copy path)
-            private MemorySegment[] vars2DSeg;
-            private MemorySegment vars1DSeg;
-            private MemorySegment outputSeg;
             private int dataSize;
             private int startIdx;
             private int length;
 
-            public WorkerThread(int workerId, int pinTarget, AtomicInteger reuseLatch, VectorCommand[] executionPlan, int stackDepth, int blockSize) {
+            public WorkerThread(int workerId, AtomicInteger reuseLatch, VectorCommand[] executionPlan, int stackDepth, int blockSize) {
                 this.workerId = workerId;
-                this.pinTarget = pinTarget;
                 this.reuseLatch = reuseLatch;
                 this.executionPlan = executionPlan;
                 this.blockSize = blockSize;
@@ -743,10 +1016,7 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
             public void submitTask2D(double[][] vars, double[] output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars2D = vars;
                 this.vars1D = null;
-                this.vars2DSeg = null;
-                this.vars1DSeg = null;
                 this.output = output;
-                this.outputSeg = null;
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
@@ -758,40 +1028,7 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
             public void submitTask1D(double[] vars, double[] output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars1D = vars;
                 this.vars2D = null;
-                this.vars2DSeg = null;
-                this.vars1DSeg = null;
                 this.output = output;
-                this.outputSeg = null;
-                this.dataSize = dataSize;
-                this.startIdx = startIdx;
-                this.length = length;
-                this.masterThread = master;
-                this.taskState = 1;
-                LockSupport.unpark(this);
-            }
-
-            public void submitTaskSeg2D(MemorySegment[] vars, MemorySegment output, int dataSize, int startIdx, int length, Thread master) {
-                this.vars2DSeg = vars;
-                this.vars1DSeg = null;
-                this.vars2D = null;
-                this.vars1D = null;
-                this.outputSeg = output;
-                this.output = null;
-                this.dataSize = dataSize;
-                this.startIdx = startIdx;
-                this.length = length;
-                this.masterThread = master;
-                this.taskState = 1;
-                LockSupport.unpark(this);
-            }
-
-            public void submitTaskSeg1D(MemorySegment vars, MemorySegment output, int dataSize, int startIdx, int length, Thread master) {
-                this.vars1DSeg = vars;
-                this.vars2DSeg = null;
-                this.vars1D = null;
-                this.vars2D = null;
-                this.outputSeg = output;
-                this.output = null;
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
@@ -807,7 +1044,7 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
 
             @Override
             public void run() {
-                CPUPinner.pinCurrentThread(this.pinTarget);
+                CPUPinner.pinCurrentThread(this.workerId);
                 while (isRunning) {
                     while (taskState == 0 && isRunning) {
                         LockSupport.park();
@@ -823,19 +1060,12 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                         applyBulkInternal(vars2D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
                     } else if (vars1D != null) {
                         applyBulkInternal(vars1D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
-                    } else if (vars2DSeg != null) {
-                        applyBulkInternalSeg(vars2DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
-                    } else if (vars1DSeg != null) {
-                        applyBulkInternalSeg(vars1DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
                     }
 
                     this.taskState = 0;
                     this.vars2D = null;
                     this.vars1D = null;
                     this.output = null;
-                    this.vars2DSeg = null;
-                    this.vars1DSeg = null;
-                    this.outputSeg = null;
 
                     if (reuseLatch.decrementAndGet() == 0 && masterThread != null) {
                         LockSupport.unpark(masterThread);
@@ -862,24 +1092,14 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                 return;
             }
 
-            pinMasterIfNeeded();
             Thread masterThread = Thread.currentThread();
-            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
-            // participants, instead of sitting idle in park() while the pool
-            // does all the work.
-            final int totalParticipants = NUM_WORKERS + 1;
-            int chunkSize = numSamples / totalParticipants;
+            int chunkSize = numSamples / NUM_WORKERS;
             reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
                 int startIdx = i * chunkSize;
-                workerPool[i].submitTask2D(variables, output, numSamples, startIdx, chunkSize, masterThread);
-            }
-
-            int masterStartIdx = NUM_WORKERS * chunkSize;
-            int masterLength = numSamples - masterStartIdx;
-            if (masterLength > 0) {
-                applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
+                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
+                workerPool[i].submitTask2D(variables, output, numSamples, startIdx, length, masterThread);
             }
 
             while (reuseLatch.get() > 0) {
@@ -899,24 +1119,14 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                 return;
             }
 
-            pinMasterIfNeeded();
             Thread masterThread = Thread.currentThread();
-            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
-            // participants, instead of sitting idle in park() while the pool
-            // does all the work.
-            final int totalParticipants = NUM_WORKERS + 1;
-            int chunkSize = numSamples / totalParticipants;
+            int chunkSize = numSamples / NUM_WORKERS;
             reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
                 int startIdx = i * chunkSize;
-                workerPool[i].submitTask1D(flatVariables, output, numSamples, startIdx, chunkSize, masterThread);
-            }
-
-            int masterStartIdx = NUM_WORKERS * chunkSize;
-            int masterLength = numSamples - masterStartIdx;
-            if (masterLength > 0) {
-                applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
+                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
+                workerPool[i].submitTask1D(flatVariables, output, numSamples, startIdx, length, masterThread);
             }
 
             while (reuseLatch.get() > 0) {
@@ -946,89 +1156,6 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
             for (int start = 0; start < numSamples; start += batchSize) {
                 int length = Math.min(batchSize, numSamples - start);
                 applyBulkInternal(flatVariables, ctx, executionPlan, BLOCK_SIZE, numSamples, output, start, length);
-            }
-        }
-
-        // --- MemorySegment (off-heap / zero-copy) entry points ---
-        // Same public contract as the double[] / double[][] variants above,
-        // reusing the same masterEvalContext / workerPool / reuseLatch machinery.
-        public void applyBulk(MemorySegment[] variables, MemorySegment output) {
-            int numSamples = (int) (variables[0].byteSize() / ValueLayout.JAVA_DOUBLE.byteSize());
-            applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
-        }
-
-        public void applyBulkParallel(MemorySegment[] variables, MemorySegment output) {
-            if (variables == null || variables.length == 0 || output == null) {
-                return;
-            }
-            int numSamples = (int) (variables[0].byteSize() / ValueLayout.JAVA_DOUBLE.byteSize());
-
-            if (NUM_WORKERS <= 0 || numSamples < PARALLEL_OPS_THRESHOLD) {
-                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
-                return;
-            }
-
-            pinMasterIfNeeded();
-            Thread masterThread = Thread.currentThread();
-            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
-            // participants, instead of sitting idle in park() while the pool
-            // does all the work.
-            final int totalParticipants = NUM_WORKERS + 1;
-            int chunkSize = numSamples / totalParticipants;
-            reuseLatch.set(NUM_WORKERS);
-
-            for (int i = 0; i < NUM_WORKERS; i++) {
-                int startIdx = i * chunkSize;
-                workerPool[i].submitTaskSeg2D(variables, output, numSamples, startIdx, chunkSize, masterThread);
-            }
-
-            int masterStartIdx = NUM_WORKERS * chunkSize;
-            int masterLength = numSamples - masterStartIdx;
-            if (masterLength > 0) {
-                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
-            }
-
-            while (reuseLatch.get() > 0) {
-                LockSupport.park();
-            }
-        }
-
-        public void applyBulk(MemorySegment variables, MemorySegment output) {
-            int numSamples = (int) (output.byteSize() / ValueLayout.JAVA_DOUBLE.byteSize());
-            applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
-        }
-
-        public void applyBulkParallel(MemorySegment variables, MemorySegment output) {
-            if (variables == null || output == null) {
-                return;
-            }
-            int numSamples = (int) (output.byteSize() / ValueLayout.JAVA_DOUBLE.byteSize());
-
-            if (NUM_WORKERS <= 0 || numSamples < PARALLEL_OPS_THRESHOLD) {
-                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
-                return;
-            }
-   
-            pinMasterIfNeeded();
-            Thread masterThread = Thread.currentThread();
-            // Master participates as slice NUM_WORKERS of NUM_WORKERS+1 total
-            // participants, instead of sitting idle in park() while the pool
-            // does all the work.
-            final int totalParticipants = NUM_WORKERS + 1;
-            int chunkSize = numSamples / totalParticipants;
-            reuseLatch.set(NUM_WORKERS);
-
-            for (int i = 0; i < NUM_WORKERS; i++) {
-                int startIdx = i * chunkSize;
-                workerPool[i].submitTaskSeg1D(variables, output, numSamples, startIdx, chunkSize, masterThread);
-            }
-            int masterStartIdx = NUM_WORKERS * chunkSize;
-            int masterLength = numSamples - masterStartIdx;
-            if (masterLength > 0) {
-                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStartIdx, masterLength);
-            }
-            while (reuseLatch.get() > 0) {
-                LockSupport.park();
             }
         }
 
@@ -1078,56 +1205,8 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                 }
             }
         }
-
-        // --- MemorySegment Core Internal Hot-Loops (mirrors the double[] / double[][] loops above) ---
-        private static void applyBulkInternalSeg(MemorySegment flatVariablesSeg, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, MemorySegment output, int startIdx, int length) {
-            final int endIdx = startIdx + length;
-            final long elemBytes = ValueLayout.JAVA_DOUBLE.byteSize();
-            double[] s = ctx.scratch;
-            for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
-                final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
-                ctx.initForBlockSeg(flatVariablesSeg, null, dataSize, blockStart);
-
-                for (int i = 0; i < executionPlan.length; i++) {
-                    executionPlan[i].execute(ctx, currentBlockSize);
-                }
-
-                // Vectorized output write back (assumes result is at scratch offset 0)
-                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
-                for (; k < limit; k += SPECIES.length()) {
-                    DoubleVector.fromArray(SPECIES, s, k)
-                            .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
-                }
-                for (; k < currentBlockSize; k++) {
-                    output.setAtIndex(ValueLayout.JAVA_DOUBLE, blockStart + k, s[k]);
-                }
-            }
-        }
-
-        private static void applyBulkInternalSeg(MemorySegment[] variablesSeg, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, MemorySegment output, int startIdx, int length) {
-            final int endIdx = startIdx + length;
-            final long elemBytes = ValueLayout.JAVA_DOUBLE.byteSize();
-            double[] s = ctx.scratch;
-            for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
-                final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
-                ctx.initForBlockSeg(null, variablesSeg, dataSize, blockStart);
-
-                for (int i = 0; i < executionPlan.length; i++) {
-                    executionPlan[i].execute(ctx, currentBlockSize);
-                }
-
-                // Vectorized output write back
-                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
-                for (; k < limit; k += SPECIES.length()) {
-                    DoubleVector.fromArray(SPECIES, s, k)
-                            .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
-                }
-                for (; k < currentBlockSize; k++) {
-                    output.setAtIndex(ValueLayout.JAVA_DOUBLE, blockStart + k, s[k]);
-                }
-            }
-        }
     }
 
     
+
 }

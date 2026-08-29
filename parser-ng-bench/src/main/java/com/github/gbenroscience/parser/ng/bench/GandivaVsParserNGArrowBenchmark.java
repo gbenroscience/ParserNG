@@ -15,7 +15,7 @@
  */
 package com.github.gbenroscience.parser.ng.bench;
 
-import com.github.gbenroscience.arrow.tools.box.ArrowBulkEvaluator; 
+import com.github.gbenroscience.arrow.tools.box.ArrowBulkEvaluator;
 import com.github.gbenroscience.arrow.tools.box.NullPolicy;
 import org.apache.arrow.gandiva.expression.ExpressionTree;
 import org.apache.arrow.gandiva.expression.TreeBuilder;
@@ -320,7 +320,7 @@ public class GandivaVsParserNGArrowBenchmark {
 
     private Map<String, Float8Vector> parserColumns;
 
-    private ArrowBulkEvaluator parserSIMDEvaluator; 
+    private ArrowBulkEvaluator parserSIMDEvaluator;
 
     private Projector gandivaProjector;
 
@@ -346,8 +346,8 @@ public class GandivaVsParserNGArrowBenchmark {
             parserSIMDEvaluator = ArrowBulkEvaluator.compile(def.parserExpr);
         } catch (Throwable ex) {
             System.getLogger(GandivaVsParserNGArrowBenchmark.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
+            throw new IllegalStateException("Failed to compile ParserNG expression: " + def.parserExpr, ex);
         }
- 
 
         gandivaProjector = buildGandivaProjector(def);
     }
@@ -448,7 +448,6 @@ public class GandivaVsParserNGArrowBenchmark {
         );
         bh.consume(parserOutput);
     }
- 
 
     @Benchmark
     public void gandiva(Blackhole bh) throws Exception {
@@ -531,6 +530,15 @@ public class GandivaVsParserNGArrowBenchmark {
      */
     @TearDown(Level.Iteration)
     public void teardownIteration() {
+
+        // parserSIMDEvaluator is a Level.Trial-scoped resource (created once
+        // in setupTrial()) and must be torn down only in teardownTrial().
+        // Previously it was closed and nulled out here too, which meant that
+        // after the first iteration of a trial, every subsequent iteration's
+        // parserNGSIMD/parserNGParallel benchmark methods called evaluate()
+        // on a null parserSIMDEvaluator -- this was the bug causing it to
+        // "become null during the benchmark".
+
         if (parserOutput != null) {
             parserOutput.close();
             parserOutput = null;
@@ -551,6 +559,7 @@ public class GandivaVsParserNGArrowBenchmark {
             x3.close();
             x3 = null;
         }
+
     }
 
     @TearDown(Level.Trial)
@@ -659,7 +668,7 @@ public class GandivaVsParserNGArrowBenchmark {
 
     public static void main(String[] args) throws Exception {
         // Run correctness across every expression FIRST.
-       // runAllCorrectnessChecks();
+        // runAllCorrectnessChecks();
 
         Scanner scanner = new Scanner(System.in);
         List<Integer> selectedIndices = promptForExpressionIndices(scanner);

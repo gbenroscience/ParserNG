@@ -1,13 +1,13 @@
 package com.github.gbenroscience.simdext.turbo.tools.command;
 
-
+ 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*; 
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*; 
 
-import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
+import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner; 
 import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMathF;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
@@ -217,6 +217,259 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
     }
 
+    // --- Fused Leaf Commands: Load(var) OP Load(var) ---
+    // When both operands of a binary op are plain variable loads (the most
+    // common shape for shallow expressions like a+b), compiling them as two
+    // separate LoadCommands + one BinaryOp forces both operands through an
+    // extra round-trip into ctx.scratch before the op even runs, and the op
+    // itself writes a third copy back into scratch. These fused commands read
+    // straight from the source (flatVariables / _2DVariables / the
+    // MemorySegment-backed equivalents) and skip that intermediate
+    // materialization entirely. Selected at compile() time via
+    // peephole-fusion over the emitted plan - see tryFuseLoadLoad().
+    // Numerically identical to LoadCommand+LoadCommand+BinaryOp: same IEEE
+    // op, same operand order, just a different source.
+
+    record LoadLoadAddCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .add(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] + flat[rBase + k];
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .add(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] + r[base + k];
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .add(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) + flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k);
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .add(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) + rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k);
+                }
+            }
+        }
+    }
+
+    record LoadLoadSubCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .sub(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] - flat[rBase + k];
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .sub(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] - r[base + k];
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .sub(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) - flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k);
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .sub(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) - rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k);
+                }
+            }
+        }
+    }
+
+    record LoadLoadMulCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .mul(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] * flat[rBase + k];
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .mul(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] * r[base + k];
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .mul(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) * flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k);
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .mul(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) * rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k);
+                }
+            }
+        }
+    }
+
+    record LoadLoadDivCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .div(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] / flat[rBase + k];
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .div(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] / r[base + k];
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .div(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) / flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k);
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .div(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) / rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k);
+                }
+            }
+        }
+    }
+
     record PowCommand(int lOff, int rOff, int destOff) implements VectorCommand {
 
         @Override
@@ -330,7 +583,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
     }
 
-// --- Unified Unary Operations (Delegates to VectorMath) ---
+// --- Unified Unary Operations (Delegates to VectorMathF) ---
     @FunctionalInterface
     interface UnaryMathOp {
 
@@ -389,23 +642,37 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                     int lOff = virtualStack[--sp];
                     int destOff = lOff; // Reuse left slot to save space
 
-                    plan.add(switch (opcode) {
-                        case OP_ADD ->
-                            new AddCommand(lOff, rOff, destOff);
-                        case OP_SUB ->
-                            new SubCommand(lOff, rOff, destOff);
-                        case OP_MUL ->
-                            new MulCommand(lOff, rOff, destOff);
-                        case OP_DIV ->
-                            new DivCommand(lOff, rOff, destOff);
-                        case OP_REM ->
-                            new RemCommand(lOff, rOff, destOff);
-                        case OP_POW ->
-                            new PowCommand(lOff, rOff, destOff);
+                    VectorCommand fused = tryFuseLoadLoad(plan, opcode, lOff, rOff, destOff);
+                    if (fused != null) {
+                        // Both LoadCommands are dead after this point: codegen is
+                        // a strict LIFO stack machine, so lOff/rOff cannot be
+                        // referenced by anything else once this op consumes them.
+                        // Removing them skips materializing both operands into
+                        // ctx.scratch - the fused command reads straight from
+                        // flatVariables/_2DVariables (or their MemorySegment
+                        // equivalents) instead.
+                        plan.remove(plan.size() - 1);
+                        plan.remove(plan.size() - 1);
+                        plan.add(fused);
+                    } else {
+                        plan.add(switch (opcode) {
+                            case OP_ADD ->
+                                new AddCommand(lOff, rOff, destOff);
+                            case OP_SUB ->
+                                new SubCommand(lOff, rOff, destOff);
+                            case OP_MUL ->
+                                new MulCommand(lOff, rOff, destOff);
+                            case OP_DIV ->
+                                new DivCommand(lOff, rOff, destOff);
+                            case OP_REM ->
+                                new RemCommand(lOff, rOff, destOff);
+                            case OP_POW ->
+                                new PowCommand(lOff, rOff, destOff);
 
-                        default ->
-                            throw new IllegalStateException();
-                    });
+                            default ->
+                                throw new IllegalStateException();
+                        });
+                    }
                     virtualStack[sp++] = destOff;
                 }
 
@@ -595,6 +862,43 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         return new SIMDVectorCompositeExpression(plan.toArray(new VectorCommand[0]), stackDepth, BLOCK_SIZE);
+    }
+
+    /**
+     * Peephole fusion: when both operands of a binary arithmetic op are
+     * plain variable loads - i.e. the last two entries in the plan are
+     * LoadCommands feeding directly into this op and nothing else - collapse
+     * them into a single fused command that reads straight from the source
+     * (flatVariables / _2DVariables, or their MemorySegment equivalents)
+     * instead of round-tripping both operands through ctx.scratch.
+     * Returns null (no fusion) for anything that doesn't match that exact
+     * shape, including OP_REM (not vectorized regardless) and OP_POW
+     * (routes through VectorMathF.executePowerBlended, not a plain lane op).
+     */
+    private static VectorCommand tryFuseLoadLoad(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 2) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof LoadCommand rLoad) || rLoad.destOff() != rOff) {
+            return null;
+        }
+        if (!(plan.get(size - 2) instanceof LoadCommand lLoad) || lLoad.destOff() != lOff) {
+            return null;
+        }
+
+        return switch (opcode) {
+            case OP_ADD ->
+                new LoadLoadAddCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_SUB ->
+                new LoadLoadSubCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_MUL ->
+                new LoadLoadMulCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_DIV ->
+                new LoadLoadDivCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            default ->
+                null;
+        };
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression implements AutoCloseable {
@@ -815,13 +1119,13 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
         }
 
-  
+     
         public void applyBulk(float[][] variables, float[] output) {
             int numSamples = variables[0].length;
             applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
         }
 
-   
+      
         public void applyBulkParallel(float[][] variables, float[] output) {
             if (variables == null || variables.length == 0 || output == null) {
                 return;
@@ -848,7 +1152,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
         }
 
-
+      
         public void applyBulkParallel(float[] flatVariables, float[] output) {
             if (flatVariables == null || output == null) {
                 return;
@@ -875,7 +1179,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
         }
 
-      
+   
         public void applyBulkBatched(float[][] variables, float[] output, int batchSize) {
             EvaluationContext ctx = masterEvalContext.get();
             int numSamples = variables[0].length;
@@ -885,7 +1189,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
         }
 
-    
+  
         public void applyBulk(float[] flatVariables, float[] output) {
             applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, output.length, output, 0, output.length);
         }
@@ -1060,6 +1364,6 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 }
             }
         }
-    } 
-
+    }
+ 
 }
