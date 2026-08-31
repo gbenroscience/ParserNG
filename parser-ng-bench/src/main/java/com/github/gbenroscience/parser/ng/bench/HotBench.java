@@ -155,14 +155,13 @@ public class HotBench {
 
     double[] result;
 
-    @Param({"8388608"})
+    @Param({"2097152"})
     private int dataSize;
 
     private double[] vars;
     private JaninoMathFunction fastEvaluator;
 
-    SIMDCommandF64.SIMDVectorCompositeExpression simdComd; 
-    com.github.gbenroscience.simdext.turbo.tools.command.fused.SIMDCommandF64.SIMDVectorCompositeExpression simdComdFused; 
+    SIMDCommandF64.SIMDVectorCompositeExpression simdComd;  
 
     private int varCount;
 
@@ -332,40 +331,14 @@ public class HotBench {
         bh.consume(res);
     }
     
-    
-    @Benchmark
-    @BenchmarkMode(Mode.AverageTime)
-    @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public void simdComdFused(Blackhole bh) {
-        // Read from the same stable scenario index—zero cursor modifications inside!
-        final double[][] input = dataSink[benchmarkScenario];
-        final double[] res = result;
-
-        // Execute core computation kernel
-        simdComdFused.applyBulk(input, res);
-        bh.consume(res);
-    }
-
-    @Benchmark
-    @BenchmarkMode(Mode.AverageTime)
-    @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public void simdComdFusedParallel(Blackhole bh) {
-        // Read from the same stable scenario index—zero cursor modifications inside!
-        final double[][] input = dataSink[benchmarkScenario];
-        final double[] res = result;
-
-        // Execute core computation kernel
-        simdComdFused.applyBulkParallel(input, res);
-        bh.consume(res);
-    }
+ 
     
    
  
 
     private void setupParserNG(MathExpression me) {
         try {
-            simdComd = SIMDCommandF64.getEvaluator(me); 
-            simdComdFused = com.github.gbenroscience.simdext.turbo.tools.command.fused.SIMDCommandF64.getEvaluator(me); 
+            simdComd = SIMDCommandF64.getEvaluator(me);  
         } catch (Throwable ex) {
             System.getLogger(HotBench.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }

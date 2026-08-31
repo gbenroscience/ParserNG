@@ -27,7 +27,7 @@ directly — see [Switching backends](#switching-backends) below.
 
 ## Why a separate class from `ArrowBulkEvaluator`
 
-`SIMDEngineEvaluator.SIMDVectorCompositeExpression.applyBulk` takes a `MemorySegment[]` — one
+`SIMDCommandSegmentF64.SIMDVectorCompositeExpression.applyBulk` takes a `MemorySegment[]` — one
 independent segment per bound variable — which is exactly what lets `ArrowBulkEvaluator` bind each
 Arrow column's data buffer with **zero copying**.
 

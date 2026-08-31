@@ -1,5 +1,28 @@
 # ParserNG
 
+### ParserNG 3.0.5 is out on maven-central!
+- This version features the gradual phaseout of SIMDEngineEvaluator and the phase-in of the SIMDCommand
+series. The former SIMDCommandEvaluator is also being retired for a suite of SIMDCommand classes; one for handling float64(double) data, one for handling float32(Java's float primitive) data, one each for handling MemorySegment storing doubles and MemorySegment storing floats.
+SIMDCommandF32,
+SIMDCommandF64,
+SIMDCommandSegmentF32,
+SIMDCommandSegmentF64,
+The API remains unchanged from that of the SIMDEngineEvaluator.
+SIMDCommandF32 runs faster by default than the others since it is handling float32 data.
+- The second big addition to the ParserNG runtime is the `parser-ng-arrow` extension which brings the SIMD and the GPU
+leveraging power of ParserNG to the Apache Arrow library.
+Out of the box, ArrowBulkEvaluator uses ParserNG's SIMD integration to beat the existing evaluator, Apache Gandiva on most expressions, save pure arithmetic and expressions where Gandiva can use the native hardware intrinsics (sqrt)
+where Gandiva is about 1.5x to 2x as fast. Since ParserNG comes with a parallel mode in its SIMD evaluators, if you set it to true, you will out of the box, see even more throughput depending on how many processors your device possesses.
+
+The second class is ArrowGpuBulkEvaluator which lets you select the GPU to use on your system to process Arrow data. It supports OpenCL and CUDA.(Feedback is needed on both paths, but especially on the CUDA path.)
+Both ArrowBulkEvaluator and ArrowGpuBulkEvaluator support Float4Vector and Float8Vector.
+For more on ArrowBulkEvaluator, see: 
+[parser-ng-arrow's README.md](parser-ng-arrow/README.md)
+
+For more on ArrowGpuBulkEvaluator, see: 
+[parser-ng-arrow's GPU README.md](parser-ng-arrow/ARROW-GPU-EVAL.md)
+
+
 ### ParserNG 3.0.4 is out on maven-central!
 This update strengthens the differential equation engine by adding systems solving capability explicitly
 in the `diffeqn` and `diffeqnPath` paths. The engine has also been given a battery of tests, 120 in number

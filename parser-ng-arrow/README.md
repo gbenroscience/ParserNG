@@ -1,7 +1,9 @@
 # parser-ng-arrow
 
 Zero-copy Apache Arrow bulk-evaluation bridge for [ParserNG](https://github.com/gbenroscience/ParserNG),
-built on `SIMDEngineEvaluator`'s `applyBulk(MemorySegment[], MemorySegment)`
+built on 
+- `SIMDCommandSegmentF64`'s `applyBulk(MemorySegment[], MemorySegment)` and
+- `SIMDCommandSegmentF32`'s
 API from `parser-ng-gpu-simd`.
 
 ## What this is
@@ -128,15 +130,17 @@ you pick:
 ```
 parser-ng-arrow/
   pom.xml
-  src/main/java/com/github/gbenroscience/simdext/arrow/
-    ArrowBulkEvaluator.java       — main entry point (Builder + evaluate/evaluateInto)
-    ArrowSegments.java            — MemorySegment <-> ArrowBuf zero-copy bridge
-    VectorCoercion.java           — non-zero-copy fallback casts to Float8Vector
-    NullPolicy.java
-    ArrowBindingException.java
-    ArrowNullValueException.java
-    UnsupportedVectorTypeException.java
+  src/main/java/com/github/gbenroscience/arrow/tools/box
+    ArrowBindingException.java       
+    ArrowBulkEvaluator.java        
+    ArrowExecutionBackend.java         
+    ArrowExpressionEvaluator.java           
+    ArrowExpressionEvaluators.java           
+    ArrowGpuBulkEvaluator.java           
+    ArrowMemoryBridge.java           
+    NullPolicy.java   
     package-info.java
-  src/test/java/com/github/gbenroscience/simdext/arrow/
+  src/test/java/com/github/gbenroscience/arrow/tools/box
     ArrowBulkEvaluatorTest.java
+    ArrowGpuBulkEvaluatorTest.java
 ```

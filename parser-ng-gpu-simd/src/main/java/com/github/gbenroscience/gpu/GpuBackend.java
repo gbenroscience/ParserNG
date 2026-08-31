@@ -11,5 +11,5 @@ public enum GpuBackend {
     /** Vendor-neutral -- runs on Intel/AMD/NVIDIA GPUs (and CPUs, via an ICD like POCL). */
     OPENCL,
     /** NVIDIA-only, requires the CUDA Toolkit's NVRTC in addition to the driver. */
-    CUDA
+    CUDA, METAL 
 }

@@ -19,16 +19,16 @@ import java.util.concurrent.locks.LockSupport;
 import jdk.incubator.vector.*;
 
 /**
- * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
+ * High-Performance float64(Java's double type) Vector API & Engine that fuses explicit SIMD vectorization
  * with a zero-allocation primitive stack interpreter. Completely eliminates the
  * scalar parser overhead and task object allocations on the hot path.
  *
- * This version is the second fastest of all the SIMD evaluators.
+ * These are the fastest of all the SIMD evaluators.
  * Combines near zero-allocation with parallel operations greatly enhanced with cpu-pinning.
  * Cpu pinning is the reason why this class is a native of this extension and is the main reason
  * why this extension is JDK22+
  * Note that CPU PINNING works best on Linux, so the worker efficiency of these classes
- * is best seen on Linux. Where 2 workers perform at almost 2x the rate of one worker.. usually between 1.88x to 2.02x
+ * is best seen on Linux. Where 2 workers perform at almost 2x the rate of one worker.. usually between 1.4x to 2.0x
  * 
  *
  */
@@ -333,6 +333,102 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
         }
     }
 
+    // --- Fused Multiply-Add/Subtract: (a*b)+c or c-(a*b) ---
+    // Collapses Mul(a,b)->m ; Add(m,c)->dest into a single hardware FMA
+    // instruction (va.fma(vb,vc) computes va*vb+vc), and Mul(a,b)->m ;
+    // Sub(c,m)->dest similarly via a negated multiplicand
+    // (va.neg().fma(vb,vc) == c - a*b).
+    //
+    // Because this compiler's postfix stack always pops the most-recently
+    // computed operand as rOff (see the OP_ADD/OP_SUB case in compile()),
+    // the Mul being fused here is always the *right*-hand operand of the
+    // Add/Sub - Sub therefore always has the shape "accumulator minus
+    // product", never "product minus accumulator". See tryFuseMulAddSub.
+    //
+    // This goes further than LoadLoadAddCommand's win: it doesn't just skip
+    // a scratch round-trip for the intermediate product m - m is never
+    // materialized at all, and two vector instructions (mul, then add/sub)
+    // collapse into one hardware FMA. That's a genuine compute-instruction
+    // reduction on top of the memory-traffic reduction, which is why this
+    // is expected to pay off even for expressions where plain load-fusion
+    // wouldn't (the arithmetic itself is doing less work, not just less
+    // memory movement).
+    //
+    // NOTE: FMA computes with a single rounding step instead of two, so
+    // results can differ from the unfused a*b+c path in the last bit. This
+    // is standard IEEE FMA behavior (strictly more accurate, not less), but
+    // re-run correctness checks against Gandiva/reference values after
+    // enabling this - a 1e-12-style tolerance should absorb it, but that
+    // should be verified, not assumed.
+    record FmaCommand(int mulL, int mulR, int addOff, int destOff, boolean subtract) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                DoubleVector a = DoubleVector.fromArray(SPECIES, s, mulL + k);
+                DoubleVector b = DoubleVector.fromArray(SPECIES, s, mulR + k);
+                DoubleVector c = DoubleVector.fromArray(SPECIES, s, addOff + k);
+                (subtract ? a.neg() : a).fma(b, c).intoArray(s, destOff + k);
+            }
+            for (; k < n; k++) {
+                double a = s[mulL + k];
+                double b = s[mulR + k];
+                double c = s[addOff + k];
+                s[destOff + k] = subtract ? Math.fma(-a, b, c) : Math.fma(a, b, c);
+            }
+        }
+    }
+
+    // Same shape as FmaCommand, one level deeper: for when the multiplication
+    // being fused was itself already collapsed into a LoadLoadMulCommand
+    // (both multiplicands are plain variable loads, so there is no
+    // intermediate scratch slot to read them back from). Reads the two
+    // multiplicands straight from flatVariables/_2DVariables instead - two
+    // loads, a multiply, and an add/sub all become one command.
+    record LoadLoadFmaCommand(int lSlot, int rSlot, int addOff, int destOff, boolean subtract) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector a = DoubleVector.fromArray(SPECIES, flat, lBase + k);
+                    DoubleVector b = DoubleVector.fromArray(SPECIES, flat, rBase + k);
+                    DoubleVector c = DoubleVector.fromArray(SPECIES, s, addOff + k);
+                    (subtract ? a.neg() : a).fma(b, c).intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    double a = flat[lBase + k];
+                    double b = flat[rBase + k];
+                    double c = s[addOff + k];
+                    s[destOff + k] = subtract ? Math.fma(-a, b, c) : Math.fma(a, b, c);
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector a = DoubleVector.fromArray(SPECIES, l, base + k);
+                    DoubleVector b = DoubleVector.fromArray(SPECIES, r, base + k);
+                    DoubleVector c = DoubleVector.fromArray(SPECIES, s, addOff + k);
+                    (subtract ? a.neg() : a).fma(b, c).intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    double a = l[base + k];
+                    double b = r[base + k];
+                    double c = s[addOff + k];
+                    s[destOff + k] = subtract ? Math.fma(-a, b, c) : Math.fma(a, b, c);
+                }
+            }
+        }
+    }
+
     record PowCommand(int lOff, int rOff, int destOff) implements VectorCommand {
 
         @Override
@@ -461,39 +557,6 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
         }
     }
 
-    // --- Fused Leaf Command: Load(var) -> UnaryMathOp ---
-    // Same idea as LoadLoadAddCommand, generalized to one operand: when the
-    // argument to a unary math op (sqrt, sin, erf, ...) is a plain variable
-    // load, this skips the load->scratch write followed immediately by the
-    // op's own read of that same scratch slot. Reads straight from
-    // flatVariables/_2DVariables and writes the result directly to the
-    // destination scratch slot. Selected at compile() time via peephole
-    // fusion - see tryFuseLoadUnary(). Numerically identical to
-    // LoadCommand + UnaryMathCommand: same op, same operand, just a
-    // different source array. Only wired up for ops whose VectorMath
-    // function is a pure single-vector-in/single-vector-out map (see the
-    // *Fused methods added to VectorMath.java) - anything without a fused
-    // variant (e.g. OP_GEGLU, whose vectorized path currently does nothing)
-    // falls back to the existing unfused UnaryMathCommand.
-    @FunctionalInterface
-    interface UnaryMathOpFused {
-
-        void apply(double[] src, int srcBase, double[] dest, int destBase, int n);
-    }
-
-    record LoadUnaryMathCommand(UnaryMathOpFused op, int slotIdx, int destOff) implements VectorCommand {
-
-        @Override
-        public void execute(EvaluationContext ctx, int n) {
-            if (ctx.flatVariables != null) {
-                int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
-                op.apply(ctx.flatVariables, srcOff, ctx.scratch, destOff, n);
-            } else {
-                op.apply(ctx._2DVariables[slotIdx], ctx.blockStart, ctx.scratch, destOff, n);
-            }
-        }
-    }
-
     @FunctionalInterface
     interface BinaryMathOp {
 
@@ -537,6 +600,18 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                     int rOff = virtualStack[--sp];
                     int lOff = virtualStack[--sp];
                     int destOff = lOff; // Reuse left slot to save space
+
+                    VectorCommand fusedMulAddSub = tryFuseMulAddSub(plan, opcode, lOff, rOff);
+                    if (fusedMulAddSub != null) {
+                        // The Mul/LoadLoadMul this Add/Sub was about to read
+                        // its right-hand operand back from scratch is now
+                        // dead - see tryFuseMulAddSub's javadoc for why this
+                        // is always the *last* plan entry, never lOff's.
+                        plan.remove(plan.size() - 1);
+                        plan.add(fusedMulAddSub);
+                        virtualStack[sp++] = destOff;
+                        break;
+                    }
 
                     VectorCommand fused = tryFuseLoadLoad(plan, opcode, lOff, rOff, destOff);
                     if (fused != null) {
@@ -751,92 +826,7 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                             throw new UnsupportedOperationException("Unmapped opcode: " + opcode);
                     };
 
-                    // Fused counterpart, if this opcode's VectorMath function is a
-                    // pure single-vector-in/single-vector-out map (see VectorMath's
-                    // *Fused methods). null for anything without one - e.g.
-                    // OP_GEGLU, whose vectorized path is currently a no-op, so
-                    // there's nothing safe to fuse against.
-                    UnaryMathOpFused fusedOp = switch (opcode) {
-                        case OP_SQRT -> VectorMath::sqrtFused;
-                        case OP_CBRT -> VectorMath::cbrtFused;
-                        case OP_GELU -> VectorMath::geluFused;
-                        case OP_GELU_FAST -> VectorMath::geluFastFused;
-                        case OP_SWIGLU -> VectorMath::swigluFused;
-                        case OP_ERF -> VectorMath::erfFused;
-                        case OP_ABS -> VectorMath::absFused;
-
-                        case OP_SIN -> VectorMath::sinFused;
-                        case OP_COS -> VectorMath::cosFused;
-                        case OP_TAN -> VectorMath::tanFused;
-
-                        case OP_SIN_DEG -> VectorMath::sinDegFused;
-                        case OP_COS_DEG -> VectorMath::cosDegFused;
-                        case OP_TAN_DEG -> VectorMath::tanDegFused;
-
-                        case OP_SIN_GRAD -> VectorMath::sinGradFused;
-                        case OP_COS_GRAD -> VectorMath::cosGradFused;
-                        case OP_TAN_GRAD -> VectorMath::tanGradFused;
-
-                        case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT -> VectorMath::asinFused;
-                        case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT -> VectorMath::acosFused;
-                        case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT -> VectorMath::atanFused;
-
-                        case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG -> VectorMath::asinDegFused;
-                        case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG -> VectorMath::acosDegFused;
-                        case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG -> VectorMath::atanDegFused;
-
-                        case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD -> VectorMath::asinGradFused;
-                        case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD -> VectorMath::acosGradFused;
-                        case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD -> VectorMath::atanGradFused;
-
-                        case OP_SEC_DEG -> VectorMath::secDegFused;
-                        case OP_COSEC_DEG -> VectorMath::cscDegFused;
-                        case OP_COT_DEG -> VectorMath::cotDegFused;
-
-                        case OP_SEC_GRAD -> VectorMath::secGradFused;
-                        case OP_COSEC_GRAD -> VectorMath::cscGradFused;
-                        case OP_COT_GRAD -> VectorMath::cotGradFused;
-
-                        case OP_ARC_SEC, OP_ARC_SEC_ALT -> VectorMath::asecFused;
-                        case OP_ARC_COSEC, OP_ARC_COSEC_ALT -> VectorMath::acscFused;
-                        case OP_ARC_COT, OP_ARC_COT_ALT -> VectorMath::acotFused;
-
-                        case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG -> VectorMath::asecDegFused;
-                        case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD -> VectorMath::asecGradFused;
-
-                        case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG -> VectorMath::acscDegFused;
-                        case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD -> VectorMath::acscGradFused;
-
-                        case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG -> VectorMath::acotDegFused;
-                        case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD -> VectorMath::acotGradFused;
-
-                        case OP_SINH -> VectorMath::sinhFused;
-                        case OP_COSH -> VectorMath::coshFused;
-                        case OP_TANH -> VectorMath::tanhFused;
-                        case OP_ASINH, OP_ASINH_ALT -> VectorMath::asinhFused;
-                        case OP_ACOSH, OP_ACOSH_ALT -> VectorMath::acoshFused;
-                        case OP_ATANH, OP_ATANH_ALT -> VectorMath::atanhFused;
-
-                        case OP_EXP -> VectorMath::expFused;
-                        case OP_LOG -> VectorMath::lnFused;
-                        case OP_LOG10 -> VectorMath::log10Fused;
-
-                        // OP_GEGLU (gegluUnary) intentionally excluded: its
-                        // vectorized path is currently a no-op, unlike every
-                        // other op here, so there's no safe fused form to emit.
-                        default -> null;
-                    };
-
-                    VectorCommand fusedCmd = tryFuseLoadUnary(plan, fusedOp, baseOff, baseOff);
-                    if (fusedCmd != null) {
-                        // The LoadCommand is dead after this point for the same
-                        // LIFO-stack reason as tryFuseLoadLoad: nothing else can
-                        // reference this operand once this op consumes it.
-                        plan.remove(plan.size() - 1);
-                        plan.add(fusedCmd);
-                    } else {
-                        plan.add(new UnaryMathCommand(mathOp, baseOff));
-                    }
+                    plan.add(new UnaryMathCommand(mathOp, baseOff));
                 }
             }
         }
@@ -881,26 +871,31 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
     }
 
     /**
-     * Peephole fusion for unary math ops: if the immediately preceding plan
-     * entry is a bare LoadCommand feeding this op's operand and nothing
-     * else, collapse them into a LoadUnaryMathCommand that reads straight
-     * from the source arrays. Mirrors tryFuseLoadLoad() but for one
-     * operand. Returns null (no fusion) when fusedOp is null - i.e. this
-     * opcode has no *Fused counterpart in VectorMath - or when the operand
-     * isn't a bare load.
+     * Peephole fusion: when an Add/Sub's right-hand operand (rOff) was just
+     * computed by the immediately-preceding Mul or LoadLoadMul, collapse the
+     * multiply and the add/sub into a single FmaCommand/LoadLoadFmaCommand -
+     * see those records' javadoc for why this only ever needs to check rOff,
+     * never lOff, and for the subtract-shape reasoning. Returns null for any
+     * opcode other than OP_ADD/OP_SUB, or when the last plan entry isn't a
+     * Mul-family command targeting rOff.
      */
-    private static VectorCommand tryFuseLoadUnary(List<VectorCommand> plan, UnaryMathOpFused fusedOp, int baseOff, int destOff) {
-        if (fusedOp == null) {
+    private static VectorCommand tryFuseMulAddSub(List<VectorCommand> plan, int opcode, int lOff, int rOff) {
+        if (opcode != OP_ADD && opcode != OP_SUB) {
             return null;
         }
         int size = plan.size();
         if (size < 1) {
             return null;
         }
-        if (!(plan.get(size - 1) instanceof LoadCommand load) || load.destOff() != baseOff) {
-            return null;
+        boolean subtract = (opcode == OP_SUB);
+        VectorCommand last = plan.get(size - 1);
+        if (last instanceof MulCommand mul && mul.destOff() == rOff) {
+            return new FmaCommand(mul.lOff(), mul.rOff(), lOff, lOff, subtract);
         }
-        return new LoadUnaryMathCommand(fusedOp, load.slotIdx(), destOff);
+        if (last instanceof LoadLoadMulCommand mul && mul.destOff() == rOff) {
+            return new LoadLoadFmaCommand(mul.lSlot(), mul.rSlot(), lOff, lOff, subtract);
+        }
+        return null;
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression implements AutoCloseable {

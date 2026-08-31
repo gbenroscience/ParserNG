@@ -24,8 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.lang.foreign.MemorySegment;
-import java.lang.foreign.ValueLayout;
+import java.lang.foreign.MemorySegment; 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -35,8 +34,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.github.gbenroscience.parser.MathExpression; 
-import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineSegmentF64;
+import com.github.gbenroscience.parser.MathExpression;  
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandSegmentF64;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -69,10 +68,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * used here with high confidence.
  * =====================================================================================
  */
-class SIMDEngineF64EvaluatorZeroCopyTest {
+class SIMDCommandSegmentF64EvaluatorZeroCopyTest {
 
     private static final long SEED = 42L;
-    private final List<SIMDEngineSegmentF64.SIMDVectorCompositeExpression> openEvaluators = new ArrayList<>();
+    private final List<SIMDCommandSegmentF64.SIMDVectorCompositeExpression> openEvaluators = new ArrayList<>();
 
     @AfterEach
     void closeEvaluators() {
@@ -88,14 +87,14 @@ class SIMDEngineF64EvaluatorZeroCopyTest {
     // =====================================================================
     // Helpers
     // =====================================================================
-    private SIMDEngineSegmentF64.SIMDVectorCompositeExpression compile(String expr) throws Throwable {
-        var evaluator = SIMDEngineSegmentF64.getEvaluator(expr);
+    private SIMDCommandSegmentF64.SIMDVectorCompositeExpression compile(String expr) throws Throwable {
+        var evaluator = SIMDCommandSegmentF64.getEvaluator(expr);
         openEvaluators.add(evaluator);
         return evaluator;
     }
 
-    private SIMDEngineSegmentF64.SIMDVectorCompositeExpression compileParallel(String expr, int workers) throws Throwable {
-        var evaluator = (SIMDEngineSegmentF64.SIMDVectorCompositeExpression) new SIMDEngineSegmentF64(new MathExpression(expr), workers).compile();
+    private SIMDCommandSegmentF64.SIMDVectorCompositeExpression compileParallel(String expr, int workers) throws Throwable {
+        var evaluator = (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(new MathExpression(expr), workers).compile();
         openEvaluators.add(evaluator);
         return evaluator;
     }
@@ -435,7 +434,7 @@ class SIMDEngineF64EvaluatorZeroCopyTest {
         for (int i = 0; i < 20; i++) {
             double[][] vars = randomVars(2, n, SEED + i);
             double[] expected = new double[n];
-            SIMDEngineSegmentF64.getEvaluator("x+y").applyBulk(vars, expected); // fresh instance as ground truth
+            SIMDCommandSegmentF64.getEvaluator("x+y").applyBulk(vars, expected); // fresh instance as ground truth
 
             double[] actual = new double[n];
             evaluator.applyBulk(toSegments(vars), MemorySegment.ofArray(actual));
@@ -470,7 +469,7 @@ class SIMDEngineF64EvaluatorZeroCopyTest {
                         double[][] vars = randomVars(2, n, seed);
 
                         double[] expected = new double[n];
-                        SIMDEngineSegmentF64.getEvaluator("x*y+sin(x)-cos(y)").applyBulk(vars, expected);
+                        SIMDCommandSegmentF64.getEvaluator("x*y+sin(x)-cos(y)").applyBulk(vars, expected);
 
                         double[] actual = new double[n];
                         evaluator.applyBulk(toSegments(vars), MemorySegment.ofArray(actual));

@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * @author GBEMIRO
  */
-public class SIMDCommandTurboEvaluatorTest {
+public class MoreSimdTests {
 
     private static final double EPSILON = 1e-12;
     private static ExecutorService threadPool;

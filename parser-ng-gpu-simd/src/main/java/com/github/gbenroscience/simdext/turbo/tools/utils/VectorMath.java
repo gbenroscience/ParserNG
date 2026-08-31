@@ -17,7 +17,6 @@ package com.github.gbenroscience.simdext.turbo.tools.utils;
 
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
-import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineF64;
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.LongVector;
 import jdk.incubator.vector.VectorMask;
@@ -852,7 +851,7 @@ import jdk.incubator.vector.VectorSpecies;
                 double uniformExp = scratch[expOffset];
 
                 if (uniformExp == 0.5) {
-                    SIMDEngineF64.VectorTranscendentals.evaluateNative(scratch, baseOffset, scratch, baseOffset, n, VectorOperators.SQRT);
+                    VectorTranscendentals.evaluateNative(scratch, baseOffset, scratch, baseOffset, n, VectorOperators.SQRT);
                     return;
                 }
                 if (uniformExp == 2.0) {
@@ -961,7 +960,7 @@ import jdk.incubator.vector.VectorSpecies;
             }
 
             if (exp == 0.5) {
-                SIMDEngineF64.VectorTranscendentals.evaluateNative(base, bOffset, dest, dOffset, n, VectorOperators.SQRT);
+                VectorTranscendentals.evaluateNative(base, bOffset, dest, dOffset, n, VectorOperators.SQRT);
                 return;
             }
 
@@ -1032,7 +1031,7 @@ import jdk.incubator.vector.VectorSpecies;
          * 6th-degree minimax polynomial via FMA + fast bit manipulation for
          * 2^k.
          */
-        static DoubleVector fastVectorExp(DoubleVector x) {
+        public static DoubleVector fastVectorExp(DoubleVector x) {
             x = x.lanewise(VectorOperators.MAX, -745.13).lanewise(VectorOperators.MIN, 709.78);
 
             DoubleVector invLn2 = DoubleVector.broadcast(SPECIES, 1.4426950408889634074);
@@ -1057,7 +1056,7 @@ import jdk.incubator.vector.VectorSpecies;
             return p.mul(twoK);
         }
 
-        static DoubleVector vectorizedErf(DoubleVector x) {
+        public static DoubleVector vectorizedErf(DoubleVector x) {
             return VectorizedCodyMath.erf(x);
         }
 

@@ -1,6 +1,5 @@
 package com.github.gbenroscience.simdext.turbo.tools.command;
-
-import com.github.gbenroscience.math.Maths;
+ 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*; 
@@ -18,16 +17,17 @@ import java.util.concurrent.locks.LockSupport;
 import jdk.incubator.vector.*;
 
 /**
- * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
+ * 
+ * High-Performance float32(Java's float type) Vector API & Engine that fuses explicit SIMD vectorization
  * with a zero-allocation primitive stack interpreter. Completely eliminates the
  * scalar parser overhead and task object allocations on the hot path.
  *
- * This version is the second fastest of all the SIMD evaluators.
+ * These are the fastest of ParserNG's SIMD evaluators
  * Combines near zero-allocation with parallel operations greatly enhanced with cpu-pinning.
- * Cpu pinning is the reason why this class is a native of this extension and is the main reason
+ * CPU pinning is the reason why this class is a native of this extension and is the main reason
  * why this extension is JDK22+
  * Note that CPU PINNING works best on Linux, so the worker efficiency of these classes
- * is best seen on Linux. Where 2 workers perform at almost 2x the rate of one worker.. usually between 1.88x to 2.02x
+ * is best seen on Linux. Where 2 workers perform at almost 2x the rate of one worker.. usually between 1.4x to 2.0x
  * 
  *
  */

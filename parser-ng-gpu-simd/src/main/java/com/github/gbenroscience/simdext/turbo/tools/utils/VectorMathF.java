@@ -17,7 +17,6 @@ package com.github.gbenroscience.simdext.turbo.tools.utils;
 
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
-import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineF32;
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.IntVector;
 import jdk.incubator.vector.VectorMask;
@@ -852,7 +851,7 @@ public final class VectorMathF {
             float uniformExp = scratch[expOffset];
 
             if (uniformExp == 0.5) {
-                SIMDEngineF32.VectorTranscendentals.evaluateNative(scratch, baseOffset, scratch, baseOffset, n, VectorOperators.SQRT);
+               VectorTranscendentals.evaluateNative(scratch, baseOffset, scratch, baseOffset, n, VectorOperators.SQRT);
                 return;
             }
             if (uniformExp == 2.0) {
@@ -961,7 +960,7 @@ public final class VectorMathF {
         }
 
         if (exp == 0.5) {
-            SIMDEngineF32.VectorTranscendentals.evaluateNative(base, bOffset, dest, dOffset, n, VectorOperators.SQRT);
+            VectorTranscendentals.evaluateNative(base, bOffset, dest, dOffset, n, VectorOperators.SQRT);
             return;
         }
 

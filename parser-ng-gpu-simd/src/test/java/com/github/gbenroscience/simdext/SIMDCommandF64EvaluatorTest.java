@@ -1,10 +1,9 @@
 package com.github.gbenroscience.simdext;
 
 import com.github.gbenroscience.logic.DRG_MODE;
-import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
-import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF; 
-import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineF64;
+import com.github.gbenroscience.parser.MathExpression; 
+import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;  
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
 
 import java.util.Arrays;
 import org.junit.jupiter.api.AfterAll;
@@ -21,7 +20,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  *
  * @author GBEMIRO
  */
-public class SIMDEngineF64EvaluatorTest {
+public class SIMDCommandF64EvaluatorTest {
 
     private static final double EPSILON = 1e-12;
     private static ExecutorService threadPool;
@@ -45,7 +44,7 @@ public class SIMDEngineF64EvaluatorTest {
     @Test
     public void testMathematicalPrecisionVsNativeJavaFlat() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDEngineF64.SIMDVectorCompositeExpression evaluator = (SIMDEngineF64.SIMDVectorCompositeExpression) new SIMDEngineF64(me).compile();
+        SIMDCommandF64.SIMDVectorCompositeExpression evaluator = SIMDCommandF64.getEvaluator(me);
 
         logDetails(me, evaluator, !active);
 
@@ -92,7 +91,7 @@ public class SIMDEngineF64EvaluatorTest {
     @Test
     public void testMathematicalPrecisionVsNativeJava() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2.23))");
-        SIMDEngineF64.SIMDVectorCompositeExpression evaluator = (SIMDEngineF64.SIMDVectorCompositeExpression) new SIMDEngineF64(me).compile();
+        SIMDCommandF64.SIMDVectorCompositeExpression evaluator = SIMDCommandF64.getEvaluator(me);
         logDetails(me, evaluator, !active);
 
         // 17 datapoints to trigger both vector lane and tail scalar loop remainders
@@ -123,7 +122,7 @@ public class SIMDEngineF64EvaluatorTest {
     public void testThreadPooledParallelBulkExecution() throws Throwable {
         MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
         me.setDRG(DRG_MODE.RAD);
-        SIMDEngineF64.SIMDVectorCompositeExpression evaluator = (SIMDEngineF64.SIMDVectorCompositeExpression) new SIMDEngineF64(me).compile();
+        SIMDCommandF64.SIMDVectorCompositeExpression evaluator = SIMDCommandF64.getEvaluator(me);
         logDetails(me, evaluator, !active);
 
         int dataSize = 250018;
@@ -148,7 +147,7 @@ public class SIMDEngineF64EvaluatorTest {
     @Test
     public void testSingleRuntime() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDEngineF64.SIMDVectorCompositeExpression evaluator = (SIMDEngineF64.SIMDVectorCompositeExpression) new SIMDEngineF64(me).compile();
+        SIMDCommandF64.SIMDVectorCompositeExpression evaluator = SIMDCommandF64.getEvaluator(me);
         double t = System.nanoTime();
         double[] out = new double[1];
         evaluator.applyBulk(new double[]{5, 4, 1}, out);
@@ -163,7 +162,7 @@ public class SIMDEngineF64EvaluatorTest {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(x+3,y-2,2*z-3)");
         System.out.println("f(x+3,y-2,2*z-3) = " + me.solve());
 
-        SIMDEngineF64.SIMDVectorCompositeExpression evaluator = (SIMDEngineF64.SIMDVectorCompositeExpression) new SIMDEngineF64(me).compile();
+        SIMDCommandF64.SIMDVectorCompositeExpression evaluator = SIMDCommandF64.getEvaluator(me);
         double t = System.nanoTime();
         double[] out = new double[1];
         try {
@@ -188,7 +187,7 @@ public class SIMDEngineF64EvaluatorTest {
         MathExpression me = new MathExpression("f(x,y,z)=3*x+4*y+sin(z-2);f(3,4,2)");
         System.out.println("f(3,4,2) = " + me.solve());
 
-        SIMDEngineF64.SIMDVectorCompositeExpression evaluator = (SIMDEngineF64.SIMDVectorCompositeExpression) new SIMDEngineF64(me).compile();
+        SIMDCommandF64.SIMDVectorCompositeExpression evaluator = SIMDCommandF64.getEvaluator(me);
         double t = System.nanoTime();
         double[] out = new double[1];
         double[]in=new double[0];
@@ -220,7 +219,7 @@ public class SIMDEngineF64EvaluatorTest {
 
         MathExpression me = new MathExpression("3 + 2*x + f(2, 3*x + sin(4*x), 5)");
 
-        SIMDEngineF64.SIMDVectorCompositeExpression evaluator = (SIMDEngineF64.SIMDVectorCompositeExpression) new SIMDEngineF64(me).compile();
+        SIMDCommandF64.SIMDVectorCompositeExpression evaluator = SIMDCommandF64.getEvaluator(me);
         double t = System.nanoTime();
         double[] out = new double[1];
         evaluator.applyBulk(new double[]{5}, out);
@@ -274,7 +273,7 @@ public class SIMDEngineF64EvaluatorTest {
      */
     private void executeKernelBenchmark(String kernelName, int sz, int arity) throws Throwable {
         MathExpression me = new MathExpression("x * 0.5 * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))");//mock expr - just need the MathExpression object(make it 1+1, still works)
-        SIMDCompositeExpression evaluator = (SIMDCompositeExpression) new SIMDEngineF64(me).compile();
+        SIMDCommandF64.SIMDVectorCompositeExpression evaluator = SIMDCommandF64.getEvaluator(me);
 
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
         FlatMatrixF.randomFill(in1);
@@ -315,7 +314,7 @@ public class SIMDEngineF64EvaluatorTest {
         Assertions.assertNotNull(out);
     }
 
-    void logDetails(MathExpression me, SIMDEngineF64.SIMDVectorCompositeExpression evaluator, boolean active) {
+    void logDetails(MathExpression me, SIMDCommandF64.SIMDVectorCompositeExpression evaluator, boolean active) {
         if (!active) {
             return;
         }

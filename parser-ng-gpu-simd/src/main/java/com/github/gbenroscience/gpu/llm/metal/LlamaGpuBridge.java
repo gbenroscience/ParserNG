@@ -2,6 +2,7 @@ package com.github.gbenroscience.gpu.llm;
 
 import com.github.gbenroscience.gpu.GpuBackend;
 import com.github.gbenroscience.gpu.llm.cuda.CudaLlamaEngine;
+import com.github.gbenroscience.gpu.llm.metal.MetalLlamaEngine;
 import com.github.gbenroscience.gpu.llm.opencl.OpenCLLlamaEngine;
 
 import java.io.File;
@@ -14,8 +15,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Single entry point for building a GPU-backed Llama engine without the
  * caller needing to know or choose between
- * {@code com.github.gbenroscience.gpu.llm.opencl.OpenCLLlamaEngine} and
- * {@code com.github.gbenroscience.gpu.llm.cuda.CudaLlamaEngine}. Direct
+ * {@code com.github.gbenroscience.gpu.llm.opencl.OpenCLLlamaEngine},
+ * {@code com.github.gbenroscience.gpu.llm.cuda.CudaLlamaEngine}, and
+ * {@code com.github.gbenroscience.gpu.llm.metal.MetalLlamaEngine}. Direct
  * counterpart of {@link com.github.gbenroscience.gpu.GpuExpressionBridge} --
  * same auto-detection model, same caching/probe behavior, same
  * {@code gpu.backend.preference} property (deliberately the SAME property,
@@ -34,7 +36,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <b>GPU VENDOR/DEVICE SELECTION</b> is a layer BELOW backend selection and
  * is not this class's job -- exactly like GpuExpressionBridge, this only
- * decides OpenCL-vs-CUDA. Once a backend is chosen (or resolved by
+ * decides OpenCL-vs-CUDA-vs-Metal. Once a backend is chosen (or resolved by
  * auto-detection), WHICH device on that backend is used is controlled the
  * same way it is everywhere else in this codebase:
  *   - OpenCL: {@code com.github.gbenroscience.gpu.opencl.OpenClDeviceSelector.selectDevice(...)}
@@ -43,6 +45,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *     {@code opencl.device.index}) the math evaluator's OpenClCompositeExpression uses.
  *   - CUDA: {@code com.github.gbenroscience.gpu.cuda.CudaDeviceSelector.selectDevice(int)}
  *     ({@code cuda.device.index} property).
+ *   - Metal: {@code com.github.gbenroscience.gpu.llm.metal.MetalDeviceSelector.selectDevice(int)}
+ *     ({@code metal.device.index} property) -- see that selector's javadoc for why the
+ *     selected device must additionally report unified memory.
  * Call the relevant selector BEFORE {@link #load}, same "sets the default
  * for whatever gets constructed next" contract those classes document.
  *
@@ -74,7 +79,7 @@ public final class LlamaGpuBridge {
         return switch (backend) {
             case OPENCL -> new OpenCLLlamaEngine(ggufPath);
             case CUDA -> new CudaLlamaEngine(ggufPath);
-            case METAL -> null;
+            case METAL -> new MetalLlamaEngine(ggufPath);
         };
     }
 
@@ -135,17 +140,19 @@ public final class LlamaGpuBridge {
      * explicitly for this one rather than relying on auto-detection.
      */
     private static List<GpuBackend> preferenceOrder() {
-        String pref = System.getProperty("gpu.backend.preference", "cuda,opencl");
+        String pref = System.getProperty("gpu.backend.preference", "cuda,metal,opencl");
         List<GpuBackend> order = new ArrayList<>();
         for (String token : pref.split(",")) {
             switch (token.trim().toLowerCase(Locale.ROOT)) {
                 case "cuda" -> order.add(GpuBackend.CUDA);
                 case "opencl" -> order.add(GpuBackend.OPENCL);
+                case "metal" -> order.add(GpuBackend.METAL);
                 default -> { /* ignore unrecognized token */ }
             }
         }
         if (order.isEmpty()) {
             order.add(GpuBackend.CUDA);
+            order.add(GpuBackend.METAL);
             order.add(GpuBackend.OPENCL);
         }
         return order;
@@ -173,6 +180,7 @@ public final class LlamaGpuBridge {
         switch (backend) {
             case OPENCL -> new com.github.gbenroscience.gpu.llm.opencl.GpuContext().close();
             case CUDA -> new com.github.gbenroscience.gpu.llm.cuda.GpuContext().close();
+            case METAL -> new com.github.gbenroscience.gpu.llm.metal.GpuContext().close();
         }
     }
 }

@@ -10,9 +10,9 @@ import com.github.gbenroscience.gpu.evaluator.opencl.OpenClCompositeExpression;
 import com.github.gbenroscience.gpu.evaluator.opencl.OpenClExpressionBridge;
 import com.github.gbenroscience.gpu.evaluator.opencl.OpenClKernelSource;
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
-import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineF64;
+import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression; 
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator; 
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -965,7 +965,7 @@ public class GpuCompositeExpressionTest {
     @Test
     void largeGridInformationalTimingWithMemorySegments() throws Throwable {
         MathExpression me = new MathExpression("3*sin(x)*cos(y)+sqrt(abs(x*y))");
-        SIMDEngineF64.SIMDVectorCompositeExpression cpu = SIMDEngineF64.getEvaluator(me);
+        SIMDCommandF64.SIMDVectorCompositeExpression cpu = SIMDCommandF64.getEvaluator(me);
         VectorTurboEvaluator vte = (VectorTurboEvaluator) cpu.getCompiler();
  
         OpenClCompositeExpression.selectDevice(OpenClCompositeExpression.GpuVendor.INTEL);

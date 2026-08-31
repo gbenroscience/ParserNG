@@ -1,7 +1,5 @@
 package com.github.gbenroscience.simdext;
 
-import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression;
 import org.junit.jupiter.api.Test;
 
 import java.lang.foreign.Arena;
@@ -9,46 +7,63 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.BLOCK_SIZE;
-import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineEvaluator;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF32;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandSegmentF32;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandSegmentF64;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for {@link SIMDEngineEvaluator}'s bulk-evaluation storage paths:
- * the original {@code double[]} / {@code double[][]} / {@code MemorySegment}
+ * Tests for {@link SIMDEngineEvaluator}'s bulk-evaluation storage paths: the
+ * original {@code double[]} / {@code double[][]} / {@code MemorySegment}
  * (packed doubles) / {@code MemorySegment[]} (packed doubles) paths, and the
  * float support added alongside them — {@code float[]}, {@code float[][]},
  * {@code MemorySegment} (packed floats), and {@code MemorySegment[]} (packed
  * floats).
  *
- * <p>Variables are assumed to be resolved to stack slots in the order they
- * first appear in the expression source (the conventional behavior for this
- * kind of expression compiler); adjust variable naming/ordering in these
- * tests if your {@code MathExpression} front-end resolves slots differently.
+ * <p>
+ * Variables are assumed to be resolved to stack slots in the order they first
+ * appear in the expression source (the conventional behavior for this kind of
+ * expression compiler); adjust variable naming/ordering in these tests if your
+ * {@code MathExpression} front-end resolves slots differently.
  *
- * <p>Tolerances: {@code SIN}/{@code COS}/{@code EXP}/{@code SQRT}/etc. go
- * through the JDK Vector API's lanewise transcendental intrinsics and are
- * compared with a tight epsilon (looser for {@code float}, tighter for
- * {@code double}, reflecting each type's native precision).
- * {@code erf}/{@code gelu} go through the {@code VectorizedCodyMath}-backed
- * piecewise rational approximation and are compared with a looser epsilon.
- * <p>All {@code MemorySegment} tests use {@link Arena#ofShared()} rather than
- * {@code Arena.ofConfined()}. The {@code *_Parallel} tests dispatch work to
- * the evaluator's background worker-thread pool, and a confined arena's
- * segments can only be accessed from the single thread that created them —
- * any access from a worker thread throws {@code WrongThreadException}. Using
- * a shared arena everywhere (not just in the parallel tests) keeps the
- * pattern uniform and avoids that trap by construction.
+ * <p>
+ * Tolerances: {@code SIN}/{@code COS}/{@code EXP}/{@code SQRT}/etc. go through
+ * the JDK Vector API's lanewise transcendental intrinsics and are compared with
+ * a tight epsilon (looser for {@code float}, tighter for {@code double},
+ * reflecting each type's native precision). {@code erf}/{@code gelu} go through
+ * the {@code VectorizedCodyMath}-backed piecewise rational approximation and
+ * are compared with a looser epsilon.
+ * <p>
+ * All {@code MemorySegment} tests use {@link Arena#ofShared()} rather than
+ * {@code Arena.ofConfined()}. The {@code *_Parallel} tests dispatch work to the
+ * evaluator's background worker-thread pool, and a confined arena's segments
+ * can only be accessed from the single thread that created them — any access
+ * from a worker thread throws {@code WrongThreadException}. Using a shared
+ * arena everywhere (not just in the parallel tests) keeps the pattern uniform
+ * and avoids that trap by construction.
  */
-class SIMDEngineEvaluatorTest {
+class SIMDCommandTest {
 
     private static final float TIGHT_EPS = 1e-4f;
     private static final float LOOSE_EPS = 5e-4f;
     private static final double D_TIGHT_EPS = 1e-9;
     private static final double D_LOOSE_EPS = 1e-6;
 
-    private static SIMDEngineEvaluator.SIMDVectorCompositeExpression compile(String expr) throws Throwable {
-        return SIMDEngineEvaluator.getEvaluator(expr);
+    private static SIMDCommandF64.SIMDVectorCompositeExpression compile(String expr) throws Throwable {
+        return SIMDCommandF64.getEvaluator(expr);
+    }
+
+    private static SIMDCommandF32.SIMDVectorCompositeExpression compileF(String expr) throws Throwable {
+        return SIMDCommandF32.getEvaluator(expr);
+    }
+
+    private static SIMDCommandSegmentF64.SIMDVectorCompositeExpression compileSegF64(String expr) throws Throwable {
+        return SIMDCommandSegmentF64.getEvaluator(expr);
+    }
+    
+        private static SIMDCommandSegmentF32.SIMDVectorCompositeExpression compileSegF32(String expr) throws Throwable {
+        return SIMDCommandSegmentF32.getEvaluator(expr);
     }
 
     private static float[] fillLinear(int n, float start, float step) {
@@ -70,10 +85,9 @@ class SIMDEngineEvaluatorTest {
     // =====================================================================
     // 1. float[] (flat single-array, multi-variable) path
     // =====================================================================
-
     @Test
     void testFloatArray_Add() throws Throwable {
-        try (var eval = compile("x + y")) {
+        try (var eval = compileF("x + y")) {
             int n = 64;
             float[] flat = new float[2 * n];
             float[] x = fillLinear(n, 1.0f, 0.5f);
@@ -92,7 +106,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testFloatArray_MulDiv() throws Throwable {
-        try (var eval = compile("(x * y) / (x + 1)")) {
+        try (var eval = compileF("(x * y) / (x + 1)")) {
             int n = 100;
             float[] x = fillLinear(n, 1.0f, 0.3f);
             float[] y = fillLinear(n, 5.0f, 0.1f);
@@ -112,7 +126,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testFloatArray_Sin() throws Throwable {
-        try (var eval = compile("sin(x)")) {
+        try (var eval = compileF("sin(x)")) {
             int n = 50;
             float[] x = fillLinear(n, -3.0f, 0.13f);
 
@@ -127,7 +141,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testFloatArray_Pow() throws Throwable {
-        try (var eval = compile("x^3")) {
+        try (var eval = compileF("x^3")) {
             int n = 40;
             float[] x = fillLinear(n, -2.0f, 0.2f);
 
@@ -142,7 +156,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testFloatArray_Gelu() throws Throwable {
-        try (var eval = compile("gelu(x)")) {
+        try (var eval = compileF("gelu(x)")) {
             int n = 30;
             float[] x = fillLinear(n, -4.0f, 0.3f);
 
@@ -159,7 +173,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testFloatArray_Comparison() throws Throwable {
-        try (var eval = compile("x > y")) {
+        try (var eval = compileF("x > y")) {
             int n = 20;
             float[] x = fillLinear(n, -2.0f, 0.4f);
             float[] y = fillLinear(n, 0.0f, 0.0f);
@@ -180,10 +194,9 @@ class SIMDEngineEvaluatorTest {
     // =====================================================================
     // 2. float[][] (one array per variable) path
     // =====================================================================
-
     @Test
     void testFloat2D_Add() throws Throwable {
-        try (var eval = compile("x + y")) {
+        try (var eval = compileF("x + y")) {
             int n = 70;
             float[][] vars = {fillLinear(n, 1.0f, 0.1f), fillLinear(n, -1.0f, 0.2f)};
 
@@ -198,7 +211,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testFloat2D_Trig() throws Throwable {
-        try (var eval = compile("cos(x) + sin(x)")) {
+        try (var eval = compileF("cos(x) + sin(x)")) {
             int n = 45;
             float[][] vars = {fillLinear(n, -5.0f, 0.25f)};
 
@@ -217,7 +230,7 @@ class SIMDEngineEvaluatorTest {
     void testFloat2D_MultiBlock() throws Throwable {
         // Deliberately larger than BLOCK_SIZE so the internal block-looping
         // logic (multiple BLOCK_SIZE-sized chunks) is exercised.
-        try (var eval = compile("x * 2 + 1")) {
+        try (var eval = compileF("x * 2 + 1")) {
             int n = BLOCK_SIZE * 3 + 17;
             float[][] vars = {fillLinear(n, 0.0f, 0.001f)};
 
@@ -233,7 +246,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testFloat2D_Sqrt() throws Throwable {
-        try (var eval = compile("sqrt(x)")) {
+        try (var eval = compileF("sqrt(x)")) {
             int n = 33;
             float[][] vars = {fillLinear(n, 0.0f, 1.0f)};
 
@@ -248,7 +261,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testFloat2D_IfElse() throws Throwable {
-        try (var eval = compile("if(x > 0, x, -x)")) {
+        try (var eval = compileF("if(x > 0, x, -x)")) {
             int n = 60;
             float[][] vars = {fillLinear(n, -30.0f, 1.0f)};
 
@@ -265,10 +278,9 @@ class SIMDEngineEvaluatorTest {
     // =====================================================================
     // 3. MemorySegment (single concatenated segment, packed floats) path
     // =====================================================================
-
     @Test
     void testMemSegFloat_Add() throws Throwable {
-        try (var eval = compile("x + y"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF32("x + y"); Arena arena = Arena.ofShared()) {
             int n = 80;
             float[] x = fillLinear(n, 3.0f, 0.05f);
             float[] y = fillLinear(n, -1.0f, 0.02f);
@@ -278,7 +290,7 @@ class SIMDEngineEvaluatorTest {
             MemorySegment.copy(y, 0, in, ValueLayout.JAVA_FLOAT, (long) n * Float.BYTES, n);
 
             MemorySegment out = arena.allocate((long) n * Float.BYTES);
-            eval.applyBulkFloat(in, out);
+            eval.applyBulk(in, out);
 
             for (int i = 0; i < n; i++) {
                 float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
@@ -289,7 +301,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegFloat_Exp() throws Throwable {
-        try (var eval = compile("exp(x)"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF32("exp(x)"); Arena arena = Arena.ofShared()) {
             int n = 25;
             float[] x = fillLinear(n, -3.0f, 0.25f);
 
@@ -297,7 +309,7 @@ class SIMDEngineEvaluatorTest {
             MemorySegment.copy(x, 0, in, ValueLayout.JAVA_FLOAT, 0L, n);
 
             MemorySegment out = arena.allocate((long) n * Float.BYTES);
-            eval.applyBulkFloat(in, out);
+            eval.applyBulk(in, out);
 
             for (int i = 0; i < n; i++) {
                 float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
@@ -308,7 +320,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegFloat_Parallel() throws Throwable {
-        try (var eval = compile("x * y"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF32("x * y"); Arena arena = Arena.ofShared()) {
             // Large enough to clear PARALLEL_OPS_THRESHOLD and actually
             // exercise the worker-pool dispatch path (falls back to
             // single-threaded automatically if NUM_WORKERS <= 0).
@@ -321,7 +333,7 @@ class SIMDEngineEvaluatorTest {
             MemorySegment.copy(y, 0, in, ValueLayout.JAVA_FLOAT, (long) n * Float.BYTES, n);
 
             MemorySegment out = arena.allocate((long) n * Float.BYTES);
-            eval.applyBulkParallelFloat(in, out);
+            eval.applyBulkParallel(in, out);
 
             // Spot-check a sample rather than every element to keep the test fast.
             for (int i = 0; i < n; i += 997) {
@@ -333,7 +345,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegFloat_Erf() throws Throwable {
-        try (var eval = compile("erf(x)"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF32("erf(x)"); Arena arena = Arena.ofShared()) {
             int n = 30;
             float[] x = fillLinear(n, -3.0f, 0.2f);
 
@@ -341,7 +353,7 @@ class SIMDEngineEvaluatorTest {
             MemorySegment.copy(x, 0, in, ValueLayout.JAVA_FLOAT, 0L, n);
 
             MemorySegment out = arena.allocate((long) n * Float.BYTES);
-            eval.applyBulkFloat(in, out);
+            eval.applyBulk(in, out);
 
             for (int i = 0; i < n; i++) {
                 float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
@@ -352,7 +364,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegFloat_MultiBlock() throws Throwable {
-        try (var eval = compile("x - 1"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF32("x - 1"); Arena arena = Arena.ofShared()) {
             int n = BLOCK_SIZE * 2 + 5;
             float[] x = fillLinear(n, 0.0f, 0.01f);
 
@@ -360,7 +372,7 @@ class SIMDEngineEvaluatorTest {
             MemorySegment.copy(x, 0, in, ValueLayout.JAVA_FLOAT, 0L, n);
 
             MemorySegment out = arena.allocate((long) n * Float.BYTES);
-            eval.applyBulkFloat(in, out);
+            eval.applyBulk(in, out);
 
             for (int i = 0; i < n; i++) {
                 float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
@@ -372,10 +384,9 @@ class SIMDEngineEvaluatorTest {
     // =====================================================================
     // 4. MemorySegment[] (one segment per variable, zero-copy) path
     // =====================================================================
-
     @Test
     void testMemSegArrayFloat_Add() throws Throwable {
-        try (var eval = compile("x + y"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF32("x + y"); Arena arena = Arena.ofShared()) {
             int n = 90;
             float[] x = fillLinear(n, 1.0f, 0.1f);
             float[] y = fillLinear(n, 2.0f, 0.2f);
@@ -386,7 +397,7 @@ class SIMDEngineEvaluatorTest {
             MemorySegment.copy(y, 0, segY, ValueLayout.JAVA_FLOAT, 0L, n);
 
             MemorySegment out = arena.allocate((long) n * Float.BYTES);
-            eval.applyBulkFloat(new MemorySegment[]{segX, segY}, out);
+            eval.applyBulk(new MemorySegment[]{segX, segY}, out);
 
             for (int i = 0; i < n; i++) {
                 float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
@@ -397,7 +408,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegArrayFloat_Mul() throws Throwable {
-        try (var eval = compile("x * y - x"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF32("x * y - x"); Arena arena = Arena.ofShared()) {
             int n = 55;
             float[] x = fillLinear(n, 2.0f, 0.05f);
             float[] y = fillLinear(n, 3.0f, 0.03f);
@@ -408,7 +419,7 @@ class SIMDEngineEvaluatorTest {
             MemorySegment.copy(y, 0, segY, ValueLayout.JAVA_FLOAT, 0L, n);
 
             MemorySegment out = arena.allocate((long) n * Float.BYTES);
-            eval.applyBulkFloat(new MemorySegment[]{segX, segY}, out);
+            eval.applyBulk(new MemorySegment[]{segX, segY}, out);
 
             for (int i = 0; i < n; i++) {
                 float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
@@ -420,7 +431,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegArrayFloat_Parallel() throws Throwable {
-        try (var eval = compile("x + y * 2"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF32("x + y * 2"); Arena arena = Arena.ofShared()) {
             int n = 200_000;
             float[] x = fillLinear(n, 0.1f, 0.00005f);
             float[] y = fillLinear(n, -0.1f, 0.00003f);
@@ -431,7 +442,7 @@ class SIMDEngineEvaluatorTest {
             MemorySegment.copy(y, 0, segY, ValueLayout.JAVA_FLOAT, 0L, n);
 
             MemorySegment out = arena.allocate((long) n * Float.BYTES);
-            eval.applyBulkParallelFloat(new MemorySegment[]{segX, segY}, out);
+            eval.applyBulkParallel(new MemorySegment[]{segX, segY}, out);
 
             for (int i = 0; i < n; i += 997) {
                 float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
@@ -447,7 +458,7 @@ class SIMDEngineEvaluatorTest {
         // segment-backed push is never consumed by any op that would
         // otherwise force materialization — exercises the explicit
         // materializeFloat() fallback in applyBulkInternalFloat(MemorySegment[]...).
-        try (var eval = compile("x"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF32("x"); Arena arena = Arena.ofShared()) {
             int n = 48;
             float[] x = fillLinear(n, -10.0f, 0.4f);
 
@@ -455,7 +466,7 @@ class SIMDEngineEvaluatorTest {
             MemorySegment.copy(x, 0, segX, ValueLayout.JAVA_FLOAT, 0L, n);
 
             MemorySegment out = arena.allocate((long) n * Float.BYTES);
-            eval.applyBulkFloat(new MemorySegment[]{segX}, out);
+            eval.applyBulk(new MemorySegment[]{segX}, out);
 
             for (int i = 0; i < n; i++) {
                 float actual = out.getAtIndex(ValueLayout.JAVA_FLOAT, i);
@@ -467,7 +478,6 @@ class SIMDEngineEvaluatorTest {
     // =====================================================================
     // 5. double[] (flat, multi-variable) path
     // =====================================================================
-
     @Test
     void testDoubleArray_Add() throws Throwable {
         try (var eval = compile("x + y")) {
@@ -577,7 +587,6 @@ class SIMDEngineEvaluatorTest {
     // =====================================================================
     // 6. double[][] (one array per variable) path
     // =====================================================================
-
     @Test
     void testDouble2D_Add() throws Throwable {
         try (var eval = compile("x + y")) {
@@ -662,10 +671,9 @@ class SIMDEngineEvaluatorTest {
     // =====================================================================
     // 7. MemorySegment (single concatenated segment, packed doubles) path
     // =====================================================================
-
     @Test
     void testMemSegDouble_Add() throws Throwable {
-        try (var eval = compile("x + y"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF64("x + y"); Arena arena = Arena.ofShared()) {
             int n = 80;
             double[] x = fillLinearD(n, 3.0, 0.05);
             double[] y = fillLinearD(n, -1.0, 0.02);
@@ -686,7 +694,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegDouble_Exp() throws Throwable {
-        try (var eval = compile("exp(x)"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF64("exp(x)"); Arena arena = Arena.ofShared()) {
             int n = 25;
             double[] x = fillLinearD(n, -3.0, 0.25);
 
@@ -705,7 +713,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegDouble_Parallel() throws Throwable {
-        try (var eval = compile("x * y"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF64("x * y"); Arena arena = Arena.ofShared()) {
             // Large enough to clear PARALLEL_OPS_THRESHOLD and actually
             // exercise the worker-pool dispatch path (falls back to
             // single-threaded automatically if NUM_WORKERS <= 0).
@@ -730,7 +738,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegDouble_Erf() throws Throwable {
-        try (var eval = compile("erf(x)"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF64("erf(x)"); Arena arena = Arena.ofShared()) {
             int n = 30;
             double[] x = fillLinearD(n, -3.0, 0.2);
 
@@ -749,7 +757,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegDouble_MultiBlock() throws Throwable {
-        try (var eval = compile("x - 1"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF64("x - 1"); Arena arena = Arena.ofShared()) {
             int n = BLOCK_SIZE * 2 + 5;
             double[] x = fillLinearD(n, 0.0, 0.01);
 
@@ -769,10 +777,9 @@ class SIMDEngineEvaluatorTest {
     // =====================================================================
     // 8. MemorySegment[] (one segment per variable, zero-copy) path
     // =====================================================================
-
     @Test
     void testMemSegArrayDouble_Add() throws Throwable {
-        try (var eval = compile("x + y"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF64("x + y"); Arena arena = Arena.ofShared()) {
             int n = 90;
             double[] x = fillLinearD(n, 1.0, 0.1);
             double[] y = fillLinearD(n, 2.0, 0.2);
@@ -794,7 +801,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegArrayDouble_Mul() throws Throwable {
-        try (var eval = compile("x * y - x"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF64("x * y - x"); Arena arena = Arena.ofShared()) {
             int n = 55;
             double[] x = fillLinearD(n, 2.0, 0.05);
             double[] y = fillLinearD(n, 3.0, 0.03);
@@ -817,7 +824,7 @@ class SIMDEngineEvaluatorTest {
 
     @Test
     void testMemSegArrayDouble_Parallel() throws Throwable {
-        try (var eval = compile("x + y * 2"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF64("x + y * 2"); Arena arena = Arena.ofShared()) {
             int n = 200_000;
             double[] x = fillLinearD(n, 0.1, 0.00005);
             double[] y = fillLinearD(n, -0.1, 0.00003);
@@ -844,7 +851,7 @@ class SIMDEngineEvaluatorTest {
         // segment-backed push is never consumed by any op that would
         // otherwise force materialization — exercises the explicit
         // materialize() fallback in applyBulkInternal(MemorySegment[]...).
-        try (var eval = compile("x"); Arena arena = Arena.ofShared()) {
+        try (var eval = compileSegF64("x"); Arena arena = Arena.ofShared()) {
             int n = 48;
             double[] x = fillLinearD(n, -10.0, 0.4);
 
@@ -876,6 +883,6 @@ class SIMDEngineEvaluatorTest {
         double poly = ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t;
         double y = 1.0 - poly * Math.exp(-ax * ax);
         return sign * y;
-      //  return Maths.erf(x);
+        //  return Maths.erf(x);
     }
 }

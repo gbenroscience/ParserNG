@@ -4,9 +4,8 @@ package com.github.gbenroscience.simdext;
  *
  * @author oluwagbemirojiboye
  */
-import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineF64;
-import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineSegmentF64;
+import com.github.gbenroscience.parser.MathExpression; 
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandSegmentF64;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -20,7 +19,7 @@ public class MemorySegmentEvaluatorTest {
     private final boolean active = true;
 
     // Dummy method to match your original test's structural dependency
-    private void logDetails(MathExpression me, SIMDEngineSegmentF64.SIMDVectorCompositeExpression eval, boolean flag) {
+    private void logDetails(MathExpression me, SIMDCommandSegmentF64.SIMDVectorCompositeExpression eval, boolean flag) {
         // Logging implementation
     }
 
@@ -31,8 +30,8 @@ public class MemorySegmentEvaluatorTest {
     @Test
     public void testMathematicalPrecisionVsNativeMemorySegmentBulk() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        SIMDEngineSegmentF64.SIMDVectorCompositeExpression evaluator
-                = (SIMDEngineSegmentF64.SIMDVectorCompositeExpression) new SIMDEngineSegmentF64(me).compile();
+        SIMDCommandSegmentF64.SIMDVectorCompositeExpression evaluator
+                = (SIMDCommandSegmentF64.SIMDVectorCompositeExpression) new SIMDCommandSegmentF64(me).compile();
 
         logDetails(me, evaluator, !active);
 
@@ -82,7 +81,7 @@ public class MemorySegmentEvaluatorTest {
     public void testMathematicalPrecisionVsNativeMemorySegmentBulkParallel() throws Throwable {
         MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
         // Instantiate with 4 workers to ensure parallel execution pool is created
-        var evaluator = SIMDEngineSegmentF64.getEvaluator(me, 2);// the second argument is the number of workers to use.
+        var evaluator = SIMDCommandSegmentF64.getEvaluator(me, 2);// the second argument is the number of workers to use.
         //If not specified, the worker count
         //is equal to the number of cpus. NOTE: parallel processing only occurs when applyBulkParallel is called
 
@@ -141,7 +140,7 @@ public class MemorySegmentEvaluatorTest {
     @Test
     public void testMemorySegmentBulkHandlesNullGracefully() throws Throwable {
         MathExpression me = new MathExpression("x * 2");
-        SIMDEngineSegmentF64.SIMDVectorCompositeExpression evaluator =  SIMDEngineSegmentF64.getEvaluator(me);
+        SIMDCommandSegmentF64.SIMDVectorCompositeExpression evaluator =  SIMDCommandSegmentF64.getEvaluator(me);
 
         try (Arena arena = Arena.ofConfined()) {
             // Test with null segments

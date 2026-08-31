@@ -4,7 +4,7 @@ import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression;
 import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;
-import com.github.gbenroscience.simdext.turbo.tools.junk.SIMDEngineF32;
+import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF32;
 
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
@@ -21,7 +21,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  *
  * @author GBEMIRO
  */
-public class SIMDEngineF32EvaluatorTest {
+public class SIMDCommandF32EvaluatorTest {
 
     private static final float ABS_EPSILON = 1e-5f;
     private static final float REL_EPSILON = 1e-5f;
@@ -100,8 +100,7 @@ public class SIMDEngineF32EvaluatorTest {
                 + "* exp((-(x2 - x3)^2) / (2 * x1^2))"
         );
 
-        SIMDEngineF32.SIMDVectorCompositeExpression evaluator
-                = (SIMDEngineF32.SIMDVectorCompositeExpression) new SIMDEngineF32(me).compile();
+        SIMDCommandF32.SIMDVectorCompositeExpression evaluator = SIMDCommandF32.getEvaluator(me);
 
         logDetails(me, evaluator, !active);
 
@@ -158,8 +157,7 @@ public class SIMDEngineF32EvaluatorTest {
                 + "* exp((-(x2 - x3)^2) / (2 * x1^2.23))"
         );
 
-        SIMDEngineF32.SIMDVectorCompositeExpression evaluator
-                = (SIMDEngineF32.SIMDVectorCompositeExpression) new SIMDEngineF32(me).compile();
+        SIMDCommandF32.SIMDVectorCompositeExpression evaluator = SIMDCommandF32.getEvaluator(me);
 
         logDetails(me, evaluator, !active);
 
@@ -205,8 +203,7 @@ public class SIMDEngineF32EvaluatorTest {
 
         me.setDRG(DRG_MODE.RAD);
 
-        SIMDEngineF32.SIMDVectorCompositeExpression evaluator
-                = (SIMDEngineF32.SIMDVectorCompositeExpression) new SIMDEngineF32(me).compile();
+        SIMDCommandF32.SIMDVectorCompositeExpression evaluator = SIMDCommandF32.getEvaluator(me);
 
         logDetails(me, evaluator, !active);
 
@@ -236,7 +233,7 @@ public class SIMDEngineF32EvaluatorTest {
             assertFloatClose(
                     expected,
                     outputVector[i],
-                    "Parallel SIMD execution drifted at index: " + i+", for x = "+x
+                    "Parallel SIMD execution drifted at index: " + i + ", for x = " + x
             );
         }
     }
@@ -248,8 +245,7 @@ public class SIMDEngineF32EvaluatorTest {
                 + "* exp((-(x2 - x3)^2) / (2 * x1^2))"
         );
 
-        SIMDEngineF32.SIMDVectorCompositeExpression evaluator
-                = (SIMDEngineF32.SIMDVectorCompositeExpression) new SIMDEngineF32(me).compile();
+        SIMDCommandF32.SIMDVectorCompositeExpression evaluator = SIMDCommandF32.getEvaluator(me);
 
         long t = System.nanoTime();
 
@@ -281,8 +277,7 @@ public class SIMDEngineF32EvaluatorTest {
                 "f(x+3,y-2,2*z-3) = " + me.solve()
         );
 
-        SIMDEngineF32.SIMDVectorCompositeExpression evaluator
-                = (SIMDEngineF32.SIMDVectorCompositeExpression) new SIMDEngineF32(me).compile();
+        SIMDCommandF32.SIMDVectorCompositeExpression evaluator = SIMDCommandF32.getEvaluator(me);
 
         long t = System.nanoTime();
 
@@ -325,9 +320,7 @@ public class SIMDEngineF32EvaluatorTest {
         System.out.println(
                 "f(3,4,2) = " + me.solve()
         );
-
-        SIMDEngineF32.SIMDVectorCompositeExpression evaluator
-                = (SIMDEngineF32.SIMDVectorCompositeExpression) new SIMDEngineF32(me).compile();
+        SIMDCommandF32.SIMDVectorCompositeExpression evaluator = SIMDCommandF32.getEvaluator(me);
 
         long t = System.nanoTime();
 
@@ -374,8 +367,7 @@ public class SIMDEngineF32EvaluatorTest {
                 "3 + 2*x + f(2, 3*x + sin(4*x), 5)"
         );
 
-        SIMDEngineF32.SIMDVectorCompositeExpression evaluator
-                = (SIMDEngineF32.SIMDVectorCompositeExpression) new SIMDEngineF32(me).compile();
+        SIMDCommandF32.SIMDVectorCompositeExpression evaluator = SIMDCommandF32.getEvaluator(me);
 
         long t = System.nanoTime();
 
@@ -461,8 +453,7 @@ public class SIMDEngineF32EvaluatorTest {
                 + "))"
         );
 
-        SIMDCompositeExpression evaluator
-                = (SIMDCompositeExpression) new SIMDEngineF32(me).compile();
+        SIMDCommandF32.SIMDVectorCompositeExpression evaluator = SIMDCommandF32.getEvaluator(me);
 
         FlatMatrixF in1 = new FlatMatrixF(sz, sz);
         FlatMatrixF.randomFill(in1);
@@ -533,7 +524,7 @@ public class SIMDEngineF32EvaluatorTest {
 
     private void logDetails(
             MathExpression me,
-            SIMDEngineF32.SIMDVectorCompositeExpression evaluator,
+            SIMDCommandF32.SIMDVectorCompositeExpression evaluator,
             boolean active) {
 
         if (!active) {
