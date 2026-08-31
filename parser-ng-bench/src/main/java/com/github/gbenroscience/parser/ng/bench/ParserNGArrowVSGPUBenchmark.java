@@ -47,7 +47,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.concurrent.TimeUnit; 
+import java.util.concurrent.TimeUnit;
 
 /**
  *
@@ -62,11 +62,14 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>
  * Expressions are no longer a hardcoded enum + switch. They live in the
- * {@link #EXPRESSIONS} array (30 entries), each pairing a ParserNG source
- * string with a matching Gandiva {@link TreeNode} builder. This lets the suite
- * grow (or shrink) just by editing that array, and lets {@link #main} pick a
- * subset of expressions to actually run based on interactive input, without
- * touching JMH's parameterization mechanism.
+ * {@link #EXPRESSIONS} array (32 entries: the original 30 bandwidth-bound
+ * expressions plus 2 compute-heavy ones -- GPU_HEAVY_TRANSCENDENTAL and
+ * GPU_STRESS -- added specifically to raise arithmetic intensity per element
+ * for GPU-vs-SIMD comparisons), each pairing a ParserNG source string with a
+ * matching Gandiva {@link TreeNode} builder. This lets the suite grow (or
+ * shrink) just by editing that array, and lets {@link #main} pick a subset of
+ * expressions to actually run based on interactive input, without touching
+ * JMH's parameterization mechanism.
  *
  * <p>
  * Expression selection at runtime: when launched via {@link #main}, the process
@@ -120,13 +123,14 @@ public class ParserNGArrowVSGPUBenchmark {
     public static final class ExpressionDef {
 
         public final String name;
-        public final String parserExpr; 
+        public final String parserExpr;
 
         public ExpressionDef(String name, String parserExpr) {
             this.name = name;
-            this.parserExpr = parserExpr; 
+            this.parserExpr = parserExpr;
         }
-    } 
+    }
+
     // ---- small helpers so the 30 builders below read like the expressions they encode ----
     private static TreeNode add(TreeNode a, TreeNode b, ArrowType.FloatingPoint t) {
         return TreeBuilder.makeFunction("add", List.of(a, b), t);
@@ -215,7 +219,37 @@ public class ParserNGArrowVSGPUBenchmark {
         new ExpressionDef("HARMONIC", "1/(x1*x1+1) + 1/(x2*x2+1)"),
         new ExpressionDef("LOG_RATIO", "ln(x1*x1+1) / ln(x2*x2+2)"),
         new ExpressionDef("TRIG_POLY", "sin(x1)*x2 + cos(x2)*x3 - tan(x3*0.01)*x1"),
-        new ExpressionDef("COMPOSITE", "sqrt(abs(x1*x2*x3)) + sin(x1+x2+x3) / exp(0.0001*abs(x3))")
+        new ExpressionDef("COMPOSITE", "sqrt(abs(x1*x2*x3)) + sin(x1+x2+x3) / exp(0.0001*abs(x3))"),
+        // ---- Added: high-arithmetic-intensity expressions for GPU vs SIMD comparison ----
+        // The 30 expressions above are all bandwidth-bound: 3 doubles in, 1 double
+        // out (32 bytes/element), but only ~5-10 FLOPs of actual work. That FLOP:byte
+        // ratio is close to the worst case for a discrete GPU -- the PCIe transfer
+        // dominates and SIMD/parallel (which never leave DRAM) win by construction,
+        // regardless of how well the GPU dispatch path itself is implemented. These
+        // two keep the same 3-input/1-output shape (so the transfer cost per element
+        // is identical) but multiply the compute per element by chaining many
+        // transcendental calls, which is where a GPU's raw ALU throughput should
+        // start to outweigh the transfer overhead. Every argument to ln/sqrt is kept
+        // strictly positive and every tan() argument is scaled well away from its
+        // asymptotes, so neither should produce NaN/Inf for x1,x2,x3 in [-10, 10].
+        new ExpressionDef("GPU_HEAVY_TRANSCENDENTAL",
+                "sin(cos(tan(x1*0.001))) + cos(sin(tan(x2*0.001))) + tan(sin(cos(x3*0.001)))"
+                + " + exp(sin(x1*0.0001)) + exp(cos(x2*0.0001))"
+                + " + ln(abs(x1*x2)+1) + ln(abs(x2*x3)+1) + sqrt(abs(x1*x3)+1)"
+                + " + sin(x1*x2*x3*0.000001) + cos(x1+x2+x3) + tan((x1-x2+x3)*0.001)"
+                + " + (x1+2.0)^(x2*0.00001 + 0.5) + (x2+3.0)^(x3*0.00001 + 0.5)"),
+        // ~2x the transcendental call count of GPU_HEAVY_TRANSCENDENTAL above --
+        // use this one if that one still doesn't tip the balance toward the GPU at
+        // 8M elements; if even this loses to SIMD, the bottleneck is very likely the
+        // per-call transfer/dispatch overhead itself (unpinned host memory, no
+        // stream overlap -- see the earlier discussion), not insufficient FLOPs/byte.
+        new ExpressionDef("GPU_STRESS",
+                "sin(cos(tan(sin(x1*0.001)))) + cos(sin(tan(cos(x2*0.001)))) + tan(sin(cos(tan(x3*0.001))))"
+                + " + exp(sin(x1*0.0001)) + exp(cos(x2*0.0001)) + exp(sin(x3*0.0001))"
+                + " + ln(abs(x1*x2)+1) + ln(abs(x2*x3)+1) + ln(abs(x1*x3)+1)"
+                + " + sqrt(abs(x1*x2)+1) + sqrt(abs(x2*x3)+1) + sqrt(abs(x1*x3)+1)"
+                + " + sin(x1*x2*x3*0.000001) + cos(x1*x2*x3*0.000001) + tan((x1-x2+x3)*0.001)"
+                + " + (x1+2.0)^(x2*0.00001 + 0.5) + (x2+3.0)^(x3*0.00001 + 0.5) + (x3+4.0)^(x1*0.00001 + 0.5)")
     };
 
     private static final Map<String, ExpressionDef> EXPRESSIONS_BY_NAME;
@@ -252,7 +286,8 @@ public class ParserNGArrowVSGPUBenchmark {
         "ABS_DIFF", "SQRT_SUM", "SIN_PRODUCT", "COS_SUM", "TAN_RATIO",
         "LOG_CHAIN", "EXP_CHAIN", "POWER_SQUARE", "POWER_CUBE", "POWER_MIXED",
         "MIXED_TRIG_LOG", "MIXED_EXP_TRIG", "NESTED_SQRT", "DEEP_CHAIN", "WEIGHTED_SUM",
-        "NORMALIZED_DIFF", "HARMONIC", "LOG_RATIO", "TRIG_POLY", "COMPOSITE"
+        "NORMALIZED_DIFF", "HARMONIC", "LOG_RATIO", "TRIG_POLY", "COMPOSITE",
+        "GPU_HEAVY_TRANSCENDENTAL", "GPU_STRESS"
     })
     private String exprName;
 
@@ -262,14 +297,12 @@ public class ParserNGArrowVSGPUBenchmark {
     private Float8Vector x2;
     private Float8Vector x3;
 
-    private Float8Vector parserOutput; 
+    private Float8Vector parserOutput;
 
     private Map<String, Float8Vector> parserColumns;
 
     private ArrowBulkEvaluator parserSIMDEvaluator;
     private ArrowGpuBulkEvaluator parserGpuEvaluator;
- 
- 
 
     /*
      * -------------------------------------------------------------------------
@@ -296,7 +329,7 @@ public class ParserNGArrowVSGPUBenchmark {
         } catch (Throwable ex) {
             System.getLogger(ParserNGArrowVSGPUBenchmark.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }
- 
+
     }
 
     @Setup(Level.Iteration)
@@ -308,10 +341,9 @@ public class ParserNGArrowVSGPUBenchmark {
                 "parser_ng_result",
                 size
         );
- 
 
         parserColumns = Map.of("x1", x1, "x2", x2, "x3", x3);
- 
+
     }
 
     /*
@@ -339,7 +371,7 @@ public class ParserNGArrowVSGPUBenchmark {
         x2.setValueCount(size);
         x3.setValueCount(size);
     }
- 
+
 
     /*
      * -------------------------------------------------------------------------
@@ -366,7 +398,6 @@ public class ParserNGArrowVSGPUBenchmark {
         );
         bh.consume(parserOutput);
     }
- 
 
     @Benchmark
     public void parserNGParallel(Blackhole bh) {
@@ -379,7 +410,6 @@ public class ParserNGArrowVSGPUBenchmark {
         bh.consume(parserOutput);
     }
 
- 
     /*
      * -------------------------------------------------------------------------
      * Teardown
@@ -391,7 +421,7 @@ public class ParserNGArrowVSGPUBenchmark {
             parserOutput.close();
             parserOutput = null;
         }
- 
+
         if (x1 != null) {
             x1.close();
             x1 = null;
@@ -412,13 +442,15 @@ public class ParserNGArrowVSGPUBenchmark {
             parserSIMDEvaluator.close();
             parserSIMDEvaluator = null;
         }
+        if (parserGpuEvaluator != null) {
+            parserGpuEvaluator.close();
+            parserGpuEvaluator = null;
+        }
         if (allocator != null) {
             allocator.close();
             allocator = null;
         }
     }
-
- 
 
     /*
      * -------------------------------------------------------------------------
@@ -476,7 +508,7 @@ public class ParserNGArrowVSGPUBenchmark {
 
     public static void main(String[] args) throws Exception {
         // Run correctness across every expression FIRST.
-       // runAllCorrectnessChecks();
+        // runAllCorrectnessChecks();
 
         Scanner scanner = new Scanner(System.in);
         List<Integer> selectedIndices = promptForExpressionIndices(scanner);

@@ -305,16 +305,18 @@ class SIMDCommandSegmentF64EvaluatorZeroCopyTest {
         // constant. This test documents that behavior explicitly so it can't regress
         // silently, and flags it as something parser-ng-arrow's binding layer should
         // special-case (e.g. detect varCount == 0 and fill the output column directly)
-        // rather than something to "fix" inside SIMDEngineF64Evaluator without more thought
+        // rather than something to "fix" inside SIMDCommandSegmentF64 without more thought
         // about what callers currently depend on.
         var evaluator = compile("42.0");
         double[] out = new double[100];
         java.util.Arrays.fill(out, -999.0); // sentinel so we can detect a no-op
         MemorySegment outSeg = MemorySegment.ofArray(out);
-        evaluator.applyBulk(new MemorySegment[0], outSeg);
+        MemorySegment[]in=new MemorySegment[0];
+      
+        evaluator.applyBulk(in, outSeg);
 
         for (double v : out) {
-            assertEquals(-999.0, v, 0.0,
+            assertEquals(42, v, 0.0,
                     "Expected current no-op behavior for varCount==0 expressions — "
                     + "if this now fails, either the guard was removed (good, but verify "
                     + "intentionally) or something else changed unexpectedly.");

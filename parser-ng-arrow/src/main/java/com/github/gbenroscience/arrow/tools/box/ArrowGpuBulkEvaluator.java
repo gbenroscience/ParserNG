@@ -17,7 +17,6 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -174,10 +173,63 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     // Every GPU dispatch on this instance goes through shared per-instance
     // device state (kernel args, command queue/stream) that only one caller
     // may touch at a time -- see the class javadoc's Thread safety section.
-    // Unlike ArrowBulkEvaluator's parallelLock (which only guards the
-    // parallel=true path), this guards every evaluate() call, since there is
-    // no non-serialized GPU dispatch path to fall back to.
+    // NOTE: this lock now guards the ENTIRE evaluate() body, not just the
+    // final dispatch call -- see "AZAAP caching" below for why that widening
+    // was necessary once evaluate() started mutating instance-level state.
     private final Object dispatchLock = new Object();
+
+    // =========================================================================
+    // AZAAP caching (As Zero-Alloc As Possible)
+    // =========================================================================
+    // ArrowMemoryBridge.wrapDoubles/wrapFloats necessarily allocates a new
+    // MemorySegment wrapper object every time it's called -- MemorySegment is
+    // an immutable value-holder in the JDK FFM API, there is no "rebase this
+    // segment onto a new address" mutator, so the bridge itself cannot be made
+    // to allocate less per *distinct* wrap. What CAN be eliminated is *redundant*
+    // wraps: when a caller re-evaluates the same expression over the same
+    // Arrow buffers repeatedly (the common benchmark/streaming-batch shape),
+    // the ArrowBuf's memoryAddress() and length are identical call to call, so
+    // re-wrapping is pure waste. The fields below cache the last wrap per slot
+    // and only call into ArrowMemoryBridge again when the address or the
+    // requested element count has actually changed (e.g. Arrow reallocated the
+    // buffer, or a shorter/longer batch came through).
+    //
+    // These fields are mutated inside evaluate(), so evaluate() as a whole is
+    // now serialized on dispatchLock (previously only the final dispatch() /
+    // dispatchF32() call was) -- this matches what the class javadoc already
+    // promised ("every evaluate call here is internally serialized") and is
+    // what makes sharing this cache across concurrent callers safe.
+    private final MemorySegment[] variableSegmentsF64; // reused array, size == slotCount
+    private final long[] slotAddrF64;                   // last-wrapped ArrowBuf address per slot
+    private final long[] slotElemsF64;                  // last-wrapped element count per slot
+    private long outAddrF64 = Long.MIN_VALUE;
+    private long outElemsF64 = -1;
+    private MemorySegment outSegF64;
+
+    private final MemorySegment[] variableSegmentsF32; // reused array, size == slotCount
+    private final long[] slotAddrF32;
+    private final long[] slotElemsF32;
+    private long outAddrF32 = Long.MIN_VALUE;
+    private long outElemsF32 = -1;
+    private MemorySegment outSegF32;
+
+    // Backfill placeholder for registry slots this expression doesn't
+    // reference (see class javadoc). Arena.ofConfined() can only ever be
+    // touched by the thread that created it, which is incompatible with this
+    // class's documented multi-thread-shared-instance contract, so the gap
+    // arena is Arena.ofShared() instead, created lazily, grown on demand
+    // (never shrunk), and closed once in close(). Below the current high
+    // watermark this costs zero allocations per call; it only allocates again
+    // when a caller asks for more rows than any previous call.
+    private Arena gapArena;
+    private MemorySegment gapSegmentF64;
+    private MemorySegment gapSegmentF32;
+    private long gapCapacityElems = 0;
+
+    // Reusable column-resolution scratch for the VectorSchemaRoot
+    // convenience overloads, so they no longer allocate a fresh HashMap on
+    // every call -- see evaluate(VectorSchemaRoot, ...) below.
+    private final FieldVector[] rootColumnScratch; // size == requiredSlots.length
 
     private ArrowGpuBulkEvaluator(MathExpression expression, GpuCompositeExpression compiled) {
         this.expression = expression;
@@ -191,6 +243,76 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
             names[i] = requiredSlots[i].getName();
         }
         this.requiredVariableNames = names;
+
+        this.variableSegmentsF64 = new MemorySegment[slotCount];
+        this.slotAddrF64 = new long[slotCount];
+        this.slotElemsF64 = new long[slotCount];
+        this.variableSegmentsF32 = new MemorySegment[slotCount];
+        this.slotAddrF32 = new long[slotCount];
+        this.slotElemsF32 = new long[slotCount];
+        Arrays.fill(this.slotAddrF64, Long.MIN_VALUE);
+        Arrays.fill(this.slotAddrF32, Long.MIN_VALUE);
+        Arrays.fill(this.slotElemsF64, -1L);
+        Arrays.fill(this.slotElemsF32, -1L);
+
+        this.rootColumnScratch = new FieldVector[requiredSlots.length];
+    }
+
+    /**
+     * Returns {@code cachedSlot} unchanged if it still aliases {@code buf} at
+     * the same element count (the common repeated-call case: zero
+     * allocation), otherwise re-wraps via {@link ArrowMemoryBridge#wrapDoubles}
+     * and updates the cache in place.
+     */
+    private MemorySegment cachedWrapDoubles(ArrowBuf buf, long elemCount, int slot,
+            long[] addrCache, long[] elemCache, MemorySegment[] segCache) {
+        long addr = buf.memoryAddress();
+        if (segCache[slot] != null && addrCache[slot] == addr && elemCache[slot] == elemCount) {
+            return segCache[slot];
+        }
+        MemorySegment seg = ArrowMemoryBridge.wrapDoubles(buf, elemCount);
+        addrCache[slot] = addr;
+        elemCache[slot] = elemCount;
+        segCache[slot] = seg;
+        return seg;
+    }
+
+    private MemorySegment cachedWrapFloats(ArrowBuf buf, long elemCount, int slot,
+            long[] addrCache, long[] elemCache, MemorySegment[] segCache) {
+        long addr = buf.memoryAddress();
+        if (segCache[slot] != null && addrCache[slot] == addr && elemCache[slot] == elemCount) {
+            return segCache[slot];
+        }
+        MemorySegment seg = ArrowMemoryBridge.wrapFloats(buf, elemCount);
+        addrCache[slot] = addr;
+        elemCache[slot] = elemCount;
+        segCache[slot] = seg;
+        return seg;
+    }
+
+    /**
+     * Ensures the shared gap arena has at least {@code rowCount} doubles'
+     * worth of zeroed backing memory, growing (doubling) only when the
+     * current watermark is insufficient. Reused across calls and across both
+     * the F64 and F32 gap segments (F32 just uses a prefix of the same
+     * memory, reinterpreted at half the element size).
+     */
+    private void ensureGapCapacity(long rowCount) {
+        if (gapArena != null && gapCapacityElems >= rowCount) {
+            return;
+        }
+        long newCapacity = Math.max(rowCount, Math.max(64, gapCapacityElems * 2));
+        Arena newArena = Arena.ofShared();
+        MemorySegment newGapF64 = newArena.allocate(ValueLayout.JAVA_DOUBLE, newCapacity);
+        MemorySegment newGapF32 = newArena.allocate(ValueLayout.JAVA_FLOAT, newCapacity);
+        Arena oldArena = gapArena;
+        gapArena = newArena;
+        gapSegmentF64 = newGapF64;
+        gapSegmentF32 = newGapF32;
+        gapCapacityElems = newCapacity;
+        if (oldArena != null) {
+            oldArena.close();
+        }
     }
 
     // =========================================================================
@@ -548,57 +670,82 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
             return;
         }
 
-        // TRUE zero-copy: each bound column's Arrow data buffer is wrapped as
-        // its own MemorySegment -- an alias via ArrowMemoryBridge, never a
-        // copy -- and handed straight to GpuCompositeExpression.applyBulk(
-        // MemorySegment[], MemorySegment), the multi-segment entry point
-        // built specifically to avoid the caller-side flatten this class
-        // used to do unconditionally. See the class javadoc for the one
-        // narrow edge case (unreferenced registry slots) that still
-        // allocates, and why it's safe/necessary.
-        MemorySegment[] variableSegments = new MemorySegment[slotCount];
-        int filledSlots = 0;
-        for (MathExpression.Slot slot : requiredSlots) {
-            Float8Vector col = columns.get(slot.getName());
-            if (col == null) {
-                throw new ArrowBindingException(
-                        "Missing Arrow column for variable '" + slot.getName() + "'. Required variables: "
-                        + Arrays.toString(requiredVariableNames));
+        // TRUE zero-copy AND (steady-state) zero-alloc: each bound column's
+        // Arrow data buffer is wrapped as its own MemorySegment -- an alias
+        // via ArrowMemoryBridge, never a copy -- and handed straight to
+        // GpuCompositeExpression.applyBulk(MemorySegment[], MemorySegment).
+        // The whole body is serialized on dispatchLock because it now
+        // mutates the instance-level segment cache (variableSegmentsF64 and
+        // friends) shared across calls -- see the "AZAAP caching" field
+        // comments above. This matches the class javadoc's existing
+        // full-serialization promise for concurrent callers.
+        synchronized (dispatchLock) {
+            int filledSlots = 0;
+            for (MathExpression.Slot slot : requiredSlots) {
+                Float8Vector col = columns.get(slot.getName());
+                if (col == null) {
+                    throw new ArrowBindingException(
+                            "Missing Arrow column for variable '" + slot.getName() + "'. Required variables: "
+                            + Arrays.toString(requiredVariableNames));
+                }
+                if (col.getValueCount() < rowCount) {
+                    throw new ArrowBindingException(
+                            "Column '" + slot.getName() + "' has " + col.getValueCount()
+                            + " rows, but output expects " + rowCount + " rows.");
+                }
+                int slotIdx = slot.getSlot();
+                variableSegmentsF64[slotIdx] = cachedWrapDoubles(
+                        col.getDataBuffer(), rowCount, slotIdx, slotAddrF64, slotElemsF64, variableSegmentsF64);
+                filledSlots++;
             }
-            if (col.getValueCount() < rowCount) {
-                throw new ArrowBindingException(
-                        "Column '" + slot.getName() + "' has " + col.getValueCount()
-                        + " rows, but output expects " + rowCount + " rows.");
+
+            MemorySegment outSeg;
+            long outAddr = output.getDataBuffer().memoryAddress();
+            if (outSegF64 != null && outAddrF64 == outAddr && outElemsF64 == rowCount) {
+                outSeg = outSegF64; // repeat call over the same output buffer: no allocation
+            } else {
+                outSeg = ArrowMemoryBridge.wrapDoubles(output.getDataBuffer(), rowCount);
+                outAddrF64 = outAddr;
+                outElemsF64 = rowCount;
+                outSegF64 = outSeg;
             }
-            variableSegments[slot.getSlot()] = ArrowMemoryBridge.wrapDoubles(col.getDataBuffer(), rowCount);
-            filledSlots++;
-        }
 
-        MemorySegment outSeg = ArrowMemoryBridge.wrapDoubles(output.getDataBuffer(), rowCount);
-
-        if (filledSlots == slotCount) {
-            // Common case: every registry slot is referenced by this
-            // expression -- nothing left to allocate, dispatch directly on
-            // column-backed segments only.
-            dispatch(variableSegments, outSeg);
-        } else {
-            // Rare case: expression.getRegistry() is wider than the set of
-            // variables THIS expression actually references (a shared/
-            // session registry can outlive any one expression).
-            // applyBulk(MemorySegment[], ...) scatters every array element
-            // to the device unconditionally, so a null entry here would NPE
-            // even though the compiled kernel itself never addresses that
-            // slot. Back-fill just the unreferenced slots with a small
-            // zeroed placeholder, scoped to this one call -- this never
-            // touches actual bound column data, and this whole branch is
-            // skipped when filledSlots == slotCount.
-            try (Arena gapArena = Arena.ofConfined()) {
+            if (filledSlots == slotCount) {
+                // Common case: every registry slot is referenced by this
+                // expression -- nothing left to fill, dispatch directly on
+                // column-backed (cached) segments only.
+                dispatch(variableSegmentsF64, outSeg);
+            } else {
+                // Rare case: expression.getRegistry() is wider than the set
+                // of variables THIS expression actually references (a
+                // shared/session registry can outlive any one expression).
+                // applyBulk(MemorySegment[], ...) scatters every array
+                // element to the device unconditionally, so a null entry
+                // here would NPE even though the compiled kernel itself
+                // never addresses that slot. Back-fill just the unreferenced
+                // slots with a small zeroed placeholder drawn from the
+                // persistent, grow-on-demand gap arena -- this never touches
+                // actual bound column data, and this whole branch is skipped
+                // (zero cost) when filledSlots == slotCount, which is the
+                // common case.
+                ensureGapCapacity(rowCount);
+                MemorySegment gapSlice = gapSegmentF64.asSlice(0, rowCount * (long) ValueLayout.JAVA_DOUBLE.byteSize());
                 for (int i = 0; i < slotCount; i++) {
-                    if (variableSegments[i] == null) {
-                        variableSegments[i] = gapArena.allocate(ValueLayout.JAVA_DOUBLE, rowCount);
+                    if (variableSegmentsF64[i] == null) {
+                        variableSegmentsF64[i] = gapSlice;
                     }
                 }
-                dispatch(variableSegments, outSeg);
+                dispatch(variableSegmentsF64, outSeg);
+                // Clear only the gap entries we just filled so a later call
+                // that references a previously-unreferenced slot re-detects
+                // it as missing rather than reusing a stale gap slice
+                // (slotAddrF64 was never set for these, so cachedWrapDoubles
+                // will naturally miss and re-wrap on the next real column).
+                for (int i = 0; i < slotCount; i++) {
+                    if (variableSegmentsF64[i] == gapSlice) {
+                        variableSegmentsF64[i] = null;
+                    }
+                }
             }
         }
 
@@ -608,15 +755,13 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     }
 
     private void dispatch(MemorySegment[] variableSegments, MemorySegment outSeg) {
-        synchronized (dispatchLock) {
-            try {
-                compiled.applyBulk(variableSegments, outSeg);
-            } catch (ArrowBindingException e) {
-                throw e;
-            } catch (Throwable t) {
-                throw new ArrowBindingException(
-                        "GPU evaluation failed for expression '" + expression.getExpression() + "'", t);
-            }
+        try {
+            compiled.applyBulk(variableSegments, outSeg);
+        } catch (ArrowBindingException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new ArrowBindingException(
+                    "GPU evaluation failed for expression '" + expression.getExpression() + "'", t);
         }
     }
 
@@ -632,6 +777,15 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
      * Convenience overload that resolves each required variable's column by
      * name from {@code root} instead of a caller-built {@code Map}.
      *
+     * <p><b>AZAAP note:</b> this used to build a fresh {@code HashMap} (and
+     * therefore a fresh {@code Node} per required variable) on every single
+     * call just to immediately hand it to {@link #evaluate(Map, Float8Vector,
+     * NullPolicy)} and throw it away. That's replaced below with direct
+     * slot-indexed resolution into the reused {@link #rootColumnScratch}
+     * array, feeding the same instance-level segment cache the {@code Map}
+     * overload uses -- no {@code Map}, no per-slot boxing, on the repeat-call
+     * path.
+     *
      * @param root
      * @param output
      * @param nullPolicy
@@ -642,54 +796,192 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     public void evaluate(VectorSchemaRoot root, Float8Vector output, NullPolicy nullPolicy) {
         ensureOpen();
 
-        Map<String, Float8Vector> columns = new HashMap<>(Math.max(4, requiredSlots.length * 2));
-        for (MathExpression.Slot slot : requiredSlots) {
-            FieldVector fv = root.getVector(slot.getName());
-            if (fv == null) {
-                continue; // reported uniformly by evaluate(Map, ...) above
-            }
-            if (!(fv instanceof Float8Vector)) {
+        int rowCount = output.getValueCount();
+        for (int i = 0; i < requiredSlots.length; i++) {
+            FieldVector fv = root.getVector(requiredSlots[i].getName());
+            if (fv != null && !(fv instanceof Float8Vector)) {
                 throw new ArrowBindingException(
-                        "Column '" + slot.getName() + "' must be a Float8Vector (float64) for GPU "
+                        "Column '" + requiredSlots[i].getName() + "' must be a Float8Vector (float64) for GPU "
                         + "evaluation; found " + fv.getClass().getSimpleName()
                         + ". Cast this column to float64 before binding.");
             }
-            columns.put(slot.getName(), (Float8Vector) fv);
+            rootColumnScratch[i] = fv;
         }
 
-        evaluate(columns, output, nullPolicy);
+        if (rowCount == 0) {
+            for (int i = 0; i < requiredSlots.length; i++) {
+                if (rootColumnScratch[i] != null && rootColumnScratch[i].getValueCount() > 0) {
+                    throw new ArrowBindingException(
+                            "Output vector has not been sized (valueCount=0) but bound column '"
+                            + requiredSlots[i].getName() + "' has " + rootColumnScratch[i].getValueCount()
+                            + " rows. Call output.allocateNew(rowCount) and output.setValueCount(rowCount) "
+                            + "before evaluate(), or use ArrowBulkEvaluator.allocateOutput(...).");
+                }
+            }
+            return;
+        }
+
+        if (constantExpression) {
+            fillConstant(output, rowCount);
+            return;
+        }
+
+        synchronized (dispatchLock) {
+            int filledSlots = 0;
+            for (int i = 0; i < requiredSlots.length; i++) {
+                MathExpression.Slot slot = requiredSlots[i];
+                Float8Vector col = (Float8Vector) rootColumnScratch[i];
+                if (col == null) {
+                    throw new ArrowBindingException(
+                            "Missing Arrow column for variable '" + slot.getName() + "'. Required variables: "
+                            + Arrays.toString(requiredVariableNames));
+                }
+                if (col.getValueCount() < rowCount) {
+                    throw new ArrowBindingException(
+                            "Column '" + slot.getName() + "' has " + col.getValueCount()
+                            + " rows, but output expects " + rowCount + " rows.");
+                }
+                int slotIdx = slot.getSlot();
+                variableSegmentsF64[slotIdx] = cachedWrapDoubles(
+                        col.getDataBuffer(), rowCount, slotIdx, slotAddrF64, slotElemsF64, variableSegmentsF64);
+                filledSlots++;
+            }
+
+            MemorySegment outSeg;
+            long outAddr = output.getDataBuffer().memoryAddress();
+            if (outSegF64 != null && outAddrF64 == outAddr && outElemsF64 == rowCount) {
+                outSeg = outSegF64;
+            } else {
+                outSeg = ArrowMemoryBridge.wrapDoubles(output.getDataBuffer(), rowCount);
+                outAddrF64 = outAddr;
+                outElemsF64 = rowCount;
+                outSegF64 = outSeg;
+            }
+
+            if (filledSlots == slotCount) {
+                dispatch(variableSegmentsF64, outSeg);
+            } else {
+                ensureGapCapacity(rowCount);
+                MemorySegment gapSlice = gapSegmentF64.asSlice(0, rowCount * (long) ValueLayout.JAVA_DOUBLE.byteSize());
+                for (int i = 0; i < slotCount; i++) {
+                    if (variableSegmentsF64[i] == null) {
+                        variableSegmentsF64[i] = gapSlice;
+                    }
+                }
+                dispatch(variableSegmentsF64, outSeg);
+                for (int i = 0; i < slotCount; i++) {
+                    if (variableSegmentsF64[i] == gapSlice) {
+                        variableSegmentsF64[i] = null;
+                    }
+                }
+            }
+        }
+
+        if (nullPolicy == NullPolicy.PROPAGATE) {
+            propagateNullsResolved(rootColumnScratch, output, rowCount);
+        }
     }
 
     /**
      * Convenience overload that resolves each required variable's column by
-     * name from {@code root} instead of a caller-built {@code Map}.
+     * name from {@code root} instead of a caller-built {@code Map}. See the
+     * AZAAP note on the {@link Float8Vector} overload above -- same fix
+     * applies here.
      *
      * @param root
      * @param output
      * @param nullPolicy
      * @throws ArrowBindingException if a required field is missing from
-     * {@code root}, or is present but is not a {@link Float8Vector}
+     * {@code root}, or is present but is not a {@link Float4Vector}
      */
     @Override
     public void evaluate(VectorSchemaRoot root, Float4Vector output, NullPolicy nullPolicy) {
         ensureOpen();
 
-        Map<String, Float4Vector> columns = new HashMap<>(Math.max(4, requiredSlots.length * 2));
-        for (MathExpression.Slot slot : requiredSlots) {
-            FieldVector fv = root.getVector(slot.getName());
-            if (fv == null) {
-                continue; // reported uniformly by evaluate(Map, ...) above
-            }
-            if (!(fv instanceof Float4Vector)) {
+        int rowCount = output.getValueCount();
+        for (int i = 0; i < requiredSlots.length; i++) {
+            FieldVector fv = root.getVector(requiredSlots[i].getName());
+            if (fv != null && !(fv instanceof Float4Vector)) {
                 throw new ArrowBindingException(
-                        "Column '" + slot.getName() + "' must be a Float4Vector (float32) for GPU "
+                        "Column '" + requiredSlots[i].getName() + "' must be a Float4Vector (float32) for GPU "
                         + "evaluation; found " + fv.getClass().getSimpleName()
                         + ". Cast this column to float32 before binding.");
             }
-            columns.put(slot.getName(), (Float4Vector) fv);
+            rootColumnScratch[i] = fv;
         }
 
-        evaluate(columns, output, nullPolicy);
+        if (rowCount == 0) {
+            for (int i = 0; i < requiredSlots.length; i++) {
+                if (rootColumnScratch[i] != null && rootColumnScratch[i].getValueCount() > 0) {
+                    throw new ArrowBindingException(
+                            "Output vector has not been sized (valueCount=0) but bound column '"
+                            + requiredSlots[i].getName() + "' has " + rootColumnScratch[i].getValueCount()
+                            + " rows. Call output.allocateNew(rowCount) and output.setValueCount(rowCount) "
+                            + "before evaluate(), or use ArrowBulkEvaluator.allocateOutput(...).");
+                }
+            }
+            return;
+        }
+
+        if (constantExpression) {
+            fillConstant(output, rowCount);
+            return;
+        }
+
+        synchronized (dispatchLock) {
+            int filledSlots = 0;
+            for (int i = 0; i < requiredSlots.length; i++) {
+                MathExpression.Slot slot = requiredSlots[i];
+                Float4Vector col = (Float4Vector) rootColumnScratch[i];
+                if (col == null) {
+                    throw new ArrowBindingException(
+                            "Missing Arrow column for variable '" + slot.getName() + "'. Required variables: "
+                            + Arrays.toString(requiredVariableNames));
+                }
+                if (col.getValueCount() < rowCount) {
+                    throw new ArrowBindingException(
+                            "Column '" + slot.getName() + "' has " + col.getValueCount()
+                            + " rows, but output expects " + rowCount + " rows.");
+                }
+                int slotIdx = slot.getSlot();
+                variableSegmentsF32[slotIdx] = cachedWrapFloats(
+                        col.getDataBuffer(), rowCount, slotIdx, slotAddrF32, slotElemsF32, variableSegmentsF32);
+                filledSlots++;
+            }
+
+            MemorySegment outSeg;
+            long outAddr = output.getDataBuffer().memoryAddress();
+            if (outSegF32 != null && outAddrF32 == outAddr && outElemsF32 == rowCount) {
+                outSeg = outSegF32;
+            } else {
+                outSeg = ArrowMemoryBridge.wrapFloats(output.getDataBuffer(), rowCount);
+                outAddrF32 = outAddr;
+                outElemsF32 = rowCount;
+                outSegF32 = outSeg;
+            }
+
+            if (filledSlots == slotCount) {
+                dispatchF32(variableSegmentsF32, outSeg);
+            } else {
+                ensureGapCapacity(rowCount);
+                MemorySegment gapSlice = gapSegmentF32.asSlice(0, rowCount * (long) ValueLayout.JAVA_FLOAT.byteSize());
+                for (int i = 0; i < slotCount; i++) {
+                    if (variableSegmentsF32[i] == null) {
+                        variableSegmentsF32[i] = gapSlice;
+                    }
+                }
+                dispatchF32(variableSegmentsF32, outSeg);
+                for (int i = 0; i < slotCount; i++) {
+                    if (variableSegmentsF32[i] == gapSlice) {
+                        variableSegmentsF32[i] = null;
+                    }
+                }
+            }
+        }
+
+        if (nullPolicy == NullPolicy.PROPAGATE) {
+            propagateNullsResolvedF32(rootColumnScratch, output, rowCount);
+        }
     }
 
     // =========================================================================
@@ -715,6 +1007,28 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
             for (int i = 0; i < validityBytes; i++) {
                 byte combined = (byte) (outValidity.getByte(i) & colValidity.getByte(i));
                 outValidity.setByte(i, combined);
+            }
+        }
+    }
+
+    /**
+     * Same as {@link #propagateNulls(Map, Float8Vector, int)} but sourced
+     * from the already-resolved {@link #rootColumnScratch} array (indexed in
+     * {@link #requiredSlots} order) instead of a {@code Map} lookup, for the
+     * {@code VectorSchemaRoot} overload's allocation-free path.
+     */
+    private void propagateNullsResolved(FieldVector[] resolvedColumns, Float8Vector output, int rowCount) {
+        int validityBytes = (rowCount + 7) / 8;
+        ArrowBuf outValidity = output.getValidityBuffer();
+
+        for (int i = 0; i < validityBytes; i++) {
+            outValidity.setByte(i, (byte) 0xFF);
+        }
+        for (int i = 0; i < requiredSlots.length; i++) {
+            ArrowBuf colValidity = ((Float8Vector) resolvedColumns[i]).getValidityBuffer();
+            for (int b = 0; b < validityBytes; b++) {
+                byte combined = (byte) (outValidity.getByte(b) & colValidity.getByte(b));
+                outValidity.setByte(b, combined);
             }
         }
     }
@@ -767,39 +1081,53 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
             return;
         }
 
-        MemorySegment[] variableSegments = new MemorySegment[slotCount];
-        int filledSlots = 0;
-        for (MathExpression.Slot slot : requiredSlots) {
-            Float4Vector col = columns.get(slot.getName());
-            if (col == null) {
-                throw new ArrowBindingException(
-                        "Missing Arrow column for variable '" + slot.getName() + "'. Required variables: "
-                        + Arrays.toString(requiredVariableNames));
+        synchronized (dispatchLock) {
+            int filledSlots = 0;
+            for (MathExpression.Slot slot : requiredSlots) {
+                Float4Vector col = columns.get(slot.getName());
+                if (col == null) {
+                    throw new ArrowBindingException(
+                            "Missing Arrow column for variable '" + slot.getName() + "'. Required variables: "
+                            + Arrays.toString(requiredVariableNames));
+                }
+                if (col.getValueCount() < rowCount) {
+                    throw new ArrowBindingException(
+                            "Column '" + slot.getName() + "' has " + col.getValueCount()
+                            + " rows, but output expects " + rowCount + " rows.");
+                }
+                int slotIdx = slot.getSlot();
+                variableSegmentsF32[slotIdx] = cachedWrapFloats(
+                        col.getDataBuffer(), rowCount, slotIdx, slotAddrF32, slotElemsF32, variableSegmentsF32);
+                filledSlots++;
             }
-            if (col.getValueCount() < rowCount) {
-                throw new ArrowBindingException(
-                        "Column '" + slot.getName() + "' has " + col.getValueCount()
-                        + " rows, but output expects " + rowCount + " rows.");
+
+            MemorySegment outSeg;
+            long outAddr = output.getDataBuffer().memoryAddress();
+            if (outSegF32 != null && outAddrF32 == outAddr && outElemsF32 == rowCount) {
+                outSeg = outSegF32; // repeat call over the same output buffer: no allocation
+            } else {
+                outSeg = ArrowMemoryBridge.wrapFloats(output.getDataBuffer(), rowCount);
+                outAddrF32 = outAddr;
+                outElemsF32 = rowCount;
+                outSegF32 = outSeg;
             }
-            // FIX 1: Wrap as Floats (4-byte strides) instead of Doubles (8-byte strides)
-            variableSegments[slot.getSlot()] = ArrowMemoryBridge.wrapFloats(col.getDataBuffer(), rowCount);
-            filledSlots++;
-        }
 
-        // FIX 1: Wrap output as Floats
-        MemorySegment outSeg = ArrowMemoryBridge.wrapFloats(output.getDataBuffer(), rowCount);
-
-        if (filledSlots == slotCount) {
-            dispatchF32(variableSegments, outSeg);
-        } else {
-            try (Arena gapArena = Arena.ofConfined()) {
+            if (filledSlots == slotCount) {
+                dispatchF32(variableSegmentsF32, outSeg);
+            } else {
+                ensureGapCapacity(rowCount);
+                MemorySegment gapSlice = gapSegmentF32.asSlice(0, rowCount * (long) ValueLayout.JAVA_FLOAT.byteSize());
                 for (int i = 0; i < slotCount; i++) {
-                    if (variableSegments[i] == null) {
-                        // FIX 1: Allocate JAVA_FLOAT for unreferenced slots
-                        variableSegments[i] = gapArena.allocate(ValueLayout.JAVA_FLOAT, rowCount);
+                    if (variableSegmentsF32[i] == null) {
+                        variableSegmentsF32[i] = gapSlice;
                     }
                 }
-                dispatchF32(variableSegments, outSeg);
+                dispatchF32(variableSegmentsF32, outSeg);
+                for (int i = 0; i < slotCount; i++) {
+                    if (variableSegmentsF32[i] == gapSlice) {
+                        variableSegmentsF32[i] = null;
+                    }
+                }
             }
         }
 
@@ -808,17 +1136,15 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
         }
     }
 
-    // FIX 2: Dedicated Float32 dispatch path calling applyBulkF32
+    // Dedicated Float32 dispatch path calling applyBulkF32
     private void dispatchF32(MemorySegment[] variableSegments, MemorySegment outSeg) {
-        synchronized (dispatchLock) {
-            try {
-                compiled.applyBulkF32(variableSegments, outSeg);
-            } catch (ArrowBindingException e) {
-                throw e;
-            } catch (Throwable t) {
-                throw new ArrowBindingException(
-                        "GPU evaluation failed for expression '" + expression.getExpression() + "'", t);
-            }
+        try {
+            compiled.applyBulkF32(variableSegments, outSeg);
+        } catch (ArrowBindingException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new ArrowBindingException(
+                    "GPU evaluation failed for expression '" + expression.getExpression() + "'", t);
         }
     }
 
@@ -834,6 +1160,35 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
             Float4Vector col = columns.get(slot.getName());
             if (col == null || col.getNullCount() == 0) {
                 continue; // Skip columns with zero nulls or missing validity buffers
+            }
+            ArrowBuf colValidity = col.getValidityBuffer();
+            if (colValidity == null) {
+                continue;
+            }
+            for (int i = 0; i < validityBytes; i++) {
+                byte combined = (byte) (outValidity.getByte(i) & colValidity.getByte(i));
+                outValidity.setByte(i, combined);
+            }
+        }
+    }
+
+    /**
+     * Same as {@link #propagateNulls(Map, Float4Vector, int)} but sourced
+     * from the already-resolved {@link #rootColumnScratch} array instead of a
+     * {@code Map} lookup, for the {@code VectorSchemaRoot} overload's
+     * allocation-free path.
+     */
+    private void propagateNullsResolvedF32(FieldVector[] resolvedColumns, Float4Vector output, int rowCount) {
+        int validityBytes = (rowCount + 7) / 8;
+        ArrowBuf outValidity = output.getValidityBuffer();
+
+        for (int i = 0; i < validityBytes; i++) {
+            outValidity.setByte(i, (byte) 0xFF);
+        }
+        for (int s = 0; s < requiredSlots.length; s++) {
+            Float4Vector col = (Float4Vector) resolvedColumns[s];
+            if (col == null || col.getNullCount() == 0) {
+                continue;
             }
             ArrowBuf colValidity = col.getValidityBuffer();
             if (colValidity == null) {
@@ -899,6 +1254,9 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     public void close() {
         if (closed.compareAndSet(false, true)) {
             compiled.close();
+            if (gapArena != null) {
+                gapArena.close();
+            }
         }
     }
 }

@@ -285,7 +285,7 @@ public final class LlamaLayer {
             this.ffnDownOut = allocFloats(ctx, cfg.dim);
 
             int maxLen = Math.max(cfg.dim, cfg.hidden_dim);
-            int maxGroups = (maxLen + MetalKernelSource.RMSNORM_WORKGROUP_SIZE - 1) / MetalKernelSource.RMSNORM_WORKGROUP_SIZE;
+            int maxGroups = (maxLen + KernelSource.RMSNORM_WORKGROUP_SIZE - 1) / KernelSource.RMSNORM_WORKGROUP_SIZE;
             this.rmsPartials = allocFloats(ctx, maxGroups);
 
             if (maxBatchT > 0) {
@@ -653,7 +653,7 @@ public final class LlamaLayer {
             Config cfg, GpuContext ctx, int vocabSize) throws Throwable {
         MetalBuffer normed = allocFloats(ctx, cfg.dim);
         MetalBuffer logitsDevice = allocFloats(ctx, vocabSize);
-        int maxGroups = (cfg.dim + MetalKernelSource.RMSNORM_WORKGROUP_SIZE - 1) / MetalKernelSource.RMSNORM_WORKGROUP_SIZE;
+        int maxGroups = (cfg.dim + KernelSource.RMSNORM_WORKGROUP_SIZE - 1) / KernelSource.RMSNORM_WORKGROUP_SIZE;
         MetalBuffer partials = allocFloats(ctx, maxGroups);
 
         try {
@@ -784,7 +784,7 @@ public final class LlamaLayer {
 
     static void rmsNorm(GpuContext ctx, MetalBuffer x, MetalBuffer gamma, MetalBuffer out,
             int features, double eps, MetalBuffer partials) throws Throwable {
-        int wgSize = MetalKernelSource.RMSNORM_WORKGROUP_SIZE;
+        int wgSize = KernelSource.RMSNORM_WORKGROUP_SIZE;
         int numGroups = (features + wgSize - 1) / wgSize;
 
         runKernel1D(ctx, ctx.kRmsnormPartialSumsq, (long) numGroups * wgSize, wgSize,
@@ -798,12 +798,12 @@ public final class LlamaLayer {
         }
         float rms = (float) (1.0 / Math.sqrt(sumSq / features + eps));
 
-        runKernel1D(ctx, ctx.kRmsnormApply, features, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kRmsnormApply, features, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(x), buf(gamma), buf(out), scalarF(rms), scalarI(features));
     }
 
     static void quantizeActivationQ8_0(GpuContext ctx, MetalBuffer x, MetalBuffer outQ8, int len) throws Throwable {
-        int blockSize = MetalKernelSource.QUANTIZE_BLOCK_SIZE;
+        int blockSize = KernelSource.QUANTIZE_BLOCK_SIZE;
         runKernel1D(ctx, ctx.kQuantizeActivationQ8_0, len, blockSize,
                 blockSize * (int) ValueLayout.JAVA_FLOAT.byteSize(),
                 buf(x), buf(outQ8), scalarI(len));
@@ -811,25 +811,25 @@ public final class LlamaLayer {
 
     static void q8_0GemvSplit(GpuContext ctx, MetalBuffer xQ8, MetalBuffer wQ8, MetalBuffer out,
             int heads, int headDim, int K) throws Throwable {
-        runKernel1D(ctx, ctx.kQ8_0GemvSplit, (long) heads * (headDim / 2), MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kQ8_0GemvSplit, (long) heads * (headDim / 2), KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(xQ8), buf(wQ8), buf(out), scalarI(heads), scalarI(headDim), scalarI(K));
     }
 
     static void q8_0GemvPlain(GpuContext ctx, MetalBuffer xQ8, MetalBuffer wQ8, MetalBuffer out,
             int N, int K) throws Throwable {
-        runKernel1D(ctx, ctx.kQ8_0GemvPlain, N, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kQ8_0GemvPlain, N, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(xQ8), buf(wQ8), buf(out), scalarI(N), scalarI(K));
     }
 
     static void ropeApplySplit(GpuContext ctx, MetalBuffer buf, MetalBuffer cosTable, MetalBuffer sinTable,
             int heads, int headDim, int cosSinOffset) throws Throwable {
-        runKernel1D(ctx, ctx.kRopeApplySplit, (long) heads * (headDim / 2), MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kRopeApplySplit, (long) heads * (headDim / 2), KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(buf), buf(cosTable), buf(sinTable), scalarI(heads), scalarI(headDim), scalarI(cosSinOffset));
     }
 
     static void attnScores(GpuContext ctx, MetalBuffer qAllHeads, MetalBuffer kCache, MetalBuffer scores,
             int qHeadOff, int headDim, int kvDim, int kvHeadOff, int posInclusive, float rsqrtD) throws Throwable {
-        runKernel1D(ctx, ctx.kAttnScores, posInclusive, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kAttnScores, posInclusive, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(qAllHeads), buf(kCache), buf(scores), scalarI(qHeadOff), scalarI(headDim),
                 scalarI(kvDim), scalarI(kvHeadOff), scalarI(posInclusive), scalarF(rsqrtD));
     }
@@ -851,33 +851,33 @@ public final class LlamaLayer {
 
     static void attnWeightedSum(GpuContext ctx, MetalBuffer scores, MetalBuffer vCache, MetalBuffer attnOutAllHeads,
             int outHeadOff, int headDim, int kvDim, int kvHeadOff, int posInclusive) throws Throwable {
-        runKernel1D(ctx, ctx.kAttnWeightedSum, headDim, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kAttnWeightedSum, headDim, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(scores), buf(vCache), buf(attnOutAllHeads), scalarI(outHeadOff), scalarI(headDim),
                 scalarI(kvDim), scalarI(kvHeadOff), scalarI(posInclusive));
     }
 
     static void swigluActivate(GpuContext ctx, MetalBuffer gate, MetalBuffer up, MetalBuffer out, int len) throws Throwable {
-        runKernel1D(ctx, ctx.kSwigluActivate, len, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kSwigluActivate, len, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(gate), buf(up), buf(out), scalarI(len));
     }
 
     static void gegluActivate(GpuContext ctx, MetalBuffer gate, MetalBuffer up, MetalBuffer out, int len) throws Throwable {
-        runKernel1D(ctx, ctx.kGegluActivate, len, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kGegluActivate, len, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(gate), buf(up), buf(out), scalarI(len));
     }
 
     static void geluActivate(GpuContext ctx, MetalBuffer gate, MetalBuffer out, int len) throws Throwable {
-        runKernel1D(ctx, ctx.kGeluActivate, len, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kGeluActivate, len, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(gate), buf(out), scalarI(len));
     }
 
     private static void residualAdd(GpuContext ctx, MetalBuffer x, MetalBuffer y, int len) throws Throwable {
-        runKernel1D(ctx, ctx.kResidualAdd, len, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kResidualAdd, len, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(x), buf(y), scalarI(len));
     }
 
     static void f32Gemv(GpuContext ctx, MetalBuffer a, MetalBuffer B, MetalBuffer out, int K, int N) throws Throwable {
-        runKernel1D(ctx, ctx.kF32Gemv, N, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel1D(ctx, ctx.kF32Gemv, N, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(a), buf(B), buf(out), scalarI(K), scalarI(N));
     }
 
@@ -894,7 +894,7 @@ public final class LlamaLayer {
 
     static void rmsNormRows(GpuContext ctx, MetalBuffer x, MetalBuffer gamma, MetalBuffer out,
             int features, double eps, int T, MetalBuffer partialsBatch, MetalBuffer rmsRowValuesBatch) throws Throwable {
-        int wgSize = MetalKernelSource.RMSNORM_WORKGROUP_SIZE;
+        int wgSize = KernelSource.RMSNORM_WORKGROUP_SIZE;
         int numGroups = (features + wgSize - 1) / wgSize;
 
         runKernel2D(ctx, ctx.kRmsnormPartialSumsqRows, (long) numGroups * wgSize, T, wgSize,
@@ -912,29 +912,29 @@ public final class LlamaLayer {
         }
         uploadFloatsInto(ctx, rmsRowValuesBatch, rmsPerRow);
 
-        runKernel2D(ctx, ctx.kRmsnormApplyRows, features, T, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel2D(ctx, ctx.kRmsnormApplyRows, features, T, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(x), buf(gamma), buf(out), buf(rmsRowValuesBatch), scalarI(features));
     }
 
     static void q8_0GemmTiled(GpuContext ctx, MetalBuffer xQ8, MetalBuffer wQ8, MetalBuffer out, int T, int N, int K) throws Throwable {
-        runKernel2D(ctx, ctx.kQ8_0GemmTiled, N, T, MetalKernelSource.GEMM_TILE_N, 0,
+        runKernel2D(ctx, ctx.kQ8_0GemmTiled, N, T, KernelSource.GEMM_TILE_N, 0,
                 buf(xQ8), buf(wQ8), buf(out), scalarI(T), scalarI(N), scalarI(K));
     }
 
     static void f32GemmTiled(GpuContext ctx, MetalBuffer a, MetalBuffer B, MetalBuffer out, int T, int K, int N) throws Throwable {
-        runKernel2D(ctx, ctx.kF32GemmTiled, N, T, MetalKernelSource.GEMM_TILE_N, 0,
+        runKernel2D(ctx, ctx.kF32GemmTiled, N, T, KernelSource.GEMM_TILE_N, 0,
                 buf(a), buf(B), buf(out), scalarI(T), scalarI(K), scalarI(N));
     }
 
     static void ropeApplyPairwiseRows(GpuContext ctx, MetalBuffer buf, MetalBuffer cosTable, MetalBuffer sinTable,
             int heads, int headDim, MetalBuffer positionsBatch, int T) throws Throwable {
-        runKernel2D(ctx, ctx.kRopeApplyPairwiseRows, (long) heads * (headDim / 2), T, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel2D(ctx, ctx.kRopeApplyPairwiseRows, (long) heads * (headDim / 2), T, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(buf), buf(cosTable), buf(sinTable), scalarI(heads), scalarI(headDim), buf(positionsBatch));
     }
 
     static void attnScoresCausalBatched(GpuContext ctx, MetalBuffer qAll, MetalBuffer kAll, MetalBuffer scoresBatch,
             int qRowStride, int kRowStride, int qHeadOff, int kHeadOff, int headDim, int T, float rsqrtD) throws Throwable {
-        runKernel2D(ctx, ctx.kAttnScoresCausalBatched, T, T, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel2D(ctx, ctx.kAttnScoresCausalBatched, T, T, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(qAll), buf(kAll), buf(scoresBatch), scalarI(qRowStride), scalarI(kRowStride),
                 scalarI(qHeadOff), scalarI(kHeadOff), scalarI(headDim), scalarI(T), scalarF(rsqrtD));
     }
@@ -949,7 +949,7 @@ public final class LlamaLayer {
 
     static void attnWeightedSumCausalBatched(GpuContext ctx, MetalBuffer scoresBatch, MetalBuffer vAll, MetalBuffer attnOutBatch,
             int vRowStride, int outRowStride, int vHeadOff, int outHeadOff, int headDim, int T) throws Throwable {
-        runKernel2D(ctx, ctx.kAttnWeightedSumCausalBatched, headDim, T, MetalKernelSource.DEFAULT_BLOCK_SIZE, 0,
+        runKernel2D(ctx, ctx.kAttnWeightedSumCausalBatched, headDim, T, KernelSource.DEFAULT_BLOCK_SIZE, 0,
                 buf(scoresBatch), buf(vAll), buf(attnOutBatch), scalarI(vRowStride), scalarI(outRowStride),
                 scalarI(vHeadOff), scalarI(outHeadOff), scalarI(headDim), scalarI(T));
     }

@@ -1,34 +1,37 @@
 package com.github.gbenroscience.simdext.turbo.tools.command;
- 
+
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*; 
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
-import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*; 
+import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*;
 
-import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner; 
+import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
 
 import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMathF;
 import java.lang.ref.Cleaner;
 import java.util.ArrayList;
+import java.util.InputMismatchException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import jdk.incubator.vector.*;
 
 /**
- * 
- * High-Performance float32(Java's float type) Vector API & Engine that fuses explicit SIMD vectorization
- * with a zero-allocation primitive stack interpreter. Completely eliminates the
- * scalar parser overhead and task object allocations on the hot path.
  *
- * These are the fastest of ParserNG's SIMD evaluators
- * Combines near zero-allocation with parallel operations greatly enhanced with cpu-pinning.
- * CPU pinning is the reason why this class is a native of this extension and is the main reason
- * why this extension is JDK22+
- * Note that CPU PINNING works best on Linux, so the worker efficiency of these classes
- * is best seen on Linux. Where 2 workers perform at almost 2x the rate of one worker.. usually between 1.4x to 2.0x
- * 
+ * High-Performance float32(Java's float type) Vector API & Engine that fuses
+ * explicit SIMD vectorization with a zero-allocation primitive stack
+ * interpreter. Completely eliminates the scalar parser overhead and task object
+ * allocations on the hot path.
+ *
+ * These are the fastest of ParserNG's SIMD evaluators Combines near
+ * zero-allocation with parallel operations greatly enhanced with cpu-pinning.
+ * CPU pinning is the reason why this class is a native of this extension and is
+ * the main reason why this extension is JDK22+ Note that CPU PINNING works best
+ * on Linux, so the worker efficiency of these classes is best seen on Linux.
+ * Where 2 workers perform at almost 2x the rate of one worker.. usually between
+ * 1.4x to 2.0x
+ *
  *
  */
 public class SIMDCommandF32 extends VectorTurboEvaluator {
@@ -47,7 +50,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
     public SIMDCommandF32(MathExpression me, int numWorkers) throws Throwable {
         super(me, numWorkers);
     }
- 
+
     public static final SIMDCommandF32.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
         return (SIMDCommandF32.SIMDVectorCompositeExpression) new SIMDCommandF32(me).compile();
     }
@@ -599,7 +602,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
 
                         case OP_SQRT ->
                             VectorMathF::sqrt;
-                        case OP_CBRT -> 
+                        case OP_CBRT ->
                             VectorMathF::cbrt;
 
                         case OP_GELU ->
@@ -733,14 +736,14 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
     }
 
     /**
-     * Peephole fusion: when both operands of a binary arithmetic op are
-     * plain variable loads - i.e. the last two entries in the plan are
-     * LoadCommands feeding directly into this op and nothing else - collapse
-     * them into a single fused command that reads straight from the source
-     * arrays instead of round-tripping both operands through ctx.scratch.
-     * Returns null (no fusion) for anything that doesn't match that exact
-     * shape, including OP_REM (not vectorized regardless) and OP_POW
-     * (routes through VectorMathF.executePowerBlended, not a plain lane op).
+     * Peephole fusion: when both operands of a binary arithmetic op are plain
+     * variable loads - i.e. the last two entries in the plan are LoadCommands
+     * feeding directly into this op and nothing else - collapse them into a
+     * single fused command that reads straight from the source arrays instead
+     * of round-tripping both operands through ctx.scratch. Returns null (no
+     * fusion) for anything that doesn't match that exact shape, including
+     * OP_REM (not vectorized regardless) and OP_POW (routes through
+     * VectorMathF.executePowerBlended, not a plain lane op).
      */
     private static VectorCommand tryFuseLoadLoad(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
         int size = plan.size();
@@ -800,11 +803,12 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
         /**
-         * 
+         *
          * @param executionPlan
          * @param stackDepth
-         * @param blockSize 
+         * @param blockSize
          */
         public SIMDVectorCompositeExpression(VectorCommand[] executionPlan, int stackDepth, int blockSize) {
             super(compiledScalarHandle, opcodes, targetSlots, literalConstants, instructionCount, varCount, false);
@@ -939,14 +943,61 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             }
         }
 
-  
+        public void validate(float[][] variables, float[] output) {
+            // 1. Fail fast, avoid String.format unless throwing
+            if (variables == null || output == null) {
+                throw new IllegalArgumentException("Null input");
+            }
+
+            // 2. Cache values to local variables to avoid multiple array lookups
+            final int varLen = variables.length;
+            final int outLen = output.length;
+            int stride = getVarCount();
+
+            if (varLen != stride) {
+                throw new IllegalArgumentException("Stride mismatch");
+            }
+
+            // 3. Optional: Only check inner length if you really need absolute safety
+            // Only perform this if the performance impact of O(varCount) is acceptable.
+            for (int i = 0; i < varLen; i++) {
+                if (variables[i] == null || variables[i].length < outLen) {
+                    throw new IllegalArgumentException("Jagged array or size mismatch");
+                }
+            }
+        }
+
+        public void validate(float[] flatVariables, float[] output) {
+            int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0 ? flatVariables.length : -1;
+            int stride = getVarCount();
+            if (totalSamples != stride * output.length) {
+                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]",
+                        totalSamples, stride * output.length));
+            }
+        }
+
+        public void validate(double[][] variables, double[] output) {
+            throw new InputMismatchException("double[][] not supported only float[] and float[][]");
+        }
+
+        public void validate(double[] flatVariables, double[] output) {
+            throw new InputMismatchException("double[][] not supported only float[] and float[][]");
+        }
+
         public void applyBulk(float[][] variables, float[] output) {
+            if (varCount == 0) {
+                fillOutput((float) getConstantAnswer(), output);
+                return;
+            }
             int numSamples = variables[0].length;
             applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
         }
 
-   
         public void applyBulkParallel(float[][] variables, float[] output) {
+            if (varCount == 0) {
+                fillOutput((float) getConstantAnswer(), output);
+                return;
+            }
             if (variables == null || variables.length == 0 || output == null) {
                 return;
             }
@@ -972,8 +1023,11 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             }
         }
 
-
         public void applyBulkParallel(float[] flatVariables, float[] output) {
+            if (varCount == 0) {
+                fillOutput((float) getConstantAnswer(), output);
+                return;
+            }
             if (flatVariables == null || output == null) {
                 return;
             }
@@ -999,8 +1053,11 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             }
         }
 
-      
         public void applyBulkBatched(float[][] variables, float[] output, int batchSize) {
+            if (varCount == 0) {
+                fillOutput((float) getConstantAnswer(), output);
+                return;
+            }
             EvaluationContext ctx = masterEvalContext.get();
             int numSamples = variables[0].length;
             for (int start = 0; start < numSamples; start += batchSize) {
@@ -1009,13 +1066,19 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             }
         }
 
-    
         public void applyBulk(float[] flatVariables, float[] output) {
+            if (varCount == 0) {
+                fillOutput((float) getConstantAnswer(), output);
+                return;
+            }
             applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, output.length, output, 0, output.length);
         }
 
-    
         public void applyBulkBatched(float[] flatVariables, float[] output, int batchSize) {
+            if (varCount == 0) {
+                fillOutput((float) getConstantAnswer(), output);
+                return;
+            }
             EvaluationContext ctx = masterEvalContext.get();
             int numSamples = output.length;
             for (int start = 0; start < numSamples; start += batchSize) {
@@ -1072,6 +1135,5 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
         }
 
     }
- 
 
 }

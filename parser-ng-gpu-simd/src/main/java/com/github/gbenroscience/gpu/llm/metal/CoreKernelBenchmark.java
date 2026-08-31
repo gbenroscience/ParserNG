@@ -356,7 +356,7 @@ public final class CoreKernelBenchmark {
         float[] x = randomFloats(rnd, (long) T * features, 3.0);
         float[] gamma = randomFloats(rnd, features, 1.0, 0.5);
 
-        int wgSize = MetalKernelSource.RMSNORM_WORKGROUP_SIZE;
+        int wgSize = KernelSource.RMSNORM_WORKGROUP_SIZE;
         int numGroups = (features + wgSize - 1) / wgSize;
 
         MetalBuffer xDev = LlamaLayer.uploadFloats(ctx, x);

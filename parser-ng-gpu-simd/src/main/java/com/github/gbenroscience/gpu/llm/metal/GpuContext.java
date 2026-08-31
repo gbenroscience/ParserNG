@@ -89,33 +89,33 @@ public final class GpuContext implements AutoCloseable {
                 throw new IllegalStateException("newCommandQueue returned nil for device " + chosen.describe());
             }
 
-            this.library = mtl.compileLibrary(device, MetalKernelSource.METAL_SOURCE);
+            this.library = mtl.compileLibrary(device, KernelSource.METAL_SOURCE);
 
-            this.kQuantizeI8 = pipeline(MetalKernelSource.KERNEL_QUANTIZE_I8);
-            this.kQuantizeActivationQ8_0 = pipeline(MetalKernelSource.KERNEL_QUANTIZE_ACTIVATION_Q8_0);
-            this.kQ8_0GemvSplit = pipeline(MetalKernelSource.KERNEL_Q8_0_GEMV_SPLIT);
-            this.kQ8_0GemvPlain = pipeline(MetalKernelSource.KERNEL_Q8_0_GEMV_PLAIN);
-            this.kRopeApplySplit = pipeline(MetalKernelSource.KERNEL_ROPE_APPLY_SPLIT);
-            this.kRmsnormPartialSumsq = pipeline(MetalKernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ);
-            this.kRmsnormApply = pipeline(MetalKernelSource.KERNEL_RMSNORM_APPLY);
-            this.kAttnScores = pipeline(MetalKernelSource.KERNEL_ATTN_SCORES);
-            this.kSoftmaxInplace = pipeline(MetalKernelSource.KERNEL_SOFTMAX_INPLACE);
-            this.kAttnWeightedSum = pipeline(MetalKernelSource.KERNEL_ATTN_WEIGHTED_SUM);
-            this.kSwigluActivate = pipeline(MetalKernelSource.KERNEL_SWIGLU_ACTIVATE);
-            this.kResidualAdd = pipeline(MetalKernelSource.KERNEL_RESIDUAL_ADD);
-            this.kF32Gemv = pipeline(MetalKernelSource.KERNEL_F32_GEMV);
+            this.kQuantizeI8 = pipeline(KernelSource.KERNEL_QUANTIZE_I8);
+            this.kQuantizeActivationQ8_0 = pipeline(KernelSource.KERNEL_QUANTIZE_ACTIVATION_Q8_0);
+            this.kQ8_0GemvSplit = pipeline(KernelSource.KERNEL_Q8_0_GEMV_SPLIT);
+            this.kQ8_0GemvPlain = pipeline(KernelSource.KERNEL_Q8_0_GEMV_PLAIN);
+            this.kRopeApplySplit = pipeline(KernelSource.KERNEL_ROPE_APPLY_SPLIT);
+            this.kRmsnormPartialSumsq = pipeline(KernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ);
+            this.kRmsnormApply = pipeline(KernelSource.KERNEL_RMSNORM_APPLY);
+            this.kAttnScores = pipeline(KernelSource.KERNEL_ATTN_SCORES);
+            this.kSoftmaxInplace = pipeline(KernelSource.KERNEL_SOFTMAX_INPLACE);
+            this.kAttnWeightedSum = pipeline(KernelSource.KERNEL_ATTN_WEIGHTED_SUM);
+            this.kSwigluActivate = pipeline(KernelSource.KERNEL_SWIGLU_ACTIVATE);
+            this.kResidualAdd = pipeline(KernelSource.KERNEL_RESIDUAL_ADD);
+            this.kF32Gemv = pipeline(KernelSource.KERNEL_F32_GEMV);
 
-            this.kGeluActivate = pipeline(MetalKernelSource.KERNEL_GELU_ACTIVATE);
-            this.kGegluActivate = pipeline(MetalKernelSource.KERNEL_GEGLU_ACTIVATE);
+            this.kGeluActivate = pipeline(KernelSource.KERNEL_GELU_ACTIVATE);
+            this.kGegluActivate = pipeline(KernelSource.KERNEL_GEGLU_ACTIVATE);
 
-            this.kQ8_0GemmTiled = pipeline(MetalKernelSource.KERNEL_Q8_0_GEMM_TILED);
-            this.kF32GemmTiled = pipeline(MetalKernelSource.KERNEL_F32_GEMM_TILED);
-            this.kRmsnormPartialSumsqRows = pipeline(MetalKernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ_ROWS);
-            this.kRmsnormApplyRows = pipeline(MetalKernelSource.KERNEL_RMSNORM_APPLY_ROWS);
-            this.kRopeApplyPairwiseRows = pipeline(MetalKernelSource.KERNEL_ROPE_APPLY_PAIRWISE_ROWS);
-            this.kAttnScoresCausalBatched = pipeline(MetalKernelSource.KERNEL_ATTN_SCORES_CAUSAL_BATCHED);
-            this.kSoftmaxInplaceRows = pipeline(MetalKernelSource.KERNEL_SOFTMAX_INPLACE_ROWS);
-            this.kAttnWeightedSumCausalBatched = pipeline(MetalKernelSource.KERNEL_ATTN_WEIGHTED_SUM_CAUSAL_BATCHED);
+            this.kQ8_0GemmTiled = pipeline(KernelSource.KERNEL_Q8_0_GEMM_TILED);
+            this.kF32GemmTiled = pipeline(KernelSource.KERNEL_F32_GEMM_TILED);
+            this.kRmsnormPartialSumsqRows = pipeline(KernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ_ROWS);
+            this.kRmsnormApplyRows = pipeline(KernelSource.KERNEL_RMSNORM_APPLY_ROWS);
+            this.kRopeApplyPairwiseRows = pipeline(KernelSource.KERNEL_ROPE_APPLY_PAIRWISE_ROWS);
+            this.kAttnScoresCausalBatched = pipeline(KernelSource.KERNEL_ATTN_SCORES_CAUSAL_BATCHED);
+            this.kSoftmaxInplaceRows = pipeline(KernelSource.KERNEL_SOFTMAX_INPLACE_ROWS);
+            this.kAttnWeightedSumCausalBatched = pipeline(KernelSource.KERNEL_ATTN_WEIGHTED_SUM_CAUSAL_BATCHED);
 
             System.err.println("[ParserNG LLM-Metal] " + chosen.describe());
 

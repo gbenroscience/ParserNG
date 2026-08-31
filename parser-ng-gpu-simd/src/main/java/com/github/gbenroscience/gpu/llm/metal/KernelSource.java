@@ -53,9 +53,9 @@ package com.github.gbenroscience.gpu.llm.metal;
  * carefully against the CUDA source kernel-by-kernel and against Apple's
  * published MSL specification, but not compiled or run.
  */
-public final class MetalKernelSource {
+public final class KernelSource {
 
-    private MetalKernelSource() {
+    private KernelSource() {
     }
 
     // ---- decode-path kernels (unchanged names from the CUDA/OpenCL ports) ----

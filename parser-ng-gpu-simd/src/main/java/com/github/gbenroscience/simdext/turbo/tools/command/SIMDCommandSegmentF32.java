@@ -1,36 +1,38 @@
 package com.github.gbenroscience.simdext.turbo.tools.command;
 
- 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*; 
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
-import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*; 
+import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*;
 
-import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner; 
+import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
 import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMathF;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.lang.ref.Cleaner;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.InputMismatchException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import jdk.incubator.vector.*;
 
 /**
- * High-Performance MemorySegment(of floats) Vector API & Engine that fuses explicit SIMD vectorization
- * with a zero-allocation primitive stack interpreter. Completely eliminates the
- * scalar parser overhead and task object allocations on the hot path.
+ * High-Performance MemorySegment(of floats) Vector API & Engine that fuses
+ * explicit SIMD vectorization with a zero-allocation primitive stack
+ * interpreter. Completely eliminates the scalar parser overhead and task object
+ * allocations on the hot path.
  *
- * This version is the second fastest of all the SIMD evaluators.
- * Combines near zero-allocation with parallel operations greatly enhanced with cpu-pinning.
- * Cpu pinning is the reason why this class is a native of this extension and is the main reason
- * why this extension is JDK22+
- * Note that CPU PINNING works best on Linux, so the worker efficiency of these classes
- * is best seen on Linux. Where 2 workers perform at almost 2x the rate of one worker.. usually between 1.4x to 2.0x
- * 
+ * This version is the second fastest of all the SIMD evaluators. Combines near
+ * zero-allocation with parallel operations greatly enhanced with cpu-pinning.
+ * Cpu pinning is the reason why this class is a native of this extension and is
+ * the main reason why this extension is JDK22+ Note that CPU PINNING works best
+ * on Linux, so the worker efficiency of these classes is best seen on Linux.
+ * Where 2 workers perform at almost 2x the rate of one worker.. usually between
+ * 1.4x to 2.0x
+ *
  *
  */
 public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
@@ -49,7 +51,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
     public SIMDCommandSegmentF32(MathExpression me, int numWorkers) throws Throwable {
         super(me, numWorkers);
     }
- 
+
     public static final SIMDCommandSegmentF32.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
         return (SIMDCommandSegmentF32.SIMDVectorCompositeExpression) new SIMDCommandSegmentF32(me).compile();
     }
@@ -229,7 +231,6 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
     // peephole-fusion over the emitted plan - see tryFuseLoadLoad().
     // Numerically identical to LoadCommand+LoadCommand+BinaryOp: same IEEE
     // op, same operand order, just a different source.
-
     record LoadLoadAddCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
 
         @Override
@@ -731,7 +732,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
 
                         case OP_SQRT ->
                             VectorMathF::sqrt;
-                        case OP_CBRT -> 
+                        case OP_CBRT ->
                             VectorMathF::cbrt;
 
                         case OP_GELU ->
@@ -865,15 +866,15 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
     }
 
     /**
-     * Peephole fusion: when both operands of a binary arithmetic op are
-     * plain variable loads - i.e. the last two entries in the plan are
-     * LoadCommands feeding directly into this op and nothing else - collapse
-     * them into a single fused command that reads straight from the source
-     * (flatVariables / _2DVariables, or their MemorySegment equivalents)
-     * instead of round-tripping both operands through ctx.scratch.
-     * Returns null (no fusion) for anything that doesn't match that exact
-     * shape, including OP_REM (not vectorized regardless) and OP_POW
-     * (routes through VectorMathF.executePowerBlended, not a plain lane op).
+     * Peephole fusion: when both operands of a binary arithmetic op are plain
+     * variable loads - i.e. the last two entries in the plan are LoadCommands
+     * feeding directly into this op and nothing else - collapse them into a
+     * single fused command that reads straight from the source (flatVariables /
+     * _2DVariables, or their MemorySegment equivalents) instead of
+     * round-tripping both operands through ctx.scratch. Returns null (no
+     * fusion) for anything that doesn't match that exact shape, including
+     * OP_REM (not vectorized regardless) and OP_POW (routes through
+     * VectorMathF.executePowerBlended, not a plain lane op).
      */
     private static VectorCommand tryFuseLoadLoad(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
         int size = plan.size();
@@ -933,11 +934,12 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
         /**
-         * 
+         *
          * @param executionPlan
          * @param stackDepth
-         * @param blockSize 
+         * @param blockSize
          */
         public SIMDVectorCompositeExpression(VectorCommand[] executionPlan, int stackDepth, int blockSize) {
             super(compiledScalarHandle, opcodes, targetSlots, literalConstants, instructionCount, varCount, false);
@@ -1119,14 +1121,176 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
         }
 
-     
+        /**
+         * 
+         * @param variables
+         * @param output 
+         */
+        public void validate(float[][] variables, float[] output) {
+            // 1. Fail fast, avoid String.format unless throwing
+            if (variables == null || output == null) {
+                throw new IllegalArgumentException("Null input");
+            }
+
+            // 2. Cache values to local variables to avoid multiple array lookups
+            final int varLen = variables.length;
+            final int outLen = output.length;
+            int stride = getVarCount();
+
+            if (varLen != stride) {
+                throw new IllegalArgumentException("Stride mismatch");
+            }
+
+            // 3. Optional: Only check inner length if you really need absolute safety
+            // Only perform this if the performance impact of O(varCount) is acceptable.
+            for (int i = 0; i < varLen; i++) {
+                if (variables[i] == null || variables[i].length < outLen) {
+                    throw new IllegalArgumentException("Jagged array or size mismatch");
+                }
+            }
+        }
+
+        /**
+         * 
+         * @param flatVariables
+         * @param output 
+         */
+        public void validate(float[] flatVariables, float[] output) {
+            int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0 ? flatVariables.length : -1;
+            int stride = getVarCount();
+            if (totalSamples != stride * output.length) {
+                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]",
+                        totalSamples, stride * output.length));
+            }
+        }
+
+        /**
+         * 
+         * @param variables
+         * @param output 
+         */
+        public void validate(double[][] variables, double[] output) {
+            throw new InputMismatchException("double[][] not supported only float[] and float[][], MemorySegment and MemorySegment[]");
+        }
+
+        /**
+         * 
+         * @param flatVariables
+         * @param output 
+         */
+        public void validate(double[] flatVariables, double[] output) {
+            throw new InputMismatchException("double[][] not supported only float[] and float[][], MemorySegment and MemorySegment[]");
+        }
+
+        
+        // --- MemorySegment (off-heap / zero-copy) entry points ---
+        // Same public contract as the float[] / float[][] variants above,
+        // reusing the same masterEvalContext / workerPool / reuseLatch machinery.
+
+        /**
+         * Validates a single flat off-heap variables segment against its
+         * output segment. numSamples for this entry point is derived from
+         * output's byte size (see applyBulk(MemorySegment, MemorySegment)
+         * below), so variables must hold exactly that many float elements
+         * too, or the read past its end would either throw or silently read
+         * garbage/adjacent memory depending on how it was allocated.
+         * @param variables
+         * @param output
+         */
+        public void validate(MemorySegment variables, MemorySegment output) {
+            if (variables == null) {
+                throw new InputMismatchException("variables MemorySegment is null");
+            }
+            if (output == null) {
+                throw new InputMismatchException("output MemorySegment is null");
+            }
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            if (variables.byteSize() == 0 || output.byteSize() == 0) {
+                throw new InputMismatchException("null/empty MemorySegment");
+            }
+            if (variables.byteSize() % elemBytes != 0) {
+                throw new InputMismatchException("variables MemorySegment byte size " + variables.byteSize()
+                        + " is not a whole multiple of the float element size (" + elemBytes + " bytes)");
+            }
+            if (output.byteSize() % elemBytes != 0) {
+                throw new InputMismatchException("output MemorySegment byte size " + output.byteSize()
+                        + " is not a whole multiple of the float element size (" + elemBytes + " bytes)");
+            }
+            if (variables.byteSize() != output.byteSize()) {
+                throw new InputMismatchException("variables (" + (variables.byteSize() / elemBytes)
+                        + " samples) and output (" + (output.byteSize() / elemBytes)
+                        + " samples) must hold the same number of elements");
+            }
+        }
+
+        /**
+         * Validates a per-variable off-heap segment array against its
+         * output segment. numSamples for this entry point is derived from
+         * variables[0]'s byte size (see applyBulk(MemorySegment[],
+         * MemorySegment) below), so every other segment in the array - and
+         * output - must agree with that sample count, or later variables
+         * would be read out of bounds relative to variables[0]'s length.
+         * @param variables
+         * @param output
+         */
+        public void validate(MemorySegment[] variables, MemorySegment output) {
+            if (variables == null || variables.length == 0) {
+                throw new InputMismatchException("null/empty MemorySegment[]");
+            }
+            if (output == null) {
+                throw new InputMismatchException("output MemorySegment is null");
+            }
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            if (output.byteSize() == 0) {
+                throw new InputMismatchException("null/empty MemorySegment");
+            }
+            if (output.byteSize() % elemBytes != 0) {
+                throw new InputMismatchException("output MemorySegment byte size " + output.byteSize()
+                        + " is not a whole multiple of the float element size (" + elemBytes + " bytes)");
+            }
+            if (variables[0] == null) {
+                throw new InputMismatchException("variables[0] is null");
+            }
+            long expectedByteSize = variables[0].byteSize();
+            if (expectedByteSize == 0) {
+                throw new InputMismatchException("null/empty MemorySegment");
+            }
+            if (expectedByteSize % elemBytes != 0) {
+                throw new InputMismatchException("variables[0] MemorySegment byte size " + expectedByteSize
+                        + " is not a whole multiple of the float element size (" + elemBytes + " bytes)");
+            }
+            for (int i = 1; i < variables.length; i++) {
+                MemorySegment seg = variables[i];
+                if (seg == null) {
+                    throw new InputMismatchException("variables[" + i + "] is null");
+                }
+                if (seg.byteSize() != expectedByteSize) {
+                    throw new InputMismatchException("variables[" + i + "] has " + (seg.byteSize() / elemBytes)
+                            + " samples but variables[0] has " + (expectedByteSize / elemBytes)
+                            + " - all variable segments must be the same length");
+                }
+            }
+            if (output.byteSize() != expectedByteSize) {
+                throw new InputMismatchException("output has " + (output.byteSize() / elemBytes)
+                        + " samples but variables have " + (expectedByteSize / elemBytes) + " samples");
+            }
+        }
+
+
         public void applyBulk(float[][] variables, float[] output) {
+             if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             int numSamples = variables[0].length;
             applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
         }
 
-      
         public void applyBulkParallel(float[][] variables, float[] output) {
+              if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             if (variables == null || variables.length == 0 || output == null) {
                 return;
             }
@@ -1152,8 +1316,11 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
         }
 
-      
         public void applyBulkParallel(float[] flatVariables, float[] output) {
+              if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             if (flatVariables == null || output == null) {
                 return;
             }
@@ -1179,8 +1346,11 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
         }
 
-   
         public void applyBulkBatched(float[][] variables, float[] output, int batchSize) {
+              if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             EvaluationContext ctx = masterEvalContext.get();
             int numSamples = variables[0].length;
             for (int start = 0; start < numSamples; start += batchSize) {
@@ -1189,13 +1359,19 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
         }
 
-  
         public void applyBulk(float[] flatVariables, float[] output) {
+              if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, output.length, output, 0, output.length);
         }
 
-    
         public void applyBulkBatched(float[] flatVariables, float[] output, int batchSize) {
+              if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             EvaluationContext ctx = masterEvalContext.get();
             int numSamples = output.length;
             for (int start = 0; start < numSamples; start += batchSize) {
@@ -1208,11 +1384,19 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         // Same public contract as the float[] / float[][] variants above,
         // reusing the same masterEvalContext / workerPool / reuseLatch machinery.
         public void applyBulk(MemorySegment[] variables, MemorySegment output) {
+             if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             int numSamples = (int) (variables[0].byteSize() / ValueLayout.JAVA_FLOAT.byteSize());
             applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
         }
 
         public void applyBulkParallel(MemorySegment[] variables, MemorySegment output) {
+             if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             if (variables == null || variables.length == 0 || output == null) {
                 return;
             }
@@ -1239,11 +1423,19 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         public void applyBulk(MemorySegment variables, MemorySegment output) {
+             if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             int numSamples = (int) (output.byteSize() / ValueLayout.JAVA_FLOAT.byteSize());
             applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
         }
 
         public void applyBulkParallel(MemorySegment variables, MemorySegment output) {
+             if (varCount == 0) {
+                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+                return;
+            }
             if (variables == null || output == null) {
                 return;
             }
@@ -1364,6 +1556,25 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 }
             }
         }
+        
+        // Note: fillOutput(float, float[]) lives on the shared base class
+        // (BatchedVectorCompositeExpression) and isn't in this file, so this
+        // is declared here directly rather than as a sibling overload next
+        // to it. Same vectorized-broadcast + scalar-tail shape as the
+        // applyBulkInternalSeg write-backs below, just filling every slot
+        // with one constant instead of the command-plan result.
+        protected void fillOutput(float value, MemorySegment out) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int n = (int) (out.byteSize() / elemBytes);
+            FloatVector bcast = FloatVector.broadcast(SPECIES, value);
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                bcast.intoMemorySegment(out, k * elemBytes, ByteOrder.nativeOrder());
+            }
+            for (; k < n; k++) {
+                out.setAtIndex(ValueLayout.JAVA_FLOAT, k, value);
+            }
+        }
     }
- 
+
 }

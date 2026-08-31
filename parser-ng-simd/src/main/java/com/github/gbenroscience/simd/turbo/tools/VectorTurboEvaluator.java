@@ -191,6 +191,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     protected int stackDepth;
     protected int instructionCount;
     protected KernelInterceptException interceptedKernel;
+    protected double constantAnswer = Double.NaN;
 
     public VectorTurboEvaluator(MathExpression me) throws Throwable {
         this(me, BatchedVectorCompositeExpression.computeWorkers());
@@ -204,7 +205,16 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         this.compiledScalarHandle = compileScalar(postfix);
         stackDepth = MathExpressionTreeDepth.calculate(postfix).depth;
         compileToPrimitiveProgram();
+        if (varCount == 0) {
+            constantAnswer = me.solveGeneric().scalar;
+        }
     }
+
+    public double getConstantAnswer() {
+        return constantAnswer;
+    }
+    
+    
 
     public static VectorTurboEvaluator.BatchedVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
         return (VectorTurboEvaluator.BatchedVectorCompositeExpression) new VectorTurboEvaluator(me).compile();
@@ -816,6 +826,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         
         @Override
         public void applyBulk(double[][] variables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             int numSamples = variables[0].length;
             // FIX: Pass dataSize explicitly. Don't let applyBulk guess from flatVariables.length
             applyBulkInternal(variables, numSamples, output, 0, numSamples);
@@ -823,6 +837,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         @Override
         public void applyBulkParallel(double[][] variables, double[] output) {
+              if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             final int numSamples = variables[0].length;
             final int stride = this.varCount;
 
@@ -911,6 +929,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         @Override
         public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
+              if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             int dataSize = variables[0].length;
 
             // FIX: Don't delegate to flat overload. Loop here.
@@ -970,6 +992,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * into indices 200,000 through 200,499 of the output array."
          */
         private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
+              if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             /*   if (startIdx + length > dataSize || startIdx + length > output.length) {
                 throw new IllegalArgumentException(String.format(
                         "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
@@ -994,6 +1020,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
         }
 
         private void applyBulkInternal(double[][] variables, int dataSize, double[] output, int startIdx, int length) {
+            if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             /*   if (startIdx + length > dataSize || startIdx + length > output.length) {
                 throw new IllegalArgumentException(String.format(
                         "Slice bounds violation: startIdx=%d, length=%d exceeds dataSize=%d or output.length=%d",
@@ -1014,6 +1044,14 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                 final int currentTileSize = Math.min(BLOCK_SIZE, endIdx - tileStart);
                 evaluateTile(variables, dataSize, output, tileStart, currentTileSize, scratch);
             }
+        }
+
+        protected void fillOutput(double value, double[] out) {
+            Arrays.fill(out, value);
+        }
+
+        protected void fillOutput(float value, float[] out) {
+            Arrays.fill(out, value);
         }
 
         /**
@@ -2010,7 +2048,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          */
         @Override
         public void applyBulkParallel(double[] flatVariables, double[] output) {
-
+  if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             final int length = output.length;
 
             if (length < PARALLEL_OPS_THRESHOLD) {
@@ -2024,7 +2065,10 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
         @Override
         public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
-
+  if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             if (batchSize <= 0) {
                 return;
             }
