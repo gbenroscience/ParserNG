@@ -236,6 +236,10 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void applyBulk(double[][] variables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             int numSamples = variables[0].length;
 
             applyBulkInternal(variables, numSamples, output, 0, numSamples);
@@ -243,6 +247,10 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void applyBulkParallel(double[][] variables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             if (variables == null || variables.length == 0 || output == null) {
                 return;
             }
@@ -257,6 +265,10 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
+            if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             int numSamples = variables[0].length;
             for (int start = 0; start < numSamples; start += batchSize) {
                 int length = Math.min(batchSize, numSamples - start);
@@ -267,11 +279,19 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         // --- 1D Flat Contiguous Frameworks ---
         @Override
         public void applyBulk(double[] flatVariables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             applyBulkInternal(flatVariables, output.length, output, 0, output.length);
         }
 
         @Override
         public void applyBulkParallel(double[] flatVariables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             int numSamples = output.length;
             if (numSamples < PARALLEL_OPS_THRESHOLD) {
                 applyBulkInternal(flatVariables, numSamples, output, 0, numSamples);
@@ -282,6 +302,10 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
         @Override
         public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
+            if (varCount == 0) {
+                fillOutput(constantAnswer, output);
+                return;
+            }
             int numSamples = output.length;
             for (int start = 0; start < numSamples; start += batchSize) {
                 int length = Math.min(batchSize, numSamples - start);
