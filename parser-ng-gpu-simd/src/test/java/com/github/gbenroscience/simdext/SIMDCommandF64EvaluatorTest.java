@@ -3,7 +3,7 @@ package com.github.gbenroscience.simdext;
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression; 
 import com.github.gbenroscience.simd.turbo.tools.FlatMatrixF;  
-import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
+import com.github.gbenroscience.simdext.turbo.tools.command.temp.SIMDCommandF64;
 
 import java.util.Arrays;
 import org.junit.jupiter.api.AfterAll;

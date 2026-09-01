@@ -50,8 +50,6 @@ import java.util.concurrent.TimeUnit;
 
 /**
  *
- *
- *
  * ParserNG GPU (OpenCL) vs ParserNG SIMD (CPU) benchmark suite.
  *
  * mvn exec:exec -Dexec.executable="java" -Dexec.args="--add-modules
@@ -68,7 +66,6 @@ import java.util.concurrent.TimeUnit;
  * suite grow (or shrink) just by editing that array, and lets {@link #main}
  * pick a subset of expressions to actually run based on interactive input,
  * without touching JMH's parameterization mechanism.
- *
  * <p>
  * Expression selection at runtime: when launched via {@link #main}, the process
  * prints the indexed expression list and reads a line from {@code System.in}
@@ -91,19 +88,7 @@ import java.util.concurrent.TimeUnit;
  * (from {@link MathExpression#getSlotItems()}) is guaranteed identical, rather
  * than risking two independently-parsed instances disagreeing on slot order.
  *
- * <p>
- * CAVEAT -- unverified API guess: {@code OpenClCompositeExpression}'s exact
- * bulk-apply method name was not available when this file was written.
- * {@link #parserNGGPU} calls
- * {@code gpuEval.apply(MemorySegment[], MemorySegment)}, inferred by symmetry
- * with {@code SIMDVectorCompositeExpression}'s contract. If the real method is
- * named differently (e.g. {@code evaluate(...)},
- * {@code execute(...)}, or something requiring an explicit device queue /
- * completion handle rather than blocking synchronously), that single call is
- * the only line that needs to change -- input generation, output buffers, and
- * teardown are otherwise API-agnostic.
- *
- * <p>
+ * 
  * Primary comparison per expression: ParserNG SIMD (serial and parallel) vs
  * ParserNG GPU (OpenCL), all along the {@code MemorySegment} path.
  */
@@ -345,8 +330,6 @@ public class GPUvsSIMD {
 
     @Benchmark
     public void parserNGGPU(Blackhole bh) throws Throwable {
-        // See the class javadoc's CAVEAT: gpuEval.apply(...)'s exact method
-        // name/signature is an inferred guess, not a verified API surface.
         gpuEval.applyBulk(inputSegments, gpuOutput);
         bh.consume(gpuOutput);
     }

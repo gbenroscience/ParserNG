@@ -12,7 +12,7 @@ import com.github.gbenroscience.gpu.evaluator.opencl.OpenClKernelSource;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.SIMDCompositeExpression; 
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator; 
-import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
+import com.github.gbenroscience.simdext.turbo.tools.command.temp.SIMDCommandF64;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

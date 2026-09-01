@@ -155,7 +155,7 @@ public class HotBench {
 
     double[] result;
 
-    @Param({"2097152"})
+    @Param({"1048576"})
     private int dataSize;
 
     private double[] vars;

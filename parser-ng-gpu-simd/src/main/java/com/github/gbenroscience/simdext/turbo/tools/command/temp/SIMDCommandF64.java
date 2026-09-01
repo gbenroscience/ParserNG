@@ -1,37 +1,39 @@
-package com.github.gbenroscience.simdext.turbo.tools.command.fused;
-
+package com.github.gbenroscience.simdext.turbo.tools.command.temp;
 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*; 
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
-
 import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
-import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath; 
+import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath;
 import java.lang.ref.Cleaner;
 import java.util.ArrayList;
+import java.util.InputMismatchException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import jdk.incubator.vector.*;
 
 /**
- * High-Performance float64(Java's double type) Vector API & Engine that fuses explicit SIMD vectorization
- * with a zero-allocation primitive stack interpreter. Completely eliminates the
- * scalar parser overhead and task object allocations on the hot path.
+ * High-Performance float64(Java's double type) Vector API & Engine that fuses
+ * explicit SIMD vectorization with a zero-allocation primitive stack
+ * interpreter. Completely eliminates the scalar parser overhead and task object
+ * allocations on the hot path.
  *
- * These are the fastest of all the SIMD evaluators.
- * Combines near zero-allocation with parallel operations greatly enhanced with cpu-pinning.
- * Cpu pinning is the reason why this class is a native of this extension and is the main reason
- * why this extension is JDK22+
- * Note that CPU PINNING works best on Linux, so the worker efficiency of these classes
- * is best seen on Linux. Where 2 workers perform at almost 2x the rate of one worker.. usually between 1.4x to 2.0x
- * 
+ * These are the fastest of all the SIMD evaluators. Combines near
+ * zero-allocation with parallel operations greatly enhanced with cpu-pinning.
+ * Cpu pinning is the reason why this class is a native of this extension and is
+ * the main reason why this extension is JDK22+ Note that CPU PINNING works best
+ * on Linux, so the worker efficiency of these classes is best seen on Linux.
+ * Where 2 workers perform at almost 2x the rate of one worker.. usually between
+ * 1.4x to 2.0x
+ *
  *
  */
+
 public class SIMDCommandF64 extends VectorTurboEvaluator {
 
     public SIMDCommandF64(MathExpression me) throws Throwable {
@@ -41,7 +43,7 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
     public SIMDCommandF64(MathExpression me, int numWorkers) throws Throwable {
         super(me, numWorkers);
     }
- 
+
     public static final SIMDCommandF64.SIMDVectorCompositeExpression getEvaluator(MathExpression me) throws Throwable {
         return (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(me).compile();
     }
@@ -333,102 +335,6 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
         }
     }
 
-    // --- Fused Multiply-Add/Subtract: (a*b)+c or c-(a*b) ---
-    // Collapses Mul(a,b)->m ; Add(m,c)->dest into a single hardware FMA
-    // instruction (va.fma(vb,vc) computes va*vb+vc), and Mul(a,b)->m ;
-    // Sub(c,m)->dest similarly via a negated multiplicand
-    // (va.neg().fma(vb,vc) == c - a*b).
-    //
-    // Because this compiler's postfix stack always pops the most-recently
-    // computed operand as rOff (see the OP_ADD/OP_SUB case in compile()),
-    // the Mul being fused here is always the *right*-hand operand of the
-    // Add/Sub - Sub therefore always has the shape "accumulator minus
-    // product", never "product minus accumulator". See tryFuseMulAddSub.
-    //
-    // This goes further than LoadLoadAddCommand's win: it doesn't just skip
-    // a scratch round-trip for the intermediate product m - m is never
-    // materialized at all, and two vector instructions (mul, then add/sub)
-    // collapse into one hardware FMA. That's a genuine compute-instruction
-    // reduction on top of the memory-traffic reduction, which is why this
-    // is expected to pay off even for expressions where plain load-fusion
-    // wouldn't (the arithmetic itself is doing less work, not just less
-    // memory movement).
-    //
-    // NOTE: FMA computes with a single rounding step instead of two, so
-    // results can differ from the unfused a*b+c path in the last bit. This
-    // is standard IEEE FMA behavior (strictly more accurate, not less), but
-    // re-run correctness checks against Gandiva/reference values after
-    // enabling this - a 1e-12-style tolerance should absorb it, but that
-    // should be verified, not assumed.
-    record FmaCommand(int mulL, int mulR, int addOff, int destOff, boolean subtract) implements VectorCommand {
-
-        @Override
-        public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
-            int k = 0, limit = SPECIES.loopBound(n);
-            for (; k < limit; k += SPECIES.length()) {
-                DoubleVector a = DoubleVector.fromArray(SPECIES, s, mulL + k);
-                DoubleVector b = DoubleVector.fromArray(SPECIES, s, mulR + k);
-                DoubleVector c = DoubleVector.fromArray(SPECIES, s, addOff + k);
-                (subtract ? a.neg() : a).fma(b, c).intoArray(s, destOff + k);
-            }
-            for (; k < n; k++) {
-                double a = s[mulL + k];
-                double b = s[mulR + k];
-                double c = s[addOff + k];
-                s[destOff + k] = subtract ? Math.fma(-a, b, c) : Math.fma(a, b, c);
-            }
-        }
-    }
-
-    // Same shape as FmaCommand, one level deeper: for when the multiplication
-    // being fused was itself already collapsed into a LoadLoadMulCommand
-    // (both multiplicands are plain variable loads, so there is no
-    // intermediate scratch slot to read them back from). Reads the two
-    // multiplicands straight from flatVariables/_2DVariables instead - two
-    // loads, a multiply, and an add/sub all become one command.
-    record LoadLoadFmaCommand(int lSlot, int rSlot, int addOff, int destOff, boolean subtract) implements VectorCommand {
-
-        @Override
-        public void execute(EvaluationContext ctx, int n) {
-            double[] s = ctx.scratch;
-            int k = 0, limit = SPECIES.loopBound(n);
-            if (ctx.flatVariables != null) {
-                double[] flat = ctx.flatVariables;
-                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
-                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
-                for (; k < limit; k += SPECIES.length()) {
-                    DoubleVector a = DoubleVector.fromArray(SPECIES, flat, lBase + k);
-                    DoubleVector b = DoubleVector.fromArray(SPECIES, flat, rBase + k);
-                    DoubleVector c = DoubleVector.fromArray(SPECIES, s, addOff + k);
-                    (subtract ? a.neg() : a).fma(b, c).intoArray(s, destOff + k);
-                }
-                for (; k < n; k++) {
-                    double a = flat[lBase + k];
-                    double b = flat[rBase + k];
-                    double c = s[addOff + k];
-                    s[destOff + k] = subtract ? Math.fma(-a, b, c) : Math.fma(a, b, c);
-                }
-            } else {
-                double[] l = ctx._2DVariables[lSlot];
-                double[] r = ctx._2DVariables[rSlot];
-                int base = ctx.blockStart;
-                for (; k < limit; k += SPECIES.length()) {
-                    DoubleVector a = DoubleVector.fromArray(SPECIES, l, base + k);
-                    DoubleVector b = DoubleVector.fromArray(SPECIES, r, base + k);
-                    DoubleVector c = DoubleVector.fromArray(SPECIES, s, addOff + k);
-                    (subtract ? a.neg() : a).fma(b, c).intoArray(s, destOff + k);
-                }
-                for (; k < n; k++) {
-                    double a = l[base + k];
-                    double b = r[base + k];
-                    double c = s[addOff + k];
-                    s[destOff + k] = subtract ? Math.fma(-a, b, c) : Math.fma(a, b, c);
-                }
-            }
-        }
-    }
-
     record PowCommand(int lOff, int rOff, int destOff) implements VectorCommand {
 
         @Override
@@ -601,18 +507,6 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                     int lOff = virtualStack[--sp];
                     int destOff = lOff; // Reuse left slot to save space
 
-                    VectorCommand fusedMulAddSub = tryFuseMulAddSub(plan, opcode, lOff, rOff);
-                    if (fusedMulAddSub != null) {
-                        // The Mul/LoadLoadMul this Add/Sub was about to read
-                        // its right-hand operand back from scratch is now
-                        // dead - see tryFuseMulAddSub's javadoc for why this
-                        // is always the *last* plan entry, never lOff's.
-                        plan.remove(plan.size() - 1);
-                        plan.add(fusedMulAddSub);
-                        virtualStack[sp++] = destOff;
-                        break;
-                    }
-
                     VectorCommand fused = tryFuseLoadLoad(plan, opcode, lOff, rOff, destOff);
                     if (fused != null) {
                         // Both LoadCommands are dead after this point: codegen is
@@ -701,7 +595,7 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
 
                         case OP_SQRT ->
                             VectorMath::sqrt;
-                        case OP_CBRT -> 
+                        case OP_CBRT ->
                             VectorMath::cbrt;
 
                         case OP_GELU ->
@@ -835,14 +729,14 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
     }
 
     /**
-     * Peephole fusion: when both operands of a binary arithmetic op are
-     * plain variable loads - i.e. the last two entries in the plan are
-     * LoadCommands feeding directly into this op and nothing else - collapse
-     * them into a single fused command that reads straight from the source
-     * arrays instead of round-tripping both operands through ctx.scratch.
-     * Returns null (no fusion) for anything that doesn't match that exact
-     * shape, including OP_REM (not vectorized regardless) and OP_POW
-     * (routes through VectorMath.executePowerBlended, not a plain lane op).
+     * Peephole fusion: when both operands of a binary arithmetic op are plain
+     * variable loads - i.e. the last two entries in the plan are LoadCommands
+     * feeding directly into this op and nothing else - collapse them into a
+     * single fused command that reads straight from the source arrays instead
+     * of round-tripping both operands through ctx.scratch. Returns null (no
+     * fusion) for anything that doesn't match that exact shape, including
+     * OP_REM (not vectorized regardless) and OP_POW (routes through
+     * VectorMath.executePowerBlended, not a plain lane op).
      */
     private static VectorCommand tryFuseLoadLoad(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
         int size = plan.size();
@@ -868,34 +762,6 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
             default ->
                 null;
         };
-    }
-
-    /**
-     * Peephole fusion: when an Add/Sub's right-hand operand (rOff) was just
-     * computed by the immediately-preceding Mul or LoadLoadMul, collapse the
-     * multiply and the add/sub into a single FmaCommand/LoadLoadFmaCommand -
-     * see those records' javadoc for why this only ever needs to check rOff,
-     * never lOff, and for the subtract-shape reasoning. Returns null for any
-     * opcode other than OP_ADD/OP_SUB, or when the last plan entry isn't a
-     * Mul-family command targeting rOff.
-     */
-    private static VectorCommand tryFuseMulAddSub(List<VectorCommand> plan, int opcode, int lOff, int rOff) {
-        if (opcode != OP_ADD && opcode != OP_SUB) {
-            return null;
-        }
-        int size = plan.size();
-        if (size < 1) {
-            return null;
-        }
-        boolean subtract = (opcode == OP_SUB);
-        VectorCommand last = plan.get(size - 1);
-        if (last instanceof MulCommand mul && mul.destOff() == rOff) {
-            return new FmaCommand(mul.lOff(), mul.rOff(), lOff, lOff, subtract);
-        }
-        if (last instanceof LoadLoadMulCommand mul && mul.destOff() == rOff) {
-            return new LoadLoadFmaCommand(mul.lSlot(), mul.rSlot(), lOff, lOff, subtract);
-        }
-        return null;
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression implements AutoCloseable {
@@ -930,11 +796,12 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                 }
             }
         }
+
         /**
-         * 
+         *
          * @param executionPlan
          * @param stackDepth
-         * @param blockSize 
+         * @param blockSize
          */
         public SIMDVectorCompositeExpression(VectorCommand[] executionPlan, int stackDepth, int blockSize) {
             super(compiledScalarHandle, opcodes, targetSlots, literalConstants, instructionCount, varCount, false);
@@ -1069,14 +936,62 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
             }
         }
 
+        public void validate(double[][] variables, double[] output) {
+            // 1. Fail fast, avoid String.format unless throwing
+            if (variables == null || output == null) {
+                throw new IllegalArgumentException("Null input");
+            }
+
+            // 2. Cache values to local variables to avoid multiple array lookups
+            final int varLen = variables.length;
+            final int outLen = output.length;
+            int stride = getVarCount();
+            if (varLen != stride) {
+                throw new IllegalArgumentException("Stride mismatch");
+            }
+
+            // 3. Optional: Only check inner length if you really need absolute safety
+            // Only perform this if the performance impact of O(varCount) is acceptable.
+            for (int i = 0; i < varLen; i++) {
+                if (variables[i] == null || variables[i].length < outLen) {
+                    throw new IllegalArgumentException("Jagged array or size mismatch");
+                }
+            }
+        }
+
+        public void validate(double[] flatVariables, double[] output) {
+            int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0 ? flatVariables.length : -1;
+            int stride = getVarCount();
+            if (totalSamples != stride * output.length) {
+                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]",
+                        totalSamples, stride * output.length));
+            }
+        }
+
+        public void validate(float[][] variables, double[] output) {
+            throw new InputMismatchException("float[][] not supported only double[] and double[][]");
+        }
+
+        public void validate(float[] flatVariables, float[] output) {
+            throw new InputMismatchException("float[][] not supported only double[] and double[][]");
+        }
+
         @Override
         public void applyBulk(double[][] variables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(SIMDCommandF64.this.constantAnswer, output);
+                return;
+            }
             int numSamples = variables[0].length;
             applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
         }
 
         @Override
         public void applyBulkParallel(double[][] variables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(SIMDCommandF64.this.constantAnswer, output);
+                return;
+            }
             if (variables == null || variables.length == 0 || output == null) {
                 return;
             }
@@ -1104,6 +1019,10 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
 
         @Override
         public void applyBulkParallel(double[] flatVariables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(SIMDCommandF64.this.constantAnswer, output);
+                return;
+            }
             if (flatVariables == null || output == null) {
                 return;
             }
@@ -1131,6 +1050,10 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
 
         @Override
         public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
+            if (varCount == 0) {
+                fillOutput(SIMDCommandF64.this.constantAnswer, output);
+                return;
+            }
             EvaluationContext ctx = masterEvalContext.get();
             int numSamples = variables[0].length;
             for (int start = 0; start < numSamples; start += batchSize) {
@@ -1141,11 +1064,19 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
 
         @Override
         public void applyBulk(double[] flatVariables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(SIMDCommandF64.this.constantAnswer, output);
+                return;
+            }
             applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, output.length, output, 0, output.length);
         }
 
         @Override
         public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
+            if (varCount == 0) {
+                fillOutput(SIMDCommandF64.this.constantAnswer, output);
+                return;
+            }
             EvaluationContext ctx = masterEvalContext.get();
             int numSamples = output.length;
             for (int start = 0; start < numSamples; start += batchSize) {
@@ -1201,7 +1132,5 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
             }
         }
     }
-
-    
 
 }

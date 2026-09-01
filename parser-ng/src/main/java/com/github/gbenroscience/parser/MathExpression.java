@@ -822,6 +822,7 @@ public class MathExpression implements Savable, Solvable {
     }
 
     private void initializing(String expression) throws InputMismatchException{
+        this.expression = STRING.purifier(expression);
         computeTreeDepth();
         setCorrectFunction(true);
         setHasListReturningOperators(false);
@@ -3892,6 +3893,8 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
     public static void main(String... args) {
 
+        MathExpression buggy = new MathExpression("(sin(8+cos(3)) + 2 + ((27-5)/(8^3)*(3.14159*4^(14-10)) + sin(-3.141) + (0%4)) * 4/3 * 3/sqrt(4))+12");
+        System.out.println("buggy.solve() - "+buggy.solve());
         MathExpression m111 = new MathExpression("x=-5;if(3*x+7<5,sin(x), -3)");
         System.out.println(m111.scanner);
 

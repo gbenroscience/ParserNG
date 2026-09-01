@@ -20,9 +20,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Evaluates a compiled ParserNG expression directly over Apache Arrow columnar
- * batches, using {@link SIMDEngineF64}'s zero-copy
+ * batches, using {@link SIMDCommandSegmentF64}'s zero-copy
  * {@code MemorySegment[]}-backed bulk evaluation path — no coalescing copy, no
  * on-heap staging buffer, no per-row boxing.
+ * 
+ * Also uses {@link SIMDCommandSegmentF32}'s zero copy for Float4Vector data
  *
  * <h2>Binding model</h2>
  * Variables in the expression are bound to Arrow columns <b>by name</b>. The
@@ -59,7 +61,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <h2>Constant expressions</h2>
  * An expression that references no variables (e.g. {@code "42.0"}) compiles to
  * a zero-slot evaluator.
- * {@code SIMDEngineF64.applyBulk(MemorySegment[], ...)} treats a
+ * {@code SIMDCommandSegmentF64.applyBulk(MemorySegment[], ...)} treats a
  * zero-length variable array as a no-op by design (see its internal guard
  * clause) — left unhandled, that would silently leave the output buffer
  * untouched. This class detects that case up front and fills the output

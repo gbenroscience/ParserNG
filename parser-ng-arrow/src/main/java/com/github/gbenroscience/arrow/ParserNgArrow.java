@@ -15,7 +15,7 @@
  */
 package com.github.gbenroscience.arrow;
 
-import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64; 
+import com.github.gbenroscience.simdext.turbo.tools.command.temp.SIMDCommandF64; 
 import java.util.Arrays;
 import java.util.Random;
 /**

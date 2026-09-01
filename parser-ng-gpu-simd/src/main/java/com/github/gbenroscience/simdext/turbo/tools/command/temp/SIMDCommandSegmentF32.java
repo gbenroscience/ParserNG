@@ -1,4 +1,4 @@
-package com.github.gbenroscience.simdext.turbo.tools.command;
+package com.github.gbenroscience.simdext.turbo.tools.command.temp;
 
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
@@ -35,6 +35,7 @@ import jdk.incubator.vector.*;
  *
  *
  */
+
 public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
 
     // NOTE: VectorConfig's statically-imported `SPECIES` constant is typed VectorSpecies<Double>
@@ -906,16 +907,9 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
 
         private static final Cleaner SYSTEM_CLEANER = Cleaner.create();
 
-        // Bounded spin budget used by the spin-then-park hybrid wait below, both
-        // for a worker waiting on new dispatch and for the master fanning-in on
-        // worker completion. Avoids the syscall cost of park()/unpark() on the
-        // (extremely common) case where the wait is only a handful of nanoseconds,
-        // while still falling back to a real park so we don't burn a core forever.
-        private static final int SPIN_LIMIT = 4_000;
-        private static final long PARK_NANOS = 20_000L;
-
         private final int NUM_WORKERS;
         private final WorkerThread[] workerPool;
+        private final AtomicInteger reuseLatch;
         private final VectorCommand[] executionPlan;
         private final ThreadLocal<EvaluationContext> masterEvalContext;
         private final Cleaner.Cleanable cleanable;
@@ -961,9 +955,10 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
 
             if (this.NUM_WORKERS > 0) {
                 this.workerPool = new WorkerThread[NUM_WORKERS];
+                this.reuseLatch = new AtomicInteger(0);
 
                 for (int i = 0; i < NUM_WORKERS; i++) {
-                    workerPool[i] = new WorkerThread(i, executionPlan, stackDepth, blockSize);
+                    workerPool[i] = new WorkerThread(i, reuseLatch, executionPlan, stackDepth, blockSize);
                 }
 
                 for (int i = 0; i < NUM_WORKERS; i++) {
@@ -973,6 +968,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 this.cleanable = SYSTEM_CLEANER.register(this, new ThreadPoolShutdownAction(workerPool));
             } else {
                 this.workerPool = null;
+                this.reuseLatch = null;
                 this.cleanable = null;
             }
         }
@@ -989,52 +985,17 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             masterEvalContext.remove();
         }
 
-        /**
-         * Spin-then-park hybrid used by the master to fan-in on a single
-         * worker's completion. Replaces the old design where every worker
-         * decremented one shared AtomicInteger latch and the master parked on
-         * that - under fan-in, all NUM_WORKERS threads were hammering the same
-         * cache line on every batch. Each WorkerThread now owns its own `done`
-         * flag (padded away from its neighbors, see WorkerThread), so this is
-         * a plain, uncontended volatile read per worker.
-         */
-        private static void awaitDone(WorkerThread worker) {
-            int spins = 0;
-            while (!worker.done) {
-                if (spins < SPIN_LIMIT) {
-                    Thread.onSpinWait();
-                    spins++;
-                } else {
-                    LockSupport.parkNanos(PARK_NANOS);
-                }
-            }
-        }
-
         private static final class WorkerThread extends Thread {
 
             private final int workerId;
+            private final AtomicInteger reuseLatch;
             private final EvaluationContext evalContext;
             private final VectorCommand[] executionPlan;
             private final int blockSize;
 
             private volatile boolean isRunning = true;
-
-            // --- Padding: isolates the hot dispatch/completion fields below from
-            // whatever lands adjacent to this WorkerThread instance on the heap
-            // (e.g. the neighboring WorkerThread in workerPool[]). Without this,
-            // one worker's dispatch writes and another worker's completion flag
-            // can share a cache line and false-share on every batch, even though
-            // the two workers never touch each other's actual data. 8 longs = 64
-            // bytes on each side of the hot block, i.e. a full cache line of
-            // padding front and back. ---
-            private long fp0, fp1, fp2, fp3, fp4, fp5, fp6, fp7;
-
-            // taskState: 0 = idle/available, 1 = task dispatched, awaiting pickup.
             private volatile int taskState = 0;
-            // Per-worker completion flag. The master spins/parks on THIS field
-            // (via awaitDone) instead of a single shared AtomicInteger latch, so
-            // fan-in no longer forces every worker to contend on one cache line.
-            private volatile boolean done = true;
+            private volatile Thread masterThread;
 
             private float[][] vars2D;
             private float[] vars1D;
@@ -1047,10 +1008,9 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             private int startIdx;
             private int length;
 
-            private long bp0, bp1, bp2, bp3, bp4, bp5, bp6, bp7;
-
-            public WorkerThread(int workerId, VectorCommand[] executionPlan, int stackDepth, int blockSize) {
+            public WorkerThread(int workerId, AtomicInteger reuseLatch, VectorCommand[] executionPlan, int stackDepth, int blockSize) {
                 this.workerId = workerId;
+                this.reuseLatch = reuseLatch;
                 this.executionPlan = executionPlan;
                 this.blockSize = blockSize;
                 this.evalContext = new EvaluationContext(stackDepth, blockSize);
@@ -1058,7 +1018,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 this.setName("ParserNG-SIMD-Worker-" + workerId);
             }
 
-            public void submitTask2D(float[][] vars, float[] output, int dataSize, int startIdx, int length) {
+            public void submitTask2D(float[][] vars, float[] output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars2D = vars;
                 this.vars1D = null;
                 this.vars2DSeg = null;
@@ -1068,11 +1028,12 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
-                this.done = false;
+                this.masterThread = master;
                 this.taskState = 1;
+                LockSupport.unpark(this);
             }
 
-            public void submitTask1D(float[] vars, float[] output, int dataSize, int startIdx, int length) {
+            public void submitTask1D(float[] vars, float[] output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars1D = vars;
                 this.vars2D = null;
                 this.vars2DSeg = null;
@@ -1082,11 +1043,12 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
-                this.done = false;
+                this.masterThread = master;
                 this.taskState = 1;
+                LockSupport.unpark(this);
             }
 
-            public void submitTaskSeg2D(MemorySegment[] vars, MemorySegment output, int dataSize, int startIdx, int length) {
+            public void submitTaskSeg2D(MemorySegment[] vars, MemorySegment output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars2DSeg = vars;
                 this.vars1DSeg = null;
                 this.vars2D = null;
@@ -1096,11 +1058,12 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
-                this.done = false;
+                this.masterThread = master;
                 this.taskState = 1;
+                LockSupport.unpark(this);
             }
 
-            public void submitTaskSeg1D(MemorySegment vars, MemorySegment output, int dataSize, int startIdx, int length) {
+            public void submitTaskSeg1D(MemorySegment vars, MemorySegment output, int dataSize, int startIdx, int length, Thread master) {
                 this.vars1DSeg = vars;
                 this.vars2DSeg = null;
                 this.vars1D = null;
@@ -1110,8 +1073,9 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 this.dataSize = dataSize;
                 this.startIdx = startIdx;
                 this.length = length;
-                this.done = false;
+                this.masterThread = master;
                 this.taskState = 1;
+                LockSupport.unpark(this);
             }
 
             public void terminate() {
@@ -1123,50 +1087,36 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             public void run() {
                 CPUPinner.pinCurrentThread(this.workerId);
                 while (isRunning) {
-                    int spins = 0;
                     while (taskState == 0 && isRunning) {
-                        if (spins < SPIN_LIMIT) {
-                            Thread.onSpinWait();
-                            spins++;
-                        } else {
-                            LockSupport.parkNanos(PARK_NANOS);
-                            if (Thread.interrupted() && !isRunning) {
-                                return;
-                            }
+                        LockSupport.park();
+                        if (Thread.interrupted()) {
+                            return;
                         }
                     }
                     if (!isRunning) {
                         return;
                     }
 
-                    // try/finally: guarantees `done` is always raised and task
-                    // state always cleared, even if a bad expression or
-                    // malformed input throws mid-block. Without this, a single
-                    // faulting task would leave the master's awaitDone() loop
-                    // spinning/parking forever on a flag that never flips.
-                    try {
-                        if (vars2D != null) {
-                            applyBulkInternal(vars2D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
-                        } else if (vars1D != null) {
-                            applyBulkInternal(vars1D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
-                        } else if (vars2DSeg != null) {
-                            applyBulkInternalSeg(vars2DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
-                        } else if (vars1DSeg != null) {
-                            applyBulkInternalSeg(vars1DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
-                        }
-                    } finally {
-                        this.taskState = 0;
-                        this.vars2D = null;
-                        this.vars1D = null;
-                        this.output = null;
-                        this.vars2DSeg = null;
-                        this.vars1DSeg = null;
-                        this.outputSeg = null;
+                    if (vars2D != null) {
+                        applyBulkInternal(vars2D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
+                    } else if (vars1D != null) {
+                        applyBulkInternal(vars1D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
+                    } else if (vars2DSeg != null) {
+                        applyBulkInternalSeg(vars2DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
+                    } else if (vars1DSeg != null) {
+                        applyBulkInternalSeg(vars1DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
+                    }
 
-                        // Plain per-worker volatile write - no unpark() needed since the
-                        // master fans-in via awaitDone()'s spin-then-park hybrid, which
-                        // simply polls this flag.
-                        this.done = true;
+                    this.taskState = 0;
+                    this.vars2D = null;
+                    this.vars1D = null;
+                    this.output = null;
+                    this.vars2DSeg = null;
+                    this.vars1DSeg = null;
+                    this.outputSeg = null;
+
+                    if (reuseLatch.decrementAndGet() == 0 && masterThread != null) {
+                        LockSupport.unpark(masterThread);
                     }
                 }
             }
@@ -1236,7 +1186,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         
         // --- MemorySegment (off-heap / zero-copy) entry points ---
         // Same public contract as the float[] / float[][] variants above,
-        // reusing the same masterEvalContext / workerPool / per-worker done-flag machinery.
+        // reusing the same masterEvalContext / workerPool / reuseLatch machinery.
 
         /**
          * Validates a single flat off-heap variables segment against its
@@ -1352,39 +1302,18 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 return;
             }
 
-            // Zero-allocation chunk plan: pure local/primitive arithmetic below -
-            // no arrays, no boxing. Aligns each participant's boundary to the
-            // SIMD lane width and hands any leftover aligned units out one-per-
-            // participant instead of dumping the whole remainder on the last one.
-            final int participants = NUM_WORKERS + 1; // NUM_WORKERS background threads + the calling (master) thread
-            final int align = Math.max(1, SPECIES.length());
-            final int totalUnits = (numSamples + align - 1) / align;
-            final int baseUnits = totalUnits / participants;
-            final int extraUnits = totalUnits % participants;
-
-            int cursor = 0;
-            int masterStart = 0, masterLength = 0;
-            // Participant 0 is the master's own chunk; workers take 1..NUM_WORKERS.
-            for (int i = 0; i < participants; i++) {
-                int units = baseUnits + (i < extraUnits ? 1 : 0);
-                int len = Math.max(0, Math.min(units * align, numSamples - cursor));
-                if (i == 0) {
-                    masterStart = cursor;
-                    masterLength = len;
-                } else {
-                    workerPool[i - 1].submitTask2D(variables, output, numSamples, cursor, len);
-                }
-                cursor += len;
-            }
-
-            // The master used to just block here reserving a whole hardware thread
-            // for nothing - now it does its own slice of the work inline first.
-            if (masterLength > 0) {
-                applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStart, masterLength);
-            }
+            Thread masterThread = Thread.currentThread();
+            int chunkSize = numSamples / NUM_WORKERS;
+            reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
-                awaitDone(workerPool[i]);
+                int startIdx = i * chunkSize;
+                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
+                workerPool[i].submitTask2D(variables, output, numSamples, startIdx, length, masterThread);
+            }
+
+            while (reuseLatch.get() > 0) {
+                LockSupport.park();
             }
         }
 
@@ -1403,32 +1332,18 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 return;
             }
 
-            final int participants = NUM_WORKERS + 1;
-            final int align = Math.max(1, SPECIES.length());
-            final int totalUnits = (numSamples + align - 1) / align;
-            final int baseUnits = totalUnits / participants;
-            final int extraUnits = totalUnits % participants;
-
-            int cursor = 0;
-            int masterStart = 0, masterLength = 0;
-            for (int i = 0; i < participants; i++) {
-                int units = baseUnits + (i < extraUnits ? 1 : 0);
-                int len = Math.max(0, Math.min(units * align, numSamples - cursor));
-                if (i == 0) {
-                    masterStart = cursor;
-                    masterLength = len;
-                } else {
-                    workerPool[i - 1].submitTask1D(flatVariables, output, numSamples, cursor, len);
-                }
-                cursor += len;
-            }
-
-            if (masterLength > 0) {
-                applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStart, masterLength);
-            }
+            Thread masterThread = Thread.currentThread();
+            int chunkSize = numSamples / NUM_WORKERS;
+            reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
-                awaitDone(workerPool[i]);
+                int startIdx = i * chunkSize;
+                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
+                workerPool[i].submitTask1D(flatVariables, output, numSamples, startIdx, length, masterThread);
+            }
+
+            while (reuseLatch.get() > 0) {
+                LockSupport.park();
             }
         }
 
@@ -1468,7 +1383,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
 
         // --- MemorySegment (off-heap / zero-copy) entry points ---
         // Same public contract as the float[] / float[][] variants above,
-        // reusing the same masterEvalContext / workerPool / per-worker done-flag machinery.
+        // reusing the same masterEvalContext / workerPool / reuseLatch machinery.
         public void applyBulk(MemorySegment[] variables, MemorySegment output) {
              if (varCount == 0) {
                 fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
@@ -1493,32 +1408,18 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 return;
             }
 
-            final int participants = NUM_WORKERS + 1;
-            final int align = Math.max(1, SPECIES.length());
-            final int totalUnits = (numSamples + align - 1) / align;
-            final int baseUnits = totalUnits / participants;
-            final int extraUnits = totalUnits % participants;
-
-            int cursor = 0;
-            int masterStart = 0, masterLength = 0;
-            for (int i = 0; i < participants; i++) {
-                int units = baseUnits + (i < extraUnits ? 1 : 0);
-                int len = Math.max(0, Math.min(units * align, numSamples - cursor));
-                if (i == 0) {
-                    masterStart = cursor;
-                    masterLength = len;
-                } else {
-                    workerPool[i - 1].submitTaskSeg2D(variables, output, numSamples, cursor, len);
-                }
-                cursor += len;
-            }
-
-            if (masterLength > 0) {
-                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStart, masterLength);
-            }
+            Thread masterThread = Thread.currentThread();
+            int chunkSize = numSamples / NUM_WORKERS;
+            reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
-                awaitDone(workerPool[i]);
+                int startIdx = i * chunkSize;
+                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
+                workerPool[i].submitTaskSeg2D(variables, output, numSamples, startIdx, length, masterThread);
+            }
+
+            while (reuseLatch.get() > 0) {
+                LockSupport.park();
             }
         }
 
@@ -1546,32 +1447,18 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 return;
             }
 
-            final int participants = NUM_WORKERS + 1;
-            final int align = Math.max(1, SPECIES.length());
-            final int totalUnits = (numSamples + align - 1) / align;
-            final int baseUnits = totalUnits / participants;
-            final int extraUnits = totalUnits % participants;
-
-            int cursor = 0;
-            int masterStart = 0, masterLength = 0;
-            for (int i = 0; i < participants; i++) {
-                int units = baseUnits + (i < extraUnits ? 1 : 0);
-                int len = Math.max(0, Math.min(units * align, numSamples - cursor));
-                if (i == 0) {
-                    masterStart = cursor;
-                    masterLength = len;
-                } else {
-                    workerPool[i - 1].submitTaskSeg1D(variables, output, numSamples, cursor, len);
-                }
-                cursor += len;
-            }
-
-            if (masterLength > 0) {
-                applyBulkInternalSeg(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, masterStart, masterLength);
-            }
+            Thread masterThread = Thread.currentThread();
+            int chunkSize = numSamples / NUM_WORKERS;
+            reuseLatch.set(NUM_WORKERS);
 
             for (int i = 0; i < NUM_WORKERS; i++) {
-                awaitDone(workerPool[i]);
+                int startIdx = i * chunkSize;
+                int length = (i == NUM_WORKERS - 1) ? (numSamples - startIdx) : chunkSize;
+                workerPool[i].submitTaskSeg1D(variables, output, numSamples, startIdx, length, masterThread);
+            }
+
+            while (reuseLatch.get() > 0) {
+                LockSupport.park();
             }
         }
 

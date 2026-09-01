@@ -2,7 +2,7 @@ package com.github.gbenroscience.simdext;
 
 
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
+import com.github.gbenroscience.simdext.turbo.tools.command.temp.SIMDCommandF64;
  
 
 /**

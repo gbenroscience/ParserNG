@@ -7,8 +7,8 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.BLOCK_SIZE;
-import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF32;
-import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandF64;
+import com.github.gbenroscience.simdext.turbo.tools.command.temp.SIMDCommandF32;
+import com.github.gbenroscience.simdext.turbo.tools.command.temp.SIMDCommandF64;
 import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandSegmentF32;
 import com.github.gbenroscience.simdext.turbo.tools.command.SIMDCommandSegmentF64;
 import static org.junit.jupiter.api.Assertions.assertEquals;

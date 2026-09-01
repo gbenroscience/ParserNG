@@ -31,8 +31,9 @@ import java.util.regex.Pattern;
  * Features: - Handles numbers (integers, decimals, scientific notation like
  * 1.2e-3) - Variables (e.g., x, varName_123) - String literals, single- or
  * double-quoted, e.g. 'hello' or "hello" (see {@link #consumeStringLiteral})
- * - Binary operators: + - * / ^
- * (power, right-associative) - Unary + - ! √ (square root) - Prefix "nth
+ * - Binary operators: + - * / % ^
+ * (^ is power, right-associative; % is modulo/remainder, same precedence
+ * tier as * and /) - Unary + - ! √ (square root) - Prefix "nth
  * root" notation: a run of superscript digits immediately before '√', e.g.
  * "³√9" (cube root of 9) - Postfix Unicode superscript exponents, e.g.
  * "x²", "3³", "y²³" (== y^23) - Binary combinatoric operators nPr and nCr,
@@ -586,11 +587,12 @@ public class MathExpressionTreeDepth implements Savable {
     }
 
     /**
-     * Multiplicative-precedence tier: {@code *}, {@code /}, and the two
-     * combinatoric binary operators {@link #PERMUTATION_CHAR} ({@code Р},
-     * nPr) and {@link #COMBINATION_CHAR} ({@code Č}, nCr) all share this
-     * level, e.g. {@code 9Р3} and {@code 6Č5} bind exactly like {@code *}
-     * and {@code /} do — tighter than {@code +}/{@code -}, looser than
+     * Multiplicative-precedence tier: {@code *}, {@code /}, {@code %}
+     * (modulo/remainder), and the two combinatoric binary operators
+     * {@link #PERMUTATION_CHAR} ({@code Р}, nPr) and
+     * {@link #COMBINATION_CHAR} ({@code Č}, nCr) all share this level, e.g.
+     * {@code 9Р3} and {@code 6Č5} bind exactly like {@code *}, {@code /},
+     * and {@code %} do — tighter than {@code +}/{@code -}, looser than
      * unary/power.
      */
     private int parseMultiplicative() {
@@ -598,7 +600,7 @@ public class MathExpressionTreeDepth implements Savable {
         while (true) {
             skipWhitespace();
             char c = peek();
-            if (c == '*' || c == '/' || c == PERMUTATION_CHAR || c == COMBINATION_CHAR) {
+            if (c == '*' || c == '/' || c == '%' || c == PERMUTATION_CHAR || c == COMBINATION_CHAR) {
                 nextChar();
                 binaryOpCount++;
                 if (c == '/') {
@@ -1353,6 +1355,9 @@ public class MathExpressionTreeDepth implements Savable {
             "'a'x",                              // implicit multiplication: string juxtaposed with an identifier
             "(x+1)'y'",                          // implicit multiplication: group juxtaposed with a string
             "len('hello') + len(\"world\")",     // strings as args to two different function calls, then summed
+            "0 % 4",                             // modulo operator, same precedence tier as * and /
+            "10 % 3 + 1",                        // modulo mixed with addition (tighter binding, like * and /)
+            "(sin(8+cos(3)) + 2 + ((27-5)/(8^3) * (3.14159 * 4^(14-10)) + sin(-3.141) + (0%4)) * 4/3 * 3/sqrt(4))+12", // regression test for the previously-mishandled '%' operator
         };
 
         for (String s : tests) {
