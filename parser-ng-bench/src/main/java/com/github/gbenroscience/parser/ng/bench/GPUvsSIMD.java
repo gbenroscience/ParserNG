@@ -83,22 +83,21 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * This suite exercises {@code SIMDCommandSegmentF64}'s and
  * {@code OpenClCompositeExpression}'s zero-copy {@code MemorySegment[]}/
- * {@code MemorySegment}-backed bulk evaluation paths directly -- the same
- * {@code applyBulk(MemorySegment[], MemorySegment)} /
+ * {@code MemorySegment}-backed bulk evaluation paths directly -- the same  {@code applyBulk(MemorySegment[], MemorySegment)} /
  * {@code applyBulkParallel(MemorySegment[], MemorySegment)} shape used
- * elsewhere in this codebase, with input/output backed by a plain
- * {@link Arena} -- no Arrow buffers involved. Both evaluators are compiled
- * from a single shared {@link MathExpression} per trial so their
- * variable-to-slot mapping (from {@link MathExpression#getSlotItems()}) is
- * guaranteed identical, rather than risking two independently-parsed
- * instances disagreeing on slot order.
+ * elsewhere in this codebase, with input/output backed by a plain {@link Arena}
+ * -- no Arrow buffers involved. Both evaluators are compiled from a single
+ * shared {@link MathExpression} per trial so their variable-to-slot mapping
+ * (from {@link MathExpression#getSlotItems()}) is guaranteed identical, rather
+ * than risking two independently-parsed instances disagreeing on slot order.
  *
  * <p>
  * CAVEAT -- unverified API guess: {@code OpenClCompositeExpression}'s exact
  * bulk-apply method name was not available when this file was written.
- * {@link #parserNGGPU} calls {@code gpuEval.apply(MemorySegment[], MemorySegment)},
- * inferred by symmetry with {@code SIMDVectorCompositeExpression}'s contract.
- * If the real method is named differently (e.g. {@code evaluate(...)},
+ * {@link #parserNGGPU} calls
+ * {@code gpuEval.apply(MemorySegment[], MemorySegment)}, inferred by symmetry
+ * with {@code SIMDVectorCompositeExpression}'s contract. If the real method is
+ * named differently (e.g. {@code evaluate(...)},
  * {@code execute(...)}, or something requiring an explicit device queue /
  * completion handle rather than blocking synchronously), that single call is
  * the only line that needs to change -- input generation, output buffers, and
@@ -290,7 +289,9 @@ public class GPUvsSIMD {
 
         try {
             simdComd = SIMDCommandSegmentF64.getEvaluator(me);
-            gpuEval = (OpenClCompositeExpression) OpenClExpressionBridge.compile(me);
+            if (gpuEval == null) {
+                gpuEval = (OpenClCompositeExpression) OpenClExpressionBridge.compile(me);
+            }
         } catch (Throwable ex) {
             System.getLogger(GPUvsSIMD.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
             ex.printStackTrace();

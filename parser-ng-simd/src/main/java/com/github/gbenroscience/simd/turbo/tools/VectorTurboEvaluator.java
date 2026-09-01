@@ -579,7 +579,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
          * When the parallel processing methods are called, parallel processing
          * will kick in at this value
          */
-        public static final int PARALLEL_OPS_THRESHOLD = 524288;
+        public static final int PARALLEL_OPS_THRESHOLD = 20*1024;
         // Optimized block size designed to comfortably fit into standard CPU L1/L2 caches (1024 * 8 bytes = 8KB)
         public static final int BLOCK_SIZE = 1024;
         public static final int BLOCK_SIZE_256 = 256;

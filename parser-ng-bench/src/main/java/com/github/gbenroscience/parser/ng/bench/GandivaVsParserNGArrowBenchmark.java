@@ -56,6 +56,8 @@ import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
 import org.apache.arrow.gandiva.exceptions.GandivaException;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.runner.options.TimeValue;
 
 /**
  *
@@ -682,6 +684,12 @@ public class GandivaVsParserNGArrowBenchmark {
 
         Options opt = new OptionsBuilder()
                 .include(GandivaVsParserNGArrowBenchmark.class.getSimpleName())
+                    .mode(Mode.AverageTime)
+                    .timeUnit(TimeUnit.MICROSECONDS)
+                    .warmupIterations(5)
+                    .warmupTime(TimeValue.milliseconds(1000L))
+                    .measurementIterations(8)
+                    .measurementTime(TimeValue.milliseconds(1000L))
                 .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
                 .param("exprName", selectedNames)
                 .jvmArgsAppend(

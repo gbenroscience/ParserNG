@@ -1,8 +1,8 @@
 # ParserNG
 
 ### ParserNG 3.0.5 is out on maven-central!
-- This version features the gradual phaseout of SIMDEngineEvaluator and the phase-in of the SIMDCommand
-series. The former SIMDCommandEvaluator is also being retired for a suite of SIMDCommand classes; one for handling float64(double) data, one for handling float32(Java's float primitive) data, one each for handling MemorySegment storing doubles and MemorySegment storing floats.
+- This version features the gradual phaseout of SIMDEngineEvaluator and the phase-in of the SIMDCommand series. 
+The former SIMDCommandEvaluator is also being retired for a suite of SIMDCommand classes; one for handling float64(double) data, one for handling float32(Java's float primitive) data, one each for handling MemorySegment storing doubles and MemorySegment storing floats.
 SIMDCommandF32,
 SIMDCommandF64,
 SIMDCommandSegmentF32,
@@ -11,16 +11,18 @@ The API remains unchanged from that of the SIMDEngineEvaluator.
 SIMDCommandF32 runs faster by default than the others since it is handling float32 data.
 - The second big addition to the ParserNG runtime is the `parser-ng-arrow` extension which brings the SIMD and the GPU
 leveraging power of ParserNG to the Apache Arrow library.
-Out of the box, ArrowBulkEvaluator uses ParserNG's SIMD integration to beat the existing evaluator, Apache Gandiva on most expressions, save pure arithmetic and expressions where Gandiva can use the native hardware intrinsics (sqrt)
-where Gandiva is about 1.5x to 2x as fast. Since ParserNG comes with a parallel mode in its SIMD evaluators, if you set it to true, you will out of the box, see even more throughput depending on how many processors your device possesses.
+Out of the box, `ArrowBulkEvaluator` uses ParserNG's SIMD integration to beat the existing evaluator, Apache Gandiva on most expressions, save pure arithmetic and expressions where Gandiva can use the native hardware intrinsics (sqrt)
+where Gandiva is about 1.5x to 2x as fast. Since ParserNG comes with a parallel mode in its SIMD evaluators, if you set it to true, out of the box, you will see even more throughput depending on how many processors and how much RAM your device possesses.
 
-The second class is ArrowGpuBulkEvaluator which lets you select the GPU to use on your system to process Arrow data. It supports OpenCL and CUDA.(Feedback is needed on both paths, but especially on the CUDA path.)
-Both ArrowBulkEvaluator and ArrowGpuBulkEvaluator support Float4Vector and Float8Vector.
-For more on ArrowBulkEvaluator, see: 
+The second class is `ArrowGpuBulkEvaluator` which lets you select the GPU to use on your system to process Arrow data. It supports OpenCL and CUDA.(Feedback is needed on both paths, but especially on the CUDA path.)
+Both `ArrowBulkEvaluator` and `ArrowGpuBulkEvaluator` support `Float4Vector` and `Float8Vector`.
+For more on `ArrowBulkEvaluator`, see: 
 [parser-ng-arrow's README.md](parser-ng-arrow/README.md)
 
-For more on ArrowGpuBulkEvaluator, see: 
+For more on `ArrowGpuBulkEvaluator`, see: 
 [parser-ng-arrow's GPU README.md](parser-ng-arrow/ARROW-GPU-EVAL.md)
+
+- Thirdly, Metal framework support has been added to the  GPU bulk evaluator and the incubating LLM engines, which formerly supported CUDA and OpenCL alone, bringing the macOS ecosystem into the ParserNG GPU bulk evaluation/LLM world, or vice versa.
 
 
 ### ParserNG 3.0.4 is out on maven-central!
@@ -29,9 +31,9 @@ in the `diffeqn` and `diffeqnPath` paths. The engine has also been given a batte
 to check the engine for correctness and to give users an insight into the usage.
 Equally important in this release is the emergence of the `ARRAY` type in ParserNG.
 This is the piece that made the systems solving ability possible in ParserNG.
-Pre-dating the ARRAY type was the `VECTOR` type which was simply and array of numbers.
+Pre-dating the ARRAY type was the `VECTOR` type which was simply an array of numbers.
 The `ARRAY` type allows one to store both numbers, strings etc.
-It is also bound to the `Function` class. Soa a Funciton in ParserNG may be a VECTOR(a 1D matrix), a MATRIX, an ARRAY, or an ALGEBRAIC_EXPRESSION. You may access it with the getArray() method on the Function object.
+It is also bound to the `Function` class. So a Function in ParserNG may be a VECTOR(a 1D matrix), a MATRIX, an ARRAY, or an ALGEBRAIC_EXPRESSION. You may access it with the getArray() method on the Function object.
 
 
 More methods are layered on the MathExpression object such as `solveGenericWithThrows` and
