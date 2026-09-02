@@ -9,7 +9,7 @@
 
 [**ParserNG 3.0.5 is live**](LATEST.md) 
 - It introduces float32(Java's float type) bulk evaluators and float64(Java's primitive double type) bulk evaluators, alongside MemorySegments of double and MemorySegments of float bulk evaluators
-- It leverages this in parser-ng-arrow, a powerful, high speed integration of ParserNG witgt Apache Arrow which in its SIMD mode(ArrowBulkEvaluator), is 10-30 times faster than Apache Gandiva except on hardware intrinsics like sqrt and pure arithmetic where Gandiva may be 1.5x to 2x faster; but once ArrowBulkEvaluator is in its inbuilt parallel mode even that lead may vanish.
+- It leverages this in parser-ng-arrow, a powerful, high speed integration of ParserNG with Apache Arrow which in its SIMD mode(ArrowBulkEvaluator), is 10-30 times faster than Apache Gandiva except on hardware intrinsics like sqrt and pure arithmetic where Gandiva may be 1.5x to 2x faster; but once ArrowBulkEvaluator is in its inbuilt parallel mode even that lead may vanish.
 - To further compound speed gains, it provides ArrowGpuBulkEvaluator, which leverages the GPU to evaluate Arrow data.
 
 

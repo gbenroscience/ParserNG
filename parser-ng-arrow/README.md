@@ -1,144 +1,317 @@
 # parser-ng-arrow
 
-Zero-copy Apache Arrow bulk-evaluation bridge for [ParserNG](https://github.com/gbenroscience/ParserNG),
-built on 
-- `SIMDCommandSegmentF64`'s `applyBulk(MemorySegment[], MemorySegment)` and
-- `SIMDCommandSegmentF32`'s
-API from `parser-ng-gpu-simd`.
+Zero-copy Apache Arrow bulk-evaluation bridge for [ParserNG](https://github.com/gbenroscience/ParserNG)
+expressions, built on `parser-ng-gpu-simd`'s `SIMDCommandSegmentF64` / `SIMDCommandSegmentF32`
+`MemorySegment`-native bulk evaluation API.
+
+This README covers the CPU engine, **`ArrowBulkEvaluator`**. For the GPU-backed engine
+(`ArrowGpuBulkEvaluator`, CUDA/OpenCL), see **[ARROW-GPU-EVAL.md](ARROW-GPU-EVAL.md)** — it's
+covered only briefly below, in the "Switching backends" section.
 
 ## What this is
 
-`SIMDEngineEvaluator` already speaks `java.lang.foreign.MemorySegment` natively,
-including a per-column overload — `applyBulk(MemorySegment[] variables, MemorySegment output)`
-— designed specifically so each variable can point at its own independently-allocated
-off-heap buffer, rather than requiring one big concatenated segment. That's exactly
-Arrow's `VectorSchemaRoot` shape: each `Float8Vector` column owns its own `ArrowBuf`.
+`SIMDCommandSegmentF64` (and its float32 counterpart, `SIMDCommandSegmentF32`) already speak
+`java.lang.foreign.MemorySegment` natively, including a per-column overload —
+`applyBulk(MemorySegment[] variables, MemorySegment output)` — designed specifically so each
+variable can point at its own independently-allocated off-heap buffer, rather than requiring one
+big concatenated segment. That's exactly Arrow's `VectorSchemaRoot` shape: each `Float8Vector` /
+`Float4Vector` column owns its own `ArrowBuf`.
 
-`ArrowBulkEvaluator` binds Arrow columns to that API directly:
+`ArrowBulkEvaluator` binds Arrow columns to that API directly — no `double[]`/`float[]` copy of
+any input column happens on the way in, and results are written straight into the output
+vector's Arrow memory too. Internally, this is done via `ArrowMemoryBridge`, which wraps each
+column's `ArrowBuf` as a `MemorySegment` over the same native address
+(`MemorySegment.ofAddress(arrowBuf.memoryAddress()).reinterpret(byteSize)`) — no allocation, no
+element-by-element staging.
+
+## Quick start
 
 ```java
-try (ArrowBulkEvaluator evaluator = ArrowBulkEvaluator.builder("(x + y) * z")
-        .variables("x", "y", "z")   // must match ParserNG's internal slot order — see below
-        .build()) {
+import com.github.gbenroscience.arrow.tools.box.ArrowBulkEvaluator;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.Float8Vector;
+import org.apache.arrow.vector.VectorSchemaRoot;
 
-    try (Float8Vector result = evaluator.evaluate(vectorSchemaRoot, allocator)) {
-        // result is a normal Arrow Float8Vector
-    }
+try (BufferAllocator allocator = new RootAllocator();
+     ArrowBulkEvaluator evaluator = ArrowBulkEvaluator.compile("(x + y) * z")) {
+
+    int rowCount = 1_000_000;
+
+    // ... x, y, z are Float8Vector columns of length >= rowCount,
+    // e.g. loaded from a VectorSchemaRoot you read from an Arrow file/stream.
+    Float8Vector output = ArrowBulkEvaluator.allocateOutput(allocator, "result", rowCount);
+
+    evaluator.evaluate(java.util.Map.of("x", x, "y", y, "z", z), output);
+
+    // output now holds one (x + y) * z per row, written directly into Arrow memory.
 }
 ```
 
-No `double[]` copy of any input column happens on the way in. `ArrowSegments.ofData(...)`
-constructs a `MemorySegment` directly over each column's existing native buffer via
-`MemorySegment.ofAddress(arrowBuf.memoryAddress()).reinterpret(byteSize)`. The output
-vector's buffer is bound the same way, so results are written straight into Arrow memory
-too.
+If your columns already live together in a `VectorSchemaRoot`, skip building the `Map` yourself:
 
-Whether the *arithmetic itself* touches Arrow memory in place, or stages an operand
-into on-heap scratch first, depends on what the expression does — see
-`SIMDEngineEvaluator`'s own docs: pure `+ - * /` chains over loaded variables never
-materialize their operands into scratch; anything invoking a transcendental function,
-`POW`, a comparison, `IF`/`AND`/`OR`, or `VMA` does, for just the operand(s) that op
-consumes.
+```java
+try (ArrowBulkEvaluator evaluator = ArrowBulkEvaluator.compile("(x + y) * z")) {
+    Float8Vector output = ArrowBulkEvaluator.allocateOutput(allocator, "result", root.getRowCount());
+    evaluator.evaluate(root, output); // resolves x, y, z from root by name
+}
+```
 
-## Variable ordering
+`evaluator.close()` shuts down the evaluator's CPU-pinned worker pool (if one was created);
+always use try-with-resources or call it explicitly when done.
 
-`applyBulk(MemorySegment[], MemorySegment)` expects `variables[i]` to be the data for
-whichever variable ParserNG assigned to slot `i` when it compiled the expression.
-**Confirmed by ParserNG's author:** `MathExpression` does no exotic slot ordering —
-variables are discovered and assigned slots on a **first-appearance, left-to-right**
-basis as the expression is scanned. `"x + y * z"` binds slot 0 = `x`, slot 1 = `y`,
-slot 2 = `z`; `"z * y + x"` binds slot 0 = `z`, slot 1 = `y`, slot 2 = `x` — order
-follows the string, not any alphabetic or declaration-list convention. This is also
-consistent with what's visible in `MathExpression`'s source: each `Token(Variable v)`
-takes `frameIndex = v.getFrameIndex()` from an internal `VariableRegistry` that hands
-out slots as `Variable` objects are encountered.
+## Binding model
 
-`ArrowBulkEvaluator.Builder.variables(...)` still takes this order as an explicit
-parameter rather than auto-deriving it from the expression string — reimplementing
-ParserNG's own tokenizer here (to know that `sin` is a function name and not a
-variable, for instance) would be a real correctness risk of its own, for a module
-that isn't part of ParserNG's core. So: **pass variable names in the same
-left-to-right order they first appear in your expression string**, and a wrong
-*count* is still caught at `build()` time by a one-row smoke test against the on-heap
-path. If ParserNG ever exposes `registry.getSlots()` (or similar) publicly, `Builder`
-should gain a `variables(MathExpression)` overload that reads the order directly
-instead of relying on the caller to mirror it correctly.
+Variables in the expression are bound to Arrow columns **by name**, not by position. The
+authoritative name-to-slot mapping comes from `MathExpression.getSlotItems()`, which reflects
+exactly the variables the compiled expression actually references and the frame index each one
+occupies internally — `ArrowBulkEvaluator` does not guess at or reimplement slot ordering itself.
+
+Call `evaluator.requiredVariableNames()` to find out what names an expression needs. Every one of
+those names must have a matching entry in the `Map` (or a matching field name in the
+`VectorSchemaRoot`) you pass to `evaluate(...)`; extra map entries are simply ignored.
+
+```java
+ArrowBulkEvaluator evaluator = ArrowBulkEvaluator.compile("sin(x) + y * 2");
+String[] needed = evaluator.requiredVariableNames(); // -> ["x", "y"], order not guaranteed
+```
+
+## Precision: float64 vs float32
+
+`ArrowBulkEvaluator` supports both `Float8Vector` (float64) and `Float4Vector` (float32) columns,
+but **a single compiled instance only ever holds one real engine**:
+
+| Compile with               | Engine held | Evaluate with                          |
+|-----------------------------|-------------|------------------------------------------|
+| `compile(...)` / `compile(expr, numWorkers)` | float64     | the `Float8Vector` `evaluate(...)` overloads |
+| `compileF32(...)` / `compileF32(expr, numWorkers)` | float32     | the `Float4Vector` `evaluate(...)` overloads |
+
+Calling a `Float8Vector` overload on an instance compiled with `compileF32(...)` (or vice versa)
+throws `IllegalStateException` immediately, for any expression that references variables. The one
+exception is a **constant expression** (see below) — those succeed on either overload regardless
+of which precision the instance was compiled for, since neither engine is touched to produce the
+result.
+
+Columns of other numeric Arrow types (`IntVector`, `BigIntVector`, `DecimalVector`, ...) are
+**not** accepted directly — cast/coerce to `Float8Vector` or `Float4Vector` yourself before
+binding. `ArrowBulkEvaluator` deliberately does not perform an implicit narrowing/widening copy,
+since doing so silently would reintroduce the exact copy this module exists to eliminate.
+
+> **⚠️ Known limitation — float32 path.** The underlying float32 engine's `MemorySegment`
+> dispatch currently has an unresolved byte-stride bug affecting `compileF32(...)`/`Float4Vector`
+> `evaluate(...)` results for **any non-constant expression**. Constant float32 expressions are
+> unaffected (they never touch the engine). Until this is fixed upstream, prefer the float64
+> (`Float8Vector`) path for anything with variables in production, and treat float32 results as
+> unverified.
+
+## Constant expressions
+
+An expression that references no variables at all (e.g. `"42.0"`, or something that fully
+constant-folds) compiles to a zero-slot evaluator. `SIMDCommandSegmentF64`/`F32`'s
+`applyBulk(MemorySegment[], ...)` treats a zero-length variable array as a no-op by design — left
+unhandled, that would silently leave the output buffer untouched. `ArrowBulkEvaluator` detects
+this case up front (`isConstantExpression()`) and fills every output row directly via
+`MathExpression.solveGeneric()` instead of going through the SIMD engine at all.
+
+```java
+try (ArrowBulkEvaluator evaluator = ArrowBulkEvaluator.compile("2 * 21")) {
+    evaluator.isConstantExpression(); // true
+    Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "result", 5);
+    evaluator.evaluate(java.util.Map.of(), out); // every row == 42.0
+}
+```
+
+## Null handling
+
+Bulk evaluation reads straight from each column's raw data buffer via `ArrowMemoryBridge` — it
+does **not** inspect Arrow validity bitmaps as part of the numeric computation itself, since doing
+so would require a per-element branch that defeats the point of the SIMD fast path. `NullPolicy`
+governs whether a separate, cheap pass over the (much smaller) validity bitmaps runs afterward:
+
+- **`NullPolicy.IGNORE`** (default, via the 2- and 3-arg `evaluate` overloads) — fastest. Rows
+  where a bound input column is null are still evaluated using whatever bit pattern happens to
+  occupy that column's data buffer at that position (Arrow does **not** guarantee this is any
+  particular value); the output's own validity bitmap is left exactly as the caller supplied it.
+  Use this when you can guarantee the bound columns have no nulls, or when null handling is
+  performed separately.
+- **`NullPolicy.PROPAGATE`** — after evaluation, the output row is marked null if **any** bound
+  input column was null at that row (standard SQL/Arrow-style null propagation), by ANDing every
+  bound column's validity bitmap into the output's. The data value at a null output row is left as
+  whatever the arithmetic happened to produce — only the validity bit is authoritative once this
+  policy is used; don't read the data value at a null row without checking validity first. This
+  costs one bitwise-AND pass over the validity bitmaps per bound column — cheap relative to the
+  data evaluation itself, since validity bitmaps are 64x smaller than the corresponding data
+  buffers (1 bit per row vs. 64 bits).
+
+```java
+evaluator.evaluate(columns, output, NullPolicy.PROPAGATE);
+```
+
+## Parallel dispatch
+
+The full `evaluate(Map, Float8Vector, NullPolicy, boolean parallel)` overload exposes a `parallel`
+flag:
+
+- `parallel = true` (the default used by the shorter overloads) dispatches to the evaluator's
+  CPU-pinned worker pool via `applyBulkParallel` — recommended for standalone calls on large
+  batches.
+- `parallel = false` calls `applyBulk` directly on the calling thread — pass this if the call is
+  already running inside your own worker thread and you want to avoid nested parallelism.
+
+```java
+// Running inside our own worker pool already — avoid nested parallel dispatch.
+evaluator.evaluate(columns, output, NullPolicy.IGNORE, false);
+```
+
+Control worker count at compile time:
+
+```java
+ArrowBulkEvaluator evaluator = ArrowBulkEvaluator.compile(expr, 8); // 8 pinned workers
+ArrowBulkEvaluator evaluator = ArrowBulkEvaluator.compile(expr, 0); // library default (detected physical cores)
+```
+
+## Thread safety
+
+A single `ArrowBulkEvaluator` instance may be shared and called concurrently from multiple
+threads and will always produce correct results, but the two evaluation modes differ in how much
+actual *concurrency* you get:
+
+- Calls with `parallel = false` run fully concurrently — the underlying evaluator uses a
+  `ThreadLocal` context per caller thread.
+- Calls with `parallel = true` (the default) are internally **serialized against each other** —
+  the engine's worker-pool dispatch uses a single shared coordination structure that is only safe
+  for one external caller at a time, so concurrent parallel calls queue rather than overlap.
+
+If you need true concurrent *parallel* evaluation from multiple threads, give each thread its own
+`ArrowBulkEvaluator` (a separate `compile(...)` call) rather than sharing one.
+
+The one hard exception either way: never call `close()` while another thread may still be inside
+`evaluate(...)`.
+
+## Errors
+
+- **`ArrowBindingException`** (unchecked) — thrown when the evaluator can't bind the expression's
+  required variables to the columns supplied: a missing column, a bound column shorter than the
+  output's row count, or (via the `VectorSchemaRoot` overloads) a column present under the right
+  name but the wrong Arrow vector type. Also thrown if `output` hasn't been sized
+  (`allocateNew`/`setValueCount`) but a bound column has rows — use `allocateOutput`/
+  `allocateOutputF32` to avoid this.
+- **`IllegalStateException`** — thrown when you call an `evaluate(...)` overload for the precision
+  this instance wasn't compiled for (see "Precision" above), or when you call any method on an
+  evaluator that's already been `close()`d.
+
+## Output allocation
+
+`allocateOutput` / `allocateOutputF32` allocate a properly sized vector (`allocateNew` +
+`setValueCount`) with every validity bit pre-set to valid — the shape `evaluate(...)` expects:
+
+```java
+Float8Vector out64 = ArrowBulkEvaluator.allocateOutput(allocator, "result", rowCount);
+Float4Vector out32 = ArrowBulkEvaluator.allocateOutputF32(allocator, "result", rowCount);
+```
+
+If you already have a correctly-sized vector from elsewhere, that's fine too — just make sure
+`allocateNew(rowCount)` and `setValueCount(rowCount)` were called before passing it in.
+
+## Switching backends (CPU vs GPU)
+
+`ArrowBulkEvaluator` implements the shared `ArrowExpressionEvaluator` interface, alongside the
+GPU-backed `ArrowGpuBulkEvaluator` (CUDA/OpenCL). If a call site should stay agnostic about which
+engine actually runs — or you want "GPU if available, otherwise CPU" — compile through
+`ArrowExpressionEvaluators` instead of calling `ArrowBulkEvaluator.compile(...)` directly:
+
+```java
+import com.github.gbenroscience.arrow.tools.box.*;
+
+// Pinned to a specific backend:
+ArrowExpressionEvaluator evaluator =
+        ArrowExpressionEvaluators.compile(expr, ArrowExecutionBackend.CPU_SIMD);
+
+// "Use the GPU if there is one, otherwise fall back to CPU":
+ArrowExpressionEvaluator evaluator = ArrowExpressionEvaluators.compilePreferGpu(expr);
+```
+
+`ArrowExpressionEvaluator` intentionally leaves out `ArrowBulkEvaluator`'s `parallel` flag and
+`ArrowGpuBulkEvaluator`'s device-selection/introspection methods (`actualBackend()`,
+`deviceDescription()`, `listOpenClDevices()`, etc.) — those are backend-specific tuning knobs.
+Downcast to `ArrowBulkEvaluator` (guided by `evaluator.backend()`) when you need the `parallel`
+flag specifically, or downcast to `ArrowGpuBulkEvaluator` for GPU device selection.
+
+**For everything about the GPU engine itself** — device selection, CUDA vs OpenCL, availability
+checks, and its own known limitations — see **[ARROW-GPU-EVAL.md](ARROW-GPU-EVAL.md)**.
+
+## Variable ordering (internals, not a caller concern)
+
+`SIMDCommandSegmentF64`/`F32`'s `applyBulk(MemorySegment[], MemorySegment)` expects
+`variables[i]` to be the data for whichever variable ParserNG assigned to slot `i` when it
+compiled the expression. `ArrowBulkEvaluator` builds that array itself from
+`MathExpression.getSlotItems()` — callers bind by **name** via the `Map`/`VectorSchemaRoot`
+overloads and never need to know or supply slot order directly.
+
+(Confirmed by ParserNG's author: variables are discovered and assigned slots on a
+first-appearance, left-to-right basis as the expression is scanned — `"x + y * z"` binds slot 0 =
+`x`, slot 1 = `y`, slot 2 = `z`. This is purely an internal detail of how `ArrowBulkEvaluator`
+constructs the `MemorySegment[]`; it does not affect the public API.)
 
 ## What's zero-copy, honestly
 
 | Path | Zero-copy? |
 |---|---|
-| Input column → engine (pure `+ - * /` chains) | Yes — reads straight from `ArrowBuf` via `MemorySegment` |
-| Input column → engine (function calls, `POW`, comparisons, `IF`/`AND`/`OR`, `VMA`) | No — that operand is staged into on-heap scratch once, on first use |
-| Engine → output column | Yes — writes straight into the output `Float8Vector`'s `ArrowBuf` |
-| Non-`Float8Vector` columns (`IntVector`, `BigIntVector`, `Float4Vector`, ...) | No — `VectorCoercion` allocates and copies |
-| `NullPolicy.PROPAGATE_NULL`'s validity-bitmap merge | Technically a copy/AND over `MemorySegment`, but it's `rowCount / 8` bytes — negligible next to the `rowCount * 8`-byte data path |
+| Input column → engine (`Float8Vector`/`Float4Vector`, any expression) | Yes — reads straight from `ArrowBuf` via `MemorySegment` |
+| Engine → output column | Yes — writes straight into the output vector's `ArrowBuf` |
+| `NullPolicy.PROPAGATE`'s validity-bitmap merge | Technically a copy/AND over bitmaps, but it's `rowCount / 8` bytes — negligible next to the `rowCount * 8` (or `* 4`)-byte data path |
+| Non-`Float8Vector`/`Float4Vector` columns (`IntVector`, `BigIntVector`, `DecimalVector`, ...) | No — not supported; caller must cast/coerce upstream |
 
-## Null handling
-
-Arrow carries a validity bitmap; `double[]`/raw memory does not. `NullPolicy` makes
-you pick:
-
-- **`REJECT_ON_NULL`** (default) — scans every bound column's validity bitmap before
-  evaluating; throws `ArrowNullValueException` if any row in range is null. Safe
-  default when your pipeline is supposed to guarantee dense batches.
-- **`PROPAGATE_NULL`** — computes over every row unconditionally (preserving the
-  zero-copy fast path — no per-element branch), then sets the output vector's validity
-  bitmap to the bitwise AND of every input column's validity bitmap. The *data* value
-  in a resulting null row is whatever the kernel computed from unspecified input bytes
-  — not guaranteed `0.0` or `NaN`. Consumers must respect the validity bitmap, as with
-  any Arrow null.
+Whether the *arithmetic itself* touches Arrow memory in place, or stages an operand into on-heap
+scratch first, depends on what the expression does — see `SIMDCommandSegmentF64`/`F32`'s own docs.
 
 ## Requirements
 
-- JDK 22+ (finalized Foreign Function & Memory API — `MemorySegment.ofAddress`/`reinterpret`;
-  also matches `SIMDEngineEvaluator`'s own JDK22+ requirement for CPU pinning).
-- `jdk.incubator.vector` on the module path at compile *and* run time (`--add-modules jdk.incubator.vector`)
-  — inherited from `parser-ng-gpu-simd`.
-- `--enable-native-access=ALL-UNNAMED` at runtime — `MemorySegment.ofAddress` over an
-  arbitrary native address is a restricted method.
-- The `--add-opens` flags Arrow itself needs for its off-heap allocator on JDK 9+
-  (`java.base/java.nio`, `java.base/java.util`). See `pom.xml`'s `surefire` config for
-  the full flag set used in tests; mirror it in your own run scripts / shaded-jar
-  manifest args.
-- Linux is where `SIMDEngineEvaluator`'s CPU pinning (and therefore its
-  `applyBulkParallel` worker efficiency) is strongest, per its own class docs.
+- JDK with the Foreign Function & Memory API finalized (`MemorySegment.ofAddress`/`reinterpret`) —
+  matches `parser-ng-gpu-simd`'s own JDK requirement for CPU pinning.
+- `jdk.incubator.vector` on the module path at compile *and* run time
+  (`--add-modules jdk.incubator.vector`) — inherited from `parser-ng-gpu-simd`.
+- `--enable-native-access=ALL-UNNAMED` at runtime (or the module-qualified equivalent) —
+  `ArrowMemoryBridge` calls `MemorySegment.reinterpret(long)`, a restricted FFM method; calls will
+  throw at runtime without this flag.
+- The `--add-opens` flags Arrow itself needs for its off-heap allocator (`java.base/java.nio`,
+  `java.base/java.util`) — see `pom.xml`'s `surefire` config for the flag set used in tests, and
+  mirror it in your own run scripts / shaded-jar manifest args.
+- Linux is where the underlying engine's CPU pinning (and therefore `applyBulkParallel` worker
+  efficiency) is strongest, per its own class docs.
 
 ## Honest limitations / not done here
 
-- **Not compiled/tested in a live Maven build in this environment** — no Maven Central
-  network access was available while writing this, so `pom.xml` and the test suite are
-  written carefully against the real Arrow 25.0.0 and `SIMDEngineEvaluator` APIs but
-  have not been run through an actual `mvn test`. Run it for real before shipping.
-- **Variable ordering follows first-appearance order in the expression string**
-  (confirmed by ParserNG's author) but is still supplied by the caller rather than
-  auto-derived — get the left-to-right order right, since a wrong order is not
-  caught by anything at build or run time (only a wrong count is).
-- **Only `Float8Vector` is zero-copy.** Everything else goes through `VectorCoercion`
-  (a real copy) or needs an upstream cast.
-- **No streaming convenience yet.** Call `evaluateInto(root, output)` once per batch in
-  your own `ArrowStreamReader`/`ArrowFileReader` loop.
-- **`andValidityInto` is a scalar byte loop**, not SIMD — deliberate v1 tradeoff given
-  its tiny size relative to the data path; flagged in `ArrowSegments`' javadoc as a
-  reasonable follow-up.
-- **`DecimalVector`, `VarCharVector`, and other non-numeric-scalar types** have no
-  coercion path at all yet — `VectorCoercion.toFloat8(FieldVector, ...)` will throw
-  `UnsupportedVectorTypeException` for them.
+- **Float32 (`compileF32`/`Float4Vector`) results for non-constant expressions are currently
+  unreliable** — see the "Known limitation" callout above. Use float64 in production until this
+  is resolved.
+- **Only `Float8Vector` and `Float4Vector` are zero-copy.** Every other Arrow vector type must be
+  cast/coerced to one of these by the caller before binding — `ArrowBulkEvaluator` throws
+  `ArrowBindingException` rather than silently copying.
+- **`ArrowMemoryBridge` relies on Arrow-internal memory layout guarantees** (`ArrowBuf`'s
+  `memoryAddress()`/`capacity()` being stable and meaning what this module assumes) that this
+  module cannot independently verify at compile time. Cover it with an integration test against
+  the exact Arrow Java version pinned in your `pom.xml` before trusting it in production — ideally
+  a round-trip test that writes known values into a real `Float8Vector`, wraps it via
+  `ArrowMemoryBridge`, reads the values back through the returned segment, and asserts equality.
+- **No streaming convenience yet.** Call `evaluate(root, output, ...)` once per batch in your own
+  `ArrowStreamReader`/`ArrowFileReader` loop.
 
 ## Module layout
 
 ```
 parser-ng-arrow/
   pom.xml
+  ARROW-GPU-EVAL.md                        # GPU engine (ArrowGpuBulkEvaluator) — separate doc
   src/main/java/com/github/gbenroscience/arrow/tools/box
-    ArrowBindingException.java       
-    ArrowBulkEvaluator.java        
-    ArrowExecutionBackend.java         
-    ArrowExpressionEvaluator.java           
-    ArrowExpressionEvaluators.java           
-    ArrowGpuBulkEvaluator.java           
-    ArrowMemoryBridge.java           
-    NullPolicy.java   
+    ArrowBindingException.java
+    ArrowBulkEvaluator.java                # this README's subject — CPU, SIMD-vectorized
+    ArrowExecutionBackend.java             # CPU_SIMD / GPU_AUTO / GPU_CUDA / GPU_OPENCL
+    ArrowExpressionEvaluator.java          # shared backend-agnostic interface
+    ArrowExpressionEvaluators.java         # single entry point for compiling either backend
+    ArrowGpuBulkEvaluator.java             # GPU engine — see ARROW-GPU-EVAL.md
+    ArrowMemoryBridge.java                 # ArrowBuf <-> MemorySegment, zero-copy
+    NullPolicy.java                        # IGNORE / PROPAGATE
     package-info.java
   src/test/java/com/github/gbenroscience/arrow/tools/box
     ArrowBulkEvaluatorTest.java
