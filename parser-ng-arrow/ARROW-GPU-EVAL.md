@@ -1,9 +1,9 @@
 # ArrowGpuBulkEvaluator
 
-Evaluates a compiled [ParserNG](https://github.com/gbenroscience) expression directly over
-[Apache Arrow](https://arrow.apache.org/) `Float8Vector` columns, dispatching the bulk numeric
-work to a GPU (CUDA or OpenCL) via `GpuExpressionBridge` instead of the CPU SIMD engine used by
-[`ArrowBulkEvaluator`](./ArrowBulkEvaluator.java).
+Evaluates a compiled [ParserNG](https://github.com/gbenroscience/ParserNG) expression directly over
+[Apache Arrow](https://arrow.apache.org/) columns, dispatching the bulk numeric work to a GPU
+(CUDA or OpenCL) via `GpuExpressionBridge` instead of the CPU SIMD engine used by
+[`ArrowBulkEvaluator`](./ArrowBulkEvaluator.java) (see the main [README](./README.md) for that).
 
 It implements the shared [`ArrowExpressionEvaluator`](./ArrowExpressionEvaluator.java) interface,
 so most code should compile against that interface (via
@@ -15,6 +15,7 @@ directly — see [Switching backends](#switching-backends) below.
 - [Why a separate class from `ArrowBulkEvaluator`](#why-a-separate-class-from-arrowbulkevaluator)
 - [Binding model](#binding-model)
 - [Quick start](#quick-start)
+- [Precision: float64 and float32](#precision-float64-and-float32)
 - [Compiling / backend selection](#compiling--backend-selection)
 - [Choosing a GPU device](#choosing-a-gpu-device)
 - [Null handling](#null-handling)
@@ -27,32 +28,46 @@ directly — see [Switching backends](#switching-backends) below.
 
 ## Why a separate class from `ArrowBulkEvaluator`
 
-`SIMDCommandSegmentF64.SIMDVectorCompositeExpression.applyBulk` takes a `MemorySegment[]` — one
-independent segment per bound variable — which is exactly what lets `ArrowBulkEvaluator` bind each
-Arrow column's data buffer with **zero copying**.
+Both classes ultimately bind each Arrow column's data buffer as its own zero-copy
+`MemorySegment` and hand an array of them straight to the underlying engine — `ArrowBulkEvaluator`
+via `SIMDCommandSegmentF64`/`F32`'s `applyBulk(MemorySegment[], MemorySegment)`,
+`ArrowGpuBulkEvaluator` via `GpuCompositeExpression`'s identically-shaped
+`applyBulk(MemorySegment[], MemorySegment)` (float64) / `applyBulkF32(MemorySegment[], MemorySegment)`
+(float32). Neither path flattens or concatenates columns into one buffer, and neither copies a
+bound column's data on the way in — see [Performance notes](#performance-notes) for what does and
+doesn't allocate.
 
-`GpuCompositeExpression.applyBulk(MemorySegment, MemorySegment)` has a different contract: it takes
-a *single* input segment holding every variable concatenated column-major (slot `s`'s `rowCount`
-values occupy `[s*rowCount, (s+1)*rowCount)`). Arrow's per-column buffers are independent
-allocations, not laid out contiguously with each other, so `ArrowGpuBulkEvaluator` **cannot** offer
-the same zero-copy binding — every `evaluate()` call stages each bound column's data into its slice
-of one flat off-heap buffer before dispatch.
+So the split isn't about copy cost — it's that the two classes wrap fundamentally different
+engines with different operational characteristics worth keeping separate:
 
-That staging copy is on top of whatever host→device transfer the GPU backend itself performs. For
-small/medium batches the GPU's raw throughput usually still wins, but this is not a drop-in
-"same cost, more parallelism" swap for `ArrowBulkEvaluator` — measure for your batch sizes before
-committing to it.
+- **Dispatch target.** One drives a CPU-pinned worker pool; the other drives a GPU command
+  queue/stream (CUDA or OpenCL) with its own bootstrap, device selection, and failure modes —
+  see [Compiling / backend selection](#compiling--backend-selection) and
+  [Choosing a GPU device](#choosing-a-gpu-device), which have no CPU-side equivalent.
+- **Registry-width dispatch array.** `GpuCompositeExpression.applyBulk(MemorySegment[], ...)`
+  scatters *every* array element to the device unconditionally, and expects the array sized to
+  the expression's full variable **registry** (matching how compiled opcodes address slots by
+  absolute registry index) — not just the variables this one expression happens to reference. A
+  shared/session registry can outlive any single expression, so `ArrowGpuBulkEvaluator`
+  back-fills any registry slot this expression doesn't reference with a small zeroed placeholder,
+  scoped to that one `evaluate()` call, drawn from a lazily-grown internal scratch buffer — a
+  null entry there would NPE during the device scatter. That placeholder never touches real bound
+  column data, and this whole path is skipped (zero cost) when every registry slot is referenced,
+  which is the common case. `ArrowBulkEvaluator`'s CPU engine has no equivalent concern.
+- **Thread-safety shape.** `ArrowBulkEvaluator` has a fully-concurrent non-parallel path;
+  `ArrowGpuBulkEvaluator` does not — see [Thread safety](#thread-safety).
+- **Precision model.** One compiled `ArrowGpuBulkEvaluator` instance can evaluate *both*
+  `Float8Vector` and `Float4Vector` columns; `ArrowBulkEvaluator` needs a separate `compileF32(...)`
+  call for that — see [Precision](#precision-float64-and-float32).
 
 ## Binding model
 
 Identical to `ArrowBulkEvaluator`: variables are bound to Arrow columns **by name**. The
-authoritative name→slot mapping comes from `MathExpression.getSlotItems()`. Only `Float8Vector`
-(Arrow's float64 column type) columns are supported — this class evaluates in full double
-precision on the GPU; there is no float32 path exposed here.
+authoritative name→slot mapping comes from `MathExpression.getSlotItems()`.
 
 A zero-variable expression (e.g. `"42.0"`, or anything that fully constant-folds) never touches the
-GPU: `evaluate()` fills the output directly via the ordinary scalar solver. Check this up front with
-[`isConstantExpression()`](./ArrowGpuBulkEvaluator.java).
+GPU: `evaluate()` fills the output directly via the ordinary scalar solver on the CPU. Check this
+up front with `isConstantExpression()`.
 
 ## Quick start
 
@@ -78,6 +93,30 @@ Or bind straight from a `VectorSchemaRoot` whose field names match the expressio
 ```java
 eval.evaluate(root, out, NullPolicy.PROPAGATE);
 ```
+
+Reuse one compiled `ArrowGpuBulkEvaluator` across many `evaluate()` calls where you can —
+repeat calls over the same underlying Arrow buffers are effectively allocation-free after the
+first call; see [Performance notes](#performance-notes).
+
+## Precision: float64 and float32
+
+Unlike `ArrowBulkEvaluator`, a single compiled `ArrowGpuBulkEvaluator` instance supports **both**
+precisions — there's no `compileF32(...)` equivalent, and no `IllegalStateException` guard against
+calling the "other" precision's overload:
+
+```java
+try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile(expr)) {
+    eval.evaluate(f64Columns, f64Output);   // Float8Vector — dispatches via applyBulk
+    eval.evaluate(f32Columns, f32Output);   // Float4Vector — dispatches via applyBulkF32
+}
+```
+
+Each precision maintains its own zero-copy segment cache internally, so alternating between them
+on the same instance doesn't invalidate or re-wrap the other precision's cached segments.
+
+As with `ArrowBulkEvaluator`, columns of other numeric Arrow types (`IntVector`, `BigIntVector`,
+`DecimalVector`, ...) are not accepted directly — cast/coerce to `Float8Vector` or `Float4Vector`
+yourself before binding.
 
 ## Compiling / backend selection
 
@@ -139,7 +178,7 @@ instances keep the device they were built with, and an in-flight expression's GP
 under it. The first time a given device is selected, its context/program is built and cached;
 switching selection back and forth (e.g. across test methods) never rebuilds or recompiles
 anything for a device already used once. Confirm what an instance actually landed on with
-`deviceDescription()`, which now returns a real description for both backends:
+`deviceDescription()`, which returns a real description for both backends:
 
 ```java
 try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile(expr, GpuBackend.CUDA)) {
@@ -149,8 +188,7 @@ try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile(expr, GpuBackend
 ```
 
 The `cuda.device.index` system property keeps working exactly as before for anyone already using
-it — `selectCudaDevice(int)` just sets that same property, now read fresh on every compile instead
-of once, ever, at JVM startup.
+it — `selectCudaDevice(int)` just sets that same property, read fresh on every compile.
 
 ## Null handling
 
@@ -170,29 +208,36 @@ All binding problems throw [`ArrowBindingException`](./ArrowBindingException.jav
 - a required variable has no corresponding entry in the bound column map / `VectorSchemaRoot`
 - a bound column is shorter than the output's row count
 - the output vector hasn't been sized (`allocateNew`/`setValueCount` never called)
-- a bound `VectorSchemaRoot` field exists but isn't a `Float8Vector`
-- the GPU dispatch itself throws (wrapped with the expression text for context)
+- a bound `VectorSchemaRoot` field exists but isn't the expected vector type for the precision
+  you're evaluating (`Float8Vector` or `Float4Vector`)
+- the GPU dispatch itself throws (wrapped as `ArrowBindingException`, with the expression text
+  and the original throwable as cause, for context)
 
 A `rowCount == 0` output is only accepted if every bound column is *also* empty — otherwise it's
 treated as "you forgot to size the output", not "empty batch", and throws.
 
+Calling any method after `close()` throws `IllegalStateException`.
+
 ## Thread safety
 
 A single instance may be shared and called concurrently from multiple threads and will always
-produce correct results, but **every** `evaluate()` call is internally serialized against every
-other call on the same instance — both GPU backends dispatch through shared per-instance device
-state (a command queue/stream and kernel-arg buffers) that isn't safe for concurrent use. Unlike
+produce correct results, but **every** `evaluate()` call — across both precisions — is internally
+serialized against every other call on the same instance. Both GPU backends dispatch through
+shared per-instance device state (a command queue/stream, kernel-arg buffers, and an internal
+zero-copy segment cache reused across calls) that isn't safe for concurrent use. Unlike
 `ArrowBulkEvaluator`, there is no non-serialized fast path here.
 
-If you need true concurrent GPU evaluation from multiple threads, give each thread its own instance
-(a separate `compile()` call) rather than sharing one.
+If you need true concurrent GPU evaluation from multiple threads, give each thread its own
+instance (a separate `compile()` call) rather than sharing one.
 
 ## Lifecycle
 
 Call `close()` when done — this releases the compiled expression's device-side resources (device
-buffers and, depending on backend, a staging `Arena`). Implements `AutoCloseable`; use
-try-with-resources. `close()` is idempotent. Do not call `close()` while another thread may still be
-inside `evaluate()`. Calling `evaluate()` after `close()` throws `IllegalStateException`.
+buffers and, depending on backend, a staging `Arena`), plus any internal scratch memory allocated
+for registry-gap back-filling (see
+[Why a separate class](#why-a-separate-class-from-arrowbulkevaluator)). Implements
+`AutoCloseable`; use try-with-resources. `close()` is idempotent. Do not call `close()` while
+another thread may still be inside `evaluate()`.
 
 ## Switching backends
 
@@ -213,20 +258,30 @@ selection or introspection (`listOpenClDevices()`, `selectCudaDevice()`, `actual
 
 ## Performance notes
 
-- Every `evaluate()` call stages bound columns into one flat off-heap buffer (see
-  [Why a separate class](#why-a-separate-class-from-arrowbulkevaluator)) — this is an extra
-  host-side copy the CPU SIMD path doesn't pay.
+- Binding is zero-copy for both precisions: each bound column's Arrow data buffer is wrapped as
+  its own `MemorySegment` alias (via `ArrowMemoryBridge`) and handed straight to the GPU engine —
+  no host-side flatten/concatenation buffer, and no copy of column data, for any slot actually
+  bound to a real column.
+- Repeat `evaluate()` calls over the **same** underlying Arrow buffers (the common
+  benchmark/streaming-batch shape) are effectively allocation-free: the instance caches the last
+  wrapped `MemorySegment` per slot and only re-wraps when a column's address or requested element
+  count actually changes (e.g. Arrow reallocated the buffer, or a differently-sized batch came
+  through).
 - Constant expressions never touch the GPU.
+- Registry-gap back-filling (see
+  [Why a separate class](#why-a-separate-class-from-arrowbulkevaluator)) only allocates once, the
+  first time a batch exceeds the previous high-water mark of rows — after that it's reused as-is.
 - Prefer reusing one `ArrowGpuBulkEvaluator` instance across many `evaluate()` calls rather than
-  recompiling per batch — compilation bootstraps a device context and uploads the compiled
-  opcode program.
-- Measure against `ArrowBulkEvaluator` for your actual batch sizes; the GPU generally wins on
-  large batches and complex expressions, not necessarily on small ones.
+  recompiling per batch — compilation bootstraps a device context and uploads the compiled opcode
+  program, and repeat evaluation is what the internal caching above is optimized for.
+- Measure against `ArrowBulkEvaluator` for your actual batch sizes and expressions; which one wins
+  depends on host↔device transfer overhead vs. raw compute, not on either path doing unnecessary
+  copying.
 
 ## Testing
 
-See [`ArrowGpuBulkEvaluatorTest`](./ArrowGpuBulkEvaluatorTest.java) — 33 tests covering
+See [`ArrowGpuBulkEvaluatorTest`](./ArrowGpuBulkEvaluatorTest.java) for coverage of
 compilation/backend selection, introspection, evaluation correctness (`Map` and
-`VectorSchemaRoot` binding), error handling, `NullPolicy` behavior, lifecycle, thread safety, and
-device selection. Like `GpuCompositeExpressionTest`, most of these require an actual GPU device and
-are gated behind `-Dgpu.tests=true`.
+`VectorSchemaRoot` binding, both precisions), error handling, `NullPolicy` behavior, lifecycle,
+and thread safety. Like `GpuCompositeExpressionTest`, most of these require an actual GPU device
+and are gated behind `-Dgpu.tests=true`.
