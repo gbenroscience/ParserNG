@@ -112,7 +112,7 @@
                 <configuration>
                     <release>${maven.compiler.release}</release>
                     <compilerArgs>
-                        <!-- SIMDEngineEvaluator uses jdk.incubator.vector -->
+                        <!-- SIMDCommandXXX classes uses jdk.incubator.vector -->
                         <arg>--add-modules</arg>
                         <arg>jdk.incubator.vector</arg>
                     </compilerArgs>
@@ -123,12 +123,18 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.3.1</version>
                 <configuration>
-                    <argLine>
+                    <argLine> 
                         --add-modules=jdk.incubator.vector
                         --enable-native-access=ALL-UNNAMED
                         --add-opens=java.base/java.nio=ALL-UNNAMED
                         --add-opens=java.base/java.util=ALL-UNNAMED
+                        --add-opens=java.base/java.lang=ALL-UNNAMED
                         --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
+                        --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+                        -Dio.netty.tryReflectionSetAccessible=true
+                        -Darrow.allocation.manager.type=Unsafe
+                        -Darrow.allocation.manager.type=Direct
+                         --sun-misc-unsafe-memory-access=allow
                     </argLine>
                 </configuration>
             </plugin>

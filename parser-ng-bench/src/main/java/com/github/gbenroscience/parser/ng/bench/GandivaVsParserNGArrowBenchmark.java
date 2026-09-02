@@ -61,7 +61,7 @@ import org.openjdk.jmh.runner.options.TimeValue;
 
 /**
  *
- *
+ * RUN on LINUX ONLY!
  *
  * ParserNG Arrow vs Apache Arrow Gandiva benchmark suite.
  *

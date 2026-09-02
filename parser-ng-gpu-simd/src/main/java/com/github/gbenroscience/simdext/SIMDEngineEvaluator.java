@@ -6,7 +6,7 @@ import com.github.gbenroscience.simdext.turbo.tools.command.temp.SIMDCommandF64;
  
 /**
  * This class is maintained for backwards compatibility for existing users.
- * @deprecated Do not use this class again. The sheer size of its methods make
+ * @deprecated Do not use this class again. The sheer size of its methods in the past make
  * escape analysis fail(by the JVM) and its otherwise blazing speeds is lost
  * when this happens. Use the classes of the
  * {@link com.github.gbenroscience.simdext.turbo.tools.command.v2} package. You

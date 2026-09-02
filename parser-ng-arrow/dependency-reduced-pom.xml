@@ -39,7 +39,13 @@
                         --enable-native-access=ALL-UNNAMED
                         --add-opens=java.base/java.nio=ALL-UNNAMED
                         --add-opens=java.base/java.util=ALL-UNNAMED
-                        --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED</argLine>
+                        --add-opens=java.base/java.lang=ALL-UNNAMED
+                        --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
+                        --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+                        -Dio.netty.tryReflectionSetAccessible=true
+                        -Darrow.allocation.manager.type=Unsafe
+                        -Darrow.allocation.manager.type=Direct
+                         --sun-misc-unsafe-memory-access=allow</argLine>
         </configuration>
       </plugin>
       <plugin>
