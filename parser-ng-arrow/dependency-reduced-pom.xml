@@ -3,12 +3,13 @@
   <parent>
     <artifactId>parser-ng-parent</artifactId>
     <groupId>com.github.gbenroscience</groupId>
-    <version>3.0.5</version>
+    <version>3.0.6</version>
   </parent>
   <modelVersion>4.0.0</modelVersion>
   <artifactId>parser-ng-arrow</artifactId>
   <name>parser-ng-arrow</name>
-  <description>ParserNg's integration with Apache Arrow - setting our sights on Big Data
+  <description>ParserNg's integration with Apache Arrow - setting our sights on Big Data.
+        filter, project and filterProject added in v3.0.6
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034</description>
   <url>https://github.com/gbenroscience/ParserNG</url>
   <build>

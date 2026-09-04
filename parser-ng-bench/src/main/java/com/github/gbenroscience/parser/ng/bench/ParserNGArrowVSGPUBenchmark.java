@@ -269,10 +269,14 @@ public class ParserNGArrowVSGPUBenchmark {
      */
     // NOTE: trimmed from the original 6-point size sweep to keep total
     // runtime sane now that it's crossed with 30 expressions instead of 5.
-    @Param({
-        "1024",
-        "262144",
-        "8388608"
+    @Param({ 
+      /*  "262144",
+        "524288",
+        "1048576",
+        "8388608",
+        "16777216",*/
+        "33554432",
+        "67108864"
     })
     private int size;
 

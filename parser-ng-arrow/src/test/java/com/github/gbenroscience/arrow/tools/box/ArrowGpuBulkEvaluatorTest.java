@@ -1,11 +1,7 @@
 package com.github.gbenroscience.arrow.tools.box;
 
-import com.github.gbenroscience.arrow.tools.box.ArrowExecutionBackend;
-import com.github.gbenroscience.arrow.tools.box.ArrowBulkEvaluator;
-import com.github.gbenroscience.arrow.tools.box.ArrowGpuBulkEvaluator;
-import com.github.gbenroscience.arrow.tools.box.ArrowBindingException;
-import com.github.gbenroscience.arrow.tools.box.NullPolicy;
 import com.github.gbenroscience.gpu.GpuBackend;
+import com.github.gbenroscience.gpu.evaluator.opencl.OpenClCompositeExpression;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -52,14 +48,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (by skipping, not failing) on a machine that only has one of the two backends
  * installed.
  *
- * <p><b>Resource discipline:</b> every {@link Float8Vector} (and every
- * {@link VectorSchemaRoot}) created in a test MUST be closed before the
- * test method returns. {@code allocator} is a single {@link RootAllocator}
- * shared across the whole class and closed in {@link #tearDown()}; if any
- * vector created in a test isn't released, {@code RootAllocator.close()}
- * throws {@code IllegalStateException: Memory was leaked by query} in
- * teardown -- reported by JUnit as an "Error" on that test even though the
- * test body itself passed every assertion. Use try-with-resources on every
+ * <p>
+ * <b>Resource discipline:</b> every {@link Float8Vector} (and every
+ * {@link VectorSchemaRoot}) created in a test MUST be closed before the test
+ * method returns. {@code allocator} is a single {@link RootAllocator} shared
+ * across the whole class and closed in {@link #tearDown()}; if any vector
+ * created in a test isn't released, {@code RootAllocator.close()} throws
+ * {@code IllegalStateException: Memory was leaked by query} in teardown --
+ * reported by JUnit as an "Error" on that test even though the test body itself
+ * passed every assertion. Use try-with-resources on every
  * {@code Float8Vector}/{@code VectorSchemaRoot} you create, including ones
  * created purely to trigger a validation failure (the exception is thrown
  * before the vector would otherwise be closed, so those need it too).
@@ -101,9 +98,7 @@ class ArrowGpuBulkEvaluatorTest {
     private double[] cpuReference(String expr, String varName, double[] xs) throws Throwable {
         // Use the already-verified CPU SIMD path as the oracle for GPU-vs-CPU
         // parity, rather than guessing at a scalar per-value solve API.
-        try (ArrowBulkEvaluator cpu = ArrowBulkEvaluator.compile(expr);
-             Float8Vector x = column(varName, xs);
-             Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "cpu-out", xs.length)) {
+        try (ArrowBulkEvaluator cpu = ArrowBulkEvaluator.compile(expr); Float8Vector x = column(varName, xs); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "cpu-out", xs.length)) {
             cpu.evaluate(Map.of(varName, x), out);
             double[] result = new double[xs.length];
             for (int i = 0; i < xs.length; i++) {
@@ -244,8 +239,7 @@ class ArrowGpuBulkEvaluatorTest {
         void evaluatesLinearExpressionOverMapBinding() throws Throwable {
             try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1")) {
                 double[] xs = {1, 2, 3, 4, 5};
-                try (Float8Vector x = column("x", xs);
-                     Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", xs.length)) {
+                try (Float8Vector x = column("x", xs); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", xs.length)) {
 
                     eval.evaluate(Map.of("x", x), out);
 
@@ -261,9 +255,7 @@ class ArrowGpuBulkEvaluatorTest {
             try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x*y+2")) {
                 double[] xs = {1, 2, 3, 4};
                 double[] ys = {10, 20, 30, 40};
-                try (Float8Vector x = column("x", xs);
-                     Float8Vector y = column("y", ys);
-                     Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", xs.length)) {
+                try (Float8Vector x = column("x", xs); Float8Vector y = column("y", ys); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", xs.length)) {
 
                     Map<String, Float8Vector> columns = new HashMap<>();
                     columns.put("x", x);
@@ -279,8 +271,7 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void constantExpressionFillsOutputWithoutTouchingGpu() throws Throwable {
-            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("7*6");
-                 Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 10)) {
+            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("7*6"); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 10)) {
                 eval.evaluate(Map.of(), out);
                 for (int i = 0; i < 10; i++) {
                     assertEquals(42.0, out.get(i), 1e-9);
@@ -297,8 +288,7 @@ class ArrowGpuBulkEvaluatorTest {
                 for (int i = 0; i < n; i++) {
                     xs[i] = -6.0 + (12.0 * i) / (n - 1);
                 }
-                try (Float8Vector x = column("x", xs);
-                     Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", n)) {
+                try (Float8Vector x = column("x", xs); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", n)) {
 
                     gpu.evaluate(Map.of("x", x), out);
 
@@ -321,9 +311,7 @@ class ArrowGpuBulkEvaluatorTest {
         void evaluatesUsingVectorSchemaRootConvenienceBinding() throws Throwable {
             try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x-2")) {
                 double[] xs = {5, 6, 7};
-                try (Float8Vector x = column("x", xs);
-                     VectorSchemaRoot root = VectorSchemaRoot.of(x);
-                     Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", xs.length)) {
+                try (Float8Vector x = column("x", xs); VectorSchemaRoot root = VectorSchemaRoot.of(x); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", xs.length)) {
                     eval.evaluate(root, out);
                     for (int i = 0; i < xs.length; i++) {
                         assertEquals(xs[i] - 2, out.get(i), 1e-9);
@@ -334,16 +322,14 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void vectorSchemaRootBindingRejectsNonFloat8VectorColumn() throws Throwable {
-            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1");
-                 IntVector wrongType = new IntVector("x", allocator)) {
+            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1"); IntVector wrongType = new IntVector("x", allocator)) {
                 wrongType.allocateNew(3);
                 wrongType.set(0, 1);
                 wrongType.set(1, 2);
                 wrongType.set(2, 3);
                 wrongType.setValueCount(3);
 
-                try (VectorSchemaRoot root = VectorSchemaRoot.of(wrongType);
-                     Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
+                try (VectorSchemaRoot root = VectorSchemaRoot.of(wrongType); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
                     ArrowBindingException ex = assertThrows(ArrowBindingException.class,
                             () -> eval.evaluate(root, out));
                     assertTrue(ex.getMessage().contains("Float8Vector"));
@@ -360,9 +346,7 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void missingRequiredColumnThrowsArrowBindingException() throws Throwable {
-            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+y");
-                 Float8Vector x = column("x", 1, 2, 3);
-                 Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
+            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+y"); Float8Vector x = column("x", 1, 2, 3); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
 
                 ArrowBindingException ex = assertThrows(ArrowBindingException.class,
                         () -> eval.evaluate(Map.of("x", x), out));
@@ -372,9 +356,8 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void columnShorterThanOutputThrowsArrowBindingException() throws Throwable {
-            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1");
-                 Float8Vector x = column("x", 1, 2); // only 2 rows
-                 Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 5)) { // expects 5
+            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1"); Float8Vector x = column("x", 1, 2); // only 2 rows
+                     Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 5)) { // expects 5
 
                 ArrowBindingException ex = assertThrows(ArrowBindingException.class,
                         () -> eval.evaluate(Map.of("x", x), out));
@@ -384,9 +367,7 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void unsizedOutputVectorThrowsArrowBindingException() throws Throwable {
-            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1");
-                 Float8Vector x = column("x", 1, 2, 3);
-                 Float8Vector out = new Float8Vector("out", allocator)) { // never allocateNew/setValueCount
+            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1"); Float8Vector x = column("x", 1, 2, 3); Float8Vector out = new Float8Vector("out", allocator)) { // never allocateNew/setValueCount
 
                 assertThrows(ArrowBindingException.class,
                         () -> eval.evaluate(Map.of("x", x), out));
@@ -395,9 +376,8 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void legitimatelyEmptyBatchIsANoOp() throws Throwable {
-            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1");
-                 Float8Vector x = column("x"); // zero rows
-                 Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 0)) {
+            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1"); Float8Vector x = column("x"); // zero rows
+                     Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 0)) {
 
                 // should not throw
                 eval.evaluate(Map.of("x", x), out);
@@ -414,9 +394,7 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void ignorePolicyLeavesOutputValidityUntouched() throws Throwable {
-            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1");
-                 Float8Vector x = columnWithNullAt(1, 1, 2, 3);
-                 Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
+            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1"); Float8Vector x = columnWithNullAt(1, 1, 2, 3); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
 
                 eval.evaluate(Map.of("x", x), out, NullPolicy.IGNORE);
 
@@ -429,9 +407,7 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void propagatePolicyMarksOutputNullWhereAnyInputIsNull() throws Throwable {
-            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1");
-                 Float8Vector x = columnWithNullAt(1, 1, 2, 3);
-                 Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
+            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1"); Float8Vector x = columnWithNullAt(1, 1, 2, 3); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
 
                 eval.evaluate(Map.of("x", x), out, NullPolicy.PROPAGATE);
 
@@ -443,9 +419,7 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void propagatePolicyLeavesOutputAllValidWhenNoInputIsNull() throws Throwable {
-            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1");
-                 Float8Vector x = column("x", 1, 2, 3);
-                 Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
+            try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1"); Float8Vector x = column("x", 1, 2, 3); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
 
                 eval.evaluate(Map.of("x", x), out, NullPolicy.PROPAGATE);
 
@@ -467,8 +441,7 @@ class ArrowGpuBulkEvaluatorTest {
             ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x+1");
             eval.close();
 
-            try (Float8Vector x = column("x", 1, 2, 3);
-                 Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
+            try (Float8Vector x = column("x", 1, 2, 3); Float8Vector out = ArrowBulkEvaluator.allocateOutput(allocator, "out", 3)) {
                 assertThrows(IllegalStateException.class, () -> eval.evaluate(Map.of("x", x), out));
             }
         }
@@ -489,6 +462,7 @@ class ArrowGpuBulkEvaluatorTest {
 
         @Test
         void concurrentEvaluateCallsSerializeToCorrectResults() throws Throwable {
+            ArrowGpuBulkEvaluator.selectOpenClDevice(OpenClCompositeExpression.GpuVendor.AMD);
             try (ArrowGpuBulkEvaluator eval = ArrowGpuBulkEvaluator.compile("x*2+1")) {
                 int threadCount = 8;
                 int rowsPerCall = 500;
@@ -512,9 +486,8 @@ class ArrowGpuBulkEvaluatorTest {
                             // shared allocator (BufferAllocator is safe for
                             // concurrent use) and MUST close them itself --
                             // nothing outside this lambda will.
-                            try (Float8Vector x = column("thread-x-" + threadId, xs);
-                                 Float8Vector out = ArrowBulkEvaluator.allocateOutput(
-                                         allocator, "thread-out-" + threadId, rowsPerCall)) {
+                            try (Float8Vector x = column("thread-x-" + threadId, xs); Float8Vector out = ArrowBulkEvaluator.allocateOutput(
+                                    allocator, "thread-out-" + threadId, rowsPerCall)) {
 
                                 eval.evaluate(Map.of("x", x), out);
 

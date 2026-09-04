@@ -1,4 +1,4 @@
-# ParserNG 3.0.5 🧮⚡
+# ParserNG 3.0.6 🧮⚡
 
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?style=flat-square&color=blue)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![Downloads](https://img.shields.io/badge/Downloads-11k%2B-brightgreen?style=flat-square)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
@@ -7,7 +7,7 @@
 
 > **The fastest pure-Java math runtime — now with GPU (CUDA and OpenCL) bulk evaluators and a fully open-sourced Vector API (SIMD) kernel. Zero JNI. Zero native binaries. Zero bytecode-safety risk.**
 
-[**ParserNG 3.0.5 is live**](LATEST.md) 
+[**ParserNG 3.0.6 is live**](LATEST.md) 
 - It introduces float32(Java's float type) bulk evaluators and float64(Java's primitive double type) bulk evaluators, alongside MemorySegments of double and MemorySegments of float bulk evaluators
 - It leverages this in parser-ng-arrow, a powerful, high speed integration of ParserNG with Apache Arrow which in its SIMD mode(ArrowBulkEvaluator), is 10-30 times faster than Apache Gandiva except on hardware intrinsics like sqrt and pure arithmetic where Gandiva may be 1.5x to 2x faster; but once ArrowBulkEvaluator is in its inbuilt parallel mode even that lead may vanish.
 - To further compound speed gains, it provides ArrowGpuBulkEvaluator, which leverages the GPU to evaluate Arrow data.
@@ -214,7 +214,7 @@ evaluator.applyBulk(inputs, out);
 | **< 1.0.0** | `MathExpression` — the interpreter. ParserNG Standard. |
 | **1.0.0 – 1.x** | Turbo tier arrives: `ScalarTurboEvaluator1` (variable args as an array), `ScalarTurboEvaluator2` (variable args as widened primitives internally), and `MatrixTurboEvaluator` — all built on `MethodHandles`. |
 | **2.0.0 – 2.x** | Bulk evaluation, via mechanical sympathy *and* SIMD. `VectorTurboEvaluator` coerces auto-vectorization through code shape alone; `SIMDVectorTurboEvaluator` forces it via the explicit Vector API. Both support `applyBulkParallel(in, out)` — but JDK 21 has no CPU pinning, capping the parallel win. |
-| **3.0.5** | `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` add CPU pinning (best on Linux): 2 workers on 2 cores ≈ 1.8×–2.0× the work of 1 worker on 1 core. `SIMDEngineEvaluator` edges out `SIMDCommandTurboEvaluator` by a few ns/op. Both live in **`parser-ng-gpu-simd`** (JDK 22+) — the module that also houses the star of this release: native **GPU bulk evaluators for CUDA and OpenCL**. |
+| **3.0.6** | `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` add CPU pinning (best on Linux): 2 workers on 2 cores ≈ 1.8×–2.0× the work of 1 worker on 1 core. `SIMDEngineEvaluator` edges out `SIMDCommandTurboEvaluator` by a few ns/op. Both live in **`parser-ng-gpu-simd`** (JDK 22+) — the module that also houses the star of this release: native **GPU bulk evaluators for CUDA and OpenCL**. |
 
 Same `MathExpression` syntax at every tier. You scale up by choosing a different evaluator, never by rewriting the expression.
 
@@ -249,9 +249,9 @@ Full measured breakdowns, including GPU throughput at scale, live in [BENCHMARK_
 
 ---
 
-## 🗃️ New in 3.0.5: the `ARRAY` type
+## 🗃️ New in 3.0.6: the `ARRAY` type
 
-ParserNG has always had `@(dim)(...)` vector/matrix literals — but those are strictly numeric, backed by a `Matrix`. 3.0.5 adds a sibling: the **`ARRAY`** type, using the exact same `@(dim)(...)` syntax, but able to hold a genuine *mix* of content — numbers and strings side by side, not just numbers.
+ParserNG has always had `@(dim)(...)` vector/matrix literals — but those are strictly numeric, backed by a `Matrix`. 3.0.6 adds a sibling: the **`ARRAY`** type, using the exact same `@(dim)(...)` syntax, but able to hold a genuine *mix* of content — numbers and strings side by side, not just numbers.
 
 ```java
 MathExpression m = new MathExpression("a=@(4)('3.14', 5, \"I am here\", 32.34)");
@@ -357,7 +357,7 @@ Core interpreter, Turbo scalar/matrix tiers, and `BulkTurboEvaluator` for mechan
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.5</version>
+    <version>3.0.6</version>
 </dependency>
 
 ```
@@ -376,12 +376,12 @@ Adds `VectorTurboEvaluator` and `SIMDVectorTurboEvaluator`:
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.5</version>
+    <version>3.0.6</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.0.5</version>
+    <version>3.0.6</version>
 </dependency>
 
 ```
@@ -394,17 +394,17 @@ Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evalua
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.5</version>
+    <version>3.0.6</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.0.5</version>
+    <version>3.0.6</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-gpu-simd</artifactId>
-    <version>3.0.5</version>
+    <version>3.0.6</version>
 </dependency>
 
 ```
@@ -415,7 +415,7 @@ Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evalua
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-bench</artifactId>
-    <version>3.0.5</version>
+    <version>3.0.6</version>
 </dependency>
 
 ```
@@ -458,7 +458,7 @@ Running any of this in production? Production infrastructures requiring predicta
 * **High-Fidelity Graphical Plotting:** [GRAPHING.md](parser-ng/GRAPHING.md) — Render configuration rules for JavaFX, Swing, and Android surfaces.
 * **Bulk Vectorization Blueprints:** [BULK.md](https://www.google.com/search?q=parser-ng/BULK.md) — Optimization techniques for massive array processing.
 * **Differential Equations:** [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md) — Full `diffeqn`/`diffeqnPath`/`diffeqnHO`/`diffeqnPathHO` syntax, solver selection guide, and result-capture patterns.
-* **Release Artifact Logs:** [LATEST.md](LATEST.md) — Change logs and technical notes for v3.0.5.
+* **Release Artifact Logs:** [LATEST.md](LATEST.md) — Change logs and technical notes for v3.0.6.
 * [MORE.md](MORE.md) — Even more to know
 * [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md) — Original readme for pre-1.0 versions with a lot of, still valid, examples
 

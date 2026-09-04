@@ -1,14 +1,18 @@
 package com.github.gbenroscience.arrow.tools.box;
 
+import static com.github.gbenroscience.arrow.tools.box.ArrowBulkEvaluator.allocateOutput;
+import static com.github.gbenroscience.arrow.tools.box.ArrowBulkEvaluator.allocateOutputF32;
 import com.github.gbenroscience.gpu.GpuBackend;
 import com.github.gbenroscience.gpu.evaluator.GpuCompositeExpression;
 import com.github.gbenroscience.gpu.evaluator.GpuExpressionBridge;
 import com.github.gbenroscience.gpu.evaluator.cuda.CudaCompositeExpression;
+import com.github.gbenroscience.gpu.evaluator.metal.MetalCompositeExpression;
 import com.github.gbenroscience.gpu.evaluator.opencl.OpenClCompositeExpression;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
 
 import org.apache.arrow.memory.ArrowBuf;
+import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -68,14 +72,28 @@ import org.apache.arrow.vector.Float4Vector;
  * {@link MathExpression#getSlotItems()}.
  *
  * <h2>Type support</h2>
- * Only {@link Float8Vector} (Arrow's float64 column type) columns are
- * supported, same as {@link ArrowBulkEvaluator} — this class evaluates in full
- * double precision on the GPU (via
- * {@link GpuCompositeExpression#applyBulk(MemorySegment[], MemorySegment)}),
- * not the native float32 kernel path
- * ({@link GpuCompositeExpression#applyBulkF32}). There is currently no float32
- * counterpart here since Arrow columns bound by this class are float64 to begin
- * with.
+ * Both {@link Float8Vector} (float64) and {@link Float4Vector} (float32) Arrow
+ * columns are supported. Unlike {@link ArrowBulkEvaluator} — where float64 and
+ * float32 are genuinely different SIMD kernels compiled by
+ * {@link #compile}/{@link #compileF32} respectively, because SIMD lane width
+ * is precision-specific — a single GPU-compiled {@link GpuCompositeExpression}
+ * exposes both {@link GpuCompositeExpression#applyBulk(MemorySegment[],
+ * MemorySegment)} (float64) and {@link GpuCompositeExpression#applyBulkF32}
+ * (float32) entry points already, so one compiled kernel can dispatch either
+ * precision.
+ *
+ * <p>This class still exposes the same {@link #compile}/{@link #compileF32}
+ * pairing as {@link ArrowBulkEvaluator} — an instance built via
+ * {@link #compile} keeps its kernel in {@link #compiled}, one built via
+ * {@link #compileF32} keeps it in {@link #compiledF32} — purely so the two
+ * backends present a symmetric compile-time precision choice to shared,
+ * backend-agnostic call sites such as
+ * {@link ArrowExpressionEvaluators#filterProject}. Whichever field is
+ * populated is the one this instance dispatches every evaluation through
+ * (see {@link #activeCompiled()}); both {@code evaluate(..., Float8Vector,
+ * ...)} and {@code evaluate(..., Float4Vector, ...)} work correctly no matter
+ * which factory method produced the instance, since the underlying kernel
+ * supports both precisions regardless of which field holds it.
  *
  * <h2>Constant expressions</h2>
  * Same handling as {@link ArrowBulkEvaluator}: a zero-slot expression skips the
@@ -164,6 +182,7 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
 
     private final MathExpression expression;
     private final GpuCompositeExpression compiled;
+    private final GpuCompositeExpression compiledF32;
     private final MathExpression.Slot[] requiredSlots;
     private final String[] requiredVariableNames;
     private final int slotCount;
@@ -231,9 +250,15 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     // every call -- see evaluate(VectorSchemaRoot, ...) below.
     private final FieldVector[] rootColumnScratch; // size == requiredSlots.length
 
-    private ArrowGpuBulkEvaluator(MathExpression expression, GpuCompositeExpression compiled) {
+    private ArrowGpuBulkEvaluator(MathExpression expression, GpuCompositeExpression compiled, boolean float64) {
         this.expression = expression;
-        this.compiled = compiled;
+        if (float64) {
+            this.compiled = compiled;
+            this.compiledF32 = null;
+        }else{
+            this.compiled = null;
+            this.compiledF32 = compiled;
+        }
         this.requiredSlots = expression.getSlotItems();
         this.slotCount = expression.getRegistry().size();
         this.constantExpression = requiredSlots.length == 0;
@@ -259,10 +284,31 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     }
 
     /**
+     * The single {@link GpuCompositeExpression} this instance actually holds —
+     * {@link #compiled} for an instance built via {@link #compile}, or
+     * {@link #compiledF32} for one built via {@link #compileF32}. Exactly one
+     * of the two fields is ever non-null (see the constructor), so this is
+     * always well-defined for a successfully-constructed instance.
+     *
+     * <p>Every place in this class that needs to actually touch the compiled
+     * kernel — dispatching an evaluation, releasing it in {@link #close()}, or
+     * introspecting it in {@link #actualBackend()} / {@link
+     * #deviceDescription()} — goes through this method rather than reading
+     * {@link #compiled} directly, precisely so those call sites work no
+     * matter which factory method produced this instance. Reading {@link
+     * #compiled} directly from a {@link #compileF32}-built instance is always
+     * wrong (it's {@code null}), which is exactly the bug this centralizes
+     * the fix for.
+     */
+    private GpuCompositeExpression activeCompiled() {
+        return compiled != null ? compiled : compiledF32;
+    }
+
+    /**
      * Returns {@code cachedSlot} unchanged if it still aliases {@code buf} at
-     * the same element count (the common repeated-call case: zero
-     * allocation), otherwise re-wraps via {@link ArrowMemoryBridge#wrapDoubles}
-     * and updates the cache in place.
+     * the same element count (the common repeated-call case: zero allocation),
+     * otherwise re-wraps via {@link ArrowMemoryBridge#wrapDoubles} and updates
+     * the cache in place.
      */
     private MemorySegment cachedWrapDoubles(ArrowBuf buf, long elemCount, int slot,
             long[] addrCache, long[] elemCache, MemorySegment[] segCache) {
@@ -291,11 +337,11 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     }
 
     /**
-     * Ensures the shared gap arena has at least {@code rowCount} doubles'
-     * worth of zeroed backing memory, growing (doubling) only when the
-     * current watermark is insufficient. Reused across calls and across both
-     * the F64 and F32 gap segments (F32 just uses a prefix of the same
-     * memory, reinterpreted at half the element size).
+     * Ensures the shared gap arena has at least {@code rowCount} doubles' worth
+     * of zeroed backing memory, growing (doubling) only when the current
+     * watermark is insufficient. Reused across calls and across both the F64
+     * and F32 gap segments (F32 just uses a prefix of the same memory,
+     * reinterpreted at half the element size).
      */
     private void ensureGapCapacity(long rowCount) {
         if (gapArena != null && gapCapacityElems >= rowCount) {
@@ -341,7 +387,7 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
      * @throws java.lang.Throwable
      */
     public static ArrowGpuBulkEvaluator compile(MathExpression expression) throws Throwable {
-        return new ArrowGpuBulkEvaluator(expression, bridgeFrom(expression, null));
+        return new ArrowGpuBulkEvaluator(expression, bridgeFrom(expression, null), true);
     }
 
     /**
@@ -369,8 +415,73 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
         if (backend == null) {
             throw new NullPointerException("backend must not be null; use compile(MathExpression) to auto-select");
         }
-        return new ArrowGpuBulkEvaluator(expression, bridgeFrom(expression, backend));
+        return new ArrowGpuBulkEvaluator(expression, bridgeFrom(expression, backend), true);
     }
+    
+    
+    
+    
+    ////////////////FLOAT32 Compilation paths/////////////////////////////////////
+    
+    // =========================================================================
+    // Compilation entry points
+    // =========================================================================
+    /**
+     * Compiles {@code expr}, auto-selecting a GPU backend (CUDA preferred,
+     * OpenCL fallback). Throws whatever
+     * {@link GpuExpressionBridge#from(VectorTurboEvaluator)} throws if no
+     * usable backend is found on this machine.
+     *
+     * @param expr
+     * @return
+     * @throws java.lang.Throwable
+     */
+    public static ArrowGpuBulkEvaluator compileF32(String expr) throws Throwable {
+        return compileF32(new MathExpression(expr));
+    }
+
+    /**
+     * Compiles an already-constructed {@link MathExpression}, auto-selecting a
+     * GPU backend.
+     *
+     * @param expression
+     * @return
+     * @throws java.lang.Throwable
+     */
+    public static ArrowGpuBulkEvaluator compileF32(MathExpression expression) throws Throwable {
+        return new ArrowGpuBulkEvaluator(expression, bridgeFrom(expression, null), false);
+    }
+
+    /**
+     * Compiles {@code expr} pinned to a specific GPU backend.
+     *
+     * @param expr
+     * @param backend
+     * @return
+     * @throws java.lang.Throwable
+     */
+    public static ArrowGpuBulkEvaluator compileF32(String expr, GpuBackend backend) throws Throwable {
+        return compileF32(new MathExpression(expr), backend);
+    }
+
+    /**
+     * Compiles an already-constructed {@link MathExpression} pinned to a
+     * specific GPU backend.
+     *
+     * @param expression
+     * @param backend
+     * @return
+     * @throws java.lang.Throwable
+     */
+    public static ArrowGpuBulkEvaluator compileF32(MathExpression expression, GpuBackend backend) throws Throwable {
+        if (backend == null) {
+            throw new NullPointerException("backend must not be null; use compile(MathExpression) to auto-select");
+        }
+        return new ArrowGpuBulkEvaluator(expression, bridgeFrom(expression, backend), false);
+    }
+    
+    
+    
 
     /**
      * Builds the {@code VectorTurboEvaluator} for {@code expression} and hands
@@ -443,19 +554,24 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
      * @return
      */
     public GpuBackend actualBackend() {
-        if (compiled instanceof CudaCompositeExpression) {
+        GpuCompositeExpression active = activeCompiled();
+        if (active instanceof CudaCompositeExpression) {
             return GpuBackend.CUDA;
         }
-        if (compiled instanceof OpenClCompositeExpression) {
+        if (active instanceof OpenClCompositeExpression) {
             return GpuBackend.OPENCL;
         }
+        if (active instanceof MetalCompositeExpression) {
+            return GpuBackend.METAL;
+        }
         throw new IllegalStateException(
-                "Unrecognized GpuCompositeExpression implementation: " + compiled.getClass().getName());
+                "Unrecognized GpuCompositeExpression implementation: " + (active == null ? "null" : active.getClass().getName()));
     }
 
     @Override
     public ArrowExecutionBackend backend() {
-        return actualBackend() == GpuBackend.CUDA ? ArrowExecutionBackend.GPU_CUDA : ArrowExecutionBackend.GPU_OPENCL;
+        GpuBackend ab = actualBackend();
+        return ab == GpuBackend.CUDA ? ArrowExecutionBackend.GPU_CUDA : (ab == GpuBackend.OPENCL ? ArrowExecutionBackend.GPU_OPENCL : ArrowExecutionBackend.GPU_METAL);
     }
 
     /**
@@ -464,22 +580,26 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
      * (compute capability 8.9)"} or {@code "[platform 0: NVIDIA CUDA]
      * [device 0: NVIDIA Corporation NVIDIA GeForce RTX 4080]"}. Fixed for this
      * instance's whole lifetime — confirms which device a prior
-     * {@link #selectCudaDevice} / {@link #selectOpenClDevice} call actually
-     * resolved to. Both backends expose this
+     * {@link #selectCudaDevice} / {@link #selectOpenClDevice} / {@link #selectMetalDevice }
+     * call actually resolved to. Both backends expose this
      * ({@link CudaCompositeExpression#getDeviceDescription()} and
      * {@link OpenClCompositeExpression#getDeviceDescription()}).
      *
      * @return
      */
     public String deviceDescription() {
-        if (compiled instanceof CudaCompositeExpression cuda) {
+        GpuCompositeExpression active = activeCompiled();
+        if (active instanceof CudaCompositeExpression cuda) {
             return cuda.getDeviceDescription();
         }
-        if (compiled instanceof OpenClCompositeExpression ocl) {
+        if (active instanceof OpenClCompositeExpression ocl) {
             return ocl.getDeviceDescription();
         }
+        if (active instanceof MetalCompositeExpression mce) {
+            return mce.getDeviceDescription();
+        }
         throw new IllegalStateException(
-                "Unrecognized GpuCompositeExpression implementation: " + compiled.getClass().getName());
+                "Unrecognized GpuCompositeExpression implementation: " + (active == null ? "null" : active.getClass().getName() )  );
     }
 
     /**
@@ -581,6 +701,51 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
      */
     public static void clearCudaDeviceSelection() {
         CudaCompositeExpression.clearDeviceSelection();
+    }
+
+    /**
+     * Every Metal device this machine's driver can see, as human-readable
+     * descriptions — see
+     * {@link MetalCompositeExpression#listAvailableDevices()}. Call this first,
+     * before guessing at a substring to pass to
+     * {@link #selectMetalDevice(String)}.
+     *
+     * @return
+     */
+    public static List<String> listMetalDevices() {
+        return MetalCompositeExpression.listAvailableDevices();
+    }
+
+    /**
+     * Selects, by case-insensitive name substring match (e.g. "4080", "A100",
+     * "RTX"), which Metal device the NEXT compiled
+     * {@link ArrowGpuBulkEvaluator} (with a Metal-selecting backend) will use.
+     * See {@link MetalCompositeExpression#selectDevice(String)} for the exact
+     * matching rules. Already-compiled instances are unaffected.
+     *
+     * @param nameSubstring
+     */
+    public static void selectMetalDevice(String nameSubstring) {
+        MetalCompositeExpression.selectDevice(nameSubstring);
+    }
+
+    /**
+     * Selects an exact device index for the NEXT compiled instance. See
+     * {@link MetalCompositeExpression#selectDevice(int)}.
+     *
+     * @param deviceIndex
+     */
+    public static void selectMetalDevice(int deviceIndex) {
+        MetalCompositeExpression.selectDevice(deviceIndex);
+    }
+
+    /**
+     * Reverts Metal device selection to the default (device 0), for instances
+     * compiled after this call. See
+     * {@link MetalCompositeExpression#clearDeviceSelection()}.
+     */
+    public static void clearMetalDeviceSelection() {
+        MetalCompositeExpression.clearDeviceSelection();
     }
 
     // =========================================================================
@@ -754,9 +919,18 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
         }
     }
 
+    /**
+     * Dispatches a float64 evaluation through {@link #activeCompiled()} — the
+     * kernel this instance actually holds, whichever of {@link #compiled} /
+     * {@link #compiledF32} that turns out to be. A {@link #compileF32}-built
+     * instance can still serve a float64 {@code evaluate(...)} call this way,
+     * since the underlying {@link GpuCompositeExpression} kernel supports both
+     * precisions regardless of which field it's stored in — see the class
+     * javadoc's "Type support" section.
+     */
     private void dispatch(MemorySegment[] variableSegments, MemorySegment outSeg) {
         try {
-            compiled.applyBulk(variableSegments, outSeg);
+            activeCompiled().applyBulk(variableSegments, outSeg);
         } catch (ArrowBindingException e) {
             throw e;
         } catch (Throwable t) {
@@ -777,14 +951,14 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
      * Convenience overload that resolves each required variable's column by
      * name from {@code root} instead of a caller-built {@code Map}.
      *
-     * <p><b>AZAAP note:</b> this used to build a fresh {@code HashMap} (and
+     * <p>
+     * <b>AZAAP note:</b> this used to build a fresh {@code HashMap} (and
      * therefore a fresh {@code Node} per required variable) on every single
      * call just to immediately hand it to {@link #evaluate(Map, Float8Vector,
      * NullPolicy)} and throw it away. That's replaced below with direct
-     * slot-indexed resolution into the reused {@link #rootColumnScratch}
-     * array, feeding the same instance-level segment cache the {@code Map}
-     * overload uses -- no {@code Map}, no per-slot boxing, on the repeat-call
-     * path.
+     * slot-indexed resolution into the reused {@link #rootColumnScratch} array,
+     * feeding the same instance-level segment cache the {@code Map} overload
+     * uses -- no {@code Map}, no per-slot boxing, on the repeat-call path.
      *
      * @param root
      * @param output
@@ -885,8 +1059,8 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     /**
      * Convenience overload that resolves each required variable's column by
      * name from {@code root} instead of a caller-built {@code Map}. See the
-     * AZAAP note on the {@link Float8Vector} overload above -- same fix
-     * applies here.
+     * AZAAP note on the {@link Float8Vector} overload above -- same fix applies
+     * here.
      *
      * @param root
      * @param output
@@ -1012,8 +1186,8 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     }
 
     /**
-     * Same as {@link #propagateNulls(Map, Float8Vector, int)} but sourced
-     * from the already-resolved {@link #rootColumnScratch} array (indexed in
+     * Same as {@link #propagateNulls(Map, Float8Vector, int)} but sourced from
+     * the already-resolved {@link #rootColumnScratch} array (indexed in
      * {@link #requiredSlots} order) instead of a {@code Map} lookup, for the
      * {@code VectorSchemaRoot} overload's allocation-free path.
      */
@@ -1136,10 +1310,18 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
         }
     }
 
-    // Dedicated Float32 dispatch path calling applyBulkF32
+    /**
+     * Dispatches a float32 evaluation through {@link #activeCompiled()} — see
+     * {@link #dispatch(MemorySegment[], MemorySegment)}'s javadoc; the same
+     * reasoning applies here. Prior to this fix this method unconditionally
+     * called {@code compiled.applyBulkF32(...)}, which threw
+     * {@link NullPointerException} for any instance built via
+     * {@link #compileF32} (where {@link #compiled} is {@code null} and the
+     * real kernel lives in {@link #compiledF32}).
+     */
     private void dispatchF32(MemorySegment[] variableSegments, MemorySegment outSeg) {
         try {
-            compiled.applyBulkF32(variableSegments, outSeg);
+            activeCompiled().applyBulkF32(variableSegments, outSeg);
         } catch (ArrowBindingException e) {
             throw e;
         } catch (Throwable t) {
@@ -1173,8 +1355,8 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     }
 
     /**
-     * Same as {@link #propagateNulls(Map, Float4Vector, int)} but sourced
-     * from the already-resolved {@link #rootColumnScratch} array instead of a
+     * Same as {@link #propagateNulls(Map, Float4Vector, int)} but sourced from
+     * the already-resolved {@link #rootColumnScratch} array instead of a
      * {@code Map} lookup, for the {@code VectorSchemaRoot} overload's
      * allocation-free path.
      */
@@ -1201,42 +1383,6 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
         }
     }
 
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     private void fillConstant(Float4Vector output, int rowCount) {
         float value = (float) expression.solveGeneric().scalar;
         for (int i = 0; i < rowCount; i++) {
@@ -1253,10 +1399,95 @@ public final class ArrowGpuBulkEvaluator implements ArrowExpressionEvaluator {
     @Override
     public void close() {
         if (closed.compareAndSet(false, true)) {
-            compiled.close();
+            GpuCompositeExpression active = activeCompiled();
+            if (active != null) {
+                active.close();
+            }
             if (gapArena != null) {
                 gapArena.close();
             }
         }
+    }
+
+    public static final boolean isFloat64(VectorSchemaRoot root) {
+        for (FieldVector vector : root.getFieldVectors()) {
+            if (!(vector instanceof Float8Vector)) {
+                return false;
+            }
+        }
+        return !root.getFieldVectors().isEmpty();
+    }
+
+    /**
+     * Filters {@code root} by evaluating this instance's compiled expression as
+     * a boolean predicate over its rows, on the GPU.
+     *
+     * <p>
+     * Same truthiness and null-handling contract as
+     * {@link ArrowBulkEvaluator#filter(VectorSchemaRoot, NullPolicy)}: a
+     * predicate result of {@code 0.0} is {@code false}, anything else
+     * (including {@code NaN} and infinities) is {@code true}, and under
+     * {@link NullPolicy#PROPAGATE} a null predicate result excludes the row.
+     * The predicate is computed via the {@link Float8Vector} {@code
+     * evaluate(...)} path when {@code root}'s columns are all float64, or via
+     * the {@link Float4Vector} path otherwise (see {@link #isFloat64}) — into a
+     * throwaway output vector that never leaves this method. This works
+     * correctly regardless of whether this instance was built via
+     * {@link #compile} or {@link #compileF32}: see the class javadoc's "Type
+     * support" section for why a single compiled kernel serves both
+     * precisions.
+     *
+     * <p>
+     * The result batch preserves {@code root}'s schema and column order.
+     * Selected rows are copied — never aliased — via each column's
+     * {@code copyFromSafe}, using a {@link BufferAllocator} taken from
+     * {@code root}'s own first column.
+     *
+     * @param root Arrow record batch containing the columns referenced by the
+     * compiled predicate
+     * @param nullPolicy how Arrow validity bitmaps and null predicate values
+     * are handled — see the null-handling note above
+     * @return a new Arrow record batch containing only rows for which the
+     * compiled predicate evaluates to a truthy value
+     * @throws NullPointerException if {@code root} or {@code nullPolicy} is
+     * null
+     * @throws ArrowBindingException if {@code root} has no columns, a required
+     * variable's column is missing or of the wrong vector type, or the GPU
+     * dispatch itself throws
+     */
+    @Override
+    public VectorSchemaRoot filter(VectorSchemaRoot root, NullPolicy nullPolicy) {
+        ensureOpen();
+        if (root == null) {
+            throw new NullPointerException("root must not be null");
+        }
+        if (nullPolicy == null) {
+            throw new NullPointerException("nullPolicy must not be null");
+        }
+
+        int rowCount = root.getRowCount();
+        BufferAllocator allocator = ArrowFilterSupport.resolveAllocator(root);
+
+        int[] selected;
+        if (rowCount == 0) {
+            selected = new int[0];
+        } else if (isFloat64(root)) {
+            try (Float8Vector predicate = allocateOutput(allocator, "__parser_ng_filter_predicate__", rowCount)) {
+                evaluate(root, predicate, nullPolicy);
+                selected = ArrowFilterSupport.selectIndices(predicate, nullPolicy);
+            }
+        } else {
+            try (Float4Vector predicate = allocateOutputF32(allocator, "__parser_ng_filter_predicate__", rowCount)) {
+                evaluate(root, predicate, nullPolicy);
+                selected = ArrowFilterSupport.selectIndices(predicate, nullPolicy);
+            }
+        }
+
+        return ArrowFilterSupport.materializeSelectedRows(root, selected, allocator);
+    }
+
+    @Override
+    public VectorSchemaRoot filter(VectorSchemaRoot root) {
+        return ArrowExpressionEvaluator.super.filter(root);
     }
 }

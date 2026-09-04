@@ -284,20 +284,7 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
     public ArrowExecutionBackend backend() {
         return ArrowExecutionBackend.CPU_SIMD;
     }
-
-    /**
-     * Which precision this specific instance was actually compiled for.
-     * Calling an {@code evaluate(...)} overload for the OTHER precision
-     * throws {@link IllegalStateException} for anything with variables — see
-     * the class javadoc's "Type support" section.
-     *
-     * @return true if this instance holds a float64 engine (built via
-     * {@link #compile}), false if it holds a float32 engine (built via
-     * {@link #compileF32})
-     */
-    public boolean isFloat64() {
-        return compiled != null;
-    }
+ 
 
     // =========================================================================
     // Evaluation — Map<String, Float8Vector> binding
@@ -737,5 +724,78 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
                 compiledF32.close();
             }
         }
+    }
+
+    /**
+     * Filters {@code root} by evaluating this instance's compiled expression
+     * as a boolean predicate over its rows.
+     *
+     * <p>This class has no dedicated boolean vector type — see
+     * {@link ArrowExpressionEvaluator}'s float64/float32-only surface — so
+     * the predicate is computed via the ordinary {@code evaluate(...)} path,
+     * using whichever precision this instance was compiled for (see
+     * {@link #isFloat64()}), into a throwaway output vector that never
+     * leaves this method. The result is interpreted with C-style
+     * truthiness: {@code 0.0}/{@code 0.0f} is {@code false}; anything else
+     * (including {@code NaN} and infinities) is {@code true}.
+     *
+     * <p>Under {@link NullPolicy#PROPAGATE}, a row whose predicate result is
+     * null (because a bound input column was null there) is excluded from
+     * the result — standard SQL {@code WHERE} semantics, where an unknown
+     * predicate is not true. Under {@link NullPolicy#IGNORE}, validity
+     * bitmaps are never consulted and the row is kept or dropped purely on
+     * whatever value the arithmetic produced.
+     *
+     * <p>The result batch preserves {@code root}'s schema and column order.
+     * Selected rows are copied — never aliased — via each column's
+     * {@code copyFromSafe}, using a {@link BufferAllocator} taken from
+     * {@code root}'s own first column.
+     *
+     * @param root Arrow record batch containing the columns referenced by
+     * the compiled predicate
+     * @param nullPolicy how Arrow validity bitmaps and null predicate values
+     * are handled — see the null-handling note above
+     * @return a new Arrow record batch containing only rows for which the
+     * compiled predicate evaluates to a truthy value
+     * @throws NullPointerException if {@code root} or {@code nullPolicy} is
+     * null
+     * @throws ArrowBindingException if {@code root} has no columns (there is
+     * then no allocator to build the result batch from), or if a required
+     * variable's column is missing or of the wrong vector type
+     */
+    @Override
+    public VectorSchemaRoot filter(VectorSchemaRoot root, NullPolicy nullPolicy) {
+        ensureOpen();
+        if (root == null) {
+            throw new NullPointerException("root must not be null");
+        }
+        if (nullPolicy == null) {
+            throw new NullPointerException("nullPolicy must not be null");
+        }
+
+        int rowCount = root.getRowCount();
+        BufferAllocator allocator = ArrowFilterSupport.resolveAllocator(root);
+
+        int[] selected;
+        if (rowCount == 0) {
+            selected = new int[0];
+        } else if (ArrowGpuBulkEvaluator.isFloat64(root)) {
+            try (Float8Vector predicate = allocateOutput(allocator, "__parser_ng_filter_predicate__", rowCount)) {
+                evaluate(root, predicate, nullPolicy, true);
+                selected = ArrowFilterSupport.selectIndices(predicate, nullPolicy);
+            }
+        } else {
+            try (Float4Vector predicate = allocateOutputF32(allocator, "__parser_ng_filter_predicate__", rowCount)) {
+                evaluate(root, predicate, nullPolicy, true);
+                selected = ArrowFilterSupport.selectIndices(predicate, nullPolicy);
+            }
+        }
+
+        return ArrowFilterSupport.materializeSelectedRows(root, selected, allocator);
+    }
+
+    @Override
+    public VectorSchemaRoot filter(VectorSchemaRoot root) {
+        return ArrowExpressionEvaluator.super.filter(root);
     }
 }

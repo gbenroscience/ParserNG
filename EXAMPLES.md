@@ -1,4 +1,4 @@
-# ParserNG 3.0.5 🧮⚡ 
+# ParserNG 3.0.6 🧮⚡ 
 ### The Fastest, Interpreted(non-compiling) Math Runtime for Java.
 
 ## GPU bulk evaluation comes to ParserNG in v3.0.x
@@ -33,11 +33,11 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![License](https://img.shields.io/github/license/gbenroscience/ParserNG?color=blue)](https://github.com/gbenroscience/ParserNG/blob/master/LICENSE)
 ![Java](https://img.shields.io/badge/Java-8%2B-orange)
-![Latest Version](https://img.shields.io/badge/version-3.0.5-success)
+![Latest Version](https://img.shields.io/badge/version-3.0.6-success)
 
-> **3.0.5** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
+> **3.0.6** introduces **Turbo Scalar** and **Turbo Matrix** compiled paths + massive speed improvements via strength reduction, constant folding, and O(1) frame-based argument passing.
 
-## ✨ Highlights (v3.0.5)
+## ✨ Highlights (v3.0.6)
 
 - **Speed champion** — rivals Janino in most benchmarks, and beats exp4J, com.expression.parser and Parsii in every benchmark (see [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md))
 - Hardware accelerated(GPU and CPU) math functions
@@ -60,12 +60,12 @@ Perfect for scientific computing, simulations, real-time systems, education tool
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.5</version>
+    <version>3.0.6</version>
 </dependency>
 ```
 
 Also available on **Maven Central**:  
-https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng/3.0.5
+https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng/3.0.6
 
 ## 🧮 Standard Mode — The old way
 
@@ -387,10 +387,10 @@ System.out.println("turbo: " + evr);
 ## ⌨️ Command-line tool (REPL)
 
 ```bash
-java -jar parser-ng-3.0.5.jar "sin(x) + cos(x)"
-java -jar parser-ng-3.0.5.jar "eigvalues(R=@(5,5)(...))"
-java -jar parser-ng-3.0.5.jar help
-java -jar parser-ng-3.0.5.jar -i          # interactive mode
+java -jar parser-ng-3.0.6.jar "sin(x) + cos(x)"
+java -jar parser-ng-3.0.6.jar "eigvalues(R=@(5,5)(...))"
+java -jar parser-ng-3.0.6.jar help
+java -jar parser-ng-3.0.6.jar -i          # interactive mode
 ```
 
 ## 📊 Supported Features at a Glance
@@ -412,8 +412,8 @@ Full list: run `help` or `new MathExpression("help").solve()`.
 - [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) — full speed comparisons
 - [VECTOR-API.md](parser-ng/BULK.md) — full speed comparisons
 - [GRAPHING.md](GRAPHING.md) — plotting on Swing / JavaFX / Android
-- [LATEST.md](LATEST.md) — what’s new in 3.0.5
-- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/3.0.5
+- [LATEST.md](LATEST.md) — what’s new in 3.0.6
+- Javadoc: https://javadoc.io/doc/com.github.gbenroscience/parser-ng/3.0.6
 - [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md) — Original readme for pre-1.0 versions with a lot of, still valid, examples
 
 ## ❤️ Support the Project
@@ -431,7 +431,7 @@ ParserNG is built with love in my free time. If it helps you:
 
 ---
 
-**ParserNG 3.0.5** — faster than the competition, stronger on matrices, and now with real Turbo Scalar + Turbo Matrix compiled power.
+**ParserNG 3.0.6** — faster than the competition, stronger on matrices, and now with real Turbo Scalar + Turbo Matrix compiled power.
 
 Happy parsing! 🚀  
 — **GBENRO JIBOYE** (@gbenroscience)

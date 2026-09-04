@@ -1,5 +1,10 @@
 # ParserNG
 
+### PasrserNG 3.0.6 is out on maven-central
+This version takes `parser-ng-arrow` to the next level by adding the `filter`, the `project` and the `filterProject` methods.
+This extends ParserNG's reach into BigData as not just an evaluator, but also as a query(non-SQL) engine fo BigData. This functionalities are available across the CPU and GPU.
+Enjoy!
+
 ### ParserNG 3.0.5 is out on maven-central!
 - This version features the gradual phaseout of SIMDEngineEvaluator and the phase-in of the SIMDCommand series. 
 The former SIMDCommandEvaluator is also being retired for a suite of SIMDCommand classes; one for handling float64(double) data, one for handling float32(Java's float primitive) data, one each for handling MemorySegment storing doubles and MemorySegment storing floats.

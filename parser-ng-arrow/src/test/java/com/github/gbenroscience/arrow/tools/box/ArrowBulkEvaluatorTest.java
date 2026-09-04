@@ -711,7 +711,7 @@ class ArrowBulkEvaluatorTest {
 
     @Test
     void test40_evaluate_veryLargeRowCount_completesAndMatchesReference() throws Throwable {
-        int n = 10_000_000;
+        int n = 100_000_000;
         double[] xData = randomData(n, 36);
         var evaluator = compile("x*2.0 - sqrt(abs(x))");
         Float8Vector x = column("x", xData);

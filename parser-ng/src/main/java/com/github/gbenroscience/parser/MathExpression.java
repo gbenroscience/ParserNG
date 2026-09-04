@@ -3893,6 +3893,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
     public static void main(String... args) {
 
+        System.out.println("x=3;y=2;x<3&&y>-2 -->> " + new MathExpression("x=3;y=2;x<3&&y>-2").solve());
         MathExpression buggy = new MathExpression("(sin(8+cos(3)) + 2 + ((27-5)/(8^3)*(3.14159*4^(14-10)) + sin(-3.141) + (0%4)) * 4/3 * 3/sqrt(4))+12");
         System.out.println("buggy.solve() - "+buggy.solve());
         MathExpression m111 = new MathExpression("x=-5;if(3*x+7<5,sin(x), -3)");

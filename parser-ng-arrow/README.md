@@ -24,6 +24,12 @@ column's `ArrowBuf` as a `MemorySegment` over the same native address
 (`MemorySegment.ofAddress(arrowBuf.memoryAddress()).reinterpret(byteSize)`) — no allocation, no
 element-by-element staging.
 
+On top of that per-row evaluation, the shared `ArrowExpressionEvaluator` interface also provides
+`filter` (row selection via a compiled boolean predicate), `project` (append a computed column),
+and `filterProject` (a fused filter-then-project pass, so the projection only ever runs over the
+rows that survive the filter) — see [Filtering and projection](#filtering-and-projection-filter-project-filterproject)
+below.
+
 ## Quick start
 
 ```java
@@ -96,13 +102,6 @@ Columns of other numeric Arrow types (`IntVector`, `BigIntVector`, `DecimalVecto
 **not** accepted directly — cast/coerce to `Float8Vector` or `Float4Vector` yourself before
 binding. `ArrowBulkEvaluator` deliberately does not perform an implicit narrowing/widening copy,
 since doing so silently would reintroduce the exact copy this module exists to eliminate.
-
-> **⚠️ Known limitation — float32 path.** The underlying float32 engine's `MemorySegment`
-> dispatch currently has an unresolved byte-stride bug affecting `compileF32(...)`/`Float4Vector`
-> `evaluate(...)` results for **any non-constant expression**. Constant float32 expressions are
-> unaffected (they never touch the engine). Until this is fixed upstream, prefer the float64
-> (`Float8Vector`) path for anything with variables in production, and treat float32 results as
-> unverified.
 
 ## Constant expressions
 
@@ -213,6 +212,101 @@ Float4Vector out32 = ArrowBulkEvaluator.allocateOutputF32(allocator, "result", r
 If you already have a correctly-sized vector from elsewhere, that's fine too — just make sure
 `allocateNew(rowCount)` and `setValueCount(rowCount)` were called before passing it in.
 
+## Filtering and projection: `filter`, `project`, `filterProject`
+
+Beyond per-row `evaluate(...)`, every `ArrowExpressionEvaluator` — so `ArrowBulkEvaluator`
+included — supports three higher-level, Arrow-batch-in/Arrow-batch-out operations, all driven by
+the same compiled expression machinery above. None of these require a new kind of expression;
+`filter` just treats this evaluator's result as a boolean predicate (C-style truthiness: `0.0` is
+false, anything else — including negatives, `NaN`, infinities — is true).
+
+| Method | Rows | Columns | Analogous SQL |
+|---|---|---|---|
+| `filter(root)` | keeps only rows where the predicate is true | unchanged | `SELECT * WHERE <expr>` |
+| `project(root, name)` | unchanged | adds one new column | `SELECT *, <expr> AS name` |
+| `filterProject(root, projection, name)` | keeps only rows where **this** predicate is true | adds one new column, computed by `projection`, only over the surviving rows | `SELECT *, <expr2> AS name WHERE <expr1>` |
+
+### `filter` — row selection
+
+```java
+try (BufferAllocator allocator = new RootAllocator();
+     ArrowBulkEvaluator isHot = ArrowBulkEvaluator.compile("temperature > 90.0")) {
+
+    // root is a VectorSchemaRoot with float64 columns, e.g. "temperature", "sensor_id", ...
+    VectorSchemaRoot hotReadings = isHot.filter(root); // NullPolicy.IGNORE by default
+
+    // hotReadings has the same schema as root, but only the rows that ran hot.
+}
+```
+
+### `project` — adding a computed column
+
+```java
+try (ArrowBulkEvaluator score = ArrowBulkEvaluator.compile("0.5*rsi + 0.3*macd + 0.2*volume_z")) {
+    VectorSchemaRoot scored = score.project(root, "score");
+
+    // scored == root's columns + a new "score" column, one value per existing row.
+}
+```
+
+### `filterProject` — the fused form, and why it's not just `filter` then `project`
+
+`filterProject` runs this evaluator as the predicate, gathers only the surviving rows, and *then*
+runs a second, independently-compiled expression as the projection — over just those surviving
+rows, not the original batch. That ordering is the entire point: if `projection` is at all
+expensive and the predicate is selective, you skip computing it for every row that's about to be
+thrown away.
+
+```java
+try (ArrowBulkEvaluator liquidAndVolatile =
+             ArrowBulkEvaluator.compile("volume > 1_000_000 && atr > 2.5");
+     ArrowBulkEvaluator riskAdjustedScore =
+             ArrowBulkEvaluator.compile("0.5*rsi + 0.3*macd + 0.2*volume_z")) {
+
+    // root has 1,000,000 rows; say ~5% pass the liquidity/volatility screen.
+    VectorSchemaRoot result = liquidAndVolatile.filterProject(
+            root, riskAdjustedScore, "risk_adjusted_score");
+
+    // result has ~50,000 rows: root's columns, restricted to the screened rows,
+    // plus "risk_adjusted_score" — computed only for those ~50,000 rows, not all 1,000,000.
+}
+```
+
+`projection` doesn't have to share a backend with the predicate — a `CPU_SIMD` filter can drive a
+GPU-evaluated projection (or vice versa), since each stage dispatches through its own
+`evaluate(...)` independently. It does, however, need to be compiled for the same precision
+(float64/float32) as `root`, same as the predicate.
+
+A second example — flagging and scoring anomalous sensor readings, computing an expensive
+correction only for the rows that actually need it:
+
+```java
+try (ArrowBulkEvaluator isAnomalous =
+             ArrowBulkEvaluator.compile("abs(reading - rolling_mean) > 3 * rolling_stddev");
+     ArrowBulkEvaluator correctedValue =
+             ArrowBulkEvaluator.compile("reading - sign(reading - rolling_mean) * rolling_stddev")) {
+
+    VectorSchemaRoot corrected = isAnomalous.filterProject(root, correctedValue, "corrected_reading");
+    // Only the anomalous rows are kept, each with its correction attached;
+    // correctedValue never runs over the (presumably much larger) set of normal readings.
+}
+```
+
+Both `filter`/`project`/`filterProject` accept an explicit `NullPolicy` overload too
+(`filter(root, NullPolicy.PROPAGATE)`, etc.) — semantics match `evaluate(...)`'s null handling
+described above, applied to the predicate for `filter`/`filterProject` and to the computed column
+for `project`/`filterProject`.
+
+`filter` and `filterProject` copy the surviving rows into a new `VectorSchemaRoot` (there's no way
+to select a row subset without copying in Arrow's columnar layout); `project` does not copy
+`root`'s existing columns at all — only the new column is freshly allocated — which is what makes
+`project` considerably cheaper than `filter` for large batches when you don't also need to drop
+rows. `filterProject` pays the row-copy cost once (for the smaller, filtered batch), never for the
+original batch.
+
+If no rows survive the predicate, `filter` and `filterProject` both return a valid, empty
+(zero-row) `VectorSchemaRoot` with the expected schema — not `null` and not an exception.
+
 ## Switching backends (CPU vs GPU)
 
 `ArrowBulkEvaluator` implements the shared `ArrowExpressionEvaluator` interface, alongside the
@@ -282,9 +376,6 @@ scratch first, depends on what the expression does — see `SIMDCommandSegmentF6
 
 ## Honest limitations / not done here
 
-- **Float32 (`compileF32`/`Float4Vector`) results for non-constant expressions are currently
-  unreliable** — see the "Known limitation" callout above. Use float64 in production until this
-  is resolved.
 - **Only `Float8Vector` and `Float4Vector` are zero-copy.** Every other Arrow vector type must be
   cast/coerced to one of these by the caller before binding — `ArrowBulkEvaluator` throws
   `ArrowBindingException` rather than silently copying.
@@ -309,6 +400,7 @@ parser-ng-arrow/
     ArrowExecutionBackend.java             # CPU_SIMD / GPU_AUTO / GPU_CUDA / GPU_OPENCL
     ArrowExpressionEvaluator.java          # shared backend-agnostic interface
     ArrowExpressionEvaluators.java         # single entry point for compiling either backend
+    ArrowFilterSupport.java                # shared filter()/project() row-select & column-append logic
     ArrowGpuBulkEvaluator.java             # GPU engine — see ARROW-GPU-EVAL.md
     ArrowMemoryBridge.java                 # ArrowBuf <-> MemorySegment, zero-copy
     NullPolicy.java                        # IGNORE / PROPAGATE

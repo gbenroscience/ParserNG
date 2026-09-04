@@ -40,5 +40,7 @@ public enum ArrowExecutionBackend {
     GPU_CUDA,
 
     /** {@link ArrowGpuBulkEvaluator} pinned to the OpenCL backend. */
-    GPU_OPENCL
+    GPU_OPENCL,
+    /** {@link ArrowGpuBulkEvaluator} pinned to the Metal backend. */
+    GPU_METAL
 }
