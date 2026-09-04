@@ -12,6 +12,7 @@
 - It puts all of that to work in **parser-ng-arrow**: a true zero-copy bridge between ParserNG and Apache Arrow, letting you evaluate any runtime string expression, filter rows, and project computed columns directly over Arrow's columnar memory, no serialization, no staging buffers, no leaving the Arrow buffer at all. In its SIMD mode (`ArrowBulkEvaluator`), it beats Apache Gandiva by 10 to 30 times on every transcendental function: `sin`, `cos`, `log`, `exp`, and the rest of the set. Gandiva still edges it out on hardware-intrinsic `sqrt` and plain arithmetic, by 1.5x to 2x, but flip on `ArrowBulkEvaluator`'s built-in parallelism and that gap is gone at just 2 workers.
 - For workloads that want more than the CPU can give, `ArrowGpuBulkEvaluator` dispatches the same expressions straight to CUDA, OpenCL, or Metal, with zero JNI and zero native binaries anywhere in your build.
 - Version 3.0.6 rounds this out with real query power: `filter`, `project`, and `filterProject`. These aren't a SQL engine, and they're no replacement for Gandiva or DataFusion, but for math-heavy numeric expressions over Arrow batches, they're the faster tool for the job. `filterProject` fuses row selection with column computation so your projection never runs on a row about to be thrown away. When your expressions are float/float64-heavy, `parser-ng-arrow` is the faster choice, by a lot.
+Check out [parser-ng-arrow here](parser-ng-arrow/README.md) 
 
 ### `filter`, `project`, and `filterProject` in action
 
