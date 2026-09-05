@@ -685,7 +685,7 @@ public final class ArrowExpressionEvaluators {
         VectorSchemaRoot root = createFloatRoot(xArr, yArr);
         printVectorSchemaRoot(root);
         try {
-            VectorSchemaRoot vsr = filterProject(root, "x<500", "x", "y", "if(sin(x) > 0, tan(x), 0.2)", "sin(x)", "x^3");
+            VectorSchemaRoot vsr = filterProject(root, "(x >= 200 && x <= 300) || ( x==4 || y==15)", "x", "y", "if(sin(x) > 0, tan(x), 0.2)", "sin(x)", "x^3");
             printVectorSchemaRoot(vsr);
         } catch (Throwable ex) {
             System.getLogger(ArrowExpressionEvaluators.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);

@@ -12,7 +12,6 @@
 - It puts all of that to work in **parser-ng-arrow**: a true zero-copy bridge between ParserNG and Apache Arrow, letting you evaluate any runtime string expression, filter rows, and project computed columns directly over Arrow's columnar memory, no serialization, no staging buffers, no leaving the Arrow buffer at all. In its SIMD mode (`ArrowBulkEvaluator`), it beats Apache Gandiva by 10 to 30 times on every transcendental function: `sin`, `cos`, `log`, `exp`, and the rest of the set. Gandiva still edges it out on hardware-intrinsic `sqrt` and plain arithmetic, by 1.5x to 2x, but flip on `ArrowBulkEvaluator`'s built-in parallelism and that gap is gone at just 2 workers.
 - For workloads that want more than the CPU can give, `ArrowGpuBulkEvaluator` dispatches the same expressions straight to CUDA, OpenCL, or Metal, with zero JNI and zero native binaries anywhere in your build.
 - Version 3.0.6 rounds this out with real query power: `filter`, `project`, and `filterProject`. These aren't a SQL engine, and they're no replacement for Gandiva or DataFusion, but for math-heavy numeric expressions over Arrow batches, they're the faster tool for the job. `filterProject` fuses row selection with column computation so your projection never runs on a row about to be thrown away. When your expressions are float/float64-heavy, `parser-ng-arrow` is the faster choice, by a lot.
-Check out [parser-ng-arrow here](parser-ng-arrow/README.md) 
 
 ### `filter`, `project`, and `filterProject` in action
 
@@ -40,21 +39,41 @@ try (ArrowBulkEvaluator costPerRequest =
 }
 ```
 
-**`filterProject`, healthcare/IoT: early-warning scoring over a stream of patient vitals**
+**`filterProject`, healthcare/IoT: two ways to score early-warning risk from a stream of patient vitals**
+
+The first is `ArrowExpressionEvaluators.filterProject`, an ad-hoc, SQL-`WHERE`/`SELECT`-shaped convenience. Every expression, predicate included, is plain text compiled fresh on this one call, the right shape when the alert rule itself is something a clinician configured at runtime and isn't worth precompiling:
+
+```java
+VectorSchemaRoot atRisk = ArrowExpressionEvaluators.filterProject(
+        vitalsBatch,
+        "heart_rate > 120 || spo2 < 92",
+        "patient_id", "heart_rate", "spo2",
+        "0.4 * (heart_rate - 100) + 0.6 * (94 - spo2)");
+// Only the patients whose vitals actually crossed the threshold survive the filter.
+// "patient_id", "heart_rate", and "spo2" pass straight through unchanged, zero copy,
+// recognized as bare column names rather than routed through the expression engine at all.
+// The last one is computed fresh, only over the rows that survived, and comes back
+// named after its own trimmed expression text. The result holds exactly these four
+// columns, nothing else from vitalsBatch tags along uninvited.
+```
+
+The second is the precompiled instance-method form covered above, the right shape once that same rule is going to run against every batch streaming off a bedside monitor, not just once:
 
 ```java
 try (ArrowBulkEvaluator isAbnormal = ArrowBulkEvaluator.compile("heart_rate > 120 || spo2 < 92");
      ArrowBulkEvaluator earlyWarningScore =
              ArrowBulkEvaluator.compile("0.4 * (heart_rate - 100) + 0.6 * (94 - spo2)")) {
 
-    VectorSchemaRoot atRisk = isAbnormal.filterProject(vitalsBatch, earlyWarningScore, "ews_score");
-    // Only the readings that actually crossed a clinical threshold get scored.
-    // The early-warning-score expression never spends a single cycle on the
-    // overwhelming majority of vitals that are perfectly normal, which is exactly
-    // the kind of fusion that matters when the data is coming off a bedside monitor
-    // in real time, not off a nightly batch job.
+    VectorSchemaRoot scored = isAbnormal.filterProject(vitalsBatch, earlyWarningScore, "ews_score");
+    // Same fusion guarantee (the score never runs on a normal reading), but this time
+    // the predicate and the projection are compiled once and reused across every batch
+    // this monitor streams, instead of being recompiled on every single call the way
+    // the ad-hoc form above always is. This form also keeps vitalsBatch's full schema
+    // and simply appends "ews_score" as a new column, rather than returning only the
+    // columns you named.
 }
 ```
+
 
 **ParserNG** is an ultra-high-performance mathematical runtime built for modern JVM workloads: real-time plotting pipelines, financial modeling, and deep learning activation functions (SwiGLU, GELU, and the rest of the Transformer toolkit). By adopting a hardware-aligned, fast-interpreted memory model instead of risky dynamic bytecode generation, ParserNG eliminates classloader bloat, protects your runtime from native segmentation faults, and dramatically simplifies your Software Bill of Materials (SBOM) compliance posture.
 

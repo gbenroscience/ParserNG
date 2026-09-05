@@ -544,6 +544,108 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
     }
 
     /**
+     * Ad-hoc, SQL-{@code WHERE}/{@code SELECT}-shaped filter + multi-column
+     * projection, run on this evaluator's own execution backend.
+     *
+     * <p>This is the instance-method mirror of
+     * {@link ArrowExpressionEvaluators#filterProject(VectorSchemaRoot, String,
+     * ArrowExecutionBackend, NullPolicy, String...)}, provided here purely for
+     * convenience so code already holding an {@link ArrowExpressionEvaluator}
+     * doesn't need a separate reference to {@link ArrowExpressionEvaluators}
+     * to run an unrelated ad-hoc query on the same backend. For example:
+     * <pre>
+     * VectorSchemaRoot result = someEvaluator.filterProject(
+     *         root,
+     *         "x &gt; 10 &amp;&amp; y &lt; 20",
+     *         "x", "y", "x * y", "sqrt(x*x + y*y)");
+     * </pre>
+     * behaves identically to calling
+     * {@code ArrowExpressionEvaluators.filterProject(root, "x > 10 && y < 20",
+     * someEvaluator.backend(), NullPolicy.IGNORE, "x", "y", "x * y", "sqrt(x*x
+     * + y*y)")} — this method's entire body is that one delegating call.
+     *
+     * <h2>{@code this} evaluator's own compiled expression is not used here</h2>
+     * Read that again before reaching for this method: unlike every other
+     * method on this interface, {@code this} instance's own expression takes
+     * no part in the computation — it is not the predicate, and it is not one
+     * of the projections. {@code predicateExpr} and every entry in
+     * {@code projections} are compiled fresh from their raw text (or, for a
+     * bare column name, resolved as a zero-copy passthrough — see the static
+     * method's javadoc for the full passthrough-vs-computed rule), exactly as
+     * they would be through the static method directly. The only thing this
+     * evaluator instance actually contributes is the answer to
+     * {@link #backend()} — which backend the predicate and every computed
+     * projection get compiled and dispatched against. If you don't specifically
+     * want "run this ad-hoc query on the same backend as an evaluator I
+     * already have on hand," calling
+     * {@link ArrowExpressionEvaluators#filterProject(VectorSchemaRoot, String,
+     * ArrowExecutionBackend, NullPolicy, String...)} directly is no less
+     * capable and doesn't require holding an unrelated evaluator instance
+     * around to call it.
+     *
+     * <h2>No compilation reuse</h2>
+     * This offers no performance advantage over the static method — it
+     * compiles {@code predicateExpr} and every non-passthrough projection
+     * fresh on every call, and closes them again before returning, precisely
+     * as {@link ArrowExpressionEvaluators#filterProject} does. For a
+     * predicate/projection set that will run repeatedly over many batches,
+     * compile once and reuse instances via
+     * {@link #filterProject(VectorSchemaRoot, ArrowExpressionEvaluator,
+     * String, NullPolicy)} instead.
+     *
+     * @param root Arrow record batch to filter and project
+     * @param predicateExpr ParserNG boolean expression selecting rows;
+     * compiled fresh against {@link #backend()}
+     * @param nullPolicy how Arrow validity bitmaps are handled, for both the
+     * filtering stage and every computed projection column
+     * @param projections one or more ParserNG expressions naming the output
+     * columns, in order — see
+     * {@link ArrowExpressionEvaluators#filterProject(VectorSchemaRoot, String,
+     * ArrowExecutionBackend, NullPolicy, String...)} for the passthrough vs.
+     * computed column rule; must contain at least one entry
+     * @return a new batch containing exactly the requested projection
+     * columns, over exactly the rows selected by {@code predicateExpr}
+     * @throws NullPointerException if {@code root}, {@code predicateExpr}, or
+     * {@code nullPolicy} is null, or if any individual projection string is
+     * null
+     * @throws IllegalArgumentException if {@code projections} is null, empty,
+     * or contains a blank string
+     * @throws ArrowBindingException if {@code root} has no columns, or if a
+     * required variable's column (for the predicate or any projection) is
+     * missing or of the wrong vector type
+     * @throws java.lang.Throwable if {@code predicateExpr} or any projection
+     * expression fails to compile, or if evaluation fails
+     */
+    default VectorSchemaRoot filterProject(
+            VectorSchemaRoot root,
+            String predicateExpr,
+            NullPolicy nullPolicy,
+            String... projections) throws Throwable {
+        return ArrowExpressionEvaluators.filterProject(root, predicateExpr, backend(), nullPolicy, projections);
+    }
+
+    /**
+     * Convenience overload for {@link #filterProject(VectorSchemaRoot, String,
+     * NullPolicy, String...)} using {@link NullPolicy#IGNORE}.
+     *
+     * @param root Arrow record batch to filter and project
+     * @param predicateExpr ParserNG boolean expression selecting rows;
+     * compiled fresh against {@link #backend()}
+     * @param projections one or more ParserNG expressions naming the output
+     * columns, in order; must contain at least one entry
+     * @return a new batch containing exactly the requested projection
+     * columns, over exactly the rows selected by {@code predicateExpr}
+     * @throws java.lang.Throwable if {@code predicateExpr} or any projection
+     * expression fails to compile, or if evaluation fails
+     */
+    default VectorSchemaRoot filterProject(
+            VectorSchemaRoot root,
+            String predicateExpr,
+            String... projections) throws Throwable {
+        return filterProject(root, predicateExpr, NullPolicy.IGNORE, projections);
+    }
+
+    /**
      * The variable names this expression requires, in no particular order.
      *
      * @return required variable names
