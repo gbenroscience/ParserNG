@@ -342,10 +342,10 @@ compiled the expression. `ArrowBulkEvaluator` builds that array itself from
 `MathExpression.getSlotItems()` — callers bind by **name** via the `Map`/`VectorSchemaRoot`
 overloads and never need to know or supply slot order directly.
 
-(Confirmed by ParserNG's author: variables are discovered and assigned slots on a
+Note that variables are discovered and assigned slots on a
 first-appearance, left-to-right basis as the expression is scanned — `"x + y * z"` binds slot 0 =
 `x`, slot 1 = `y`, slot 2 = `z`. This is purely an internal detail of how `ArrowBulkEvaluator`
-constructs the `MemorySegment[]`; it does not affect the public API.)
+constructs the `MemorySegment[]`; it does not affect the public API.
 
 ## What's zero-copy, honestly
 
