@@ -310,17 +310,11 @@ class SIMDCommandF64SegmentTest {
         // about what callers currently depend on.
         var evaluator = compile("42.0");
         double[] out = new double[100];
-        java.util.Arrays.fill(out, -999.0); // sentinel so we can detect a no-op
+        
         MemorySegment outSeg = MemorySegment.ofArray(out);
-        try{
-        evaluator.applyBulk(new MemorySegment[0], outSeg);
-            assertTrue(false, "Index exception should have been thrown for missing variable slots since expression is a constant one");
-        }catch(IndexOutOfBoundsException e){
-            assertTrue(true, "constant expression does not need to be evaluated on a bulk scale");
-            return;
-        }
+        evaluator.applyBulk(new MemorySegment[100], outSeg);
         for (double v : out) {
-            assertEquals(-999.0, v, 0.0,
+            assertEquals(42, v, 0.0,
                     "Expected current no-op behavior for varCount==0 expressions — "
                     + "if this now fails, either the guard was removed (good, but verify "
                     + "intentionally) or something else changed unexpectedly.");
