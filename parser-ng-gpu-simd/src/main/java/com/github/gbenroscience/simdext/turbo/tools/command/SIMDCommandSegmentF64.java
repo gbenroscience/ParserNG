@@ -1102,109 +1102,90 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
 // --- Comparisons ---
     record CompareCommand(int lOff, int rOff, int destOff, int opcode) implements VectorCommand, DirectOutputCommand {
 
+        // Computes s[lOff+k..] OP s[rOff+k..] as a VectorMask, per the same
+        // truthiness rules compareScalar() below applies to the tail. Shared
+        // by execute() and executeToOutput() so the opcode -> comparison
+        // mapping exists in exactly one place instead of being duplicated
+        // across two switch statements (as it was before this vectorization).
+        // OP_AND/OP_OR are built from two NE-vs-zero masks combined with
+        // mask.and()/mask.or() -- the vectorized form of the same C-style
+        // "nonzero is true" rule the scalar path already used.
+        private VectorMask<Double> compareMask(double[] s, int k) {
+            DoubleVector lv = DoubleVector.fromArray(SPECIES, s, lOff + k);
+            DoubleVector rv = DoubleVector.fromArray(SPECIES, s, rOff + k);
+            return switch (opcode) {
+                case OP_GT ->
+                    lv.compare(VectorOperators.GT, rv);
+                case OP_LT ->
+                    lv.compare(VectorOperators.LT, rv);
+                case OP_EQ ->
+                    lv.compare(VectorOperators.EQ, rv);
+                case OP_NE ->
+                    lv.compare(VectorOperators.NE, rv);
+                case OP_GE ->
+                    lv.compare(VectorOperators.GE, rv);
+                case OP_LE ->
+                    lv.compare(VectorOperators.LE, rv);
+                case OP_AND ->
+                    lv.compare(VectorOperators.NE, 0.0).and(rv.compare(VectorOperators.NE, 0.0));
+                case OP_OR ->
+                    lv.compare(VectorOperators.NE, 0.0).or(rv.compare(VectorOperators.NE, 0.0));
+                default ->
+                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            };
+        }
+
+        // Scalar ground truth for the tail -- must stay in lockstep with
+        // compareMask()'s per-lane semantics above.
+        private static boolean compareScalar(int opcode, double l, double r) {
+            return switch (opcode) {
+                case OP_GT ->
+                    l > r;
+                case OP_LT ->
+                    l < r;
+                case OP_EQ ->
+                    l == r;
+                case OP_NE ->
+                    l != r;
+                case OP_GE ->
+                    l >= r;
+                case OP_LE ->
+                    l <= r;
+                case OP_AND ->
+                    l != 0.0 && r != 0.0;
+                case OP_OR ->
+                    l != 0.0 || r != 0.0;
+                default ->
+                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            };
+        }
+
         @Override
         public void execute(EvaluationContext ctx, int n) {
             double[] s = ctx.scratch;
-            int l = lOff;
-            int r = rOff;
-            int d = destOff;
-
-            switch (opcode) {
-                case OP_GT -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] > s[r + k]) ? 1.0 : 0.0;
-                    }
-                }
-                case OP_LT -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] < s[r + k]) ? 1.0 : 0.0;
-                    }
-                }
-                case OP_EQ -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] == s[r + k]) ? 1.0 : 0.0;
-                    }
-                }
-                case OP_NE -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] != s[r + k]) ? 1.0 : 0.0;
-                    }
-                }
-                case OP_GE -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] >= s[r + k]) ? 1.0 : 0.0;
-                    }
-                }
-                case OP_LE -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] <= s[r + k]) ? 1.0 : 0.0;
-                    }
-                }
-                // Standard C-style floating-point truthiness: non-zero is true
-                case OP_AND -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] != 0.0 && s[r + k] != 0.0) ? 1.0 : 0.0;
-                    }
-                }
-                case OP_OR -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] != 0.0 || s[r + k] != 0.0) ? 1.0 : 0.0;
-                    }
-                }
-                default ->
-                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                VectorMask<Double> mask = compareMask(s, k);
+                DoubleVector.zero(SPECIES).blend(1.0, mask).intoArray(s, destOff + k);
+            }
+            for (; k < n; k++) {
+                s[destOff + k] = compareScalar(opcode, s[lOff + k], s[rOff + k]) ? 1.0 : 0.0;
             }
         }
 
         @Override
         public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
             double[] s = ctx.scratch;
-            int l = lOff;
-            int r = rOff;
-
-            switch (opcode) {
-                case OP_GT -> {
-                    for (int k = 0; k < n; k++) {
-                        output.setAtIndex(ValueLayout.JAVA_DOUBLE, outputElemOffset + k, (s[l + k] > s[r + k]) ? 1.0 : 0.0);
-                    }
-                }
-                case OP_LT -> {
-                    for (int k = 0; k < n; k++) {
-                        output.setAtIndex(ValueLayout.JAVA_DOUBLE, outputElemOffset + k, (s[l + k] < s[r + k]) ? 1.0 : 0.0);
-                    }
-                }
-                case OP_EQ -> {
-                    for (int k = 0; k < n; k++) {
-                        output.setAtIndex(ValueLayout.JAVA_DOUBLE, outputElemOffset + k, (s[l + k] == s[r + k]) ? 1.0 : 0.0);
-                    }
-                }
-                case OP_NE -> {
-                    for (int k = 0; k < n; k++) {
-                        output.setAtIndex(ValueLayout.JAVA_DOUBLE, outputElemOffset + k, (s[l + k] != s[r + k]) ? 1.0 : 0.0);
-                    }
-                }
-                case OP_GE -> {
-                    for (int k = 0; k < n; k++) {
-                        output.setAtIndex(ValueLayout.JAVA_DOUBLE, outputElemOffset + k, (s[l + k] >= s[r + k]) ? 1.0 : 0.0);
-                    }
-                }
-                case OP_LE -> {
-                    for (int k = 0; k < n; k++) {
-                        output.setAtIndex(ValueLayout.JAVA_DOUBLE, outputElemOffset + k, (s[l + k] <= s[r + k]) ? 1.0 : 0.0);
-                    }
-                }
-                case OP_AND -> {
-                    for (int k = 0; k < n; k++) {
-                        output.setAtIndex(ValueLayout.JAVA_DOUBLE, outputElemOffset + k, (s[l + k] != 0.0 && s[r + k] != 0.0) ? 1.0 : 0.0);
-                    }
-                }
-                case OP_OR -> {
-                    for (int k = 0; k < n; k++) {
-                        output.setAtIndex(ValueLayout.JAVA_DOUBLE, outputElemOffset + k, (s[l + k] != 0.0 || s[r + k] != 0.0) ? 1.0 : 0.0);
-                    }
-                }
-                default ->
-                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            long elemBytes = ValueLayout.JAVA_DOUBLE.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                VectorMask<Double> mask = compareMask(s, k);
+                DoubleVector.zero(SPECIES).blend(1.0, mask)
+                        .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+            }
+            for (; k < n; k++) {
+                output.setAtIndex(ValueLayout.JAVA_DOUBLE, outputElemOffset + k,
+                        compareScalar(opcode, s[lOff + k], s[rOff + k]) ? 1.0 : 0.0);
             }
         }
     }

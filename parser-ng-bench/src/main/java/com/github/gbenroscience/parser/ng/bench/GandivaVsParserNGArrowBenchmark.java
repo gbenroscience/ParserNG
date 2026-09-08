@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      http://apache.org
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -59,76 +59,31 @@ import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.runner.options.TimeValue;
 
-/**
- *
- * RUN on LINUX ONLY!
- *
- * ParserNG Arrow vs Apache Arrow Gandiva benchmark suite.
- *
- * mvn exec:exec -Dexec.executable="java" -Dexec.args="--add-modules
- * jdk.incubator.vector -classpath %classpath
- * com.github.gbenroscience.parser.ng.bench.GandivaVsParserNGArrowBenchmark"
- *
- *
- * <p>
- * Expressions are no longer a hardcoded enum + switch. They live in the
- * {@link #EXPRESSIONS} array (30 entries), each pairing a ParserNG source
- * string with a matching Gandiva {@link TreeNode} builder. This lets the suite
- * grow (or shrink) just by editing that array, and lets {@link #main} pick a
- * subset of expressions to actually run based on interactive input, without
- * touching JMH's parameterization mechanism.
- *
- * <p>
- * Expression selection at runtime: when launched via {@link #main}, the process
- * prints the indexed expression list and reads a line from {@code System.in}
- * via {@link Scanner#nextLine()}. The line may be a single index ({@code "7"})
- * or a comma-separated list of indices ({@code "0,4,17,29"}); every expression
- * named by those indices is run. This only applies when going through
- * {@code main()} -- running the shaded jar directly through JMH's own launcher
- * bypasses the prompt and runs every expression in {@link #EXPRESSIONS}, since
- * {@code exprName}'s {@code @Param} values list all 30 names as the default
- * set.
- *
- * <p>
- * CAVEAT -- please verify before trusting the numbers: the Gandiva function
- * names used below ("add", "subtract", "multiply", "divide", "sqrt", "abs",
- * "sin", "cos", "tan", "log", "exp", "power") are Gandiva's standard math
- * function registry as I understand it, but I have not run this against Gandiva
- * myself to confirm every name resolves -- "log" specifically is assumed to
- * mean natural log (matching ParserNG's "ln"), which is the common Gandiva
- * convention but worth double-checking against Gandiva's actual registry if any
- * expression throws a "function not found" error. "divide" in particular is
- * exercised by several of the new expressions (HARMONIC, LOG_RATIO, TAN_RATIO,
- * NORMALIZED_DIFF, DIVIDE_CHAIN, COMPOSITE) and was not used anywhere in the
- * original five-expression suite, so it's the newest unverified surface here.
- * ParserNG's own function names ("ln", "^", "sin", "cos", "tan", "sqrt", "abs",
- * "exp") are taken from confirmed working usage elsewhere in this codebase, but
- * adjust to whatever ParserNG's actual token names are if any of these don't
- * parse.
- *
- * <p>
- * Primary comparison per expression: ParserNG Arrow SIMD, single-threaded and
- * parallel vs Gandiva Projector
- */
 @State(Scope.Benchmark)
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 8, time = 1, timeUnit = TimeUnit.SECONDS)
-@Fork(value = 2)
+// Mirrors the flags in main()'s OptionsBuilder.jvmArgsAppend(...) below, so
+// the same JVM tuning applies whether this is launched through main() or
+// picked up directly by JMH's own shaded-jar launcher.
+@Fork(value = 2, jvmArgsAppend = {
+    "--add-modules=jdk.incubator.vector",
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    "-Darrow.enable_unsafe_memory_access=true",
+    "-Darrow.enable_null_check_for_get=false",
+    "-Darrow.allocation.manager.type=Unsafe",
+    "-Darrow.memory.debug.allocator=false",
+    "-Dio.netty.tryReflectionSetAccessible=true",
+    "-XX:+UseParallelGC",
+    "-XX:+AlwaysPreTouch",
+    "-XX:+UseLargePages"
+})
 public class GandivaVsParserNGArrowBenchmark {
 
-    /*
-     * -------------------------------------------------------------------------
-     * Expression catalog
-     * -------------------------------------------------------------------------
-     */
-    /**
-     * One benchmarkable expression: a ParserNG source string paired with a
-     * Gandiva tree builder.
-     */
     public static final class ExpressionDef {
-
         public final String name;
         public final String parserExpr;
         public final GandivaTreeBuilder gandivaBuilder;
@@ -142,11 +97,9 @@ public class GandivaVsParserNGArrowBenchmark {
 
     @FunctionalInterface
     public interface GandivaTreeBuilder {
-
         TreeNode build(TreeNode x1, TreeNode x2, TreeNode x3, ArrowType.FloatingPoint doubleType);
     }
 
-    // ---- small helpers so the 30 builders below read like the expressions they encode ----
     private static TreeNode add(TreeNode a, TreeNode b, ArrowType.FloatingPoint t) {
         return TreeBuilder.makeFunction("add", List.of(a, b), t);
     }
@@ -199,11 +152,58 @@ public class GandivaVsParserNGArrowBenchmark {
         return TreeBuilder.makeLiteral(v);
     }
 
-    /**
-     * All 30 benchmarkable expressions, in display/index order. Index into this
-     * array is exactly the index the user enters at the prompt in
-     * {@link #main}.
-     */
+    // ---- transcendental / inverse-trig / hyperbolic helpers -----------------
+    // STATUS as of the last real run against this codebase:
+    //   ParserNG confirmed working: sin, cos, tan, asin, acos, atan, sinh,
+    //   cosh, tanh, sqrt, abs, ln, cbrt (none of these appeared as an
+    //   unresolved "variable" in ArrowBulkEvaluator's required-variable list
+    //   when TRANSCENDENTAL_STACK was run).
+    //   ParserNG CONFIRMED NOT SUPPORTED: log10 -- it is not in ParserNG's
+    //   registry and gets silently treated as a bare unbound variable
+    //   ("Missing Arrow column for variable 'log10'") rather than a parse
+    //   error, which is why it slipped past compilation and only failed at
+    //   evaluate() time. Every parserExpr string below uses ln(v)/ln(10)
+    //   instead of log10(v) for exactly this reason.
+    //   Gandiva side: "atan2" is still unverified against Gandiva's function
+    //   registry -- none of the expressions below happened to exercise a
+    //   Gandiva-only run in isolation yet, so treat ATAN2_ANGLE and
+    //   ANGLE_ROUNDTRIP as the two still-unconfirmed entries if either
+    //   throws "function signature not supported" at Projector.make() time.
+    private static TreeNode asinFn(TreeNode a, ArrowType.FloatingPoint t) {
+        return TreeBuilder.makeFunction("asin", List.of(a), t);
+    }
+
+    private static TreeNode acosFn(TreeNode a, ArrowType.FloatingPoint t) {
+        return TreeBuilder.makeFunction("acos", List.of(a), t);
+    }
+
+    private static TreeNode atanFn(TreeNode a, ArrowType.FloatingPoint t) {
+        return TreeBuilder.makeFunction("atan", List.of(a), t);
+    }
+
+    private static TreeNode atan2Fn(TreeNode a, TreeNode b, ArrowType.FloatingPoint t) {
+        return TreeBuilder.makeFunction("atan2", List.of(a, b), t);
+    }
+
+    private static TreeNode sinhFn(TreeNode a, ArrowType.FloatingPoint t) {
+        return TreeBuilder.makeFunction("sinh", List.of(a), t);
+    }
+
+    private static TreeNode coshFn(TreeNode a, ArrowType.FloatingPoint t) {
+        return TreeBuilder.makeFunction("cosh", List.of(a), t);
+    }
+
+    private static TreeNode tanhFn(TreeNode a, ArrowType.FloatingPoint t) {
+        return TreeBuilder.makeFunction("tanh", List.of(a), t);
+    }
+
+    private static TreeNode log10Fn(TreeNode a, ArrowType.FloatingPoint t) {
+        return TreeBuilder.makeFunction("log10", List.of(a), t);
+    }
+
+    private static TreeNode cbrtFn(TreeNode a, ArrowType.FloatingPoint t) {
+        return TreeBuilder.makeFunction("cbrt", List.of(a), t);
+    }
     public static final ExpressionDef[] EXPRESSIONS = new ExpressionDef[]{
         new ExpressionDef("DISTANCE", "sin(sqrt(x1*x1 + x2*x2 + x3*x3))",
         (x1, x2, x3, t) -> sinFn(sqrtFn(add(add(mul(x1, x1, t), mul(x2, x2, t), t), mul(x3, x3, t), t), t), t)),
@@ -212,10 +212,7 @@ public class GandivaVsParserNGArrowBenchmark {
         new ExpressionDef("LOG_EXP", "ln(x1*x1 + 1) + exp(x2*0.001) - x3",
         (x1, x2, x3, t) -> sub(add(lnFn(add(mul(x1, x1, t), lit(1.0), t), t), expFn(mul(x2, lit(0.001), t), t), t), x3, t)),
         new ExpressionDef("TRIG_CHAIN", "sin(x1)*cos(x2) + tan(x3*0.1) - sin(x1*x2*0.0001) + sqrt(abs(x3)+1)",
-        (x1, x2, x3, t) -> add(
-        sub(add(mul(sinFn(x1, t), cosFn(x2, t), t), tanFn(mul(x3, lit(0.1), t), t), t),
-        sinFn(mul(mul(x1, x2, t), lit(0.0001), t), t), t),
-        sqrtFn(add(absFn(x3, t), lit(1.0), t), t), t)),
+        (x1, x2, x3, t) -> add(sub(add(mul(sinFn(x1, t), cosFn(x2, t), t), tanFn(mul(x3, lit(0.1), t), t), t), sinFn(mul(mul(x1, x2, t), lit(0.0001), t), t), t), sqrtFn(add(absFn(x3, t), lit(1.0), t), t), t)),
         new ExpressionDef("VARIABLE_POWER", "(x1+11.0)^(x2*0.0001 + 1.0)",
         (x1, x2, x3, t) -> pow(add(x1, lit(11.0), t), add(mul(x2, lit(0.0001), t), lit(1.0), t), t)),
         new ExpressionDef("SIMPLE_SUM", "x1 + x2 + x3",
@@ -267,10 +264,46 @@ public class GandivaVsParserNGArrowBenchmark {
         new ExpressionDef("TRIG_POLY", "sin(x1)*x2 + cos(x2)*x3 - tan(x3*0.01)*x1",
         (x1, x2, x3, t) -> sub(add(mul(sinFn(x1, t), x2, t), mul(cosFn(x2, t), x3, t), t), mul(tanFn(mul(x3, lit(0.01), t), t), x1, t), t)),
         new ExpressionDef("COMPOSITE", "sqrt(abs(x1*x2*x3)) + sin(x1+x2+x3) / exp(0.0001*abs(x3))",
-        (x1, x2, x3, t) -> add(
-        sqrtFn(absFn(mul(mul(x1, x2, t), x3, t), t), t),
-        div(sinFn(add(add(x1, x2, t), x3, t), t), expFn(mul(lit(0.0001), absFn(x3, t), t), t), t),
-        t))
+        (x1, x2, x3, t) -> add(sqrtFn(absFn(mul(mul(x1, x2, t), x3, t), t), t), div(sinFn(add(add(x1, x2, t), x3, t), t), expFn(mul(lit(0.0001), absFn(x3, t), t), t), t), t)),
+
+        // ---- transcendental category ------------------------------------
+        // x1/x2/x3 are sin/cos-derived and range roughly [-10, 10], so asin
+        // and acos inputs below are scaled by 0.09 to stay inside [-1, 1].
+        new ExpressionDef("INV_TRIG_MIX", "asin(x1*0.09) + acos(x2*0.09) - atan(x3)",
+        (x1, x2, x3, t) -> sub(add(asinFn(mul(x1, lit(0.09), t), t), acosFn(mul(x2, lit(0.09), t), t), t), atanFn(x3, t), t)),
+        new ExpressionDef("ATAN2_ANGLE", "atan2(x2, x1)",
+        (x1, x2, x3, t) -> atan2Fn(x2, x1, t)),
+        new ExpressionDef("ANGLE_ROUNDTRIP", "atan2(sin(x1), cos(x1))",
+        (x1, x2, x3, t) -> atan2Fn(sinFn(x1, t), cosFn(x1, t), t)),
+        new ExpressionDef("HYPERBOLIC_CHAIN", "sinh(x1*0.001) + cosh(x2*0.001) - tanh(x3*0.001)",
+        (x1, x2, x3, t) -> sub(add(sinhFn(mul(x1, lit(0.001), t), t), coshFn(mul(x2, lit(0.001), t), t), t), tanhFn(mul(x3, lit(0.001), t), t), t)),
+        // CONFIRMED via a real run: ParserNG has no "log10" token -- it gets
+        // treated as a bare unbound variable ("Missing Arrow column for
+        // variable 'log10'"). Rewritten below as ln(v)/ln(10), which is
+        // mathematically identical and safe here since v = x1*x1+1 / x2*x2+2
+        // is always >= 1. Gandiva's side is untouched -- it does resolve
+        // "log10" as a real function.
+        new ExpressionDef("LOG10_SUM", "ln(x1*x1+1)/ln(10) + ln(x2*x2+2)/ln(10)",
+        (x1, x2, x3, t) -> add(log10Fn(add(mul(x1, x1, t), lit(1.0), t), t), log10Fn(add(mul(x2, x2, t), lit(2.0), t), t), t)),
+        new ExpressionDef("CBRT_SUM", "cbrt(x1) + cbrt(x2) + cbrt(x3)",
+        (x1, x2, x3, t) -> add(add(cbrtFn(x1, t), cbrtFn(x2, t), t), cbrtFn(x3, t), t)),
+        new ExpressionDef("TRANSCENDENTAL_STACK",
+        "sin(x1*0.01)+cos(x2*0.01)+tan(x3*0.01)+asin(x1*0.09)+acos(x2*0.09)+atan(x3)"
+        + "+sinh(x1*0.001)+cosh(x2*0.001)+tanh(x3*0.001)+ln(x1*x1+1)/ln(10)+cbrt(x2)+sqrt(abs(x3)+1)",
+        (x1, x2, x3, t) -> {
+            TreeNode sum = add(sinFn(mul(x1, lit(0.01), t), t), cosFn(mul(x2, lit(0.01), t), t), t);
+            sum = add(sum, tanFn(mul(x3, lit(0.01), t), t), t);
+            sum = add(sum, asinFn(mul(x1, lit(0.09), t), t), t);
+            sum = add(sum, acosFn(mul(x2, lit(0.09), t), t), t);
+            sum = add(sum, atanFn(x3, t), t);
+            sum = add(sum, sinhFn(mul(x1, lit(0.001), t), t), t);
+            sum = add(sum, coshFn(mul(x2, lit(0.001), t), t), t);
+            sum = add(sum, tanhFn(mul(x3, lit(0.001), t), t), t);
+            sum = add(sum, log10Fn(add(mul(x1, x1, t), lit(1.0), t), t), t);
+            sum = add(sum, cbrtFn(x2, t), t);
+            sum = add(sum, sqrtFn(add(absFn(x3, t), lit(1.0), t), t), t);
+            return sum;
+        })
     };
 
     private static final Map<String, ExpressionDef> EXPRESSIONS_BY_NAME;
@@ -282,14 +315,6 @@ public class GandivaVsParserNGArrowBenchmark {
         }
         EXPRESSIONS_BY_NAME = Map.copyOf(byName);
     }
-
-    /*
-     * -------------------------------------------------------------------------
-     * JMH state
-     * -------------------------------------------------------------------------
-     */
-    // NOTE: trimmed from the original 6-point size sweep to keep total
-    // runtime sane now that it's crossed with 30 expressions instead of 5.
     @Param({
         "1024",
         "262144",
@@ -297,44 +322,30 @@ public class GandivaVsParserNGArrowBenchmark {
     })
     private int size;
 
-    // Default value set lists every expression by name, in EXPRESSIONS order.
-    // When launched through main(), this default is overridden per the
-    // indices entered at the prompt; running the shaded jar directly through
-    // JMH's own launcher (bypassing main()) runs all 30, same as before.
     @Param({
         "DISTANCE", "POLY", "LOG_EXP", "TRIG_CHAIN", "VARIABLE_POWER",
         "SIMPLE_SUM", "SIMPLE_PRODUCT", "QUADRATIC", "CUBIC", "DIVIDE_CHAIN",
         "ABS_DIFF", "SQRT_SUM", "SIN_PRODUCT", "COS_SUM", "TAN_RATIO",
         "LOG_CHAIN", "EXP_CHAIN", "POWER_SQUARE", "POWER_CUBE", "POWER_MIXED",
         "MIXED_TRIG_LOG", "MIXED_EXP_TRIG", "NESTED_SQRT", "DEEP_CHAIN", "WEIGHTED_SUM",
-        "NORMALIZED_DIFF", "HARMONIC", "LOG_RATIO", "TRIG_POLY", "COMPOSITE"
+        "NORMALIZED_DIFF", "HARMONIC", "LOG_RATIO", "TRIG_POLY", "COMPOSITE",
+        "INV_TRIG_MIX", "ATAN2_ANGLE", "ANGLE_ROUNDTRIP", "HYPERBOLIC_CHAIN",
+        "LOG10_SUM", "CBRT_SUM", "TRANSCENDENTAL_STACK"
     })
     private String exprName;
 
     private BufferAllocator allocator;
-
     private Float8Vector x1;
     private Float8Vector x2;
     private Float8Vector x3;
-
     private Float8Vector parserOutput;
     private Float8Vector gandivaOutput;
-
     private Map<String, Float8Vector> parserColumns;
-
     private ArrowBulkEvaluator parserSIMDEvaluator;
-
     private Projector gandivaProjector;
-
     private List<org.apache.arrow.memory.ArrowBuf> gandivaInputBuffers;
     private List<ValueVector> gandivaOutputVectors;
     private Schema gandivaSchema;
-
-    /*
-     * -------------------------------------------------------------------------
-     * Setup
-     * -------------------------------------------------------------------------
-     */
     @Setup(Level.Trial)
     public void setupTrial() throws Exception {
         allocator = new RootAllocator(Long.MAX_VALUE);
@@ -352,21 +363,18 @@ public class GandivaVsParserNGArrowBenchmark {
         }
 
         gandivaProjector = buildGandivaProjector(def);
-    }
 
-    @Setup(Level.Iteration)
-    public void setupIteration() {
-        createInput();
+        x1 = new Float8Vector("x1", allocator);
+        x2 = new Float8Vector("x2", allocator);
+        x3 = new Float8Vector("x3", allocator);
 
-        parserOutput = ArrowBulkEvaluator.allocateOutput(
-                allocator,
-                "parser_ng_result",
-                size
-        );
+        x1.allocateNew(size);
+        x2.allocateNew(size);
+        x3.allocateNew(size);
 
+        parserOutput = ArrowBulkEvaluator.allocateOutput(allocator, "parser_ng_result", size);
         gandivaOutput = new Float8Vector("gandiva_result", allocator);
         gandivaOutput.allocateNew(size);
-        gandivaOutput.setValueCount(size);
 
         parserColumns = Map.of("x1", x1, "x2", x2, "x3", x3);
 
@@ -382,101 +390,71 @@ public class GandivaVsParserNGArrowBenchmark {
         gandivaOutputVectors = List.of(gandivaOutput);
     }
 
-    /*
-     * -------------------------------------------------------------------------
-     * Input generation
-     * -------------------------------------------------------------------------
-     */
-    private void createInput() {
-        x1 = new Float8Vector("x1", allocator);
-        x2 = new Float8Vector("x2", allocator);
-        x3 = new Float8Vector("x3", allocator);
+    @Setup(Level.Iteration)
+    public void setupIteration() {
+        populateInputData();
+        gandivaOutput.setValueCount(size);
+    }
 
-        x1.allocateNew(size);
-        x2.allocateNew(size);
-        x3.allocateNew(size);
-
+    private void populateInputData() {
         for (int i = 0; i < size; i++) {
             double t = i * 0.0001;
             x1.set(i, Math.sin(t) * 10.0);
             x2.set(i, Math.cos(t * 0.7) * 10.0);
             x3.set(i, Math.sin(t * 1.3) * Math.cos(t * 0.31) * 10.0);
         }
-
         x1.setValueCount(size);
         x2.setValueCount(size);
         x3.setValueCount(size);
     }
-
-    /*
-     * -------------------------------------------------------------------------
-     * Gandiva expression construction
-     * -------------------------------------------------------------------------
-     */
     private Projector buildGandivaProjector(ExpressionDef def) throws Exception {
-
         ArrowType.FloatingPoint doubleType = new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE);
 
-        Field x1Field = new Field("x1", FieldType.nullable(doubleType), null);
-        Field x2Field = new Field("x2", FieldType.nullable(doubleType), null);
-        Field x3Field = new Field("x3", FieldType.nullable(doubleType), null);
-        Field resultField = new Field("result", FieldType.nullable(doubleType), null);
+        // Non-nullable: populateInputData() never writes nulls, so Gandiva can
+        // skip generating validity-bitmap checks for every function call in
+        // the compiled expression -- this is a real win for chains with many
+        // nested function calls (TRANSCENDENTAL_STACK, COMPOSITE, etc.).
+        Field x1Field = new Field("x1", FieldType.notNullable(doubleType), null);
+        Field x2Field = new Field("x2", FieldType.notNullable(doubleType), null);
+        Field x3Field = new Field("x3", FieldType.notNullable(doubleType), null);
+        Field resultField = new Field("result", FieldType.notNullable(doubleType), null);
 
         TreeNode x1Node = TreeBuilder.makeField(x1Field);
         TreeNode x2Node = TreeBuilder.makeField(x2Field);
         TreeNode x3Node = TreeBuilder.makeField(x3Field);
 
         TreeNode root = def.gandivaBuilder.build(x1Node, x2Node, x3Node, doubleType);
-
         ExpressionTree expressionTree = TreeBuilder.makeExpression(root, resultField);
-
         gandivaSchema = new Schema(List.of(x1Field, x2Field, x3Field));
 
         return Projector.make(gandivaSchema, List.of(expressionTree));
     }
+    // NOTE: gandivaInputBuffers (built in setupTrial()) still passes each
+    // vector's validity buffer alongside its data buffer even though the
+    // fields above are now notNullable -- Arrow vectors always physically
+    // carry a validity buffer regardless of the schema-level nullability
+    // flag, and Gandiva's evaluate() signature expects the (validity, data)
+    // pair per column either way. The notNullable declaration only affects
+    // what code Gandiva's LLVM codegen emits (it skips bitmap checks), not
+    // which buffers you hand it at evaluate() time -- no other change needed.
 
-    /*
-     * -------------------------------------------------------------------------
-     * Benchmarks
-     * -------------------------------------------------------------------------
-     */
     @Benchmark
     public void parserNGSIMD(Blackhole bh) {
-        parserSIMDEvaluator.evaluate(
-                parserColumns,
-                parserOutput,
-                NullPolicy.IGNORE,
-                false
-        );
+        parserSIMDEvaluator.evaluate(parserColumns, parserOutput, NullPolicy.IGNORE, false);
         bh.consume(parserOutput);
     }
 
     @Benchmark
     public void gandiva(Blackhole bh) throws Exception {
-        gandivaProjector.evaluate(
-                size,
-                gandivaInputBuffers,
-                gandivaOutputVectors
-        );
+        gandivaProjector.evaluate(size, gandivaInputBuffers, gandivaOutputVectors);
         bh.consume(gandivaOutput);
     }
 
     @Benchmark
     public void parserNGParallel(Blackhole bh) {
-        parserSIMDEvaluator.evaluate(
-                parserColumns,
-                parserOutput,
-                NullPolicy.IGNORE,
-                true
-        );
+        parserSIMDEvaluator.evaluate(parserColumns, parserOutput, NullPolicy.IGNORE, true);
         bh.consume(parserOutput);
     }
-
-    /*
-     * -------------------------------------------------------------------------
-     * Correctness check
-     * -------------------------------------------------------------------------
-     */
     private void verifyCorrectness(ExpressionDef def) throws Exception {
         parserSIMDEvaluator.evaluate(parserColumns, parserOutput, NullPolicy.IGNORE, false);
         gandivaProjector.evaluate(size, gandivaInputBuffers, gandivaOutputVectors);
@@ -520,48 +498,12 @@ public class GandivaVsParserNGArrowBenchmark {
         System.out.printf(Locale.ROOT, "maxAbs           : %.17g%n", maxAbs);
         System.out.printf(Locale.ROOT, "maxRel           : %.17g%n", maxRel);
         System.out.println("mismatches       : " + mismatches);
-        System.out.println("NaN mismatches   : " + nanMismatches
-                + " (one side NaN, other not -- always worth investigating)");
+        System.out.println("NaN mismatches   : " + nanMismatches + " (one side NaN, other not)");
         System.out.println("============================================================\n");
     }
 
-    /*
-     * -------------------------------------------------------------------------
-     * Teardown
-     * -------------------------------------------------------------------------
-     */
     @TearDown(Level.Iteration)
     public void teardownIteration() {
-
-        // parserSIMDEvaluator is a Level.Trial-scoped resource (created once
-        // in setupTrial()) and must be torn down only in teardownTrial().
-        // Previously it was closed and nulled out here too, which meant that
-        // after the first iteration of a trial, every subsequent iteration's
-        // parserNGSIMD/parserNGParallel benchmark methods called evaluate()
-        // on a null parserSIMDEvaluator -- this was the bug causing it to
-        // "become null during the benchmark".
-
-        if (parserOutput != null) {
-            parserOutput.close();
-            parserOutput = null;
-        }
-        if (gandivaOutput != null) {
-            gandivaOutput.close();
-            gandivaOutput = null;
-        }
-        if (x1 != null) {
-            x1.close();
-            x1 = null;
-        }
-        if (x2 != null) {
-            x2.close();
-            x2 = null;
-        }
-        if (x3 != null) {
-            x3.close();
-            x3 = null;
-        }
-
     }
 
     @TearDown(Level.Trial)
@@ -571,32 +513,19 @@ public class GandivaVsParserNGArrowBenchmark {
             parserSIMDEvaluator = null;
         }
         if (gandivaProjector != null) {
-            try {
-                gandivaProjector.close();
-            } catch (GandivaException ex) {
-                /* ignored */ }
+            try { gandivaProjector.close(); } catch (GandivaException ex) {}
             gandivaProjector = null;
         }
+        if (parserOutput != null) { parserOutput.close(); parserOutput = null; }
+        if (gandivaOutput != null) { gandivaOutput.close(); gandivaOutput = null; }
+        if (x1 != null) { x1.close(); x1 = null; }
+        if (x2 != null) { x2.close(); x2 = null; }
+        if (x3 != null) { x3.close(); x3 = null; }
         if (allocator != null) {
             allocator.close();
             allocator = null;
         }
     }
-
-    /*
-     * -------------------------------------------------------------------------
-     * Correctness-check runner -- checks EVERY expression in EXPRESSIONS in
-     * one pass, independent of JMH. Run this FIRST, before trusting any
-     * throughput number below, via:
-     *
-     *   java --add-modules=jdk.incubator.vector \
-     *        --add-opens=java.base/java.nio=ALL-UNNAMED \
-     *        --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-     *        -Darrow.allocation.manager.type=Unsafe \
-     *        -cp target/benchmarks.jar \
-     *        com.github.gbenroscience.parser.ng.bench.GandivaVsParserNGArrowBenchmark
-     * -------------------------------------------------------------------------
-     */
     public static void runAllCorrectnessChecks() throws Exception {
         for (ExpressionDef def : EXPRESSIONS) {
             GandivaVsParserNGArrowBenchmark benchmark = new GandivaVsParserNGArrowBenchmark();
@@ -614,18 +543,22 @@ public class GandivaVsParserNGArrowBenchmark {
         }
     }
 
-    /*
-     * -------------------------------------------------------------------------
-     * Interactive expression selection
-     * -------------------------------------------------------------------------
-     */
-    /**
-     * Prints the indexed expression catalog and reads a comma-separated list of
-     * indices from {@code System.in} via {@link Scanner#nextLine()}. Re-prompts
-     * on empty input, an out-of-range index, or a non-integer token. Returns
-     * the parsed, order-preserving (duplicates allowed) list of indices the
-     * user selected.
-     */
+        public static void runSingleCorrectnessCheck(int exprIndex) throws Exception {
+            ExpressionDef ed = EXPRESSIONS[exprIndex];
+           GandivaVsParserNGArrowBenchmark benchmark = new GandivaVsParserNGArrowBenchmark();
+            benchmark.exprName = ed.name;
+            benchmark.size = 1_000_000;
+            benchmark.setupTrial();
+            benchmark.setupIteration();
+
+            try {
+                benchmark.verifyCorrectness(ed);
+            } finally {
+                benchmark.teardownIteration();
+                benchmark.teardownTrial();
+            }
+    }
+
     private static List<Integer> promptForExpressionIndices(Scanner scanner) {
         System.out.println("Available expressions:");
         for (int i = 0; i < EXPRESSIONS.length; i++) {
@@ -662,16 +595,10 @@ public class GandivaVsParserNGArrowBenchmark {
                 }
             }
 
-            if (valid) {
-                return parsed;
-            }
+            if (valid) return parsed;
         }
     }
-
     public static void main(String[] args) throws Exception {
-        // Run correctness across every expression FIRST.
-        // runAllCorrectnessChecks();
-
         Scanner scanner = new Scanner(System.in);
         List<Integer> selectedIndices = promptForExpressionIndices(scanner);
 
@@ -679,6 +606,11 @@ public class GandivaVsParserNGArrowBenchmark {
         for (int i = 0; i < selectedIndices.size(); i++) {
             selectedNames[i] = EXPRESSIONS[selectedIndices.get(i)].name;
         }
+        System.out.println("TESTING SELECTED EXPRESSIONS FOR CORRECTNESS---");
+        for(int idx : selectedIndices){
+            runSingleCorrectnessCheck(idx);
+        }
+        System.out.println("TESTING SELECTED EXPRESSIONS FOR CORRECTNESS---");
 
         System.out.println("\nRunning JMH for: " + String.join(", ", selectedNames) + "\n");
 
@@ -695,7 +627,38 @@ public class GandivaVsParserNGArrowBenchmark {
                 .jvmArgsAppend(
                         "--add-modules=jdk.incubator.vector",
                         "--add-opens=java.base/java.nio=ALL-UNNAMED",
-                        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+                        // Netty (which Arrow's default buffer/allocator machinery
+                        // sits on top of) uses reflection to grab direct-buffer
+                        // internals for its fast paths; this flag keeps that path
+                        // open on JDKs that restrict reflective access by default.
+                        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+                        // ---- Gandiva / Arrow buffer-access fast paths ----
+                        "-Darrow.enable_unsafe_memory_access=true",
+                        "-Darrow.enable_null_check_for_get=false",
+                        "-Darrow.allocation.manager.type=Unsafe",
+                        // Skips Arrow's debug/leak-tracking allocator wrapper,
+                        // which otherwise adds bookkeeping to every buffer
+                        // alloc/access. CAVEAT: verify this system property name
+                        // against your arrow-memory-core version -- it may be
+                        // "arrow.memory.debug.allocator" or controlled instead by
+                        // the io.netty.util.internal logging/leak-detection level
+                        // in older Arrow releases.
+                        "-Darrow.memory.debug.allocator=false",
+                        "-Dio.netty.tryReflectionSetAccessible=true",
+                        // ---- JVM-side throughput tuning ----
+                        // Parallel GC favors raw throughput over pause time, which
+                        // is what a JMH AverageTime benchmark wants; G1 (the
+                        // default) optimizes for pause latency instead.
+                        "-XX:+UseParallelGC",
+                        // Pre-faults heap pages at JVM startup instead of taking
+                        // page faults mid-measurement.
+                        "-XX:+AlwaysPreTouch",
+                        // Reduces TLB pressure on the large (up to ~64MB per
+                        // vector at size=8388608) off-heap buffers. Harmless if
+                        // the OS has no huge pages configured -- HotSpot falls
+                        // back to normal pages with a warning rather than failing.
+                        "-XX:+UseLargePages"
                 )
                 .build();
         new Runner(opt).run();

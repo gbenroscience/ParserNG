@@ -75,6 +75,39 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
         void execute(EvaluationContext ctx, int n);
     }
 
+    /**
+     * Optional extension of {@link VectorCommand} for command types that can
+     * write their result directly into the plan's final output array --
+     * {@code output[outputOffset..+n]} -- instead of into {@code ctx.scratch}.
+     *
+     * <p>Implemented only by command types whose math is plain {@code float[]}
+     * lane arithmetic. {@link PowCommand} (routes through
+     * {@code VectorMathF.executePowerBlended(ctx.scratch, ...)}),
+     * {@link UnaryMathCommand}/{@link LoadUnaryMathCommand}, and
+     * {@link BinaryMathCommand} deliberately do NOT implement this: their
+     * math is delegated to a functional interface whose signature is fixed
+     * to {@code float[] scratch}, and retargeting that would mean either
+     * changing those interfaces' signatures (a much larger change touching
+     * every one of the ~50 unary/binary math ops) or duplicating
+     * {@code VectorMathF}'s internals outside {@code VectorMathF} - neither
+     * is done here.
+     *
+     * <p>When the LAST command in a compiled plan implements this interface,
+     * {@code applyBulkInternal} calls {@link #executeToOutput} for it
+     * instead of {@code execute(...)} followed by the separate
+     * scratch-to-output writeback pass - eliminating one full extra
+     * read+write pass over the block for exactly that case. Every command
+     * before the last one in the plan is completely unaffected either way;
+     * this only ever changes how the FINAL result reaches the output
+     * array. When the last command does not implement this interface,
+     * {@code applyBulkInternal} falls back to the original
+     * {@code execute()}+writeback path, byte-for-byte unchanged.
+     */
+    interface DirectOutputCommand {
+
+        void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset);
+    }
+
 // 2. Ultra-lean Context (Zero dynamic stack allocation)
     private static final class EvaluationContext {
 
@@ -98,7 +131,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
     }
 // --- Memory Operations ---
 
-    record ConstCommand(float value, int destOff) implements VectorCommand {
+    record ConstCommand(float value, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -112,9 +145,21 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 s[destOff + k] = value;
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            FloatVector v = FloatVector.broadcast(SPECIES, value);
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                v.intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = value;
+            }
+        }
     }
 
-    record LoadCommand(int slotIdx, int destOff) implements VectorCommand {
+    record LoadCommand(int slotIdx, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -125,10 +170,20 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 System.arraycopy(ctx._2DVariables[slotIdx], ctx.blockStart, ctx.scratch, destOff, n);
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            if (ctx.flatVariables != null) {
+                int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
+                System.arraycopy(ctx.flatVariables, srcOff, output, outputOffset, n);
+            } else {
+                System.arraycopy(ctx._2DVariables[slotIdx], ctx.blockStart, output, outputOffset, n);
+            }
+        }
     }
 
 // --- Core Binary Operations ---
-    record AddCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record AddCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -143,9 +198,23 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 s[destOff + k] = s[lOff + k] + s[rOff + k];
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .add(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] + s[rOff + k];
+            }
+        }
     }
 
-    record SubCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record SubCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -160,9 +229,23 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 s[destOff + k] = s[lOff + k] - s[rOff + k];
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .sub(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] - s[rOff + k];
+            }
+        }
     }
 
-    record MulCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record MulCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -177,9 +260,23 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 s[destOff + k] = s[lOff + k] * s[rOff + k];
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .mul(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] * s[rOff + k];
+            }
+        }
     }
 
-    record DivCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record DivCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -192,6 +289,20 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             }
             for (; k < n; k++) {
                 s[destOff + k] = s[lOff + k] / s[rOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .div(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] / s[rOff + k];
             }
         }
     }
@@ -207,7 +318,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
     // via peephole-fusion over the emitted plan — see tryFuseLoadLoad().
     // Numerically identical to LoadCommand+LoadCommand+BinaryOp: same IEEE 754
     // binary32 op, same operand order, just a different source array.
-    record LoadLoadAddCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+    record LoadLoadAddCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -239,9 +350,39 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .add(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] + flat[rBase + k];
+                }
+            } else {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .add(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] + r[base + k];
+                }
+            }
+        }
     }
 
-    record LoadLoadSubCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+    record LoadLoadSubCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -273,9 +414,39 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .sub(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] - flat[rBase + k];
+                }
+            } else {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .sub(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] - r[base + k];
+                }
+            }
+        }
     }
 
-    record LoadLoadMulCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+    record LoadLoadMulCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -307,9 +478,39 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .mul(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] * flat[rBase + k];
+                }
+            } else {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .mul(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] * r[base + k];
+                }
+            }
+        }
     }
 
-    record LoadLoadDivCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+    record LoadLoadDivCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -341,6 +542,189 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .div(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] / flat[rBase + k];
+                }
+            } else {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .div(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] / r[base + k];
+                }
+            }
+        }
+    }
+
+    // --- Fused Scale (const*var) and Scale-Accumulate (axpy chain) ---
+    // Together these collapse a linear-combination-shaped expression --
+    // a1*x1 + a2*x2 + ... + an*xn, or any mix of + / - between such terms --
+    // from 4N-1 commands (with no fusion at all: a separate ConstCommand,
+    // LoadCommand, MulCommand per term, plus an AddCommand/SubCommand
+    // chaining each term into a running total, each command a full pass
+    // through ctx.scratch) down to exactly N commands: the first term
+    // becomes one ScaleCommand seeding the accumulator, and every
+    // subsequent term becomes one ScaleAccumulateCommand -- a single SIMD
+    // pass per term, each doing exactly one hardware fused-multiply-add per
+    // lane. See tryFuseConstLoad() and tryFuseScaleAccumulate() for the
+    // peephole rules that emit these; they compose without either knowing
+    // about the other -- tryFuseConstLoad only ever looks at the immediate
+    // ConstCommand/LoadCommand pair beneath an OP_MUL, and
+    // tryFuseScaleAccumulate only ever looks at the ScaleCommand beneath an
+    // OP_ADD/OP_SUB -- so an arbitrarily long chain of terms folds correctly
+    // without any whole-expression pattern matching.
+    record ScaleCommand(float coeff, int varSlot, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            float[] s = ctx.scratch;
+            FloatVector coeffVec = FloatVector.broadcast(SPECIES, coeff);
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, base + k)
+                            .mul(coeffVec)
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = coeff * flat[base + k];
+                }
+            } else {
+                float[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, v, base + k)
+                            .mul(coeffVec)
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = coeff * v[base + k];
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            FloatVector coeffVec = FloatVector.broadcast(SPECIES, coeff);
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, base + k)
+                            .mul(coeffVec)
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = coeff * flat[base + k];
+                }
+            } else {
+                float[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, v, base + k)
+                            .mul(coeffVec)
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = coeff * v[base + k];
+                }
+            }
+        }
+    }
+
+    // acc[k] = acc[k] + coeff*var[k] (or acc - coeff*var, folded into a
+    // negated coeff at fusion time -- see tryFuseScaleAccumulate), computed
+    // as a single hardware fused-multiply-add per SIMD lane, in place on
+    // scratch at accOff. Numerically this is strictly at least as accurate
+    // as the unfused mul-then-add: one IEEE-754 rounding instead of two.
+    record ScaleAccumulateCommand(float coeff, int varSlot, int accOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            float[] s = ctx.scratch;
+            FloatVector coeffVec = FloatVector.broadcast(SPECIES, coeff);
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, base + k)
+                            .fma(coeffVec, FloatVector.fromArray(SPECIES, s, accOff + k))
+                            .intoArray(s, accOff + k);
+                }
+                for (; k < n; k++) {
+                    s[accOff + k] = Math.fma(flat[base + k], coeff, s[accOff + k]);
+                }
+            } else {
+                float[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, v, base + k)
+                            .fma(coeffVec, FloatVector.fromArray(SPECIES, s, accOff + k))
+                            .intoArray(s, accOff + k);
+                }
+                for (; k < n; k++) {
+                    s[accOff + k] = Math.fma(v[base + k], coeff, s[accOff + k]);
+                }
+            }
+        }
+
+        // Note: the accumulator itself is still read from ctx.scratch here --
+        // it's a running value built up by prior commands, not a source --
+        // only the FINAL fused-multiply-add result is written to `output`
+        // instead of back into scratch. This is exactly the "accumulator +
+        // coeff*var" shape ScaleAccumulateCommand's ordinary execute() computes,
+        // just landing its one write in a different place.
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            FloatVector coeffVec = FloatVector.broadcast(SPECIES, coeff);
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, base + k)
+                            .fma(coeffVec, FloatVector.fromArray(SPECIES, s, accOff + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = Math.fma(flat[base + k], coeff, s[accOff + k]);
+                }
+            } else {
+                float[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, v, base + k)
+                            .fma(coeffVec, FloatVector.fromArray(SPECIES, s, accOff + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = Math.fma(v[base + k], coeff, s[accOff + k]);
+                }
+            }
+        }
     }
 
     record PowCommand(int lOff, int rOff, int destOff) implements VectorCommand {
@@ -353,7 +737,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
         }
     }
 
-    record RemCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record RemCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -362,68 +746,106 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 s[destOff + k] = s[lOff + k] % s[rOff + k];
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] % s[rOff + k];
+            }
+        }
     }
 
 // --- Comparisons ---
-    record CompareCommand(int lOff, int rOff, int destOff, int opcode) implements VectorCommand {
+    record CompareCommand(int lOff, int rOff, int destOff, int opcode) implements VectorCommand, DirectOutputCommand {
+
+        // Computes s[lOff+k..] OP s[rOff+k..] as a VectorMask, per the same
+        // truthiness rules compareScalar() below applies to the tail. Shared
+        // by execute() and executeToOutput() so the opcode -> comparison
+        // mapping exists in exactly one place instead of being duplicated
+        // across two switch statements (as it was before this vectorization).
+        // OP_AND/OP_OR are built from two NE-vs-zero masks combined with
+        // mask.and()/mask.or() -- the vectorized form of the same C-style
+        // "nonzero is true" rule the scalar path already used.
+        private VectorMask<Float> compareMask(float[] s, int k) {
+            FloatVector lv = FloatVector.fromArray(SPECIES, s, lOff + k);
+            FloatVector rv = FloatVector.fromArray(SPECIES, s, rOff + k);
+            return switch (opcode) {
+                case OP_GT ->
+                    lv.compare(VectorOperators.GT, rv);
+                case OP_LT ->
+                    lv.compare(VectorOperators.LT, rv);
+                case OP_EQ ->
+                    lv.compare(VectorOperators.EQ, rv);
+                case OP_NE ->
+                    lv.compare(VectorOperators.NE, rv);
+                case OP_GE ->
+                    lv.compare(VectorOperators.GE, rv);
+                case OP_LE ->
+                    lv.compare(VectorOperators.LE, rv);
+                case OP_AND ->
+                    lv.compare(VectorOperators.NE, 0.0f).and(rv.compare(VectorOperators.NE, 0.0f));
+                case OP_OR ->
+                    lv.compare(VectorOperators.NE, 0.0f).or(rv.compare(VectorOperators.NE, 0.0f));
+                default ->
+                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            };
+        }
+
+        // Scalar ground truth for the tail -- must stay in lockstep with
+        // compareMask()'s per-lane semantics above.
+        private static boolean compareScalar(int opcode, float l, float r) {
+            return switch (opcode) {
+                case OP_GT ->
+                    l > r;
+                case OP_LT ->
+                    l < r;
+                case OP_EQ ->
+                    l == r;
+                case OP_NE ->
+                    l != r;
+                case OP_GE ->
+                    l >= r;
+                case OP_LE ->
+                    l <= r;
+                case OP_AND ->
+                    l != 0.0f && r != 0.0f;
+                case OP_OR ->
+                    l != 0.0f || r != 0.0f;
+                default ->
+                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            };
+        }
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
             float[] s = ctx.scratch;
-            int l = lOff;
-            int r = rOff;
-            int d = destOff;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                VectorMask<Float> mask = compareMask(s, k);
+                FloatVector.zero(SPECIES).blend(1.0f, mask).intoArray(s, destOff + k);
+            }
+            for (; k < n; k++) {
+                s[destOff + k] = compareScalar(opcode, s[lOff + k], s[rOff + k]) ? 1.0f : 0.0f;
+            }
+        }
 
-            switch (opcode) {
-                case OP_GT -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] > s[r + k]) ? 1.0f : 0.0f;
-                    }
-                }
-                case OP_LT -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] < s[r + k]) ? 1.0f : 0.0f;
-                    }
-                }
-                case OP_EQ -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] == s[r + k]) ? 1.0f : 0.0f;
-                    }
-                }
-                case OP_NE -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] != s[r + k]) ? 1.0f : 0.0f;
-                    }
-                }
-                case OP_GE -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] >= s[r + k]) ? 1.0f : 0.0f;
-                    }
-                }
-                case OP_LE -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] <= s[r + k]) ? 1.0f : 0.0f;
-                    }
-                }
-                // Standard C-style floating-point truthiness: non-zero is true
-                case OP_AND -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] != 0.0 && s[r + k] != 0.0) ? 1.0f : 0.0f;
-                    }
-                }
-                case OP_OR -> {
-                    for (int k = 0; k < n; k++) {
-                        s[d + k] = (s[l + k] != 0.0 || s[r + k] != 0.0) ? 1.0f : 0.0f;
-                    }
-                }
-                default ->
-                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                VectorMask<Float> mask = compareMask(s, k);
+                FloatVector.zero(SPECIES).blend(1.0f, mask).intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = compareScalar(opcode, s[lOff + k], s[rOff + k]) ? 1.0f : 0.0f;
             }
         }
     }
 
 // --- Ternary / Branching ---
-    record VmaCommand(int aOff, int bOff, int cOff, int destOff) implements VectorCommand {
+    record VmaCommand(int aOff, int bOff, int cOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -443,15 +865,42 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                         .intoArray(s, destOff + k, mask);
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, bound = SPECIES.loopBound(n);
+            for (; k < bound; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, aOff + k)
+                        .fma(FloatVector.fromArray(SPECIES, s, bOff + k),
+                                FloatVector.fromArray(SPECIES, s, cOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            if (k < n) {
+                var mask = SPECIES.indexInRange(k, n);
+                FloatVector.fromArray(SPECIES, s, aOff + k, mask)
+                        .fma(FloatVector.fromArray(SPECIES, s, bOff + k, mask),
+                                FloatVector.fromArray(SPECIES, s, cOff + k, mask))
+                        .intoArray(output, outputOffset + k, mask);
+            }
+        }
     }
 
-    record IfCommand(int condOff, int trueOff, int falseOff, int destOff) implements VectorCommand {
+    record IfCommand(int condOff, int trueOff, int falseOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
             float[] s = ctx.scratch;
             for (int k = 0; k < n; k++) {
                 s[destOff + k] = (s[condOff + k] != 0.0) ? s[trueOff + k] : s[falseOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                output[outputOffset + k] = (s[condOff + k] != 0.0) ? s[trueOff + k] : s[falseOff + k];
             }
         }
     }
@@ -468,6 +917,122 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
         @Override
         public void execute(EvaluationContext ctx, int n) {
             op.apply(baseOff, n, ctx.scratch);
+        }
+    }
+
+    // --- Fused Load+UnaryMathOp ---
+    // A unary math op applied directly to a bare variable load -- e.g.
+    // sin(x), not sin(x+1) -- otherwise compiles to two separate commands:
+    // a LoadCommand materializing x into ctx.scratch, then a
+    // UnaryMathCommand reading that scratch range and transforming it in
+    // place. LoadUnaryMathCommand collapses that into ONE VectorCommand:
+    // it inlines the exact same source dispatch LoadCommand.execute()
+    // performs (flatVariables / _2DVariables), then immediately calls the
+    // existing UnaryMathOp on the freshly-copied range. This still
+    // delegates the actual math to the same op table used everywhere else
+    // -- no new per-op vectorized primitives, no risk of a hand-written
+    // fused implementation drifting from VectorMathF's own numerics -- so
+    // what's eliminated is purely dispatch: one fewer entry in
+    // executionPlan, one fewer pass through the interpreter's outer
+    // (inherently megamorphic, since it iterates over every VectorCommand
+    // subtype) dispatch loop.
+    //
+    // This generic form does NOT eliminate the copy-into-scratch pass
+    // itself -- op.apply still reads and writes that same scratch range,
+    // so the operand is still touched twice in memory (once to copy it in,
+    // once to transform it). For ops where the per-element compute cost
+    // already dominates (sin, cos, tan, exp, ln, ...: many instructions for
+    // range reduction + polynomial evaluation), that's a rounding error and
+    // this generic fusion captures effectively all of the available win.
+    // For ops cheap enough that the extra pass is a real fraction of total
+    // cost -- one hardware instruction, like sqrt -- a fully dedicated
+    // command that never materializes at all recovers strictly more; see
+    // LoadSqrtCommand immediately below for that treatment, and
+    // tryFuseLoadUnary() in compile() for how OP_SQRT is special-cased to
+    // prefer it over this generic path.
+    record LoadUnaryMathCommand(UnaryMathOp op, int varSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            if (ctx.flatVariables != null) {
+                int srcOff = (varSlot * ctx.dataSize) + ctx.blockStart;
+                System.arraycopy(ctx.flatVariables, srcOff, ctx.scratch, destOff, n);
+            } else {
+                System.arraycopy(ctx._2DVariables[varSlot], ctx.blockStart, ctx.scratch, destOff, n);
+            }
+            op.apply(destOff, n, ctx.scratch);
+        }
+    }
+
+    // --- Fully-fused Load+Sqrt ---
+    // Unlike LoadUnaryMathCommand, this never materializes the operand into
+    // scratch at all: it reads straight from the source array, computes
+    // sqrt via the hardware-mapped VectorOperators.SQRT in the SAME SIMD
+    // pass, and writes the result straight to ctx.scratch. sqrt is cheap
+    // enough (one SQRTPS instruction per lane) that the extra
+    // read-then-transform pass LoadUnaryMathCommand still pays is a real
+    // cost relative to the operation itself -- this is the dedicated escape
+    // hatch for that case. No VectorMathF dependency at all;
+    // VectorOperators.SQRT is used exactly as VectorMathF's own sqrt()
+    // implementation uses it, so results are bit-identical to the unfused
+    // path, just computed in one pass instead of two.
+    record LoadSqrtCommand(int varSlot, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, base + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = (float) Math.sqrt(flat[base + k]);
+                }
+            } else {
+                float[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, v, base + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = (float) Math.sqrt(v[base + k]);
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, base + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = (float) Math.sqrt(flat[base + k]);
+                }
+            } else {
+                float[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, v, base + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = (float) Math.sqrt(v[base + k]);
+                }
+            }
         }
     }
 
@@ -515,16 +1080,43 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                     int lOff = virtualStack[--sp];
                     int destOff = lOff; // Reuse left slot to save space
 
+                    // Peephole fusions, tried in order of specificity. Each
+                    // helper is self-contained: it inspects the tail of `plan`,
+                    // removes whatever entries it consumes on success, and
+                    // returns null (leaving `plan` untouched) on no match -- see
+                    // each method's own javadoc for exactly what shape it looks
+                    // for and why removal is always safe (strict LIFO stack
+                    // machine: once an operand's stack slot is popped here,
+                    // nothing else in the program can reference it again).
                     VectorCommand fused = tryFuseLoadLoad(plan, opcode, lOff, rOff, destOff);
+                    if (fused == null && opcode == OP_MUL) {
+                        // const*var or var*const, e.g. the a_i*x_i term of a
+                        // linear combination -- see ScaleCommand.
+                        fused = tryFuseConstLoad(plan, lOff, rOff, destOff);
+                    }
+                    if (fused == null && (opcode == OP_ADD || opcode == OP_SUB)) {
+                        // accumulator +/- (a_i*x_i term just computed above) --
+                        // see ScaleAccumulateCommand. Composes with the
+                        // tryFuseConstLoad case above to fold an entire
+                        // a1*x1 + a2*x2 + ... + an*xn chain into N commands.
+                        fused = tryFuseScaleAccumulate(plan, opcode, lOff, rOff, destOff);
+                    }
+                    if (fused == null && (opcode == OP_ADD || opcode == OP_SUB)) {
+                        // accumulator +/- (bare variable), e.g. the x3 term of
+                        // x1+x2+x3 -- an unweighted sum is just the coeff=1.0
+                        // special case of the axpy chain above, so it reuses
+                        // the exact same ScaleAccumulateCommand rather than a
+                        // new command class. Tried after tryFuseScaleAccumulate
+                        // since the two match mutually exclusive shapes (one
+                        // needs a ScaleCommand on top of the plan, this one
+                        // needs a bare LoadCommand) and tryFuseLoadLoad above
+                        // already claims the case where BOTH operands are bare
+                        // loads, so this only ever fires for the "accumulator
+                        // so far, plus one more plain variable" shape.
+                        fused = tryFuseLoadAccumulate(plan, opcode, lOff, rOff, destOff);
+                    }
+
                     if (fused != null) {
-                        // Both LoadCommands are dead after this point: codegen is
-                        // a strict LIFO stack machine, so lOff/rOff cannot be
-                        // referenced by anything else once this op consumes them.
-                        // Removing them skips materializing both operands into
-                        // ctx.scratch - the fused command reads straight from
-                        // flatVariables/_2DVariables instead.
-                        plan.remove(plan.size() - 1);
-                        plan.remove(plan.size() - 1);
                         plan.add(fused);
                     } else {
                         plan.add(switch (opcode) {
@@ -599,7 +1191,32 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                     // All remaining valid opcodes are Unary/In-place operations.
                     int baseOff = virtualStack[sp - 1]; // Peak at top of stack (in-place)
 
-                    UnaryMathOp mathOp = switch (opcode) {
+                    // Peephole: this unary op is applied directly to a bare
+                    // variable load (sin(x), not sin(x+1)) -- fuse the pending
+                    // LoadCommand into the unary op itself. See
+                    // tryFuseLoadUnary()'s javadoc for the generic-vs-dedicated
+                    // (LoadSqrtCommand) distinction.
+                    VectorCommand loadFused = tryFuseLoadUnary(plan, opcode, baseOff);
+                    if (loadFused != null) {
+                        plan.add(loadFused);
+                    } else {
+                        plan.add(new UnaryMathCommand(resolveUnaryMathOp(opcode), baseOff));
+                    }
+                }
+            }
+        }
+
+        return new SIMDVectorCompositeExpression(plan.toArray(new VectorCommand[0]), stackDepth, BLOCK_SIZE);
+    }
+
+    /**
+     * The opcode -&gt; {@link UnaryMathOp} mapping, factored out of the
+     * {@code compile()} switch so both the ordinary (unfused) unary path and
+     * {@link #tryFuseLoadUnary} can share one source of truth instead of two
+     * copies of the same ~50-case table drifting apart over time.
+     */
+    private static UnaryMathOp resolveUnaryMathOp(int opcode) {
+        return switch (opcode) {
 
                         case OP_SQRT ->
                             VectorMathF::sqrt;
@@ -726,14 +1343,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
 
                         default ->
                             throw new UnsupportedOperationException("Unmapped opcode: " + opcode);
-                    };
-
-                    plan.add(new UnaryMathCommand(mathOp, baseOff));
-                }
-            }
-        }
-
-        return new SIMDVectorCompositeExpression(plan.toArray(new VectorCommand[0]), stackDepth, BLOCK_SIZE);
+        };
     }
 
     /**
@@ -758,7 +1368,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             return null;
         }
 
-        return switch (opcode) {
+        VectorCommand fused = switch (opcode) {
             case OP_ADD ->
                 new LoadLoadAddCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
             case OP_SUB ->
@@ -770,6 +1380,186 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             default ->
                 null;
         };
+        if (fused == null) {
+            return null;
+        }
+
+        // Both LoadCommands are dead after this point: codegen is a strict
+        // LIFO stack machine, so lOff/rOff cannot be referenced by anything
+        // else once this op consumes them. Removing them skips materializing
+        // both operands into ctx.scratch - the fused command reads straight
+        // from flatVariables/_2DVariables instead.
+        plan.remove(size - 1);
+        plan.remove(size - 2);
+        return fused;
+    }
+
+    /**
+     * Peephole fusion for unweighted running sums/differences -
+     * {@code x1 + x2 + x3 + ... + xn}, or any mix of {@code +}/{@code -}
+     * between bare variables, with no coefficients anywhere. This is the
+     * {@code coeff = 1.0f} (or {@code -1.0f}, for {@code OP_SUB}) special
+     * case of {@link #tryFuseScaleAccumulate} - reusing the exact same
+     * {@link ScaleAccumulateCommand} (one hardware fused-multiply-add per
+     * SIMD lane, {@code acc = acc + 1.0f*var}) rather than a separate
+     * plain-accumulate command class - for when the right-hand operand of an
+     * {@code OP_ADD}/{@code OP_SUB} is a bare {@link LoadCommand} rather
+     * than a {@link ScaleCommand}.
+     *
+     * <p>Tried after {@link #tryFuseScaleAccumulate}, since the two match
+     * mutually exclusive shapes (that one needs a {@code ScaleCommand} on
+     * top of the plan; this one needs a bare {@code LoadCommand}), and after
+     * {@link #tryFuseLoadLoad} already has first claim on the case where
+     * BOTH operands are bare loads (e.g. the {@code x1+x2} seed of
+     * {@code x1+x2+x3}) - so this only ever fires for "the accumulator so
+     * far, plus one more plain variable", which is exactly the shape every
+     * term after the first takes in an unweighted sum.
+     *
+     * <p>Composes with {@link #tryFuseLoadLoad} the same way
+     * {@link #tryFuseConstLoad}/{@link #tryFuseScaleAccumulate} compose for
+     * a weighted chain: an N-term unweighted sum collapses from
+     * {@code 2N-3} commands (a standalone {@code LoadCommand} plus a plain
+     * {@code AddCommand}/{@code SubCommand} for every term after the first
+     * two) down to {@code N-1} (one {@code LoadLoadAddCommand} seeding the
+     * accumulator from the first two terms, then one
+     * {@code ScaleAccumulateCommand} per remaining term).
+     */
+    private static VectorCommand tryFuseLoadAccumulate(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 1) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof LoadCommand load) || load.destOff() != rOff) {
+            return null;
+        }
+
+        float coeff = (opcode == OP_SUB) ? -1.0f : 1.0f;
+        plan.remove(size - 1);
+        return new ScaleAccumulateCommand(coeff, load.slotIdx(), destOff);
+    }
+
+    /**
+     * Peephole fusion for linear-combination-shaped expressions
+     * ({@code a1*x1 + a2*x2 + ... + an*xn}, and the equivalent with any mix
+     * of {@code +}/{@code -} between terms): when the right-hand operand of
+     * an {@code OP_ADD}/{@code OP_SUB} is a {@link ScaleCommand} that was
+     * JUST emitted - the last entry in the plan, nothing has consumed it yet
+     * - collapse the pair into a single {@link ScaleAccumulateCommand}: one
+     * hardware fused-multiply-add per SIMD lane
+     * ({@code acc = acc + coeff*var}, or {@code acc = acc - coeff*var} via a
+     * negated coefficient for {@code OP_SUB}), reading the variable straight
+     * from its source.
+     *
+     * <p>Unlike {@link #tryFuseLoadLoad}/{@link #tryFuseConstLoad}, only ONE
+     * plan entry is ever removed here - the left-hand (accumulator) operand
+     * is never a single fresh command to delete, it's whatever arbitrary
+     * chain of prior commands already left its value at {@code lOff} in
+     * scratch (itself possibly a previous {@code ScaleAccumulateCommand}),
+     * and that chain is left completely untouched. {@code destOff} is
+     * {@code lOff} by the caller's existing "reuse the left slot" convention
+     * for {@code OP_ADD}/{@code OP_SUB}, so the accumulator is written back
+     * into exactly the slot it already occupies.
+     *
+     * <p>Composing this with {@link #tryFuseConstLoad} is what collapses an
+     * entire N-term linear combination into exactly N commands: the first
+     * term becomes one {@code ScaleCommand} (seeding the accumulator), and
+     * every subsequent term becomes one {@code ScaleAccumulateCommand} -
+     * versus {@code 4N-1} commands (multiple full materialization passes per
+     * term) with no fusion at all.
+     */
+    private static VectorCommand tryFuseScaleAccumulate(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 1) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof ScaleCommand scale) || scale.destOff() != rOff) {
+            return null;
+        }
+
+        float coeff = (opcode == OP_SUB) ? -scale.coeff() : scale.coeff();
+        plan.remove(size - 1);
+        return new ScaleAccumulateCommand(coeff, scale.varSlot(), destOff);
+    }
+
+    /**
+     * Peephole fusion: when one operand of an {@code OP_MUL} is a plain
+     * numeric constant and the other is a plain variable load - the last two
+     * plan entries are exactly a {@link ConstCommand} and a
+     * {@link LoadCommand} feeding this multiplication, in either order
+     * (multiplication is commutative, so {@code a*x} and {@code x*a} both
+     * match) - collapse them into a single {@link ScaleCommand} that reads
+     * the variable straight from its source and multiplies by the constant
+     * in one pass. This is the building block
+     * {@link #tryFuseScaleAccumulate} depends on: {@code a1*x1} compiles to
+     * one {@code ScaleCommand} instead of three separate commands
+     * ({@code ConstCommand}, {@code LoadCommand}, {@code MulCommand}).
+     *
+     * <p>Only fires for {@code OP_MUL} - the caller is responsible for not
+     * calling this for other opcodes, since e.g. {@code a/x} and
+     * {@code x/a} are not interchangeable.
+     */
+    private static VectorCommand tryFuseConstLoad(List<VectorCommand> plan, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 2) {
+            return null;
+        }
+
+        VectorCommand last = plan.get(size - 1);
+        VectorCommand secondLast = plan.get(size - 2);
+
+        ConstCommand constCmd;
+        LoadCommand loadCmd;
+        if (last instanceof LoadCommand l && l.destOff() == rOff
+                && secondLast instanceof ConstCommand c && c.destOff() == lOff) {
+            constCmd = c;
+            loadCmd = l;
+        } else if (last instanceof ConstCommand c && c.destOff() == rOff
+                && secondLast instanceof LoadCommand l && l.destOff() == lOff) {
+            constCmd = c;
+            loadCmd = l;
+        } else {
+            return null;
+        }
+
+        plan.remove(size - 1);
+        plan.remove(size - 2);
+        return new ScaleCommand(constCmd.value(), loadCmd.slotIdx(), destOff);
+    }
+
+    /**
+     * Peephole fusion for any unary math opcode applied directly to a bare
+     * variable load: if the last plan entry is exactly the
+     * {@link LoadCommand} that produced {@code baseOff}, fuse the pair into
+     * a single command that reads the variable straight from its source
+     * instead of paying for a separate materialization pass first.
+     *
+     * <p>{@code OP_SQRT} gets the fully-dedicated {@link LoadSqrtCommand} -
+     * no separate materialization pass at all, see that class's javadoc for
+     * why sqrt specifically earns the hand-written treatment. Every other
+     * unary opcode gets the generic {@link LoadUnaryMathCommand}, which
+     * still delegates the actual math to the shared {@link #resolveUnaryMathOp}
+     * table but skips the extra {@code VectorCommand} dispatch a standalone
+     * {@code LoadCommand} would otherwise cost.
+     *
+     * <p>Returns {@code null} (no fusion) when the operand isn't a bare load
+     * - e.g. {@code sqrt(x+1)}, where the operand is the result of a prior
+     * {@code ADD}, not a {@code LoadCommand} - in which case the ordinary
+     * {@link UnaryMathCommand} path handles it exactly as before.
+     */
+    private static VectorCommand tryFuseLoadUnary(List<VectorCommand> plan, int opcode, int baseOff) {
+        int size = plan.size();
+        if (size < 1) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof LoadCommand load) || load.destOff() != baseOff) {
+            return null;
+        }
+
+        plan.remove(size - 1);
+        if (opcode == OP_SQRT) {
+            return new LoadSqrtCommand(load.slotIdx(), baseOff);
+        }
+        return new LoadUnaryMathCommand(resolveUnaryMathOp(opcode), load.slotIdx(), baseOff);
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression implements AutoCloseable {
@@ -1209,22 +1999,41 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
         private static void applyBulkInternal(float[] flatVariables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, float[] output, int startIdx, int length) {
             final int endIdx = startIdx + length;
             float[] s = ctx.scratch;
+            final int planLen = executionPlan.length;
+            // If the last command in the plan can write its result straight to
+            // `output` (see DirectOutputCommand), run every command before it
+            // as usual but skip BOTH running the last one via the ordinary
+            // execute() path AND the separate scratch-to-output writeback loop
+            // below entirely -- one fewer full read+write pass over every
+            // block. When the last command doesn't implement DirectOutputCommand
+            // (PowCommand, or anything that delegates to VectorMathF's
+            // scratch-shaped UnaryMathOp/BinaryMathOp), `terminal` is null and
+            // this falls back to the original path, byte-for-byte unchanged.
+            // Resolved once outside the block loop since it's the same for
+            // every block.
+            final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
+            final int runLen = terminal != null ? planLen - 1 : planLen;
+
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
                 ctx.initForBlock(flatVariables, null, dataSize, blockStart);
 
-                for (int i = 0; i < executionPlan.length; i++) {
+                for (int i = 0; i < runLen; i++) {
                     executionPlan[i].execute(ctx, currentBlockSize);
                 }
 
-                // Vectorized output write back (assumes result is at scratch offset 0)
-                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
-                for (; k < limit; k += SPECIES.length()) {
-                    FloatVector.fromArray(SPECIES, s, k)
-                            .intoArray(output, blockStart + k);
-                }
-                for (; k < currentBlockSize; k++) {
-                    output[blockStart + k] = s[k];
+                if (terminal != null) {
+                    terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
+                } else {
+                    // Vectorized output write back (assumes result is at scratch offset 0)
+                    int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                    for (; k < limit; k += SPECIES.length()) {
+                        FloatVector.fromArray(SPECIES, s, k)
+                                .intoArray(output, blockStart + k);
+                    }
+                    for (; k < currentBlockSize; k++) {
+                        output[blockStart + k] = s[k];
+                    }
                 }
             }
         }
@@ -1232,22 +2041,32 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
         private static void applyBulkInternal(float[][] variables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, float[] output, int startIdx, int length) {
             final int endIdx = startIdx + length;
             float[] s = ctx.scratch;
+            final int planLen = executionPlan.length;
+            // See the flatVariables overload above for the full explanation of
+            // this DirectOutputCommand check -- identical logic here.
+            final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
+            final int runLen = terminal != null ? planLen - 1 : planLen;
+
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
                 ctx.initForBlock(null, variables, dataSize, blockStart);
 
-                for (int i = 0; i < executionPlan.length; i++) {
+                for (int i = 0; i < runLen; i++) {
                     executionPlan[i].execute(ctx, currentBlockSize);
                 }
 
-                // Vectorized output write back
-                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
-                for (; k < limit; k += SPECIES.length()) {
-                    FloatVector.fromArray(SPECIES, s, k)
-                            .intoArray(output, blockStart + k);
-                }
-                for (; k < currentBlockSize; k++) {
-                    output[blockStart + k] = s[k];
+                if (terminal != null) {
+                    terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
+                } else {
+                    // Vectorized output write back
+                    int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                    for (; k < limit; k += SPECIES.length()) {
+                        FloatVector.fromArray(SPECIES, s, k)
+                                .intoArray(output, blockStart + k);
+                    }
+                    for (; k < currentBlockSize; k++) {
+                        output[blockStart + k] = s[k];
+                    }
                 }
             }
         }
@@ -1255,5 +2074,3 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
     }
 
 }
-
-
