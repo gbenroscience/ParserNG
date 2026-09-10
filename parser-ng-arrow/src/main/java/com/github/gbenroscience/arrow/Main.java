@@ -62,6 +62,8 @@ public final class Main {
                 + Arrays.toString(Arrays.copyOf(out, PREVIEW_COUNT)));
         System.out.println("FLOAT  RESULTS (first " + PREVIEW_COUNT + "): "
                 + Arrays.toString(Arrays.copyOf(outf, PREVIEW_COUNT)));
+        
+        System.out.println("SPEEDUP: FLOAT vs DOUBLE - "+(doubleNanosPerRun/floatNanosPerRun)+"x");
     }
 
     private interface BulkOp {

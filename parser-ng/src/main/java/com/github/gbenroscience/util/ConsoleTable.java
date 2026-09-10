@@ -90,9 +90,9 @@ public class ConsoleTable {
             data[i][1] = "ParserNG";
             data[i][2] = "JavaMEP";
             data[i][3] = "MathLib";
-            data[i][4] = (i < 5) ? "NaN" : String.format("%.5f", Math.random());
-            data[i][5] = (i < 5) ? "NaN" : String.format("%.5f", Math.random());
-            data[i][6] = (i < 5) ? "NaN" : String.format("%.5f", Math.random());
+            data[i][4] = (i < 5) ? "NaN" : String.format("%.15f", Math.random());
+            data[i][5] = (i < 5) ? "NaN" : String.format("%.15f", Math.random());
+            data[i][6] = (i < 5) ? "NaN" : String.format("%.15f", Math.random());
         }
 
         // 4. Create and Display Table

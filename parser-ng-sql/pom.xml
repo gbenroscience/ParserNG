@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
                              https://maven.apache.org/xsd/maven-4.0.0.xsd">
 
     <modelVersion>4.0.0</modelVersion>
@@ -12,40 +12,50 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>parser-ng-arrow</artifactId>
+    <artifactId>parser-ng-sql</artifactId>
+    <version>3.0.7</version>
     <packaging>jar</packaging>
-    <name>parser-ng-arrow</name> 
+    <name>parser-ng-sql</name>
     <description>
-        ParserNg's integration with Apache Arrow - setting our sights on Big Data.
-        filter, project and filterProject added in v3.0.6
+        A SQL-shaped front end over parser-ng-arrow: SELECT ... FROM ... [WHERE ...] compiles
+        to a vectorized Arrow filter/projection pipeline built on ArrowExpressionEvaluators.
+        This is deliberately NOT a database - no JOIN, INSERT, UPDATE, DELETE, transactions,
+        catalogs, GROUP BY or ORDER BY. It exists purely to make SQL a convenient surface
+        syntax for describing vectorized Arrow computations that parser-ng-arrow already knows
+        how to run.
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
     </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
 
     <properties>
-        <!-- This module requires Java 21+ because of Vector API -->
+        <!-- Same requirement as parser-ng-arrow: Vector API / jdk.incubator.vector -->
         <maven.compiler.release>22</maven.compiler.release>
         <arrow.version>19.0.0</arrow.version>
-
+        <upstream.version>3.0.6</upstream.version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng</artifactId>
-            <version>${project.version}</version>
+            <version>${upstream.version}</version>
         </dependency>
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng-simd</artifactId>
-            <version>${project.version}</version>
+            <version>${upstream.version}</version>
         </dependency>
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng-gpu-simd</artifactId>
-            <version>${project.version}</version>
+            <version>${upstream.version}</version>
         </dependency>
-        
+        <dependency>
+            <groupId>com.github.gbenroscience</groupId>
+            <artifactId>parser-ng-arrow</artifactId>
+            <version>${upstream.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-vector</artifactId>
@@ -54,21 +64,14 @@
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-memory-netty</artifactId>
-            <version>${arrow.version}</version> 
+            <version>${arrow.version}</version>
         </dependency>
-
 
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-api</artifactId>
             <version>5.10.3</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.codehaus.janino</groupId>
-            <artifactId>janino</artifactId>
-            <version>3.1.12</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -82,18 +85,6 @@
             <artifactId>junit-jupiter-params</artifactId>
             <version>5.10.3</version>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.openjdk.jmh</groupId>
-            <artifactId>jmh-core</artifactId>
-            <version>1.37</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.openjdk.jmh</groupId>
-            <artifactId>jmh-generator-annprocess</artifactId>
-            <version>1.37</version>
-            <scope>provided</scope>
         </dependency>
     </dependencies>
 
@@ -113,7 +104,6 @@
                 <configuration>
                     <release>${maven.compiler.release}</release>
                     <compilerArgs>
-                        <!-- SIMDCommandXXX classes uses jdk.incubator.vector -->
                         <arg>--add-modules</arg>
                         <arg>jdk.incubator.vector</arg>
                     </compilerArgs>
@@ -124,7 +114,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.3.1</version>
                 <configuration>
-                    <argLine> 
+                    <argLine>
                         --add-modules=jdk.incubator.vector
                         --enable-native-access=ALL-UNNAMED
                         --add-opens=java.base/java.nio=ALL-UNNAMED
@@ -135,43 +125,9 @@
                         -Dio.netty.tryReflectionSetAccessible=true
                         -Darrow.allocation.manager.type=Unsafe
                         -Darrow.allocation.manager.type=Direct
-                         --sun-misc-unsafe-memory-access=allow
+                        --sun-misc-unsafe-memory-access=allow
                     </argLine>
                 </configuration>
-            </plugin>
-
-            <!-- JMH Benchmark shading -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.2</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <finalName>benchmarks</finalName>
-                            <includeDependencySources>false</includeDependencySources>
-                            <filters>
-                                <filter>
-                                    <artifact>*:*</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/*.SF</exclude>
-                                        <exclude>META-INF/*.DSA</exclude>
-                                        <exclude>META-INF/*.RSA</exclude>
-                                    </excludes>
-                                </filter>
-                            </filters>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>org.openjdk.jmh.Main</mainClass>
-                                </transformer>
-                            </transformers>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

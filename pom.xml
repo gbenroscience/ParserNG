@@ -6,17 +6,14 @@
 
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-parent</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
     <packaging>pom</packaging>
 
     <name>${project.groupId}:${project.artifactId}</name>
  
     <description>
         Parent infrastructure for ParserNG mathematical runtime.
-        Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies. 
-        Version 3.0.4 features GPU bulk evaluation and the highly stable SIMDEngineEvaluator which combines CPU pinning of threads with its workers. It also sports
-        a SIMDCommandTurboEvaluator class which is a bit slower than
-        ensuring hardware acceleration of all user designed functions and inbuilt functions that can be expressed in terms of the Vector API
+        Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.  
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
     </description>
     <url>https://github.com/gbenroscience/ParserNG</url>
@@ -27,6 +24,7 @@
         <module>parser-ng-bench</module>
         <module>parser-ng-gpu-simd</module>
         <module>parser-ng-arrow</module>
+        <module>parser-ng-sql</module>
     </modules>
 
     <properties>
