@@ -50,7 +50,17 @@ public final class ArrowSqlDemo {
 
             runOneShot("SELECT x,y,", allocator,
                     () -> sampleXY(allocator),
-                    "SELECT x,y, 3*x+y, erf(x) AS erfx FROM data where x-erf(x)>0");
+                    "SELECT x,y, 3*x+y, erf(x) AS erfx FROM data where x-erf(x)>0 ORDER BY erfx");
+            
+            
+            runOneShot("SELECT x,y,", allocator,
+                    () -> sampleXY(allocator),
+                    "SELECT x,y, 3*x+y, sin(x) AS sinx FROM data where x-erf(x)>0 ORDER BY sinx");
+            
+            
+            runOneShot("SELECT x,y,", allocator,
+                    () -> sampleXY(allocator),
+                    "SELECT x,y, 3*x+y, sin(x) AS sinx FROM data where x-erf(x)>0 ORDER BY sinx LIMIT 4");
 
             // ---- SELECT list forms -------------------------------------------
             runOneShot("SELECT * -- passthrough every column", allocator,
