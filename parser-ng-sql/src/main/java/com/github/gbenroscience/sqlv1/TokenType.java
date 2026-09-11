@@ -4,12 +4,14 @@ package com.github.gbenroscience.sqlv1;
  * Lexical categories produced by {@link SqlLexer}.
  *
  * <p>
- * This is deliberately a small, closed set: parser-ng-sql speaks exactly the
- * grammar documented on {@link SqlParser} (a {@code SELECT ... FROM ...
- * [WHERE ...]} shape over ParserNG arithmetic expressions) and nothing more.
- * There is no token type for {@code JOIN}, {@code GROUP BY},
- * {@code ORDER BY}, subqueries, etc. — those are out of scope by design; see
- * the parser-ng-sql module javadoc.
+ * parser-ng-sql speaks the {@code SELECT ... FROM ... [WHERE ...] [GROUP BY
+ * ...] [HAVING ...] [ORDER BY ...] [LIMIT ...]} shape over ParserNG
+ * arithmetic expressions documented on {@link SqlParser}, plus {@code CASE}/
+ * {@code WHEN}/{@code THEN}/{@code ELSE}/{@code END} and {@code CAST} as
+ * expression-level constructs. There is still no token type for
+ * {@code JOIN}, subqueries, {@code INSERT}/{@code UPDATE}/{@code DELETE},
+ * transactions, or catalogs — those remain out of scope by design; see the
+ * parser-ng-sql module javadoc.
  *
  * @author GBEMIRO
  */
@@ -29,6 +31,19 @@ public enum TokenType {
     NULL,
     TRUE,
     FALSE,
+    CASE,
+    WHEN,
+    THEN,
+    ELSE,
+    END,
+    CAST,
+    GROUP,
+    BY,
+    HAVING,
+    ORDER,
+    ASC,
+    DESC,
+    LIMIT,
 
     // --- literals / names ---
     IDENTIFIER,

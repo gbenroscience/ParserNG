@@ -183,4 +183,26 @@ public final class WhereAliasResolver {
         }
         return n;
     }
+
+    /**
+     * Public entry point for a single raw expression string (as opposed to
+     * a {@link BoolExpr} tree) — used by {@code ArrowQuery} to resolve
+     * {@code SELECT}-list aliases referenced from an {@code ORDER BY} key,
+     * exactly the same way {@link #resolve(BoolExpr, Map)} resolves them
+     * for {@code WHERE}/{@code HAVING} leaf operands. Thin public wrapper
+     * around the package-private {@link #substitute(String, Map)}.
+     *
+     * @param exprText the raw ParserNG expression text to resolve aliases
+     * within
+     * @param aliasToExpr alias output name -&gt; the raw expression text it
+     * stands for; an empty map is a no-op
+     * @throws IllegalArgumentException if {@code aliasToExpr} contains a
+     * cycle reachable from a name used in {@code exprText}
+     */
+    public static String substituteText(String exprText, Map<String, String> aliasToExpr) {
+        if (aliasToExpr.isEmpty()) {
+            return exprText;
+        }
+        return substitute(exprText, aliasToExpr);
+    }
 }

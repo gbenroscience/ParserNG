@@ -1,16 +1,23 @@
 /**
  * jiboyeisrael@gmail.com
  * A SQL-shaped front end for parser-ng-arrow: {@code SELECT ... FROM ...
- * [WHERE ...]} compiles into vectorized Apache Arrow computations, driven
- * entirely by ParserNG expressions.
+ * [WHERE ...] [GROUP BY ...] [HAVING ...] [ORDER BY ...] [LIMIT ...]}
+ * compiles into vectorized Apache Arrow computations, driven entirely by
+ * ParserNG expressions.
  *
  * <h2>Scope</h2>
  * This package deliberately implements a small, closed grammar --
  * documented in full on {@link com.github.gbenroscience.sqlv1.SqlParser} --
  * and nothing more: no {@code JOIN}, no {@code INSERT}/{@code UPDATE}/
- * {@code DELETE}, no transactions, no catalogs, no subqueries,
- * {@code GROUP BY}, or {@code ORDER BY}. The goal, in the words of the
- * original design brief, is
+ * {@code DELETE}, no transactions, no catalogs, no subqueries. Within that
+ * {@code SELECT} shape, {@code CASE}/{@code WHEN}/{@code THEN}/{@code ELSE}/
+ * {@code END}, {@code CAST}, {@code GROUP BY}, {@code HAVING},
+ * {@code ORDER BY}, and {@code LIMIT} are all supported -- see
+ * {@code SqlParser} for how each compiles to ParserNG text, and
+ * {@link com.github.gbenroscience.sqlv1.ArrowQuery} ("Aggregation
+ * strategy" and "{@code ORDER BY} and {@code LIMIT}") for how grouping,
+ * aggregate functions, and sorting are actually executed. The goal, in the
+ * words of the original design brief, is
  * <blockquote>"Make SQL a convenient way to describe vectorized Arrow
  * computations." Not: "Make parser-ng-arrow a SQL database."</blockquote>
  *

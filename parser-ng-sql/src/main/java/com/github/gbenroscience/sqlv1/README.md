@@ -16,9 +16,9 @@ VectorSchemaRoot result = ArrowSql.execute(root,
 ```
 
 This module intentionally stops at `SELECT`/`WHERE` with column aliasing —
-no `JOIN`, `INSERT`, `UPDATE`, `DELETE`, transactions, catalogs, subqueries,
-`GROUP BY`, or `ORDER BY`. The goal is *"make SQL a convenient way to
-describe vectorized Arrow computations"*, not *"build a database"*.
+no `JOIN`, `INSERT`, `UPDATE`, `DELETE`, transactions, catalogs, or
+subqueries. The goal is *"make SQL a convenient way to describe vectorized
+Arrow computations"*, not *"build a database"*.
 
 ## Installing into the ParserNG repo
 
@@ -36,30 +36,81 @@ Requires JDK 22+ and network access to Maven Central for `arrow-vector` /
 already used by `parser-ng-arrow`.
 
 ## Grammar (v1)
-
-```
-query               ::= SELECT select_list FROM table_reference [WHERE boolean_expression]
-select_list         ::= '*' | select_item (',' select_item)*
-select_item         ::= expression [AS identifier]
-boolean_expression  ::= or_expression
-or_expression       ::= and_expression ('OR' and_expression)*
-and_expression      ::= not_expression ('AND' not_expression)*
-not_expression      ::= 'NOT' not_expression | predicate
-predicate           ::= comparison
-                       | expression 'IS' ['NOT'] 'NULL'
-                       | expression ['NOT'] 'BETWEEN' expression 'AND' expression
-                       | expression ['NOT'] 'IN' '(' expression_list ')'
-                       | '(' boolean_expression ')'
-comparison          ::= expression comparison_operator expression
+query ::= SELECT select_list
+FROM table_reference
+[WHERE boolean_expression]
+[GROUP BY expression_list]
+[HAVING boolean_expression]
+[ORDER BY order_item (',' order_item)]
+[LIMIT integer_literal]
+select_list ::= '' | select_item (',' select_item)*
+select_item ::= expression [AS identifier]
+| aggregate_call [AS identifier]
+aggregate_call ::= ('COUNT'|'SUM'|'AVG'|'MIN'|'MAX') '(' (expression|'') ')'
+-- '' only valid with COUNT
+order_item ::= expression ['ASC' | 'DESC']
+boolean_expression ::= or_expression
+or_expression ::= and_expression ('OR' and_expression)*
+and_expression ::= not_expression ('AND' not_expression)*
+not_expression ::= 'NOT' not_expression | predicate
+predicate ::= comparison
+| expression 'IS' ['NOT'] 'NULL'
+| expression ['NOT'] 'BETWEEN' expression 'AND' expression
+| expression ['NOT'] 'IN' '(' expression_list ')'
+| '(' boolean_expression ')'
+comparison ::= expression comparison_operator expression
 comparison_operator ::= '=' | '!=' | '<>' | '<' | '<=' | '>' | '>='
-expression          ::= additive_expression   (ParserNG's own arithmetic grammar --
-                                                + - * / % ^, parens, function calls,
-                                                identifiers, literals)
-```
+expression ::= additive_expression (ParserNG's own arithmetic grammar --
++ - * / % ^, parens, function calls,
+identifiers, literals, plus
+case_expression/cast_expression below)
+case_expression ::= 'CASE' expression ('WHEN' expression 'THEN' expression)+
+['ELSE' expression] 'END' -- simple CASE
+| 'CASE' ('WHEN' boolean_expression 'THEN' expression)+
+['ELSE' expression] 'END' -- searched CASE
+cast_expression ::= 'CAST' '(' expression 'AS' identifier ')'
 
 Full javadoc for the grammar and its rationale lives on `SqlParser`; the
-`ast` package and `BoolExprs` document how `WHERE` is normalized (negation-
-normal form, since ParserNG has no logical-not operator) and rendered.
+`ast` package and `BoolExprs` document how `WHERE`/`HAVING` are normalized
+(negation-normal form, since ParserNG has no logical-not operator) and
+rendered.
+
+### `CASE`/`WHEN`/`THEN`/`ELSE`/`END`
+
+ParserNG has no `CASE` operator, but does have the `if(cond, then, else)`
+idiom described below. A `CASE` expression compiles to a right-nested chain
+of `if(...)` calls — `CASE WHEN a THEN 1 WHEN b THEN 2 ELSE 3 END` becomes
+`if(a, 1, if(b, 2, 3))`, and an omitted `ELSE` falls back to the literal
+`NULL`. Both the searched form (a full boolean condition per `WHEN`) and
+the simple form (`CASE x WHEN 1 THEN ... END`, compiled via `x == 1`) are
+supported. See `SqlParser`'s "CASE/WHEN/THEN/ELSE/END".
+
+### `CAST`
+
+`CAST(expr AS type)` has no ParserNG operator either, and since every value
+in this module is already a ParserNG/Arrow `float64`/`float32`, there is no
+representation change to make: `CAST(x AS INT/INTEGER/SMALLINT/BIGINT/LONG)`
+truncates toward zero (`if(x >= 0, floor(x), -1 * floor(-1 * (x)))` —
+assumes ParserNG provides `floor`); `CAST(x AS FLOAT/REAL/DOUBLE/DECIMAL/NUMERIC)`
+is a pure no-op. See `SqlParser`'s "CAST".
+
+### `GROUP BY`/`HAVING`/aggregates and `ORDER BY`/`LIMIT`
+
+`COUNT`/`SUM`/`AVG`/`MIN`/`MAX` are recognized only at the top level of a
+`select_item` (no nested aggregates, matching standard SQL). Every
+non-aggregate `select_item` in a grouped/aggregate query must match a
+`GROUP BY` expression verbatim — enforced by `SelectStatement`'s
+constructor. Grouping and aggregation are computed client-side (a plain
+nested-loop grouped aggregation, not a vectorized one — see `ArrowQuery`'s
+"Aggregation strategy"); `HAVING` then reuses `WHERE`'s own fused/leaf-mask
+predicate machinery against the resulting one-row-per-group data. Alias an
+aggregate item you intend to reference from `HAVING`/`ORDER BY`
+(`SUM(x) AS total ... HAVING total > 10`) rather than repeating its raw
+call text. `ORDER BY`/`LIMIT` apply after `WHERE`/`GROUP BY`/`HAVING` but
+before the final projection, so an `ORDER BY` key may also name a
+`SELECT`-list alias; sorting is a stable multi-key sort with `NULL`s last
+regardless of direction. See `ArrowQuery`'s "Aggregation strategy" and
+"`ORDER BY` and `LIMIT`".
 
 ## Package
 
@@ -67,23 +118,37 @@ Everything lives under `com.github.gbenroscience.sqlv1`.
 
 ## Verification status (please read before relying on this in production)
 
-This module was written and reviewed in a sandboxed environment **without
-network access to Maven Central** and **without a JDK 22 installation** —
-only a JDK 21 runtime plus an apt-installable JDK 21 *compiler* were
-available, and only for packages already present in that environment.
-Concretely, that means two different levels of confidence for two different
-parts of this module:
+This module was originally written and reviewed in a sandboxed environment
+**without network access to Maven Central** but **with a JDK 21 compiler**
+available locally, letting the dependency-free part of it actually be
+compiled and run (see below). The `CASE`/`CAST`/`GROUP BY`/`HAVING`/
+`ORDER BY`/`LIMIT` additions described in this README were made in a
+follow-up sandbox with **no compiler available at all** (no `javac`, and no
+network access to install one) — those additions were reviewed by hand
+(balanced syntax, matching method signatures across files) but never
+compiled. Concretely, that means three different levels of confidence for
+three different parts of this module:
 
 - **`SqlLexer`, `SqlParser`, the `ast` package, and `BoolExprs`** (SQL text
   → AST → ParserNG expression text; no Arrow dependency at all) were
   **actually compiled and run** in that sandbox, against a real JDK 21
   `javac`/`java`, via the dependency-free harness
-  `src/test/java/.../ParserSmokeTest.java`. All 38 of its checks pass,
-  including the new embedded-boolean-condition cases
-  (`if(sin(x) > 0, tan(x), 0.2)` and friends). The JUnit test class
-  `SqlParserTest` (42 `@Test` methods) mirrors the same checks in ordinary
-  JUnit 5 for this module's real build, since JUnit itself wasn't fetchable
-  in that sandbox to run it there directly.
+  `src/test/java/.../ParserSmokeTest.java`, for the original `SELECT`/
+  `WHERE` grammar. All 38 of its checks passed, including the
+  embedded-boolean-condition cases (`if(sin(x) > 0, tan(x), 0.2)` and
+  friends). The JUnit test class `SqlParserTest` (42 `@Test` methods)
+  mirrors the same checks in ordinary JUnit 5 for this module's real build,
+  since JUnit itself wasn't fetchable in that sandbox to run it there
+  directly.
+
+  **`CASE`/`WHEN`/`THEN`/`ELSE`/`END`, `CAST`, `GROUP BY`, `HAVING`,
+  `ORDER BY`, and `LIMIT` were added afterward, in a sandbox with no
+  compiler available at all (not even `javac`, let alone network access) —
+  they were reviewed line-by-line against the existing code's own patterns
+  and checked for balanced syntax and matching signatures across files, but
+  have not been compiled or run anywhere.** Extend `ParserSmokeTest`/
+  `SqlParserTest` to cover them, and run the full suite, before relying on
+  these specific additions.
 
 - **`ArrowQuery` and `ArrowSql`** (the classes that actually call into
   `arrow-vector` and `parser-ng-arrow`) could **not** be compiled in that
@@ -134,6 +199,22 @@ parts of this module:
   irrelevant to ParserNG's own whitespace-insensitive scanner, but worth
   knowing if you inspect `exprText()` directly rather than only its
   compiled/evaluated result.
+- **Grouped aggregation is client-side, not vectorized.** `GROUP BY`
+  partitions rows and computes `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` with a plain
+  nested loop (materializing each group's rows into their own small
+  sub-batch) rather than a vectorized grouped-aggregation kernel — fine for
+  parser-ng-sql's goal of a convenient computation language, not a claim of
+  database-grade aggregation performance. See `ArrowQuery`'s "Aggregation
+  strategy".
+- **`HAVING`/`ORDER BY` should reference an aggregate `SELECT` item by
+  alias.** An unaliased aggregate item (`SUM(x)` with no `AS`) is named
+  after its own reconstructed call text; referencing that same text from
+  `HAVING`/`ORDER BY` only resolves if written identically. Always alias an
+  aggregate you plan to reference from either clause.
+- **No nested aggregates and no `DISTINCT`.** `COUNT`/`SUM`/`AVG`/`MIN`/
+  `MAX` are recognized only at the top level of a `select_item`, matching
+  standard SQL's prohibition on nesting them; there is no `COUNT(DISTINCT ...)`
+  or other `DISTINCT` support.
 
 ## Embedded boolean conditions (`if(sin(x) > 0, tan(x), 0.2)` and friends)
 
@@ -162,4 +243,3 @@ intended restriction, and is now fixed:
   is still fully supported (`WHERE x = (y > 0)` works fine).
 - See `SqlParser`'s "Embedded boolean conditions" section for the full
   rationale and exactly which positions are safe.
-
