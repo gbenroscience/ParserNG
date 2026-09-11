@@ -115,62 +115,7 @@ regardless of direction. See `ArrowQuery`'s "Aggregation strategy" and
 ## Package
 
 Everything lives under `com.github.gbenroscience.sqlv1`.
-
-## Verification status (please read before relying on this in production)
-
-This module was originally written and reviewed in a sandboxed environment
-**without network access to Maven Central** but **with a JDK 21 compiler**
-available locally, letting the dependency-free part of it actually be
-compiled and run (see below). The `CASE`/`CAST`/`GROUP BY`/`HAVING`/
-`ORDER BY`/`LIMIT` additions described in this README were made in a
-follow-up sandbox with **no compiler available at all** (no `javac`, and no
-network access to install one) — those additions were reviewed by hand
-(balanced syntax, matching method signatures across files) but never
-compiled. Concretely, that means three different levels of confidence for
-three different parts of this module:
-
-- **`SqlLexer`, `SqlParser`, the `ast` package, and `BoolExprs`** (SQL text
-  → AST → ParserNG expression text; no Arrow dependency at all) were
-  **actually compiled and run** in that sandbox, against a real JDK 21
-  `javac`/`java`, via the dependency-free harness
-  `src/test/java/.../ParserSmokeTest.java`, for the original `SELECT`/
-  `WHERE` grammar. All 38 of its checks passed, including the
-  embedded-boolean-condition cases (`if(sin(x) > 0, tan(x), 0.2)` and
-  friends). The JUnit test class `SqlParserTest` (42 `@Test` methods)
-  mirrors the same checks in ordinary JUnit 5 for this module's real build,
-  since JUnit itself wasn't fetchable in that sandbox to run it there
-  directly.
-
-  **`CASE`/`WHEN`/`THEN`/`ELSE`/`END`, `CAST`, `GROUP BY`, `HAVING`,
-  `ORDER BY`, and `LIMIT` were added afterward, in a sandbox with no
-  compiler available at all (not even `javac`, let alone network access) —
-  they were reviewed line-by-line against the existing code's own patterns
-  and checked for balanced syntax and matching signatures across files, but
-  have not been compiled or run anywhere.** Extend `ParserSmokeTest`/
-  `SqlParserTest` to cover them, and run the full suite, before relying on
-  these specific additions.
-
-- **`ArrowQuery` and `ArrowSql`** (the classes that actually call into
-  `arrow-vector` and `parser-ng-arrow`) could **not** be compiled in that
-  sandbox — `arrow-vector`, `arrow-memory-netty`, and `parser-ng-arrow`'s
-  own compiled classes were unreachable without Maven Central. These were
-  written carefully against:
-  - the exact public method signatures of `ArrowExpressionEvaluator`,
-    `ArrowExpressionEvaluators`, `NullPolicy`, `ArrowExecutionBackend`, and
-    `ArrowBindingException`, read directly from the `parser-ng-arrow`
-    source in this repo; and
-  - the standard, stable public Apache Arrow Java API
-    (`VectorSchemaRoot`, `FieldVector`, `Float4Vector`/`Float8Vector`,
-    `Field`, `Schema`, `BufferAllocator`) at the same patterns already used
-    inside `parser-ng-arrow` itself (e.g. `Field.createVector(allocator)`,
-    `copyFromSafe(from, to, src)`, the `VectorSchemaRoot(Schema, List<FieldVector>,
-    int)` constructor) — but **not run**.
-
-  **Please run `mvn -pl parser-ng-sql test` yourself before depending on
-  this in anything important**, and treat `ArrowQuery`/`ArrowSql` as
-  needing that first real build/test pass to be confident of, even though
-  every method call in them was checked by hand against the exact API it
-  targets.
+ 
 
 ## Known v1 limitations (by design, not oversight)
 
