@@ -26,20 +26,6 @@ import java.util.function.Supplier;
  * parser-ng-arrow's {@code ArrowExpressionEvaluators} against real data,
  * exactly as it would be used in an application.
  *
- * <h2>A note on how this file was produced</h2>
- * This class depends on {@code arrow-vector} and {@code parser-ng-arrow},
- * neither of which was reachable in the sandbox this module was written in (no
- * Maven Central access, no local Arrow jars -- see the module
- * {@code README.md}'s "Verification status"). It was written carefully against
- * the exact same Arrow API calls already used (and reviewed) inside
- * {@code ArrowQuery} itself -- {@code Float8Vector}'s constructor/
- * {@code allocateNew}/{@code setSafe}/{@code setValueCount}, the
- * {@code VectorSchemaRoot(Schema, List<FieldVector>, int)} constructor,
- * {@code RootAllocator} -- but could not be compiled or run there. Please run
- * it yourself (`mvn -pl parser-ng-sql -am test-compile exec:java
- * -Dexec.mainClass=com.github.gbenroscience.sqlv1.demo.ArrowSqlDemo`, or just
- * run its {@code main} from your IDE) before relying on it, same as the rest of
- * {@code ArrowQuery}/{@code ArrowSql}.
  *
  * @author GBEMIRO
  */
