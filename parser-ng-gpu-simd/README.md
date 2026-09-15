@@ -134,18 +134,18 @@ Enterprise binaries are hosted securely inside your designated private repositor
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng</artifactId>
-        <version>3.0.6</version>
+        <version>3.0.7</version>
     </dependency>
 
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-simd</artifactId>
-        <version>3.0.6</version>
+        <version>3.0.7</version>
     </dependency>
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-gpu-simd</artifactId>
-        <version>3.0.6</version>
+        <version>3.0.7</version>
     </dependency>
 </dependencies>
 ```
@@ -321,14 +321,11 @@ Out of the box, the enterprise kernel includes optimized presets for:
 To run microbenchmarks, check hardware lane allocations, and verify vector compilation paths on your machine architecture, execute the included target test harness:
 
 ```bash
-mvn clean test -Dtest=SIMDTurboEvaluatorTest
+mvn clean test -Dtest=SIMDCommandF64SegmentTest
 ```
 
 The validation tool tests across variable scale profiles (20 x 20, 70 x 70, 100 x 100, 200 x 200, 512 x 512, and 1024 x 1024).
-
-> ⚠️ **Developer Note:** To prevent console I/O bottlenecks and virtual terminal blocking from stalling the execution test cycle, do not pass debug variables to print raw matrices out into standard log files during 200 x 200 test iterations.
-
----
+ 
 
 ## Enterprise Support, SLAs, & Custom DSL Services
 

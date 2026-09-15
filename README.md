@@ -1,4 +1,4 @@
-# ParserNG 3.0.6 🧮⚡
+# ParserNG 3.0.7 🧮⚡
 
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?style=flat-square&color=blue)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![Downloads](https://img.shields.io/badge/Downloads-11k%2B-brightgreen?style=flat-square)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
@@ -7,11 +7,12 @@
 
 > **The fastest pure-Java math runtime, now with GPU (CUDA and OpenCL) bulk evaluators and a fully open-sourced Vector API (SIMD) kernel. Zero JNI. Zero native binaries. Zero bytecode-safety risk.**
 
-[**ParserNG 3.0.6 is live**](LATEST.md) 
+[**ParserNG 3.0.7 is live**](LATEST.md)
+- In this version, `parser-ng-sql`, a new extension has been introduced to help Apache Arrow users of ParserNG(parser-ng-arrow) maximize its use, using SQL as a query language 
 - It introduced (in v3.0.5) float32 (Java's float type) and float64 (Java's primitive double type) bulk evaluators, alongside MemorySegment-based bulk evaluators for both precisions.
 - It puts all of that to work in **parser-ng-arrow**: a true zero-copy bridge between ParserNG and Apache Arrow, letting you evaluate any runtime string expression, filter rows, and project computed columns directly over Arrow's columnar memory, no serialization, no staging buffers, no leaving the Arrow buffer at all. In its SIMD mode (`ArrowBulkEvaluator`), it beats Apache Gandiva by 10 to 30 times on every transcendental function: `sin`, `cos`, `log`, `exp`, and the rest of the set. Gandiva still edges it out on hardware-intrinsic `sqrt` and plain arithmetic, by 1.5x to 2x, but flip on `ArrowBulkEvaluator`'s built-in parallelism and that gap is gone at just 2 workers.
 - For workloads that want more than the CPU can give, `ArrowGpuBulkEvaluator` dispatches the same expressions straight to CUDA, OpenCL, or Metal, with zero JNI and zero native binaries anywhere in your build.
-- Version 3.0.6 rounds this out with real query power: `filter`, `project`, and `filterProject`. These aren't a SQL engine, and they're no replacement for Gandiva or DataFusion, but for math-heavy numeric expressions over Arrow batches, they're the faster tool for the job. `filterProject` fuses row selection with column computation so your projection never runs on a row about to be thrown away. When your expressions are float/float64-heavy, `parser-ng-arrow` is the faster choice, by a lot.
+- Version 3.0.7 rounds this out with real query power: `filter`, `project`, and `filterProject`. These aren't a SQL engine, and they're no replacement for Gandiva or DataFusion, but for math-heavy numeric expressions over Arrow batches, they're the faster tool for the job. `filterProject` fuses row selection with column computation so your projection never runs on a row about to be thrown away. When your expressions are float/float64-heavy, `parser-ng-arrow` is the faster choice, by a lot.
 
 ### `filter`, `project`, and `filterProject` in action
 
@@ -96,9 +97,9 @@ Book a **free 30-minute introductory call** to discuss your production needs. On
 
 This is the part of ParserNG worth losing sleep over, so it goes first.
 
-### GPU bulk evaluation: CUDA and OpenCL, zero native code
+### GPU bulk evaluation: CUDA and OpenCL, and Metal, zero native code
 
-One kernel, two backends, your choice of double or genuinely native float32 (not double silently upcast: a lot of consumer GPUs run fp64 at a fraction of their fp32 rate, so faking float32 would defeat the entire point). Auto-detects whichever backend is installed, or you pick explicitly:
+One kernel, three backends, your choice of double or genuinely native float32 (not double silently upcast: a lot of consumer GPUs run fp64 at a fraction of their fp32 rate, so faking float32 would defeat the entire point). Auto-detects whichever backend is installed, or you pick explicitly:
 
 ```java
 MathExpression me = new MathExpression("3*cos(x-2)+ln(3*x^3-5*x-4*tan(x))");
@@ -276,7 +277,7 @@ evaluator.applyBulk(inputs, out);
 | **< 1.0.0** | `MathExpression`, the interpreter. ParserNG Standard. |
 | **1.0.0 – 1.x** | Turbo tier arrives: `ScalarTurboEvaluator1` (variable args as an array), `ScalarTurboEvaluator2` (variable args as widened primitives internally), and `MatrixTurboEvaluator`, all built on `MethodHandles`. |
 | **2.0.0 – 2.x** | Bulk evaluation, via mechanical sympathy *and* SIMD. `VectorTurboEvaluator` coerces auto-vectorization through code shape alone; `SIMDVectorTurboEvaluator` forces it via the explicit Vector API. Both support `applyBulkParallel(in, out)`, but JDK 21 has no CPU pinning, capping the parallel win. |
-| **3.0.6** | `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` add CPU pinning (best on Linux): 2 workers on 2 cores ≈ 1.8×–2.0× the work of 1 worker on 1 core. `SIMDEngineEvaluator` edges out `SIMDCommandTurboEvaluator` by a few ns/op. Both live in **`parser-ng-gpu-simd`** (JDK 22+), the module that also houses the star of this release: native **GPU bulk evaluators for CUDA and OpenCL**. |
+| **3.0.7** | `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` add CPU pinning (best on Linux): 2 workers on 2 cores ≈ 1.8×–2.0× the work of 1 worker on 1 core. `SIMDEngineEvaluator` edges out `SIMDCommandTurboEvaluator` by a few ns/op. Both live in **`parser-ng-gpu-simd`** (JDK 22+), the module that also houses the star of this release: native **GPU bulk evaluators for CUDA and OpenCL**. |
 
 Same `MathExpression` syntax at every tier. You scale up by choosing a different evaluator, never by rewriting the expression.
 
@@ -311,9 +312,9 @@ Full measured breakdowns, including GPU throughput at scale, live in [BENCHMARK_
 
 ---
 
-## 🗃️ New in 3.0.6: the `ARRAY` type
+## 🗃️ New in 3.0.7: the `ARRAY` type
 
-ParserNG has always had `@(dim)(...)` vector/matrix literals, but those are strictly numeric, backed by a `Matrix`. 3.0.6 adds a sibling: the **`ARRAY`** type, using the exact same `@(dim)(...)` syntax, but able to hold a genuine *mix* of content: numbers and strings side by side, not just numbers.
+ParserNG has always had `@(dim)(...)` vector/matrix literals, but those are strictly numeric, backed by a `Matrix`. 3.0.7 adds a sibling: the **`ARRAY`** type, using the exact same `@(dim)(...)` syntax, but able to hold a genuine *mix* of content: numbers and strings side by side, not just numbers.
 
 ```java
 MathExpression m = new MathExpression("a=@(4)('3.14', 5, \"I am here\", 32.34)");
@@ -419,7 +420,7 @@ Core interpreter, Turbo scalar/matrix tiers, and `BulkTurboEvaluator` for mechan
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 
 ```
@@ -438,12 +439,12 @@ Adds `VectorTurboEvaluator` and `SIMDVectorTurboEvaluator`:
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 
 ```
@@ -456,17 +457,17 @@ Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evalua
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-gpu-simd</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 
 ```
@@ -477,7 +478,7 @@ Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evalua
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-bench</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 
 ```
@@ -491,8 +492,12 @@ Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evalua
 | **Arithmetic Operators** | `+`, `-`, `*`, `/`, `^`, `%`, `and`, `or`, `==`, `!=` | **Full Hardware Mapping** |
 | **Trigonometric Functions** | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh` | **Full Hardware Mapping** |
 | **Calculus Engines** | `diff` (Symbolic Engine), `intg` (Numerical Boundaries) | **Yes** |
+| **Calculus Equations** | `diffeqn`, `diffeqnPath`, `diffeqnHO`, `diffeqnPathHO` See:  [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md): | **Yes** |
+
 | **Matrix Algebra** | `det`, `eigvalues`, `eigvec`, `adjoint`, `linear_sys` | **Optimized Linear Path** |
-| **Statistical Functions** | `avg`, `variance`, `rms`, `sort` | **Yes** |
+| **Statistical Functions** | `avg`, `variance`, `rms`, `sort`, `erf`, `erfc` | **Yes** |
+| **Activation Functions** | `gelu`, `geglu`, `swiglu` | **Yes** |
+
 
 ---
 
@@ -520,7 +525,7 @@ Running any of this in production? Production infrastructures requiring predicta
 * **High-Fidelity Graphical Plotting:** [GRAPHING.md](parser-ng/GRAPHING.md): Render configuration rules for JavaFX, Swing, and Android surfaces.
 * **Bulk Vectorization Blueprints:** [BULK.md](https://www.google.com/search?q=parser-ng/BULK.md): Optimization techniques for massive array processing.
 * **Differential Equations:** [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md): Full `diffeqn`/`diffeqnPath`/`diffeqnHO`/`diffeqnPathHO` syntax, solver selection guide, and result-capture patterns.
-* **Release Artifact Logs:** [LATEST.md](LATEST.md): Change logs and technical notes for v3.0.6.
+* **Release Artifact Logs:** [LATEST.md](LATEST.md): Change logs and technical notes for v3.0.7.
 * [MORE.md](MORE.md): Even more to know
 * [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md): Original readme for pre-1.0 versions with a lot of, still valid, examples
 

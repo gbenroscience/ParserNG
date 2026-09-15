@@ -1,5 +1,5 @@
-# ParserNG 3.0.6
-
+# ParserNG 3.0.7
+  
 An ultra-high-performance mathematical expression parsing and evaluation engine for Java. Version 2.0.x introduces a breakthrough **Block Vectorization Engine** (`VectorTurboEvaluator`) and `SIMDVectorTurboEvaluator` powered by the Java **Vector API** (`jdk.incubator.vector`). 
 
 By processing data pipelines natively inside hardware registers, ParserNG completely eliminates runtime allocation overhead and flattens interpreter branches. It matches dynamic bytecode compilation frameworks (like Janino) ns for ns on massive datasets by leveraging bare-metal SIMD hardware capabilities.
@@ -39,12 +39,12 @@ To use SIMDVectorTurboEvaluator(e.g. on modern servers(JDK 21+) and laptops(JDK2
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 ```
 
@@ -53,7 +53,7 @@ To use VectorTurboEvaluator's exact cousin, i.e `BulkTurboEvaluator`(e.g. on And
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.6</version>
+    <version>3.0.7</version>
 </dependency>
 ```
 

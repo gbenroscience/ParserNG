@@ -1,6 +1,10 @@
 # ParserNG
 
-### PasrserNG 3.0.6 is out on maven-central
+### ParserNG 3.0.7 is out on maven-central
+   A SQL-shaped front end over parser-ng-arrow: SELECT ... FROM ... [WHERE ...] compiles to a vectorized Arrow filter/projection pipeline built on ArrowExpressionEvaluators. 
+This is deliberately NOT a database - no JOIN, INSERT, UPDATE, DELETE, transactions. 
+It exists purely to make SQL a convenient surface syntax for describing vectorized Arrow computations that parser-ng-arrow already knows how to run.
+### ParserNG 3.0.6 is out on maven-central
 This version takes `parser-ng-arrow` to the next level by adding the `filter`, the `project` and the `filterProject` methods.
 This extends ParserNG's reach into BigData as not just an evaluator, but also as a query(non-SQL) engine fo BigData. This functionalities are available across the CPU and GPU.
 Enjoy!

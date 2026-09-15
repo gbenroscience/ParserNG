@@ -280,9 +280,10 @@ SELECT category, reading, SUM(reading) FROM data GROUP BY category
 just a bare column:
 
 ```sql
-SELECT category, SUM(reading) AS total
+SELECT category, subcategory, SUM(reading) AS total
 FROM data
-GROUP BY category
+GROUP BY category, subcategory
+ORDER BY category, subcategory
 ```
 
 ### HAVING

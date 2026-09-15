@@ -4,7 +4,7 @@ ParserNG can solve ordinary differential equations — single equations, systems
 
 ---
 
-## 1. The one hard rule: the diffeqn call must be the whole expression
+## 1. The one hard rule: the `diffeqn` call must be the whole expression
 
 Before anything else, the rule that matters most:
 
