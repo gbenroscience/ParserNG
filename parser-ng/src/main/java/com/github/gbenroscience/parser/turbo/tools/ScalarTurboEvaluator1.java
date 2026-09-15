@@ -50,7 +50,7 @@ import com.github.gbenroscience.util.Utils;
 import com.github.gbenroscience.util.io.ByteArrayBuilder;
 import java.lang.invoke.*;
 import java.util.*;
-import java.util.concurrent.ThreadLocalRandom; 
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Turbo compiler optimized for PURE SCALAR expressions. Uses an array based
@@ -223,13 +223,12 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
     }
 
     /**
-     * Hardened production bridge. Zero allocation for arity <= 8. Safely scales
-     * for any arity without crashing. @param methodId @param argsValues
-     * @r
+     * Hardened production bridge. Zero allocation for arity &lt;= 8. Safely
+     * scales for any arity without crashing.   
      *
-     * e
-     * t
-     * urn
+     * @param methodId
+     * @param argsValues
+     * @return
      */
     public static MathExpression.EvalResult invokeRegistryMethod(int methodId, double[] argsValues) {
         MathExpression.EvalResult[] wrappers = WRAPPER_CACHE.get();
@@ -273,8 +272,8 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
                     @Override
                     public MathExpression.EvalResult apply(double[] variables) {
                         MathExpression.EvalResult out = getNextResult();
-                        EquationRuntime.solve(postfix, out); 
-                        return out; 
+                        EquationRuntime.solve(postfix, out);
+                        return out;
                     }
 
                     @Override

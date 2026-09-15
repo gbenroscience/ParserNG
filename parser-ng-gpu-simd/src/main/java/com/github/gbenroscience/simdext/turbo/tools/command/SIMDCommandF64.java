@@ -12,8 +12,7 @@ import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath;
 import java.lang.ref.Cleaner;
 import java.util.ArrayList;
 import java.util.InputMismatchException;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.List; 
 import java.util.concurrent.locks.LockSupport;
 import jdk.incubator.vector.*;
 
@@ -1228,6 +1227,12 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                             VectorMath::erf;
                         case OP_ABS ->
                             VectorMath::abs;
+                        case OP_CEIL ->
+                            VectorMath::floor;
+                        case OP_ROUND ->
+                            VectorMath::round; 
+                        case OP_FLOOR ->
+                            VectorMath::floor;
 
                         // Standard Trig
                         case OP_SIN ->

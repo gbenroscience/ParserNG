@@ -15,7 +15,7 @@ import java.lang.ref.Cleaner;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.InputMismatchException;
-import java.util.List; 
+import java.util.List;
 import java.util.concurrent.locks.LockSupport;
 import jdk.incubator.vector.*;
 
@@ -35,7 +35,6 @@ import jdk.incubator.vector.*;
  *
  *
  */
-
 public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
 
     public SIMDCommandSegmentF64(MathExpression me) throws Throwable {
@@ -75,31 +74,31 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
      * {@link MemorySegment} slice at absolute element offset
      * {@code outputElemOffset..+n} -- instead of into {@code ctx.scratch}.
      *
-     * <p>Implemented only by command types that are pure
+     * <p>
+     * Implemented only by command types that are pure
      * {@code java.lang.foreign}/{@code jdk.incubator.vector} code with no
      * dependency on {@link VectorMath}'s {@code double[]}-scratch-shaped
      * {@link UnaryMathOp}/{@link BinaryMathOp} functional interfaces.
-     * {@link PowCommand} (routes through
-     * {@code VectorMath.executePowerBlended(ctx.scratch, ...)}),
+     * {@link PowCommand} (routes through      {@code VectorMath.executePowerBlended(ctx.scratch, ...)}),
      * {@link UnaryMathCommand}/{@link LoadUnaryMathCommand}, and
-     * {@link BinaryMathCommand} deliberately do NOT implement this: their
-     * math is delegated to a functional interface whose signature is fixed
-     * to {@code double[] scratch}, and retargeting that would mean either
-     * changing those interfaces' signatures (a much larger change touching
-     * every one of the ~50 unary/binary math ops) or duplicating
-     * {@code VectorMath}'s internals outside {@code VectorMath} - neither is
-     * done here.
+     * {@link BinaryMathCommand} deliberately do NOT implement this: their math
+     * is delegated to a functional interface whose signature is fixed to
+     * {@code double[] scratch}, and retargeting that would mean either changing
+     * those interfaces' signatures (a much larger change touching every one of
+     * the ~50 unary/binary math ops) or duplicating {@code VectorMath}'s
+     * internals outside {@code VectorMath} - neither is done here.
      *
-     * <p>When the LAST command in a compiled plan implements this interface,
+     * <p>
+     * When the LAST command in a compiled plan implements this interface,
      * {@code applyBulkInternalSeg} calls {@link #executeToOutput} for it
      * instead of {@code execute(...)} followed by the separate
-     * scratch-to-output writeback pass - eliminating one full extra
-     * read+write pass over the block for exactly that case. Every command
-     * before the last one in the plan is completely unaffected either way;
-     * this only ever changes how the FINAL result reaches the output
-     * buffer. When the last command does not implement this interface,
-     * {@code applyBulkInternalSeg} falls back to the original
-     * {@code execute()}+writeback path, byte-for-byte unchanged.
+     * scratch-to-output writeback pass - eliminating one full extra read+write
+     * pass over the block for exactly that case. Every command before the last
+     * one in the plan is completely unaffected either way; this only ever
+     * changes how the FINAL result reaches the output buffer. When the last
+     * command does not implement this interface, {@code applyBulkInternalSeg}
+     * falls back to the original {@code execute()}+writeback path,
+     * byte-for-byte unchanged.
      */
     interface DirectOutputCommand {
 
@@ -1622,131 +1621,136 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
     private static UnaryMathOp resolveUnaryMathOp(int opcode) {
         return switch (opcode) {
 
-                        case OP_SQRT ->
-                            VectorMath::sqrt;
-                        case OP_CBRT ->
-                            VectorMath::cbrt;
+            case OP_SQRT ->
+                VectorMath::sqrt;
+            case OP_CBRT ->
+                VectorMath::cbrt;
 
-                        case OP_GELU ->
-                            VectorMath::gelu;
+            case OP_GELU ->
+                VectorMath::gelu;
 
-                        case OP_GELU_FAST ->
-                            VectorMath::geluFast;
-                        case OP_SWIGLU ->
-                            VectorMath::swiglu;
-                        case OP_GEGLU ->
-                            VectorMath::gegluUnary;
-                        case OP_ERF ->
-                            VectorMath::erf;
-                        case OP_ABS ->
-                            VectorMath::abs;
+            case OP_GELU_FAST ->
+                VectorMath::geluFast;
+            case OP_SWIGLU ->
+                VectorMath::swiglu;
+            case OP_GEGLU ->
+                VectorMath::gegluUnary;
+            case OP_ERF ->
+                VectorMath::erf;
+            case OP_ABS ->
+                VectorMath::abs;
+            case OP_CEIL ->
+                VectorMath::floor;
+            case OP_ROUND ->
+                VectorMath::round;
+            case OP_FLOOR ->
+                VectorMath::floor;
+            // Standard Trig
+            case OP_SIN ->
+                VectorMath::sin;
+            case OP_COS ->
+                VectorMath::cos;
+            case OP_TAN ->
+                VectorMath::tan;
 
-                        // Standard Trig
-                        case OP_SIN ->
-                            VectorMath::sin;
-                        case OP_COS ->
-                            VectorMath::cos;
-                        case OP_TAN ->
-                            VectorMath::tan;
+            // Degree Variants
+            case OP_SIN_DEG ->
+                VectorMath::sinDeg;
+            case OP_COS_DEG ->
+                VectorMath::cosDeg;
+            case OP_TAN_DEG ->
+                VectorMath::tanDeg;
 
-                        // Degree Variants
-                        case OP_SIN_DEG ->
-                            VectorMath::sinDeg;
-                        case OP_COS_DEG ->
-                            VectorMath::cosDeg;
-                        case OP_TAN_DEG ->
-                            VectorMath::tanDeg;
+            case OP_SIN_GRAD ->
+                VectorMath::sinGrad;
+            case OP_COS_GRAD ->
+                VectorMath::cosGrad;
+            case OP_TAN_GRAD ->
+                VectorMath::tanGrad;
 
-                        case OP_SIN_GRAD ->
-                            VectorMath::sinGrad;
-                        case OP_COS_GRAD ->
-                            VectorMath::cosGrad;
-                        case OP_TAN_GRAD ->
-                            VectorMath::tanGrad;
+            // Standard Inverse
+            case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT ->
+                VectorMath::asin;
+            case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT ->
+                VectorMath::acos;
+            case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT ->
+                VectorMath::atan;
 
-                        // Standard Inverse
-                        case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT ->
-                            VectorMath::asin;
-                        case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT ->
-                            VectorMath::acos;
-                        case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT ->
-                            VectorMath::atan;
+            case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG ->
+                VectorMath::asinDeg;
+            case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG ->
+                VectorMath::acosDeg;
+            case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG ->
+                VectorMath::atanDeg;
 
-                        case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG ->
-                            VectorMath::asinDeg;
-                        case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG ->
-                            VectorMath::acosDeg;
-                        case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG ->
-                            VectorMath::atanDeg;
+            case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD ->
+                VectorMath::asinGrad;
+            case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD ->
+                VectorMath::acosGrad;
+            case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD ->
+                VectorMath::atanGrad;
 
-                        case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD ->
-                            VectorMath::asinGrad;
-                        case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD ->
-                            VectorMath::acosGrad;
-                        case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD ->
-                            VectorMath::atanGrad;
+            // Degree Variants
+            case OP_SEC_DEG ->
+                VectorMath::secDeg;
+            case OP_COSEC_DEG ->
+                VectorMath::cscDeg;
+            case OP_COT_DEG ->
+                VectorMath::cotDeg;
 
-                        // Degree Variants
-                        case OP_SEC_DEG ->
-                            VectorMath::secDeg;
-                        case OP_COSEC_DEG ->
-                            VectorMath::cscDeg;
-                        case OP_COT_DEG ->
-                            VectorMath::cotDeg;
+            case OP_SEC_GRAD ->
+                VectorMath::secGrad;
+            case OP_COSEC_GRAD ->
+                VectorMath::cscGrad;
+            case OP_COT_GRAD ->
+                VectorMath::cotGrad;
 
-                        case OP_SEC_GRAD ->
-                            VectorMath::secGrad;
-                        case OP_COSEC_GRAD ->
-                            VectorMath::cscGrad;
-                        case OP_COT_GRAD ->
-                            VectorMath::cotGrad;
+            // Standard Inverse
+            case OP_ARC_SEC, OP_ARC_SEC_ALT ->
+                VectorMath::asec;
+            case OP_ARC_COSEC, OP_ARC_COSEC_ALT ->
+                VectorMath::acsc;
+            case OP_ARC_COT, OP_ARC_COT_ALT ->
+                VectorMath::acot;
 
-                        // Standard Inverse
-                        case OP_ARC_SEC, OP_ARC_SEC_ALT ->
-                            VectorMath::asec;
-                        case OP_ARC_COSEC, OP_ARC_COSEC_ALT ->
-                            VectorMath::acsc;
-                        case OP_ARC_COT, OP_ARC_COT_ALT ->
-                            VectorMath::acot;
+            case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG ->
+                VectorMath::asecDeg;
+            case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD ->
+                VectorMath::asecGrad;
 
-                        case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG ->
-                            VectorMath::asecDeg;
-                        case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD ->
-                            VectorMath::asecGrad;
+            case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG ->
+                VectorMath::acscDeg;
+            case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD ->
+                VectorMath::acscGrad;
 
-                        case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG ->
-                            VectorMath::acscDeg;
-                        case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD ->
-                            VectorMath::acscGrad;
+            case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG ->
+                VectorMath::acotDeg;
+            case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD ->
+                VectorMath::acotGrad;
 
-                        case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG ->
-                            VectorMath::acotDeg;
-                        case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD ->
-                            VectorMath::acotGrad;
+            case OP_SINH ->
+                VectorMath::sinh;
+            case OP_COSH ->
+                VectorMath::cosh;
+            case OP_TANH ->
+                VectorMath::tanh;
+            case OP_ASINH, OP_ASINH_ALT ->
+                VectorMath::asinh;
+            case OP_ACOSH, OP_ACOSH_ALT ->
+                VectorMath::acosh;
+            case OP_ATANH, OP_ATANH_ALT ->
+                VectorMath::atanh;
 
-                        case OP_SINH ->
-                            VectorMath::sinh;
-                        case OP_COSH ->
-                            VectorMath::cosh;
-                        case OP_TANH ->
-                            VectorMath::tanh;
-                        case OP_ASINH, OP_ASINH_ALT ->
-                            VectorMath::asinh;
-                        case OP_ACOSH, OP_ACOSH_ALT ->
-                            VectorMath::acosh;
-                        case OP_ATANH, OP_ATANH_ALT ->
-                            VectorMath::atanh;
+            // Exp/Log
+            case OP_EXP ->
+                VectorMath::exp;
+            case OP_LOG ->
+                VectorMath::ln;
+            case OP_LOG10 ->
+                VectorMath::log10;
 
-                        // Exp/Log
-                        case OP_EXP ->
-                            VectorMath::exp;
-                        case OP_LOG ->
-                            VectorMath::ln;
-                        case OP_LOG10 ->
-                            VectorMath::log10;
-
-                        default ->
-                            throw new UnsupportedOperationException("Unmapped opcode: " + opcode);
+            default ->
+                throw new UnsupportedOperationException("Unmapped opcode: " + opcode);
         };
     }
 
@@ -1761,11 +1765,12 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
      * OP_REM (not vectorized regardless) and OP_POW (routes through
      * VectorMath.executePowerBlended, not a plain lane op).
      *
-     * <p>Self-contained like every {@code tryFuseXxx} helper in this class:
-     * on a match, it removes the plan entries it consumed (both LoadCommands
-     * here) itself and returns the fused replacement; on no match, it
-     * returns {@code null} and leaves {@code plan} untouched. Callers never
-     * need to know how many entries a given fusion consumes.
+     * <p>
+     * Self-contained like every {@code tryFuseXxx} helper in this class: on a
+     * match, it removes the plan entries it consumed (both LoadCommands here)
+     * itself and returns the fused replacement; on no match, it returns
+     * {@code null} and leaves {@code plan} untouched. Callers never need to
+     * know how many entries a given fusion consumes.
      */
     private static VectorCommand tryFuseLoadLoad(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
         int size = plan.size();
@@ -1802,21 +1807,21 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
     }
 
     /**
-     * Peephole fusion: when one operand of an {@code OP_MUL} is a plain
-     * numeric constant and the other is a plain variable load - the last two
-     * plan entries are exactly a {@link ConstCommand} and a
-     * {@link LoadCommand} feeding this multiplication, in either order
-     * (multiplication is commutative, so {@code a*x} and {@code x*a} both
-     * match) - collapse them into a single {@link ScaleCommand} that reads
-     * the variable straight from its source and multiplies by the constant
-     * in one pass. This is the building block
-     * {@link #tryFuseScaleAccumulate} depends on: {@code a1*x1} compiles to
-     * one {@code ScaleCommand} instead of three separate commands
+     * Peephole fusion: when one operand of an {@code OP_MUL} is a plain numeric
+     * constant and the other is a plain variable load - the last two plan
+     * entries are exactly a {@link ConstCommand} and a {@link LoadCommand}
+     * feeding this multiplication, in either order (multiplication is
+     * commutative, so {@code a*x} and {@code x*a} both match) - collapse them
+     * into a single {@link ScaleCommand} that reads the variable straight from
+     * its source and multiplies by the constant in one pass. This is the
+     * building block {@link #tryFuseScaleAccumulate} depends on: {@code a1*x1}
+     * compiles to one {@code ScaleCommand} instead of three separate commands
      * ({@code ConstCommand}, {@code LoadCommand}, {@code MulCommand}).
      *
-     * <p>Only fires for {@code OP_MUL} - the caller is responsible for not
-     * calling this for other opcodes, since e.g. {@code a/x} and
-     * {@code x/a} are not interchangeable.
+     * <p>
+     * Only fires for {@code OP_MUL} - the caller is responsible for not calling
+     * this for other opcodes, since e.g. {@code a/x} and {@code x/a} are not
+     * interchangeable.
      */
     private static VectorCommand tryFuseConstLoad(List<VectorCommand> plan, int lOff, int rOff, int destOff) {
         int size = plan.size();
@@ -1848,32 +1853,33 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
 
     /**
      * Peephole fusion for linear-combination-shaped expressions
-     * ({@code a1*x1 + a2*x2 + ... + an*xn}, and the equivalent with any mix
-     * of {@code +}/{@code -} between terms): when the right-hand operand of
-     * an {@code OP_ADD}/{@code OP_SUB} is a {@link ScaleCommand} that was
-     * JUST emitted - the last entry in the plan, nothing has consumed it yet
-     * - collapse the pair into a single {@link ScaleAccumulateCommand}: one
-     * hardware fused-multiply-add per SIMD lane
-     * ({@code acc = acc + coeff*var}, or {@code acc = acc - coeff*var} via a
-     * negated coefficient for {@code OP_SUB}), reading the variable straight
-     * from its source.
+     * ({@code a1*x1 + a2*x2 + ... + an*xn}, and the equivalent with any mix of
+     * {@code +}/{@code -} between terms): when the right-hand operand of an
+     * {@code OP_ADD}/{@code OP_SUB} is a {@link ScaleCommand} that was JUST
+     * emitted - the last entry in the plan, nothing has consumed it yet -
+     * collapse the pair into a single {@link ScaleAccumulateCommand}: one
+     * hardware fused-multiply-add per SIMD lane ({@code acc = acc + coeff*var},
+     * or {@code acc = acc - coeff*var} via a negated coefficient for
+     * {@code OP_SUB}), reading the variable straight from its source.
      *
-     * <p>Unlike {@link #tryFuseLoadLoad}/{@link #tryFuseConstLoad}, only ONE
-     * plan entry is ever removed here - the left-hand (accumulator) operand
-     * is never a single fresh command to delete, it's whatever arbitrary
-     * chain of prior commands already left its value at {@code lOff} in
-     * scratch (itself possibly a previous {@code ScaleAccumulateCommand}),
-     * and that chain is left completely untouched. {@code destOff} is
-     * {@code lOff} by the caller's existing "reuse the left slot" convention
-     * for {@code OP_ADD}/{@code OP_SUB}, so the accumulator is written back
-     * into exactly the slot it already occupies.
+     * <p>
+     * Unlike {@link #tryFuseLoadLoad}/{@link #tryFuseConstLoad}, only ONE plan
+     * entry is ever removed here - the left-hand (accumulator) operand is never
+     * a single fresh command to delete, it's whatever arbitrary chain of prior
+     * commands already left its value at {@code lOff} in scratch (itself
+     * possibly a previous {@code ScaleAccumulateCommand}), and that chain is
+     * left completely untouched. {@code destOff} is {@code lOff} by the
+     * caller's existing "reuse the left slot" convention for
+     * {@code OP_ADD}/{@code OP_SUB}, so the accumulator is written back into
+     * exactly the slot it already occupies.
      *
-     * <p>Composing this with {@link #tryFuseConstLoad} is what collapses an
-     * entire N-term linear combination into exactly N commands: the first
-     * term becomes one {@code ScaleCommand} (seeding the accumulator), and
-     * every subsequent term becomes one {@code ScaleAccumulateCommand} -
-     * versus {@code 4N-1} commands (multiple full materialization passes per
-     * term) with no fusion at all.
+     * <p>
+     * Composing this with {@link #tryFuseConstLoad} is what collapses an entire
+     * N-term linear combination into exactly N commands: the first term becomes
+     * one {@code ScaleCommand} (seeding the accumulator), and every subsequent
+     * term becomes one {@code ScaleAccumulateCommand} - versus {@code 4N-1}
+     * commands (multiple full materialization passes per term) with no fusion
+     * at all.
      */
     private static VectorCommand tryFuseScaleAccumulate(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
         int size = plan.size();
@@ -1893,29 +1899,31 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
      * Peephole fusion for unweighted running sums/differences -
      * {@code x1 + x2 + x3 + ... + xn}, or any mix of {@code +}/{@code -}
      * between bare variables, with no coefficients anywhere. This is the
-     * {@code coeff = 1.0} (or {@code -1.0}, for {@code OP_SUB}) special case
-     * of {@link #tryFuseScaleAccumulate} - reusing the exact same
-     * {@link ScaleAccumulateCommand} (one hardware fused-multiply-add per
-     * SIMD lane, {@code acc = acc + 1.0*var}) rather than a separate
+     * {@code coeff = 1.0} (or {@code -1.0}, for {@code OP_SUB}) special case of
+     * {@link #tryFuseScaleAccumulate} - reusing the exact same
+     * {@link ScaleAccumulateCommand} (one hardware fused-multiply-add per SIMD
+     * lane, {@code acc = acc + 1.0*var}) rather than a separate
      * plain-accumulate command class - for when the right-hand operand of an
-     * {@code OP_ADD}/{@code OP_SUB} is a bare {@link LoadCommand} rather
-     * than a {@link ScaleCommand}.
+     * {@code OP_ADD}/{@code OP_SUB} is a bare {@link LoadCommand} rather than a
+     * {@link ScaleCommand}.
      *
-     * <p>Tried after {@link #tryFuseScaleAccumulate}, since the two match
-     * mutually exclusive shapes (that one needs a {@code ScaleCommand} on
-     * top of the plan; this one needs a bare {@code LoadCommand}), and after
-     * {@link #tryFuseLoadLoad} already has first claim on the case where
-     * BOTH operands are bare loads (e.g. the {@code x1+x2} seed of
-     * {@code x1+x2+x3}) - so this only ever fires for "the accumulator so
-     * far, plus one more plain variable", which is exactly the shape every
-     * term after the first takes in an unweighted sum.
+     * <p>
+     * Tried after {@link #tryFuseScaleAccumulate}, since the two match mutually
+     * exclusive shapes (that one needs a {@code ScaleCommand} on top of the
+     * plan; this one needs a bare {@code LoadCommand}), and after
+     * {@link #tryFuseLoadLoad} already has first claim on the case where BOTH
+     * operands are bare loads (e.g. the {@code x1+x2} seed of {@code x1+x2+x3})
+     * - so this only ever fires for "the accumulator so far, plus one more
+     * plain variable", which is exactly the shape every term after the first
+     * takes in an unweighted sum.
      *
-     * <p>Composes with {@link #tryFuseLoadLoad} the same way
-     * {@link #tryFuseConstLoad}/{@link #tryFuseScaleAccumulate} compose for
-     * a weighted chain: an N-term unweighted sum collapses from
-     * {@code 2N-3} commands (a standalone {@code LoadCommand} plus a plain
-     * {@code AddCommand}/{@code SubCommand} for every term after the first
-     * two) down to {@code N-1} (one {@code LoadLoadAddCommand} seeding the
+     * <p>
+     * Composes with {@link #tryFuseLoadLoad} the same way
+     * {@link #tryFuseConstLoad}/{@link #tryFuseScaleAccumulate} compose for a
+     * weighted chain: an N-term unweighted sum collapses from {@code 2N-3}
+     * commands (a standalone {@code LoadCommand} plus a plain
+     * {@code AddCommand}/{@code SubCommand} for every term after the first two)
+     * down to {@code N-1} (one {@code LoadLoadAddCommand} seeding the
      * accumulator from the first two terms, then one
      * {@code ScaleAccumulateCommand} per remaining term).
      */
@@ -1935,21 +1943,23 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
 
     /**
      * Peephole fusion for any unary math opcode applied directly to a bare
-     * variable load: if the last plan entry is exactly the
-     * {@link LoadCommand} that produced {@code baseOff}, fuse the pair into
-     * a single command that reads the variable straight from its source
-     * instead of paying for a separate materialization pass first.
+     * variable load: if the last plan entry is exactly the {@link LoadCommand}
+     * that produced {@code baseOff}, fuse the pair into a single command that
+     * reads the variable straight from its source instead of paying for a
+     * separate materialization pass first.
      *
-     * <p>{@code OP_SQRT} gets the fully-dedicated {@link LoadSqrtCommand} -
-     * no separate materialization pass at all, see that class's javadoc for
-     * why sqrt specifically earns the hand-written treatment. Every other
-     * unary opcode gets the generic {@link LoadUnaryMathCommand}, which
-     * still delegates the actual math to the shared {@link #resolveUnaryMathOp}
-     * table but skips the extra {@code VectorCommand} dispatch a standalone
+     * <p>
+     * {@code OP_SQRT} gets the fully-dedicated {@link LoadSqrtCommand} - no
+     * separate materialization pass at all, see that class's javadoc for why
+     * sqrt specifically earns the hand-written treatment. Every other unary
+     * opcode gets the generic {@link LoadUnaryMathCommand}, which still
+     * delegates the actual math to the shared {@link #resolveUnaryMathOp} table
+     * but skips the extra {@code VectorCommand} dispatch a standalone
      * {@code LoadCommand} would otherwise cost.
      *
-     * <p>Returns {@code null} (no fusion) when the operand isn't a bare load
-     * - e.g. {@code sqrt(x+1)}, where the operand is the result of a prior
+     * <p>
+     * Returns {@code null} (no fusion) when the operand isn't a bare load -
+     * e.g. {@code sqrt(x+1)}, where the operand is the result of a prior
      * {@code ADD}, not a {@code LoadCommand} - in which case the ordinary
      * {@link UnaryMathCommand} path handles it exactly as before.
      */
@@ -2062,8 +2072,8 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
          * decremented one shared AtomicInteger latch and the master parked on
          * that - under fan-in, all NUM_WORKERS threads were hammering the same
          * cache line on every batch. Each WorkerThread now owns its own `done`
-         * flag (padded away from its neighbors, see WorkerThread), so this is
-         * a plain, uncontended volatile read per worker.
+         * flag (padded away from its neighbors, see WorkerThread), so this is a
+         * plain, uncontended volatile read per worker.
          */
         private static void awaitDone(WorkerThread worker) {
             int spins = 0;

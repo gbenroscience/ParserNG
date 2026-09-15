@@ -851,7 +851,7 @@ public final class VectorMathF {
             float uniformExp = scratch[expOffset];
 
             if (uniformExp == 0.5) {
-               VectorTranscendentals.evaluateNative(scratch, baseOffset, scratch, baseOffset, n, VectorOperators.SQRT);
+                VectorTranscendentals.evaluateNative(scratch, baseOffset, scratch, baseOffset, n, VectorOperators.SQRT);
                 return;
             }
             if (uniformExp == 2.0) {
@@ -1235,6 +1235,97 @@ public final class VectorMathF {
         }
         for (; k < n; k++) {
             s[base + k] = (float) Math.abs(s[base + k]);
+        }
+    }
+
+    private static final VectorSpecies<Float> SPECIES_F = FloatVector.SPECIES_PREFERRED;
+
+// All floats with magnitude >= 2^23 have a ULP of at least 1 (23 explicit
+// mantissa bits), so they're already integers -- no fractional part is even
+// representable. Same reasoning as the double version's 2^52 bound, scaled
+// down to float's narrower mantissa.
+    private static final float SAFE_INTEGRAL_BOUND_F = 8388608.0f; // 2^23
+
+    public static void round(int base, int n, float[] s) {
+        int limit = SPECIES_F.loopBound(n);
+        int k = 0;
+
+        for (; k < limit; k += SPECIES_F.length()) {
+            FloatVector v = FloatVector.fromArray(SPECIES_F, s, base + k);
+
+            // Math.round(a) == floor(a + 0.5) for every a, including negative
+            // half-integers -- no sign branch needed, same fix as the double version.
+            FloatVector shifted = v.add(0.5f);
+
+            FloatVector truncated = (FloatVector) shifted.convert(VectorOperators.F2I, 0)
+                    .convert(VectorOperators.I2F, 0);
+
+            var overshot = truncated.compare(VectorOperators.GT, shifted);
+            FloatVector rounded = truncated.blend(truncated.sub(1.0f), overshot);
+
+            rounded.intoArray(s, base + k);
+        }
+
+        for (; k < n; k++) {
+            // Math.round(float) returns int; widens back to float on assignment, no cast needed.
+            s[base + k] = Math.round(s[base + k]);
+        }
+    }
+
+    public static void ceil(int base, int n, float[] s) {
+        int limit = SPECIES_F.loopBound(n);
+        int k = 0;
+
+        for (; k < limit; k += SPECIES_F.length()) {
+            FloatVector v = FloatVector.fromArray(SPECIES_F, s, base + k);
+
+            // False for |v| >= 2^23 (already integral), and also false for
+            // +-Infinity and NaN (any compare against NaN is false) -- one guard
+            // covers all three "leave as-is" cases.
+            var inSafeRange = v.abs().compare(VectorOperators.LT, SAFE_INTEGRAL_BOUND_F);
+            // Preserves -0.0f's sign, which the F2I/I2F round trip would otherwise flip to +0.0f.
+            var isZero = v.compare(VectorOperators.EQ, 0.0f);
+            var passthrough = inSafeRange.not().or(isZero);
+
+            FloatVector truncated = (FloatVector) v.convert(VectorOperators.F2I, 0)
+                    .convert(VectorOperators.I2F, 0);
+
+            var truncatedLow = truncated.compare(VectorOperators.LT, v);
+            FloatVector ceiled = truncated.blend(truncated.add(1.0f), truncatedLow);
+
+            FloatVector result = ceiled.blend(v, passthrough);
+            result.intoArray(s, base + k);
+        }
+
+        for (; k < n; k++) {
+            // Math.ceil only has a double overload -- cast back, or this silently widens the array's type intent.
+            s[base + k] = (float) Math.ceil(s[base + k]);
+        }
+    }
+
+    public static void floor(int base, int n, float[] s) {
+        int limit = SPECIES_F.loopBound(n);
+        int k = 0;
+
+        for (; k < limit; k += SPECIES_F.length()) {
+            FloatVector v = FloatVector.fromArray(SPECIES_F, s, base + k);
+
+            var inSafeRange = v.abs().compare(VectorOperators.LT, SAFE_INTEGRAL_BOUND_F);
+            var isZero = v.compare(VectorOperators.EQ, 0.0f);
+            var passthrough = inSafeRange.not().or(isZero);
+
+            FloatVector truncated = (FloatVector) v.convert(VectorOperators.F2I, 0)
+                    .convert(VectorOperators.I2F, 0);
+
+            var truncatedHigh = truncated.compare(VectorOperators.GT, v);
+            FloatVector floored = truncated.blend(truncated.sub(1.0f), truncatedHigh);
+
+            FloatVector result = floored.blend(v, passthrough);
+            result.intoArray(s, base + k);
+        }
+
+        for (; k < n; k++) {
+            s[base + k] = (float) Math.floor(s[base + k]);
         }
     }
 

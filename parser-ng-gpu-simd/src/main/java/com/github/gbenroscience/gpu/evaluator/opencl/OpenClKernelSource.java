@@ -151,9 +151,13 @@ public final class OpenClKernelSource {
         #define OP_GEGLU_2 99
         #define OP_SWIGLU_2 100
         #define OP_ERF 101
-        #define OP_AND 102
-        #define OP_OR 103                                               
+        #define OP_AND 102   
+        #define OP_OR 103                                        
 
+        #define OP_FLOOR 104  
+        #define OP_CEIL 105  
+        #define OP_ROUND 106     
+                                               
         #define MAX_STACK 64
 
         // ---- double-precision constants/helpers (used by "interpret") ----
@@ -260,6 +264,9 @@ public final class OpenClKernelSource {
                     case OP_COSH: stack[sp-1] = cosh(stack[sp-1]); break;
                     case OP_TANH: stack[sp-1] = tanh(stack[sp-1]); break;
                     case OP_ABS:  stack[sp-1] = fabs(stack[sp-1]); break;
+                    case OP_CEIL:  stack[sp-1] = ceil(stack[sp-1]);  break;
+                    case OP_FLOOR: stack[sp-1] = floor(stack[sp-1]); break;
+                    case OP_ROUND: stack[sp-1] = round(stack[sp-1]); break;                                               
                     case OP_EXP:  stack[sp-1] = exp(stack[sp-1]);  break;
                     case OP_SQRT: stack[sp-1] = sqrt(stack[sp-1]); break;
                     case OP_CBRT: stack[sp-1] = cbrt(stack[sp-1]); break;
@@ -429,6 +436,9 @@ public final class OpenClKernelSource {
                     case OP_COSH: stack[sp-1] = cosh(stack[sp-1]); break;
                     case OP_TANH: stack[sp-1] = tanh(stack[sp-1]); break;
                     case OP_ABS:  stack[sp-1] = fabs(stack[sp-1]); break;
+                    case OP_CEIL:  stack[sp-1] = ceil(stack[sp-1]);  break;
+                    case OP_FLOOR: stack[sp-1] = floor(stack[sp-1]); break;
+                    case OP_ROUND: stack[sp-1] = round(stack[sp-1]); break;                                               
                     case OP_EXP:  stack[sp-1] = exp(stack[sp-1]);  break;
                     case OP_SQRT: stack[sp-1] = sqrt(stack[sp-1]); break;
                     case OP_CBRT: stack[sp-1] = cbrt(stack[sp-1]); break;

@@ -345,7 +345,7 @@ public class MethodRegistry {
         registerMethod(Declarations.SQRT, (ctx, arity, args) -> ctx.wrap(Math.sqrt(args[0].scalar)));
         registerMethod(Declarations.ABS, (ctx, arity, args) -> ctx.wrap(Math.abs(args[0].scalar)));
         registerMethod(Declarations.CEIL, (ctx, arity, args) -> ctx.wrap(Math.ceil(args[0].scalar)));
-        registerMethod(Declarations.FLOOR, (ctx, arity, args) -> ctx.wrap(Math.floor(args[0].scalar)));
+        registerMethod(Declarations.FLOOR, (ctx, arity, args) -> ctx.wrap(Math.floor(args[0].scalar))); 
         registerMethod(Declarations.POW, (ctx, arity, args) -> ctx.wrap(Math.pow(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.ATAN2, (ctx, arity, args) -> ctx.wrap(Math.atan2(args[0].scalar, args[1].scalar)));
         registerMethod(Declarations.EXP, (ctx, arity, args) -> ctx.wrap(Math.exp(args[0].scalar)));

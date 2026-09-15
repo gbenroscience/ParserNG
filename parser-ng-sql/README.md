@@ -1,190 +1,501 @@
 # parser-ng-sql
 
-A SQL-shaped front end for `parser-ng-arrow`: `SELECT ... FROM ... [WHERE ...]`
-compiles into vectorized Apache Arrow computations, driven entirely by
-ParserNG expressions.
+**Make SQL a convenient way to describe vectorized Apache Arrow computations.**
+
+parser-ng-sql is a `SELECT`-only SQL front end for [ParserNG](https://github.com/gbenroscience/ParserNG)'s
+Arrow integration, parser-ng-arrow. It compiles a SQL statement once into a
+small set of ParserNG expression evaluators, then lets you run that compiled
+query against as many `VectorSchemaRoot` batches as you like. It is not, and
+is not trying to become, a database: there is no catalog, no `JOIN`, no
+`INSERT`/`UPDATE`/`DELETE`, no transactions. There is exactly one job —
+turning a `SELECT` statement into a fast, reusable, vectorized computation
+over an Arrow batch you already have in hand — and it is built to do that
+job well rather than to do many jobs adequately.
 
 ```java
 ArrowQuery query = ArrowQuery.compile(
         "SELECT sqrt(x*x + y*y) AS distance FROM data WHERE x > 10");
-VectorSchemaRoot result = query.execute(root); // call as many times as you like
-query.close();
 
-// or, for a one-off query:
-VectorSchemaRoot result = ArrowSql.execute(root,
-        "SELECT x, y, sqrt(x*x + y*y) AS magnitude FROM points WHERE magnitude > 10");
+VectorSchemaRoot result = query.execute(root); // run it as many times as you like
+query.close();
 ```
 
-This module intentionally stops at `SELECT`/`WHERE` with column aliasing —
-no `JOIN`, `INSERT`, `UPDATE`, `DELETE`, transactions, catalogs, or
-subqueries. The goal is *"make SQL a convenient way to describe vectorized
-Arrow computations"*, not *"build a database"*.
+## Contents
 
-## Installing into the ParserNG repo
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Why SQL, why this shape](#why-sql-why-this-shape)
+- [Language reference](#language-reference)
+  - [SELECT list](#select-list)
+  - [WHERE](#where)
+  - [CASE / WHEN](#case--when)
+  - [CAST](#cast)
+  - [GROUP BY and aggregates](#group-by-and-aggregates)
+  - [HAVING](#having)
+  - [ORDER BY and LIMIT](#order-by-and-limit)
+  - [Referencing a SELECT-list alias](#referencing-a-select-list-alias)
+- [Execution model](#execution-model)
+  - [Compile once, execute many](#compile-once-execute-many)
+  - [Choosing an execution backend](#choosing-an-execution-backend)
+  - [Null handling](#null-handling)
+- [Performance notes](#performance-notes)
+- [Error handling](#error-handling)
+- [What's intentionally out of scope](#whats-intentionally-out-of-scope)
+- [Resource ownership and thread-safety](#resource-ownership-and-thread-safety)
 
-1. Copy the `parser-ng-sql/` folder into the root of your `ParserNG` clone,
-   next to `parser-ng-arrow/`.
-2. In the root `pom.xml`, add `<module>parser-ng-sql</module>` inside the
-   existing `<modules>` block (after `parser-ng-arrow`), if it isn't already
-   there.
-3. Build: `mvn -pl parser-ng-sql -am install` (or just `mvn install` from the
-   repo root to build everything).
-4. Run its tests: `mvn -pl parser-ng-sql test`.
+## Installation
 
-Requires JDK 22+ and network access to Maven Central for `arrow-vector` /
-`arrow-memory-netty` (19.0.0) and JUnit 5 (5.10.3), matching the versions
-already used by `parser-ng-arrow`.
+parser-ng-sql is a module of the main [ParserNG](https://github.com/gbenroscience/ParserNG)
+repository and is published to Maven Central alongside it.
 
-## Grammar (v1)
-query ::= SELECT select_list
+**Maven**
+
+```xml
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng-sql</artifactId>
+    <version>3.0.7</version>
+</dependency>
+```
+
+**Gradle**
+
+```groovy
+implementation("com.github.gbenroscience:parser-ng-sql:3.0.7")
+```
+
+parser-ng-sql depends on `parser-ng-arrow`, `parser-ng`, `parser-ng-simd`, and
+`parser-ng-gpu-simd` transitively — a plain dependency declaration pulls in
+everything needed to compile and run a query, including Apache Arrow's own
+`arrow-vector` artifact. Requires JDK 22 or later.
+
+## Quick start
+
+```java
+import com.github.gbenroscience.sqlv1.ArrowQuery;
+import org.apache.arrow.vector.VectorSchemaRoot;
+
+// root is a VectorSchemaRoot you already have -- from a file, a stream,
+// wherever your data comes from.
+try (ArrowQuery query = ArrowQuery.compile(
+        "SELECT x, y, sqrt(x*x + y*y) AS magnitude "
+      + "FROM data "
+      + "WHERE magnitude > 60")) {
+
+    try (VectorSchemaRoot result = query.execute(root)) {
+        // result has columns x, y, magnitude -- only the rows where
+        // magnitude > 60 -- ready to hand off to whatever's next.
+    }
+}
+```
+
+For a single one-off run where you don't need to keep the compiled query
+around, `ArrowSql.execute` is a shorter equivalent:
+
+```java
+try (VectorSchemaRoot result = ArrowSql.execute(root,
+        "SELECT x, y, sqrt(x*x + y*y) AS magnitude FROM data WHERE magnitude > 60")) {
+    // ...
+}
+```
+
+## Why SQL, why this shape
+
+ParserNG's Arrow integration already gives you fast, vectorized `filter`,
+`project`, and `filterProject` operations driven by expression strings. What
+it doesn't give you is a convenient way to *describe* those operations —
+you're writing predicate and projection text by hand, keeping track of which
+columns feed which computation, and re-deriving the same expression twice if
+you need it in both a filter and a projection. SQL is a format almost every
+engineer already knows for exactly that kind of description. parser-ng-sql
+takes that familiar syntax and compiles it straight down to the same
+`ArrowExpressionEvaluator`s you'd have written by hand — nothing about the
+underlying computation changes, only how convenient it is to say what you
+want.
+
+## Language reference
+
+A query has this shape:
+
+```
+SELECT select_list
 FROM table_reference
 [WHERE boolean_expression]
 [GROUP BY expression_list]
 [HAVING boolean_expression]
-[ORDER BY order_item (',' order_item)]
+[ORDER BY order_item [, order_item ...]]
 [LIMIT integer_literal]
-select_list ::= '' | select_item (',' select_item)*
-select_item ::= expression [AS identifier]
-| aggregate_call [AS identifier]
-aggregate_call ::= ('COUNT'|'SUM'|'AVG'|'MIN'|'MAX') '(' (expression|'') ')'
--- '' only valid with COUNT
-order_item ::= expression ['ASC' | 'DESC']
-boolean_expression ::= or_expression
-or_expression ::= and_expression ('OR' and_expression)*
-and_expression ::= not_expression ('AND' not_expression)*
-not_expression ::= 'NOT' not_expression | predicate
-predicate ::= comparison
-| expression 'IS' ['NOT'] 'NULL'
-| expression ['NOT'] 'BETWEEN' expression 'AND' expression
-| expression ['NOT'] 'IN' '(' expression_list ')'
-| '(' boolean_expression ')'
-comparison ::= expression comparison_operator expression
-comparison_operator ::= '=' | '!=' | '<>' | '<' | '<=' | '>' | '>='
-expression ::= additive_expression (ParserNG's own arithmetic grammar --
-+ - * / % ^, parens, function calls,
-identifiers, literals, plus
-case_expression/cast_expression below)
-case_expression ::= 'CASE' expression ('WHEN' expression 'THEN' expression)+
-['ELSE' expression] 'END' -- simple CASE
-| 'CASE' ('WHEN' boolean_expression 'THEN' expression)+
-['ELSE' expression] 'END' -- searched CASE
-cast_expression ::= 'CAST' '(' expression 'AS' identifier ')'
+```
 
-Full javadoc for the grammar and its rationale lives on `SqlParser`; the
-`ast` package and `BoolExprs` document how `WHERE`/`HAVING` are normalized
-(negation-normal form, since ParserNG has no logical-not operator) and
-rendered.
+Every arithmetic expression anywhere in a query — a `SELECT` item, a `WHERE`
+operand, an aggregate's argument, an `ORDER BY` key — is ordinary ParserNG
+expression syntax: `+ - * / % ^`, parentheses, and any ParserNG function
+(`sqrt`, `sin`, `erf`, `if`, and everything else ParserNG registers).
+Column names are looked up directly against the `VectorSchemaRoot` you pass
+to `execute`.
 
-### `CASE`/`WHEN`/`THEN`/`ELSE`/`END`
+### SELECT list
 
-ParserNG has no `CASE` operator, but does have the `if(cond, then, else)`
-idiom described below. A `CASE` expression compiles to a right-nested chain
-of `if(...)` calls — `CASE WHEN a THEN 1 WHEN b THEN 2 ELSE 3 END` becomes
-`if(a, 1, if(b, 2, 3))`, and an omitted `ELSE` falls back to the literal
-`NULL`. Both the searched form (a full boolean condition per `WHEN`) and
-the simple form (`CASE x WHEN 1 THEN ... END`, compiled via `x == 1`) are
-supported. See `SqlParser`'s "CASE/WHEN/THEN/ELSE/END".
+```sql
+SELECT * FROM data
+```
+Every column of the input batch, unchanged.
 
-### `CAST`
+```sql
+SELECT x, y FROM data
+```
+A column subset — no computation, no filtering.
 
-`CAST(expr AS type)` has no ParserNG operator either, and since every value
-in this module is already a ParserNG/Arrow `float64`/`float32`, there is no
-representation change to make: `CAST(x AS INT/INTEGER/SMALLINT/BIGINT/LONG)`
-truncates toward zero (`if(x >= 0, floor(x), -1 * floor(-1 * (x)))` —
-assumes ParserNG provides `floor`); `CAST(x AS FLOAT/REAL/DOUBLE/DECIMAL/NUMERIC)`
-is a pure no-op. See `SqlParser`'s "CAST".
+```sql
+SELECT x, y, sqrt(x*x + y*y) AS magnitude FROM data
+```
+Passthrough columns and a computed column, aliased with `AS`. An unaliased
+computed column is named after its own (trimmed) expression text.
 
-### `GROUP BY`/`HAVING`/aggregates and `ORDER BY`/`LIMIT`
+### WHERE
 
-`COUNT`/`SUM`/`AVG`/`MIN`/`MAX` are recognized only at the top level of a
-`select_item` (no nested aggregates, matching standard SQL). Every
-non-aggregate `select_item` in a grouped/aggregate query must match a
-`GROUP BY` expression verbatim — enforced by `SelectStatement`'s
-constructor. Grouping and aggregation are computed client-side (a plain
-nested-loop grouped aggregation, not a vectorized one — see `ArrowQuery`'s
-"Aggregation strategy"); `HAVING` then reuses `WHERE`'s own fused/leaf-mask
-predicate machinery against the resulting one-row-per-group data. Alias an
-aggregate item you intend to reference from `HAVING`/`ORDER BY`
-(`SUM(x) AS total ... HAVING total > 10`) rather than repeating its raw
-call text. `ORDER BY`/`LIMIT` apply after `WHERE`/`GROUP BY`/`HAVING` but
-before the final projection, so an `ORDER BY` key may also name a
-`SELECT`-list alias; sorting is a stable multi-key sort with `NULL`s last
-regardless of direction. See `ArrowQuery`'s "Aggregation strategy" and
-"`ORDER BY` and `LIMIT`".
+```sql
+SELECT x, y FROM data WHERE x > 20 AND y < 90
+SELECT x, y FROM data WHERE x < 20 OR x > 70
+SELECT x, y FROM data WHERE NOT x > 50
+SELECT x, y FROM data WHERE x BETWEEN 20 AND 60
+SELECT x, y FROM data WHERE x IN (10, 50, 90)
+SELECT reading FROM data WHERE reading IS NULL
+SELECT reading FROM data WHERE reading IS NOT NULL
+```
 
-## Package
+`AND`/`OR`/`NOT` compose and nest with parentheses as you'd expect:
 
-Everything lives under `com.github.gbenroscience.sqlv1`.
- 
+```sql
+SELECT x, y FROM data
+WHERE (x > 20 AND y < 90) OR (x < 5 AND y > 50)
+```
 
-## Known v1 limitations (by design, not oversight)
+A `WHERE` operand can itself be a parenthesized boolean condition — useful
+for feeding a boolean result into an otherwise-arithmetic position, like a
+`CASE` condition built by hand or a nested `if`:
 
-- **`IS [NOT] NULL`** has no ParserNG rendering (ParserNG's bulk evaluators
-  never expose a null-test operator), so a `WHERE` clause containing one
-  falls back to a slower leaf-by-leaf mask evaluation instead of one fused
-  kernel — see `ArrowQuery`'s "Predicate evaluation strategy". For the same
-  reason, `IS [NOT] NULL` may only be used directly in a `WHERE` clause: it
-  is rejected with a precise `SqlSyntaxException` if used as a function
-  argument or inside a grouping paren (see "Embedded boolean conditions"
-  below) — there, only comparisons/`AND`/`OR`/`NOT`/`BETWEEN`/`IN` are
-  accepted, since only those have a ParserNG rendering.
-- **Column aliasing always copies.** Every output column (passthrough or
-  computed) is materialized into a fresh vector under its final name,
-  rather than zero-copy-transferring a renamed passthrough column, so that
-  a source column referenced more than once (`SELECT x, x AS y FROM t`)
-  can never be accidentally emptied by a buffer transfer. A future version
-  could special-case the single-reference case for a zero-copy rename.
-- **No quoted identifiers**, no scientific-notation numeric literals, and
-  `table_reference` is a plain identifier that is not resolved against
-  anything (there is no table catalog — `ArrowQuery.execute` always takes
-  the `VectorSchemaRoot` directly).
-- **Expression text is reassembled, not always verbatim.** Reconstructed
-  arithmetic text normalizes whitespace to single spaces between tokens
-  (`x*x` becomes `x * x` in `SelectItem.exprText()`) — cosmetic only, and
-  irrelevant to ParserNG's own whitespace-insensitive scanner, but worth
-  knowing if you inspect `exprText()` directly rather than only its
-  compiled/evaluated result.
-- **Grouped aggregation is client-side, not vectorized.** `GROUP BY`
-  partitions rows and computes `COUNT`/`SUM`/`AVG`/`MIN`/`MAX` with a plain
-  nested loop (materializing each group's rows into their own small
-  sub-batch) rather than a vectorized grouped-aggregation kernel — fine for
-  parser-ng-sql's goal of a convenient computation language, not a claim of
-  database-grade aggregation performance. See `ArrowQuery`'s "Aggregation
-  strategy".
-- **`HAVING`/`ORDER BY` should reference an aggregate `SELECT` item by
-  alias.** An unaliased aggregate item (`SUM(x)` with no `AS`) is named
-  after its own reconstructed call text; referencing that same text from
-  `HAVING`/`ORDER BY` only resolves if written identically. Always alias an
-  aggregate you plan to reference from either clause.
-- **No nested aggregates and no `DISTINCT`.** `COUNT`/`SUM`/`AVG`/`MIN`/
-  `MAX` are recognized only at the top level of a `select_item`, matching
-  standard SQL's prohibition on nesting them; there is no `COUNT(DISTINCT ...)`
-  or other `DISTINCT` support.
+```sql
+SELECT x, if(x > 50, 1, 0) AS high_flag FROM data
+```
 
-## Embedded boolean conditions (`if(sin(x) > 0, tan(x), 0.2)` and friends)
+### CASE / WHEN
 
-ParserNG's own expression language natively evaluates comparisons and
-`&&`/`||` as ordinary truthy (0/1) values — that's exactly how idioms like
-`if(sin(x) > 0, tan(x), 0.2)` work in plain ParserNG: the condition argument
-is just an expression like any other. The grammar as originally specified
-restricted `expression` to pure arithmetic, which meant that idiom could
-not be written from SQL text at all (`sin(x) > 0` is a `comparison`, not an
-`expression`, one level up in the grammar) — that was an oversight, not an
-intended restriction, and is now fixed:
+Both the *searched* and *simple* forms of `CASE` are supported. Every
+`CASE` must end in an explicit `ELSE` — there is no numeric `NULL` literal
+for a missing branch to fall back to, so a missing `ELSE` is rejected at
+compile time with a clear message rather than failing confusingly later.
 
-- A `function_call`'s arguments, a parenthesized grouping term, and a
-  `select_item`'s own top-level expression may each independently be either
-  a plain arithmetic expression **or** a full boolean condition
-  (comparisons, `AND`/`OR`/`NOT`, `BETWEEN`, `IN`) — parsed with the same
-  machinery as a `WHERE` clause, normalized to negation-normal form, and
-  rendered to ParserNG's native `&&`/`||`/`==` text before being spliced
-  back in. `SELECT if(sin(x) > 0, tan(x), 0.2) AS y FROM t` and
-  `SELECT x > 0 AS flag FROM t` both work.
-- This is deliberately **not** extended to a `comparison`'s own operands or
-  a `BETWEEN`'s bounds — those are bounded by `AND`/`OR`-adjacent tokens
-  that can themselves continue a boolean expression, so a greedy trial
-  parse there would swallow tokens meant for the *outer* `WHERE` clause.
-  Nesting further inside a paren/argument those positions themselves open
-  is still fully supported (`WHERE x = (y > 0)` works fine).
-- See `SqlParser`'s "Embedded boolean conditions" section for the full
-  rationale and exactly which positions are safe.
+**Searched form** — a `WHEN` clause per condition, evaluated in order:
+
+```sql
+SELECT
+    x,
+    CASE
+        WHEN x < 10 THEN sin(x)
+        WHEN x < 50 THEN erf(x)
+        ELSE x^3
+    END AS result
+FROM data
+WHERE x > 0
+```
+
+**Simple form** — one operand, compared for equality against each `WHEN`
+value:
+
+```sql
+SELECT
+    category,
+    CASE category
+        WHEN 1 THEN 100
+        WHEN 2 THEN 200
+        ELSE -1
+    END AS label
+FROM data
+```
+
+`CASE category WHEN 1 THEN ...` is exactly equivalent to hand-writing
+`CASE WHEN category = 1 THEN ...` — the simple form is pure convenience,
+not a different capability.
+
+### CAST
+
+`CAST(expression AS type)` supports numeric target types — since every
+ParserNG value is already a floating-point number under the hood, `CAST`
+here means "how should this number be interpreted," not a general type
+system:
+
+```sql
+SELECT reading, CAST(reading AS INT) AS truncated FROM data
+```
+
+`INT`, `INTEGER`, `SMALLINT`, `BIGINT`, and `LONG` all truncate toward
+zero — `-2.7` becomes `-2`, not `-3`, matching a Java `(long)` cast, not
+mathematical floor. `DOUBLE`, `FLOAT`, `REAL`, `NUMERIC`, and `DECIMAL` are
+a no-op identity, since that's already the representation in use. Any other
+target type is rejected at compile time with a clear message rather than
+silently doing nothing useful.
+
+### GROUP BY and aggregates
+
+`SUM`, `COUNT`, `AVG`, `MIN`, and `MAX` are recognized wherever they appear
+as a top-level `SELECT`-item function call. `COUNT(*)` counts every row in
+a group; every other aggregate skips `null` inputs, matching standard SQL
+aggregate semantics — including that `SUM`/`AVG`/`MIN`/`MAX` over a group
+with no non-null values come back `null`, while `COUNT` comes back `0`.
+
+```sql
+SELECT
+    category,
+    SUM(reading)  AS total,
+    COUNT(*)      AS n,
+    AVG(reading)  AS avg_reading,
+    MIN(reading)  AS min_reading,
+    MAX(reading)  AS max_reading
+FROM data
+GROUP BY category
+```
+
+An aggregate query needs no explicit `GROUP BY` at all — with none present,
+the whole (filtered) input is treated as a single implicit group, exactly
+as plain SQL does:
+
+```sql
+SELECT SUM(reading) AS total, COUNT(*) AS n
+FROM data
+WHERE reading > 0
+```
+
+A grouped query's non-aggregate `SELECT` items must match a `GROUP BY` key
+expression exactly — the usual SQL rule that a plain column in the select
+list of a grouped query has to be functionally determined by the grouping
+key. This is checked once, at compile time:
+
+```sql
+-- rejected: 'reading' is neither aggregated nor a GROUP BY key
+SELECT category, reading, SUM(reading) FROM data GROUP BY category
+```
+
+`GROUP BY` accepts more than one key, and a key can be any expression, not
+just a bare column:
+
+```sql
+SELECT category, SUM(reading) AS total
+FROM data
+GROUP BY category
+```
+
+### HAVING
+
+`HAVING` filters groups by an aggregate result, after grouping — the same
+boolean-expression grammar as `WHERE`, evaluated against the grouped
+result rather than individual rows:
+
+```sql
+SELECT category, SUM(reading) AS total
+FROM data
+GROUP BY category
+HAVING total > 50
+```
+
+`HAVING` only applies to a grouped query (an explicit `GROUP BY`, or at
+least one aggregate `SELECT` item); using it otherwise is rejected at
+compile time.
+
+### ORDER BY and LIMIT
+
+```sql
+SELECT x, y FROM data ORDER BY x DESC LIMIT 3
+```
+
+Multiple sort keys, mixed direction, are supported:
+
+```sql
+SELECT category, reading FROM data ORDER BY category ASC, reading DESC
+```
+
+`NULL`s sort last regardless of `ASC`/`DESC` — a `null` is "unknown," not
+the smallest or largest value.
+
+For a query with no `GROUP BY`, `ORDER BY` conceptually sorts the
+`FROM`/`WHERE` row set before the `SELECT` list narrows it down to a
+smaller list of columns — so it can name a column that isn't even in the
+`SELECT` list:
+
+```sql
+-- only x is projected, but the sort key is y
+SELECT x FROM data ORDER BY y DESC
+```
+
+It can also name a `SELECT`-list alias, resolved back to the expression it
+stands for, the same way `WHERE` resolves one (see the next section):
+
+```sql
+SELECT x, y, sqrt(x*x + y*y) AS magnitude
+FROM data
+ORDER BY magnitude DESC
+LIMIT 3
+```
+
+For a grouped query, `ORDER BY` instead sorts the final grouped result, so
+it names a `GROUP BY` key or an aggregate's own alias:
+
+```sql
+SELECT category, SUM(reading) AS total
+FROM data
+GROUP BY category
+ORDER BY total DESC
+LIMIT 2
+```
+
+`LIMIT` always applies last, after any `ORDER BY`.
+
+### Referencing a SELECT-list alias
+
+A `WHERE`/`HAVING`/`ORDER BY` clause can name a `SELECT`-list alias
+directly instead of repeating its expression:
+
+```sql
+SELECT x, y, sqrt(x*x + y*y) AS magnitude
+FROM data
+WHERE magnitude > 60
+```
+
+is exactly equivalent to writing the expression out by hand:
+
+```sql
+SELECT x, y, sqrt(x*x + y*y) AS magnitude
+FROM data
+WHERE (sqrt(x*x + y*y)) > 60
+```
+
+A real input column always wins over a same-named alias, and a chain of
+aliases (one alias's expression naming a second alias) resolves
+transitively.
+
+## Execution model
+
+### Compile once, execute many
+
+`ArrowQuery.compile(sql)` only parses the SQL text — cheap, and independent
+of any particular Arrow schema. The actual ParserNG expression evaluators
+are compiled lazily on the first call to `execute`, because whether
+ParserNG compiles `float64` or `float32` kernels depends on the column
+types of the batch you pass in. Once built, that compiled plan is cached
+and reused on every subsequent `execute` call against a batch with the
+same schema — the SQL parsing and expression compilation genuinely happen
+once, no matter how many batches you run through it:
+
+```java
+try (ArrowQuery reusable = ArrowQuery.compile(
+        "SELECT x, y, x * y AS product FROM data WHERE x > 15")) {
+
+    VectorSchemaRoot result1 = reusable.execute(batch1);
+    VectorSchemaRoot result2 = reusable.execute(batch2); // same compiled plan, no recompilation
+}
+```
+
+If a later `execute` call passes a batch with a genuinely different schema
+(different column names or types), the plan is transparently recompiled —
+you don't need to detect that yourself.
+
+### Choosing an execution backend
+
+By default, compiled expressions target ParserNG's CPU SIMD backend.
+`withBackend` selects a different one:
+
+```java
+ArrowQuery query = ArrowQuery.compile(sql)
+        .withBackend(ArrowExecutionBackend.GPU_AUTO);
+```
+
+Available backends: `CPU_SIMD`, `GPU_AUTO`, `GPU_CUDA`, `GPU_OPENCL`,
+`GPU_METAL`. Changing the backend after a plan has already been compiled
+invalidates and recompiles it on the next `execute`.
+
+### Null handling
+
+`withNullPolicy` controls how a `null` input is treated:
+
+```java
+ArrowQuery query = ArrowQuery.compile(sql)
+        .withNullPolicy(NullPolicy.PROPAGATE);
+```
+
+`NullPolicy.PROPAGATE` (the default) produces a computed value everywhere
+the inputs allow one, and `null` only where an input actually was —
+standard, predictable null propagation through arithmetic. Unlike
+`withBackend`, changing the null policy never requires recompilation.
+
+## Performance notes
+
+A few design choices worth knowing about if you're deciding whether
+parser-ng-sql fits a performance-sensitive path:
+
+- **A passthrough column is never copied.** `SELECT x, y FROM data` returns
+  `x` and `y` as zero-copy references into the already-filtered batch, not
+  fresh row-by-row copies — copying only happens where it's actually
+  needed (a computed column, or a passthrough column that's also being
+  renamed).
+- **`GROUP BY` and aggregate arguments are evaluated in bulk, once, not per
+  row and not per group.** Every `GROUP BY` key and every distinct
+  aggregate argument is evaluated across the whole filtered batch in a
+  single pass before grouping happens, so aggregation cost scales with the
+  number of input rows, not with the number of distinct groups.
+- **The compiled-plan cache check itself is allocation-free.** Confirming
+  a cached plan still matches the current batch's schema is a handful of
+  primitive comparisons, not a fresh collection built on every call.
+- **A predicate or projection expression referenced more than once is
+  compiled once.** If a `WHERE` clause resolves a `SELECT`-list alias back
+  to the same expression a projection already needs, both share a single
+  compiled evaluator rather than compiling it twice.
+
+## Error handling
+
+parser-ng-sql draws a clear line between two kinds of failure, and tries
+hard to keep problems on the compile-time side of that line rather than
+letting them surface as a confusing runtime failure:
+
+- **`SqlSyntaxException`** — the SQL text itself doesn't parse: a missing
+  keyword, an unsupported `CAST` target type, a `CASE` with no `ELSE`. This
+  is thrown as early as possible, from `ArrowQuery.compile`, before any
+  ParserNG expression is even compiled.
+- **`ArrowSqlException`** — the SQL parsed fine, but compiling its
+  expressions against a particular batch's schema failed: a grouped
+  query's `SELECT` item doesn't match a `GROUP BY` key, a cyclic
+  `SELECT`-list alias reference, and similar shape mismatches that can
+  only be detected once a real schema is in hand. Thrown from the first
+  `execute` call against a given schema.
+- **`ArrowBindingException`** — thrown directly by parser-ng-arrow itself
+  when a compiled expression can't actually run against the data in front
+  of it (a column genuinely missing from the batch, for instance).
+
+## What's intentionally out of scope
+
+parser-ng-sql deliberately does not implement:
+
+- `JOIN`, subqueries, or any multi-table concept — every query operates on
+  exactly one `VectorSchemaRoot` you already have in hand.
+- `INSERT`, `UPDATE`, `DELETE`, transactions, or a catalog of any kind —
+  there is no notion of a persistent table to mutate.
+- `DISTINCT`.
+- Non-numeric `CAST` targets or general string/text processing — every
+  value in a ParserNG expression is a floating-point number.
+
+None of these are missing by oversight. The goal is a fast, predictable way
+to describe a vectorized Arrow computation, not a general-purpose query
+engine — see the tagline at the top of this document.
+
+## Resource ownership and thread-safety
+
+An `ArrowQuery` owns whatever expression evaluators it has compiled and
+must be closed when no longer needed — a try-with-resources block, as in
+every example above, is the simplest way. Every `VectorSchemaRoot` returned
+by `execute` is a fresh, independently-owned batch that the caller owns and
+must close in turn; parser-ng-sql never returns a view over, or a root
+that shares ownership with, the root you passed in.
+
+Configuring a query (`withBackend`/`withNullPolicy`) and calling `execute`
+concurrently from multiple threads is not supported. Calling `execute`
+concurrently once a query's configuration has stopped changing is only as
+safe as the underlying ParserNG evaluators' own backend.

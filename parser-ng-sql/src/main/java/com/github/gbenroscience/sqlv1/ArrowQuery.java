@@ -5,13 +5,14 @@ import com.github.gbenroscience.arrow.tools.box.ArrowExecutionBackend;
 import com.github.gbenroscience.arrow.tools.box.ArrowExpressionEvaluator;
 import com.github.gbenroscience.arrow.tools.box.ArrowExpressionEvaluators;
 import com.github.gbenroscience.arrow.tools.box.NullPolicy;
-import com.github.gbenroscience.sqlv1.ast.AggregateKind;
+import com.github.gbenroscience.sqlv1.ast.AggFunc;
+import com.github.gbenroscience.sqlv1.ast.AggregateSpec;
 import com.github.gbenroscience.sqlv1.ast.AndExpr;
 import com.github.gbenroscience.sqlv1.ast.BoolExpr;
 import com.github.gbenroscience.sqlv1.ast.BoolExprs;
 import com.github.gbenroscience.sqlv1.ast.IsNullExpr;
-import com.github.gbenroscience.sqlv1.ast.OrExpr;
 import com.github.gbenroscience.sqlv1.ast.OrderItem;
+import com.github.gbenroscience.sqlv1.ast.OrExpr;
 import com.github.gbenroscience.sqlv1.ast.SelectItem;
 import com.github.gbenroscience.sqlv1.ast.SelectStatement;
 import com.github.gbenroscience.sqlv1.ast.WhereAliasResolver;
@@ -22,17 +23,16 @@ import org.apache.arrow.vector.Float4Vector;
 import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Predicate;
 
 /**
  * A compiled parser-ng-sql query: parse once, compile expressions once
@@ -146,89 +146,65 @@ import java.util.function.Predicate;
  * above) but the result will not contain the data you asked for. Prefer the
  * default unless and until this is confirmed fixed upstream.
  *
- * <h2>Aggregation strategy ({@code GROUP BY}/{@code HAVING}/aggregate {@code SELECT} items)</h2>
- * A query is handled by the aggregation path whenever {@link SelectStatement#isAggregateQuery()}
- * is {@code true} (a non-empty {@code GROUP BY}, or at least one aggregate
- * {@code SELECT} item even without one — see that method's javadoc for the
- * implicit-single-group case). The pipeline is:
- * <ol>
- * <li>{@code WHERE} is applied first, exactly as in the non-aggregate case,
- * against the original per-row {@code VectorSchemaRoot}.</li>
- * <li>Each {@code GROUP BY} key expression is evaluated once over every
- * (post-{@code WHERE}) row (compiled once per plan, like everything else —
- * see "Expression deduplication"), and rows are partitioned by the
- * resulting composite key, preserving first-seen group order.</li>
- * <li>A small synthetic, in-memory {@code VectorSchemaRoot} — one row per
- * group — is materialized: one column per {@code GROUP BY} expression
- * (named after its own trimmed text) plus one column per {@code SELECT}
- * item (named after {@link SelectItem#outputName()}). A group-key
- * {@code SELECT} item's column is copied from the matching {@code GROUP BY}
- * column's value for that group (validated at parse time — see
- * {@link SelectStatement}'s javadoc); an aggregate item's column is
- * computed by materializing just that group's rows into their own small
- * sub-{@code VectorSchemaRoot}, evaluating the aggregate's argument
- * expression against it, and reducing client-side ({@code SUM}/{@code AVG}/
- * {@code MIN}/{@code MAX} skip {@code NULL} argument values the same way
- * SQL does; {@code COUNT(*)} is simply the group's row count; an aggregate
- * over zero non-null values is {@code NULL}, except {@code COUNT} which is
- * {@code 0}). This is a plain nested-loop grouped aggregation, not a
- * vectorized one — adequate for parser-ng-sql's goal of making {@code SQL}
- * a convenient way to describe a computation, not a claim of
- * database-grade grouped-aggregation performance.</li>
- * <li>{@code HAVING}, if present, is compiled and evaluated against that
- * synthetic per-group root using <i>exactly</i> the same fused/leaf-mask
- * machinery as {@code WHERE} (see "Predicate evaluation strategy") — it is
- * simply a {@code WHERE}-shaped filter over a different root. Its operand
- * text must resolve to a real column of that root: a bare {@code GROUP BY}
- * expression's own text, or a {@code SELECT} item's {@link SelectItem#outputName()}.
- * <b>Alias an aggregate {@code SELECT} item you intend to reference from
- * {@code HAVING}</b> (e.g. {@code SUM(x) AS total ... HAVING total > 10})
- * — an unaliased reference only resolves if written identically to that
- * item's own reconstructed call text, which is fragile to rely on.</li>
- * <li>{@code ORDER BY} and {@code LIMIT} are then applied to that
- * (possibly {@code HAVING}-filtered) per-group root exactly as described
- * below, and finally the ordinary projection/aliasing step runs — every
- * {@code SELECT} item is, by construction, already a same-named passthrough
- * column of that root at this point.</li>
- * </ol>
- *
- * <h2>{@code ORDER BY} and {@code LIMIT}</h2>
- * Both apply <i>after</i> {@code WHERE} (and, for an aggregate query,
- * {@code GROUP BY}/{@code HAVING}) but <i>before</i> the final projection —
- * an {@code ORDER BY} key may therefore name a real input column or a
- * {@code SELECT}-list alias (resolved the same way {@code WHERE} resolves
- * an alias — see "{@code WHERE} referencing a {@code SELECT}-list alias" —
- * for a non-aggregate query only; an aggregate query's {@code ORDER BY}
- * follows the same alias-or-verbatim-call-text resolution rule just
- * described for {@code HAVING}) even when that alias is not itself the
- * sort key of the final output ordering. Sorting is a stable multi-key sort
- * (later keys break ties among equal earlier keys); {@code NULL} values
- * sort last regardless of {@code ASC}/{@code DESC}. {@code LIMIT} simply
- * caps the row count after sorting (or, with no {@code ORDER BY}, after
- * whatever order the rows already have) — both are folded into a single
- * row-selecting/reordering pass, so at most one extra copy of the
- * pre-projection data is made regardless of whether one, both, or neither
- * clause is present.
- *
  * <h2>{@code SELECT *}</h2>
  * Passes every column of the (filtered) input straight through, under its
  * original name — there is no aliasing syntax for {@code *} in the grammar
- * (see {@link SqlParser}). {@code SELECT *} can never be combined with
- * {@code GROUP BY}/{@code HAVING}/an aggregate item (rejected at parse
- * time by {@link SelectStatement}), so this path is never an aggregate
- * query; {@code ORDER BY}/{@code LIMIT} still apply to it normally.
+ * (see {@link SqlParser}).
  *
  * <h2>Column aliasing</h2>
  * An unaliased passthrough or computed column keeps ParserNG's own
  * convention of being named after its (trimmed) expression text; an
- * {@code AS} alias always wins. Every output column — passthrough or
- * computed — is materialized into a freshly allocated vector under its
- * final name; a passthrough column is not returned as a zero-copy alias of
- * its source vector, so that a source column referenced more than once
- * (e.g. {@code SELECT x, x AS y FROM t}) is never accidentally shared or
- * emptied by a buffer transfer. This trades a copy for straightforward
- * correctness; see the module README for the zero-copy optimization this
- * leaves on the table for a future version.
+ * {@code AS} alias always wins. A passthrough column whose output name
+ * matches its source column's own name is returned as a zero-copy
+ * reference to that source vector rather than a freshly allocated,
+ * row-by-row copy — {@link #buildProjection} tracks which output vectors
+ * are such reused references (in an identity set, since two different
+ * {@code FieldVector} instances can be {@code equals}-equal) so its cleanup
+ * path never closes one still owned by the result it's returning. A
+ * passthrough column that *is* renamed (e.g. {@code SELECT x AS y FROM t})
+ * still gets a real, freshly allocated copy, since the same source column
+ * referenced twice under different names (e.g. {@code SELECT x, x AS y
+ * FROM t}) must never share one mutable vector between two independent
+ * output columns.
+ *
+ * <h2>{@code GROUP BY} / {@code HAVING} / {@code ORDER BY} / {@code LIMIT}</h2>
+ * Aggregation ({@code SUM}/{@code COUNT}/{@code AVG}/{@code MIN}/{@code MAX})
+ * is evaluated entirely in Java, not by ParserNG (see {@link AggFunc}'s
+ * javadoc) — {@link #buildGroupedResult} bulk-evaluates every {@code GROUP
+ * BY} key and every aggregate's argument once each across all filtered
+ * rows (see {@link #evaluateNumericColumn}), then buckets rows into groups
+ * in a single pass. A non-aggregate {@code SELECT} item in a grouped query
+ * must match a {@code GROUP BY} key expression exactly — see
+ * {@code SelectStatement}'s javadoc for this (standard-SQL) restriction,
+ * enforced once in {@link #buildGroupPlan} rather than per row.
+ * <p>
+ * {@code HAVING} only ever applies to a grouped query and always operates
+ * on the final grouped result, reusing the exact same fused-evaluator /
+ * leaf-by-leaf {@code IS NULL} mask machinery {@code WHERE} uses (see
+ * {@link #buildPredicateNode}) — compiled once in {@link #buildPlan} against
+ * a throwaway zero-row "phantom" root carrying only the grouped result's
+ * eventual column names, since that column set (the {@code SELECT} list's
+ * own output names) is fixed by the parsed statement alone, independent of
+ * any particular input root.
+ * <p>
+ * {@code ORDER BY} sorts at a different pipeline stage depending on query
+ * shape (see {@link #runPlan}): a <b>grouped</b> query's {@code ORDER BY}
+ * runs after projection, against that same final grouped result, exactly
+ * like {@code HAVING}. A <b>non-grouped</b> query's {@code ORDER BY} instead
+ * runs <i>before</i> projection, against the {@code WHERE}-filtered root —
+ * so it may reference a real input column that was never in the
+ * {@code SELECT} list at all (e.g. {@code SELECT x FROM t ORDER BY y}), or
+ * a {@code SELECT}-list alias, resolved back to the input-column-based
+ * expression it stands for via the same {@link WhereAliasResolver}
+ * machinery {@code WHERE} itself uses (see
+ * {@link WhereAliasResolver#substituteText}) — matching ORDER BY's usual
+ * SQL semantics (it conceptually sorts the {@code FROM}/{@code WHERE} row
+ * set, only afterward narrowed by the {@code SELECT} list), not a
+ * restriction to columns that happen to survive projection.
+ * <p>
+ * {@code LIMIT} always applies last, after any {@code ORDER BY}, on
+ * whatever the final result is at that point (grouped-and-{@code HAVING}-filtered,
+ * or plain projected).
  *
  * <h2>Resource ownership</h2>
  * An {@code ArrowQuery} owns whatever {@code ArrowExpressionEvaluator}s it
@@ -417,16 +393,17 @@ public final class ArrowQuery implements AutoCloseable {
         boolean float64 = isFloat64(root);
 
         // Shared within this one buildPlan() call: any two leaves (a
-        // predicate comparison, an IS NULL probe, a computed projection)
-        // that render to the exact same ParserNG text compile to, and
-        // share, a single ArrowExpressionEvaluator instead of one each.
-        // This is common -- e.g. WhereAliasResolver routinely re-expands a
-        // SELECT-list alias's expression text verbatim into WHERE, so the
-        // projection and the predicate leaf it feeds are frequently
-        // identical text. CompiledPlan.close() owns closing every distinct
-        // evaluator exactly once via this map's values(); no other site
-        // closes one directly. See "Expression deduplication" in this
-        // class's javadoc.
+        // predicate comparison, an IS NULL probe, a computed projection,
+        // a GROUP BY key, an aggregate's argument, a HAVING/ORDER BY
+        // expression) that render to the exact same ParserNG text compile
+        // to, and share, a single ArrowExpressionEvaluator instead of one
+        // each. This is common -- e.g. WhereAliasResolver routinely
+        // re-expands a SELECT-list alias's expression text verbatim into
+        // WHERE, so the projection and the predicate leaf it feeds are
+        // frequently identical text. CompiledPlan.close() owns closing
+        // every distinct evaluator exactly once via this map's values(); no
+        // other site closes one directly. See "Expression deduplication"
+        // in this class's javadoc.
         Map<String, ArrowExpressionEvaluator> compiledCache = new LinkedHashMap<>();
 
         BoolExpr where = stmt.where();
@@ -446,123 +423,87 @@ public final class ArrowQuery implements AutoCloseable {
         PredicateNode maskPredicateRoot = null;
         if (where != null) {
             if (BoolExprs.containsIsNull(where)) {
-                Predicate<String> hasColumn = name -> root.getVector(name) != null;
-                maskPredicateRoot = buildPredicateNode(where, backend, float64, hasColumn, compiledCache);
+                maskPredicateRoot = buildPredicateNode(where, backend, float64, root, compiledCache);
             } else {
                 String text = BoolExprs.renderFused(where);
                 fusedPredicate = compileCached(text, backend, float64, compiledCache);
             }
         }
 
-        boolean aggregateQuery = stmt.isAggregateQuery();
-
-        // --- GROUP BY / aggregate SELECT items / HAVING (see "Aggregation
-        // strategy" in this class's javadoc) -- every evaluator compiled
-        // here is root-agnostic text (ArrowExpressionEvaluators.compile
-        // takes only text + backend, never a root), so it is safe to
-        // compile all of this once here even though the synthetic
-        // per-group root it eventually runs against does not exist until
-        // execute() actually groups some rows.
-        List<ArrowExpressionEvaluator> groupByEvaluators = List.of();
-        List<AggregateItemPlan> aggregateItems = List.of();
-        ArrowExpressionEvaluator havingFusedPredicate = null;
-        PredicateNode havingMaskPredicateRoot = null;
-
-        if (aggregateQuery) {
-            List<ArrowExpressionEvaluator> gbEvals = new ArrayList<>();
-            for (String gbExpr : stmt.groupBy()) {
-                gbEvals.add(compileCached(gbExpr, backend, float64, compiledCache));
-            }
-            groupByEvaluators = gbEvals;
-
-            Map<String, Integer> groupByIndexByText = new LinkedHashMap<>();
-            for (int i = 0; i < stmt.groupBy().size(); i++) {
-                groupByIndexByText.put(stmt.groupBy().get(i).trim(), i);
-            }
-
-            List<AggregateItemPlan> items = new ArrayList<>();
-            for (SelectItem item : stmt.items()) {
-                if (item.isAggregate()) {
-                    ArrowExpressionEvaluator argEval = item.aggregateStar()
-                            ? null : compileCached(item.aggregateArgText(), backend, float64, compiledCache);
-                    items.add(AggregateItemPlan.aggregate(
-                            item.outputName(), item.aggregateKind(), item.aggregateStar(), argEval));
-                } else {
-                    Integer idx = groupByIndexByText.get(item.exprText().trim());
-                    if (idx == null) {
-                        // SelectStatement's own constructor already rejects
-                        // this; defensive guard in case that invariant is
-                        // ever loosened without updating this class.
-                        throw new ArrowSqlException(
-                                "Column '" + item.exprText() + "' must appear in GROUP BY or be used "
-                                        + "inside an aggregate function.", null);
-                    }
-                    items.add(AggregateItemPlan.groupKey(item.outputName(), idx));
-                }
-            }
-            aggregateItems = items;
-
-            BoolExpr having = stmt.having();
-            if (having != null) {
-                Set<String> aggregatedColumnNames = new HashSet<>();
-                for (String gb : stmt.groupBy()) {
-                    aggregatedColumnNames.add(gb.trim());
-                }
-                for (SelectItem item : stmt.items()) {
-                    aggregatedColumnNames.add(item.outputName());
-                }
-                if (BoolExprs.containsIsNull(having)) {
-                    havingMaskPredicateRoot = buildPredicateNode(
-                            having, backend, float64, aggregatedColumnNames::contains, compiledCache);
-                } else {
-                    String text = BoolExprs.renderFused(having);
-                    havingFusedPredicate = compileCached(text, backend, float64, compiledCache);
-                }
-            }
-        }
-
-        // --- ORDER BY (see "ORDER BY and LIMIT" in this class's javadoc).
-        // A non-aggregate query may name a SELECT-list alias, resolved the
-        // same way WHERE resolves one; an aggregate query's keys are
-        // expected to already be verbatim column names of the synthetic
-        // per-group root (a GROUP BY expression's own text, or a SELECT
-        // item's outputName()) and are used as-is.
-        List<ArrowExpressionEvaluator> orderByEvaluators = new ArrayList<>();
-        Map<String, String> orderAliasBindings = aggregateQuery ? Map.of() : collectWhereAliasBindings(root);
-        for (OrderItem orderItem : stmt.orderBy()) {
-            String text = aggregateQuery
-                    ? orderItem.exprText()
-                    : WhereAliasResolver.substituteText(orderItem.exprText(), orderAliasBindings);
-            orderByEvaluators.add(compileCached(text, backend, float64, compiledCache));
-        }
-
         List<ProjectionPlan> projections = new ArrayList<>();
-        if (!stmt.selectAll()) {
-            if (aggregateQuery) {
-                // Every SELECT item is, by construction, already a
-                // same-named column of the synthetic per-group root built
-                // at execute() time -- see buildAggregatedRoot(). No
-                // evaluator to compile here; this is always a passthrough.
-                for (SelectItem item : stmt.items()) {
-                    projections.add(new ProjectionPlan(item.outputName(), true, item.outputName(), null));
+        GroupPlan groupPlan = null;
+        if (stmt.isGrouped()) {
+            groupPlan = buildGroupPlan(root, backend, float64, compiledCache);
+        } else if (!stmt.selectAll()) {
+            for (SelectItem item : stmt.items()) {
+                String expr = item.exprText();
+                String outputName = item.outputName();
+                if (root.getVector(expr) != null) {
+                    projections.add(new ProjectionPlan(outputName, true, expr, null));
+                } else {
+                    ArrowExpressionEvaluator eval = compileCached(expr, backend, float64, compiledCache);
+                    projections.add(new ProjectionPlan(outputName, false, null, eval));
+                }
+            }
+        }
+
+        // HAVING always operates on the final grouped/projected result (see
+        // buildGroupPlan's javadoc for why that column set is always
+        // statically known). ORDER BY differs by query shape: a grouped
+        // query's ORDER BY operates on that same final grouped result
+        // (compiled unconditionally, same as HAVING, for the same reason);
+        // a non-grouped query's ORDER BY instead operates on the
+        // WHERE-filtered root *before* projection narrows its columns --
+        // exactly like WHERE itself, an ORDER BY key may reference a real
+        // input column that never appears in the SELECT list at all, or a
+        // SELECT-list alias (resolved via the same WhereAliasResolver
+        // machinery WHERE uses), and gets the same bare-column passthrough
+        // optimization projections/GROUP BY keys already get. See
+        // ArrowQuery's "ORDER BY and LIMIT" javadoc.
+        PredicateNode havingNode = null;
+        ArrowExpressionEvaluator havingFused = null;
+        if (stmt.having() != null) {
+            BoolExpr having = stmt.having();
+            if (BoolExprs.containsIsNull(having)) {
+                VectorSchemaRoot phantom = phantomResultRoot(float64);
+                try {
+                    havingNode = buildPredicateNode(having, backend, float64, phantom, compiledCache);
+                } finally {
+                    closePhantomRoot(phantom);
                 }
             } else {
-                for (SelectItem item : stmt.items()) {
-                    String expr = item.exprText();
-                    String outputName = item.outputName();
-                    if (root.getVector(expr) != null) {
-                        projections.add(new ProjectionPlan(outputName, true, expr, null));
-                    } else {
-                        ArrowExpressionEvaluator eval = compileCached(expr, backend, float64, compiledCache);
-                        projections.add(new ProjectionPlan(outputName, false, null, eval));
-                    }
+                havingFused = compileCached(BoolExprs.renderFused(having), backend, float64, compiledCache);
+            }
+        }
+
+        List<OrderByPlan> orderByPlans = new ArrayList<>(stmt.orderBy().size());
+        if (stmt.isGrouped()) {
+            for (OrderItem item : stmt.orderBy()) {
+                orderByPlans.add(new OrderByPlan(false, null,
+                        compileCached(item.exprText(), backend, float64, compiledCache)));
+            }
+        } else {
+            Map<String, String> orderByAliasBindings = collectWhereAliasBindings(root);
+            for (OrderItem item : stmt.orderBy()) {
+                String resolved;
+                try {
+                    resolved = WhereAliasResolver.substituteText(item.exprText(), orderByAliasBindings);
+                } catch (IllegalArgumentException cyclicAlias) {
+                    throw new ArrowSqlException(
+                            "Failed to compile query \"" + sql + "\": " + cyclicAlias.getMessage(), cyclicAlias);
+                }
+                if (root.getVector(resolved) != null) {
+                    orderByPlans.add(new OrderByPlan(true, resolved, null));
+                } else {
+                    orderByPlans.add(new OrderByPlan(false, null,
+                            compileCached(resolved, backend, float64, compiledCache)));
                 }
             }
         }
 
         return new CompiledPlan(fingerprint, float64, fusedPredicate, maskPredicateRoot, projections,
-                List.copyOf(compiledCache.values()), aggregateQuery, groupByEvaluators, aggregateItems,
-                havingFusedPredicate, havingMaskPredicateRoot, orderByEvaluators);
+                groupPlan, havingFused, havingNode, orderByPlans,
+                List.copyOf(compiledCache.values()));
     }
 
     /**
@@ -594,17 +535,7 @@ public final class ArrowQuery implements AutoCloseable {
      * the raw expression text it stands for. Empty for {@code SELECT *}
      * (there are no aliases to speak of) or a {@code WHERE}-less query
      * (nothing to resolve against) — checked by the caller, but harmless to
-     * call regardless. An aggregate {@link SelectItem} (see
-     * {@link SelectItem#isAggregate()}) is never included: its
-     * {@link SelectItem#exprText()} is the canonical aggregate call text
-     * (e.g. {@code "SUM(x)"}), which is meaningless spliced into a
-     * per-row {@code WHERE}/{@code ORDER BY} expression evaluated against
-     * the original, pre-aggregation root — referencing an aggregate result
-     * from {@code WHERE} is invalid SQL in the first place (that is what
-     * {@code HAVING} is for), and this method is also reused (see
-     * {@code buildPlan}'s {@code ORDER BY} handling) only for the
-     * non-aggregate-query case, where no {@link SelectItem} is ever an
-     * aggregate anyway.
+     * call regardless.
      */
     private Map<String, String> collectWhereAliasBindings(VectorSchemaRoot root) {
         if (stmt.selectAll()) {
@@ -612,9 +543,6 @@ public final class ArrowQuery implements AutoCloseable {
         }
         Map<String, String> bindings = new LinkedHashMap<>();
         for (SelectItem item : stmt.items()) {
-            if (item.isAggregate()) {
-                continue;
-            }
             String outputName = item.outputName();
             if (root.getVector(outputName) != null) {
                 continue;
@@ -624,40 +552,23 @@ public final class ArrowQuery implements AutoCloseable {
         return bindings;
     }
 
-    /**
-     * Builds the leaf-by-leaf mask-evaluation fallback for a {@code WHERE}
-     * or {@code HAVING} clause containing {@code IS [NOT] NULL} (see
-     * "Predicate evaluation strategy").
-     *
-     * @param hasColumn tells an {@link IsNullExpr} leaf whether its target
-     * is a bare column of the root it will eventually be evaluated
-     * against, so it can read that column's validity bitmap directly
-     * instead of compiling a probe evaluator. For {@code WHERE} this is
-     * {@code name -> root.getVector(name) != null} against the real,
-     * already-in-hand root; for {@code HAVING} the synthetic per-group
-     * root does not exist yet at compile time, so this is instead a
-     * membership test against the statically-known set of column names
-     * that root will have (every {@code GROUP BY} expression's text, plus
-     * every {@code SELECT} item's {@link SelectItem#outputName()}) — see
-     * "Aggregation strategy" in this class's javadoc.
-     */
     private static PredicateNode buildPredicateNode(
-            BoolExpr expr, ArrowExecutionBackend backend, boolean float64, Predicate<String> hasColumn,
+            BoolExpr expr, ArrowExecutionBackend backend, boolean float64, VectorSchemaRoot root,
             Map<String, ArrowExpressionEvaluator> compiledCache) throws Throwable {
 
         if (expr instanceof AndExpr a) {
             return new AndNode(
-                    buildPredicateNode(a.left(), backend, float64, hasColumn, compiledCache),
-                    buildPredicateNode(a.right(), backend, float64, hasColumn, compiledCache));
+                    buildPredicateNode(a.left(), backend, float64, root, compiledCache),
+                    buildPredicateNode(a.right(), backend, float64, root, compiledCache));
         }
         if (expr instanceof OrExpr o) {
             return new OrNode(
-                    buildPredicateNode(o.left(), backend, float64, hasColumn, compiledCache),
-                    buildPredicateNode(o.right(), backend, float64, hasColumn, compiledCache));
+                    buildPredicateNode(o.left(), backend, float64, root, compiledCache),
+                    buildPredicateNode(o.right(), backend, float64, root, compiledCache));
         }
         if (expr instanceof IsNullExpr n) {
             String target = n.target().trim();
-            if (hasColumn.test(target)) {
+            if (root.getVector(target) != null) {
                 return new IsNullLeafNode(target, null, n.negated());
             }
             ArrowExpressionEvaluator probe = compileCached(target, backend, float64, compiledCache);
@@ -668,6 +579,125 @@ public final class ArrowQuery implements AutoCloseable {
         String text = BoolExprs.renderLeaf(expr);
         ArrowExpressionEvaluator eval = compileCached(text, backend, float64, compiledCache);
         return new CompareLeafNode(eval);
+    }
+
+    /**
+     * Builds the {@link GroupPlan} for a {@link SelectStatement#isGrouped()}
+     * query: one {@link KeyPlan} per {@link SelectStatement#groupBy()} entry
+     * (with the same bare-column passthrough optimization projections
+     * already get), one {@link AggPlan} per aggregate {@link SelectItem},
+     * and a binding from each {@code SELECT} item's position back to
+     * whichever of those two lists produces its value. Validates, once
+     * here rather than per-execute, that every non-aggregate item matches a
+     * {@code GROUP BY} key exactly -- see {@code SelectStatement}'s
+     * javadoc, "{@code GROUP BY} / aggregates — a deliberately strict
+     * subset".
+     */
+    private GroupPlan buildGroupPlan(
+            VectorSchemaRoot root, ArrowExecutionBackend backend, boolean float64,
+            Map<String, ArrowExpressionEvaluator> compiledCache) throws Throwable {
+
+        List<KeyPlan> keys = new ArrayList<>(stmt.groupBy().size());
+        for (String keyExpr : stmt.groupBy()) {
+            if (root.getVector(keyExpr) != null) {
+                keys.add(new KeyPlan(keyExpr, true, keyExpr, null));
+            } else {
+                ArrowExpressionEvaluator eval = compileCached(keyExpr, backend, float64, compiledCache);
+                keys.add(new KeyPlan(keyExpr, false, null, eval));
+            }
+        }
+
+        List<SelectItem> items = stmt.items();
+        int[] itemKeyIndex = new int[items.size()];
+        int[] itemAggIndex = new int[items.size()];
+        List<AggPlan> aggregates = new ArrayList<>();
+
+        for (int i = 0; i < items.size(); i++) {
+            SelectItem item = items.get(i);
+            if (item.isAggregate()) {
+                AggregateSpec spec = item.aggregate();
+                String passthroughColumn = null;
+                ArrowExpressionEvaluator eval = null;
+                if (!spec.star()) {
+                    if (root.getVector(spec.argExprText()) != null) {
+                        passthroughColumn = spec.argExprText();
+                    } else {
+                        eval = compileCached(spec.argExprText(), backend, float64, compiledCache);
+                    }
+                }
+                aggregates.add(new AggPlan(spec.func(), spec.star(), passthroughColumn, eval));
+                itemAggIndex[i] = aggregates.size() - 1;
+                itemKeyIndex[i] = -1;
+            } else {
+                int keyIdx = -1;
+                String trimmed = item.exprText().trim();
+                for (int k = 0; k < stmt.groupBy().size(); k++) {
+                    if (stmt.groupBy().get(k).trim().equals(trimmed)) {
+                        keyIdx = k;
+                        break;
+                    }
+                }
+                if (keyIdx < 0) {
+                    throw new ArrowSqlException(
+                            "Failed to compile query \"" + sql + "\": SELECT item \"" + item.exprText()
+                                    + "\" is neither an aggregate call nor one of the GROUP BY expressions ("
+                                    + stmt.groupBy() + "). A grouped query's non-aggregate SELECT items must "
+                                    + "match a GROUP BY key exactly -- see SelectStatement's javadoc.", null);
+                }
+                itemKeyIndex[i] = keyIdx;
+                itemAggIndex[i] = -1;
+            }
+        }
+
+        return new GroupPlan(keys, aggregates, itemKeyIndex, itemAggIndex);
+    }
+
+    /**
+     * Builds a zero-row {@code VectorSchemaRoot} whose schema is exactly
+     * the final grouped result's column set (one column per
+     * {@link SelectStatement#items()}, named by {@link SelectItem#outputName()})
+     * -- used only to let {@link #buildPredicateNode} run its bare-column
+     * {@code IS [NOT] NULL} detection (a pure schema check; it never reads
+     * row data) against a {@code HAVING} clause during {@link #buildPlan},
+     * before any real grouped result exists. Always closed immediately
+     * after that one use via {@link #closePhantomRoot}; never retained,
+     * never returned to a caller.
+     */
+    private VectorSchemaRoot phantomResultRoot(boolean float64) {
+        BufferAllocator allocator = new org.apache.arrow.memory.RootAllocator(1024);
+        List<Field> fields = new ArrayList<>(stmt.items().size());
+        List<FieldVector> vectors = new ArrayList<>(stmt.items().size());
+        for (SelectItem item : stmt.items()) {
+            Field field = new Field(item.outputName(),
+                    FieldType.nullable(float64
+                            ? new org.apache.arrow.vector.types.pojo.ArrowType.FloatingPoint(
+                                    org.apache.arrow.vector.types.FloatingPointPrecision.DOUBLE)
+                            : new org.apache.arrow.vector.types.pojo.ArrowType.FloatingPoint(
+                                    org.apache.arrow.vector.types.FloatingPointPrecision.SINGLE)),
+                    null);
+            FieldVector v = field.createVector(allocator);
+            v.setInitialCapacity(0);
+            v.allocateNew();
+            v.setValueCount(0);
+            fields.add(field);
+            vectors.add(v);
+        }
+        return new VectorSchemaRoot(new Schema(fields), vectors, 0);
+    }
+
+    private static void closePhantomRoot(VectorSchemaRoot phantom) {
+        BufferAllocator allocator = phantom.getFieldVectors().isEmpty() ? null : allocatorOf(phantom);
+        for (FieldVector v : phantom.getFieldVectors()) {
+            closeQuietly(v);
+        }
+        if (allocator != null) {
+            try {
+                allocator.close();
+            } catch (RuntimeException ignored) {
+                // best-effort cleanup of the throwaway allocator created
+                // solely for this phantom root -- see phantomResultRoot
+            }
+        }
     }
 
     /**
@@ -738,58 +768,368 @@ public final class ArrowQuery implements AutoCloseable {
     }
 
     // =====================================================================
-    // per-call execution: select rows -> [group/aggregate/HAVING] ->
-    // [ORDER BY/LIMIT] -> project/alias
+    // per-call execution: select rows -> materialize -> project/alias
     // =====================================================================
 
-    /**
-     * Runs the full per-execute pipeline against {@code root}, tracking
-     * ownership of exactly one {@code VectorSchemaRoot} ({@code current})
-     * at a time: each stage below either returns {@code current} unchanged
-     * or produces a brand-new root and closes the old one, so a failure at
-     * any point only ever needs to close whatever {@code current} refers
-     * to right then. See this class's javadoc, "Aggregation strategy" and
-     * "{@code ORDER BY} and {@code LIMIT}".
-     */
     private VectorSchemaRoot runPlan(CompiledPlan p, VectorSchemaRoot root) {
         int[] selected = selectRows(p, root);
-        VectorSchemaRoot current = materializeRows(root, selected);
+        VectorSchemaRoot filtered = materializeRows(root, selected);
+
+        // Non-grouped queries sort *before* projection: an ORDER BY key may
+        // name a real input column that never appears in the SELECT list,
+        // or a SELECT-list alias resolved back to its input-column-based
+        // expression (see buildPlan's ORDER BY comment) -- both only
+        // resolve correctly against the pre-projection root.
+        if (p.groupPlan == null && !p.orderByPlans.isEmpty()) {
+            VectorSchemaRoot sortedFiltered = applyOrderBy(p, filtered);
+            for (FieldVector v : filtered.getFieldVectors()) {
+                closeQuietly(v);
+            }
+            filtered = sortedFiltered;
+        }
+
+        VectorSchemaRoot result;
+        if (p.groupPlan != null) {
+            try {
+                result = buildGroupedResult(p, filtered);
+            } catch (RuntimeException | Error e) {
+                for (FieldVector v : filtered.getFieldVectors()) {
+                    closeQuietly(v);
+                }
+                throw e;
+            }
+            for (FieldVector v : filtered.getFieldVectors()) {
+                closeQuietly(v);
+            }
+        } else if (stmt.selectAll()) {
+            result = filtered;
+        } else {
+            try {
+                result = buildProjection(p, filtered);
+            } catch (RuntimeException | Error e) {
+                for (FieldVector v : filtered.getFieldVectors()) {
+                    closeQuietly(v);
+                }
+                throw e;
+            }
+        }
+
+        // HAVING only ever applies to a grouped query (see
+        // SelectStatement's validation) and always operates on the final
+        // grouped result. A grouped query's ORDER BY, unlike a
+        // non-grouped query's (handled above, before projection), runs
+        // *after* projection too, against that same final grouped result
+        // -- see buildPlan's ORDER BY comment for why grouped and
+        // non-grouped queries sort at different pipeline stages.
+        if (p.havingFused != null || p.havingNode != null) {
+            VectorSchemaRoot havingFiltered = applyHaving(p, result);
+            for (FieldVector v : result.getFieldVectors()) {
+                closeQuietly(v);
+            }
+            result = havingFiltered;
+        }
+        if (p.groupPlan != null && !p.orderByPlans.isEmpty()) {
+            VectorSchemaRoot sorted = applyOrderBy(p, result);
+            for (FieldVector v : result.getFieldVectors()) {
+                closeQuietly(v);
+            }
+            result = sorted;
+        }
+        if (stmt.limit() != null && stmt.limit() < result.getRowCount()) {
+            VectorSchemaRoot limited = materializeRows(result,
+                    java.util.stream.IntStream.range(0, stmt.limit()).toArray());
+            for (FieldVector v : result.getFieldVectors()) {
+                closeQuietly(v);
+            }
+            result = limited;
+        }
+        return result;
+    }
+
+    /**
+     * Turns a {@code WHERE}-filtered row set into one row per distinct
+     * {@code GROUP BY} key: evaluates every key expression and every
+     * aggregate's argument once, in bulk, over all of {@code filtered}'s
+     * rows (never per-row calls into ParserNG -- see
+     * {@link #evaluateNumericColumn}), buckets rows into groups by key
+     * (first-seen order, via {@link GroupKey}), accumulates each group's
+     * {@link Aggregator}s, then materializes exactly one output column per
+     * {@code SELECT} item using {@link GroupPlan#itemKeyIndex}/
+     * {@link GroupPlan#itemAggIndex} to pick, per item, either a group's key
+     * value or an aggregate's result.
+     */
+    private VectorSchemaRoot buildGroupedResult(CompiledPlan p, VectorSchemaRoot filtered) {
+        GroupPlan gp = p.groupPlan;
+        int rowCount = filtered.getRowCount();
+        BufferAllocator allocator = allocatorOf(filtered);
+
+        int numKeys = gp.keys.size();
+        double[][] keyValues = new double[numKeys][];
+        boolean[][] keyIsNull = new boolean[numKeys][];
+        for (int k = 0; k < numKeys; k++) {
+            keyValues[k] = new double[rowCount];
+            keyIsNull[k] = new boolean[rowCount];
+            KeyPlan kp = gp.keys.get(k);
+            evaluateNumericColumn(kp.evaluator, kp.sourceColumnName, filtered, p.float64, nullPolicy,
+                    keyValues[k], keyIsNull[k]);
+        }
+
+        int numAggs = gp.aggregates.size();
+        double[][] aggValues = new double[numAggs][];
+        boolean[][] aggIsNull = new boolean[numAggs][];
+        for (int a = 0; a < numAggs; a++) {
+            AggPlan ap = gp.aggregates.get(a);
+            if (ap.star) {
+                continue; // COUNT(*) needs no per-row value at all
+            }
+            aggValues[a] = new double[rowCount];
+            aggIsNull[a] = new boolean[rowCount];
+            evaluateNumericColumn(ap.evaluator, ap.passthroughColumn, filtered, p.float64, nullPolicy,
+                    aggValues[a], aggIsNull[a]);
+        }
+
+        Map<GroupKey, Integer> groupIndex = new LinkedHashMap<>();
+        List<double[]> groupKeyValuesOut = new ArrayList<>();
+        List<Aggregator[]> groupAggregators = new ArrayList<>();
+
+        for (int row = 0; row < rowCount; row++) {
+            double[] key = new double[numKeys];
+            for (int k = 0; k < numKeys; k++) {
+                key[k] = keyIsNull[k][row] ? Double.NaN : keyValues[k][row];
+            }
+            GroupKey gk = new GroupKey(key);
+            Integer idx = groupIndex.get(gk);
+            if (idx == null) {
+                idx = groupAggregators.size();
+                groupIndex.put(gk, idx);
+                groupKeyValuesOut.add(key);
+                Aggregator[] aggs = new Aggregator[numAggs];
+                for (int a = 0; a < numAggs; a++) {
+                    aggs[a] = newAggregator(gp.aggregates.get(a).func);
+                }
+                groupAggregators.add(aggs);
+            }
+            Aggregator[] aggs = groupAggregators.get(idx);
+            for (int a = 0; a < numAggs; a++) {
+                if (gp.aggregates.get(a).star) {
+                    aggs[a].accumulate(0.0, false);
+                } else {
+                    aggs[a].accumulate(aggValues[a][row], aggIsNull[a][row]);
+                }
+            }
+        }
+
+        int numGroups = groupAggregators.size();
+        List<SelectItem> items = stmt.items();
+        List<Field> outFields = new ArrayList<>(items.size());
+        List<FieldVector> outVectors = new ArrayList<>(items.size());
         try {
-            if (p.aggregateQuery) {
-                VectorSchemaRoot aggregated = buildAggregatedRoot(p, current);
-                closeAll(current);
-                current = aggregated;
-
-                int[] havingSelected = selectHavingRows(p, current);
-                VectorSchemaRoot havingFiltered = materializeRows(current, havingSelected);
-                closeAll(current);
-                current = havingFiltered;
+            for (int i = 0; i < items.size(); i++) {
+                SelectItem item = items.get(i);
+                FieldVector out = p.float64
+                        ? new Float8Vector(item.outputName(), allocator)
+                        : new Float4Vector(item.outputName(), allocator);
+                if (p.float64) {
+                    ((Float8Vector) out).allocateNew(numGroups);
+                } else {
+                    ((Float4Vector) out).allocateNew(numGroups);
+                }
+                out.setValueCount(numGroups);
+                if (gp.itemAggIndex[i] >= 0) {
+                    int a = gp.itemAggIndex[i];
+                    for (int g = 0; g < numGroups; g++) {
+                        Aggregator agg = groupAggregators.get(g)[a];
+                        if (agg.isNullResult()) {
+                            out.setNull(g);
+                        } else {
+                            setNumeric(out, g, agg.result(), p.float64);
+                        }
+                    }
+                } else {
+                    int k = gp.itemKeyIndex[i];
+                    for (int g = 0; g < numGroups; g++) {
+                        double v = groupKeyValuesOut.get(g)[k];
+                        if (Double.isNaN(v)) {
+                            out.setNull(g);
+                        } else {
+                            setNumeric(out, g, v, p.float64);
+                        }
+                    }
+                }
+                outFields.add(out.getField());
+                outVectors.add(out);
             }
-
-            if (!p.orderByEvaluators.isEmpty() || stmt.limit() != null) {
-                int[] permutation = computeOrderPermutation(p, current);
-                VectorSchemaRoot ordered = materializeRows(current, permutation);
-                closeAll(current);
-                current = ordered;
-            }
-
-            if (stmt.selectAll()) {
-                return current;
-            }
-            // buildProjection takes ownership of `current` from here: it
-            // closes every one of its vectors that isn't reused verbatim
-            // in the returned result (see buildProjection's own javadoc).
-            return buildProjection(p, current);
         } catch (RuntimeException | Error e) {
-            closeAll(current);
+            for (FieldVector v : outVectors) {
+                closeQuietly(v);
+            }
             throw e;
+        }
+        return new VectorSchemaRoot(new Schema(outFields), outVectors, numGroups);
+    }
+
+    private static void setNumeric(FieldVector v, int index, double value, boolean float64) {
+        if (float64) {
+            ((Float8Vector) v).set(index, value);
+        } else {
+            ((Float4Vector) v).set(index, (float) value);
         }
     }
 
-    private static void closeAll(VectorSchemaRoot r) {
-        for (FieldVector v : r.getFieldVectors()) {
-            closeQuietly(v);
+    /**
+     * Bulk-evaluates one expression (a compiled {@code evaluator}, or a
+     * direct column read when {@code passthroughColumn} is non-{@code null})
+     * across every row of {@code root} into {@code outValues}/{@code outIsNull} —
+     * the shared building block behind reading a {@code GROUP BY} key or an
+     * aggregate's argument for every row at once, rather than one ParserNG
+     * dispatch per row.
+     */
+    private static void evaluateNumericColumn(
+            ArrowExpressionEvaluator evaluator, String passthroughColumn, VectorSchemaRoot root,
+            boolean float64, NullPolicy nullPolicy, double[] outValues, boolean[] outIsNull) {
+
+        int rowCount = root.getRowCount();
+        if (rowCount == 0) {
+            return;
         }
+        if (passthroughColumn != null) {
+            FieldVector v = root.getVector(passthroughColumn);
+            if (v == null) {
+                throw new ArrowBindingException("Column '" + passthroughColumn + "' not found.");
+            }
+            if (float64) {
+                Float8Vector fv = (Float8Vector) v;
+                for (int i = 0; i < rowCount; i++) {
+                    outIsNull[i] = fv.isNull(i);
+                    outValues[i] = outIsNull[i] ? 0.0 : fv.get(i);
+                }
+            } else {
+                Float4Vector fv = (Float4Vector) v;
+                for (int i = 0; i < rowCount; i++) {
+                    outIsNull[i] = fv.isNull(i);
+                    outValues[i] = outIsNull[i] ? 0.0 : fv.get(i);
+                }
+            }
+            return;
+        }
+        BufferAllocator allocator = allocatorOf(root);
+        if (float64) {
+            try (Float8Vector out = new Float8Vector("__parser_ng_sql_bulk__", allocator)) {
+                out.allocateNew(rowCount);
+                out.setValueCount(rowCount);
+                evaluator.evaluate(root, out, nullPolicy);
+                for (int i = 0; i < rowCount; i++) {
+                    outIsNull[i] = out.isNull(i);
+                    outValues[i] = outIsNull[i] ? 0.0 : out.get(i);
+                }
+            }
+        } else {
+            try (Float4Vector out = new Float4Vector("__parser_ng_sql_bulk__", allocator)) {
+                out.allocateNew(rowCount);
+                out.setValueCount(rowCount);
+                evaluator.evaluate(root, out, nullPolicy);
+                for (int i = 0; i < rowCount; i++) {
+                    outIsNull[i] = out.isNull(i);
+                    outValues[i] = outIsNull[i] ? 0.0 : out.get(i);
+                }
+            }
+        }
+    }
+
+    /**
+     * Filters {@code result} (the final projected/grouped output) by
+     * {@code HAVING}, reusing exactly the same fused-evaluator /
+     * leaf-by-leaf-mask machinery {@code WHERE} uses (see
+     * {@link #selectFromEvaluator}/{@link PredicateNode}) — {@code result}
+     * is a real {@code VectorSchemaRoot} by this point, so
+     * {@link PredicateNode#evalMask} (and the bare-column {@code IS NULL}
+     * detection {@link #buildPredicateNode} baked into {@code havingNode}
+     * against a phantom root back in {@link #buildPlan}) both resolve
+     * correctly against it.
+     */
+    private VectorSchemaRoot applyHaving(CompiledPlan p, VectorSchemaRoot result) {
+        int[] selected;
+        int rowCount = result.getRowCount();
+        if (p.havingFused != null) {
+            selected = selectFromEvaluator(p.havingFused, result, rowCount, p.float64, nullPolicy);
+        } else {
+            boolean[] mask = p.havingNode.evalMask(result, nullPolicy, p.float64);
+            int count = 0;
+            for (boolean b : mask) {
+                if (b) {
+                    count++;
+                }
+            }
+            selected = new int[count];
+            int idx = 0;
+            for (int i = 0; i < mask.length; i++) {
+                if (mask[i]) {
+                    selected[idx++] = i;
+                }
+            }
+        }
+        return materializeRows(result, selected);
+    }
+
+    /**
+     * Sorts {@code root} by {@link SelectStatement#orderBy()}, evaluating
+     * every key once in bulk (see {@link #evaluateNumericColumn}) rather
+     * than per-comparison, then gathering rows via a stable multi-key
+     * {@link java.util.Comparator} over row indices. {@code root} is
+     * whichever root {@link #runPlan} passes in: the final grouped/HAVING-filtered
+     * result for a grouped query, or the pre-projection {@code WHERE}-filtered
+     * root for a non-grouped one — see {@code buildPlan}'s "ORDER BY" comment
+     * for why those differ, and {@code CompiledPlan#orderByPlans}, which is
+     * built to match whichever one will actually be passed here. SQL
+     * null-ordering convention: nulls sort last regardless of
+     * {@code ASC}/{@code DESC} (a null is "unknown", not "smallest" or
+     * "largest" — this matches PostgreSQL's default, one of the two common
+     * real-engine conventions; MySQL/SQLite instead treat null as the
+     * smallest value under {@code ASC}).
+     */
+    private VectorSchemaRoot applyOrderBy(CompiledPlan p, VectorSchemaRoot root) {
+        int rowCount = root.getRowCount();
+        List<OrderItem> orderBy = stmt.orderBy();
+        int numKeys = orderBy.size();
+        double[][] values = new double[numKeys][];
+        boolean[][] isNull = new boolean[numKeys][];
+        for (int k = 0; k < numKeys; k++) {
+            values[k] = new double[rowCount];
+            isNull[k] = new boolean[rowCount];
+            OrderByPlan op = p.orderByPlans.get(k);
+            evaluateNumericColumn(op.evaluator, op.sourceColumnName, root, p.float64, nullPolicy,
+                    values[k], isNull[k]);
+        }
+
+        Integer[] order = new Integer[rowCount];
+        for (int i = 0; i < rowCount; i++) {
+            order[i] = i;
+        }
+        Arrays.sort(order, (i1, i2) -> {
+            for (int k = 0; k < numKeys; k++) {
+                boolean n1 = isNull[k][i1];
+                boolean n2 = isNull[k][i2];
+                int cmp;
+                if (n1 || n2) {
+                    cmp = (n1 == n2) ? 0 : (n1 ? 1 : -1); // nulls last, regardless of ASC/DESC
+                } else {
+                    cmp = Double.compare(values[k][i1], values[k][i2]);
+                    if (orderBy.get(k).descending()) {
+                        cmp = -cmp;
+                    }
+                }
+                if (cmp != 0) {
+                    return cmp;
+                }
+            }
+            return 0; // stable: ties keep their original relative order
+        });
+
+        int[] indices = new int[rowCount];
+        for (int i = 0; i < rowCount; i++) {
+            indices[i] = order[i];
+        }
+        return materializeRows(root, indices);
     }
 
     private int[] selectRows(CompiledPlan p, VectorSchemaRoot root) {
@@ -805,32 +1145,6 @@ public final class ArrowQuery implements AutoCloseable {
             return selectFromEvaluator(p.fusedPredicate, root, rowCount, p.float64, nullPolicy);
         }
         boolean[] mask = p.maskPredicateRoot.evalMask(root, nullPolicy, p.float64);
-        return maskToIndices(mask);
-    }
-
-    /**
-     * {@code HAVING}'s counterpart to {@link #selectRows(CompiledPlan, VectorSchemaRoot)},
-     * evaluated against the synthetic per-group root built by
-     * {@link #buildAggregatedRoot} instead of the original input root. See
-     * this class's javadoc, "Aggregation strategy".
-     */
-    private int[] selectHavingRows(CompiledPlan p, VectorSchemaRoot aggregated) {
-        int rowCount = aggregated.getRowCount();
-        if (p.havingFusedPredicate == null && p.havingMaskPredicateRoot == null) {
-            int[] all = new int[rowCount];
-            for (int i = 0; i < rowCount; i++) {
-                all[i] = i;
-            }
-            return all;
-        }
-        if (p.havingFusedPredicate != null) {
-            return selectFromEvaluator(p.havingFusedPredicate, aggregated, rowCount, p.float64, nullPolicy);
-        }
-        boolean[] mask = p.havingMaskPredicateRoot.evalMask(aggregated, nullPolicy, p.float64);
-        return maskToIndices(mask);
-    }
-
-    private static int[] maskToIndices(boolean[] mask) {
         int count = 0;
         for (boolean b : mask) {
             if (b) {
@@ -1011,326 +1325,6 @@ public final class ArrowQuery implements AutoCloseable {
     }
 
     // =====================================================================
-    // GROUP BY / aggregation -- see this class's javadoc, "Aggregation
-    // strategy"
-    // =====================================================================
-
-    /**
-     * Groups {@code filtered} (the post-{@code WHERE} rows) by
-     * {@code p.groupByEvaluators} and materializes a synthetic, one-row-
-     * per-group {@code VectorSchemaRoot} carrying every column that
-     * {@code HAVING}, {@code ORDER BY}, or the final projection might need:
-     * one per {@code GROUP BY} expression (named after its own trimmed
-     * text) and one per {@code SELECT} item (named after
-     * {@link SelectItem#outputName()}) -- see "Aggregation strategy" for
-     * why both sets exist and how a name collision between them is
-     * resolved (harmlessly: the values are guaranteed identical whenever
-     * the names coincide).
-     */
-    private VectorSchemaRoot buildAggregatedRoot(CompiledPlan p, VectorSchemaRoot filtered) {
-        int rowCount = filtered.getRowCount();
-        int groupCount = p.groupByEvaluators.size();
-        List<String> groupByTexts = stmt.groupBy();
-
-        double[][] keyValues = new double[groupCount][];
-        boolean[][] keyNulls = new boolean[groupCount][];
-        for (int g = 0; g < groupCount; g++) {
-            EvalResult r = evaluateToDoubles(p.groupByEvaluators.get(g), filtered, p.float64, nullPolicy);
-            keyValues[g] = r.values();
-            keyNulls[g] = r.nulls();
-        }
-
-        Map<GroupKey, List<Integer>> groups = new LinkedHashMap<>();
-        if (groupCount == 0) {
-            // No explicit GROUP BY but at least one aggregate item (see
-            // SelectStatement#isAggregateQuery()): the entire (possibly
-            // empty) filtered result is one implicit group, exactly as
-            // plain SQL treats an aggregate query with no GROUP BY.
-            List<Integer> all = new ArrayList<>(rowCount);
-            for (int i = 0; i < rowCount; i++) {
-                all.add(i);
-            }
-            groups.put(GroupKey.EMPTY, all);
-        } else {
-            for (int i = 0; i < rowCount; i++) {
-                double[] key = new double[groupCount];
-                boolean[] nulls = new boolean[groupCount];
-                for (int g = 0; g < groupCount; g++) {
-                    key[g] = keyValues[g][i];
-                    nulls[g] = keyNulls[g][i];
-                }
-                groups.computeIfAbsent(new GroupKey(key, nulls), unused -> new ArrayList<>()).add(i);
-            }
-        }
-
-        List<GroupKey> keys = new ArrayList<>(groups.keySet());
-        List<List<Integer>> rowsByGroup = new ArrayList<>(keys.size());
-        for (GroupKey k : keys) {
-            rowsByGroup.add(groups.get(k));
-        }
-        int outRows = keys.size();
-
-        // Column name -> how to fill it, deduplicated by name so a SELECT
-        // item whose outputName() coincides with a GROUP BY expression's
-        // own text (or with another item) does not produce two Arrow
-        // fields of the same name.
-        Map<String, AggColumnSpec> columns = new LinkedHashMap<>();
-        for (int g = 0; g < groupCount; g++) {
-            columns.putIfAbsent(groupByTexts.get(g).trim(), new AggColumnSpec(g));
-        }
-        for (AggregateItemPlan item : p.aggregateItems) {
-            columns.putIfAbsent(item.outputName,
-                    item.isGroupKey ? new AggColumnSpec(item.groupByIndex) : new AggColumnSpec(item));
-        }
-
-        BufferAllocator allocator = allocatorOf(filtered);
-        List<Field> outFields = new ArrayList<>(columns.size());
-        List<FieldVector> outVectors = new ArrayList<>(columns.size());
-        try {
-            for (Map.Entry<String, AggColumnSpec> entry : columns.entrySet()) {
-                FieldVector v = newNumericVector(entry.getKey(), allocator, p.float64);
-                if (outRows > 0) {
-                    v.setInitialCapacity(outRows);
-                }
-                v.allocateNew();
-                AggColumnSpec spec = entry.getValue();
-                for (int r = 0; r < outRows; r++) {
-                    if (spec.isGroupColumn()) {
-                        GroupKey k = keys.get(r);
-                        writeValue(v, r, k.values[spec.groupIndex], k.nulls[spec.groupIndex], p.float64);
-                    } else {
-                        computeAggregate(spec.item, filtered, rowsByGroup.get(r), p.float64, v, r);
-                    }
-                }
-                v.setValueCount(outRows);
-                outFields.add(v.getField());
-                outVectors.add(v);
-            }
-        } catch (RuntimeException | Error e) {
-            for (FieldVector v : outVectors) {
-                closeQuietly(v);
-            }
-            throw e;
-        }
-        return new VectorSchemaRoot(new Schema(outFields), outVectors, outRows);
-    }
-
-    /**
-     * Computes one aggregate {@code SELECT} item's value for a single
-     * group and writes it into {@code outVector} at {@code outIdx}. Every
-     * kind except {@code COUNT(*)} materializes the group's own rows into
-     * a small sub-{@code VectorSchemaRoot} (reusing {@link #materializeRows}),
-     * evaluates the aggregate's argument expression against it, and
-     * reduces client-side, skipping {@code NULL} argument values -- see
-     * {@link AggregateKind}'s javadoc for the exact per-kind semantics.
-     */
-    private void computeAggregate(
-            AggregateItemPlan item, VectorSchemaRoot filtered, List<Integer> rowsInGroup,
-            boolean float64, FieldVector outVector, int outIdx) {
-
-        if (item.kind == AggregateKind.COUNT && item.star) {
-            writeValue(outVector, outIdx, rowsInGroup.size(), false, float64);
-            return;
-        }
-
-        int[] indices = new int[rowsInGroup.size()];
-        for (int i = 0; i < indices.length; i++) {
-            indices[i] = rowsInGroup.get(i);
-        }
-        VectorSchemaRoot sub = materializeRows(filtered, indices);
-        try {
-            EvalResult r = evaluateToDoubles(item.argEvaluator, sub, float64, nullPolicy);
-            switch (item.kind) {
-                case COUNT -> {
-                    int count = 0;
-                    for (boolean isNull : r.nulls()) {
-                        if (!isNull) {
-                            count++;
-                        }
-                    }
-                    writeValue(outVector, outIdx, count, false, float64);
-                }
-                case SUM -> {
-                    double sum = 0.0;
-                    boolean any = false;
-                    for (int i = 0; i < r.values().length; i++) {
-                        if (!r.nulls()[i]) {
-                            sum += r.values()[i];
-                            any = true;
-                        }
-                    }
-                    writeValue(outVector, outIdx, sum, !any, float64);
-                }
-                case AVG -> {
-                    double sum = 0.0;
-                    int count = 0;
-                    for (int i = 0; i < r.values().length; i++) {
-                        if (!r.nulls()[i]) {
-                            sum += r.values()[i];
-                            count++;
-                        }
-                    }
-                    writeValue(outVector, outIdx, count == 0 ? 0.0 : sum / count, count == 0, float64);
-                }
-                case MIN -> {
-                    double min = Double.POSITIVE_INFINITY;
-                    boolean any = false;
-                    for (int i = 0; i < r.values().length; i++) {
-                        if (!r.nulls()[i] && (!any || r.values()[i] < min)) {
-                            min = r.values()[i];
-                            any = true;
-                        }
-                    }
-                    writeValue(outVector, outIdx, min, !any, float64);
-                }
-                case MAX -> {
-                    double max = Double.NEGATIVE_INFINITY;
-                    boolean any = false;
-                    for (int i = 0; i < r.values().length; i++) {
-                        if (!r.nulls()[i] && (!any || r.values()[i] > max)) {
-                            max = r.values()[i];
-                            any = true;
-                        }
-                    }
-                    writeValue(outVector, outIdx, max, !any, float64);
-                }
-            }
-        } finally {
-            closeAll(sub);
-        }
-    }
-
-    private static FieldVector newNumericVector(String name, BufferAllocator allocator, boolean float64) {
-        return float64 ? new Float8Vector(name, allocator) : new Float4Vector(name, allocator);
-    }
-
-    private static void writeValue(FieldVector v, int idx, double value, boolean isNull, boolean float64) {
-        if (float64) {
-            Float8Vector fv = (Float8Vector) v;
-            if (isNull) {
-                fv.setNull(idx);
-            } else {
-                fv.set(idx, value);
-            }
-        } else {
-            Float4Vector fv = (Float4Vector) v;
-            if (isNull) {
-                fv.setNull(idx);
-            } else {
-                fv.set(idx, (float) value);
-            }
-        }
-    }
-
-    /**
-     * Evaluates {@code eval} against every row of {@code root}, reading
-     * each result back through {@code isNull} before {@code get} (same
-     * unconditional guard as everywhere else in this class -- see "A note
-     * on {@code NullPolicy}"). Shared by {@code GROUP BY} key evaluation,
-     * aggregate-argument evaluation, and {@code ORDER BY} key evaluation.
-     */
-    private static EvalResult evaluateToDoubles(
-            ArrowExpressionEvaluator eval, VectorSchemaRoot root, boolean float64, NullPolicy nullPolicy) {
-        int rowCount = root.getRowCount();
-        double[] values = new double[rowCount];
-        boolean[] nulls = new boolean[rowCount];
-        if (rowCount == 0) {
-            return new EvalResult(values, nulls);
-        }
-        BufferAllocator allocator = allocatorOf(root);
-        if (float64) {
-            try (Float8Vector out = new Float8Vector("__parser_ng_sql_eval__", allocator)) {
-                out.allocateNew(rowCount);
-                out.setValueCount(rowCount);
-                eval.evaluate(root, out, nullPolicy);
-                for (int i = 0; i < rowCount; i++) {
-                    nulls[i] = out.isNull(i);
-                    values[i] = nulls[i] ? 0.0 : out.get(i);
-                }
-            }
-        } else {
-            try (Float4Vector out = new Float4Vector("__parser_ng_sql_eval__", allocator)) {
-                out.allocateNew(rowCount);
-                out.setValueCount(rowCount);
-                eval.evaluate(root, out, nullPolicy);
-                for (int i = 0; i < rowCount; i++) {
-                    nulls[i] = out.isNull(i);
-                    values[i] = nulls[i] ? 0.0 : out.get(i);
-                }
-            }
-        }
-        return new EvalResult(values, nulls);
-    }
-
-    private record EvalResult(double[] values, boolean[] nulls) {
-    }
-
-    // =====================================================================
-    // ORDER BY / LIMIT -- see this class's javadoc, "ORDER BY and LIMIT"
-    // =====================================================================
-
-    /**
-     * Computes the row permutation (into {@code base}'s current row
-     * order) that {@code ORDER BY}/{@code LIMIT} require: a stable
-     * multi-key sort (later {@link OrderItem}s break ties among equal
-     * earlier keys; {@code NULL} sorts last regardless of direction),
-     * truncated to {@link SelectStatement#limit()} if present. Called only
-     * when at least one of {@code ORDER BY}/{@code LIMIT} is actually
-     * present (see {@link #runPlan}), but safe (a no-op identity
-     * permutation) otherwise too.
-     */
-    private int[] computeOrderPermutation(CompiledPlan p, VectorSchemaRoot base) {
-        int rowCount = base.getRowCount();
-        int keyCount = p.orderByEvaluators.size();
-
-        List<Integer> order = new ArrayList<>(rowCount);
-        for (int i = 0; i < rowCount; i++) {
-            order.add(i);
-        }
-
-        if (keyCount > 0) {
-            double[][] keys = new double[keyCount][];
-            boolean[][] nulls = new boolean[keyCount][];
-            for (int k = 0; k < keyCount; k++) {
-                EvalResult r = evaluateToDoubles(p.orderByEvaluators.get(k), base, p.float64, nullPolicy);
-                keys[k] = r.values();
-                nulls[k] = r.nulls();
-            }
-            List<OrderItem> orderItems = stmt.orderBy();
-            order.sort((a, b) -> {
-                for (int k = 0; k < keyCount; k++) {
-                    boolean aNull = nulls[k][a];
-                    boolean bNull = nulls[k][b];
-                    if (aNull && bNull) {
-                        continue;
-                    }
-                    if (aNull) {
-                        return 1; // NULLs last, regardless of ASC/DESC
-                    }
-                    if (bNull) {
-                        return -1;
-                    }
-                    int cmp = Double.compare(keys[k][a], keys[k][b]);
-                    if (cmp != 0) {
-                        return orderItems.get(k).descending() ? -cmp : cmp;
-                    }
-                }
-                return Integer.compare(a, b); // stable tie-break
-            });
-        }
-
-        int[] result = new int[order.size()];
-        for (int i = 0; i < result.length; i++) {
-            result[i] = order.get(i);
-        }
-        Integer limit = stmt.limit();
-        if (limit != null && limit < result.length) {
-            result = Arrays.copyOf(result, limit);
-        }
-        return result;
-    }
-
-    // =====================================================================
     // compiled plan model
     // =====================================================================
 
@@ -1341,46 +1335,50 @@ public final class ArrowQuery implements AutoCloseable {
         final ArrowExpressionEvaluator fusedPredicate;
         final PredicateNode maskPredicateRoot;
         final List<ProjectionPlan> projections;
+        // Non-null iff this is a GROUP BY / aggregate query (SelectStatement#isGrouped());
+        // mutually exclusive with `projections`, which stays empty in that
+        // case. See "GROUP BY / HAVING / ORDER BY / LIMIT" in this class's
+        // javadoc.
+        final GroupPlan groupPlan;
+        // At most one of havingFused/havingNode is non-null, mirroring
+        // fusedPredicate/maskPredicateRoot's own "fused fast path vs.
+        // leaf-by-leaf IS-NULL fallback" split for WHERE -- both are always
+        // null when the query has no HAVING clause.
+        final ArrowExpressionEvaluator havingFused;
+        final PredicateNode havingNode;
+        // Parallel to stmt.orderBy(), in the same (sort-priority) order.
+        // For a grouped query, every entry is a plain (non-passthrough)
+        // compiled evaluator operating on the final grouped result. For a
+        // non-grouped query, an entry may instead be a passthrough marker
+        // (see OrderByPlan) -- ORDER BY there runs against the
+        // pre-projection filtered root, where a bare-column reference is
+        // both common and worth optimizing. See buildPlan's ORDER BY
+        // comment.
+        final List<OrderByPlan> orderByPlans;
         // Every distinct compiled evaluator this plan owns, deduplicated by
         // rendered ParserNG text (see buildPlan's compiledCache) -- the
         // *sole* owner responsible for closing each one exactly once, even
         // though the very same instance may also be referenced by
-        // fusedPredicate, a leaf inside maskPredicateRoot, and/or one or
-        // more entries of projections. See "Expression deduplication" in
-        // this class's javadoc.
+        // fusedPredicate, a leaf inside maskPredicateRoot/havingNode, an
+        // entry of projections/groupPlan, and/or orderByEvaluators. See
+        // "Expression deduplication" in this class's javadoc.
         final List<ArrowExpressionEvaluator> compiledEvaluators;
 
-        // --- GROUP BY / aggregate / HAVING / ORDER BY -- see this class's
-        // javadoc, "Aggregation strategy" and "ORDER BY and LIMIT". Every
-        // evaluator referenced below is also present in compiledEvaluators
-        // (via buildPlan's shared dedup cache), which remains the sole
-        // owner responsible for closing them -- these fields only borrow
-        // references for use at runtime.
-        final boolean aggregateQuery;
-        final List<ArrowExpressionEvaluator> groupByEvaluators;
-        final List<AggregateItemPlan> aggregateItems;
-        final ArrowExpressionEvaluator havingFusedPredicate;
-        final PredicateNode havingMaskPredicateRoot;
-        final List<ArrowExpressionEvaluator> orderByEvaluators;
-
         CompiledPlan(long fingerprint, boolean float64, ArrowExpressionEvaluator fusedPredicate,
-                PredicateNode maskPredicateRoot, List<ProjectionPlan> projections,
-                List<ArrowExpressionEvaluator> compiledEvaluators, boolean aggregateQuery,
-                List<ArrowExpressionEvaluator> groupByEvaluators, List<AggregateItemPlan> aggregateItems,
-                ArrowExpressionEvaluator havingFusedPredicate, PredicateNode havingMaskPredicateRoot,
-                List<ArrowExpressionEvaluator> orderByEvaluators) {
+                PredicateNode maskPredicateRoot, List<ProjectionPlan> projections, GroupPlan groupPlan,
+                ArrowExpressionEvaluator havingFused, PredicateNode havingNode,
+                List<OrderByPlan> orderByPlans,
+                List<ArrowExpressionEvaluator> compiledEvaluators) {
             this.fingerprint = fingerprint;
             this.float64 = float64;
             this.fusedPredicate = fusedPredicate;
             this.maskPredicateRoot = maskPredicateRoot;
             this.projections = projections;
+            this.groupPlan = groupPlan;
+            this.havingFused = havingFused;
+            this.havingNode = havingNode;
+            this.orderByPlans = orderByPlans;
             this.compiledEvaluators = compiledEvaluators;
-            this.aggregateQuery = aggregateQuery;
-            this.groupByEvaluators = groupByEvaluators;
-            this.aggregateItems = aggregateItems;
-            this.havingFusedPredicate = havingFusedPredicate;
-            this.havingMaskPredicateRoot = havingMaskPredicateRoot;
-            this.orderByEvaluators = orderByEvaluators;
         }
 
         void close() {
@@ -1406,94 +1404,108 @@ public final class ArrowQuery implements AutoCloseable {
     }
 
     /**
-     * One {@code SELECT} item's plan within an aggregate query: either a
-     * copy of a {@code GROUP BY} key's value for the group ({@code isGroupKey})
-     * or a compiled aggregate ({@code kind}/{@code star}/{@code argEvaluator}).
-     * See {@link #buildAggregatedRoot} and {@link #computeAggregate}.
+     * Everything needed to turn a filtered row set into a grouped result:
+     * how to compute each {@code GROUP BY} key, how to compute each
+     * aggregate's per-row input, and how each {@code SELECT} item's output
+     * column is produced from those two lists. See
+     * {@link #buildGroupPlan} and {@link #buildGroupedResult}.
      */
-    private static final class AggregateItemPlan {
+    private static final class GroupPlan {
 
-        final String outputName;
-        final boolean isGroupKey;
-        final int groupByIndex;
-        final AggregateKind kind;
+        final List<KeyPlan> keys;
+        final List<AggPlan> aggregates;
+        // Parallel to stmt.items(): for item i, exactly one of
+        // itemKeyIndex[i] (an index into `keys`) or itemAggIndex[i] (an
+        // index into `aggregates`) is >= 0 and the other is -1.
+        final int[] itemKeyIndex;
+        final int[] itemAggIndex;
+
+        GroupPlan(List<KeyPlan> keys, List<AggPlan> aggregates, int[] itemKeyIndex, int[] itemAggIndex) {
+            this.keys = keys;
+            this.aggregates = aggregates;
+            this.itemKeyIndex = itemKeyIndex;
+            this.itemAggIndex = itemAggIndex;
+        }
+    }
+
+    /** One {@code GROUP BY} key expression, compiled (or passthrough-optimized) once. */
+    private static final class KeyPlan {
+
+        final String exprText;
+        final boolean passthrough;
+        final String sourceColumnName;
+        final ArrowExpressionEvaluator evaluator;
+
+        KeyPlan(String exprText, boolean passthrough, String sourceColumnName, ArrowExpressionEvaluator evaluator) {
+            this.exprText = exprText;
+            this.passthrough = passthrough;
+            this.sourceColumnName = sourceColumnName;
+            this.evaluator = evaluator;
+        }
+    }
+
+    /** One aggregate call's compiled argument (or {@code COUNT(*)}'s absence of one). */
+    private static final class AggPlan {
+
+        final AggFunc func;
         final boolean star;
-        final ArrowExpressionEvaluator argEvaluator;
+        final String passthroughColumn;
+        final ArrowExpressionEvaluator evaluator;
 
-        private AggregateItemPlan(String outputName, boolean isGroupKey, int groupByIndex,
-                AggregateKind kind, boolean star, ArrowExpressionEvaluator argEvaluator) {
-            this.outputName = outputName;
-            this.isGroupKey = isGroupKey;
-            this.groupByIndex = groupByIndex;
-            this.kind = kind;
+        AggPlan(AggFunc func, boolean star, String passthroughColumn, ArrowExpressionEvaluator evaluator) {
+            this.func = func;
             this.star = star;
-            this.argEvaluator = argEvaluator;
-        }
-
-        static AggregateItemPlan groupKey(String outputName, int groupByIndex) {
-            return new AggregateItemPlan(outputName, true, groupByIndex, null, false, null);
-        }
-
-        static AggregateItemPlan aggregate(
-                String outputName, AggregateKind kind, boolean star, ArrowExpressionEvaluator argEvaluator) {
-            return new AggregateItemPlan(outputName, false, -1, kind, star, argEvaluator);
+            this.passthroughColumn = passthroughColumn;
+            this.evaluator = evaluator;
         }
     }
 
     /**
-     * One column of the synthetic per-group root built by
-     * {@link #buildAggregatedRoot}: either a copy of group-key value
-     * {@code groupIndex}, or the reduction described by {@code item}.
+     * One {@code ORDER BY} key, compiled (or passthrough-optimized) once.
+     * See {@code CompiledPlan#orderByPlans}' javadoc for when the
+     * passthrough path is actually used.
      */
-    private static final class AggColumnSpec {
+    private static final class OrderByPlan {
 
-        final int groupIndex;
-        final AggregateItemPlan item;
+        final boolean passthrough;
+        final String sourceColumnName;
+        final ArrowExpressionEvaluator evaluator;
 
-        AggColumnSpec(int groupIndex) {
-            this.groupIndex = groupIndex;
-            this.item = null;
-        }
-
-        AggColumnSpec(AggregateItemPlan item) {
-            this.groupIndex = -1;
-            this.item = item;
-        }
-
-        boolean isGroupColumn() {
-            return item == null;
+        OrderByPlan(boolean passthrough, String sourceColumnName, ArrowExpressionEvaluator evaluator) {
+            this.passthrough = passthrough;
+            this.sourceColumnName = sourceColumnName;
+            this.evaluator = evaluator;
         }
     }
 
     /**
-     * A composite {@code GROUP BY} key: one {@code double} value (plus a
-     * {@code NULL} flag) per {@code GROUP BY} expression, compared by
-     * value equality so rows with equal key tuples land in the same group.
-     * {@link #EMPTY} (a zero-length key) is used for the implicit single
-     * group of an aggregate query with no explicit {@code GROUP BY}.
+     * A hashable tuple of {@code GROUP BY} key values for one row, used as
+     * the key of the {@code LinkedHashMap} that buckets rows into groups in
+     * {@link #buildGroupedResult} (insertion order preserved, so a query
+     * with no {@code ORDER BY} still gets a deterministic, first-seen
+     * output order). A {@code null} key value (an input row where a
+     * {@code GROUP BY} expression evaluated to {@code null}) is represented
+     * as {@code Double.NaN} — every SQL null groups with every other null
+     * on that key, matching standard {@code GROUP BY} null-handling, and
+     * {@code Double.doubleToLongBits}-based equality/hashing (rather than
+     * {@code ==}/{@code Double.hashCode}'s own contract, which already
+     * agrees for {@code NaN}) makes that comparison exact and stable.
      */
     private static final class GroupKey {
 
-        static final GroupKey EMPTY = new GroupKey(new double[0], new boolean[0]);
+        private final double[] values;
 
-        final double[] values;
-        final boolean[] nulls;
-
-        GroupKey(double[] values, boolean[] nulls) {
+        GroupKey(double[] values) {
             this.values = values;
-            this.nulls = nulls;
         }
 
         @Override
         public boolean equals(Object o) {
-            if (!(o instanceof GroupKey other) || other.values.length != values.length) {
+            if (!(o instanceof GroupKey other) || values.length != other.values.length) {
                 return false;
             }
             for (int i = 0; i < values.length; i++) {
-                if (nulls[i] != other.nulls[i]) {
-                    return false;
-                }
-                if (!nulls[i] && Double.compare(values[i], other.values[i]) != 0) {
+                if (Double.doubleToLongBits(values[i]) != Double.doubleToLongBits(other.values[i])) {
                     return false;
                 }
             }
@@ -1503,11 +1515,141 @@ public final class ArrowQuery implements AutoCloseable {
         @Override
         public int hashCode() {
             int h = 1;
-            for (int i = 0; i < values.length; i++) {
-                h = 31 * h + Boolean.hashCode(nulls[i]);
-                h = 31 * h + (nulls[i] ? 0 : Double.hashCode(values[i]));
+            for (double v : values) {
+                h = 31 * h + Double.hashCode(v);
             }
             return h;
+        }
+    }
+
+    /**
+     * A per-group running accumulator for one aggregate call. {@code null}
+     * input values (an aggregate argument that evaluated to {@code null}
+     * for some row) are skipped entirely -- standard SQL aggregate
+     * null-handling -- except {@link CountAgg}, which increments
+     * unconditionally for {@code COUNT(*)} and skips nulls for
+     * {@code COUNT(expr)} exactly like every other aggregate.
+     */
+    private interface Aggregator {
+
+        void accumulate(double value, boolean isNull);
+
+        /** @return {@code true} iff this aggregate's result is SQL null (no non-null input seen; never true for COUNT) */
+        boolean isNullResult();
+
+        double result();
+    }
+
+    private static Aggregator newAggregator(AggFunc func) {
+        return switch (func) {
+            case SUM -> new SumAgg();
+            case COUNT -> new CountAgg();
+            case AVG -> new AvgAgg();
+            case MIN -> new MinAgg();
+            case MAX -> new MaxAgg();
+        };
+    }
+
+    private static final class SumAgg implements Aggregator {
+
+        private double sum;
+        private boolean any;
+
+        public void accumulate(double v, boolean isNull) {
+            if (!isNull) {
+                sum += v;
+                any = true;
+            }
+        }
+
+        public boolean isNullResult() {
+            return !any;
+        }
+
+        public double result() {
+            return sum;
+        }
+    }
+
+    private static final class CountAgg implements Aggregator {
+
+        private long count;
+
+        public void accumulate(double v, boolean isNull) {
+            if (!isNull) {
+                count++;
+            }
+        }
+
+        public boolean isNullResult() {
+            return false;
+        }
+
+        public double result() {
+            return (double) count;
+        }
+    }
+
+    private static final class AvgAgg implements Aggregator {
+
+        private double sum;
+        private long count;
+
+        public void accumulate(double v, boolean isNull) {
+            if (!isNull) {
+                sum += v;
+                count++;
+            }
+        }
+
+        public boolean isNullResult() {
+            return count == 0;
+        }
+
+        public double result() {
+            return sum / count;
+        }
+    }
+
+    private static final class MinAgg implements Aggregator {
+
+        private double min = Double.POSITIVE_INFINITY;
+        private boolean any;
+
+        public void accumulate(double v, boolean isNull) {
+            if (!isNull && (!any || v < min)) {
+                min = v;
+                any = true;
+            }
+        }
+
+        public boolean isNullResult() {
+            return !any;
+        }
+
+        public double result() {
+            return min;
+        }
+    }
+
+    private static final class MaxAgg implements Aggregator {
+
+        private double max = Double.NEGATIVE_INFINITY;
+        private boolean any;
+
+        public void accumulate(double v, boolean isNull) {
+            if (!isNull && (!any || v > max)) {
+                max = v;
+                any = true;
+            }
+        }
+
+        public boolean isNullResult() {
+            return !any;
+        }
+
+        public double result() {
+            return max;
         }
     }
 

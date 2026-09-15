@@ -1,11 +1,12 @@
-package com.github.gbenroscience.sqlv1;
+package com.github.gbenroscience.sqlv1.demo;
 
+import com.github.gbenroscience.sqlv1.SqlParser;
+import com.github.gbenroscience.sqlv1.SqlSyntaxException;
 import com.github.gbenroscience.sqlv1.ast.BoolExpr;
 import com.github.gbenroscience.sqlv1.ast.BoolExprs;
 import com.github.gbenroscience.sqlv1.ast.SelectItem;
 import com.github.gbenroscience.sqlv1.ast.SelectStatement;
 
-import java.util.List;
 
 /**
  * A dependency-free smoke test for the SQL-text -&gt; AST -&gt; ParserNG-text
@@ -288,6 +289,145 @@ public final class ParserSmokeTest {
                 expectEq(op, op.negate().negate());
                 expect(op != op.negate(), "an operator must never be its own negation: " + op);
             }
+        });
+
+        // =====================================================================
+        // GROUP BY / HAVING / aggregates -- see SqlParser's "GROUP BY /
+        // aggregates" and SelectStatement's "GROUP BY / aggregates -- a
+        // deliberately strict subset"
+        // =====================================================================
+
+        check("SUM/COUNT(*)/AVG/MIN/MAX all recognized as aggregate select items", () -> {
+            SelectStatement s = SqlParser.parse(
+                    "SELECT cat, SUM(x) AS s, COUNT(*) AS n, AVG(x) AS a, MIN(x) AS mn, MAX(x) AS mx "
+                    + "FROM t GROUP BY cat");
+            expectEq(6, s.items().size());
+            expect(!s.items().get(0).isAggregate(), "cat is not an aggregate");
+            expectEq("cat", s.items().get(0).outputName());
+            SelectItem sum = s.items().get(1);
+            expect(sum.isAggregate(), "SUM(x) is an aggregate");
+            expectEq(com.github.gbenroscience.sqlv1.ast.AggFunc.SUM, sum.aggregate().func());
+            expectEq("x", sum.aggregate().argExprText());
+            expect(!sum.aggregate().star(), "SUM(x) is not star");
+            expectEq("s", sum.outputName());
+            SelectItem count = s.items().get(2);
+            expectEq(com.github.gbenroscience.sqlv1.ast.AggFunc.COUNT, count.aggregate().func());
+            expect(count.aggregate().star(), "COUNT(*) is star");
+            expect(count.aggregate().argExprText() == null, "COUNT(*) has no argument expression");
+            expectEq(java.util.List.of("cat"), s.groupBy());
+            expect(s.isGrouped(), "query with GROUP BY is grouped");
+        });
+
+        check("SUM(*) is rejected -- only COUNT(*) is valid", () -> {
+            expectThrows(() -> SqlParser.parse("SELECT SUM(*) FROM t"));
+        });
+
+        check("a bare column merely sharing an aggregate function's name is not treated as one", () -> {
+            SelectStatement s = SqlParser.parse("SELECT sum FROM t");
+            expect(!s.items().get(0).isAggregate(), "bare 'sum' column is not an aggregate call");
+            expectEq("sum", s.items().get(0).exprText());
+            expect(!s.isGrouped(), "a query with no GROUP BY and no aggregate item is not grouped");
+        });
+
+        check("an aggregate item with no explicit GROUP BY is still a grouped (whole-table) query", () -> {
+            SelectStatement s = SqlParser.parse("SELECT COUNT(*) AS n FROM t");
+            expect(s.groupBy().isEmpty(), "no explicit GROUP BY");
+            expect(s.isGrouped(), "an aggregate item alone still makes the query grouped");
+        });
+
+        check("HAVING parses and renders like WHERE", () -> {
+            SelectStatement s = SqlParser.parse("SELECT cat, SUM(x) AS s FROM t GROUP BY cat HAVING SUM(x) > 100");
+            expectEq("(SUM(x) > 100)", BoolExprs.renderFused(s.having()));
+        });
+
+        check("HAVING without GROUP BY or an aggregate item is rejected", () -> {
+            expectThrows(() -> SqlParser.parse("SELECT x FROM t HAVING x > 1"));
+        });
+
+        check("SELECT * cannot be combined with GROUP BY", () -> {
+            expectThrows(() -> SqlParser.parse("SELECT * FROM t GROUP BY cat"));
+        });
+
+        // =====================================================================
+        // ORDER BY / LIMIT
+        // =====================================================================
+
+        check("ORDER BY defaults to ascending", () -> {
+            SelectStatement s = SqlParser.parse("SELECT x FROM t ORDER BY x");
+            expectEq(1, s.orderBy().size());
+            expectEq("x", s.orderBy().get(0).exprText());
+            expect(!s.orderBy().get(0).descending(), "ORDER BY x defaults to ascending");
+        });
+
+        check("ORDER BY multiple keys with explicit ASC/DESC", () -> {
+            SelectStatement s = SqlParser.parse("SELECT x, y FROM t ORDER BY x ASC, y DESC");
+            expectEq(2, s.orderBy().size());
+            expect(!s.orderBy().get(0).descending(), "x ASC");
+            expect(s.orderBy().get(1).descending(), "y DESC");
+        });
+
+        check("LIMIT parses as a plain non-negative integer", () -> {
+            SelectStatement s = SqlParser.parse("SELECT x FROM t LIMIT 10");
+            expectEq(10, s.limit());
+        });
+
+        check("LIMIT rejects a decimal literal", () -> {
+            expectThrows(() -> SqlParser.parse("SELECT x FROM t LIMIT 10.5"));
+        });
+
+        check("LIMIT rejects a negative literal (the grammar has no unary minus in this position)", () -> {
+            expectThrows(() -> SqlParser.parse("SELECT x FROM t LIMIT -5"));
+        });
+
+        check("WHERE + GROUP BY + HAVING + ORDER BY + LIMIT compose in one query", () -> {
+            SelectStatement s = SqlParser.parse(
+                    "SELECT cat, SUM(x) AS total FROM t WHERE x > 0 GROUP BY cat "
+                    + "HAVING SUM(x) > 50 ORDER BY total DESC LIMIT 5");
+            expectEq("(x > 0)", BoolExprs.renderFused(s.where()));
+            expectEq(java.util.List.of("cat"), s.groupBy());
+            expectEq("(SUM(x) > 50)", BoolExprs.renderFused(s.having()));
+            expectEq(1, s.orderBy().size());
+            expect(s.orderBy().get(0).descending(), "ORDER BY total DESC");
+            expectEq(5, s.limit());
+        });
+
+        // =====================================================================
+        // CASE / CAST -- see SqlParser's "CASE / CAST"
+        // =====================================================================
+
+        check("searched CASE desugars right-to-left into nested if(...)", () -> {
+            SelectStatement s = SqlParser.parse(
+                    "SELECT CASE WHEN x > 0 THEN 1 WHEN x < 0 THEN -1 ELSE 0 END AS sign FROM t");
+            expectEq("(if((x > 0), 1, if((x < 0), - 1, 0)))", s.items().get(0).exprText());
+            expectEq("sign", s.items().get(0).alias());
+        });
+
+        check("simple CASE compares its operand for equality with each WHEN value", () -> {
+            SelectStatement s = SqlParser.parse(
+                    "SELECT CASE cat WHEN 1 THEN 'a' WHEN 2 THEN 'b' ELSE 'c' END AS label FROM t");
+            expectEq("(if(((cat) == (1)), 'a', if(((cat) == (2)), 'b', 'c')))", s.items().get(0).exprText());
+        });
+
+        check("CASE without ELSE is rejected -- there is no numeric NULL to fall back to", () -> {
+            expectThrows(() -> SqlParser.parse("SELECT CASE WHEN x > 0 THEN 1 END AS s FROM t"));
+        });
+
+        check("IS NULL inside a CASE WHEN condition is rejected, same reason as other embedded positions", () -> {
+            expectThrows(() -> SqlParser.parse("SELECT CASE WHEN x IS NULL THEN 1 ELSE 0 END AS s FROM t"));
+        });
+
+        check("CAST to an integer type truncates toward zero via expr - (expr % 1)", () -> {
+            SelectStatement s = SqlParser.parse("SELECT CAST(x AS INT) AS xi FROM t");
+            expectEq("((x) - ((x) % 1))", s.items().get(0).exprText());
+        });
+
+        check("CAST to a floating type is a no-op identity", () -> {
+            SelectStatement s = SqlParser.parse("SELECT CAST(x AS DOUBLE) AS xd FROM t");
+            expectEq("(x)", s.items().get(0).exprText());
+        });
+
+        check("CAST to a non-numeric target type is rejected", () -> {
+            expectThrows(() -> SqlParser.parse("SELECT CAST(x AS VARCHAR) AS xs FROM t"));
         });
 
         System.out.println();

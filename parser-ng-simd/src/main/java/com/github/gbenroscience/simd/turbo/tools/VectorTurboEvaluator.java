@@ -178,6 +178,11 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
 
     public static final int OP_AND = 102;
     public static final int OP_OR = 103;
+    
+    
+    public static final int OP_FLOOR = 104;
+    public static final int OP_CEIL = 105;
+    public static final int OP_ROUND = 106;
 
     // Pre-allocated compilation state
     protected MathExpression.Token[] postfix;
@@ -297,6 +302,12 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         // Core Math Functions
                         case "abs" ->
                             OP_ABS;
+                        case "ceil" ->
+                            OP_CEIL;
+                        case "floor" ->
+                            OP_FLOOR;
+                        case "round" ->
+                            OP_ROUND;
                         case "exp" ->
                             OP_EXP;
                         case "sqrt" ->
@@ -1292,6 +1303,28 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                             scratch[base + k] = Math.abs(scratch[base + k]);
                         }
                     }
+                    
+                    case OP_CEIL -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.ceil(scratch[base + k]);
+                        }
+                    }
+                    
+                    case OP_FLOOR -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.floor(scratch[base + k]);
+                        }
+                    }
+                    
+                    case OP_ROUND -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.round(scratch[base + k]);
+                        }
+                    }
+                    
 
                     case OP_EXP -> {
                         final int base = (sp - 1) * BLOCK_SIZE;

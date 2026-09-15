@@ -1,5 +1,6 @@
 package com.github.gbenroscience.sqlv1;
 
+import com.github.gbenroscience.sqlv1.ast.AggFunc;
 import com.github.gbenroscience.sqlv1.ast.BoolExprs;
 import com.github.gbenroscience.sqlv1.ast.CompOp;
 import com.github.gbenroscience.sqlv1.ast.IsNullExpr;
@@ -7,6 +8,8 @@ import com.github.gbenroscience.sqlv1.ast.SelectItem;
 import com.github.gbenroscience.sqlv1.ast.SelectStatement;
 
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -369,5 +372,173 @@ class SqlParserTest {
     @Test
     void unterminatedStringLiteralIsRejected() {
         assertThrows(SqlSyntaxException.class, () -> SqlParser.parse("SELECT x FROM t WHERE tag = 'abc"));
+    }
+
+    // =====================================================================
+    // GROUP BY / HAVING / aggregates -- see SqlParser's "GROUP BY /
+    // aggregates" and SelectStatement's "GROUP BY / aggregates -- a
+    // deliberately strict subset"
+    // =====================================================================
+
+    @Test
+    void sumCountAvgMinMaxAllRecognizedAsAggregateSelectItems() {
+        SelectStatement s = SqlParser.parse(
+                "SELECT cat, SUM(x) AS s, COUNT(*) AS n, AVG(x) AS a, MIN(x) AS mn, MAX(x) AS mx "
+                        + "FROM t GROUP BY cat");
+        assertEquals(6, s.items().size());
+        assertFalse(s.items().get(0).isAggregate());
+        assertEquals("cat", s.items().get(0).outputName());
+
+        SelectItem sum = s.items().get(1);
+        assertTrue(sum.isAggregate());
+        assertEquals(AggFunc.SUM, sum.aggregate().func());
+        assertEquals("x", sum.aggregate().argExprText());
+        assertFalse(sum.aggregate().star());
+        assertEquals("s", sum.outputName());
+
+        SelectItem count = s.items().get(2);
+        assertEquals(AggFunc.COUNT, count.aggregate().func());
+        assertTrue(count.aggregate().star());
+        assertNull(count.aggregate().argExprText());
+
+        assertEquals(List.of("cat"), s.groupBy());
+        assertTrue(s.isGrouped());
+    }
+
+    @Test
+    void sumOfStarIsRejectedOnlyCountStarIsValid() {
+        assertThrows(SqlSyntaxException.class, () -> SqlParser.parse("SELECT SUM(*) FROM t"));
+    }
+
+    @Test
+    void bareColumnMerelySharingAnAggregateFunctionsNameIsNotTreatedAsOne() {
+        SelectStatement s = SqlParser.parse("SELECT sum FROM t");
+        assertFalse(s.items().get(0).isAggregate());
+        assertEquals("sum", s.items().get(0).exprText());
+        assertFalse(s.isGrouped());
+    }
+
+    @Test
+    void anAggregateItemWithNoExplicitGroupByIsStillAGroupedWholeTableQuery() {
+        SelectStatement s = SqlParser.parse("SELECT COUNT(*) AS n FROM t");
+        assertTrue(s.groupBy().isEmpty());
+        assertTrue(s.isGrouped());
+    }
+
+    @Test
+    void havingParsesAndRendersLikeWhere() {
+        SelectStatement s = SqlParser.parse("SELECT cat, SUM(x) AS s FROM t GROUP BY cat HAVING SUM(x) > 100");
+        assertEquals("(SUM(x) > 100)", BoolExprs.renderFused(s.having()));
+    }
+
+    @Test
+    void havingWithoutGroupByOrAnAggregateItemIsRejected() {
+        assertThrows(SqlSyntaxException.class, () -> SqlParser.parse("SELECT x FROM t HAVING x > 1"));
+    }
+
+    @Test
+    void selectStarCannotBeCombinedWithGroupBy() {
+        assertThrows(SqlSyntaxException.class, () -> SqlParser.parse("SELECT * FROM t GROUP BY cat"));
+    }
+
+    // =====================================================================
+    // ORDER BY / LIMIT
+    // =====================================================================
+
+    @Test
+    void orderByDefaultsToAscending() {
+        SelectStatement s = SqlParser.parse("SELECT x FROM t ORDER BY x");
+        assertEquals(1, s.orderBy().size());
+        assertEquals("x", s.orderBy().get(0).exprText());
+        assertFalse(s.orderBy().get(0).descending());
+    }
+
+    @Test
+    void orderByMultipleKeysWithExplicitAscDesc() {
+        SelectStatement s = SqlParser.parse("SELECT x, y FROM t ORDER BY x ASC, y DESC");
+        assertEquals(2, s.orderBy().size());
+        assertFalse(s.orderBy().get(0).descending());
+        assertTrue(s.orderBy().get(1).descending());
+    }
+
+    @Test
+    void limitParsesAsAPlainNonNegativeInteger() {
+        SelectStatement s = SqlParser.parse("SELECT x FROM t LIMIT 10");
+        assertEquals(10, s.limit().intValue());
+    }
+
+    @Test
+    void limitRejectsADecimalLiteral() {
+        assertThrows(SqlSyntaxException.class, () -> SqlParser.parse("SELECT x FROM t LIMIT 10.5"));
+    }
+
+    @Test
+    void limitRejectsANegativeLiteral() {
+        // The grammar has no unary minus in this position -- LIMIT expects
+        // a plain NUMBER token immediately, so this fails at the lexical/
+        // parse level rather than ever reaching SelectStatement's own
+        // defensive "LIMIT must be non-negative" check.
+        assertThrows(SqlSyntaxException.class, () -> SqlParser.parse("SELECT x FROM t LIMIT -5"));
+    }
+
+    @Test
+    void whereGroupByHavingOrderByLimitComposeInOneQuery() {
+        SelectStatement s = SqlParser.parse(
+                "SELECT cat, SUM(x) AS total FROM t WHERE x > 0 GROUP BY cat "
+                        + "HAVING SUM(x) > 50 ORDER BY total DESC LIMIT 5");
+        assertEquals("(x > 0)", BoolExprs.renderFused(s.where()));
+        assertEquals(List.of("cat"), s.groupBy());
+        assertEquals("(SUM(x) > 50)", BoolExprs.renderFused(s.having()));
+        assertEquals(1, s.orderBy().size());
+        assertTrue(s.orderBy().get(0).descending());
+        assertEquals(5, s.limit().intValue());
+    }
+
+    // =====================================================================
+    // CASE / CAST -- see SqlParser's "CASE / CAST"
+    // =====================================================================
+
+    @Test
+    void searchedCaseDesugarsRightToLeftIntoNestedIf() {
+        SelectStatement s = SqlParser.parse(
+                "SELECT CASE WHEN x > 0 THEN 1 WHEN x < 0 THEN -1 ELSE 0 END AS sign FROM t");
+        assertEquals("(if((x > 0), 1, if((x < 0), - 1, 0)))", s.items().get(0).exprText());
+        assertEquals("sign", s.items().get(0).alias());
+    }
+
+    @Test
+    void simpleCaseComparesItsOperandForEqualityWithEachWhenValue() {
+        SelectStatement s = SqlParser.parse(
+                "SELECT CASE cat WHEN 1 THEN 'a' WHEN 2 THEN 'b' ELSE 'c' END AS label FROM t");
+        assertEquals("(if(((cat) == (1)), 'a', if(((cat) == (2)), 'b', 'c')))", s.items().get(0).exprText());
+    }
+
+    @Test
+    void caseWithoutElseIsRejected() {
+        assertThrows(SqlSyntaxException.class,
+                () -> SqlParser.parse("SELECT CASE WHEN x > 0 THEN 1 END AS s FROM t"));
+    }
+
+    @Test
+    void isNullInsideACaseWhenConditionIsRejected() {
+        assertThrows(SqlSyntaxException.class,
+                () -> SqlParser.parse("SELECT CASE WHEN x IS NULL THEN 1 ELSE 0 END AS s FROM t"));
+    }
+
+    @Test
+    void castToAnIntegerTypeTruncatesTowardZero() {
+        SelectStatement s = SqlParser.parse("SELECT CAST(x AS INT) AS xi FROM t");
+        assertEquals("((x) - ((x) % 1))", s.items().get(0).exprText());
+    }
+
+    @Test
+    void castToAFloatingTypeIsANoOpIdentity() {
+        SelectStatement s = SqlParser.parse("SELECT CAST(x AS DOUBLE) AS xd FROM t");
+        assertEquals("(x)", s.items().get(0).exprText());
+    }
+
+    @Test
+    void castToANonNumericTargetTypeIsRejected() {
+        assertThrows(SqlSyntaxException.class, () -> SqlParser.parse("SELECT CAST(x AS VARCHAR) AS xs FROM t"));
     }
 }

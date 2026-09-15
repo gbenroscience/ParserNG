@@ -748,7 +748,12 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                             VectorMathF::erf;
                         case OP_ABS ->
                             VectorMathF::abs;
-
+                        case OP_CEIL ->
+                            VectorMathF::floor;
+                        case OP_ROUND ->
+                            VectorMathF::round;
+                        case OP_FLOOR ->
+                            VectorMathF::floor;
                         // Standard Trig
                         case OP_SIN ->
                             VectorMathF::sin;
@@ -995,8 +1000,8 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
          * decremented one shared AtomicInteger latch and the master parked on
          * that - under fan-in, all NUM_WORKERS threads were hammering the same
          * cache line on every batch. Each WorkerThread now owns its own `done`
-         * flag (padded away from its neighbors, see WorkerThread), so this is
-         * a plain, uncontended volatile read per worker.
+         * flag (padded away from its neighbors, see WorkerThread), so this is a
+         * plain, uncontended volatile read per worker.
          */
         private static void awaitDone(WorkerThread worker) {
             int spins = 0;
@@ -1173,9 +1178,9 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         /**
-         * 
+         *
          * @param variables
-         * @param output 
+         * @param output
          */
         public void validate(float[][] variables, float[] output) {
             // 1. Fail fast, avoid String.format unless throwing
@@ -1202,9 +1207,9 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         /**
-         * 
+         *
          * @param flatVariables
-         * @param output 
+         * @param output
          */
         public void validate(float[] flatVariables, float[] output) {
             int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0 ? flatVariables.length : -1;
@@ -1216,35 +1221,34 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         /**
-         * 
+         *
          * @param variables
-         * @param output 
+         * @param output
          */
         public void validate(double[][] variables, double[] output) {
             throw new InputMismatchException("double[][] not supported only float[] and float[][], MemorySegment and MemorySegment[]");
         }
 
         /**
-         * 
+         *
          * @param flatVariables
-         * @param output 
+         * @param output
          */
         public void validate(double[] flatVariables, double[] output) {
             throw new InputMismatchException("double[][] not supported only float[] and float[][], MemorySegment and MemorySegment[]");
         }
 
-        
         // --- MemorySegment (off-heap / zero-copy) entry points ---
         // Same public contract as the float[] / float[][] variants above,
         // reusing the same masterEvalContext / workerPool / per-worker done-flag machinery.
-
         /**
-         * Validates a single flat off-heap variables segment against its
-         * output segment. numSamples for this entry point is derived from
-         * output's byte size (see applyBulk(MemorySegment, MemorySegment)
-         * below), so variables must hold exactly that many float elements
-         * too, or the read past its end would either throw or silently read
-         * garbage/adjacent memory depending on how it was allocated.
+         * Validates a single flat off-heap variables segment against its output
+         * segment. numSamples for this entry point is derived from output's
+         * byte size (see applyBulk(MemorySegment, MemorySegment) below), so
+         * variables must hold exactly that many float elements too, or the read
+         * past its end would either throw or silently read garbage/adjacent
+         * memory depending on how it was allocated.
+         *
          * @param variables
          * @param output
          */
@@ -1275,12 +1279,13 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         /**
-         * Validates a per-variable off-heap segment array against its
-         * output segment. numSamples for this entry point is derived from
+         * Validates a per-variable off-heap segment array against its output
+         * segment. numSamples for this entry point is derived from
          * variables[0]'s byte size (see applyBulk(MemorySegment[],
          * MemorySegment) below), so every other segment in the array - and
-         * output - must agree with that sample count, or later variables
-         * would be read out of bounds relative to variables[0]'s length.
+         * output - must agree with that sample count, or later variables would
+         * be read out of bounds relative to variables[0]'s length.
+         *
          * @param variables
          * @param output
          */
@@ -1327,10 +1332,9 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
         }
 
-
         public void applyBulk(float[][] variables, float[] output) {
-             if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             int numSamples = variables[0].length;
@@ -1338,8 +1342,8 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         public void applyBulkParallel(float[][] variables, float[] output) {
-              if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             if (variables == null || variables.length == 0 || output == null) {
@@ -1389,8 +1393,8 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         public void applyBulkParallel(float[] flatVariables, float[] output) {
-              if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             if (flatVariables == null || output == null) {
@@ -1433,8 +1437,8 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         public void applyBulkBatched(float[][] variables, float[] output, int batchSize) {
-              if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             EvaluationContext ctx = masterEvalContext.get();
@@ -1446,16 +1450,16 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         public void applyBulk(float[] flatVariables, float[] output) {
-              if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, output.length, output, 0, output.length);
         }
 
         public void applyBulkBatched(float[] flatVariables, float[] output, int batchSize) {
-              if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             EvaluationContext ctx = masterEvalContext.get();
@@ -1470,8 +1474,8 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         // Same public contract as the float[] / float[][] variants above,
         // reusing the same masterEvalContext / workerPool / per-worker done-flag machinery.
         public void applyBulk(MemorySegment[] variables, MemorySegment output) {
-             if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             int numSamples = (int) (variables[0].byteSize() / ValueLayout.JAVA_FLOAT.byteSize());
@@ -1479,8 +1483,8 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         public void applyBulkParallel(MemorySegment[] variables, MemorySegment output) {
-             if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             if (variables == null || variables.length == 0 || output == null) {
@@ -1523,8 +1527,8 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         public void applyBulk(MemorySegment variables, MemorySegment output) {
-             if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             int numSamples = (int) (output.byteSize() / ValueLayout.JAVA_FLOAT.byteSize());
@@ -1532,8 +1536,8 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
 
         public void applyBulkParallel(MemorySegment variables, MemorySegment output) {
-             if (varCount == 0) {
-                fillOutput((float)SIMDCommandSegmentF32.this.constantAnswer, output);
+            if (varCount == 0) {
+                fillOutput((float) SIMDCommandSegmentF32.this.constantAnswer, output);
                 return;
             }
             if (variables == null || output == null) {
@@ -1670,7 +1674,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 }
             }
         }
-        
+
         // Note: fillOutput(float, float[]) lives on the shared base class
         // (BatchedVectorCompositeExpression) and isn't in this file, so this
         // is declared here directly rather than as a sibling overload next

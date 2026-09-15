@@ -24,8 +24,29 @@ import java.util.function.Supplier;
  * {@code VectorSchemaRoot}, hands it to {@link ArrowQuery}/{@link ArrowSql},
  * and prints the actual computed/filtered result -- i.e. parser-ng-sql driving
  * parser-ng-arrow's {@code ArrowExpressionEvaluators} against real data,
- * exactly as it would be used in an application.
+ * exactly as it would be used in an application. Covers every grammar
+ * construct documented on {@code SqlParser}, including {@code CASE}/{@code WHEN}
+ * (both searched and simple forms), {@code CAST}, and {@code GROUP BY}/
+ * {@code HAVING}/{@code ORDER BY}/{@code LIMIT}, plus the error-handling
+ * behavior of each (a missing {@code CASE ELSE}, an unsupported {@code CAST}
+ * target type, a non-aggregate {@code SELECT} item that doesn't match a
+ * {@code GROUP BY} key) so those failure modes are as easy to see as the
+ * success cases.
  *
+ * <h2>A note on how this file was produced</h2>
+ * This class depends on {@code arrow-vector} and {@code parser-ng-arrow},
+ * neither of which was reachable in the sandbox this module was written in (no
+ * Maven Central access, no local Arrow jars -- see the module
+ * {@code README.md}'s "Verification status"). It was written carefully against
+ * the exact same Arrow API calls already used (and reviewed) inside
+ * {@code ArrowQuery} itself -- {@code Float8Vector}'s constructor/
+ * {@code allocateNew}/{@code setSafe}/{@code setValueCount}, the
+ * {@code VectorSchemaRoot(Schema, List<FieldVector>, int)} constructor,
+ * {@code RootAllocator} -- but could not be compiled or run there. Please run
+ * it yourself (`mvn -pl parser-ng-sql -am test-compile exec:java
+ * -Dexec.mainClass=com.github.gbenroscience.sqlv1.demo.ArrowSqlDemo`, or just
+ * run its {@code main} from your IDE) before relying on it, same as the rest of
+ * {@code ArrowQuery}/{@code ArrowSql}.
  *
  * @author GBEMIRO
  */
@@ -36,17 +57,7 @@ public final class ArrowSqlDemo {
 
             runOneShot("SELECT x,y,", allocator,
                     () -> sampleXY(allocator),
-                    "SELECT x,y, 3*x+y, erf(x) AS erfx FROM data where x-erf(x)>0 ORDER BY erfx");
-            
-            
-            runOneShot("SELECT x,y,", allocator,
-                    () -> sampleXY(allocator),
-                    "SELECT x,y, 3*x+y, sin(x) AS sinx FROM data where x-erf(x)>0 ORDER BY sinx");
-            
-            
-            runOneShot("SELECT x,y,", allocator,
-                    () -> sampleXY(allocator),
-                    "SELECT x,y, 3*x+y, sin(x) AS sinx FROM data where x-erf(x)>0 ORDER BY sinx LIMIT 4");
+                    "SELECT x,y, 3*x+y, erf(x) AS erfx FROM data where x-erf(x)>0");
 
             // ---- SELECT list forms -------------------------------------------
             runOneShot("SELECT * -- passthrough every column", allocator,
@@ -110,18 +121,6 @@ public final class ArrowSqlDemo {
             runOneShot("if(condition, a, b) as a computed projection column", allocator,
                     () -> sampleXY(allocator),
                     "SELECT x, if(x > 50, 1, 0) AS high_flag FROM data");
-            
-            
-            // ---- embedded boolean condition inside a projection ---------------
-            runOneShot("Another if(condition, a, b) as a computed projection column", allocator,
-                    () -> sampleXY(allocator),
-                    "SELECT x, if(sin(x) > 0, tan(x), 0.2) AS tan_vs_a_fifth FROM data");
-            
-                 // ---- embedded boolean condition inside a projection ---------------
-            runOneShot("With BETWEEN: if(condition, a, b) as a computed projection column", allocator,
-                    () -> sampleXY(allocator),
-                    "SELECT x, if(x BETWEEN 1 AND 50, 1, 0) AS binary FROM data");
-
 
             // ---- compile once, execute many times against different batches --
             System.out.println("=== Compile once, execute many: the same ArrowQuery run against two batches ===");
@@ -145,6 +144,97 @@ public final class ArrowSqlDemo {
                 runCompiled("  -> PROPAGATE: a null input keeps the output null instead of being skipped",
                         propagatePolicy, sampleReadingsWithNulls(allocator));
             }
+
+            // ---- CASE / WHEN / THEN / ELSE / END ------------------------------
+            System.out.println("=== CASE / WHEN -- searched form, exactly the motivating example ===");
+            runOneShot("Searched CASE: a different expression per range of x", allocator,
+                    () -> sampleXY(allocator),
+                    "SELECT x, "
+                            + "CASE "
+                            + "WHEN x < 10 THEN sin(x) "
+                            + "WHEN x < 50 THEN erf(x) "
+                            + "ELSE x^3 "
+                            + "END AS result "
+                            + "FROM data WHERE x > 0");
+
+            System.out.println("=== CASE / WHEN -- simple form: 'CASE operand WHEN value THEN ...' ===");
+            System.out.println("Equivalent to writing 'CASE WHEN operand == value THEN ... END' by hand --");
+            System.out.println("ParserNG's own equality operator, not string/identifier equality.");
+            runOneShot("Simple CASE: label each row by its category code", allocator,
+                    () -> sampleCategorizedReadings(allocator),
+                    "SELECT category, "
+                            + "CASE category "
+                            + "WHEN 1 THEN 100 "
+                            + "WHEN 2 THEN 200 "
+                            + "ELSE -1 "
+                            + "END AS label "
+                            + "FROM data");
+
+            System.out.println("=== CASE requires ELSE -- there is no numeric NULL literal to fall back to ===");
+            runOneShot("Missing ELSE is rejected at parse time, not a runtime surprise", allocator,
+                    () -> sampleXY(allocator),
+                    "SELECT CASE WHEN x > 0 THEN 1 END AS flag FROM data");
+
+            // ---- CAST -----------------------------------------------------------
+            System.out.println("=== CAST(... AS INT) -- truncates toward zero, like a Java (long) cast ===");
+            runOneShot("CAST to an integer type", allocator,
+                    () -> sampleSignedReadings(allocator),
+                    "SELECT reading, CAST(reading AS INT) AS truncated FROM data");
+
+            runOneShot("CAST to a floating type is a no-op identity (already the representation in use)", allocator,
+                    () -> sampleSignedReadings(allocator),
+                    "SELECT reading, CAST(reading AS DOUBLE) AS same FROM data");
+
+            System.out.println("=== CAST rejects a non-numeric target type at parse time ===");
+            runOneShot("Only numeric CAST targets are supported", allocator,
+                    () -> sampleXY(allocator),
+                    "SELECT CAST(x AS VARCHAR) AS s FROM data");
+
+            // ---- GROUP BY / aggregates / HAVING ----------------------------------
+            System.out.println("=== GROUP BY with SUM / COUNT / AVG / MIN / MAX ===");
+            runOneShot("One row per category, five aggregates each", allocator,
+                    () -> sampleCategorizedReadings(allocator),
+                    "SELECT category, SUM(reading) AS total, COUNT(*) AS n, "
+                            + "AVG(reading) AS avg_reading, MIN(reading) AS min_reading, MAX(reading) AS max_reading "
+                            + "FROM data GROUP BY category");
+
+            System.out.println("=== Aggregates with no GROUP BY at all: the whole (filtered) table is one implicit group ===");
+            runOneShot("A single summary row", allocator,
+                    () -> sampleCategorizedReadings(allocator),
+                    "SELECT SUM(reading) AS total, COUNT(*) AS n FROM data WHERE reading > 0");
+
+            System.out.println("=== HAVING -- filters groups by an aggregate result, after grouping ===");
+            runOneShot("Only categories whose total exceeds 50", allocator,
+                    () -> sampleCategorizedReadings(allocator),
+                    "SELECT category, SUM(reading) AS total FROM data GROUP BY category HAVING total > 50");
+
+            System.out.println("=== A non-aggregate SELECT item must match a GROUP BY key exactly ===");
+            runOneShot("Rejected at compile time, not silently guessed at", allocator,
+                    () -> sampleCategorizedReadings(allocator),
+                    "SELECT category, reading, SUM(reading) FROM data GROUP BY category");
+
+            // ---- ORDER BY / LIMIT -------------------------------------------------
+            System.out.println("=== ORDER BY / LIMIT on a plain (non-grouped) query ===");
+            runOneShot("Top 3 rows by x, descending", allocator,
+                    () -> sampleXY(allocator),
+                    "SELECT x, y FROM data ORDER BY x DESC LIMIT 3");
+
+            System.out.println("=== A non-grouped ORDER BY may reference a column that isn't even in the SELECT list ===");
+            System.out.println("(It conceptually sorts the FROM/WHERE row set, only afterward narrowed by SELECT --");
+            System.out.println("see ArrowQuery's \"GROUP BY / HAVING / ORDER BY / LIMIT\" javadoc.)");
+            runOneShot("SELECT x only, but ORDER BY the un-selected column y", allocator,
+                    () -> sampleXY(allocator),
+                    "SELECT x FROM data ORDER BY y DESC");
+
+            System.out.println("=== ...or a SELECT-list alias for a computed expression, resolved the same way WHERE resolves one ===");
+            runOneShot("ORDER BY a computed alias", allocator,
+                    () -> sampleXY(allocator),
+                    "SELECT x, y, sqrt(x*x + y*y) AS magnitude FROM data ORDER BY magnitude DESC LIMIT 3");
+
+            System.out.println("=== ORDER BY / LIMIT on a grouped query sorts the final grouped result ===");
+            runOneShot("Categories ordered by total, highest first", allocator,
+                    () -> sampleCategorizedReadings(allocator),
+                    "SELECT category, SUM(reading) AS total FROM data GROUP BY category ORDER BY total DESC LIMIT 2");
         }
     }
 
@@ -216,6 +306,29 @@ public final class ArrowSqlDemo {
         double[] values = {12.5, 0, 7.25, 0, 0, 42.0};
         boolean[] isNull = {false, true, false, true, true, false};
         return root(col(allocator, "reading", values, isNull));
+    }
+
+    /**
+     * Three categories, deliberately including a negative reading in
+     * category 3 -- used by the {@code GROUP BY}/{@code HAVING}/aggregate
+     * examples. Category totals: 1 -&gt; 35, 2 -&gt; 70, 3 -&gt; 10, so
+     * {@code HAVING total > 50} keeps only category 2.
+     */
+    private static VectorSchemaRoot sampleCategorizedReadings(BufferAllocator allocator) {
+        double[] categories = {1, 1, 1, 2, 2, 3, 3, 3};
+        double[] readings = {10, 20, 5, 30, 40, -10, 5, 15};
+        return root(col(allocator, "category", categories, null), col(allocator, "reading", readings, null));
+    }
+
+    /**
+     * Negative and fractional readings -- used by the {@code CAST(... AS INT)}
+     * example to show truncation-toward-zero on both sides of zero
+     * ({@code -2.7 -> -2}, not {@code -3}), matching Java's own
+     * {@code (long)} cast semantics.
+     */
+    private static VectorSchemaRoot sampleSignedReadings(BufferAllocator allocator) {
+        double[] readings = {-2.7, 2.5, -0.3, 3.999, 10.0, -10.0};
+        return root(col(allocator, "reading", readings, null));
     }
 
     private static Float8Vector col(BufferAllocator allocator, String name, double[] values, boolean[] nullMask) {

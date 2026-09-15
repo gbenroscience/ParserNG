@@ -187,10 +187,10 @@ public final class WhereAliasResolver {
     /**
      * Public entry point for a single raw expression string (as opposed to
      * a {@link BoolExpr} tree) — used by {@code ArrowQuery} to resolve
-     * {@code SELECT}-list aliases referenced from an {@code ORDER BY} key,
-     * exactly the same way {@link #resolve(BoolExpr, Map)} resolves them
-     * for {@code WHERE}/{@code HAVING} leaf operands. Thin public wrapper
-     * around the package-private {@link #substitute(String, Map)}.
+     * {@code SELECT}-list aliases referenced from an {@code ORDER BY} key
+     * of a non-grouped query, exactly the same way {@link #resolve(BoolExpr, Map)}
+     * resolves them for {@code WHERE}/{@code HAVING} leaf operands. Thin
+     * public wrapper around the package-private {@link #substitute(String, Map)}.
      *
      * @param exprText the raw ParserNG expression text to resolve aliases
      * within

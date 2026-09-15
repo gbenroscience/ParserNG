@@ -14,10 +14,7 @@ import java.util.Map;
  * Quoted/bracketed identifiers ({@code "col"}, {@code [col]}, <code>`col`</code>)
  * are not supported in this v1; column and table names must be plain
  * identifiers, which also matches what ParserNG's own variable-name syntax
- * expects downstream. {@code CAST}'s target type name ({@code INTEGER},
- * {@code DOUBLE}, etc.) is likewise lexed as a plain identifier — it is not
- * a reserved keyword, only meaningful in the {@code AS} position inside
- * {@code CAST(...)} (see {@link SqlParser}).
+ * expects downstream.
  *
  * <p>
  * Numbers are unsigned {@code integer_literal | decimal_literal} per the
@@ -37,12 +34,12 @@ import java.util.Map;
  * {@code AND}, {@code OR}, {@code NOT}, {@code BETWEEN}, {@code IN},
  * {@code IS}, {@code NULL}, {@code TRUE}, {@code FALSE}, {@code CASE},
  * {@code WHEN}, {@code THEN}, {@code ELSE}, {@code END}, {@code CAST},
- * {@code GROUP}, {@code BY}, {@code HAVING}, {@code ORDER}, {@code ASC},
- * {@code DESC}, {@code LIMIT}) are matched case-insensitively, exactly like
+ * {@code GROUP}, {@code BY}, {@code HAVING}, {@code ORDER}, {@code LIMIT},
+ * {@code ASC}, {@code DESC}) are matched case-insensitively, exactly like
  * standard SQL; everything else (identifiers, i.e. column/table/function
- * names, and a {@code CAST} target type name) is case-sensitive, since those
- * names are looked up verbatim against Arrow column names and ParserNG's
- * own case-sensitive function/variable names downstream.
+ * names) is case-sensitive, since those names are looked up verbatim
+ * against Arrow column names and ParserNG's own case-sensitive
+ * function/variable names downstream.
  *
  * @author GBEMIRO
  */
@@ -72,9 +69,9 @@ public final class SqlLexer {
             Map.entry("BY", TokenType.BY),
             Map.entry("HAVING", TokenType.HAVING),
             Map.entry("ORDER", TokenType.ORDER),
+            Map.entry("LIMIT", TokenType.LIMIT),
             Map.entry("ASC", TokenType.ASC),
-            Map.entry("DESC", TokenType.DESC),
-            Map.entry("LIMIT", TokenType.LIMIT)
+            Map.entry("DESC", TokenType.DESC)
     );
 
     private final String src;

@@ -1,6 +1,7 @@
 package com.github.gbenroscience.sqlv1;
 
-import com.github.gbenroscience.sqlv1.ast.AggregateKind;
+import com.github.gbenroscience.sqlv1.ast.AggFunc;
+import com.github.gbenroscience.sqlv1.ast.AggregateSpec;
 import com.github.gbenroscience.sqlv1.ast.AndExpr;
 import com.github.gbenroscience.sqlv1.ast.BetweenExpr;
 import com.github.gbenroscience.sqlv1.ast.BoolExpr;
@@ -10,15 +11,14 @@ import com.github.gbenroscience.sqlv1.ast.CompOp;
 import com.github.gbenroscience.sqlv1.ast.InExpr;
 import com.github.gbenroscience.sqlv1.ast.IsNullExpr;
 import com.github.gbenroscience.sqlv1.ast.NotExpr;
-import com.github.gbenroscience.sqlv1.ast.OrExpr;
 import com.github.gbenroscience.sqlv1.ast.OrderItem;
+import com.github.gbenroscience.sqlv1.ast.OrExpr;
 import com.github.gbenroscience.sqlv1.ast.SelectItem;
 import com.github.gbenroscience.sqlv1.ast.SelectStatement;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /**
  * Hand-written recursive-descent parser for parser-ng-sql's {@code SELECT}
@@ -38,14 +38,12 @@ import java.util.Set;
  *     ::= '*'
  *       | select_item (',' select_item)*
  * select_item
- *     ::= expression [AS identifier]
- *       | aggregate_call [AS identifier]
+ *     ::= (expression | aggregate_call) [AS identifier]
  * aggregate_call
- *     ::= ('COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX') '(' (expression | '*') ')'
- *                                                -- '*' only valid with COUNT;
- *                                                   see "Aggregates and GROUP BY"
+ *     ::= ('SUM'|'COUNT'|'AVG'|'MIN'|'MAX') '(' (expression | '*') ')'
+ *                                              -- '*' only valid for COUNT
  * order_item
- *     ::= expression ['ASC' | 'DESC']
+ *     ::= expression [ASC | DESC]
  * boolean_expression
  *     ::= or_expression
  * or_expression
@@ -77,19 +75,19 @@ import java.util.Set;
  *     ::= ('+' | '-') unary_expression
  *       | primary
  * primary
- *     ::= literal | identifier | function_call | case_expression | cast_expression
- *       | '(' expression ')'
+ *     ::= literal | identifier | function_call | case_expression
+ *       | cast_expression | '(' expression ')'
  *       | '(' boolean_expression ')'          -- see "Embedded boolean conditions"
- * function_call
- *     ::= identifier '(' [expression_list] ')'
  * case_expression
- *     ::= 'CASE' expression ('WHEN' expression 'THEN' expression)+ ['ELSE' expression] 'END'
- *                                                -- "simple" CASE; see "CASE/WHEN/THEN/ELSE/END"
- *       | 'CASE' ('WHEN' boolean_expression 'THEN' expression)+ ['ELSE' expression] 'END'
- *                                                -- "searched" CASE (no operand before the
- *                                                   first WHEN)
+ *     ::= 'CASE' ('WHEN' boolean_expression 'THEN' expression)+
+ *         'ELSE' expression 'END'             -- searched CASE; see "CASE / CAST"
+ *       | 'CASE' expression ('WHEN' expression 'THEN' expression)+
+ *         'ELSE' expression 'END'             -- simple CASE; see "CASE / CAST"
  * cast_expression
  *     ::= 'CAST' '(' expression 'AS' identifier ')'
+ *                                              -- see "CASE / CAST"
+ * function_call
+ *     ::= identifier '(' [expression_list] ')'
  * expression_list
  *     ::= expression (',' expression)*        -- each element may itself be
  *                                                 a boolean_expression; see below
@@ -97,11 +95,93 @@ import java.util.Set;
  *     ::= integer_literal | decimal_literal | string_literal
  *       | boolean_literal | 'NULL'
  * </pre>
- * This is the grammar for parser-ng-sql: enough SQL to make {@code SELECT}
- * an expressive, vectorized-Arrow computation language, deliberately
- * stopping short of {@code JOIN}, {@code INSERT}, {@code UPDATE},
- * {@code DELETE}, transactions, or catalogs — plus two amendments to the
- * original {@code expression} production (below).
+ * This is exactly the grammar requested for parser-ng-sql v1: enough SQL to
+ * make {@code SELECT} an expressive, vectorized-Arrow computation language,
+ * deliberately stopping short of {@code JOIN}, {@code INSERT},
+ * {@code UPDATE}, {@code DELETE}, transactions, or catalogs — plus two
+ * amendments to the original {@code expression}/{@code query} productions:
+ * "Embedded boolean conditions" (below), which turned out to be too narrow
+ * for ParserNG's own idioms, and "{@code GROUP BY}/{@code CASE}/{@code CAST}"
+ * (also below), a deliberate, scoped expansion of the original v1 shape.
+ *
+ * <h2>{@code CASE} / {@code CAST}</h2>
+ * Both are handled entirely at the SQL layer, by desugaring into ParserNG
+ * text ParserNG already understands — no change to how expressions are
+ * captured/compiled downstream (see "Why expressions are captured, not
+ * rebuilt" below).
+ * <p>
+ * Both {@code CASE} forms are supported. <i>Searched</i> {@code CASE}
+ * ({@code CASE WHEN cond THEN expr ... ELSE expr END}) parses each
+ * {@code WHEN} condition with exactly the same {@link #parseBooleanExpression()}
+ * machinery a {@code WHERE} clause uses (normalized to negation-normal
+ * form, rendered via {@link BoolExprs#renderFused}) and may not contain
+ * {@code IS [NOT] NULL} for the same reason {@link #tryParseNestedCondition()}
+ * excludes it (see "Embedded boolean conditions"). <i>Simple</i> {@code CASE}
+ * ({@code CASE operand WHEN value THEN expr ... ELSE expr END}) parses an
+ * arithmetic {@code operand} expression immediately after {@code CASE}
+ * (bounded by {@code WHEN}, exactly like a {@code GROUP BY}/{@code ORDER BY}
+ * key — see {@link #buildExpressionText()}'s default case), then builds
+ * each branch's condition as {@code operand == value} using ParserNG's own
+ * equality operator (see {@code CompOp.EQ}), so {@code CASE cat WHEN 1
+ * THEN ... END} is exactly equivalent to writing
+ * {@code CASE WHEN cat == 1 THEN ... END} by hand. Both forms require
+ * {@code ELSE} (not optional the way standard SQL allows, implicitly
+ * defaulting to {@code NULL}): ParserNG has no numeric {@code NULL} literal
+ * usable in an arbitrary arithmetic position — a bare {@code NULL} token
+ * parses as an ordinary (and always unbound) <em>variable</em> named
+ * {@code NULL}, not a literal, confirmed via
+ * {@code ArrowExpressionEvaluator#requiredVariableNames()} against a real
+ * {@code parser-ng-3.0.7} build — so there is nothing sound to default to.
+ * {@link #buildCaseExpressionText()} throws a precise
+ * {@link SqlSyntaxException} at parse time if {@code ELSE} is missing,
+ * rather than silently compiling something that can only fail later, at
+ * evaluate time, with a confusing "missing variable NULL" binding error.
+ * The whole construct desugars right-to-left into nested ParserNG
+ * {@code if(cond, then, else)} calls — verified against a real
+ * {@code parser-ng-arrow} 3.0.7 build to be a genuine three-argument
+ * ternary function, not an implicit-multiplication false positive (see
+ * this module's {@code ArrowSqlDemo}/README for the verification
+ * methodology this project uses for every ParserNG built-in before relying
+ * on it).
+ * <p>
+ * {@code CAST(expr AS type)} supports numeric target types only, since
+ * every ParserNG value is already a floating-point number under the hood:
+ * {@code INT}/{@code INTEGER}/{@code SMALLINT}/{@code BIGINT}/{@code LONG}
+ * truncate toward zero, and {@code DOUBLE}/{@code FLOAT}/{@code REAL}/
+ * {@code NUMERIC}/{@code DECIMAL} are a no-op identity (already the
+ * representation in use). Any other target type is a compile-time
+ * {@link SqlSyntaxException}. The truncation itself deliberately does
+ * <em>not</em> use a ParserNG {@code floor}/{@code ceil}/{@code round}/
+ * {@code trunc}-named call: none of those exist in a real
+ * {@code parser-ng-3.0.7} build — each one either fails to compile at all,
+ * or (worse, and the reason this is called out explicitly) silently
+ * "succeeds" by parsing as <em>implicit multiplication</em> of an unbound
+ * variable of that name against the parenthesized argument (verified via
+ * {@code ArrowExpressionEvaluator#requiredVariableNames()}: e.g.
+ * {@code "floor(x)"} fails outright with {@code Unknown function: floor},
+ * while {@code "trunc(x)"} compiles but reports required variables
+ * {@code [trunc, x]} — i.e. it is silently {@code trunc * x}, not a
+ * function call at all). Truncation toward zero is instead built from two
+ * confirmed-real primitives: {@code expr - (expr % 1)}, verified by direct
+ * evaluation to match Java's {@code (long)} cast semantics exactly,
+ * including sign handling for negative operands (ParserNG's {@code %} is
+ * ordinary remainder — sign follows the dividend, not always non-negative
+ * mathematical modulo).
+ *
+ * <h2>{@code GROUP BY} / aggregates</h2>
+ * {@code SUM}/{@code COUNT}/{@code AVG}/{@code MIN}/{@code MAX} are
+ * recognized contextually in a {@code select_item} (an identifier matching
+ * one of those names, case-insensitively, immediately followed by
+ * {@code '('} — see {@link #tryParseAggregate()}) rather than being lexer
+ * keywords, so a real column or ParserNG function coincidentally sharing
+ * one of those names is never shadowed. Aggregation itself is evaluated
+ * entirely in Java by {@code ArrowQuery}, not by ParserNG (see
+ * {@link AggFunc}'s javadoc) — this parser's only job is to recognize the
+ * call shape and capture the argument text. See
+ * {@code SelectStatement}'s javadoc, "{@code GROUP BY} / aggregates — a
+ * deliberately strict subset", for the (standard-SQL) restriction this
+ * module places on which non-aggregate {@code SELECT} items a grouped query
+ * may contain.
  *
  * <h2>Embedded boolean conditions</h2>
  * ParserNG's own expression language natively evaluates comparisons and
@@ -122,10 +202,8 @@ import java.util.Set;
  * and rendered to ParserNG's native {@code &&}/{@code ||}/{@code ==} text
  * ({@link BoolExprs#renderFused(BoolExpr)}) before being spliced into the
  * surrounding expression text. The same applies to a {@code select_item}'s
- * own top-level {@code expression}, and to a {@code CASE} branch's
- * {@code THEN}/{@code ELSE} expression — {@code SELECT x > 0 AS flag FROM t}
- * and {@code CASE WHEN a THEN b > 0 ELSE c < 0 END} are both valid for the
- * same reason.
+ * own top-level {@code expression} — {@code SELECT x > 0 AS flag FROM t} is
+ * valid for the same reason.
  *
  * <p>
  * <b>Why this is safe, and where it stops.</b> Trying "is this a boolean
@@ -134,8 +212,7 @@ import java.util.Set;
  * <i>bounded</i> by a delimiter that can never itself be mistaken for a
  * continuation of a {@code boolean_expression} — a function argument or
  * grouping paren's own closing {@code ')'}, an argument list's {@code ','},
- * a {@code select_item}'s {@code ','}/{@code FROM}, or a {@code CASE}
- * branch's {@code WHEN}/{@code ELSE}/{@code END}. It is deliberately
+ * or a {@code select_item}'s {@code ','}/{@code FROM}. It is deliberately
  * <b>not</b> attempted for a {@code comparison}'s own operands or a
  * {@code BETWEEN}'s bounds ({@link #buildExpressionText()} is used there
  * directly, unchanged): those are bounded by {@code AND}/{@code OR}-adjacent
@@ -157,72 +234,7 @@ import java.util.Set;
  * (see its javadoc), so {@link #tryParseNestedCondition()} throws a precise
  * {@link SqlSyntaxException} if a successfully-parsed nested condition
  * turns out to contain one — {@code IS [NOT] NULL} may only be used
- * directly in a {@code WHERE}/{@code HAVING} clause, and the same
- * restriction applies to a searched {@code CASE}'s {@code WHEN} conditions
- * (see {@link #buildCaseExpressionText()}).
- *
- * <h2>{@code CASE}/{@code WHEN}/{@code THEN}/{@code ELSE}/{@code END}</h2>
- * ParserNG has no {@code CASE} operator of its own, but does have the
- * {@code if(cond, then, else)} idiom described above. A {@code CASE}
- * expression compiles to a right-nested chain of {@code if(...)} calls
- * ({@link #buildCaseExpressionText()}): the {@code n}-th {@code WHEN}
- * becomes the {@code n}-th nesting level's condition/then-branch, and the
- * innermost {@code else}-branch is either the {@code ELSE} expression or,
- * if none was written, the literal {@code NULL} (already an accepted
- * arithmetic-expression literal — see {@link #buildExpressionText()}'s
- * {@code NULL} case). Both grammar forms are supported: <i>searched</i>
- * {@code CASE} (no operand — each {@code WHEN} carries its own full
- * {@code boolean_expression} condition, parsed and rendered exactly like a
- * {@code WHERE} clause, including the {@link IsNullExpr} restriction above)
- * and <i>simple</i> {@code CASE} (an operand expression immediately after
- * {@code CASE}, compared with {@code =} against each {@code WHEN}'s own
- * expression to build that branch's condition).
- *
- * <h2>{@code CAST}</h2>
- * {@code CAST(expr AS type)} has no ParserNG operator either, and — since
- * every value passing through this module is already a ParserNG/Arrow
- * {@code float64} or {@code float32} (see {@code ArrowQuery#isFloat64}) —
- * there is no storage-representation change to perform. {@link #renderCastText}
- * recognizes two families of target type name (matched case-insensitively,
- * exactly like a keyword, even though lexically it is just an identifier —
- * see {@link SqlLexer}):
- * <ul>
- * <li>{@code INT}/{@code INTEGER}/{@code SMALLINT}/{@code BIGINT}/{@code LONG}
- * — truncates toward zero, rendered as
- * {@code if(expr >= 0, floor(expr), -1 * floor(-1 * (expr)))} (assumes
- * ParserNG provides a {@code floor} function, as a general-purpose math
- * expression language would).</li>
- * <li>{@code FLOAT}/{@code REAL}/{@code DOUBLE}/{@code DECIMAL}/{@code NUMERIC}
- * — a pure no-op, rendered as {@code (expr)}, since the value is already
- * floating-point.</li>
- * </ul>
- * Any other target type name is rejected with a {@link SqlSyntaxException}
- * at parse time.
- *
- * <h2>Aggregates and {@code GROUP BY}</h2>
- * {@code COUNT}/{@code SUM}/{@code AVG}/{@code MIN}/{@code MAX} are
- * recognized only at the top level of a {@code select_item} — an identifier
- * spelling one of those names (case-insensitively) immediately followed by
- * {@code '('} ({@link #parseSelectItem()}) — never nested inside a larger
- * expression, matching standard SQL's prohibition on nested aggregates. The
- * function's single argument is parsed with {@link #parseValueExpression()}
- * (so it may itself embed a boolean condition, {@code CASE}, or {@code CAST}),
- * except for {@code COUNT(*)}, the one aggregate call that takes a bare
- * {@code '*'} instead. {@code GROUP BY}'s own expression list uses
- * {@link #buildExpressionText()} directly (a {@code GROUP BY} key is always
- * a plain arithmetic expression, e.g. a column) — see
- * {@code SelectStatement}'s javadoc for the rule that every non-aggregate
- * {@code select_item} must match one of these expressions verbatim, and
- * {@code ArrowQuery}'s "Aggregation strategy" for how grouping and the
- * aggregate functions are actually computed.
- *
- * <h2>{@code HAVING} and {@code ORDER BY}</h2>
- * Both are parsed with exactly the machinery already used for {@code WHERE}
- * ({@link #parseBooleanExpression()} for {@code HAVING}; {@link #buildExpressionText()}
- * per key for {@code ORDER BY}) — see {@code ArrowQuery} for how each is
- * evaluated once the query is compiled against a concrete schema, including
- * the recommendation to alias an aggregate {@code select_item} referenced
- * from either clause.
+ * directly in a {@code WHERE} clause.
  *
  * <h2>Why (the rest of) expressions are captured, not rebuilt</h2>
  * Outside of the embedded-boolean-condition case above, the arithmetic
@@ -234,18 +246,15 @@ import java.util.Set;
  * {@link #buildExpressionText()} reconstructs this near-verbatim (token
  * text is reassembled with normalized single-space separation rather than
  * re-derived), recursing only where it must — into
- * {@link #buildParenGroupText()} for a parenthesized group,
+ * {@link #buildParenGroupText()} for a parenthesized group and
  * {@link #buildFunctionCallText(String)} for a function call's argument
- * list, {@link #buildCaseExpressionText()} for a {@code CASE} expression,
- * and {@link #buildCastExpressionText()} for a {@code CAST} expression —
- * specifically so those constructs can each independently host an embedded
- * boolean condition as described above. Every inbuilt and user-registered
- * ParserNG function is supported automatically and exactly as ParserNG
- * itself defines it; this layer never needs to know a function's name or
- * arity (except for the aggregate names and {@code CASE}/{@code CAST}
- * themselves, which are structural keywords/recognized names, not ordinary
- * ParserNG functions) — it never re-derives arithmetic semantics, it only
- * ever reassembles tokens or splices in already-rendered text.
+ * list — specifically so those two constructs can each independently host
+ * an embedded boolean condition as described above. Every inbuilt and
+ * user-registered ParserNG function is supported automatically and exactly
+ * as ParserNG itself defines it; this layer never needs to know a
+ * function's name or arity, because it never re-derives arithmetic
+ * semantics — it only ever reassembles tokens or splices in already-
+ * rendered boolean text.
  *
  * <h2>The leading-{@code '('} ambiguity in {@code predicate}</h2>
  * {@code predicate}'s parenthesized-group alternative
@@ -270,14 +279,6 @@ import java.util.Set;
  */
 public final class SqlParser {
 
-    private static final Set<String> AGGREGATE_FUNCTION_NAMES = Set.of("COUNT", "SUM", "AVG", "MIN", "MAX");
-
-    private static final Set<String> CAST_TRUNCATING_TYPES =
-            Set.of("INT", "INTEGER", "SMALLINT", "BIGINT", "LONG");
-
-    private static final Set<String> CAST_NOOP_TYPES =
-            Set.of("FLOAT", "REAL", "DOUBLE", "DECIMAL", "NUMERIC");
-
     private final List<Token> tokens;
     private int pos;
 
@@ -293,10 +294,6 @@ public final class SqlParser {
      * @throws SqlSyntaxException if {@code sql} does not conform to the
      * grammar (this includes lexical errors from {@link SqlLexer}, and
      * trailing input after a complete, otherwise-valid query)
-     * @throws IllegalArgumentException if {@code sql} is structurally valid
-     * but violates an aggregate/{@code GROUP BY} rule enforced by
-     * {@link SelectStatement}'s constructor (e.g. a plain select-list
-     * column absent from {@code GROUP BY})
      */
     public static SelectStatement parse(String sql) {
         List<Token> tokens = SqlLexer.tokenize(sql);
@@ -333,17 +330,15 @@ public final class SqlParser {
             where = BoolExprs.toNnf(parseBooleanExpression());
         }
 
-        List<String> groupBy = List.of();
+        List<String> groupBy = new ArrayList<>();
         if (peekType() == TokenType.GROUP) {
             advance();
             expect(TokenType.BY, "Expected BY after GROUP");
-            List<String> gb = new ArrayList<>();
-            gb.add(buildExpressionText());
+            groupBy.add(buildExpressionText());
             while (peekType() == TokenType.COMMA) {
                 advance();
-                gb.add(buildExpressionText());
+                groupBy.add(buildExpressionText());
             }
-            groupBy = gb;
         }
 
         BoolExpr having = null;
@@ -352,84 +347,48 @@ public final class SqlParser {
             having = BoolExprs.toNnf(parseBooleanExpression());
         }
 
-        List<OrderItem> orderBy = List.of();
+        List<OrderItem> orderBy = new ArrayList<>();
         if (peekType() == TokenType.ORDER) {
             advance();
             expect(TokenType.BY, "Expected BY after ORDER");
-            List<OrderItem> ob = new ArrayList<>();
-            ob.add(parseOrderItem());
+            orderBy.add(parseOrderItem());
             while (peekType() == TokenType.COMMA) {
                 advance();
-                ob.add(parseOrderItem());
+                orderBy.add(parseOrderItem());
             }
-            orderBy = ob;
         }
 
         Integer limit = null;
         if (peekType() == TokenType.LIMIT) {
             advance();
-            limit = parseLimitValue();
+            Token n = expect(TokenType.NUMBER, "Expected a non-negative integer after LIMIT");
+            if (n.text().indexOf('.') >= 0) {
+                throw new SqlSyntaxException("LIMIT must be a plain integer, not '" + n.text() + "'", n.start());
+            }
+            try {
+                limit = Integer.parseInt(n.text());
+            } catch (NumberFormatException overflow) {
+                throw new SqlSyntaxException("LIMIT value '" + n.text() + "' is out of range", n.start());
+            }
         }
 
         expect(TokenType.EOF, "Unexpected trailing input after a complete query");
 
-        return new SelectStatement(selectAll, items, table, where, groupBy, having, orderBy, limit);
-    }
-
-    private SelectItem parseSelectItem() {
-        if (peekType() == TokenType.IDENTIFIER) {
-            String upper = peek().text().toUpperCase(Locale.ROOT);
-            if (AGGREGATE_FUNCTION_NAMES.contains(upper) && peekTypeAt(1) == TokenType.LPAREN) {
-                return parseAggregateSelectItem(upper);
-            }
+        try {
+            return new SelectStatement(selectAll, items, table, where, groupBy, having, orderBy, limit);
+        } catch (IllegalArgumentException invalidShape) {
+            throw new SqlSyntaxException(invalidShape.getMessage(), 0);
         }
-        // A select_item's own expression is bounded by ',' or FROM, neither
-        // of which can continue a boolean_expression -- safe to try a
-        // boolean condition first. See class javadoc, "Embedded boolean
-        // conditions".
-        String expr = parseValueExpression();
-        String alias = null;
-        if (peekType() == TokenType.AS) {
-            advance();
-            alias = expectIdentifier("Expected an alias identifier after AS");
-        }
-        return new SelectItem(expr, alias);
     }
 
     /**
-     * Parses an {@code aggregate_call}'s {@code '(' (expression | '*') ')'}
-     * tail (the function-name identifier, already confirmed to be one of
-     * {@link #AGGREGATE_FUNCTION_NAMES} followed by {@code '('}, is
-     * consumed here) and its optional {@code AS} alias. See class javadoc,
-     * "Aggregates and GROUP BY".
+     * Parses one {@code order_item ::= expression [ASC | DESC]}. The
+     * expression is bounded by {@code ','}, {@code LIMIT}, or end of input —
+     * none of which can continue a {@code boolean_expression} — but an
+     * {@code ORDER BY} key is, per the grammar, an ordinary {@code expression},
+     * not a full {@code boolean_expression}, so {@link #buildExpressionText()}
+     * is used directly here rather than {@link #parseValueExpression()}.
      */
-    private SelectItem parseAggregateSelectItem(String funcNameUpper) {
-        Token nameTok = advance(); // the function-name identifier
-        advance(); // '('
-        AggregateKind kind = AggregateKind.valueOf(funcNameUpper);
-
-        boolean star = false;
-        String argText = null;
-        if (kind == AggregateKind.COUNT && peekType() == TokenType.STAR) {
-            advance();
-            star = true;
-        } else if (peekType() == TokenType.STAR) {
-            error("'*' is only valid as the argument to COUNT");
-        } else {
-            argText = parseValueExpression();
-        }
-        expect(TokenType.RPAREN, "Expected ')' to close call to '" + nameTok.text() + "'");
-
-        String canonicalText = nameTok.text() + "(" + (star ? "*" : argText) + ")";
-
-        String alias = null;
-        if (peekType() == TokenType.AS) {
-            advance();
-            alias = expectIdentifier("Expected an alias identifier after AS");
-        }
-        return SelectItem.aggregate(kind, star, argText, canonicalText, alias);
-    }
-
     private OrderItem parseOrderItem() {
         String expr = buildExpressionText();
         boolean descending = false;
@@ -442,16 +401,67 @@ public final class SqlParser {
         return new OrderItem(expr, descending);
     }
 
-    private Integer parseLimitValue() {
-        Token n = expect(TokenType.NUMBER, "Expected a non-negative integer after LIMIT");
-        if (n.text().indexOf('.') >= 0) {
-            throw new SqlSyntaxException("LIMIT requires a plain integer, not '" + n.text() + "'", n.start());
+    private SelectItem parseSelectItem() {
+        AggregateSpec agg = tryParseAggregate();
+        if (agg != null) {
+            String alias = null;
+            if (peekType() == TokenType.AS) {
+                advance();
+                alias = expectIdentifier("Expected an alias identifier after AS");
+            }
+            return SelectItem.aggregate(agg, alias);
         }
-        try {
-            return Integer.valueOf(n.text());
-        } catch (NumberFormatException tooLarge) {
-            throw new SqlSyntaxException("LIMIT value is too large: '" + n.text() + "'", n.start());
+        // A select_item's own expression is bounded by ',' or FROM, neither
+        // of which can continue a boolean_expression -- safe to try a
+        // boolean condition first. See class javadoc, "Embedded boolean
+        // conditions".
+        String expr = parseValueExpression();
+        String alias = null;
+        if (peekType() == TokenType.AS) {
+            advance();
+            alias = expectIdentifier("Expected an alias identifier after AS");
         }
+        return SelectItem.plain(expr, alias);
+    }
+
+    /**
+     * Speculatively parses an {@code aggregate_call} at the current
+     * position, or returns {@code null} (restoring the token cursor) if the
+     * upcoming tokens do not form one — either the identifier is not one of
+     * {@code SUM}/{@code COUNT}/{@code AVG}/{@code MIN}/{@code MAX}
+     * (case-insensitively), or it is but is not immediately followed by
+     * {@code '('} (a real column or variable that merely happens to share
+     * one of those names, used bare — e.g. a column literally named
+     * {@code sum}). Contextual disambiguation only, exactly like
+     * {@link #tryParseNestedCondition()}; see class javadoc,
+     * "{@code GROUP BY} / aggregates".
+     */
+    private AggregateSpec tryParseAggregate() {
+        if (peekType() != TokenType.IDENTIFIER) {
+            return null;
+        }
+        AggFunc func = AggFunc.fromName(peek().text());
+        if (func == null) {
+            return null;
+        }
+        int mark = pos;
+        advance(); // consume the function-name identifier
+        if (peekType() != TokenType.LPAREN) {
+            pos = mark;
+            return null;
+        }
+        advance(); // consume '('
+        if (func == AggFunc.COUNT && peekType() == TokenType.STAR) {
+            advance();
+            expect(TokenType.RPAREN, "Expected ')' to close COUNT(*)");
+            return new AggregateSpec(AggFunc.COUNT, null, true);
+        }
+        if (peekType() == TokenType.STAR) {
+            error(func + "(*) is not valid; only COUNT(*) is");
+        }
+        String argExpr = parseValueExpression();
+        expect(TokenType.RPAREN, "Expected ')' to close " + func + "(...)");
+        return new AggregateSpec(func, argExpr, false);
     }
 
     // =====================================================================
@@ -616,8 +626,7 @@ public final class SqlParser {
      * Parses one {@code expression}-grammar slot that is safely
      * <i>bounded</i> by a delimiter which can never continue a
      * {@code boolean_expression} (a function argument, an {@code IN}-list
-     * value, a {@code select_item}, or a {@code CASE} branch's
-     * {@code THEN}/{@code ELSE} expression): tries a full boolean condition
+     * value, or a {@code select_item}): tries a full boolean condition
      * first, falling back to plain arithmetic. See class javadoc.
      */
     private String parseValueExpression() {
@@ -653,7 +662,7 @@ public final class SqlParser {
             throw new SqlSyntaxException(
                     "IS [NOT] NULL cannot be used inside a nested expression, function "
                             + "argument, or grouping -- it has no ParserNG rendering. Use it "
-                            + "only directly in a WHERE/HAVING clause.",
+                            + "only directly in a WHERE clause.",
                     tokens.get(mark).start());
         }
         return BoolExprs.renderFused(cond);
@@ -661,15 +670,12 @@ public final class SqlParser {
 
     /**
      * Parses one arithmetic {@code expression} (additive/multiplicative/
-     * power/unary/primary/function_call/case_expression/cast_expression),
-     * reassembling its token text. Stops without consuming at the first
-     * token that can never continue an arithmetic expression at this
-     * level: a comparison operator, {@code AS}, {@code AND}/{@code OR}/
-     * {@code NOT}/{@code BETWEEN}/{@code IN}/{@code IS}, a comma or closing
-     * paren belonging to an enclosing construct, {@code FROM}, {@code WHERE},
-     * {@code GROUP}, {@code HAVING}, {@code ORDER}, {@code LIMIT},
-     * {@code WHEN}/{@code THEN}/{@code ELSE}/{@code END} belonging to an
-     * enclosing {@code CASE}, or end of input.
+     * power/unary/primary/function_call), reassembling its token text. Stops
+     * without consuming at the first token that can never continue an
+     * arithmetic expression at this level: a comparison operator, {@code AS},
+     * {@code AND}/{@code OR}/{@code NOT}/{@code BETWEEN}/{@code IN}/
+     * {@code IS}, a comma or closing paren belonging to an enclosing
+     * construct, {@code FROM}, {@code WHERE}, or end of input.
      */
     private String buildExpressionText() {
         StringBuilder sb = new StringBuilder();
@@ -712,16 +718,137 @@ public final class SqlParser {
                     break;
                 default:
                     // RPAREN, COMMA (both belonging to an enclosing
-                    // construct at this level), AS, FROM, WHERE, GROUP, BY,
-                    // HAVING, ORDER, ASC, DESC, LIMIT, AND, OR, NOT,
-                    // BETWEEN, IN, IS, WHEN, THEN, ELSE, END, EQ, NEQ, LT,
-                    // LE, GT, GE, EOF -- none of these can ever legally
-                    // continue an arithmetic `expression`.
+                    // construct at this level), AS, FROM, WHERE, AND, OR,
+                    // NOT, BETWEEN, IN, IS, EQ, NEQ, LT, LE, GT, GE, WHEN,
+                    // THEN, ELSE, END, GROUP, BY, HAVING, ORDER, ASC, DESC,
+                    // LIMIT, EOF -- none of these can ever legally continue
+                    // an arithmetic `expression`.
                     if (sb.length() == 0) {
                         error("Expected an expression");
                     }
                     return sb.toString();
             }
+        }
+    }
+
+    /**
+     * Parses a {@code case_expression} (the {@code CASE} keyword has not
+     * yet been consumed) and desugars it into nested ParserNG
+     * {@code if(cond, then, else)} calls, right-to-left, so that
+     * <pre>{@code
+     * CASE WHEN c1 THEN r1 WHEN c2 THEN r2 ELSE r3 END
+     * }</pre>
+     * becomes {@code (if(c1, r1, if(c2, r2, r3)))}. See class javadoc,
+     * "{@code CASE} / {@code CAST}", for why only the searched form is
+     * supported, why {@code ELSE} is mandatory, and the verification this
+     * desugaring target ({@code if}) was given against a real ParserNG
+     * build.
+     */
+    private String buildCaseExpressionText() {
+        Token caseTok = expect(TokenType.CASE, "Expected CASE");
+        List<String> conditions = new ArrayList<>();
+        List<String> results = new ArrayList<>();
+
+        // A "simple" CASE has an operand expression before the first WHEN;
+        // a "searched" CASE goes straight to WHEN. buildExpressionText()
+        // safely stops at WHEN (it is not part of the arithmetic-expression
+        // continuation set -- see its own default case), so this lookahead
+        // is unambiguous with no backtracking needed.
+        String operand = null;
+        if (peekType() != TokenType.WHEN) {
+            operand = buildExpressionText();
+        }
+
+        if (peekType() != TokenType.WHEN) {
+            error("Expected WHEN in CASE (either 'CASE WHEN cond THEN expr ... ELSE expr END', or "
+                    + "'CASE operand WHEN value THEN expr ... ELSE expr END')");
+        }
+        while (peekType() == TokenType.WHEN) {
+            advance();
+            String conditionText;
+            if (operand != null) {
+                // Simple CASE: each WHEN's own expression is compared for
+                // equality against the CASE operand -- 'CASE cat WHEN 1
+                // THEN ... END' means 'CASE WHEN cat == 1 THEN ... END'.
+                // ParserNG's equality operator is "==" (see CompOp.EQ),
+                // matching the searched form's own rendering exactly.
+                String comparand = buildExpressionText();
+                conditionText = "((" + operand + ") == (" + comparand + "))";
+            } else {
+                BoolExpr cond = BoolExprs.toNnf(parseBooleanExpression());
+                if (BoolExprs.containsIsNull(cond)) {
+                    throw new SqlSyntaxException(
+                            "IS [NOT] NULL cannot be used inside a CASE WHEN condition -- it has no ParserNG "
+                                    + "rendering. See SqlParser's class javadoc, \"Embedded boolean conditions\".",
+                            caseTok.start());
+                }
+                conditionText = BoolExprs.renderFused(cond);
+            }
+            conditions.add(conditionText);
+            expect(TokenType.THEN, "Expected THEN after a WHEN condition");
+            results.add(parseValueExpression());
+        }
+
+        if (peekType() != TokenType.ELSE) {
+            throw new SqlSyntaxException(
+                    "CASE requires an explicit ELSE branch in this grammar -- there is no numeric NULL "
+                            + "literal for a missing ELSE to fall back to. See SqlParser's class javadoc, "
+                            + "\"CASE / CAST\".",
+                    peek().start());
+        }
+        advance();
+        String elseExpr = parseValueExpression();
+        expect(TokenType.END, "Expected END to close CASE");
+
+        String result = elseExpr;
+        for (int i = conditions.size() - 1; i >= 0; i--) {
+            result = "if(" + conditions.get(i) + ", " + results.get(i) + ", " + result + ")";
+        }
+        return "(" + result + ")";
+    }
+
+    /**
+     * Parses a {@code cast_expression} (the {@code CAST} keyword has not
+     * yet been consumed) and desugars it into ParserNG text. See class
+     * javadoc, "{@code CASE} / {@code CAST}", for exactly which target
+     * types are supported and why the truncation formula used for integer
+     * targets is built from {@code %} rather than any
+     * {@code floor}/{@code ceil}/{@code round}/{@code trunc}-named ParserNG
+     * call (none of which exist in a real build).
+     */
+    private String buildCastExpressionText() {
+        expect(TokenType.CAST, "Expected CAST");
+        expect(TokenType.LPAREN, "Expected '(' after CAST");
+        String inner = parseValueExpression();
+        expect(TokenType.AS, "Expected AS inside CAST(... AS type)");
+        Token typeTok = expect(TokenType.IDENTIFIER, "Expected a target type name after AS in CAST(... AS type)");
+        expect(TokenType.RPAREN, "Expected ')' to close CAST(...)");
+
+        String type = typeTok.text().toUpperCase(Locale.ROOT);
+        switch (type) {
+            case "INT":
+            case "INTEGER":
+            case "SMALLINT":
+            case "BIGINT":
+            case "LONG":
+                // Truncation toward zero via (expr) - ((expr) % 1), verified
+                // against a real parser-ng-arrow 3.0.7 build to match
+                // Java's (long) cast semantics exactly, including sign
+                // handling for negative operands.
+                return "((" + inner + ") - ((" + inner + ") % 1))";
+            case "DOUBLE":
+            case "FLOAT":
+            case "REAL":
+            case "NUMERIC":
+            case "DECIMAL":
+                return "(" + inner + ")";
+            default:
+                throw new SqlSyntaxException(
+                        "Unsupported CAST target type '" + typeTok.text() + "' -- parser-ng-sql only supports "
+                                + "numeric CAST targets (INT/INTEGER/BIGINT/SMALLINT/LONG or "
+                                + "DOUBLE/FLOAT/REAL/NUMERIC/DECIMAL), since every ParserNG value is already "
+                                + "a floating-point number under the hood.",
+                        typeTok.start());
         }
     }
 
@@ -770,105 +897,6 @@ public final class SqlParser {
     }
 
     /**
-     * Parses a {@code case_expression} (the leading {@code CASE} has not
-     * yet been consumed) and renders it to a right-nested chain of
-     * ParserNG {@code if(cond, then, else)} calls. See class javadoc,
-     * "CASE/WHEN/THEN/ELSE/END".
-     */
-    private String buildCaseExpressionText() {
-        Token caseTok = expect(TokenType.CASE, "Expected CASE");
-
-        // A "simple" CASE has an operand expression before the first WHEN;
-        // a "searched" CASE goes straight to WHEN. buildExpressionText()
-        // safely stops at WHEN (it is not part of the arithmetic-expression
-        // continuation set), so this lookahead is unambiguous.
-        String operand = null;
-        if (peekType() != TokenType.WHEN) {
-            operand = buildExpressionText();
-        }
-
-        List<String> conditions = new ArrayList<>();
-        List<String> thenBranches = new ArrayList<>();
-        while (peekType() == TokenType.WHEN) {
-            advance();
-            String conditionText;
-            if (operand != null) {
-                String comparand = buildExpressionText();
-                conditionText = "(" + operand + " == " + comparand + ")";
-            } else {
-                BoolExpr cond = BoolExprs.toNnf(parseBooleanExpression());
-                if (BoolExprs.containsIsNull(cond)) {
-                    throw new SqlSyntaxException(
-                            "IS [NOT] NULL cannot be used in a CASE WHEN condition -- it has "
-                                    + "no ParserNG rendering. Use it only directly in a "
-                                    + "WHERE/HAVING clause.",
-                            caseTok.start());
-                }
-                conditionText = BoolExprs.renderFused(cond);
-            }
-            expect(TokenType.THEN, "Expected THEN after CASE WHEN condition");
-            String thenText = parseValueExpression();
-            conditions.add(conditionText);
-            thenBranches.add(thenText);
-        }
-        if (conditions.isEmpty()) {
-            error("CASE requires at least one WHEN ... THEN ... clause");
-        }
-
-        String elseText = "NULL";
-        if (peekType() == TokenType.ELSE) {
-            advance();
-            elseText = parseValueExpression();
-        }
-        expect(TokenType.END, "Expected END to close CASE");
-
-        String result = elseText;
-        for (int i = conditions.size() - 1; i >= 0; i--) {
-            result = "if(" + conditions.get(i) + ", " + thenBranches.get(i) + ", " + result + ")";
-        }
-        return result;
-    }
-
-    /**
-     * Parses a {@code cast_expression} (the leading {@code CAST} has not
-     * yet been consumed) and renders it per {@link #renderCastText}. See
-     * class javadoc, "CAST".
-     */
-    private String buildCastExpressionText() {
-        expect(TokenType.CAST, "Expected CAST");
-        expect(TokenType.LPAREN, "Expected '(' after CAST");
-        // parseValueExpression(): this position is bounded by AS, which
-        // can never continue a boolean_expression -- safe to try a boolean
-        // condition first, same as a function argument.
-        String inner = parseValueExpression();
-        expect(TokenType.AS, "Expected AS in CAST(... AS type)");
-        Token typeTok = expect(TokenType.IDENTIFIER, "Expected a target type after AS");
-        expect(TokenType.RPAREN, "Expected ')' to close CAST(...)");
-        return renderCastText(inner, typeTok);
-    }
-
-    /**
-     * @return ParserNG text implementing {@code CAST(innerText AS typeTok)}
-     * -- see class javadoc, "CAST", for the two supported type families
-     * @throws SqlSyntaxException if {@code typeTok} does not spell a
-     * recognized target type
-     */
-    private static String renderCastText(String innerText, Token typeTok) {
-        String type = typeTok.text().toUpperCase(Locale.ROOT);
-        if (CAST_TRUNCATING_TYPES.contains(type)) {
-            return "if(" + innerText + " >= 0, floor(" + innerText + "), -1 * floor(-1 * (" + innerText + ")))";
-        }
-        if (CAST_NOOP_TYPES.contains(type)) {
-            return "(" + innerText + ")";
-        }
-        throw new SqlSyntaxException(
-                "Unsupported CAST target type '" + typeTok.text() + "'; supported types are "
-                        + "INT/INTEGER/SMALLINT/BIGINT/LONG (truncating) and "
-                        + "FLOAT/REAL/DOUBLE/DECIMAL/NUMERIC (no-op, already floating-point)",
-                typeTok.start());
-    }
-
-    /**
      * Re-quotes a {@link Token#text()} of type {@link TokenType#STRING}
      * (which {@link SqlLexer} stores already unescaped/unquoted) back into
      * ParserNG-safe single-quoted text, doubling any embedded {@code '}
@@ -895,19 +923,6 @@ public final class SqlParser {
 
     private TokenType peekType() {
         return tokens.get(pos).type();
-    }
-
-    /**
-     * @return the type of the token {@code offset} positions ahead of the
-     * current position, or {@link TokenType#EOF} if that would run past
-     * the end of the token stream (which cannot happen for a well-formed
-     * stream, since {@link SqlLexer} always appends a trailing
-     * {@link TokenType#EOF} token, but this stays safe regardless of
-     * {@code offset})
-     */
-    private TokenType peekTypeAt(int offset) {
-        int idx = pos + offset;
-        return idx < tokens.size() ? tokens.get(idx).type() : TokenType.EOF;
     }
 
     private Token advance() {

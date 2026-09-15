@@ -638,6 +638,10 @@ public class Declarations {
     }
 
     public static void main(String[] args) {
+        
+        System.out.println(new MathExpression("floor(8.72)").solve());
+        System.out.println(new MathExpression("ceil(8.72)").solve());
+        System.out.println(new MathExpression("round(8.72)").solve());
         createInBuiltMethods();
     }
 }
