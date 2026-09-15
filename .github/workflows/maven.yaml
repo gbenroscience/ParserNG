@@ -42,10 +42,10 @@ jobs:
             mvn -B test -pl "!parser-ng-bench,!parser-ng-gpu-simd"
             
           elif [ "${{ matrix.java-version }}" -eq 21 ]; then
-            echo "Java 21 detected → Building core + CPU SIMD (excluding parser-ng-bench, parser-ng-gpu-simd, and parser-ng-arrow)"
-            mvn -B --update-snapshots clean install -Dgpg.skip -pl "!parser-ng-bench,!parser-ng-gpu-simd,!parser-ng-arrow"
+            echo "Java 21 detected → Building core + CPU SIMD (excluding parser-ng-bench, parser-ng-gpu-simd,  parser-ng-arrow and parser-ng-sql)"
+            mvn -B --update-snapshots clean install -Dgpg.skip -pl "!parser-ng-bench,!parser-ng-gpu-simd,!parser-ng-arrow,!parser-ng-sql"
             
           else
-            echo "Legacy Java (< 21) detected → Building core engine only (excluding SIMD, GPU, Arrow, and bench)"
-            mvn -B --update-snapshots clean install -Dgpg.skip -pl "!parser-ng-simd,!parser-ng-bench,!parser-ng-gpu-simd,!parser-ng-arrow"
+            echo "Legacy Java (< 21) detected → Building core engine only (excluding SIMD, GPU, Arrow, bench and parser-ng-sql)"
+            mvn -B --update-snapshots clean install -Dgpg.skip -pl "!parser-ng-simd,!parser-ng-bench,!parser-ng-gpu-simd,!parser-ng-arrow,!parser-ng-sql"
           fi

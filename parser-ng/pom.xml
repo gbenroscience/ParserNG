@@ -12,6 +12,7 @@
     </parent>
     
     <artifactId>parser-ng</artifactId>
+    <version>3.0.7</version>
     <packaging>jar</packaging>
    
     <name>ParserNG</name>

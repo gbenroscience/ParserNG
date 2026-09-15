@@ -19,8 +19,8 @@
     <description>
         A SQL-shaped front end over parser-ng-arrow: SELECT ... FROM ... [WHERE ...] compiles
         to a vectorized Arrow filter/projection pipeline built on ArrowExpressionEvaluators.
-        This is deliberately NOT a database - no JOIN, INSERT, UPDATE, DELETE, transactions,
-        catalogs, GROUP BY or ORDER BY. It exists purely to make SQL a convenient surface
+        This is deliberately NOT a database - no JOIN, INSERT, UPDATE, DELETE, transactions. 
+        It exists purely to make SQL a convenient surface
         syntax for describing vectorized Arrow computations that parser-ng-arrow already knows
         how to run.
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
