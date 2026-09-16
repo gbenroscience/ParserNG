@@ -5,7 +5,7 @@
 [![Growth](https://img.shields.io/badge/Growth-%2B250%25%20(90%20days)-orange?style=flat-square)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![JDK Compatibility](https://img.shields.io/badge/JDK-8%20to%2026%2B-red?style=flat-square)](https://www.oracle.com/java/)
 
-> **The fastest pure-Java math runtime, now with GPU (CUDA and OpenCL) bulk evaluators and a fully open-sourced Vector API (SIMD) kernel. Zero JNI. Zero native binaries. Zero bytecode-safety risk.**
+> **The fastest pure-Java math runtime, now with GPU (CUDA, Metal and OpenCL) bulk evaluators and a fully open-sourced Vector API (SIMD) kernel. Zero JNI. Zero native binaries. Zero bytecode-safety risk.**
 
 [**ParserNG 3.0.7 is live**](LATEST.md)
 - In this version, `parser-ng-sql`, a new extension has been introduced to help Apache Arrow users of ParserNG(parser-ng-arrow) maximize its use, using SQL as a query language 
@@ -105,7 +105,7 @@ One kernel, three backends, your choice of double or genuinely native float32 (n
 MathExpression me = new MathExpression("3*cos(x-2)+ln(3*x^3-5*x-4*tan(x))");
 VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
 
-try (GpuCompositeExpression gpu = GpuExpressionBridge.from(vte)) {   // auto-picks CUDA, falls back to OpenCL
+try (GpuCompositeExpression gpu = GpuExpressionBridge.from(vte)) {   // auto-picks CUDA, falls back to OpenCL/Metal
     double[] flat = /* your sample buffer, column-major per variable slot */;
     double[] out  = new double[flat.length];
     gpu.applyBulk(flat, out);          // full double precision
@@ -277,7 +277,7 @@ evaluator.applyBulk(inputs, out);
 | **< 1.0.0** | `MathExpression`, the interpreter. ParserNG Standard. |
 | **1.0.0 – 1.x** | Turbo tier arrives: `ScalarTurboEvaluator1` (variable args as an array), `ScalarTurboEvaluator2` (variable args as widened primitives internally), and `MatrixTurboEvaluator`, all built on `MethodHandles`. |
 | **2.0.0 – 2.x** | Bulk evaluation, via mechanical sympathy *and* SIMD. `VectorTurboEvaluator` coerces auto-vectorization through code shape alone; `SIMDVectorTurboEvaluator` forces it via the explicit Vector API. Both support `applyBulkParallel(in, out)`, but JDK 21 has no CPU pinning, capping the parallel win. |
-| **3.0.7** | `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` add CPU pinning (best on Linux): 2 workers on 2 cores ≈ 1.8×–2.0× the work of 1 worker on 1 core. `SIMDEngineEvaluator` edges out `SIMDCommandTurboEvaluator` by a few ns/op. Both live in **`parser-ng-gpu-simd`** (JDK 22+), the module that also houses the star of this release: native **GPU bulk evaluators for CUDA and OpenCL**. |
+| **3.0.7** | `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` add CPU pinning (best on Linux): 2 workers on 2 cores ≈ 1.8×–2.0× the work of 1 worker on 1 core. `SIMDEngineEvaluator` edges out `SIMDCommandTurboEvaluator` by a few ns/op. Both live in **`parser-ng-gpu-simd`** (JDK 22+), the module that also houses the star of this release: native **GPU bulk evaluators for CUDA and OpenCL and Metal**. |
 
 Same `MathExpression` syntax at every tier. You scale up by choosing a different evaluator, never by rewriting the expression.
 
@@ -391,7 +391,7 @@ double[] out = new double[totalElements];
 evaluator.applyBulk(inputs, out); // tail elements auto-masked if totalElements isn't lane-aligned
 ```
 
-### 5. GPU: OpenCL / CUDA (`parser-ng-gpu-simd`, JDK 22+)
+### 5. GPU: OpenCL / CUDA / Metal(`parser-ng-gpu-simd`, JDK 22+)
 
 ```java
 MathExpression me = new MathExpression("2*x^2-3*x+1");
@@ -451,7 +451,7 @@ Adds `VectorTurboEvaluator` and `SIMDVectorTurboEvaluator`:
 
 ### For Modern JDK 22+ GPU and/or CPU-Pinned SIMD Environments
 
-Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evaluators (CUDA + OpenCL):
+Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evaluators (CUDA + OpenCL + Metal):
 
 ```xml
 <dependency>

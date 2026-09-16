@@ -94,9 +94,7 @@ mvn clean test -Dtest=SIMDTurboEvaluatorTest
 
 The test harness evaluates throughput performance vectors across varying scales ($20 \times 20$, $70 \times 70$, $100 \times 100$, and $200 \times 200$).
 
-> ⚠️ **Configuration Suggestion:** Avoid configuring raw matrix printouts at higher dimension limits ($200 \times 200$) within the terminal log to prevent console buffer IO bottlenecks from stalling the test cycle.
 
----
 
 ### Current Project Roadmap
 

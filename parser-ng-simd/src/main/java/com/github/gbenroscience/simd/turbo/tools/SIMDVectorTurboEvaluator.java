@@ -1,21 +1,33 @@
 package com.github.gbenroscience.simd.turbo.tools;
-
-import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.parser.MathExpression;
+ 
+import com.github.gbenroscience.parser.MathExpression; 
 import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
+import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
-
-import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
-import jdk.incubator.vector.*;
+ 
+import com.github.gbenroscience.simd.turbo.tools.utils.VectorMath;
+import java.lang.ref.Cleaner;
+import java.util.ArrayList;
+import java.util.InputMismatchException;
+import java.util.List; 
 import java.util.concurrent.locks.LockSupport;
+import jdk.incubator.vector.*;
 
 /**
- * High-Performance Vector API & Engine that fuses explicit SIMD vectorization
- * with a zero-allocation primitive stack interpreter. Completely eliminates the
- * scalar parser overhead and task object allocations on the hot path.
+ * High-Performance float64(Java's double type) Vector API & Engine that fuses
+ * explicit SIMD vectorization with a zero-allocation primitive stack
+ * interpreter. Completely eliminates the scalar parser overhead and task object
+ * allocations on the hot path.
+ *
+ * These are the fastest of all the SIMD evaluators. Has near
+ * zero-allocation with parallel operations. 
+ * Is now the JDK21 version of SIMDCommandF64 on JDK22+ parser-ng-gpu-simd, as its code has being changed to use pre-compiled
+ * easily optimizable(for Hotspot), JIT style architecture.
+ *
+ *
  */
+
 public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
 
     public SIMDVectorTurboEvaluator(MathExpression me) throws Throwable {
@@ -42,2693 +54,2003 @@ public class SIMDVectorTurboEvaluator extends VectorTurboEvaluator {
         return (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) new SIMDVectorTurboEvaluator(new MathExpression(expr), numWorkers).compile();
     }
 
-    @Override
-    public BatchedVectorCompositeExpression compile() throws Throwable {
-        return new SIMDVectorCompositeExpression();
+    // 1. Updated Command Interface
+    @FunctionalInterface
+    static interface VectorCommand {
+
+        void execute(EvaluationContext ctx, int n);
     }
 
-    public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression {
+    /**
+     * Optional extension of {@link VectorCommand} for command types that can
+     * write their result directly into the plan's final output array --
+     * {@code output[outputOffset..+n]} -- instead of into {@code ctx.scratch}.
+     *
+     * <p>Implemented only by command types whose math is plain {@code double[]}
+     * lane arithmetic. {@link PowCommand} (routes through
+     * {@code VectorMath.executePowerBlended(ctx.scratch, ...)}),
+     * {@link UnaryMathCommand}/{@link LoadUnaryMathCommand}, and
+     * {@link BinaryMathCommand} deliberately do NOT implement this: their
+     * math is delegated to a functional interface whose signature is fixed
+     * to {@code double[] scratch}, and retargeting that would mean either
+     * changing those interfaces' signatures (a much larger change touching
+     * every one of the ~50 unary/binary math ops) or duplicating
+     * {@code VectorMath}'s internals outside {@code VectorMath} - neither is
+     * done here.
+     *
+     * <p>When the LAST command in a compiled plan implements this interface,
+     * {@code applyBulkInternal} calls {@link #executeToOutput} for it
+     * instead of {@code execute(...)} followed by the separate
+     * scratch-to-output writeback pass - eliminating one full extra
+     * read+write pass over the block for exactly that case. Every command
+     * before the last one in the plan is completely unaffected either way;
+     * this only ever changes how the FINAL result reaches the output
+     * array. When the last command does not implement this interface,
+     * {@code applyBulkInternal} falls back to the original
+     * {@code execute()}+writeback path, byte-for-byte unchanged.
+     */
+    interface DirectOutputCommand {
 
-        // Pre-allocated ONCE during initialization/compilation
+        void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset);
+    }
+
+// 2. Ultra-lean Context (Zero dynamic stack allocation)
+    private static final class EvaluationContext {
+
+        final double[] scratch;
+        double[] flatVariables;
+        double[][] _2DVariables;
+        int dataSize;
+        int blockStart;
+
+        EvaluationContext(int maxStackDepth, int blockSize) {
+            // Only one flat scratch pad is needed!
+            scratch = new double[maxStackDepth * blockSize];
+        }
+
+        void initForBlock(double[] flat, double[][] _2D, int size, int bStart) {
+            this.flatVariables = flat;
+            this._2DVariables = _2D;
+            this.dataSize = size;
+            this.blockStart = bStart;
+        }
+    }
+// --- Memory Operations ---
+
+    record ConstCommand(double value, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            DoubleVector v = DoubleVector.broadcast(SPECIES, value);
+            for (; k < limit; k += SPECIES.length()) {
+                v.intoArray(s, destOff + k);
+            }
+            for (; k < n; k++) {
+                s[destOff + k] = value;
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            DoubleVector v = DoubleVector.broadcast(SPECIES, value);
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                v.intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = value;
+            }
+        }
+    }
+
+    record LoadCommand(int slotIdx, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            if (ctx.flatVariables != null) {
+                int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
+                System.arraycopy(ctx.flatVariables, srcOff, ctx.scratch, destOff, n);
+            } else {
+                System.arraycopy(ctx._2DVariables[slotIdx], ctx.blockStart, ctx.scratch, destOff, n);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            if (ctx.flatVariables != null) {
+                int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
+                System.arraycopy(ctx.flatVariables, srcOff, output, outputOffset, n);
+            } else {
+                System.arraycopy(ctx._2DVariables[slotIdx], ctx.blockStart, output, outputOffset, n);
+            }
+        }
+    }
+
+// --- Core Binary Operations ---
+    record AddCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, lOff + k)
+                        .add(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(s, destOff + k);
+            }
+            for (; k < n; k++) {
+                s[destOff + k] = s[lOff + k] + s[rOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, lOff + k)
+                        .add(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] + s[rOff + k];
+            }
+        }
+    }
+
+    record SubCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, lOff + k)
+                        .sub(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(s, destOff + k);
+            }
+            for (; k < n; k++) {
+                s[destOff + k] = s[lOff + k] - s[rOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, lOff + k)
+                        .sub(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] - s[rOff + k];
+            }
+        }
+    }
+
+    record MulCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, lOff + k)
+                        .mul(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(s, destOff + k);
+            }
+            for (; k < n; k++) {
+                s[destOff + k] = s[lOff + k] * s[rOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, lOff + k)
+                        .mul(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] * s[rOff + k];
+            }
+        }
+    }
+
+    record DivCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, lOff + k)
+                        .div(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(s, destOff + k);
+            }
+            for (; k < n; k++) {
+                s[destOff + k] = s[lOff + k] / s[rOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, lOff + k)
+                        .div(DoubleVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] / s[rOff + k];
+            }
+        }
+    }
+
+    // --- Fused Leaf Commands: Load(var) OP Load(var) ---
+    // When both operands of a binary op are plain variable loads (the most
+    // common shape for shallow expressions like a+b), compiling them as two
+    // separate LoadCommands + one BinaryOp forces both operands through an
+    // extra round-trip into ctx.scratch before the op even runs, and the op
+    // itself writes a third copy back into scratch. These fused commands read
+    // straight from the source arrays (flatVariables / _2DVariables) and skip
+    // that intermediate materialization entirely. Selected at compile() time
+    // via peephole-fusion over the emitted plan — see tryFuseLoadLoad().
+    // Numerically identical to LoadCommand+LoadCommand+BinaryOp: same IEEE
+    // op, same operand order, just a different source array.
+    record LoadLoadAddCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .add(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] + flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .add(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] + r[base + k];
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .add(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] + flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .add(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] + r[base + k];
+                }
+            }
+        }
+    }
+
+    record LoadLoadSubCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .sub(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] - flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .sub(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] - r[base + k];
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .sub(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] - flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .sub(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] - r[base + k];
+                }
+            }
+        }
+    }
+
+    record LoadLoadMulCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .mul(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] * flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .mul(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] * r[base + k];
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .mul(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] * flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .mul(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] * r[base + k];
+                }
+            }
+        }
+    }
+
+    record LoadLoadDivCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .div(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = flat[lBase + k] / flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .div(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = l[base + k] / r[base + k];
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, lBase + k)
+                            .div(DoubleVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] / flat[rBase + k];
+                }
+            } else {
+                double[] l = ctx._2DVariables[lSlot];
+                double[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, l, base + k)
+                            .div(DoubleVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] / r[base + k];
+                }
+            }
+        }
+    }
+
+    // --- Fused Scale (const*var) and Scale-Accumulate (axpy chain) ---
+    // Together these collapse a linear-combination-shaped expression --
+    // a1*x1 + a2*x2 + ... + an*xn, or any mix of + / - between such terms --
+    // from 4N-1 commands (with no fusion at all: a separate ConstCommand,
+    // LoadCommand, MulCommand per term, plus an AddCommand/SubCommand
+    // chaining each term into a running total, each command a full pass
+    // through ctx.scratch) down to exactly N commands: the first term
+    // becomes one ScaleCommand seeding the accumulator, and every
+    // subsequent term becomes one ScaleAccumulateCommand -- a single SIMD
+    // pass per term, each doing exactly one hardware fused-multiply-add per
+    // lane. See tryFuseConstLoad() and tryFuseScaleAccumulate() for the
+    // peephole rules that emit these; they compose without either knowing
+    // about the other -- tryFuseConstLoad only ever looks at the immediate
+    // ConstCommand/LoadCommand pair beneath an OP_MUL, and
+    // tryFuseScaleAccumulate only ever looks at the ScaleCommand beneath an
+    // OP_ADD/OP_SUB -- so an arbitrarily long chain of terms folds correctly
+    // without any whole-expression pattern matching.
+    record ScaleCommand(double coeff, int varSlot, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            DoubleVector coeffVec = DoubleVector.broadcast(SPECIES, coeff);
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, base + k)
+                            .mul(coeffVec)
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = coeff * flat[base + k];
+                }
+            } else {
+                double[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, v, base + k)
+                            .mul(coeffVec)
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = coeff * v[base + k];
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            DoubleVector coeffVec = DoubleVector.broadcast(SPECIES, coeff);
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, base + k)
+                            .mul(coeffVec)
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = coeff * flat[base + k];
+                }
+            } else {
+                double[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, v, base + k)
+                            .mul(coeffVec)
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = coeff * v[base + k];
+                }
+            }
+        }
+    }
+
+    // acc[k] = acc[k] + coeff*var[k] (or acc - coeff*var, folded into a
+    // negated coeff at fusion time -- see tryFuseScaleAccumulate), computed
+    // as a single hardware fused-multiply-add per SIMD lane, in place on
+    // scratch at accOff. Numerically this is strictly at least as accurate
+    // as the unfused mul-then-add: one IEEE-754 rounding instead of two.
+    record ScaleAccumulateCommand(double coeff, int varSlot, int accOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            DoubleVector coeffVec = DoubleVector.broadcast(SPECIES, coeff);
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, base + k)
+                            .fma(coeffVec, DoubleVector.fromArray(SPECIES, s, accOff + k))
+                            .intoArray(s, accOff + k);
+                }
+                for (; k < n; k++) {
+                    s[accOff + k] = Math.fma(flat[base + k], coeff, s[accOff + k]);
+                }
+            } else {
+                double[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, v, base + k)
+                            .fma(coeffVec, DoubleVector.fromArray(SPECIES, s, accOff + k))
+                            .intoArray(s, accOff + k);
+                }
+                for (; k < n; k++) {
+                    s[accOff + k] = Math.fma(v[base + k], coeff, s[accOff + k]);
+                }
+            }
+        }
+
+        // Note: the accumulator itself is still read from ctx.scratch here --
+        // it's a running value built up by prior commands, not a source --
+        // only the FINAL fused-multiply-add result is written to `output`
+        // instead of back into scratch. This is exactly the "accumulator +
+        // coeff*var" shape ScaleAccumulateCommand's ordinary execute() computes,
+        // just landing its one write in a different place.
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            double[] s = ctx.scratch;
+            DoubleVector coeffVec = DoubleVector.broadcast(SPECIES, coeff);
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, base + k)
+                            .fma(coeffVec, DoubleVector.fromArray(SPECIES, s, accOff + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = Math.fma(flat[base + k], coeff, s[accOff + k]);
+                }
+            } else {
+                double[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, v, base + k)
+                            .fma(coeffVec, DoubleVector.fromArray(SPECIES, s, accOff + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = Math.fma(v[base + k], coeff, s[accOff + k]);
+                }
+            }
+        }
+    }
+
+    record PowCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            VectorMath.executePowerBlended(ctx.scratch, lOff, rOff, n);
+            // Note: executePowerBlended writes to lOff. If dest != lOff, we must copy.
+            // The compiler guarantees dest == lOff by reusing stack slots.
+        }
+    }
+
+    record RemCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                s[destOff + k] = s[lOff + k] % s[rOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            double[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] % s[rOff + k];
+            }
+        }
+    }
+
+// --- Comparisons ---
+    record CompareCommand(int lOff, int rOff, int destOff, int opcode) implements VectorCommand, DirectOutputCommand {
+
+        // Computes s[lOff+k..] OP s[rOff+k..] as a VectorMask, per the same
+        // truthiness rules compareScalar() below applies to the tail. Shared
+        // by execute() and executeToOutput() so the opcode -> comparison
+        // mapping exists in exactly one place instead of being duplicated
+        // across two switch statements (as it was before this vectorization).
+        // OP_AND/OP_OR are built from two NE-vs-zero masks combined with
+        // mask.and()/mask.or() -- the vectorized form of the same C-style
+        // "nonzero is true" rule the scalar path already used.
+        private VectorMask<Double> compareMask(double[] s, int k) {
+            DoubleVector lv = DoubleVector.fromArray(SPECIES, s, lOff + k);
+            DoubleVector rv = DoubleVector.fromArray(SPECIES, s, rOff + k);
+            return switch (opcode) {
+                case OP_GT ->
+                    lv.compare(VectorOperators.GT, rv);
+                case OP_LT ->
+                    lv.compare(VectorOperators.LT, rv);
+                case OP_EQ ->
+                    lv.compare(VectorOperators.EQ, rv);
+                case OP_NE ->
+                    lv.compare(VectorOperators.NE, rv);
+                case OP_GE ->
+                    lv.compare(VectorOperators.GE, rv);
+                case OP_LE ->
+                    lv.compare(VectorOperators.LE, rv);
+                case OP_AND ->
+                    lv.compare(VectorOperators.NE, 0.0).and(rv.compare(VectorOperators.NE, 0.0));
+                case OP_OR ->
+                    lv.compare(VectorOperators.NE, 0.0).or(rv.compare(VectorOperators.NE, 0.0));
+                default ->
+                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            };
+        }
+
+        // Scalar ground truth for the tail -- must stay in lockstep with
+        // compareMask()'s per-lane semantics above.
+        private static boolean compareScalar(int opcode, double l, double r) {
+            return switch (opcode) {
+                case OP_GT ->
+                    l > r;
+                case OP_LT ->
+                    l < r;
+                case OP_EQ ->
+                    l == r;
+                case OP_NE ->
+                    l != r;
+                case OP_GE ->
+                    l >= r;
+                case OP_LE ->
+                    l <= r;
+                case OP_AND ->
+                    l != 0.0 && r != 0.0;
+                case OP_OR ->
+                    l != 0.0 || r != 0.0;
+                default ->
+                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            };
+        }
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                VectorMask<Double> mask = compareMask(s, k);
+                DoubleVector.zero(SPECIES).blend(1.0, mask).intoArray(s, destOff + k);
+            }
+            for (; k < n; k++) {
+                s[destOff + k] = compareScalar(opcode, s[lOff + k], s[rOff + k]) ? 1.0 : 0.0;
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                VectorMask<Double> mask = compareMask(s, k);
+                DoubleVector.zero(SPECIES).blend(1.0, mask).intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = compareScalar(opcode, s[lOff + k], s[rOff + k]) ? 1.0 : 0.0;
+            }
+        }
+    }
+
+// --- Ternary / Branching ---
+    record VmaCommand(int aOff, int bOff, int cOff, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, bound = SPECIES.loopBound(n);
+            for (; k < bound; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, aOff + k)
+                        .fma(DoubleVector.fromArray(SPECIES, s, bOff + k),
+                                DoubleVector.fromArray(SPECIES, s, cOff + k))
+                        .intoArray(s, destOff + k);
+            }
+            if (k < n) {
+                var mask = SPECIES.indexInRange(k, n);
+                DoubleVector.fromArray(SPECIES, s, aOff + k, mask)
+                        .fma(DoubleVector.fromArray(SPECIES, s, bOff + k, mask),
+                                DoubleVector.fromArray(SPECIES, s, cOff + k, mask))
+                        .intoArray(s, destOff + k, mask);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            double[] s = ctx.scratch;
+            int k = 0, bound = SPECIES.loopBound(n);
+            for (; k < bound; k += SPECIES.length()) {
+                DoubleVector.fromArray(SPECIES, s, aOff + k)
+                        .fma(DoubleVector.fromArray(SPECIES, s, bOff + k),
+                                DoubleVector.fromArray(SPECIES, s, cOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            if (k < n) {
+                var mask = SPECIES.indexInRange(k, n);
+                DoubleVector.fromArray(SPECIES, s, aOff + k, mask)
+                        .fma(DoubleVector.fromArray(SPECIES, s, bOff + k, mask),
+                                DoubleVector.fromArray(SPECIES, s, cOff + k, mask))
+                        .intoArray(output, outputOffset + k, mask);
+            }
+        }
+    }
+
+    record IfCommand(int condOff, int trueOff, int falseOff, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                s[destOff + k] = (s[condOff + k] != 0.0) ? s[trueOff + k] : s[falseOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            double[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                output[outputOffset + k] = (s[condOff + k] != 0.0) ? s[trueOff + k] : s[falseOff + k];
+            }
+        }
+    }
+
+// --- Unified Unary Operations (Delegates to VectorMath) ---
+    @FunctionalInterface
+    interface UnaryMathOp {
+
+        void apply(int base, int n, double[] scratch);
+    }
+
+    record UnaryMathCommand(UnaryMathOp op, int baseOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            op.apply(baseOff, n, ctx.scratch);
+        }
+    }
+
+    // --- Fused Load+UnaryMathOp ---
+    // A unary math op applied directly to a bare variable load -- e.g.
+    // sin(x), not sin(x+1) -- otherwise compiles to two separate commands:
+    // a LoadCommand materializing x into ctx.scratch, then a
+    // UnaryMathCommand reading that scratch range and transforming it in
+    // place. LoadUnaryMathCommand collapses that into ONE VectorCommand:
+    // it inlines the exact same source dispatch LoadCommand.execute()
+    // performs (flatVariables / _2DVariables), then immediately calls the
+    // existing UnaryMathOp on the freshly-copied range. This still
+    // delegates the actual math to the same op table used everywhere else
+    // -- no new per-op vectorized primitives, no risk of a hand-written
+    // fused implementation drifting from VectorMath's own numerics -- so
+    // what's eliminated is purely dispatch: one fewer entry in
+    // executionPlan, one fewer pass through the interpreter's outer
+    // (inherently megamorphic, since it iterates over every VectorCommand
+    // subtype) dispatch loop.
+    //
+    // This generic form does NOT eliminate the copy-into-scratch pass
+    // itself -- op.apply still reads and writes that same scratch range,
+    // so the operand is still touched twice in memory (once to copy it in,
+    // once to transform it). For ops where the per-element compute cost
+    // already dominates (sin, cos, tan, exp, ln, ...: many instructions for
+    // range reduction + polynomial evaluation), that's a rounding error and
+    // this generic fusion captures effectively all of the available win.
+    // For ops cheap enough that the extra pass is a real fraction of total
+    // cost -- one hardware instruction, like sqrt -- a fully dedicated
+    // command that never materializes at all recovers strictly more; see
+    // LoadSqrtCommand immediately below for that treatment, and
+    // tryFuseLoadUnary() in compile() for how OP_SQRT is special-cased to
+    // prefer it over this generic path.
+    record LoadUnaryMathCommand(UnaryMathOp op, int varSlot, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            if (ctx.flatVariables != null) {
+                int srcOff = (varSlot * ctx.dataSize) + ctx.blockStart;
+                System.arraycopy(ctx.flatVariables, srcOff, ctx.scratch, destOff, n);
+            } else {
+                System.arraycopy(ctx._2DVariables[varSlot], ctx.blockStart, ctx.scratch, destOff, n);
+            }
+            op.apply(destOff, n, ctx.scratch);
+        }
+    }
+
+    // --- Fully-fused Load+Sqrt ---
+    // Unlike LoadUnaryMathCommand, this never materializes the operand into
+    // scratch at all: it reads straight from the source array, computes
+    // sqrt via the hardware-mapped VectorOperators.SQRT in the SAME SIMD
+    // pass, and writes the result straight to ctx.scratch. sqrt is cheap
+    // enough (one SQRTPD instruction per lane) that the extra
+    // read-then-transform pass LoadUnaryMathCommand still pays is a real
+    // cost relative to the operation itself -- this is the dedicated escape
+    // hatch for that case. No VectorMath dependency at all;
+    // VectorOperators.SQRT is used exactly as VectorMath's own sqrt()
+    // implementation uses it, so results are bit-identical to the unfused
+    // path, just computed in one pass instead of two.
+    record LoadSqrtCommand(int varSlot, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            double[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, base + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = Math.sqrt(flat[base + k]);
+                }
+            } else {
+                double[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, v, base + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(s, destOff + k);
+                }
+                for (; k < n; k++) {
+                    s[destOff + k] = Math.sqrt(v[base + k]);
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, double[] output, int outputOffset) {
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                double[] flat = ctx.flatVariables;
+                int base = (varSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, flat, base + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = Math.sqrt(flat[base + k]);
+                }
+            } else {
+                double[] v = ctx._2DVariables[varSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    DoubleVector.fromArray(SPECIES, v, base + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = Math.sqrt(v[base + k]);
+                }
+            }
+        }
+    }
+
+    @FunctionalInterface
+    interface BinaryMathOp {
+
+        void apply(int lOff, int rOff, int destOff, int n, double[] scratch);
+    }
+
+    record BinaryMathCommand(BinaryMathOp op, int lOff, int rOff, int destOff) implements VectorCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            op.apply(lOff, rOff, destOff, n, ctx.scratch);
+        }
+    }
+
+    @Override
+    public BatchedVectorCompositeExpression compile() throws Throwable {
+        List<VectorCommand> plan = new ArrayList<>(instructionCount);
+
+        int BLOCK_SIZE = VectorTurboEvaluator.BatchedVectorCompositeExpression.BLOCK_SIZE;
+        // Virtual stack to track memory offsets during compilation
+        int[] virtualStack = new int[stackDepth];
+        int sp = 0;
+
+        for (int i = 0; i < instructionCount; i++) {
+            final int opcode = opcodes[i];
+
+            switch (opcode) {
+                case OP_CONST -> {
+                    int dest = sp * BLOCK_SIZE;
+                    plan.add(new ConstCommand(literalConstants[i], dest));
+                    virtualStack[sp++] = dest;
+                }
+                case OP_LOAD -> {
+                    int dest = sp * BLOCK_SIZE;
+                    plan.add(new LoadCommand(targetSlots[i], dest));
+                    virtualStack[sp++] = dest;
+                }
+
+                // --- Binary Operations ---
+                case OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_REM, OP_POW -> {
+                    int rOff = virtualStack[--sp];
+                    int lOff = virtualStack[--sp];
+                    int destOff = lOff; // Reuse left slot to save space
+
+                    // Peephole fusions, tried in order of specificity. Each
+                    // helper is self-contained: it inspects the tail of `plan`,
+                    // removes whatever entries it consumes on success, and
+                    // returns null (leaving `plan` untouched) on no match -- see
+                    // each method's own javadoc for exactly what shape it looks
+                    // for and why removal is always safe (strict LIFO stack
+                    // machine: once an operand's stack slot is popped here,
+                    // nothing else in the program can reference it again).
+                    VectorCommand fused = tryFuseLoadLoad(plan, opcode, lOff, rOff, destOff);
+                    if (fused == null && opcode == OP_MUL) {
+                        // const*var or var*const, e.g. the a_i*x_i term of a
+                        // linear combination -- see ScaleCommand.
+                        fused = tryFuseConstLoad(plan, lOff, rOff, destOff);
+                    }
+                    if (fused == null && (opcode == OP_ADD || opcode == OP_SUB)) {
+                        // accumulator +/- (a_i*x_i term just computed above) --
+                        // see ScaleAccumulateCommand. Composes with the
+                        // tryFuseConstLoad case above to fold an entire
+                        // a1*x1 + a2*x2 + ... + an*xn chain into N commands.
+                        fused = tryFuseScaleAccumulate(plan, opcode, lOff, rOff, destOff);
+                    }
+                    if (fused == null && (opcode == OP_ADD || opcode == OP_SUB)) {
+                        // accumulator +/- (bare variable), e.g. the x3 term of
+                        // x1+x2+x3 -- an unweighted sum is just the coeff=1.0
+                        // special case of the axpy chain above, so it reuses
+                        // the exact same ScaleAccumulateCommand rather than a
+                        // new command class. Tried after tryFuseScaleAccumulate
+                        // since the two match mutually exclusive shapes (one
+                        // needs a ScaleCommand on top of the plan, this one
+                        // needs a bare LoadCommand) and tryFuseLoadLoad above
+                        // already claims the case where BOTH operands are bare
+                        // loads, so this only ever fires for the "accumulator
+                        // so far, plus one more plain variable" shape.
+                        fused = tryFuseLoadAccumulate(plan, opcode, lOff, rOff, destOff);
+                    }
+
+                    if (fused != null) {
+                        plan.add(fused);
+                    } else {
+                        plan.add(switch (opcode) {
+                            case OP_ADD ->
+                                new AddCommand(lOff, rOff, destOff);
+                            case OP_SUB ->
+                                new SubCommand(lOff, rOff, destOff);
+                            case OP_MUL ->
+                                new MulCommand(lOff, rOff, destOff);
+                            case OP_DIV ->
+                                new DivCommand(lOff, rOff, destOff);
+                            case OP_REM ->
+                                new RemCommand(lOff, rOff, destOff);
+                            case OP_POW ->
+                                new PowCommand(lOff, rOff, destOff);
+
+                            default ->
+                                throw new IllegalStateException();
+                        });
+                    }
+                    virtualStack[sp++] = destOff;
+                }
+
+                // --- Binary Mathematical Activations ---
+                case OP_SWIGLU_2, OP_GEGLU_2 -> {
+                    int rOff = virtualStack[--sp];
+                    int lOff = virtualStack[--sp];
+                    int destOff = lOff; // Re-use the left stack slot to save memory
+
+                    BinaryMathOp mathOp = switch (opcode) {
+                        case OP_SWIGLU_2 ->
+                            VectorMath::swiglu2;
+                        case OP_GEGLU_2 ->
+                            VectorMath::geglu2;
+                        default ->
+                            throw new IllegalStateException();
+                    };
+
+                    plan.add(new BinaryMathCommand(mathOp, lOff, rOff, destOff));
+                    virtualStack[sp++] = destOff;
+                }
+
+                // --- Comparisons ---
+                case OP_GT, OP_LT, OP_EQ, OP_NE, OP_GE, OP_LE, OP_AND, OP_OR -> {
+                    int rOff = virtualStack[--sp];
+                    int lOff = virtualStack[--sp];
+                    int destOff = lOff;
+                    plan.add(new CompareCommand(lOff, rOff, destOff, opcode));
+                    virtualStack[sp++] = destOff;
+                }
+
+                // --- Ternary ---
+                case OP_VMA -> {
+                    int cOff = virtualStack[--sp];
+                    int bOff = virtualStack[--sp];
+                    int aOff = virtualStack[--sp];
+                    int destOff = aOff;
+                    plan.add(new VmaCommand(aOff, bOff, cOff, destOff));
+                    virtualStack[sp++] = destOff;
+                }
+                case OP_IF -> {
+                    int falseOff = virtualStack[--sp];
+                    int trueOff = virtualStack[--sp];
+                    int condOff = virtualStack[--sp];
+                    int destOff = condOff;
+                    plan.add(new IfCommand(condOff, trueOff, falseOff, destOff));
+                    virtualStack[sp++] = destOff;
+                }
+
+                // --- Unary Math Operations ---
+                default -> {
+                    // All remaining valid opcodes are Unary/In-place operations.
+                    int baseOff = virtualStack[sp - 1]; // Peak at top of stack (in-place)
+
+                    // Peephole: this unary op is applied directly to a bare
+                    // variable load (sin(x), not sin(x+1)) -- fuse the pending
+                    // LoadCommand into the unary op itself. See
+                    // tryFuseLoadUnary()'s javadoc for the generic-vs-dedicated
+                    // (LoadSqrtCommand) distinction.
+                    VectorCommand loadFused = tryFuseLoadUnary(plan, opcode, baseOff);
+                    if (loadFused != null) {
+                        plan.add(loadFused);
+                    } else {
+                        plan.add(new UnaryMathCommand(resolveUnaryMathOp(opcode), baseOff));
+                    }
+                }
+            }
+        }
+
+        return new SIMDVectorCompositeExpression(plan.toArray(new VectorCommand[0]), stackDepth, BLOCK_SIZE);
+    }
+
+    /**
+     * The opcode -&gt; {@link UnaryMathOp} mapping, factored out of the
+     * {@code compile()} switch so both the ordinary (unfused) unary path and
+     * {@link #tryFuseLoadUnary} can share one source of truth instead of two
+     * copies of the same ~50-case table drifting apart over time.
+     */
+    private static UnaryMathOp resolveUnaryMathOp(int opcode) {
+        return switch (opcode) {
+
+                        case OP_SQRT ->
+                            VectorMath::sqrt;
+                        case OP_CBRT ->
+                            VectorMath::cbrt;
+
+                        case OP_GELU ->
+                            VectorMath::gelu;
+
+                        case OP_GELU_FAST ->
+                            VectorMath::geluFast;
+                        case OP_SWIGLU ->
+                            VectorMath::swiglu;
+                        case OP_GEGLU ->
+                            VectorMath::gegluUnary;
+                        case OP_ERF ->
+                            VectorMath::erf;
+                        case OP_ABS ->
+                            VectorMath::abs;
+                        case OP_CEIL ->
+                            VectorMath::floor;
+                        case OP_ROUND ->
+                            VectorMath::round; 
+                        case OP_FLOOR ->
+                            VectorMath::floor;
+
+                        // Standard Trig
+                        case OP_SIN ->
+                            VectorMath::sin;
+                        case OP_COS ->
+                            VectorMath::cos;
+                        case OP_TAN ->
+                            VectorMath::tan;
+
+                        // Degree Variants
+                        case OP_SIN_DEG ->
+                            VectorMath::sinDeg;
+                        case OP_COS_DEG ->
+                            VectorMath::cosDeg;
+                        case OP_TAN_DEG ->
+                            VectorMath::tanDeg;
+
+                        case OP_SIN_GRAD ->
+                            VectorMath::sinGrad;
+                        case OP_COS_GRAD ->
+                            VectorMath::cosGrad;
+                        case OP_TAN_GRAD ->
+                            VectorMath::tanGrad;
+
+                        // Standard Inverse
+                        case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT ->
+                            VectorMath::asin;
+                        case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT ->
+                            VectorMath::acos;
+                        case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT ->
+                            VectorMath::atan;
+
+                        case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG ->
+                            VectorMath::asinDeg;
+                        case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG ->
+                            VectorMath::acosDeg;
+                        case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG ->
+                            VectorMath::atanDeg;
+
+                        case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD ->
+                            VectorMath::asinGrad;
+                        case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD ->
+                            VectorMath::acosGrad;
+                        case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD ->
+                            VectorMath::atanGrad;
+
+                        // Degree Variants
+                        case OP_SEC_DEG ->
+                            VectorMath::secDeg;
+                        case OP_COSEC_DEG ->
+                            VectorMath::cscDeg;
+                        case OP_COT_DEG ->
+                            VectorMath::cotDeg;
+
+                        case OP_SEC_GRAD ->
+                            VectorMath::secGrad;
+                        case OP_COSEC_GRAD ->
+                            VectorMath::cscGrad;
+                        case OP_COT_GRAD ->
+                            VectorMath::cotGrad;
+
+                        // Standard Inverse
+                        case OP_ARC_SEC, OP_ARC_SEC_ALT ->
+                            VectorMath::asec;
+                        case OP_ARC_COSEC, OP_ARC_COSEC_ALT ->
+                            VectorMath::acsc;
+                        case OP_ARC_COT, OP_ARC_COT_ALT ->
+                            VectorMath::acot;
+
+                        case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG ->
+                            VectorMath::asecDeg;
+                        case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD ->
+                            VectorMath::asecGrad;
+
+                        case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG ->
+                            VectorMath::acscDeg;
+                        case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD ->
+                            VectorMath::acscGrad;
+
+                        case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG ->
+                            VectorMath::acotDeg;
+                        case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD ->
+                            VectorMath::acotGrad;
+
+                        case OP_SINH ->
+                            VectorMath::sinh;
+                        case OP_COSH ->
+                            VectorMath::cosh;
+                        case OP_TANH ->
+                            VectorMath::tanh;
+                        case OP_ASINH, OP_ASINH_ALT ->
+                            VectorMath::asinh;
+                        case OP_ACOSH, OP_ACOSH_ALT ->
+                            VectorMath::acosh;
+                        case OP_ATANH, OP_ATANH_ALT ->
+                            VectorMath::atanh;
+
+                        // Exp/Log
+                        case OP_EXP ->
+                            VectorMath::exp;
+                        case OP_LOG ->
+                            VectorMath::ln;
+                        case OP_LOG10 ->
+                            VectorMath::log10;
+
+                        default ->
+                            throw new UnsupportedOperationException("Unmapped opcode: " + opcode);
+        };
+    }
+
+    /**
+     * Peephole fusion: when both operands of a binary arithmetic op are plain
+     * variable loads - i.e. the last two entries in the plan are LoadCommands
+     * feeding directly into this op and nothing else - collapse them into a
+     * single fused command that reads straight from the source arrays instead
+     * of round-tripping both operands through ctx.scratch. Returns null (no
+     * fusion) for anything that doesn't match that exact shape, including
+     * OP_REM (not vectorized regardless) and OP_POW (routes through
+     * VectorMath.executePowerBlended, not a plain lane op).
+     */
+    private static VectorCommand tryFuseLoadLoad(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 2) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof LoadCommand rLoad) || rLoad.destOff() != rOff) {
+            return null;
+        }
+        if (!(plan.get(size - 2) instanceof LoadCommand lLoad) || lLoad.destOff() != lOff) {
+            return null;
+        }
+
+        return switch (opcode) {
+            case OP_ADD ->
+                new LoadLoadAddCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_SUB ->
+                new LoadLoadSubCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_MUL ->
+                new LoadLoadMulCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            case OP_DIV ->
+                new LoadLoadDivCommand(lLoad.slotIdx(), rLoad.slotIdx(), destOff);
+            default ->
+                null;
+        };
+    }
+    
+     /**
+     * Peephole fusion for unweighted running sums/differences -
+     * {@code x1 + x2 + x3 + ... + xn}, or any mix of {@code +}/{@code -}
+     * between bare variables, with no coefficients anywhere. This is the
+     * {@code coeff = 1.0} (or {@code -1.0}, for {@code OP_SUB}) special case
+     * of {@link #tryFuseScaleAccumulate} - reusing the exact same
+     * {@link ScaleAccumulateCommand} (one hardware fused-multiply-add per
+     * SIMD lane, {@code acc = acc + 1.0*var}) rather than a separate
+     * plain-accumulate command class - for when the right-hand operand of an
+     * {@code OP_ADD}/{@code OP_SUB} is a bare {@link LoadCommand} rather
+     * than a {@link ScaleCommand}.
+     *
+     * <p>Tried after {@link #tryFuseScaleAccumulate}, since the two match
+     * mutually exclusive shapes (that one needs a {@code ScaleCommand} on
+     * top of the plan; this one needs a bare {@code LoadCommand}), and after
+     * {@link #tryFuseLoadLoad} already has first claim on the case where
+     * BOTH operands are bare loads (e.g. the {@code x1+x2} seed of
+     * {@code x1+x2+x3}) - so this only ever fires for "the accumulator so
+     * far, plus one more plain variable", which is exactly the shape every
+     * term after the first takes in an unweighted sum.
+     *
+     * <p>Composes with {@link #tryFuseLoadLoad} the same way
+     * {@link #tryFuseConstLoad}/{@link #tryFuseScaleAccumulate} compose for
+     * a weighted chain: an N-term unweighted sum collapses from
+     * {@code 2N-3} commands (a standalone {@code LoadCommand} plus a plain
+     * {@code AddCommand}/{@code SubCommand} for every term after the first
+     * two) down to {@code N-1} (one {@code LoadLoadAddCommand} seeding the
+     * accumulator from the first two terms, then one
+     * {@code ScaleAccumulateCommand} per remaining term).
+     */
+    private static VectorCommand tryFuseLoadAccumulate(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 1) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof LoadCommand load) || load.destOff() != rOff) {
+            return null;
+        }
+
+        double coeff = (opcode == OP_SUB) ? -1.0 : 1.0;
+        plan.remove(size - 1);
+        return new ScaleAccumulateCommand(coeff, load.slotIdx(), destOff);
+    }
+    
+      /**
+     * Peephole fusion for linear-combination-shaped expressions
+     * ({@code a1*x1 + a2*x2 + ... + an*xn}, and the equivalent with any mix
+     * of {@code +}/{@code -} between terms): when the right-hand operand of
+     * an {@code OP_ADD}/{@code OP_SUB} is a {@link ScaleCommand} that was
+     * JUST emitted - the last entry in the plan, nothing has consumed it yet
+     * - collapse the pair into a single {@link ScaleAccumulateCommand}: one
+     * hardware fused-multiply-add per SIMD lane
+     * ({@code acc = acc + coeff*var}, or {@code acc = acc - coeff*var} via a
+     * negated coefficient for {@code OP_SUB}), reading the variable straight
+     * from its source.
+     *
+     * <p>Unlike {@link #tryFuseLoadLoad}/{@link #tryFuseConstLoad}, only ONE
+     * plan entry is ever removed here - the left-hand (accumulator) operand
+     * is never a single fresh command to delete, it's whatever arbitrary
+     * chain of prior commands already left its value at {@code lOff} in
+     * scratch (itself possibly a previous {@code ScaleAccumulateCommand}),
+     * and that chain is left completely untouched. {@code destOff} is
+     * {@code lOff} by the caller's existing "reuse the left slot" convention
+     * for {@code OP_ADD}/{@code OP_SUB}, so the accumulator is written back
+     * into exactly the slot it already occupies.
+     *
+     * <p>Composing this with {@link #tryFuseConstLoad} is what collapses an
+     * entire N-term linear combination into exactly N commands: the first
+     * term becomes one {@code ScaleCommand} (seeding the accumulator), and
+     * every subsequent term becomes one {@code ScaleAccumulateCommand} -
+     * versus {@code 4N-1} commands (multiple full materialization passes per
+     * term) with no fusion at all.
+     */
+    private static VectorCommand tryFuseScaleAccumulate(List<VectorCommand> plan, int opcode, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 1) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof ScaleCommand scale) || scale.destOff() != rOff) {
+            return null;
+        }
+
+        double coeff = (opcode == OP_SUB) ? -scale.coeff() : scale.coeff();
+        plan.remove(size - 1);
+        return new ScaleAccumulateCommand(coeff, scale.varSlot(), destOff);
+    }
+    /**
+     * Peephole fusion: when one operand of an {@code OP_MUL} is a plain
+     * numeric constant and the other is a plain variable load - the last two
+     * plan entries are exactly a {@link ConstCommand} and a
+     * {@link LoadCommand} feeding this multiplication, in either order
+     * (multiplication is commutative, so {@code a*x} and {@code x*a} both
+     * match) - collapse them into a single {@link ScaleCommand} that reads
+     * the variable straight from its source and multiplies by the constant
+     * in one pass. This is the building block
+     * {@link #tryFuseScaleAccumulate} depends on: {@code a1*x1} compiles to
+     * one {@code ScaleCommand} instead of three separate commands
+     * ({@code ConstCommand}, {@code LoadCommand}, {@code MulCommand}).
+     *
+     * <p>Only fires for {@code OP_MUL} - the caller is responsible for not
+     * calling this for other opcodes, since e.g. {@code a/x} and
+     * {@code x/a} are not interchangeable.
+     */
+    private static VectorCommand tryFuseConstLoad(List<VectorCommand> plan, int lOff, int rOff, int destOff) {
+        int size = plan.size();
+        if (size < 2) {
+            return null;
+        }
+
+        VectorCommand last = plan.get(size - 1);
+        VectorCommand secondLast = plan.get(size - 2);
+
+        ConstCommand constCmd;
+        LoadCommand loadCmd;
+        if (last instanceof LoadCommand l && l.destOff() == rOff
+                && secondLast instanceof ConstCommand c && c.destOff() == lOff) {
+            constCmd = c;
+            loadCmd = l;
+        } else if (last instanceof ConstCommand c && c.destOff() == rOff
+                && secondLast instanceof LoadCommand l && l.destOff() == lOff) {
+            constCmd = c;
+            loadCmd = l;
+        } else {
+            return null;
+        }
+
+        plan.remove(size - 1);
+        plan.remove(size - 2);
+        return new ScaleCommand(constCmd.value(), loadCmd.slotIdx(), destOff);
+    }
+
+    /**
+     * Peephole fusion for any unary math opcode applied directly to a bare
+     * variable load: if the last plan entry is exactly the
+     * {@link LoadCommand} that produced {@code baseOff}, fuse the pair into
+     * a single command that reads the variable straight from its source
+     * instead of paying for a separate materialization pass first.
+     *
+     * <p>{@code OP_SQRT} gets the fully-dedicated {@link LoadSqrtCommand} -
+     * no separate materialization pass at all, see that class's javadoc for
+     * why sqrt specifically earns the hand-written treatment. Every other
+     * unary opcode gets the generic {@link LoadUnaryMathCommand}, which
+     * still delegates the actual math to the shared {@link #resolveUnaryMathOp}
+     * table but skips the extra {@code VectorCommand} dispatch a standalone
+     * {@code LoadCommand} would otherwise cost.
+     *
+     * <p>Returns {@code null} (no fusion) when the operand isn't a bare load
+     * - e.g. {@code sqrt(x+1)}, where the operand is the result of a prior
+     * {@code ADD}, not a {@code LoadCommand} - in which case the ordinary
+     * {@link UnaryMathCommand} path handles it exactly as before.
+     */
+    private static VectorCommand tryFuseLoadUnary(List<VectorCommand> plan, int opcode, int baseOff) {
+        int size = plan.size();
+        if (size < 1) {
+            return null;
+        }
+        if (!(plan.get(size - 1) instanceof LoadCommand load) || load.destOff() != baseOff) {
+            return null;
+        }
+
+        plan.remove(size - 1);
+        if (opcode == OP_SQRT) {
+            return new LoadSqrtCommand(load.slotIdx(), baseOff);
+        }
+        return new LoadUnaryMathCommand(resolveUnaryMathOp(opcode), load.slotIdx(), baseOff);
+    }
+
+    public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression implements AutoCloseable {
+
+        private static final Cleaner SYSTEM_CLEANER = Cleaner.create();
+
+        // Bounded spin budget before parking, shared by the worker dispatch
+        // wait and the master completion wait. Keeps best-case wake latency
+        // in the tens-of-nanoseconds range instead of an OS park/unpark
+        // round trip on every call, while still falling back to park() so a
+        // waiter never burns a core forever if something stalls.
+        private static final int SPIN_LIMIT = 2000;
+
         private final int NUM_WORKERS;
+        private final WorkerThread[] workerPool;
+        private final VectorCommand[] executionPlan;
+        private final ThreadLocal<EvaluationContext> masterEvalContext;
+        // Reusable per-caller-thread scratch buffer for computeChunkLengths(),
+        // sized NUM_WORKERS + 1. Kept per-thread (not a single shared array)
+        // because this class supports concurrent calls to applyBulkParallel
+        // from multiple external threads on the same instance — a shared
+        // buffer would let two callers stomp on each other's chunk math.
+        private final ThreadLocal<int[]> chunkLengthsScratch;
+        private final Cleaner.Cleanable cleanable;
 
-        // --- ZERO-ALLOCATION MULTI-THREADING SUBSYSTEM (ported from
-        // BulkTurboEvaluator.BatchedVectorCompositeExpression) ---
-        //
-        // A fixed ring of daemon worker threads is spawned exactly once, at
-        // construction time. Every subsequent dispatchToWorkerRing(...) call
-        // coordinates those SAME pre-existing threads purely through
-        // LockSupport.park()/unpark() on volatile "transfer registers" —
-        // no task object, no lambda, no Stream pipeline node, no
-        // ForkJoinTask is ever created after construction. This is what
-        // gives bulkTurboParallel its ~0 B/op allocation profile, and it
-        // is exactly reproduced here for the SIMD path.
-        private static final int SIMD_STATE_IDLE = 0;
-        private static final int SIMD_STATE_RUNNING = 1;
-        private static final int SIMD_STATE_FINISHED = 2;
+        private volatile boolean isClosed = false;
 
-        private final SIMDWorkerThread[] simdWorkers;
+        private static final class ThreadPoolShutdownAction implements Runnable {
 
-        // Volatile transfer registers (zero-heap parameter passing into the ring)
-        private volatile Thread simdMasterThread;
-        private volatile double[] simdCurrentFlatVars;
-        private volatile double[][] simdCurrent2DVars;
-        private volatile double[] simdCurrentOutput;
-        private volatile int simdCurrentDataSize;
+            private final WorkerThread[] pool;
 
-        /**
-         * Private worker used exclusively by the SIMD worker ring. Spins parked
-         * until the master publishes work into the volatile registers above,
-         * executes its slice via the existing applyBulkInternal(...) overloads
-         * (which already do the SIMD/Vector API work), then parks again.
-         */
-        private final class SIMDWorkerThread extends Thread {
-
-            private final int workerId;
-            volatile int state = SIMD_STATE_IDLE;
-
-            SIMDWorkerThread(int workerId) {
-                super("SIMDTurbo-Worker-" + workerId);
-                this.workerId = workerId;
+            ThreadPoolShutdownAction(WorkerThread[] pool) {
+                this.pool = pool;
             }
 
             @Override
             public void run() {
-                while (true) {
-                    while (state != SIMD_STATE_RUNNING) {
-                        LockSupport.park();
-                    }
-
-                    // Volatile reads establish a happens-before guarantee
-                    final double[] flatVars = simdCurrentFlatVars;
-                    final double[][] vars2D = simdCurrent2DVars;
-                    final double[] out = simdCurrentOutput;
-                    final int dataSize = simdCurrentDataSize;
-
-                    final int chunkSize = (dataSize + NUM_WORKERS - 1) / NUM_WORKERS;
-                    final int start = workerId * chunkSize;
-                    final int end = Math.min(start + chunkSize, dataSize);
-                    if (start < end) {
-                        if (flatVars != null) {
-                            applyBulkInternal(flatVars, dataSize, out, start, end - start);
-                        } else {
-                            applyBulkInternal(vars2D, dataSize, out, start, end - start);
+                if (pool != null) {
+                    for (WorkerThread worker : pool) {
+                        if (worker != null) {
+                            worker.terminate();
                         }
                     }
-
-                    state = SIMD_STATE_FINISHED;
-                    LockSupport.unpark(simdMasterThread);
                 }
             }
         }
 
-        SIMDVectorCompositeExpression() {
-            super(compiledScalarHandle, opcodes, targetSlots,
-                    literalConstants, instructionCount, varCount);
+        /**
+         *
+         * @param executionPlan
+         * @param stackDepth
+         * @param blockSize
+         */
+        public SIMDVectorCompositeExpression(VectorCommand[] executionPlan, int stackDepth, int blockSize) {
+            super(compiledScalarHandle, opcodes, targetSlots, literalConstants, instructionCount, varCount, false);
+            this.executionPlan = executionPlan;
+            this.masterEvalContext = ThreadLocal.withInitial(() -> new EvaluationContext(stackDepth, blockSize));
 
-            // Match bulkTurbo's worker-ring sizing (BulkTurboEvaluator uses
-            // the full detected core count with no reduction). The master
-            // thread fully parks in dispatchToWorkerRing(...) while workers
-            // run — it performs zero CPU work during dispatch — so reserving
-            // a core for it here only threw away a worker's worth of
-            // parallelism for no benefit.
-            this.NUM_WORKERS = numWorkers;
-
-            // Spawn the worker ring exactly once, at compile/construction time.
-            this.simdWorkers = new SIMDWorkerThread[this.NUM_WORKERS];
-            for (int i = 0; i < this.NUM_WORKERS; i++) {
-                simdWorkers[i] = new SIMDWorkerThread(i);
-                simdWorkers[i].setDaemon(true);
-                simdWorkers[i].start();
-            }
-        }
-
-        @Override
-        public MathExpression.EvalResult apply(double[] vars) {
-            return null;
-        }
-
-        @Override
-        public String checkErrorLogs() {
-            return "";
-        }
-
-        @Override
-        public TurboExpressionEvaluator getCompiler() {
-            return SIMDVectorTurboEvaluator.this;
-        }
-
-        // --- Zero-Allocation Worker-Ring Dispatchers ---
-        //
-        // Previously this used IntStream.range(0, numCores).parallel().forEach(...),
-        // which rebuilds an entire java.util.stream pipeline (Head node,
-        // ForEachOps.ForEachTask recursive-splitting tree, Spliterator
-        // wrappers, Sink chains) on every single call — none of it cached.
-        // That's why the parallel SIMD path showed ~49-54KB/op of allocation
-        // versus ~0.3KB/op for bulkTurboParallel.
-        //
-        // bulkTurboParallel avoids all of that by never allocating a task
-        // graph per call in the first place: it pre-spawns a fixed ring of
-        // daemon threads once, then coordinates them via LockSupport
-        // park()/unpark() on volatile fields for every dispatch. That
-        // pattern is reproduced here verbatim — dispatch is now just a
-        // couple of volatile writes and unpark() calls per worker, with
-        // zero object allocation on the hot path.
-        @Override
-        protected void dispatchToWorkerRing(double[] flatVariables, double[] output, int dataSize) {
-            // 1. Publish parameters to volatile registers (No allocations)
-            this.simdMasterThread = Thread.currentThread();
-            this.simdCurrentFlatVars = flatVariables;
-            this.simdCurrent2DVars = null;
-            this.simdCurrentOutput = output;
-            this.simdCurrentDataSize = dataSize;
-
-            // 2. Wake up the pre-spawned worker threads via OS permits
-            for (int i = 0; i < NUM_WORKERS; i++) {
-                simdWorkers[i].state = SIMD_STATE_RUNNING;
-                LockSupport.unpark(simdWorkers[i]);
+            if (numWorkers <= 2) {
+                this.NUM_WORKERS = numWorkers;
+            } else {
+                this.NUM_WORKERS = numWorkers - 1;
             }
 
-            // 3. Wait loop (0 bytes allocated on heap while sleeping)
-            for (int i = 0; i < NUM_WORKERS; i++) {
-                SIMDWorkerThread worker = simdWorkers[i];
-                while (worker.state != SIMD_STATE_FINISHED) {
-                    LockSupport.park();
+            if (this.NUM_WORKERS > 0) {
+                this.workerPool = new WorkerThread[NUM_WORKERS];
+                final int totalSlices = NUM_WORKERS + 1;
+                this.chunkLengthsScratch = ThreadLocal.withInitial(() -> new int[totalSlices]);
+
+                for (int i = 0; i < NUM_WORKERS; i++) {
+                    workerPool[i] = new WorkerThread(i, executionPlan, stackDepth, blockSize);
                 }
-                worker.state = SIMD_STATE_IDLE;
-            }
 
-            // 4. Memory leak protection
-            this.simdMasterThread = null;
-            this.simdCurrentFlatVars = null;
-            this.simdCurrentOutput = null;
+                for (int i = 0; i < NUM_WORKERS; i++) {
+                    workerPool[i].start();
+                }
+
+                this.cleanable = SYSTEM_CLEANER.register(this, new ThreadPoolShutdownAction(workerPool));
+            } else {
+                this.workerPool = null;
+                this.chunkLengthsScratch = null;
+                this.cleanable = null;
+            }
         }
 
         @Override
-        protected void dispatchToWorkerRing(double[][] variables, double[] output, int dataSize) {
-            // 1. Publish parameters to volatile registers (No allocations)
-            this.simdMasterThread = Thread.currentThread();
-            this.simdCurrentFlatVars = null;
-            this.simdCurrent2DVars = variables;
-            this.simdCurrentOutput = output;
-            this.simdCurrentDataSize = dataSize;
-
-            // 2. Wake up the pre-spawned worker threads via OS permits
-            for (int i = 0; i < NUM_WORKERS; i++) {
-                simdWorkers[i].state = SIMD_STATE_RUNNING;
-                LockSupport.unpark(simdWorkers[i]);
+        public void close() {
+            if (isClosed) {
+                return;
             }
+            isClosed = true;
+            if (cleanable != null) {
+                cleanable.clean();
+            }
+            masterEvalContext.remove();
+            if (chunkLengthsScratch != null) {
+                chunkLengthsScratch.remove();
+            }
+        }
 
-            // 3. Wait loop (0 bytes allocated on heap while sleeping)
-            for (int i = 0; i < NUM_WORKERS; i++) {
-                SIMDWorkerThread worker = simdWorkers[i];
-                while (worker.state != SIMD_STATE_FINISHED) {
-                    LockSupport.park();
+        /**
+         * Splits {@code numSamples} into {@code totalSlices} chunks, each an
+         * exact multiple of the SIMD lane width except for the very last
+         * slice, which also absorbs whatever scalar remainder is left over.
+         * The last slice is always handed to the calling (master) thread
+         * (see the {@code applyBulkParallel} overloads below), so every
+         * background worker gets a perfectly vector-aligned chunk with zero
+         * scalar tail, and no slice carries more than one extra lane-group
+         * versus its neighbours.
+         *
+         * Writes into the calling thread's {@link #chunkLengthsScratch}
+         * buffer rather than allocating, so repeated calls from the same
+         * thread cost zero garbage.
+         */
+        private int[] computeChunkLengths(int numSamples, int totalSlices) {
+            final int vlen = SPECIES.length();
+            final int units = numSamples / vlen;
+            final int scalarRemainder = numSamples - (units * vlen);
+            final int baseUnits = units / totalSlices;
+            final int extraUnits = units % totalSlices;
+
+            int[] lengths = chunkLengthsScratch.get();
+            for (int i = 0; i < totalSlices; i++) {
+                int u = baseUnits + (i < extraUnits ? 1 : 0);
+                lengths[i] = u * vlen;
+            }
+            lengths[totalSlices - 1] += scalarRemainder;
+            return lengths;
+        }
+
+        /**
+         * Waits for the first {@code used} workers in {@link #workerPool} to
+         * finish. Each worker only ever writes its own {@code done} flag, so
+         * unlike a shared decrementing latch this generates no cache-line
+         * contention between workers as they finish at roughly the same
+         * time. Spins briefly before parking to avoid paying OS wake latency
+         * in the common case where the wait is short.
+         */
+        private void awaitWorkers(int used) {
+            for (int i = 0; i < used; i++) {
+                WorkerThread w = workerPool[i];
+                int spins = 0;
+                while (!w.done) {
+                    if (spins < SPIN_LIMIT) {
+                        Thread.onSpinWait();
+                        spins++;
+                    } else {
+                        LockSupport.park();
+                    }
                 }
-                worker.state = SIMD_STATE_IDLE;
+            }
+        }
+
+        private static final class WorkerThread extends Thread {
+
+            // Manual cache-line padding around the hot per-worker dispatch
+            // state below. Java gives no field-layout guarantee, but keeping
+            // this state clustered and padded discourages the JVM/hardware
+            // from letting one worker's dispatch writes false-share a line
+            // with a neighbouring WorkerThread's, without depending on
+            // JDK-internal @Contended (which needs module opens we can't
+            // assume the embedding application has granted).
+            private long p0, p1, p2, p3, p4, p5, p6, p7;
+
+            private final int workerId;
+            private final EvaluationContext evalContext;
+            private final VectorCommand[] executionPlan;
+            private final int blockSize;
+
+            private volatile boolean isRunning = true;
+            private volatile int taskState = 0;
+            // Written only by this worker; polled by the master in
+            // awaitWorkers(). Deliberately not shared/aggregated so workers
+            // never contend with each other while reporting completion.
+            private volatile boolean done = true;
+            private volatile Thread masterThread;
+
+            private double[][] vars2D;
+            private double[] vars1D;
+            private double[] output;
+            private int dataSize;
+            private int startIdx;
+            private int length;
+
+            private long q0, q1, q2, q3, q4, q5, q6, q7;
+
+            public WorkerThread(int workerId, VectorCommand[] executionPlan, int stackDepth, int blockSize) {
+                this.workerId = workerId;
+                this.executionPlan = executionPlan;
+                this.blockSize = blockSize;
+                this.evalContext = new EvaluationContext(stackDepth, blockSize);
+                this.setDaemon(true);
+                this.setName("ParserNG-SIMD-Worker-" + workerId);
             }
 
-            // 4. Memory leak protection
-            this.simdMasterThread = null;
-            this.simdCurrent2DVars = null;
-            this.simdCurrentOutput = null;
+            public void submitTask2D(double[][] vars, double[] output, int dataSize, int startIdx, int length, Thread master) {
+                this.vars2D = vars;
+                this.vars1D = null;
+                this.output = output;
+                this.dataSize = dataSize;
+                this.startIdx = startIdx;
+                this.length = length;
+                this.masterThread = master;
+                this.done = false;
+                this.taskState = 1;
+                LockSupport.unpark(this);
+            }
+
+            public void submitTask1D(double[] vars, double[] output, int dataSize, int startIdx, int length, Thread master) {
+                this.vars1D = vars;
+                this.vars2D = null;
+                this.output = output;
+                this.dataSize = dataSize;
+                this.startIdx = startIdx;
+                this.length = length;
+                this.masterThread = master;
+                this.done = false;
+                this.taskState = 1;
+                LockSupport.unpark(this);
+            }
+
+            public void terminate() {
+                this.isRunning = false;
+                this.interrupt();
+            }
+
+            @Override
+            public void run() {
+                while (isRunning) {
+                    int spins = 0;
+                    while (taskState == 0 && isRunning) {
+                        if (spins < SPIN_LIMIT) {
+                            Thread.onSpinWait();
+                            spins++;
+                        } else {
+                            LockSupport.park();
+                            if (Thread.interrupted()) {
+                                return;
+                            }
+                        }
+                    }
+                    if (!isRunning) {
+                        return;
+                    }
+
+                    // try/finally: guarantees `done` is always raised and the
+                    // master always unparked, even if a bad expression or
+                    // malformed input throws mid-block. Without this a single
+                    // faulting task would leave the master parked forever.
+                    try {
+                        if (vars2D != null) {
+                            applyBulkInternal(vars2D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
+                        } else if (vars1D != null) {
+                            applyBulkInternal(vars1D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
+                        }
+                    } finally {
+                        this.taskState = 0;
+                        this.vars2D = null;
+                        this.vars1D = null;
+                        this.output = null;
+                        this.done = true;
+                        Thread master = this.masterThread;
+                        if (master != null) {
+                            LockSupport.unpark(master);
+                        }
+                    }
+                }
+            }
+        }
+
+        public void validate(double[][] variables, double[] output) {
+            // 1. Fail fast, avoid String.format unless throwing
+            if (variables == null || output == null) {
+                throw new IllegalArgumentException("Null input");
+            }
+
+            // 2. Cache values to local variables to avoid multiple array lookups
+            final int varLen = variables.length;
+            final int outLen = output.length;
+            int stride = getVarCount();
+            if (varLen != stride) {
+                throw new IllegalArgumentException("Stride mismatch");
+            }
+
+            // 3. Optional: Only check inner length if you really need absolute safety
+            // Only perform this if the performance impact of O(varCount) is acceptable.
+            for (int i = 0; i < varLen; i++) {
+                if (variables[i] == null || variables[i].length < outLen) {
+                    throw new IllegalArgumentException("Jagged array or size mismatch");
+                }
+            }
+        }
+
+        public void validate(double[] flatVariables, double[] output) {
+            int totalSamples = flatVariables != null && flatVariables.length > 0 && output != null && output.length > 0 ? flatVariables.length : -1;
+            int stride = getVarCount();
+            if (totalSamples != stride * output.length) {
+                throw new IllegalStateException(String.format("array sizes not correct[totalSamples=%d vs computed(var-count*output-array-size)=%d]",
+                        totalSamples, stride * output.length));
+            }
+        }
+
+        public void validate(float[][] variables, double[] output) {
+            throw new InputMismatchException("float[][] not supported only double[] and double[][]");
+        }
+
+        public void validate(float[] flatVariables, float[] output) {
+            throw new InputMismatchException("float[][] not supported only double[] and double[][]");
         }
 
         @Override
         public void applyBulk(double[][] variables, double[] output) {
             if (varCount == 0) {
-                fillOutput(constantAnswer, output);
+                fillOutput(SIMDVectorTurboEvaluator.this.constantAnswer, output);
                 return;
             }
             int numSamples = variables[0].length;
-
-            applyBulkInternal(variables, numSamples, output, 0, numSamples);
+            applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
         }
 
         @Override
         public void applyBulkParallel(double[][] variables, double[] output) {
             if (varCount == 0) {
-                fillOutput(constantAnswer, output);
+                fillOutput(SIMDVectorTurboEvaluator.this.constantAnswer, output);
                 return;
             }
             if (variables == null || variables.length == 0 || output == null) {
                 return;
             }
             int numSamples = variables[0].length;
-            if (numSamples < PARALLEL_OPS_THRESHOLD) {
-                applyBulk(variables, output);
+
+            if (NUM_WORKERS <= 0 || numSamples < PARALLEL_OPS_THRESHOLD) {
+                applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
                 return;
             }
 
-            dispatchToWorkerRing(variables, output, numSamples);
-        }
+            // NUM_WORKERS background threads + the calling thread itself.
+            // The master no longer sits idle while it waits: it takes the
+            // last (vector-aligned-plus-remainder) slice and computes it
+            // while the background workers are running.
+            final int totalSlices = NUM_WORKERS + 1;
+            final int[] lengths = computeChunkLengths(numSamples, totalSlices);
+            final Thread masterThread = Thread.currentThread();
 
-        @Override
-        public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
-            if (varCount == 0) {
-                fillOutput(constantAnswer, output);
-                return;
+            int startIdx = 0;
+            int used = 0;
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                int length = lengths[i];
+                if (length > 0) {
+                    workerPool[i].submitTask2D(variables, output, numSamples, startIdx, length, masterThread);
+                    used++;
+                }
+                startIdx += length;
             }
-            int numSamples = variables[0].length;
-            for (int start = 0; start < numSamples; start += batchSize) {
-                int length = Math.min(batchSize, numSamples - start);
-                applyBulkInternal(variables, numSamples, output, start, length);
-            }
-        }
 
-        // --- 1D Flat Contiguous Frameworks ---
-        @Override
-        public void applyBulk(double[] flatVariables, double[] output) {
-            if (varCount == 0) {
-                fillOutput(constantAnswer, output);
-                return;
+            int masterLength = lengths[totalSlices - 1];
+            if (masterLength > 0) {
+                applyBulkInternal(variables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, startIdx, masterLength);
             }
-            applyBulkInternal(flatVariables, output.length, output, 0, output.length);
+
+            awaitWorkers(used);
         }
 
         @Override
         public void applyBulkParallel(double[] flatVariables, double[] output) {
             if (varCount == 0) {
-                fillOutput(constantAnswer, output);
+                fillOutput(SIMDVectorTurboEvaluator.this.constantAnswer, output);
+                return;
+            }
+            if (flatVariables == null || output == null) {
                 return;
             }
             int numSamples = output.length;
-            if (numSamples < PARALLEL_OPS_THRESHOLD) {
-                applyBulkInternal(flatVariables, numSamples, output, 0, numSamples);
+
+            if (NUM_WORKERS <= 0 || numSamples < PARALLEL_OPS_THRESHOLD) {
+                applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, 0, numSamples);
                 return;
             }
-            dispatchToWorkerRing(flatVariables, output, numSamples);
+
+            final int totalSlices = NUM_WORKERS + 1;
+            final int[] lengths = computeChunkLengths(numSamples, totalSlices);
+            final Thread masterThread = Thread.currentThread();
+
+            int startIdx = 0;
+            int used = 0;
+            for (int i = 0; i < NUM_WORKERS; i++) {
+                int length = lengths[i];
+                if (length > 0) {
+                    workerPool[i].submitTask1D(flatVariables, output, numSamples, startIdx, length, masterThread);
+                    used++;
+                }
+                startIdx += length;
+            }
+
+            int masterLength = lengths[totalSlices - 1];
+            if (masterLength > 0) {
+                applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, numSamples, output, startIdx, masterLength);
+            }
+
+            awaitWorkers(used);
+        }
+
+        @Override
+        public void applyBulkBatched(double[][] variables, double[] output, int batchSize) {
+            if (varCount == 0) {
+                fillOutput(SIMDVectorTurboEvaluator.this.constantAnswer, output);
+                return;
+            }
+            EvaluationContext ctx = masterEvalContext.get();
+            int numSamples = variables[0].length;
+            for (int start = 0; start < numSamples; start += batchSize) {
+                int length = Math.min(batchSize, numSamples - start);
+                applyBulkInternal(variables, ctx, executionPlan, BLOCK_SIZE, numSamples, output, start, length);
+            }
+        }
+
+        @Override
+        public void applyBulk(double[] flatVariables, double[] output) {
+            if (varCount == 0) {
+                fillOutput(SIMDVectorTurboEvaluator.this.constantAnswer, output);
+                return;
+            }
+            applyBulkInternal(flatVariables, masterEvalContext.get(), executionPlan, BLOCK_SIZE, output.length, output, 0, output.length);
         }
 
         @Override
         public void applyBulkBatched(double[] flatVariables, double[] output, int batchSize) {
             if (varCount == 0) {
-                fillOutput(constantAnswer, output);
+                fillOutput(SIMDVectorTurboEvaluator.this.constantAnswer, output);
                 return;
             }
+            EvaluationContext ctx = masterEvalContext.get();
             int numSamples = output.length;
             for (int start = 0; start < numSamples; start += batchSize) {
                 int length = Math.min(batchSize, numSamples - start);
-                applyBulkInternal(flatVariables, numSamples, output, start, length);
+                applyBulkInternal(flatVariables, ctx, executionPlan, BLOCK_SIZE, numSamples, output, start, length);
             }
         }
 
-        /**
-         * Core column-major vectorized loop processor utilizing a flat memory
-         * architecture. Bypasses pointer-chasing and allocation overhead
-         * inherent to jagged multidimensional arrays (e.g., {@code double[][]})
-         * to execute loops at maximum hardware throughput.
-         * <p>
-         * Based on the {@code tiledExecution} execution parameter, this method
-         * delegates to either a cache-conscious tiledExecution implementation
-         * or a direct flat streaming evaluation strategy.
-         * </p>
-         *
-         * @param flatVariables a contiguous, single-dimensional array
-         * containing concatenated variable tracks back-to-back (e.g.,
-         * {@code [x1, x2...xn, y1, y2...yn, z1, z2...zn]})
-         * @param dataSize the total number of elements per individual variable
-         * row, used as the stride offset to hop between distinct variable
-         * memory blocks
-         * @param output the target destination array where the resulting
-         * mathematical evaluations are written
-         * @param startIdx the baseline index indicating where the batch
-         * processing slice begins
-         * @param length the absolute number of elements to process within this
-         * batch window Tiles by default: If execution should be routed
-         *
-         * through a block memory pattern optimized for L1/L2 cache locality;
-         * {@code false} for flat, non-tiledExecution bulk processing
-         *
-         * If you are processing a total dataset of 1,000,000 elements (dataSize
-         * = 1000000), but a specific thread or tile is only processing a chunk
-         * of 500 elements starting at element 200,000:
-         *
-         * startIdx = 200000
-         *
-         * length = 500
-         *
-         * It tells the engine: "Grab 500 elements starting at offset 200,000
-         * from each variable segment in the input, compute them, and write them
-         * into indices 200,000 through 200,499 of the output array."
-         */
-        private void applyBulkInternal(double[] flatVariables, int dataSize, double[] output, int startIdx, int length) {
-            // Thread-local scratch space acquisition & sizing guard
-            double[] scratch = FLAT_SCRATCH_STACK.get();
-            final int requiredScratchSize = Math.min(BLOCK_SIZE, length);
-            if (scratch == null || scratch.length < requiredScratchSize) {
-                scratch = new double[requiredScratchSize];
-                FLAT_SCRATCH_STACK.set(scratch);
-            }
-
-            // Cache-aligned Loop Tiling
+        // --- Core Internal Hot-Loops with Vectorized Copy Defenses ---
+        private static void applyBulkInternal(double[] flatVariables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, double[] output, int startIdx, int length) {
             final int endIdx = startIdx + length;
-            for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
-                final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
-                evaluateBlock(flatVariables, dataSize, output, blockStart, currentBlockSize, scratch);
-            }
-        }
-
-        private void applyBulkInternal(double[][] variables, int dataSize, double[] output, int startIdx, int length) {
-
-            // Thread-local scratch space acquisition & sizing guard
-            double[] scratch = FLAT_SCRATCH_STACK.get();
-            if (scratch == null || scratch.length < (SIMDVectorTurboEvaluator.this.stackDepth * BLOCK_SIZE)) {
-                scratch = new double[SIMDVectorTurboEvaluator.this.stackDepth * BLOCK_SIZE];
-                FLAT_SCRATCH_STACK.set(scratch);
-            }
-
-            // Cache-aligned Loop Tiling
-            final int endIdx = startIdx + length;
-            for (int blockStart = startIdx; blockStart < endIdx; blockStart += BLOCK_SIZE) {
-                final int currentBlockSize = Math.min(BLOCK_SIZE, endIdx - blockStart);
-                evaluateBlock(variables, output, blockStart, currentBlockSize, scratch);
-            }
-        }
-
-        ////////////////////////////////////////////
-        /**
-         * Core interpretation stream. Leverages explicit AVX-bound Incubator
-         * Vector API instructions where possible, falling back to clean
-         * primitive loops for auto-vectorization across the tile window.
-         */
-        private void evaluateBlock(double[] flatVariables,
-                int dataSize,
-                double[] output,
-                int blockStart,
-                int currentBlockSize,
-                double[] scratch) {
-
-            final int n = currentBlockSize; // Local alias for loop bounds
-            int sp = 0;
-
-            for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
-                final int opcode = opcodes[instIdx];
-
-                switch (opcode) {
-                    case OP_CONST -> {
-                        final double val = literalConstants[instIdx];
-                        final int stackOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        DoubleVector valVec = DoubleVector.broadcast(SPECIES, val);
-                        for (; k < upperBound; k += VLEN) {
-                            valVec.intoArray(scratch, stackOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[stackOffset + k] = val;
-                        }
-                    }
-
-                    case OP_LOAD -> {
-                        final int slotIdx = targetSlots[instIdx];
-                        final int stackOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        if (stackOffset + n > scratch.length) {
-                            throw new IllegalStateException(
-                                    String.format("Scratch buffer overflow! dataSize=%d, stackOffset=%d, n=%d, scratch.length=%d, BLOCK_SIZE=%d, sp=%d",
-                                            dataSize, stackOffset, n, scratch.length, BLOCK_SIZE, sp));
-                        }
-                        final int flatOffset = (slotIdx * dataSize) + blockStart;
-                        System.arraycopy(flatVariables, flatOffset, scratch, stackOffset, n);
-                    }
-
-                    // Binary Operators
-                    case OP_ADD -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        for (; k < upperBound; k += VLEN) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-                            va.add(vb).intoArray(scratch, resOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] + scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_SUB -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        for (; k < upperBound; k += VLEN) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-                            va.sub(vb).intoArray(scratch, resOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] - scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_MUL -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        for (; k < upperBound; k += VLEN) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-                            va.mul(vb).intoArray(scratch, resOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] * scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_DIV -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        for (; k < upperBound; k += VLEN) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-                            va.div(vb).intoArray(scratch, resOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] / scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_POW -> {
-                        final int expOffset = (sp - 1) * BLOCK_SIZE;
-                        final int baseOffset = (sp - 2) * BLOCK_SIZE;
-
-                        // Keep the switch thin! Delegate out to highly optimized,
-                        // easily inlined method kernels to preserve Escape Analysis.
-                        VectorMath.executePowerBlended(scratch, baseOffset, expOffset, n);
-
-                        sp--;
-                    }
-
-                    case OP_SWIGLU_2 -> {
-                        sp -= 2;
-                        final int base = sp * BLOCK_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + BLOCK_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        final int loopBound = SPECIES.loopBound(n);
-                        int k = 0;
-
-                        // Hoist constants outside the hot loop
-                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
-
-                        // 1. Vectorized main loop
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector y = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-
-                            // Calculate SwiGLU: (x * y) / (1.0 + exp(-x))
-                            DoubleVector expNegX = VectorMath.fastVectorExp(x.neg()); // x.neg() simply flips the sign bit (fast)
-                            DoubleVector denom = expNegX.add(ONE);
-                            DoubleVector result = x.mul(y).div(denom);     // Fused mul + hardware div 
-
-                            result.intoArray(scratch, resOffset + k);
-                        }
-
-                        // 2. Scalar tail loop for any remaining elements
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = Maths.swiglu(scratch[lOffset + k], scratch[rOffset + k]);
-                        }
-                    }
-                    case OP_GEGLU_2 -> {
-                        sp -= 2; // Adjust stack pointer
-                        final int lOffset = sp * BLOCK_SIZE;
-                        final int rOffset = lOffset + BLOCK_SIZE;
-                        final int loopBound = SPECIES.loopBound(n);
-
-                        final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
-                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
-                        final DoubleVector INV_SQRT_2 = DoubleVector.broadcast(SPECIES, 0.7071067811865476);
-
-                        int k = 0;
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            // Load two inputs simultaneously
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector y = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-
-                            // GeLU(y) = 0.5 * y * (1 + erf(y / sqrt(2)))
-                            // We reuse your high-precision vectorizedErf utility
-                            DoubleVector erfVal = VectorMath.vectorizedErf(y.mul(INV_SQRT_2));
-                            DoubleVector geluY = y.mul(HALF).mul(erfVal.add(ONE));
-
-                            // Result = x * GeLU(y)
-                            DoubleVector result = x.mul(geluY);
-
-                            // Store back to lOffset (simulating stack push)
-                            result.intoArray(scratch, lOffset + k);
-                        }
-
-                        // Tail cleanup
-                        for (; k < n; k++) {
-                            scratch[lOffset + k] = Maths.geglu(scratch[lOffset + k], scratch[rOffset + k]);
-                        }
-
-                        sp++; // Finalize stack pointer adjustment
-                    }
-                    case OP_REM -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] % scratch[rOffset + k];
-                        }
-                    }
-
-                    // Base Unary Operations (In-place scalar evaluation)
-                    case OP_SIN -> {
-                        VectorMath.sin((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_COS -> {
-                        VectorMath.cos((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_TAN -> {
-                        VectorMath.tan((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_SINH -> {
-                        VectorMath.sinh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_COSH -> {
-                        VectorMath.cosh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_TANH -> {
-                        VectorMath.tanh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_ABS -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.abs(scratch[srcOffset + k]);
-                        }
-                    }
-
-                    case OP_EXP -> {
-                        VectorMath.exp((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_SQRT -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        VectorTranscendentals.evaluateNative(
-                                scratch, // src array
-                                srcOffset, // srcOffset
-                                scratch, // dest array (in-place)
-                                srcOffset, // destOffset
-                                n, // element count
-                                VectorOperators.SQRT // unary operator
-                        );
-                    }
-
-                    case OP_CBRT -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        VectorTranscendentals.evaluateNative(
-                                scratch, // src array
-                                srcOffset, // srcOffset
-                                scratch, // dest array (in-place)
-                                srcOffset, // destOffset
-                                n, // element count
-                                VectorOperators.CBRT // unary operator
-                        );
-                    }
-                    case OP_SWIGLU -> {
-                        final int base = (sp - 1) * BLOCK_SIZE;
-
-                        final int loopBound = SPECIES.loopBound(n);
-                        int k = 0;
-
-                        // Hoist constant outside the hot loop
-                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
-
-                        // 1. Vectorized main loop (In-place modification)
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
-
-                            // Calculate 1-arg SwiGLU (Swish/SiLU): x / (1.0 + exp(-x))
-                            DoubleVector expNegX = VectorMath.fastVectorExp(x.neg());
-                            DoubleVector denom = expNegX.add(ONE);
-                            DoubleVector result = x.div(denom);
-
-                            // Write directly back to the same offset
-                            result.intoArray(scratch, base + k);
-                        }
-
-                        // 2. Scalar tail loop for remaining elements
-                        for (; k < n; k++) {
-                            scratch[base + k] = Maths.swiglu(scratch[base + k]);
-                        }
-                    }
-                    case OP_GELU, OP_GEGLU, OP_GELU_FAST -> {
-                        final int base = (sp - 1) * BLOCK_SIZE;
-                        final int loopBound = SPECIES.loopBound(n);
-                        int k = 0;
-
-                        // Common constants
-                        final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
-                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
-                        final DoubleVector TWO = DoubleVector.broadcast(SPECIES, 2.0);
-
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
-                            DoubleVector result;
-
-                            if (opcode == OP_GELU) {
-                                // GELU = 0.5 * x * (1 + erf(x / sqrt(2)))
-                                final DoubleVector INV_SQRT_2 = DoubleVector.broadcast(SPECIES, 0.7071067811865476);
-                                // Note: Reuse your vectorizedErf here
-                                result = x.mul(HALF).mul(VectorMath.vectorizedErf(x.mul(INV_SQRT_2)).add(ONE));
-                            } else if (opcode == OP_GELU_FAST) {
-                                // FAST GELU = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-                                final DoubleVector SQRT_2_OVER_PI = DoubleVector.broadcast(SPECIES, 0.7978845608028654);
-                                final DoubleVector COEF = DoubleVector.broadcast(SPECIES, 0.044715);
-
-                                DoubleVector x3 = x.mul(x).mul(x);
-                                DoubleVector z = x3.mul(COEF).add(x).mul(SQRT_2_OVER_PI);
-
-                                // Using your optimized fastVectorExp for tanh calculation
-                                DoubleVector exp2z = VectorMath.fastVectorExp(z.mul(TWO));
-                                DoubleVector tanhZ = exp2z.sub(ONE).div(exp2z.add(ONE));
-                                result = x.mul(HALF).mul(tanhZ.add(ONE));
-                            } else { // OP_GEGLU
-                                // Placeholder for GEGLU logic (Gated Error Linear Unit)
-                                result = x;
-                            }
-
-                            result.intoArray(scratch, base + k);
-                        }
-
-                        // Scalar fallback
-                        for (; k < n; k++) {
-                            if (opcode == OP_GELU) {
-                                scratch[base + k] = Maths.gelu(scratch[base + k]);
-                            } else if (opcode == OP_GELU_FAST) {
-                                scratch[base + k] = Maths.fastGelu(scratch[base + k]);
-                            } else {
-                                scratch[base + k] = Maths.geglu(scratch[base + k]);
-                            }
-                        }
-                    }
-                    case OP_ERF -> {
-                        final int base = (sp - 1) * BLOCK_SIZE;
-                        final int loopBound = SPECIES.loopBound(n);
-                        int k = 0;
-
-                        // 1. Vectorized main loop
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
-
-                            // Use your optimized piecewise vectorizedErf
-                            DoubleVector result = VectorMath.vectorizedErf(x);
-
-                            result.intoArray(scratch, base + k);
-                        }
-
-                        // 2. Scalar tail loop for remaining elements
-                        for (; k < n; k++) {
-                            scratch[base + k] = Maths.erf(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_LOG -> {
-                        VectorMath.ln((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_LOG10 -> {
-                        VectorMath.log10((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    // --- Inverse Radians (Routed to VectorMath for Alias Mapping) ---
-                    case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT -> {
-                        VectorMath.asin((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT -> {
-                        VectorMath.acos((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT -> {
-                        VectorMath.atan((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    // --- DEGREE / GRADIAN TRIG VARIANTS ---
-                    case OP_SIN_DEG ->
-                        VectorMath.sinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COS_DEG ->
-                        VectorMath.cosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_TAN_DEG ->
-                        VectorMath.tanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_SIN_GRAD ->
-                        VectorMath.sinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COS_GRAD ->
-                        VectorMath.cosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_TAN_GRAD ->
-                        VectorMath.tanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // --- INVERSE DEGREE / GRADIAN VARIANTS ---
-                    case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG ->
-                        VectorMath.asinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG ->
-                        VectorMath.acosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG ->
-                        VectorMath.atanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD ->
-                        VectorMath.asinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD ->
-                        VectorMath.acosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD ->
-                        VectorMath.atanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // --- RECIPROCAL TRIG (SEC, CSC, COT) VARIANTS ---
-                    case OP_SEC ->
-                        VectorMath.sec((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_SEC_DEG ->
-                        VectorMath.secDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_SEC_GRAD ->
-                        VectorMath.secGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COSEC ->
-                        VectorMath.csc((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COSEC_DEG ->
-                        VectorMath.cscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COSEC_GRAD ->
-                        VectorMath.cscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COT ->
-                        VectorMath.cot((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COT_DEG ->
-                        VectorMath.cotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COT_GRAD ->
-                        VectorMath.cotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // --- INVERSE RECIPROCAL TRIG VARIANTS ---
-                    case OP_ARC_SEC, OP_ARC_SEC_ALT ->
-                        VectorMath.asec((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG ->
-                        VectorMath.asecDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD ->
-                        VectorMath.asecGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COSEC, OP_ARC_COSEC_ALT ->
-                        VectorMath.acsc((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG ->
-                        VectorMath.acscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD ->
-                        VectorMath.acscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COT, OP_ARC_COT_ALT ->
-                        VectorMath.acot((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG ->
-                        VectorMath.acotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD ->
-                        VectorMath.acotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // --- HYPERBOLIC INVERSES ---
-                    case OP_ASINH, OP_ASINH_ALT ->
-                        VectorMath.asinh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ACOSH, OP_ACOSH_ALT ->
-                        VectorMath.acosh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ATANH, OP_ATANH_ALT ->
-                        VectorMath.atanh((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // Conditional Comparisons
-                    case OP_GT -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] > scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_LT -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] < scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_EQ -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] == scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_NE -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] != scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_GE -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] >= scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_LE -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] <= scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_VMA -> {
-                        final int cOffset = (--sp) * BLOCK_SIZE;
-                        final int bOffset = (--sp) * BLOCK_SIZE;
-                        final int aOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-
-                        int k = 0;
-                        // 1. Process as many full vectors as possible
-                        int bound = SPECIES.loopBound(n);
-                        for (; k < bound; k += SPECIES.length()) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, aOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, bOffset + k);
-                            DoubleVector vc = DoubleVector.fromArray(SPECIES, scratch, cOffset + k);
-
-                            va.fma(vb, vc).intoArray(scratch, resOffset + k);
-                        }
-
-                        // 2. Handle the "tail" using a Mask
-                        // This creates a mask where only indices < n are enabled
-                        if (k < n) {
-                            VectorMask<Double> mask = SPECIES.indexInRange(k, n);
-
-                            // Use 'fromArray' with a mask to safely load only valid elements
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, aOffset + k, mask);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, bOffset + k, mask);
-                            DoubleVector vc = DoubleVector.fromArray(SPECIES, scratch, cOffset + k, mask);
-
-                            // FMA with mask - only updates enabled lanes
-                            va.fma(vb, vc).intoArray(scratch, resOffset + k, mask);
-                        }
-                    }
-                    case OP_IF -> {
-                        final int falseOffset = (--sp) * BLOCK_SIZE;
-                        final int trueOffset = (--sp) * BLOCK_SIZE;
-                        final int condOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = (scratch[condOffset + k] != 0.0) ? scratch[trueOffset + k] : scratch[falseOffset + k];
-                        }
-                    }
-
-                    default ->
-                        throw new UnsupportedOperationException("Unknown opcode: " + opcode);
-                }
-            }
-
-            // Flush the final computation results out to the destination block segment
-            System.arraycopy(scratch, 0, output, blockStart, n);
-        }
-
-        private void evaluateBlock(double[][] _2DVariables,
-                double[] output,
-                int blockStart,
-                int currentBlockSize,
-                double[] scratch) {
-
-            final int n = currentBlockSize; // Local alias for loop bounds
-            int sp = 0;
-
-            for (int instIdx = 0; instIdx < instructionCount; instIdx++) {
-                final int opcode = opcodes[instIdx];
-
-                switch (opcode) {
-                    case OP_CONST -> {
-                        final double val = literalConstants[instIdx];
-                        final int stackOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        DoubleVector valVec = DoubleVector.broadcast(SPECIES, val);
-                        for (; k < upperBound; k += VLEN) {
-                            valVec.intoArray(scratch, stackOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[stackOffset + k] = val;
-                        }
-                    }
-
-                    case OP_LOAD -> {
-                        final int slotIdx = targetSlots[instIdx];
-                        final int stackOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        /*if (stackOffset + n > scratch.length) {
-                            throw new IllegalStateException(
-                            String.format("Scratch buffer overflow! dataSize=%d, stackOffset=%d, n=%d, scratch.length=%d, BLOCK_SIZE=%d, sp=%d",
-                                            dataSize, stackOffset, n, scratch.length, BLOCK_SIZE, sp));
-                        }
-                        //final int flatOffset = (slotIdx * dataSize) + blockStart;
-                        //System.arraycopy(_2DVariables, flatOffset, scratch, stackOffset, n);
-                         */
- /*Works
-                        for (int k = 0; k < n; k++) {
-                            scratch[stackOffset + k] = _2DVariables[slotIdx][blockStart + k];
-                        }*/
-                        if (stackOffset + n > scratch.length) {
-                            throw new IllegalStateException(
-                                    String.format("Buffer overflow imminent! destArray.length=%d, destPos=%d, copyLength=%d",
-                                            scratch.length, stackOffset, n)
-                            );
-                        }
-                        System.arraycopy(_2DVariables[slotIdx], blockStart, scratch, stackOffset, n);
-                    }
-
-                    // Binary Operators
-                    case OP_ADD -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        for (; k < upperBound; k += VLEN) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-                            va.add(vb).intoArray(scratch, resOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] + scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_SUB -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        for (; k < upperBound; k += VLEN) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-                            va.sub(vb).intoArray(scratch, resOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] - scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_MUL -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        for (; k < upperBound; k += VLEN) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-                            va.mul(vb).intoArray(scratch, resOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] * scratch[rOffset + k];
-                        }
-                    }
-
-                    case OP_DIV -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        int upperBound = SPECIES.loopBound(n);
-                        for (; k < upperBound; k += VLEN) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-                            va.div(vb).intoArray(scratch, resOffset + k);
-                        }
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] / scratch[rOffset + k];
-                        }
-                    }
-                    case OP_POW -> {
-                        final int expOffset = (sp - 1) * BLOCK_SIZE;
-                        final int baseOffset = (sp - 2) * BLOCK_SIZE;
-
-                        // Keep the switch thin! Delegate out to highly optimized,
-                        // easily inlined method kernels to preserve Escape Analysis.
-                        VectorMath.executePowerBlended(scratch, baseOffset, expOffset, n);
-
-                        sp--;
-                    }
-
-                    case OP_SWIGLU_2 -> {
-                        sp -= 2;
-                        final int base = sp * BLOCK_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + BLOCK_SIZE;
-                        final int resOffset = base;
-                        sp++;
-
-                        final int loopBound = SPECIES.loopBound(n);
-                        int k = 0;
-
-                        // Hoist constants outside the hot loop
-                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
-
-                        // 1. Vectorized main loop
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector y = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-
-                            // Calculate SwiGLU: (x * y) / (1.0 + exp(-x))
-                            DoubleVector expNegX = VectorMath.fastVectorExp(x.neg()); // x.neg() simply flips the sign bit (fast)
-                            DoubleVector denom = expNegX.add(ONE);
-                            DoubleVector result = x.mul(y).div(denom);     // Fused mul + hardware div 
-
-                            result.intoArray(scratch, resOffset + k);
-                        }
-
-                        // 2. Scalar tail loop for any remaining elements
-                        for (; k < n; k++) {
-                            scratch[resOffset + k] = Maths.swiglu(scratch[lOffset + k], scratch[rOffset + k]);
-                        }
-                    }
-                    case OP_GEGLU_2 -> {
-                        sp -= 2; // Adjust stack pointer
-                        final int lOffset = sp * BLOCK_SIZE;
-                        final int rOffset = lOffset + BLOCK_SIZE;
-                        final int loopBound = SPECIES.loopBound(n);
-
-                        final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
-                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
-                        final DoubleVector INV_SQRT_2 = DoubleVector.broadcast(SPECIES, 0.7071067811865476);
-
-                        int k = 0;
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            // Load two inputs simultaneously
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, lOffset + k);
-                            DoubleVector y = DoubleVector.fromArray(SPECIES, scratch, rOffset + k);
-
-                            // GeLU(y) = 0.5 * y * (1 + erf(y / sqrt(2)))
-                            // We reuse your high-precision vectorizedErf utility
-                            DoubleVector erfVal = VectorMath.vectorizedErf(y.mul(INV_SQRT_2));
-                            DoubleVector geluY = y.mul(HALF).mul(erfVal.add(ONE));
-
-                            // Result = x * GeLU(y)
-                            DoubleVector result = x.mul(geluY);
-
-                            // Store back to lOffset (simulating stack push)
-                            result.intoArray(scratch, lOffset + k);
-                        }
-
-                        // Tail cleanup
-                        for (; k < n; k++) {
-                            scratch[lOffset + k] = Maths.geglu(scratch[lOffset + k], scratch[rOffset + k]);
-                        }
-
-                        sp++; // Finalize stack pointer adjustment
-                    }
-                    case OP_REM -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] % scratch[rOffset + k];
-                        }
-                    }
-
-                    // Base Unary Operations (In-place scalar evaluation)
-                    case OP_SIN -> {
-                        VectorMath.sin((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_COS -> {
-                        VectorMath.cos((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_TAN -> {
-                        VectorMath.tan((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_SINH -> {
-                        VectorMath.sinh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_COSH -> {
-                        VectorMath.cosh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_TANH -> {
-                        VectorMath.tanh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_ABS -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.abs(scratch[srcOffset + k]);
-                        }
-                    }
-
-                    /*  case OP_EXP -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-
-                        for (int k = 0; k < n; k++) {
-                            scratch[srcOffset + k] = Math.exp(scratch[srcOffset + k]);
-                        }
-                    }*/
-                    case OP_EXP -> {
-                        VectorMath.exp((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_SQRT -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        VectorTranscendentals.evaluateNative(
-                                scratch, // src array
-                                srcOffset, // srcOffset
-                                scratch, // dest array (in-place)
-                                srcOffset, // destOffset
-                                n, // element count
-                                VectorOperators.SQRT // unary operator
-                        );
-                    }
-
-                    case OP_CBRT -> {
-                        final int srcOffset = (sp - 1) * BLOCK_SIZE;
-                        VectorTranscendentals.evaluateNative(
-                                scratch, // src array
-                                srcOffset, // srcOffset
-                                scratch, // dest array (in-place)
-                                srcOffset, // destOffset
-                                n, // element count
-                                VectorOperators.CBRT // unary operator
-                        );
-                    }
-
-                    case OP_SWIGLU -> {
-                        final int base = (sp - 1) * BLOCK_SIZE;
-
-                        final int loopBound = SPECIES.loopBound(n);
-                        int k = 0;
-
-                        // Hoist constant outside the hot loop
-                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
-
-                        // 1. Vectorized main loop (In-place modification)
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
-
-                            // Calculate 1-arg SwiGLU (Swish/SiLU): x / (1.0 + exp(-x))
-                            DoubleVector expNegX = VectorMath.fastVectorExp(x.neg());
-                            DoubleVector denom = expNegX.add(ONE);
-                            DoubleVector result = x.div(denom);
-
-                            // Write directly back to the same offset
-                            result.intoArray(scratch, base + k);
-                        }
-
-                        // 2. Scalar tail loop for remaining elements
-                        for (; k < n; k++) {
-                            scratch[base + k] = Maths.swiglu(scratch[base + k]);
-                        }
-                    }
-                    case OP_GELU, OP_GEGLU, OP_GELU_FAST -> {
-                        final int base = (sp - 1) * BLOCK_SIZE;
-                        final int loopBound = SPECIES.loopBound(n);
-                        int k = 0;
-
-                        // Common constants
-                        final DoubleVector HALF = DoubleVector.broadcast(SPECIES, 0.5);
-                        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
-                        final DoubleVector TWO = DoubleVector.broadcast(SPECIES, 2.0);
-
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
-                            DoubleVector result;
-
-                            if (opcode == OP_GELU) {
-                                // GELU = 0.5 * x * (1 + erf(x / sqrt(2)))
-                                final DoubleVector INV_SQRT_2 = DoubleVector.broadcast(SPECIES, 0.7071067811865476);
-                                // Note: Reuse your vectorizedErf here
-                                result = x.mul(HALF).mul(VectorMath.vectorizedErf(x.mul(INV_SQRT_2)).add(ONE));
-                            } else if (opcode == OP_GELU_FAST) {
-                                // FAST GELU = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-                                final DoubleVector SQRT_2_OVER_PI = DoubleVector.broadcast(SPECIES, 0.7978845608028654);
-                                final DoubleVector COEF = DoubleVector.broadcast(SPECIES, 0.044715);
-
-                                DoubleVector x3 = x.mul(x).mul(x);
-                                DoubleVector z = x3.mul(COEF).add(x).mul(SQRT_2_OVER_PI);
-
-                                // Using your optimized fastVectorExp for tanh calculation
-                                DoubleVector exp2z = VectorMath.fastVectorExp(z.mul(TWO));
-                                DoubleVector tanhZ = exp2z.sub(ONE).div(exp2z.add(ONE));
-                                result = x.mul(HALF).mul(tanhZ.add(ONE));
-                            } else { // OP_GEGLU
-                                // Placeholder for GEGLU logic (Gated Error Linear Unit)
-                                result = x;
-                            }
-
-                            result.intoArray(scratch, base + k);
-                        }
-
-                        // Scalar fallback
-                        for (; k < n; k++) {
-                            if (opcode == OP_GELU) {
-                                scratch[base + k] = Maths.gelu(scratch[base + k]);
-                            } else if (opcode == OP_GELU_FAST) {
-                                scratch[base + k] = Maths.fastGelu(scratch[base + k]);
-                            } else {
-                                scratch[base + k] = Maths.geglu(scratch[base + k]);
-                            }
-                        }
-                    }
-                    case OP_ERF -> {
-                        final int base = (sp - 1) * BLOCK_SIZE;
-                        final int loopBound = SPECIES.loopBound(n);
-                        int k = 0;
-
-                        // 1. Vectorized main loop
-                        for (; k < loopBound; k += SPECIES.length()) {
-                            DoubleVector x = DoubleVector.fromArray(SPECIES, scratch, base + k);
-
-                            // Use your optimized piecewise vectorizedErf
-                            DoubleVector result = VectorMath.vectorizedErf(x);
-
-                            result.intoArray(scratch, base + k);
-                        }
-                        // 2. Scalar tail loop for remaining elements
-                        for (; k < n; k++) {
-                            scratch[base + k] = Maths.erf(scratch[base + k]);
-                        }
-                    }
-
-                    case OP_LOG -> {
-                        VectorMath.ln((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_LOG10 -> {
-                        VectorMath.log10((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    // --- Inverse Radians (Routed to VectorMath for Alias Mapping) ---
-                    case OP_ASIN, OP_ASIN_ALT, OP_ARC_SIN_ALT -> {
-                        VectorMath.asin((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_ACOS, OP_ACOS_ALT, OP_ARC_COS_ALT -> {
-                        VectorMath.acos((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    case OP_ATAN, OP_ATAN_ALT, OP_ARC_TAN_ALT -> {
-                        VectorMath.atan((sp - 1) * BLOCK_SIZE, n, scratch);
-                    }
-
-                    // --- DEGREE / GRADIAN TRIG VARIANTS ---
-                    case OP_SIN_DEG ->
-                        VectorMath.sinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COS_DEG ->
-                        VectorMath.cosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_TAN_DEG ->
-                        VectorMath.tanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_SIN_GRAD ->
-                        VectorMath.sinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COS_GRAD ->
-                        VectorMath.cosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_TAN_GRAD ->
-                        VectorMath.tanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // --- INVERSE DEGREE / GRADIAN VARIANTS ---
-                    case OP_ASIN_DEG, OP_ASIN_DEG_ALT, OP_ARC_SIN_ALT_DEG ->
-                        VectorMath.asinDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ACOS_DEG, OP_ACOS_DEG_ALT, OP_ARC_COS_ALT_DEG ->
-                        VectorMath.acosDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ATAN_DEG, OP_ATAN_DEG_ALT, OP_ARC_TAN_ALT_DEG ->
-                        VectorMath.atanDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ASIN_GRAD, OP_ASIN_GRAD_ALT, OP_ARC_SIN_ALT_GRAD ->
-                        VectorMath.asinGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ACOS_GRAD, OP_ACOS_GRAD_ALT, OP_ARC_COS_ALT_GRAD ->
-                        VectorMath.acosGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ATAN_GRAD, OP_ATAN_GRAD_ALT, OP_ARC_TAN_ALT_GRAD ->
-                        VectorMath.atanGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // --- RECIPROCAL TRIG (SEC, CSC, COT) VARIANTS ---
-                    case OP_SEC ->
-                        VectorMath.sec((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_SEC_DEG ->
-                        VectorMath.secDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_SEC_GRAD ->
-                        VectorMath.secGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COSEC ->
-                        VectorMath.csc((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COSEC_DEG ->
-                        VectorMath.cscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COSEC_GRAD ->
-                        VectorMath.cscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COT ->
-                        VectorMath.cot((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COT_DEG ->
-                        VectorMath.cotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_COT_GRAD ->
-                        VectorMath.cotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // --- INVERSE RECIPROCAL TRIG VARIANTS ---
-                    case OP_ARC_SEC, OP_ARC_SEC_ALT ->
-                        VectorMath.asec((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_SEC_DEG, OP_ARC_SEC_ALT_DEG ->
-                        VectorMath.asecDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_SEC_GRAD, OP_ARC_SEC_ALT_GRAD ->
-                        VectorMath.asecGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COSEC, OP_ARC_COSEC_ALT ->
-                        VectorMath.acsc((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COSEC_DEG, OP_ARC_COSEC_ALT_DEG ->
-                        VectorMath.acscDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COSEC_GRAD, OP_ARC_COSEC_ALT_GRAD ->
-                        VectorMath.acscGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COT, OP_ARC_COT_ALT ->
-                        VectorMath.acot((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COT_DEG, OP_ARC_COT_ALT_DEG ->
-                        VectorMath.acotDeg((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ARC_COT_GRAD, OP_ARC_COT_ALT_GRAD ->
-                        VectorMath.acotGrad((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // --- HYPERBOLIC INVERSES ---
-                    case OP_ASINH, OP_ASINH_ALT ->
-                        VectorMath.asinh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ACOSH, OP_ACOSH_ALT ->
-                        VectorMath.acosh((sp - 1) * BLOCK_SIZE, n, scratch);
-                    case OP_ATANH, OP_ATANH_ALT ->
-                        VectorMath.atanh((sp - 1) * BLOCK_SIZE, n, scratch);
-
-                    // Conditional Comparisons
-                    case OP_GT -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] > scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_LT -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] < scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_EQ -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] == scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_NE -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] != scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_GE -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] >= scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_LE -> {
-                        final int rOffset = (--sp) * BLOCK_SIZE;
-                        final int lOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[lOffset + k] <= scratch[rOffset + k] ? 1.0 : 0.0;
-                        }
-                    }
-
-                    // Ternary Operations (Manual FMA & Logical Selection)
-                    case OP_VMA -> {
-                        final int cOffset = (--sp) * BLOCK_SIZE;
-                        final int bOffset = (--sp) * BLOCK_SIZE;
-                        final int aOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-
-                        int k = 0;
-                        // 1. Process as many full vectors as possible
-                        int bound = SPECIES.loopBound(n);
-                        for (; k < bound; k += SPECIES.length()) {
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, aOffset + k);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, bOffset + k);
-                            DoubleVector vc = DoubleVector.fromArray(SPECIES, scratch, cOffset + k);
-
-                            va.fma(vb, vc).intoArray(scratch, resOffset + k);
-                        }
-
-                        // 2. Handle the "tail" using a Mask
-                        // This creates a mask where only indices < n are enabled
-                        if (k < n) {
-                            VectorMask<Double> mask = SPECIES.indexInRange(k, n);
-
-                            // Use 'fromArray' with a mask to safely load only valid elements
-                            DoubleVector va  = DoubleVector.fromArray(SPECIES, scratch, aOffset + k, mask);
-                            DoubleVector vb = DoubleVector.fromArray(SPECIES, scratch, bOffset + k, mask);
-                            DoubleVector vc = DoubleVector.fromArray(SPECIES, scratch, cOffset + k, mask);
-
-                            // FMA with mask - only updates enabled lanes
-                            va.fma(vb, vc).intoArray(scratch, resOffset + k, mask);
-                        }
-                    }
-                    case OP_IF -> {
-                        final int falseOffset = (--sp) * BLOCK_SIZE;
-                        final int trueOffset = (--sp) * BLOCK_SIZE;
-                        final int condOffset = (--sp) * BLOCK_SIZE;
-                        final int resOffset = sp * BLOCK_SIZE;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            double c = scratch[condOffset + k];
-                            double t = scratch[trueOffset + k];
-                            double f = scratch[falseOffset + k];
-
-                            // Branchless: c!= 0? 1 : 0 -> becomes cmov on x86
-                            double m = Double.doubleToRawLongBits(c) != 0L ? 1.0 : 0.0;
-
-                            scratch[resOffset + k] = m * t + (1.0 - m) * f;
-                        }
-                    }
-                    case OP_AND -> {
-                        sp -= 2;
-                        final int base = sp * BLOCK_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + BLOCK_SIZE;
-                        final int resOffset = base;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            // Any non-zero value is treated as TRUE
-                            scratch[resOffset + k] = (scratch[lOffset + k] != 0.0 && scratch[rOffset + k] != 0.0) ? 1.0 : 0.0;
-                        }
-                    }
-
-                    case OP_OR -> {
-                        sp -= 2;
-                        final int base = sp * BLOCK_SIZE;
-                        final int lOffset = base;
-                        final int rOffset = base + BLOCK_SIZE;
-                        final int resOffset = base;
-                        sp++;
-                        for (int k = 0; k < n; k++) {
-                            // Any non-zero value is treated as TRUE
-                            scratch[resOffset + k] = (scratch[lOffset + k] != 0.0 || scratch[rOffset + k] != 0.0) ? 1.0 : 0.0;
-                        }
-                    }
-
-                    default ->
-                        throw new UnsupportedOperationException("Unknown opcode: " + opcode);
-                }
-            }
-
-            // Flush the final computation results out to the destination block segment
-            System.arraycopy(scratch, 0, output, blockStart, n);
-        }
-    }
-
-    public final class VectorMath {
-
-        private VectorMath() {
-        }
-
-        private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-        public static int VECTOR_THRESHOLD = 256;
-
-        // Angle conversions
-        private static final double DEG_TO_RAD = Math.PI / 180.0;
-        private static final double RAD_TO_DEG = 180.0 / Math.PI;
-        private static final double GRAD_TO_RAD = Math.PI / 200.0;
-        private static final double RAD_TO_GRAD = 200.0 / Math.PI;
-
-        private static final DoubleVector V_DEG_TO_RAD = DoubleVector.broadcast(SPECIES, DEG_TO_RAD);
-        private static final DoubleVector V_RAD_TO_DEG = DoubleVector.broadcast(SPECIES, RAD_TO_DEG);
-        private static final DoubleVector V_GRAD_TO_RAD = DoubleVector.broadcast(SPECIES, GRAD_TO_RAD);
-        private static final DoubleVector V_RAD_TO_GRAD = DoubleVector.broadcast(SPECIES, RAD_TO_GRAD);
-
-        // Core constants
-        private static final DoubleVector V_ONE = DoubleVector.broadcast(SPECIES, 1.0);
-        private static final DoubleVector V_NEG_ONE = DoubleVector.broadcast(SPECIES, -1.0);
-        private static final DoubleVector V_HALF = DoubleVector.broadcast(SPECIES, 0.5);
-        private static final DoubleVector V_HALF_PI = DoubleVector.broadcast(SPECIES, Math.PI / 2.0);
-        private static final DoubleVector V_NEG_HALF_PI = DoubleVector.broadcast(SPECIES, -Math.PI / 2.0);
-        private static final DoubleVector V_NAN = DoubleVector.broadcast(SPECIES, Double.NaN);
-        private static final DoubleVector ZERO = DoubleVector.broadcast(SPECIES, 0.0);
-
-        private static final double THRESHOLD_LOW = 0.46875;
-        private static final double THRESHOLD_HIGH = 4.0;
-
-        // ========================================================================
-        // NO-LAMBDA DIRECT OPERATIONS
-        // ========================================================================
-        // Radian
-        public static void sin(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.SIN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.sin(s[base + i]);
-            }
-        }
-
-        public static void cos(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.COS)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.cos(s[base + i]);
-            }
-        }
-
-        public static void tan(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.TAN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.tan(s[base + i]);
-            }
-        }
-
-        // Degree
-        public static void sinDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_DEG_TO_RAD)
-                        .lanewise(VectorOperators.SIN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.sin(Math.toRadians(s[base + i]));
-            }
-        }
-
-        public static void cosDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_DEG_TO_RAD)
-                        .lanewise(VectorOperators.COS)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.cos(Math.toRadians(s[base + i]));
-            }
-        }
-
-        public static void tanDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_DEG_TO_RAD)
-                        .lanewise(VectorOperators.TAN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.tan(Math.toRadians(s[base + i]));
-            }
-        }
-
-        // Grad
-        public static void sinGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_GRAD_TO_RAD)
-                        .lanewise(VectorOperators.SIN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.sin(s[base + i] * GRAD_TO_RAD);
-            }
-        }
-
-        public static void cosGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_GRAD_TO_RAD)
-                        .lanewise(VectorOperators.COS)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.cos(s[base + i] * GRAD_TO_RAD);
-            }
-        }
-
-        public static void tanGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_GRAD_TO_RAD)
-                        .lanewise(VectorOperators.TAN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.tan(s[base + i] * GRAD_TO_RAD);
-            }
-        }
-
-        // ===================== Reciprocal Trigonometric =====================
-        // Radian
-        public static void sec(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.COS))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = 1.0 / Math.cos(s[base + i]);
-            }
-        }
-
-        public static void csc(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.SIN))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = 1.0 / Math.sin(s[base + i]);
-            }
-        }
-
-        public static void cot(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
-                v.lanewise(VectorOperators.COS)
-                        .div(v.lanewise(VectorOperators.SIN))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = 1.0 / Math.tan(s[base + i]);
-            }
-        }
-
-        // Degree
-        public static void secDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_DEG_TO_RAD)
-                        .lanewise(VectorOperators.COS))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = 1.0 / Math.cos(Math.toRadians(s[base + i]));
-            }
-        }
-
-        public static void cscDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_DEG_TO_RAD)
-                        .lanewise(VectorOperators.SIN))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = 1.0 / Math.sin(Math.toRadians(s[base + i]));
-            }
-        }
-
-        public static void cotDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_DEG_TO_RAD);
-                v.lanewise(VectorOperators.COS)
-                        .div(v.lanewise(VectorOperators.SIN))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = 1.0 / Math.tan(Math.toRadians(s[base + i]));
-            }
-        }
-
-        // Grad
-        public static void secGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_GRAD_TO_RAD)
-                        .lanewise(VectorOperators.COS))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = 1.0 / Math.cos(s[base + i] * GRAD_TO_RAD);
-            }
-        }
-
-        public static void cscGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_GRAD_TO_RAD)
-                        .lanewise(VectorOperators.SIN))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = 1.0 / Math.sin(s[base + i] * GRAD_TO_RAD);
-            }
-        }
-
-        public static void cotGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i)
-                        .mul(V_GRAD_TO_RAD);
-                v.lanewise(VectorOperators.COS)
-                        .div(v.lanewise(VectorOperators.SIN))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = 1.0 / Math.tan(s[base + i] * GRAD_TO_RAD);
-            }
-        }
-
-        // ===================== Inverse Trigonometric =====================
-        // Radian
-        public static void asin(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.ASIN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.asin(s[base + i]);
-            }
-        }
-
-        public static void acos(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.ACOS)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.acos(s[base + i]);
-            }
-        }
-
-        public static void atan(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.ATAN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.atan(s[base + i]);
-            }
-        }
-
-        // Degree
-        public static void asinDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.ASIN)
-                        .mul(V_RAD_TO_DEG)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.toDegrees(Math.asin(s[base + i]));
-            }
-        }
-
-        public static void acosDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.ACOS)
-                        .mul(V_RAD_TO_DEG)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.toDegrees(Math.acos(s[base + i]));
-            }
-        }
-
-        public static void atanDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.ATAN)
-                        .mul(V_RAD_TO_DEG)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.toDegrees(Math.atan(s[base + i]));
-            }
-        }
-
-        // Grad
-        public static void asinGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.ASIN)
-                        .mul(V_RAD_TO_GRAD)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.asin(s[base + i]) * RAD_TO_GRAD;
-            }
-        }
-
-        public static void acosGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.ACOS)
-                        .mul(V_RAD_TO_GRAD)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.acos(s[base + i]) * RAD_TO_GRAD;
-            }
-        }
-
-        public static void atanGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.ATAN)
-                        .mul(V_RAD_TO_GRAD)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.atan(s[base + i]) * RAD_TO_GRAD;
-            }
-        }
-
-        // ===================== Inverse Reciprocal Trigonometric =====================
-        // Radian
-        public static void acsc(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .lanewise(VectorOperators.ASIN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.asin(1.0 / s[base + i]);
-            }
-        }
-
-        public static void asec(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .lanewise(VectorOperators.ACOS)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.acos(1.0 / s[base + i]);
-            }
-        }
-
-        public static void acot(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .lanewise(VectorOperators.ATAN)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.atan(1.0 / s[base + i]);
-            }
-        }
-
-        // Degree
-        public static void acscDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .lanewise(VectorOperators.ASIN)
-                        .mul(V_RAD_TO_DEG)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.toDegrees(Math.asin(1.0 / s[base + i]));
-            }
-        }
-
-        public static void asecDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .lanewise(VectorOperators.ACOS)
-                        .mul(V_RAD_TO_DEG)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.toDegrees(Math.acos(1.0 / s[base + i]));
-            }
-        }
-
-        public static void acotDeg(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .lanewise(VectorOperators.ATAN)
-                        .mul(V_RAD_TO_DEG)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.toDegrees(Math.atan(1.0 / s[base + i]));
-            }
-        }
-
-        // Grad
-        public static void acscGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .lanewise(VectorOperators.ASIN)
-                        .mul(V_RAD_TO_GRAD)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.asin(1.0 / s[base + i]) * RAD_TO_GRAD;
-            }
-        }
-
-        public static void asecGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .lanewise(VectorOperators.ACOS)
-                        .mul(V_RAD_TO_GRAD)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.acos(1.0 / s[base + i]) * RAD_TO_GRAD;
-            }
-        }
-
-        public static void acotGrad(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                V_ONE.div(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .lanewise(VectorOperators.ATAN)
-                        .mul(V_RAD_TO_GRAD)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.atan(1.0 / s[base + i]) * RAD_TO_GRAD;
-            }
-        }
-
-        // ===================== Hyperbolic =====================
-        public static void sinh(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.SINH)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.sinh(s[base + i]);
-            }
-        }
-
-        public static void cosh(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.COSH)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.cosh(s[base + i]);
-            }
-        }
-
-        public static void tanh(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.TANH)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.tanh(s[base + i]);
-            }
-        }
-
-        // ===================== Inverse Hyperbolic =====================
-        public static void asinh(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                vectorAsinhImpl(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.log(s[base + i] + Math.sqrt(s[base + i] * s[base + i] + 1.0));
-            }
-        }
-
-        public static void acosh(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                vectorAcoshImpl(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                double x = s[base + i];
-                s[base + i] = x < 1.0 ? Double.NaN : Math.log(x + Math.sqrt(x * x - 1.0));
-            }
-        }
-
-        public static void atanh(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                vectorAtanhImpl(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                double x = s[base + i];
-                s[base + i] = 0.5 * Math.log((1.0 + x) / (1.0 - x));
-            }
-        }
-
-        public static void asech(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                vectorAsechImpl(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                double x = s[base + i];
-                s[base + i] = (x <= 0.0 || x > 1.0) ? Double.NaN : Math.log((1.0 / x) + Math.sqrt((1.0 / (x * x)) - 1.0));
-            }
-        }
-
-        public static void acsch(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                vectorAcschImpl(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                double x = s[base + i];
-                s[base + i] = x == 0.0 ? Double.NaN : Math.log((1.0 / x) + Math.sqrt((1.0 / (x * x)) + 1.0));
-            }
-        }
-
-        public static void acoth(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                vectorAcothImpl(DoubleVector.fromArray(SPECIES, s, base + i))
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                double x = s[base + i];
-                s[base + i] = Math.abs(x) <= 1.0 ? Double.NaN : 0.5 * Math.log((1.0 + (1.0 / x)) / (1.0 - (1.0 / x)));
-            }
-        }
-
-        // ===================== Exponential and Logarithmic =====================
-        public static void exp(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.EXP)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.exp(s[base + i]);
-            }
-        }
-
-        public static void ln(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.LOG)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.log(s[base + i]);
-            }
-        }
-
-        public static void log10(int base, int n, double[] s) {
-            int i = 0;
-            int limit = SPECIES.loopBound(n);
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector.fromArray(SPECIES, s, base + i)
-                        .lanewise(VectorOperators.LOG10)
-                        .intoArray(s, base + i);
-            }
-            for (; i < n; i++) {
-                s[base + i] = Math.log10(s[base + i]);
-            }
-        }
-
-        private static boolean isExponentUniform(double[] scratch, int offset, int n) {
-            if (n <= 1) {
-                return true;
-            }
-
-            final double first = scratch[offset];
-            if (Double.isNaN(first)) {
-                // All must be NaN
-                final int vl = SPECIES.length();
-                int i = 0;
-                int bound = SPECIES.loopBound(n);
-                for (; i < bound; i += vl) {
-                    DoubleVector v = DoubleVector.fromArray(SPECIES, scratch, offset + i);
-                    if (v.compare(VectorOperators.EQ, v).anyTrue()) {
-                        return false;
-                    }
-                }
-                int remaining = n - i;
-                if (remaining > 0) {
-                    var mask = SPECIES.indexInRange(0, remaining);
-                    DoubleVector v = DoubleVector.fromArray(SPECIES, scratch, offset + i, mask);
-                    if (v.compare(VectorOperators.EQ, v, mask).anyTrue()) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-
-            final DoubleVector target = DoubleVector.broadcast(SPECIES, first);
-            final int vl = SPECIES.length();
-            int i = 0;
-            int bound = SPECIES.loopBound(n);
-
-            for (; i < bound; i += vl) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, scratch, offset + i);
-                if (v.compare(VectorOperators.NE, target).anyTrue()) {
-                    return false;
-                }
-            }
-
-            int remaining = n - i;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector v = DoubleVector.fromArray(SPECIES, scratch, offset + i, mask);
-                if (v.compare(VectorOperators.NE, target, mask).anyTrue()) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        public static void evaluateVariableExponent(double[] base, int bOffset, double[] exp, int eOffset,
-                double[] dest, int dOffset, int n) {
-            if (n <= 0) {
-                return;
-            }
-
-            int i = 0;
-            final int limit = SPECIES.loopBound(n);
-
-            // === 1. Core Vector Loop: exp(y * ln(x)) ===
-            for (; i < limit; i += SPECIES.length()) {
-                DoubleVector vBase = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                DoubleVector vExp = DoubleVector.fromArray(SPECIES, exp, eOffset + i);
-
-                // Execute algebraic transcendental transformation
-                DoubleVector log = vBase.lanewise(VectorOperators.LOG);
-                DoubleVector scaled = log.mul(vExp);
-                scaled.lanewise(VectorOperators.EXP).intoArray(dest, dOffset + i);
-            }
-
-            // === 2. Masked Tail Pass ===
-            int remaining = n - i;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector vBase = DoubleVector.fromArray(SPECIES, base, bOffset + i, mask);
-                DoubleVector vExp = DoubleVector.fromArray(SPECIES, exp, eOffset + i, mask);
-
-                // Apply masks to intermediate operators to maintain lane isolation
-                DoubleVector log = vBase.lanewise(VectorOperators.LOG, mask);
-                DoubleVector scaled = log.mul(vExp, mask);
-                DoubleVector res = scaled.lanewise(VectorOperators.EXP, mask);
-
-                res.intoArray(dest, dOffset + i, mask);
-            }
-        }
-
-        public static void executePowerBlended(double[] scratch, int baseOffset, int expOffset, int n) {
-            if (n <= 0) {
-                return;
-            }
-
-            if (isExponentUniform(scratch, expOffset, n)) {
-                double uniformExp = scratch[expOffset];
-
-                if (uniformExp == 0.5) {
-                    VectorTranscendentals.evaluateNative(scratch, baseOffset, scratch, baseOffset, n, VectorOperators.SQRT);
-                    return;
-                }
-                if (uniformExp == 2.0) {
-                    computeSquare(scratch, baseOffset, scratch, baseOffset, n);
-                    return;
-                }
-                if (uniformExp == 3.0) {
-                    computeCube(scratch, baseOffset, scratch, baseOffset, n);
-                    return;
-                }
-                if (uniformExp == 4.0) {
-                    computeFourthPower(scratch, baseOffset, scratch, baseOffset, n);
-                    return;
+            double[] s = ctx.scratch;
+            final int planLen = executionPlan.length;
+            // If the last command in the plan can write its result straight to
+            // `output` (see DirectOutputCommand), run every command before it
+            // as usual but skip BOTH running the last one via the ordinary
+            // execute() path AND the separate scratch-to-output writeback loop
+            // below entirely -- one fewer full read+write pass over every
+            // block. When the last command doesn't implement DirectOutputCommand
+            // (PowCommand, or anything that delegates to VectorMath's
+            // scratch-shaped UnaryMathOp/BinaryMathOp), `terminal` is null and
+            // this falls back to the original path, byte-for-byte unchanged.
+            // Resolved once outside the block loop since it's the same for
+            // every block.
+            final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
+            final int runLen = terminal != null ? planLen - 1 : planLen;
+
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
+                final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
+                ctx.initForBlock(flatVariables, null, dataSize, blockStart);
+
+                for (int i = 0; i < runLen; i++) {
+                    executionPlan[i].execute(ctx, currentBlockSize);
                 }
 
-                // Isolated fallback for uniform constants
-                evaluateUniformExponent(scratch, baseOffset, uniformExp, scratch, baseOffset, n);
-            } else {
-                // Isolated fallback for variable exponents
-                evaluateVariableExponent(scratch, baseOffset, scratch, expOffset, scratch, baseOffset, n);
-            }
-        }
-
-// ==========================================
-// Isolated Fast-Path Micro-Methods (EA Safe)
-// ==========================================
-        private static void computeSquare(double[] src, int srcOff, double[] dest, int destOff, int n) {
-            int k = 0;
-            final int limit = SPECIES.loopBound(n);
-            final int vl = SPECIES.length();
-
-            for (; k < limit; k += vl) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k);
-                v.mul(v).intoArray(dest, destOff + k);
-            }
-
-            int remaining = n - k;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k, mask);
-                v.mul(v).intoArray(dest, destOff + k, mask);
-            }
-        }
-
-        private static void computeCube(double[] src, int srcOff, double[] dest, int destOff, int n) {
-            int k = 0;
-            final int limit = SPECIES.loopBound(n);
-            final int vl = SPECIES.length();
-
-            for (; k < limit; k += vl) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k);
-                v.mul(v).mul(v).intoArray(dest, destOff + k);
-            }
-
-            int remaining = k - n; // Wait, original had n - k, let's keep it safe:
-            remaining = n - k;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k, mask);
-                v.mul(v).mul(v).intoArray(dest, destOff + k, mask);
-            }
-        }
-
-        private static void computeFourthPower(double[] src, int srcOff, double[] dest, int destOff, int n) {
-            int k = 0;
-            final int limit = SPECIES.loopBound(n);
-            final int vl = SPECIES.length();
-
-            for (; k < limit; k += vl) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k);
-                DoubleVector sq = v.mul(v);
-                sq.mul(sq).intoArray(dest, destOff + k);
-            }
-
-            int remaining = n - k;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector v = DoubleVector.fromArray(SPECIES, src, srcOff + k, mask);
-                DoubleVector sq = v.mul(v);
-                sq.mul(sq).intoArray(dest, destOff + k, mask);
-            }
-        }
-
-        public static void evaluateUniformExponent(double[] base, int bOffset, double exp,
-                double[] dest, int dOffset, int n) {
-            if (n <= 0) {
-                return;
-            }
-
-            if (exp == 1.0) {
-                if (base != dest || bOffset != dOffset) {
-                    System.arraycopy(base, bOffset, dest, dOffset, n);
-                }
-                return;
-            }
-            if (exp == 2.0) {
-                computeSquare(base, bOffset, dest, dOffset, n);
-                return;
-            }
-            if (exp == 3.0) {
-                computeCube(base, bOffset, dest, dOffset, n);
-                return;
-            }
-            if (exp == 4.0) {
-                computeFourthPower(base, bOffset, dest, dOffset, n);
-                return;
-            }
-
-            if (exp == 0.5) {
-                VectorTranscendentals.evaluateNative(base, bOffset, dest, dOffset, n, VectorOperators.SQRT);
-                return;
-            }
-
-            // Delegate the highly complex log/exp routines to a separate compilation target
-            evaluateComplexUniformExponent(base, bOffset, exp, dest, dOffset, n);
-        }
-
-        private static void evaluateComplexUniformExponent(double[] base, int bOffset, double exp,
-                double[] dest, int dOffset, int n) {
-            final int vl = SPECIES.length();
-            final int limit = SPECIES.loopBound(n);
-            int i = 0;
-
-            if (exp == 0.0) {
-                for (; i < limit; i += vl) {
-                    V_ONE.intoArray(dest, dOffset + i);
-                }
-            } else if (exp == -1.0) {
-                for (; i < limit; i += vl) {
-                    DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                    V_ONE.div(v).intoArray(dest, dOffset + i);
-                }
-            } else {
-                final DoubleVector vExp = DoubleVector.broadcast(SPECIES, exp);
-                if (exp % 1.0 == 0.0) {
-                    if (exp % 2.0 != 0.0) {
-                        // Scenario 1: Odd Integer (FIXED: targetIdx bug resolved)
-                        for (; i < limit; i += vl) {
-                            DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                            var isNegativeMask = v.compare(VectorOperators.LT, 0.0);
-                            DoubleVector log = v.abs().lanewise(VectorOperators.LOG);
-                            DoubleVector scaled = log.mul(vExp);
-                            DoubleVector resAbs = scaled.lanewise(VectorOperators.EXP);
-                            resAbs.blend(resAbs.neg(), isNegativeMask).intoArray(dest, dOffset + i);
-                        }
-                    } else {
-                        // Scenario 2: Even Integer
-                        for (; i < limit; i += vl) {
-                            DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                            DoubleVector log = v.abs().lanewise(VectorOperators.LOG);
-                            DoubleVector scaled = log.mul(vExp);
-                            scaled.lanewise(VectorOperators.EXP).intoArray(dest, dOffset + i);
-                        }
-                    }
+                if (terminal != null) {
+                    terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
                 } else {
-                    // Scenario 3: Non-Integer
-                    for (; i < limit; i += vl) {
-                        DoubleVector v = DoubleVector.fromArray(SPECIES, base, bOffset + i);
-                        DoubleVector log = v.lanewise(VectorOperators.LOG);
-                        DoubleVector scaled = log.mul(vExp);
-                        scaled.lanewise(VectorOperators.EXP).intoArray(dest, dOffset + i);
+                    // Vectorized output write back (assumes result is at scratch offset 0)
+                    int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                    for (; k < limit; k += SPECIES.length()) {
+                        DoubleVector.fromArray(SPECIES, s, k)
+                                .intoArray(output, blockStart + k);
+                    }
+                    for (; k < currentBlockSize; k++) {
+                        output[blockStart + k] = s[k];
                     }
                 }
             }
-
-            // Clean Scalar Tail Pass
-            for (; i < n; i++) {
-                final double b = base[bOffset + i];
-                dest[dOffset + i] = (exp == 0.0) ? 1.0 : (exp == -1.0) ? 1.0 / b : Math.pow(b, exp);
-            }
         }
 
-        // ========================================================================
-        // Specialized Mathematical Transcendentals
-        // ========================================================================
-        /**
-         * High-performance vectorized exp() using magic-number rounding +
-         * 6th-degree minimax polynomial via FMA + fast bit manipulation for
-         * 2^k.
-         */
-        private static DoubleVector fastVectorExp(DoubleVector x) {
-            x = x.lanewise(VectorOperators.MAX, -745.13).lanewise(VectorOperators.MIN, 709.78);
+        private static void applyBulkInternal(double[][] variables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, double[] output, int startIdx, int length) {
+            final int endIdx = startIdx + length;
+            double[] s = ctx.scratch;
+            final int planLen = executionPlan.length;
+            // See the flatVariables overload above for the full explanation of
+            // this DirectOutputCommand check -- identical logic here.
+            final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
+            final int runLen = terminal != null ? planLen - 1 : planLen;
 
-            DoubleVector invLn2 = DoubleVector.broadcast(SPECIES, 1.4426950408889634074);
-            DoubleVector ln2Hi = DoubleVector.broadcast(SPECIES, -0.6931471805599453);
-            DoubleVector ln2Lo = DoubleVector.broadcast(SPECIES, -2.8235290563031574E-13);
+            for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
+                final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
+                ctx.initForBlock(null, variables, dataSize, blockStart);
 
-            DoubleVector magic = DoubleVector.broadcast(SPECIES, 4503599627370496.0); // 2^52
-            DoubleVector k = x.mul(invLn2).add(magic).sub(magic);
-            DoubleVector r = x.add(k.mul(ln2Hi)).add(k.mul(ln2Lo));
+                for (int i = 0; i < runLen; i++) {
+                    executionPlan[i].execute(ctx, currentBlockSize);
+                }
 
-            DoubleVector p = r.mul(0.001398199650).add(0.0088632903);
-            p = r.lanewise(VectorOperators.FMA, p, DoubleVector.broadcast(SPECIES, 0.04166666666));
-            p = r.lanewise(VectorOperators.FMA, p, DoubleVector.broadcast(SPECIES, 0.16666666666));
-            p = r.lanewise(VectorOperators.FMA, p, DoubleVector.broadcast(SPECIES, 0.5));
-            p = r.lanewise(VectorOperators.FMA, p, V_ONE);
-            p = r.lanewise(VectorOperators.FMA, p, V_ONE);
-
-            LongVector kLong = (LongVector) k.convert(VectorOperators.D2L, 0);
-            LongVector exponent = kLong.add(1023).lanewise(VectorOperators.LSHL, 52);
-            DoubleVector twoK = (DoubleVector) exponent.convert(VectorOperators.REINTERPRET_L2D, 0);
-
-            return p.mul(twoK);
-        }
-
-        static DoubleVector vectorizedErf(DoubleVector x) {
-            return VectorizedCodyMath.erf(x);
-        }
-
-        // ===================== Stirling's Factorial Approximation =====================
-        public static void stirling(int base, int n, double[] s) {
-            int vl = SPECIES.length();
-            int bound = SPECIES.loopBound(n);
-            DoubleVector pi2 = DoubleVector.broadcast(SPECIES, 2.0 * Math.PI);
-            DoubleVector nanVec = DoubleVector.broadcast(SPECIES, Double.NaN);
-            int i = 0;
-
-            for (; i < bound; i += vl) {
-                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i);
-                DoubleVector lnN = v.lanewise(VectorOperators.LOG);
-                DoubleVector term1 = v.mul(lnN).sub(v);
-                DoubleVector term2 = pi2.mul(v).lanewise(VectorOperators.LOG).mul(0.5);
-                DoubleVector term3 = V_ONE.div(v.mul(12.0));
-                DoubleVector result = term1.add(term2).add(term3).lanewise(VectorOperators.EXP);
-
-                var invalidMask = v.compare(VectorOperators.LE, 0.0);
-                result.blend(nanVec, invalidMask).intoArray(s, base + i);
-            }
-
-            int remaining = n - i;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector v = DoubleVector.fromArray(SPECIES, s, base + i, mask);
-                DoubleVector lnN = v.lanewise(VectorOperators.LOG);
-                DoubleVector term1 = v.mul(lnN).sub(v);
-                DoubleVector term2 = pi2.mul(v).lanewise(VectorOperators.LOG).mul(0.5);
-                DoubleVector term3 = V_ONE.div(v.mul(12.0));
-                DoubleVector result = term1.add(term2).add(term3).lanewise(VectorOperators.EXP);
-
-                var invalidMask = v.compare(VectorOperators.LE, 0.0);
-                result.blend(nanVec, invalidMask).intoArray(s, base + i, mask);
-            }
-        }
-
-        // ===================== Conditional Branching =====================
-        public static void if3(int base, int tileN, double[] s, int block) {
-            final int cond = base + block;
-            final int trueVal = base + 2 * block;
-            final int falseVal = base + 3 * block;
-            final int res = base;
-
-            int vl = SPECIES.length();
-            int bound = SPECIES.loopBound(tileN);
-            int i = 0;
-
-            for (; i < bound; i += vl) {
-                DoubleVector vc = DoubleVector.fromArray(SPECIES, s, cond + i);
-                DoubleVector vt = DoubleVector.fromArray(SPECIES, s, trueVal + i);
-                DoubleVector vf = DoubleVector.fromArray(SPECIES, s, falseVal + i);
-                VectorMask<Double> mask = vc.compare(VectorOperators.NE, 0.0).and(vc.compare(VectorOperators.EQ, vc));
-                vf.blend(vt, mask).intoArray(s, res + i);
-            }
-
-            int remaining = tileN - i;
-            if (remaining > 0) {
-                var maskTail = SPECIES.indexInRange(0, remaining);
-                DoubleVector vc = DoubleVector.fromArray(SPECIES, s, cond + i, maskTail);
-                DoubleVector vt = DoubleVector.fromArray(SPECIES, s, trueVal + i, maskTail);
-                DoubleVector vf = DoubleVector.fromArray(SPECIES, s, falseVal + i, maskTail);
-                VectorMask<Double> mask = vc.compare(VectorOperators.NE, 0.0).and(vc.compare(VectorOperators.EQ, vc));
-                vf.blend(vt, mask).intoArray(s, res + i, maskTail);
-            }
-        }
-
-        // ========================================================================
-        // Vectorized Inverse Hyperbolic Implementations
-        // ========================================================================
-        private static DoubleVector vectorAsinhImpl(DoubleVector x) {
-            return x.add(x.mul(x).add(V_ONE).lanewise(VectorOperators.SQRT))
-                    .lanewise(VectorOperators.LOG);
-        }
-
-        private static DoubleVector vectorAcoshImpl(DoubleVector x) {
-            VectorMask<Double> valid = x.compare(VectorOperators.GE, V_ONE);
-            DoubleVector result = x.add(x.mul(x).sub(V_ONE).lanewise(VectorOperators.SQRT))
-                    .lanewise(VectorOperators.LOG);
-            return result.blend(V_NAN, valid.not());
-        }
-
-        private static DoubleVector vectorAtanhImpl(DoubleVector x) {
-            VectorMask<Double> valid = x.abs().compare(VectorOperators.LT, V_ONE);
-            DoubleVector result = V_ONE.add(x).div(V_ONE.sub(x))
-                    .lanewise(VectorOperators.LOG)
-                    .mul(V_HALF);
-            return result.blend(V_NAN, valid.not());
-        }
-
-        private static DoubleVector vectorAsechImpl(DoubleVector x) {
-            VectorMask<Double> valid = x.compare(VectorOperators.GT, 0.0)
-                    .and(x.compare(VectorOperators.LE, V_ONE));
-            DoubleVector result = V_ONE.div(x).add(V_ONE.div(x.mul(x)).sub(V_ONE).lanewise(VectorOperators.SQRT))
-                    .lanewise(VectorOperators.LOG);
-            return result.blend(V_NAN, valid.not());
-        }
-
-        private static DoubleVector vectorAcschImpl(DoubleVector x) {
-            VectorMask<Double> valid = x.compare(VectorOperators.NE, 0.0);
-            DoubleVector result = V_ONE.div(x).add(V_ONE.div(x.mul(x)).add(V_ONE).lanewise(VectorOperators.SQRT))
-                    .lanewise(VectorOperators.LOG);
-            return result.blend(V_NAN, valid.not());
-        }
-
-        private static DoubleVector vectorAcothImpl(DoubleVector x) {
-            VectorMask<Double> valid = x.abs().compare(VectorOperators.GT, V_ONE);
-            DoubleVector result = V_ONE.add(V_ONE.div(x)).div(V_ONE.sub(V_ONE.div(x)))
-                    .lanewise(VectorOperators.LOG)
-                    .mul(V_HALF);
-            return result.blend(V_NAN, valid.not());
-        }
-
-    }
-
-    public static final class VectorTranscendentals {
-
-        private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-
-        public static void evaluateNative(double[] src, int srcOffset, double[] dest, int destOffset, int n, VectorOperators.Unary op) {
-            int vl = SPECIES.length();
-            int limit = SPECIES.loopBound(n);
-            int i = 0;
-
-            // Vector Loop
-            for (; i < limit; i += vl) {
-                DoubleVector va  = DoubleVector.fromArray(SPECIES, src, srcOffset + i);
-                va.lanewise(op).intoArray(dest, destOffset + i);
-            }
-
-            // Clean Masked Tail
-            int remaining = n - i;
-            if (remaining > 0) {
-                var mask = SPECIES.indexInRange(0, remaining);
-                DoubleVector va  = DoubleVector.fromArray(SPECIES, src, srcOffset + i, mask);
-                va.lanewise(op).intoArray(dest, destOffset + i, mask);
+                if (terminal != null) {
+                    terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
+                } else {
+                    // Vectorized output write back
+                    int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                    for (; k < limit; k += SPECIES.length()) {
+                        DoubleVector.fromArray(SPECIES, s, k)
+                                .intoArray(output, blockStart + k);
+                    }
+                    for (; k < currentBlockSize; k++) {
+                        output[blockStart + k] = s[k];
+                    }
+                }
             }
         }
     }

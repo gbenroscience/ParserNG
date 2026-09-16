@@ -8,7 +8,7 @@ import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.Bat
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
 import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
-import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath;
+import com.github.gbenroscience.simd.turbo.tools.utils.VectorMath;
 import java.lang.ref.Cleaner;
 import java.util.ArrayList;
 import java.util.InputMismatchException;

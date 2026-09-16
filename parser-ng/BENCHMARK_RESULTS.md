@@ -86,7 +86,7 @@ The following data represents high-concurrency performance and memory allocation
 
 ### 📈 Overall Verdict
 
-> **ParserNG 1.0.0+ Turbo is the clear winner.**  
+> **ParserNG 1.0.0+ Turbo is clearly very competitive with the compiled parsers**  
 > It delivers **bytecode-level performance** with the flexibility and safety of an interpreter, ** near-zero allocation** in all cases, and powerful features (symbolic differentiation, matrix algebra, equation solvers, etc.) that others lack.
 
 ParserNG Turbo is now competitive with (and at-times faster than) Janino on complex expressions while maintaining excellent safety and low memory footprint.

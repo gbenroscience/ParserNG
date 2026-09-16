@@ -13,10 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.github.gbenroscience.simdext.turbo.tools.utils;
+package com.github.gbenroscience.simd.turbo.tools.utils;
 
-import com.github.gbenroscience.math.Maths;
-import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
+import com.github.gbenroscience.math.Maths; 
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.LongVector;
 import jdk.incubator.vector.VectorMask;

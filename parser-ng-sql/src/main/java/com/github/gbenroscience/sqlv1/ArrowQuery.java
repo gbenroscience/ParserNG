@@ -11,6 +11,7 @@ import com.github.gbenroscience.sqlv1.ast.AndExpr;
 import com.github.gbenroscience.sqlv1.ast.BoolExpr;
 import com.github.gbenroscience.sqlv1.ast.BoolExprs;
 import com.github.gbenroscience.sqlv1.ast.IsNullExpr;
+import com.github.gbenroscience.sqlv1.ast.NotExpr;
 import com.github.gbenroscience.sqlv1.ast.OrderItem;
 import com.github.gbenroscience.sqlv1.ast.OrExpr;
 import com.github.gbenroscience.sqlv1.ast.SelectItem;
@@ -18,6 +19,7 @@ import com.github.gbenroscience.sqlv1.ast.SelectStatement;
 import com.github.gbenroscience.sqlv1.ast.WhereAliasResolver;
 
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.Float4Vector;
 import org.apache.arrow.vector.Float8Vector;
@@ -30,8 +32,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 
 /**
@@ -224,9 +228,51 @@ import java.util.Set;
  * adds no additional synchronization around {@code evaluate} calls beyond
  * what is needed to build/cache the compiled plan itself.
  *
+ * <h2>Warming up</h2>
+ * The very first time a given compiled expression actually runs in a JVM
+ * process, it is meaningfully slower than every run after it — the
+ * underlying ParserNG/SIMD machinery is paying a one-time classloading and
+ * JIT-warmup cost, not a cost proportional to the data. Left alone, that
+ * cost lands on whichever {@link #execute} call happens to be first —
+ * frequently a real request a real caller is waiting on. {@link #warmup}
+ * pays that cost deliberately, ahead of time, on synthetic data:
+ * <pre>{@code
+ * try (ArrowQuery query = ArrowQuery.compile(sql)) {
+ *     query.warmup(sampleRoot);   // synthetic data, same schema as sampleRoot
+ *     // ... later, in the real hot path:
+ *     query.execute(realRoot);    // no cold-start penalty left to pay
+ * }
+ * }</pre>
+ * {@code sampleRoot} is read only for its schema (column names and types,
+ * via {@link #isFloat64}) — its row data, if it has any, is never touched,
+ * and it is never closed by this call. Because the synthetic batch
+ * {@link #warmup} builds shares that exact schema, the plan it compiles is
+ * the very same plan a real {@link #execute} call against that schema would
+ * need — {@link #warmup} does not compile a separate, throwaway plan that
+ * then gets discarded; it primes the real one, cached exactly the way any
+ * other {@link #execute} call caches it (see "What \"compiled\" means here,
+ * precisely" above). Only the row values are synthetic and thrown away.
+ *
  * @author GBEMIRO
  */
 public final class ArrowQuery implements AutoCloseable {
+
+    /**
+     * Default row count for the synthetic batch {@link #warmup()} builds.
+     * Chosen empirically: large enough that a single {@link #execute} call
+     * against it gives the JIT enough loop iterations to fully tier up,
+     * small enough that a handful of repetitions stays fast. A too-small
+     * warmup batch (a handful of rows) does not reliably reach this —
+     * see {@link #warmup(VectorSchemaRoot, int, int)} if tuning is needed.
+     */
+    public static final int DEFAULT_WARMUP_ROWS = 20_000;
+
+    /**
+     * Default repetition count for {@link #warmup()}. Repeating against
+     * the same synthetic batch several times, not once, is what lets the
+     * JIT actually converge — see {@link #warmup(VectorSchemaRoot, int, int)}.
+     */
+    public static final int DEFAULT_WARMUP_REPETITIONS = 8;
 
     private final String sql;
     private final SelectStatement stmt;
@@ -302,6 +348,110 @@ public final class ArrowQuery implements AutoCloseable {
         }
         this.nullPolicy = nullPolicy;
         return this;
+    }
+
+    /**
+     * Warms up this query using {@link #DEFAULT_WARMUP_ROWS} synthetic rows
+     * repeated {@link #DEFAULT_WARMUP_REPETITIONS} times, over the same
+     * schema as {@code schemaTemplate} — see this class's "Warming up".
+     *
+     * @param schemaTemplate a root with the same column names and types
+     * real calls to {@link #execute} will use; read only for its schema,
+     * never for its row data, and never closed by this call
+     * @return {@code this}, for chaining
+     * @throws ArrowSqlException if compiling the query's expressions
+     * against {@code schemaTemplate}'s schema fails
+     */
+    public ArrowQuery warmup(VectorSchemaRoot schemaTemplate) {
+        return warmup(schemaTemplate, DEFAULT_WARMUP_ROWS, DEFAULT_WARMUP_REPETITIONS);
+    }
+
+    /**
+     * Warms up this query using {@code rows} synthetic rows repeated
+     * {@code repetitions} times, over the same schema as
+     * {@code schemaTemplate} — see this class's "Warming up". Most callers
+     * want {@link #warmup(VectorSchemaRoot)}; this overload exists for
+     * cases where {@link #DEFAULT_WARMUP_ROWS}/{@link #DEFAULT_WARMUP_REPETITIONS}
+     * either overshoot a tight startup budget or undershoot for an
+     * unusually heavy expression.
+     *
+     * @param schemaTemplate a root with the same column names and types
+     * real calls to {@link #execute} will use; read only for its schema,
+     * never for its row data, and never closed by this call
+     * @param rows how many synthetic rows to generate; must be positive
+     * @param repetitions how many times to execute against that synthetic
+     * batch; must be positive — a single repetition is rarely enough to
+     * reach a steady JIT state (see this class's "Warming up")
+     * @return {@code this}, for chaining
+     * @throws IllegalArgumentException if {@code rows} or {@code repetitions}
+     * is not positive
+     * @throws ArrowSqlException if compiling the query's expressions
+     * against {@code schemaTemplate}'s schema fails
+     */
+    public ArrowQuery warmup(VectorSchemaRoot schemaTemplate, int rows, int repetitions) {
+        if (schemaTemplate == null) {
+            throw new NullPointerException("schemaTemplate must not be null");
+        }
+        if (rows <= 0) {
+            throw new IllegalArgumentException("rows must be positive, was " + rows);
+        }
+        if (repetitions <= 0) {
+            throw new IllegalArgumentException("repetitions must be positive, was " + repetitions);
+        }
+        boolean float64 = isFloat64(schemaTemplate);
+        try (RootAllocator syntheticAllocator = new RootAllocator(Long.MAX_VALUE)) {
+            VectorSchemaRoot synthetic = buildSyntheticRoot(schemaTemplate.getSchema(), rows, float64, syntheticAllocator);
+            try {
+                for (int i = 0; i < repetitions; i++) {
+                    execute(synthetic).close();
+                }
+            } finally {
+                for (FieldVector v : synthetic.getFieldVectors()) {
+                    closeQuietly(v);
+                }
+            }
+        }
+        return this;
+    }
+
+    /**
+     * Builds a throwaway root matching {@code schema}'s column names and
+     * types exactly, filled with deterministic pseudo-random values (a
+     * fixed seed, so a given {@code (schema, rows)} pair always produces
+     * the same synthetic data run to run) — used only by {@link #warmup}.
+     * Values are drawn from a wide, arbitrary range with no attempt to
+     * respect any real-world meaning a column name might suggest, since
+     * warmup only needs the underlying ParserNG kernels to actually run,
+     * not to produce meaningful output.
+     */
+    private static VectorSchemaRoot buildSyntheticRoot(
+            Schema schema, int rows, boolean float64, BufferAllocator allocator) {
+        Random random = new Random(0x50415252_4E47L); // "PARRNG" -- fixed, arbitrary seed
+        List<Field> fields = new ArrayList<>(schema.getFields().size());
+        List<FieldVector> vectors = new ArrayList<>(schema.getFields().size());
+        for (org.apache.arrow.vector.types.pojo.Field templateField : schema.getFields()) {
+            Field field = new Field(templateField.getName(), templateField.getFieldType(), null);
+            if (float64) {
+                Float8Vector v = (Float8Vector) field.createVector(allocator);
+                v.allocateNew(rows);
+                for (int i = 0; i < rows; i++) {
+                    v.set(i, (random.nextDouble() * 2000) - 1000);
+                }
+                v.setValueCount(rows);
+                fields.add(field);
+                vectors.add(v);
+            } else {
+                Float4Vector v = (Float4Vector) field.createVector(allocator);
+                v.allocateNew(rows);
+                for (int i = 0; i < rows; i++) {
+                    v.set(i, (random.nextFloat() * 2000f) - 1000f);
+                }
+                v.setValueCount(rows);
+                fields.add(field);
+                vectors.add(v);
+            }
+        }
+        return new VectorSchemaRoot(new Schema(fields), vectors, rows);
     }
 
     /**

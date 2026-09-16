@@ -7,7 +7,7 @@ import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.*;
 import static com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator.BatchedVectorCompositeExpression.*;
 import static com.github.gbenroscience.simd.turbo.tools.utils.VectorConfig.*;
 
-import com.github.gbenroscience.simdext.turbo.tools.utils.VectorMath;
+import com.github.gbenroscience.simd.turbo.tools.utils.VectorMath;
 import com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;

@@ -63,7 +63,7 @@ public final class Benchmark {
     // =========================================================================
     // Tunables
     // =========================================================================
-    private static final int DEFAULT_ROW_COUNT = 2_000_000;
+    private static final int DEFAULT_ROW_COUNT = 3_000_000;
     private static final int WARMUP_ITERATIONS = 5;
     private static final int MEASURED_ITERATIONS = 15;
     private static final long RANDOM_SEED = 42L;
@@ -139,7 +139,9 @@ public final class Benchmark {
                     "SELECT (a + b) * sqrt(x*x + y*y) - z^2 / (a + 2) AS big_mix FROM data"),
             new BenchExpression("Signed magnitude (AND/OR/BETWEEN inside if(...))",
                     "SELECT if((x > 0 AND y > 0) OR z BETWEEN -10 AND 10, "
-                    + "sqrt(x*x + y*y + z*z), 0 - sqrt(x*x + y*y + z*z)) AS signed_magnitude FROM data")
+                    + "sqrt(x*x + y*y + z*z), 0 - sqrt(x*x + y*y + z*z)) AS signed_magnitude FROM data"),
+            new BenchExpression("Select x, y and computed value as z from existing data",
+                    "SELECT x, y, sin(sqrt(x^2+y^2)) AS z FROM data")
     // Add more here, e.g.:
     // new BenchExpression("My new expression", "SELECT ... FROM data")
     ));
@@ -209,6 +211,7 @@ public final class Benchmark {
             // ---- compile phase: SQL parse, timed on its own ----
             long parseStart = System.nanoTime();
             ArrowQuery query = ArrowQuery.compile(expr.sql()).withBackend(ArrowExecutionBackend.CPU_SIMD).withNullPolicy(NullPolicy.IGNORE);
+            query.warmup(data);
             long parseElapsedNanos = System.nanoTime() - parseStart;
 
             try {

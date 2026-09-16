@@ -291,6 +291,8 @@ public final class SqlParser {
      * Parses {@code sql} as a single {@code query} per the grammar
      * documented on this class.
      *
+     * @param sql
+     * @return 
      * @throws SqlSyntaxException if {@code sql} does not conform to the
      * grammar (this includes lexical errors from {@link SqlLexer}, and
      * trailing input after a complete, otherwise-valid query)

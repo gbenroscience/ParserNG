@@ -20,8 +20,8 @@ package com.github.gbenroscience.simd;
  * @author GBEMIRO
  */
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator;
-import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator.VectorMath;
+import com.github.gbenroscience.simd.turbo.tools.SIMDVectorTurboEvaluator; 
+import com.github.gbenroscience.simd.turbo.tools.utils.VectorMath;
 import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import static org.junit.jupiter.api.Assertions.assertEquals;
