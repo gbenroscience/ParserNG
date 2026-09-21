@@ -59,7 +59,7 @@ Execution paths utilize pre-allocated internal memory frames and Thread-Local Al
 
 | Library / Engine | GELU Execution Profile | Architectural Mechanism | Native Overhead / GC Churn |
 | :--- | :--- | :--- | :--- |
-| **ParserNG Enterprise** | **80 µs (2.00 ns/elt)** | **Pure Java Vector API (Direct SIMD)** | **None (Zero Allocation)** |
+| **ParserNG** | **80 µs (2.00 ns/elt)** | **Pure Java Vector API (Direct SIMD)** | **None (Zero Allocation)** |
 | Standard JIT Scalar | ~3,800 µs (95.0 ns/elt) | Unrolled C2 Scalar Loops | None |
 | Typical Native-JNI Bridge | ~1,200 µs (30.0 ns/elt) | Off-Heap C++ Context Switch | High (JNI Boundary Overhead) |
 
@@ -70,13 +70,13 @@ Execution paths utilize pre-allocated internal memory frames and Thread-Local Al
 
 ---
 
-## Deep Comparison: ParserNG Enterprise vs. Janino JIT Compiler
+## Deep Comparison: ParserNG vs. Janino JIT Compiler
 To demonstrate the limitations of standard runtime-compilation engines, the micro-benchmarks below contrast Janino's scalar bytecode output with ParserNG's hardware-aligned SIMD execution architecture across 2,000,000 elements.
 
 ### Workload A: Transcendental Composition (21 Sines + 20 Arithmetic Steps)
 When tasked with deep, complex mathematical curves containing intense instruction depths, traditional scalar JIT execution hits a hard processing wall.
 * **Janino / Traditional Scalar Baseline:** ~590.00 ms
-* **ParserNG Enterprise (Parallel Vector Engine):** **~104.00 ms** (A massive **5.6×** throughput explosion)
+* **ParserNG (Parallel Vector Engine):** **~104.00 ms** (A massive **5.6×** throughput explosion)
 
 ### Workload B: Multi-Variable Algebraic Complexity (x1^3+x2^3+x3^3+x4^3+x5^3+x6^3)
 The performance gap scales exponentially when moving to a Structure of Arrays (SoA) layout across multiple independent variables. Because scalar compilers cannot vectorize execution loops, they force the CPU to cycle across separate memory streams, inducing devastating cache thrashing and register pressure.
@@ -84,12 +84,12 @@ The performance gap scales exponentially when moving to a Structure of Arrays (S
 #### Single-Thread Control (1 Pinned Worker)
 * **Janino AoS (Array of Structures):** 260.31 ms
 * **Janino SoA (Structure of Arrays):** 277.28 ms
-* **ParserNG Enterprise (Pure SoA SIMD):** **19.03 ms** (Up to **14.6× faster** on a single core)
+* **ParserNG (Pure SoA SIMD):** **19.03 ms** (Up to **14.6× faster** on a single core)
 
 #### Multi-Thread Scaling Execution (e.g. 2 Active Workers)
 * **Janino AoS (Array of Structures):** 271.40 ms *(Stagnated / Degraded by -4.2%)*
 * **Janino SoA (Structure of Arrays):** 301.36 ms *(Choked / Degraded by -8.7%)*
-* **ParserNG Enterprise (Pure SoA SIMD):** **11.86 ms** (**🚀 1.60× Near-Linear Speedup**)
+* **ParserNG (Pure SoA SIMD):** **11.86 ms** (**🚀 1.60× Near-Linear Speedup**)
 
 > 💡 **Concurrency handling:** Adding threads to Janino is not straightforward, unlike in ParserNG. ParserNG's vector loop design tracks contiguous chunks smoothly, converting raw compute addition directly into clean, scalable throughput.
 
@@ -124,7 +124,7 @@ Enterprise binaries are hosted securely inside your designated private repositor
 <repositories>
     <repository>
         <id>parserng-enterprise-repo</id>
-        <name>ParserNG Enterprise Private Artifact Registry</name>
+        <name>ParserNG Private Artifact Registry</name>
         <url>https://maven.pkg.github.com/gbenroscience/parserng-enterprise</url>
         <releases><enabled>true</enabled></releases>
     </repository>
@@ -329,7 +329,7 @@ The validation tool tests across variable scale profiles (20 x 20, 70 x 70, 100 
 
 ## Enterprise Support, SLAs, & Custom DSL Services
 
-ParserNG Enterprise includes full support contracts designed for mission-critical banking, financial technology, and AI inference runtimes:
+ParserNG includes full support contracts designed for mission-critical banking, financial technology, and AI inference runtimes:
 
 * **Commercial Support SLAs:** Guaranteed response times (24-hour response windows for tier-1 critical processing interruptions).
 * **Custom Architecture Consultative Audits:** Direct assistance with cache layouts, hardware tuning, pinning worker threads to prevent bus contention, and maximizing mechanical sympathy profiles.

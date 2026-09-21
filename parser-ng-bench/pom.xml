@@ -9,7 +9,7 @@
     <artifactId>parser-ng-bench</artifactId>
     <name>parser-ng-bench</name>
     <version>3.0.7</version>
-      <description>
+    <description>
         Local benchmark suite for ParserNG and its extensions.
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034
     </description>
@@ -111,6 +111,11 @@
             <artifactId>parser-ng-arrow</artifactId>
             <version>${project.version}</version>
         </dependency>        
+        <dependency>
+            <groupId>com.github.gbenroscience</groupId>
+            <artifactId>parser-ng-sql</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.arrow.gandiva</groupId>
             <artifactId>arrow-gandiva</artifactId>

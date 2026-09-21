@@ -1,5 +1,6 @@
 package com.github.gbenroscience.sqlv1.demo;
 
+import com.github.gbenroscience.arrow.tools.box.ArrowExecutionBackend;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.types.pojo.*;
@@ -54,7 +55,7 @@ public class ExecBench {
         try (RootAllocator allocator = new RootAllocator(Long.MAX_VALUE)) {
             VectorSchemaRoot root = makeRoot(allocator, BATCH);
  
-            var qD = com.github.gbenroscience.sqlv1.ArrowQuery.compile(sql);
+            var qD = com.github.gbenroscience.sqlv1.ArrowQuery.compile(sql).withBackend(ArrowExecutionBackend.CPU_SIMD);
 
            
             Compiled cD = new Compiled() {
@@ -65,7 +66,7 @@ public class ExecBench {
             for (int i = 0; i < WARMUP; i++) { cD.execute(root).close(); }
 
             double[] usD = new double[REPS];
-            for (int r = 0; r < REPS; r++) {
+              for (int r = 0; r < REPS; r++) {
                 System.gc(); try { Thread.sleep(50); } catch (InterruptedException ignored) {}
                 long s = System.nanoTime();  
                 for (int i = 0; i < CALLS_PER_REP; i++) cD.execute(root).close();

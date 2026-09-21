@@ -27,6 +27,7 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.arrow.vector.util.TransferPair;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -64,7 +65,9 @@ import java.util.Set;
  * that compiled plan is cached and reused on every subsequent
  * {@code execute} call whose root has the same column names/types (a
  * schema-fingerprint check); a root with a genuinely different schema
- * transparently triggers a one-time recompilation.
+ * transparently triggers a one-time recompilation — see "Thread-safety"
+ * for how that recompilation is made safe against a concurrently in-flight
+ * call still using the plan being replaced.
  *
  * <h2>{@code WHERE} referencing a {@code SELECT}-list alias</h2>
  * {@code WHERE} still evaluates against the <i>input</i> root's own
@@ -113,6 +116,34 @@ import java.util.Set;
  * {@code NullPolicy}" below for why that unconditional guard is required
  * even on ordinary, entirely-non-null data.
  *
+ * <h2>No-{@code WHERE} and {@code LIMIT} fast paths</h2>
+ * When a query has no {@code WHERE} clause at all, every row of the input
+ * survives unfiltered; when a query has a {@code LIMIT}, the surviving rows
+ * are always a contiguous prefix of whatever came before it. Both cases are
+ * detected explicitly ({@link #selectRows} returns {@code null} as a "keep
+ * everything, in order" sentinel for the first; {@link #runPlan} calls
+ * {@link #materializePrefix} directly for the second) and handled with a
+ * single {@link TransferPair}-based buffer transfer per column — an
+ * O(1)-relative-to-row-count buffer copy — instead of the general
+ * {@link #materializeRows} path's per-row {@code copyFromSafe} loop, which
+ * is reserved for genuinely non-contiguous/reordered row sets (an actual
+ * {@code WHERE} filter, or a sort). {@link #buildProjection}'s renamed
+ * passthrough case (e.g. {@code SELECT x AS y}) uses the same bulk-transfer
+ * technique for the same reason: it is always copying an already-materialized,
+ * contiguous {@code [0, rowCount)} range, just under a new name.
+ * <p>
+ * <b>Known remaining cost, deliberately not addressed here:</b> both fast
+ * paths above still copy <i>every</i> column of the source root, even one a
+ * query never references (e.g. {@code SELECT x*y FROM data} where
+ * {@code data} also has unrelated columns {@code z, a, b}). Pruning to only
+ * the columns a query actually needs is possible in principle, but is only
+ * <i>safe</i> if the underlying {@code ArrowExpressionEvaluator} resolves
+ * its referenced columns by name from whichever root it is given, rather
+ * than by position against the exact schema it was compiled with — this
+ * class has no visibility into that implementation detail, so it does not
+ * attempt the pruning rather than risk silently reading the wrong column
+ * into the wrong output.
+ *
  * <h2>Expression deduplication</h2>
  * Within one {@link #buildPlan} call, every leaf that needs an
  * {@code ArrowExpressionEvaluator} — a predicate comparison/{@code BETWEEN}/
@@ -126,8 +157,8 @@ import java.util.Set;
  * are frequently the exact same text. {@link CompiledPlan} holds the
  * deduplicated set directly (not derived from {@code fusedPredicate}/
  * {@code maskPredicateRoot}/{@code projections}, which may reference the
- * same instance more than once) and is the sole owner responsible for
- * closing each distinct evaluator exactly once.
+ * same instance more than once) — see "Thread-safety" for how and when
+ * those evaluators are actually closed.
  *
  * <h2>A note on {@code NullPolicy} (read before choosing {@link NullPolicy#IGNORE})</h2>
  * As verified against a real build/run of {@code parser-ng-arrow} 3.0.6
@@ -149,6 +180,15 @@ import java.util.Set;
  * throw when that happens (see the unconditional {@code isNull} guard
  * above) but the result will not contain the data you asked for. Prefer the
  * default unless and until this is confirmed fixed upstream.
+ * <p>
+ * <b>Per-call consistency:</b> each {@link #execute(VectorSchemaRoot)} /
+ * {@link #execute(VectorSchemaRoot, VectorSchemaRoot)} call reads
+ * {@link #nullPolicy} exactly once, at the very start, and threads that one
+ * snapshot through every sub-evaluation the call performs ({@code WHERE},
+ * every projection, {@code ORDER BY}, {@code HAVING}). This guarantees a
+ * single call is internally consistent even if another thread calls
+ * {@link #withNullPolicy(NullPolicy)} while it is in flight — see
+ * "Thread-safety".
  *
  * <h2>{@code SELECT *}</h2>
  * Passes every column of the (filtered) input straight through, under its
@@ -160,16 +200,21 @@ import java.util.Set;
  * convention of being named after its (trimmed) expression text; an
  * {@code AS} alias always wins. A passthrough column whose output name
  * matches its source column's own name is returned as a zero-copy
- * reference to that source vector rather than a freshly allocated,
- * row-by-row copy — {@link #buildProjection} tracks which output vectors
- * are such reused references (in an identity set, since two different
- * {@code FieldVector} instances can be {@code equals}-equal) so its cleanup
- * path never closes one still owned by the result it's returning. A
- * passthrough column that *is* renamed (e.g. {@code SELECT x AS y FROM t})
- * still gets a real, freshly allocated copy, since the same source column
- * referenced twice under different names (e.g. {@code SELECT x, x AS y
- * FROM t}) must never share one mutable vector between two independent
- * output columns.
+ * reference to that source vector rather than a freshly allocated copy —
+ * {@link #buildProjection} tracks which output vectors are such reused
+ * references (in an identity set, since two different {@code FieldVector}
+ * instances can be {@code equals}-equal) so its cleanup path never closes
+ * one still owned by the result it's returning. A passthrough column that
+ * *is* renamed (e.g. {@code SELECT x AS y FROM t}) still gets a real,
+ * independent copy, since the same source column referenced twice under
+ * different names (e.g. {@code SELECT x, x AS y FROM t}) must never share
+ * one mutable vector between two independent output columns — that copy is
+ * a single bulk {@link TransferPair} buffer transfer, not a per-row loop
+ * (see "No-{@code WHERE} and {@code LIMIT} fast paths"). Both optimizations
+ * only apply to {@link #execute(VectorSchemaRoot)}'s fresh-result-per-call
+ * path — the reusable-output overload below always copies into the
+ * caller's buffer row-by-row, since that buffer's identity must remain
+ * stable across calls (see "Reusable output buffers").
  *
  * <h2>{@code GROUP BY} / {@code HAVING} / {@code ORDER BY} / {@code LIMIT}</h2>
  * Aggregation ({@code SUM}/{@code COUNT}/{@code AVG}/{@code MIN}/{@code MAX})
@@ -210,23 +255,77 @@ import java.util.Set;
  * whatever the final result is at that point (grouped-and-{@code HAVING}-filtered,
  * or plain projected).
  *
+ * <h2>Reusable output buffers (avoiding a fresh result per call)</h2>
+ * {@link #execute(VectorSchemaRoot)} always returns a brand-new,
+ * independently-owned {@link VectorSchemaRoot} — simple and safe, but for a
+ * tight, repeated-call hot path (a benchmark, a streaming loop) it means a
+ * fresh allocation on every single call. {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}
+ * is an opt-in alternative for that hot path: it writes into a
+ * caller-supplied, caller-owned output root instead, reusing the exact same
+ * output buffers call after call, and reuses an internal scratch buffer
+ * (see {@link ReusableScratch}) for the two things that overload cannot
+ * write directly into the caller's buffer: a {@code WHERE}-narrowed
+ * computed column (still needs a full-batch scratch evaluation before
+ * gathering) and the {@code WHERE} predicate's own evaluation output. It is
+ * deliberately restricted to queries with no {@code GROUP BY},
+ * {@code ORDER BY}, {@code HAVING} or {@code LIMIT} — every one of those
+ * can make the output row count depend on the data in a way a
+ * fixed-capacity buffer cannot safely be pre-sized for — and throws
+ * {@link UnsupportedOperationException} up front for any query shape it
+ * does not support, rather than silently doing something surprising.
+ * {@link #allocateReusableOutput} builds a correctly-shaped/typed buffer
+ * for a given query, so callers do not have to hand-construct one. See
+ * both methods' own javadoc for the full contract, and "Thread-safety"
+ * below for the concurrency restriction this overload carries that
+ * {@link #execute(VectorSchemaRoot)} does not.
+ *
  * <h2>Resource ownership</h2>
  * An {@code ArrowQuery} owns whatever {@code ArrowExpressionEvaluator}s it
  * has compiled and must be {@link #close()}d when no longer needed (a
  * try-with-resources block is the simplest way, as in the example above).
- * Every {@code VectorSchemaRoot} returned by {@link #execute} is a fresh,
- * independent batch that the <i>caller</i> owns and must close in turn —
- * this class never returns a view over, or a root that shares ownership
- * with, the root passed in.
+ * Every {@code VectorSchemaRoot} returned by {@link #execute(VectorSchemaRoot)}
+ * is a fresh, independent batch that the <i>caller</i> owns and must close
+ * in turn — this class never returns a view over, or a root that shares
+ * ownership with, the root passed in. {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}
+ * is the one deliberate exception: it returns the very {@code reusableOutput}
+ * the caller passed in, which the caller already owns and keeps owning.
  *
  * <h2>Thread-safety</h2>
- * Configuring a query ({@link #withBackend}/{@link #withNullPolicy}) and
- * calling {@link #execute} concurrently from multiple threads is not
- * supported. Calling {@link #execute} concurrently from multiple threads
- * once a query's configuration is no longer changing is only as safe as the
- * underlying {@code ArrowExpressionEvaluator}s' own backend — this class
- * adds no additional synchronization around {@code evaluate} calls beyond
- * what is needed to build/cache the compiled plan itself.
+ * <b>{@link #execute(VectorSchemaRoot)} is safe to call concurrently from
+ * multiple threads</b> — including concurrently with {@link #close()},
+ * {@link #withBackend}, or another thread triggering a schema-driven plan
+ * recompilation. This is deliberate, not incidental: the compiled plan a
+ * call uses is reference-counted ({@link CompiledPlan#acquire()}/
+ * {@link CompiledPlan#release()}/{@link CompiledPlan#retire()}) — a call
+ * acquires the plan it looked up before using it and releases it when
+ * done, and a plan superseded by recompilation, a backend change, or
+ * {@code close()} only has its evaluators actually closed once every
+ * in-flight call holding a reference to it has released. A thread mid
+ * {@link #execute(VectorSchemaRoot)} therefore always finishes safely
+ * against the plan it started with, never against one already closed out
+ * from under it. Similarly, {@link #withNullPolicy(NullPolicy)} is safe to
+ * call concurrently: each {@code execute} call snapshots {@link #nullPolicy}
+ * once at the start (see "A note on {@code NullPolicy}"'s "Per-call
+ * consistency"), so a policy change never splits across one call's own
+ * sub-evaluations.
+ * <p>
+ * What this does <i>not</i> give you: a single {@code execute} call is not
+ * linearized against a concurrent {@code withBackend}/{@code withNullPolicy}
+ * call — a call already in flight when the configuration changes completes
+ * using whatever it already captured, not the new configuration. For
+ * predictable, easy-to-reason-about behavior, configure backend/nullPolicy
+ * once before traffic starts rather than changing them under concurrent
+ * load, even though doing so is now memory-safe.
+ * <p>
+ * {@link #execute(VectorSchemaRoot, VectorSchemaRoot)} and
+ * {@link #allocateReusableOutput} are the exception to all of the above:
+ * they are <b>not</b> safe to call concurrently on the same
+ * {@code ArrowQuery} instance, even under a stable schema/configuration,
+ * because they read and mutate a per-instance {@link ReusableScratch} —
+ * that mutable state is exactly what lets them avoid the allocations
+ * {@link #execute(VectorSchemaRoot)} pays for. Use one {@code ArrowQuery}
+ * per thread for this overload (queries are cheap to {@link #compile}), or
+ * fully serialize access to a shared instance yourself.
  *
  * <h2>Warming up</h2>
  * The very first time a given compiled expression actually runs in a JVM
@@ -283,6 +382,14 @@ public final class ArrowQuery implements AutoCloseable {
     private volatile CompiledPlan plan;
     private volatile VectorSchemaRoot lastRoot;
 
+    /**
+     * Scratch buffers for {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}'s
+     * WHERE-evaluation and WHERE-narrowed-computed-column paths — see that
+     * method's javadoc and this class's "Thread-safety". Never touched by
+     * {@link #execute(VectorSchemaRoot)}.
+     */
+    private volatile ReusableScratch reusableScratch;
+
     private ArrowQuery(String sql, SelectStatement stmt) {
         this.sql = sql;
         this.stmt = stmt;
@@ -313,7 +420,9 @@ public final class ArrowQuery implements AutoCloseable {
      * Selects which parser-ng-arrow execution backend compiled expressions
      * target (default: {@link ArrowExecutionBackend#CPU_SIMD}). Changing
      * the backend after a plan has already been compiled invalidates and
-     * recompiles it on the next {@link #execute}.
+     * recompiles it on the next {@link #execute} — safely with respect to
+     * any other thread currently mid-{@link #execute(VectorSchemaRoot)}
+     * against the old plan; see this class's "Thread-safety".
      * @param backend
      * @return 
      */
@@ -338,7 +447,9 @@ public final class ArrowQuery implements AutoCloseable {
      * the more obviously-named default, is not one currently). Unlike
      * {@link #withBackend}, this never requires recompilation —
      * {@code NullPolicy} is a per-{@code evaluate} concern, not a
-     * per-compiled-kernel one.
+     * per-compiled-kernel one — and each in-flight {@link #execute} call is
+     * unaffected by a concurrent call to this method; see "Per-call
+     * consistency" and "Thread-safety".
      * @param nullPolicy
      * @return 
      */
@@ -457,7 +568,8 @@ public final class ArrowQuery implements AutoCloseable {
     /**
      * Executes this query against {@code root}, compiling (or, on a later
      * call against a root with an unchanged schema, reusing) the underlying
-     * ParserNG expressions as needed.
+     * ParserNG expressions as needed. Safe to call concurrently from
+     * multiple threads — see this class's "Thread-safety".
      *
      * @param root
      * @return a fresh, independently-owned result batch: the projected
@@ -472,6 +584,9 @@ public final class ArrowQuery implements AutoCloseable {
         if (root == null) {
             throw new NullPointerException("root must not be null");
         }
+        // Snapshotted once, up front -- see "A note on NullPolicy"'s
+        // "Per-call consistency" and this class's "Thread-safety".
+        NullPolicy effectiveNullPolicy = this.nullPolicy;
         CompiledPlan p;
         try {
             p = ensurePlan(root);
@@ -481,13 +596,431 @@ public final class ArrowQuery implements AutoCloseable {
             throw new ArrowSqlException(
                     "Failed to compile query \"" + sql + "\" against the given schema: " + t.getMessage(), t);
         }
-        return runPlan(p, root);
+        try {
+            return runPlan(p, root, effectiveNullPolicy);
+        } finally {
+            p.release();
+        }
+    }
+
+    /**
+     * Like {@link #execute(VectorSchemaRoot)}, but writes into a
+     * caller-supplied, caller-owned {@code reusableOutput} root instead of
+     * allocating a fresh result on every call — see this class's "Reusable
+     * output buffers" for the motivation. {@link #allocateReusableOutput}
+     * builds a correctly-shaped {@code reusableOutput} for this query, so
+     * most callers should not need to hand-construct one.
+     *
+     * <p><b>Not safe for concurrent use on the same {@code ArrowQuery}
+     * instance</b> — see this class's "Thread-safety". Use one
+     * {@code ArrowQuery} per thread for this overload.
+     *
+     * <h4>Supported query shapes</h4>
+     * Only a query with no {@code GROUP BY}, {@code HAVING}, {@code ORDER BY}
+     * or {@code LIMIT} is supported — every one of those can make the
+     * result's row count depend on the data in a way a fixed-capacity
+     * buffer cannot be safely pre-sized for. Calling this on an
+     * unsupported query shape throws {@link UnsupportedOperationException}
+     * immediately, without touching {@code root} or {@code reusableOutput}
+     * at all; use {@link #execute(VectorSchemaRoot)} for those queries
+     * instead.
+     *
+     * <h4>Sizing {@code reusableOutput}</h4>
+     * {@code reusableOutput} must have exactly one column per
+     * {@code SELECT} item (or, for {@code SELECT *}, one column per column
+     * of {@code root}), and every one of its vectors must have a
+     * {@link FieldVector#getValueCapacity()} of at least
+     * {@code root.getRowCount()} — a {@code WHERE} clause can only shrink
+     * the row count relative to {@code root}, never grow it, so sizing to
+     * {@code root}'s own row count is always sufficient headroom. This is
+     * checked up front and reported as an {@link IllegalArgumentException}
+     * naming the offending column, rather than left to fail obscurely
+     * mid-write. This method never calls {@code allocateNew()} or otherwise
+     * reallocates {@code reusableOutput}'s vectors — sizing them adequately
+     * up front is entirely the caller's responsibility, which is the whole
+     * point of reuse: this call performs no allocation of its own on the
+     * repeat-call path (other than internal scratch space, kept and grown
+     * as needed rather than freed between calls — see below).
+     *
+     * <h4>What this does <i>not</i> avoid</h4>
+     * A passthrough column (a bare {@code SELECT x FROM ...} item) is still
+     * copied row-by-row into {@code reusableOutput}, not zero-copy
+     * referenced the way {@link #execute(VectorSchemaRoot)} can — the
+     * output buffer's identity must stay stable across calls, so there is
+     * no vector to alias into it without invalidating that guarantee.
+     *
+     * @param root the input batch, exactly as for {@link #execute(VectorSchemaRoot)}
+     * @param reusableOutput the caller-owned buffer to write into; returned
+     * unchanged as this call's result (with {@link VectorSchemaRoot#setRowCount})
+     * updated to the actual output row count)
+     * @return {@code reusableOutput}, after being populated
+     * @throws UnsupportedOperationException if this query has a
+     * {@code GROUP BY}, {@code HAVING}, {@code ORDER BY} or {@code LIMIT}
+     * @throws IllegalArgumentException if {@code reusableOutput}'s column
+     * count or any column's capacity is insufficient
+     * @throws ArrowSqlException if compiling the query's expressions
+     * against {@code root}'s schema fails
+     * @throws ArrowBindingException if evaluation fails at runtime
+     */
+    public VectorSchemaRoot execute(VectorSchemaRoot root, VectorSchemaRoot reusableOutput) {
+        if (root == null) {
+            throw new NullPointerException("root must not be null");
+        }
+        if (reusableOutput == null) {
+            throw new NullPointerException("reusableOutput must not be null");
+        }
+        requireReusableOutputSupportedShape();
+
+        NullPolicy effectiveNullPolicy = this.nullPolicy;
+        CompiledPlan p;
+        try {
+            p = ensurePlan(root);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new ArrowSqlException(
+                    "Failed to compile query \"" + sql + "\" against the given schema: " + t.getMessage(), t);
+        }
+        try {
+            int rowCount = root.getRowCount();
+            ReusableScratch scratch = scratchFor(p, p.projections.size());
+            int[] selected = selectRowsReusable(p, root, effectiveNullPolicy, scratch);
+            int outRowCount = selected == null ? rowCount : selected.length;
+
+            if (stmt.selectAll()) {
+                List<FieldVector> sourceVectors = root.getFieldVectors();
+                List<FieldVector> outVectors = reusableOutput.getFieldVectors();
+                validateReusableOutputShape(sourceVectors.size(), outVectors, rowCount);
+                for (int i = 0; i < sourceVectors.size(); i++) {
+                    gatherColumnInto(sourceVectors.get(i), selected, outVectors.get(i), outRowCount);
+                }
+                reusableOutput.setRowCount(outRowCount);
+                return reusableOutput;
+            }
+
+            List<ProjectionPlan> projections = p.projections;
+            List<FieldVector> outVectors = reusableOutput.getFieldVectors();
+            validateReusableOutputShape(projections.size(), outVectors, rowCount);
+
+            for (int i = 0; i < projections.size(); i++) {
+                ProjectionPlan proj = projections.get(i);
+                FieldVector out = outVectors.get(i);
+
+                if (proj.passthrough) {
+                    FieldVector src = root.getVector(proj.sourceColumnName);
+                    if (src == null) {
+                        throw new ArrowBindingException(
+                                "Column '" + proj.sourceColumnName + "' not found while projecting.");
+                    }
+                    gatherColumnInto(src, selected, out, outRowCount);
+
+                } else if (selected == null) {
+                    // No WHERE narrowed anything: evaluate straight into the
+                    // caller's buffer, no scratch/gather step needed at all.
+                    out.setValueCount(rowCount);
+                    proj.evaluator.evaluate(root, out, effectiveNullPolicy);
+
+                } else {
+                    // WHERE narrowed rows: the compiled evaluator only knows
+                    // how to evaluate over an entire batch, so evaluate over
+                    // all of `root` into a reusable scratch vector, then
+                    // gather just the accepted rows into `out`.
+                    FieldVector scratchVec = scratch.forProjection(i, rowCount, p.float64, allocatorOf(root));
+                    proj.evaluator.evaluate(root, scratchVec, effectiveNullPolicy);
+                    gatherColumnInto(scratchVec, selected, out, outRowCount);
+                }
+            }
+
+            reusableOutput.setRowCount(outRowCount);
+            return reusableOutput;
+        } finally {
+            p.release();
+        }
+    }
+
+    /**
+     * Builds a {@code VectorSchemaRoot} correctly shaped and typed to pass
+     * as {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}'s
+     * {@code reusableOutput} argument for this query: one column per
+     * {@code SELECT} item (matching name and, for a computed column, the
+     * {@code float64}/{@code float32} kernel precision {@code schemaTemplate}
+     * implies; for a passthrough column, the source column's own type), or
+     * one column per column of {@code schemaTemplate} for {@code SELECT *}.
+     * Every column is allocated with capacity for at least {@code maxRows}
+     * rows — pass the largest {@code root.getRowCount()} you expect to
+     * {@link #execute(VectorSchemaRoot, VectorSchemaRoot)} across this
+     * buffer's lifetime, since this method (like that one) never
+     * reallocates on your behalf later.
+     *
+     * @param schemaTemplate a root with the same column names/types real
+     * calls to {@link #execute(VectorSchemaRoot, VectorSchemaRoot)} will
+     * use; read only for its schema, never for its row data, and never
+     * closed by this call
+     * @param maxRows capacity to allocate for each output column; must be
+     * positive
+     * @return a zero-row, fully allocated {@code VectorSchemaRoot} the
+     * caller owns and must eventually close
+     * @throws UnsupportedOperationException if this query has a
+     * {@code GROUP BY}, {@code HAVING}, {@code ORDER BY} or {@code LIMIT}
+     * @throws IllegalArgumentException if {@code maxRows} is not positive
+     * @throws ArrowSqlException if compiling the query's expressions
+     * against {@code schemaTemplate}'s schema fails
+     */
+    public VectorSchemaRoot allocateReusableOutput(VectorSchemaRoot schemaTemplate, int maxRows) {
+        if (schemaTemplate == null) {
+            throw new NullPointerException("schemaTemplate must not be null");
+        }
+        if (maxRows <= 0) {
+            throw new IllegalArgumentException("maxRows must be positive, was " + maxRows);
+        }
+        requireReusableOutputSupportedShape();
+
+        CompiledPlan p;
+        try {
+            p = ensurePlan(schemaTemplate);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new ArrowSqlException(
+                    "Failed to compile query \"" + sql + "\" against the given schema: " + t.getMessage(), t);
+        }
+        try {
+            BufferAllocator allocator = allocatorOf(schemaTemplate);
+            List<Field> outFields = new ArrayList<>();
+            List<FieldVector> outVectors = new ArrayList<>();
+            try {
+                if (stmt.selectAll()) {
+                    for (FieldVector src : schemaTemplate.getFieldVectors()) {
+                        FieldVector v = src.getField().createVector(allocator);
+                        v.setInitialCapacity(maxRows);
+                        v.allocateNew();
+                        outFields.add(v.getField());
+                        outVectors.add(v);
+                    }
+                } else {
+                    for (ProjectionPlan proj : p.projections) {
+                        FieldType type;
+                        if (proj.passthrough) {
+                            FieldVector src = schemaTemplate.getVector(proj.sourceColumnName);
+                            if (src == null) {
+                                throw new ArrowBindingException(
+                                        "Column '" + proj.sourceColumnName + "' not found in schemaTemplate.");
+                            }
+                            type = src.getField().getFieldType();
+                        } else {
+                            type = FieldType.nullable(p.float64
+                                    ? new org.apache.arrow.vector.types.pojo.ArrowType.FloatingPoint(
+                                            org.apache.arrow.vector.types.FloatingPointPrecision.DOUBLE)
+                                    : new org.apache.arrow.vector.types.pojo.ArrowType.FloatingPoint(
+                                            org.apache.arrow.vector.types.FloatingPointPrecision.SINGLE));
+                        }
+                        Field field = new Field(proj.outputName, type, null);
+                        FieldVector v = field.createVector(allocator);
+                        v.setInitialCapacity(maxRows);
+                        v.allocateNew();
+                        outFields.add(field);
+                        outVectors.add(v);
+                    }
+                }
+            } catch (RuntimeException | Error e) {
+                for (FieldVector v : outVectors) {
+                    closeQuietly(v);
+                }
+                throw e;
+            }
+            return new VectorSchemaRoot(new Schema(outFields), outVectors, 0);
+        } finally {
+            p.release();
+        }
+    }
+
+    private void requireReusableOutputSupportedShape() {
+        if (stmt.isGrouped()) {
+            throw new UnsupportedOperationException(
+                    "execute(root, reusableOutput)/allocateReusableOutput do not support GROUP BY queries "
+                            + "-- their row count depends on the data and cannot be bounded by a "
+                            + "fixed-capacity output buffer. Use execute(root) instead.");
+        }
+        if (stmt.having() != null) {
+            throw new UnsupportedOperationException(
+                    "execute(root, reusableOutput)/allocateReusableOutput do not support HAVING. "
+                            + "Use execute(root) instead.");
+        }
+        if (!stmt.orderBy().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "execute(root, reusableOutput)/allocateReusableOutput do not support ORDER BY. "
+                            + "Use execute(root) instead.");
+        }
+        if (stmt.limit() != null) {
+            throw new UnsupportedOperationException(
+                    "execute(root, reusableOutput)/allocateReusableOutput do not support LIMIT. "
+                            + "Use execute(root) instead.");
+        }
+    }
+
+    /**
+     * Validates that {@code reusableOutput}'s column count and per-column
+     * capacity ({@link FieldVector#getValueCapacity()}) are sufficient for
+     * {@code rowCount} input rows — see
+     * {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}'s "Sizing
+     * reusableOutput". Does not check per-column Arrow type: a mismatch
+     * there (e.g. passing a {@code Float4Vector} where this query produces
+     * {@code Float8Vector} values) surfaces as a {@link ClassCastException}
+     * from the underlying {@code copyFromSafe}/{@code evaluate} call
+     * instead, since the correct expected type can differ per column
+     * (passthrough columns keep their source's own type) and re-deriving
+     * it here would duplicate logic {@link #allocateReusableOutput} and
+     * {@link #buildProjection} already own.
+     */
+    private static void validateReusableOutputShape(
+            int expectedColumns, List<FieldVector> outVectors, int rowCount) {
+        if (outVectors.size() != expectedColumns) {
+            throw new IllegalArgumentException(
+                    "reusableOutput has " + outVectors.size() + " column(s) but this query produces "
+                            + expectedColumns + ". Build reusableOutput with allocateReusableOutput(...) "
+                            + "against the same query.");
+        }
+        for (int i = 0; i < outVectors.size(); i++) {
+            FieldVector v = outVectors.get(i);
+            if (v.getValueCapacity() < rowCount) {
+                throw new IllegalArgumentException(
+                        "reusableOutput column " + i + " (\"" + v.getField().getName() + "\") has capacity "
+                                + v.getValueCapacity() + " but root has " + rowCount + " rows; a WHERE "
+                                + "clause can only shrink the row count, never grow it, so reusableOutput "
+                                + "must be sized to at least root's row count. See allocateReusableOutput.");
+            }
+        }
+    }
+
+    /**
+     * Copies either every row of {@code src} in order ({@code selected == null})
+     * or exactly the rows named by {@code selected}, in that order, into
+     * {@code dst} — the shared gather step behind
+     * {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}'s passthrough
+     * and WHERE-narrowed-computed-column paths. Always a per-row
+     * {@code copyFromSafe} loop, even for {@code selected == null}: unlike
+     * {@link #materializeRows}'s bulk {@link TransferPair} fast path,
+     * {@code dst} here is a caller-owned buffer whose identity must remain
+     * stable across calls, so its backing storage cannot simply be handed
+     * over from {@code src} the way a fresh, this-call-only result root's
+     * could be.
+     */
+    private static void gatherColumnInto(FieldVector src, int[] selected, FieldVector dst, int outRowCount) {
+        if (selected == null) {
+            for (int i = 0; i < outRowCount; i++) {
+                dst.copyFromSafe(i, i, src);
+            }
+        } else {
+            for (int i = 0; i < outRowCount; i++) {
+                dst.copyFromSafe(selected[i], i, src);
+            }
+        }
+        dst.setValueCount(outRowCount);
+    }
+
+    private synchronized ReusableScratch scratchFor(CompiledPlan p, int projectionCount) {
+        ReusableScratch s = reusableScratch;
+        if (s == null || s.forPlan != p) {
+            if (s != null) {
+                s.close();
+            }
+            s = new ReusableScratch(p, projectionCount);
+            reusableScratch = s;
+        }
+        return s;
+    }
+
+    /**
+     * {@code WHERE}-clause row selection for
+     * {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}: identical
+     * result semantics to {@link #selectRows}, but evaluates the fused
+     * predicate into {@code scratch}'s reusable predicate buffer instead of
+     * allocating a fresh one — safe only because this overload is
+     * documented as never called concurrently on the same instance (see
+     * this class's "Thread-safety"). The leaf-by-leaf {@code IS [NOT] NULL}
+     * mask path is left as-is (still allocates several {@code boolean[]}
+     * arrays per call) — a lower-priority cost than the Arrow off-heap
+     * buffer allocations the fused path avoids, and safely reusing those
+     * arrays across an arbitrary {@code AndNode}/{@code OrNode} tree shape
+     * is more involved than the win currently justifies.
+     */
+    private static int[] selectRowsReusable(
+            CompiledPlan p, VectorSchemaRoot root, NullPolicy nullPolicy, ReusableScratch scratch) {
+        if (p.fusedPredicate == null && p.maskPredicateRoot == null) {
+            return null;
+        }
+        int rowCount = root.getRowCount();
+        if (p.fusedPredicate != null) {
+            return selectFromEvaluatorReusable(p.fusedPredicate, root, rowCount, p.float64, nullPolicy, scratch);
+        }
+        boolean[] mask = p.maskPredicateRoot.evalMask(root, nullPolicy, p.float64);
+        int count = 0;
+        for (boolean b : mask) {
+            if (b) {
+                count++;
+            }
+        }
+        int[] out = new int[count];
+        int idx = 0;
+        for (int i = 0; i < mask.length; i++) {
+            if (mask[i]) {
+                out[idx++] = i;
+            }
+        }
+        return out;
+    }
+
+    private static int[] selectFromEvaluatorReusable(
+            ArrowExpressionEvaluator predicate, VectorSchemaRoot root, int rowCount,
+            boolean float64, NullPolicy nullPolicy, ReusableScratch scratch) {
+
+        if (rowCount == 0) {
+            return new int[0];
+        }
+        FieldVector out = scratch.predicateScratch(rowCount, float64, allocatorOf(root));
+        int[] buffer = new int[Math.max(16, rowCount / 4)];
+        int count = 0;
+
+        predicate.evaluate(root, out, nullPolicy);
+        if (float64) {
+            Float8Vector out8 = (Float8Vector) out;
+            for (int i = 0; i < rowCount; i++) {
+                if (out8.isNull(i)) {
+                    continue;
+                }
+                if (out8.get(i) != 0.0) {
+                    if (count == buffer.length) {
+                        buffer = Arrays.copyOf(buffer, buffer.length * 2);
+                    }
+                    buffer[count++] = i;
+                }
+            }
+        } else {
+            Float4Vector out4 = (Float4Vector) out;
+            for (int i = 0; i < rowCount; i++) {
+                if (out4.isNull(i)) {
+                    continue;
+                }
+                if (out4.get(i) != 0.0f) {
+                    if (count == buffer.length) {
+                        buffer = Arrays.copyOf(buffer, buffer.length * 2);
+                    }
+                    buffer[count++] = i;
+                }
+            }
+        }
+        return Arrays.copyOf(buffer, count);
     }
 
     /**
      * Releases every {@code ArrowExpressionEvaluator} this query has
-     * compiled. Safe to call more than once; safe to call even if
-     * {@link #execute} was never called.
+     * compiled — or, if another thread is currently mid-{@link #execute(VectorSchemaRoot)}
+     * against the current plan, marks it for release as soon as that call
+     * finishes (see this class's "Thread-safety" and
+     * {@link CompiledPlan#retire()}). Safe to call more than once, safe to
+     * call even if {@link #execute} was never called, and safe to call
+     * concurrently with an in-flight {@link #execute(VectorSchemaRoot)}
+     * call on another thread.
      */
     @Override
     public synchronized void close() {
@@ -497,27 +1030,38 @@ public final class ArrowQuery implements AutoCloseable {
     private synchronized void invalidatePlan() {
         lastRoot = null;
         if (plan != null) {
-            plan.close();
+            plan.retire();
             plan = null;
+        }
+        if (reusableScratch != null) {
+            reusableScratch.close();
+            reusableScratch = null;
         }
     }
 
     // =====================================================================
-    // plan compilation (lazy, cached, schema-fingerprinted)
+    // plan compilation (lazy, cached, schema-fingerprinted, ref-counted)
     // =====================================================================
 
+    /**
+     * Looks up (compiling if necessary) the {@link CompiledPlan} for
+     * {@code root}'s schema and returns it already
+     * {@link CompiledPlan#acquire() acquired} — the caller MUST
+     * {@link CompiledPlan#release()} it exactly once, in a {@code finally}
+     * block, when done. See this class's "Thread-safety".
+     */
     private CompiledPlan ensurePlan(VectorSchemaRoot root) throws Throwable {
         // Lock-free fast path: the overwhelmingly common case is the exact
         // same VectorSchemaRoot instance being re-executed in a loop (a
         // cached materialized batch, a benchmark, a retry) - reference
         // equality against the last-seen root skips the fingerprint
-        // computation AND the synchronized section entirely, with no
-        // allocation and no monitor acquisition. Safe under races: a stale
-        // read here just falls through to the synchronized slow path below,
-        // it can never return a plan that doesn't match some earlier state.
+        // computation AND the synchronized section entirely. Safe under
+        // races: a stale read here, or an acquire() that loses a race
+        // against a concurrent retire(), just falls through to the
+        // synchronized slow path below, which always resolves correctly.
         VectorSchemaRoot seenRoot = lastRoot;
         CompiledPlan cached = plan;
-        if (seenRoot == root && cached != null) {
+        if (seenRoot == root && cached != null && cached.acquire()) {
             return cached;
         }
         return ensurePlanSlow(root);
@@ -528,14 +1072,37 @@ public final class ArrowQuery implements AutoCloseable {
         CompiledPlan existing = plan;
         if (existing != null && existing.fingerprint == fingerprint) {
             lastRoot = root;
-            return existing;
+            if (existing.acquire()) {
+                return existing;
+            }
+            // existing was retired-and-closed by a race between the
+            // volatile read above and this acquire() (e.g. a concurrent
+            // close()) -- fall through and rebuild exactly as if there
+            // were no cached plan at all.
         }
         CompiledPlan fresh = buildPlan(root, fingerprint);
         lastRoot = root;
-        if (existing != null) {
-            existing.close();
+        if (plan != null) {
+            // Mark the outgoing plan superseded. If another thread is
+            // currently mid-execute() holding an acquired reference to it,
+            // its evaluators are NOT closed here -- only once that
+            // reference is released. See CompiledPlan's javadoc.
+            plan.retire();
         }
         plan = fresh;
+        if (reusableScratch != null) {
+            // Tied to the outgoing plan's identity (see ReusableScratch's
+            // javadoc); scratchFor() would rebuild it lazily on the next
+            // execute(root, reusableOutput) call regardless, but closing
+            // eagerly here avoids it lingering in the meantime. Safe to
+            // close immediately, unlike the plan itself: this overload is
+            // documented as never called concurrently with anything else
+            // on this instance, so there is no other thread that could be
+            // mid-use of it right now.
+            reusableScratch.close();
+            reusableScratch = null;
+        }
+        fresh.acquire(); // brand new plan: never retired, this always succeeds
         return fresh;
     }
 
@@ -550,10 +1117,8 @@ public final class ArrowQuery implements AutoCloseable {
         // each. This is common -- e.g. WhereAliasResolver routinely
         // re-expands a SELECT-list alias's expression text verbatim into
         // WHERE, so the projection and the predicate leaf it feeds are
-        // frequently identical text. CompiledPlan.close() owns closing
-        // every distinct evaluator exactly once via this map's values(); no
-        // other site closes one directly. See "Expression deduplication"
-        // in this class's javadoc.
+        // frequently identical text. See "Expression deduplication" in
+        // this class's javadoc.
         Map<String, ArrowExpressionEvaluator> compiledCache = new LinkedHashMap<>();
 
         BoolExpr where = stmt.where();
@@ -921,8 +1486,8 @@ public final class ArrowQuery implements AutoCloseable {
     // per-call execution: select rows -> materialize -> project/alias
     // =====================================================================
 
-    private VectorSchemaRoot runPlan(CompiledPlan p, VectorSchemaRoot root) {
-        int[] selected = selectRows(p, root);
+    private VectorSchemaRoot runPlan(CompiledPlan p, VectorSchemaRoot root, NullPolicy nullPolicy) {
+        int[] selected = selectRows(p, root, nullPolicy);
         VectorSchemaRoot filtered = materializeRows(root, selected);
 
         // Non-grouped queries sort *before* projection: an ORDER BY key may
@@ -931,7 +1496,7 @@ public final class ArrowQuery implements AutoCloseable {
         // expression (see buildPlan's ORDER BY comment) -- both only
         // resolve correctly against the pre-projection root.
         if (p.groupPlan == null && !p.orderByPlans.isEmpty()) {
-            VectorSchemaRoot sortedFiltered = applyOrderBy(p, filtered);
+            VectorSchemaRoot sortedFiltered = applyOrderBy(p, filtered, nullPolicy);
             for (FieldVector v : filtered.getFieldVectors()) {
                 closeQuietly(v);
             }
@@ -941,7 +1506,7 @@ public final class ArrowQuery implements AutoCloseable {
         VectorSchemaRoot result;
         if (p.groupPlan != null) {
             try {
-                result = buildGroupedResult(p, filtered);
+                result = buildGroupedResult(p, filtered, nullPolicy);
             } catch (RuntimeException | Error e) {
                 for (FieldVector v : filtered.getFieldVectors()) {
                     closeQuietly(v);
@@ -955,7 +1520,7 @@ public final class ArrowQuery implements AutoCloseable {
             result = filtered;
         } else {
             try {
-                result = buildProjection(p, filtered);
+                result = buildProjection(p, filtered, nullPolicy);
             } catch (RuntimeException | Error e) {
                 for (FieldVector v : filtered.getFieldVectors()) {
                     closeQuietly(v);
@@ -972,22 +1537,27 @@ public final class ArrowQuery implements AutoCloseable {
         // -- see buildPlan's ORDER BY comment for why grouped and
         // non-grouped queries sort at different pipeline stages.
         if (p.havingFused != null || p.havingNode != null) {
-            VectorSchemaRoot havingFiltered = applyHaving(p, result);
+            VectorSchemaRoot havingFiltered = applyHaving(p, result, nullPolicy);
             for (FieldVector v : result.getFieldVectors()) {
                 closeQuietly(v);
             }
             result = havingFiltered;
         }
         if (p.groupPlan != null && !p.orderByPlans.isEmpty()) {
-            VectorSchemaRoot sorted = applyOrderBy(p, result);
+            VectorSchemaRoot sorted = applyOrderBy(p, result, nullPolicy);
             for (FieldVector v : result.getFieldVectors()) {
                 closeQuietly(v);
             }
             result = sorted;
         }
         if (stmt.limit() != null && stmt.limit() < result.getRowCount()) {
-            VectorSchemaRoot limited = materializeRows(result,
-                    java.util.stream.IntStream.range(0, stmt.limit()).toArray());
+            // Contiguous-prefix fast path: LIMIT always keeps rows
+            // [0, limit) of whatever ORDER BY (or the query's natural
+            // order) produced, so a bulk TransferPair copy applies here
+            // exactly as it does for the no-WHERE case in selectRows/
+            // materializeRows -- see this class's "No-WHERE and LIMIT fast
+            // paths".
+            VectorSchemaRoot limited = materializePrefix(result, stmt.limit());
             for (FieldVector v : result.getFieldVectors()) {
                 closeQuietly(v);
             }
@@ -1008,7 +1578,7 @@ public final class ArrowQuery implements AutoCloseable {
      * {@link GroupPlan#itemAggIndex} to pick, per item, either a group's key
      * value or an aggregate's result.
      */
-    private VectorSchemaRoot buildGroupedResult(CompiledPlan p, VectorSchemaRoot filtered) {
+    private VectorSchemaRoot buildGroupedResult(CompiledPlan p, VectorSchemaRoot filtered, NullPolicy nullPolicy) {
         GroupPlan gp = p.groupPlan;
         int rowCount = filtered.getRowCount();
         BufferAllocator allocator = allocatorOf(filtered);
@@ -1197,7 +1767,7 @@ public final class ArrowQuery implements AutoCloseable {
      * against a phantom root back in {@link #buildPlan}) both resolve
      * correctly against it.
      */
-    private VectorSchemaRoot applyHaving(CompiledPlan p, VectorSchemaRoot result) {
+    private static VectorSchemaRoot applyHaving(CompiledPlan p, VectorSchemaRoot result, NullPolicy nullPolicy) {
         int[] selected;
         int rowCount = result.getRowCount();
         if (p.havingFused != null) {
@@ -1237,7 +1807,7 @@ public final class ArrowQuery implements AutoCloseable {
      * real-engine conventions; MySQL/SQLite instead treat null as the
      * smallest value under {@code ASC}).
      */
-    private VectorSchemaRoot applyOrderBy(CompiledPlan p, VectorSchemaRoot root) {
+    private VectorSchemaRoot applyOrderBy(CompiledPlan p, VectorSchemaRoot root, NullPolicy nullPolicy) {
         int rowCount = root.getRowCount();
         List<OrderItem> orderBy = stmt.orderBy();
         int numKeys = orderBy.size();
@@ -1282,15 +1852,24 @@ public final class ArrowQuery implements AutoCloseable {
         return materializeRows(root, indices);
     }
 
-    private int[] selectRows(CompiledPlan p, VectorSchemaRoot root) {
-        int rowCount = root.getRowCount();
+    /**
+     * @return {@code null} as a "keep every row of {@code root}, in its
+     * original order" sentinel when this query has no {@code WHERE} clause
+     * at all (letting {@link #materializeRows} take its bulk
+     * {@link TransferPair} fast path instead of allocating and populating
+     * an identity index array just to hand it back), or the row indices
+     * that survive {@code WHERE} otherwise. See this class's "No-WHERE and
+     * LIMIT fast paths". Always allocates a fresh predicate-evaluation
+     * output buffer per call, unlike {@link #selectRowsReusable} — this is
+     * the version used by {@link #execute(VectorSchemaRoot)}, which must
+     * stay safe for concurrent multi-threaded use and therefore cannot
+     * share any mutable per-instance scratch state.
+     */
+    private static int[] selectRows(CompiledPlan p, VectorSchemaRoot root, NullPolicy nullPolicy) {
         if (p.fusedPredicate == null && p.maskPredicateRoot == null) {
-            int[] all = new int[rowCount];
-            for (int i = 0; i < rowCount; i++) {
-                all[i] = i;
-            }
-            return all;
+            return null;
         }
+        int rowCount = root.getRowCount();
         if (p.fusedPredicate != null) {
             return selectFromEvaluator(p.fusedPredicate, root, rowCount, p.float64, nullPolicy);
         }
@@ -1366,7 +1945,24 @@ public final class ArrowQuery implements AutoCloseable {
         return Arrays.copyOf(buffer, count);
     }
 
+    /**
+     * General row-materialization path: copies exactly the rows named by
+     * {@code selectedIndices}, in that order, into a fresh, independent
+     * {@code VectorSchemaRoot} — one {@code copyFromSafe} call per
+     * (column, output row) pair, because a genuinely filtered and/or
+     * reordered index set has no cheaper representation.
+     * {@code selectedIndices == null} instead means "every row of
+     * {@code source}, in its original order" — handled by delegating to
+     * {@link #materializePrefix}'s bulk {@link TransferPair} copy rather
+     * than falling through to the per-row loop below, since that identity
+     * case is exactly what a plain buffer transfer already does correctly
+     * and far more cheaply. See this class's "No-WHERE and LIMIT fast
+     * paths".
+     */
     private static VectorSchemaRoot materializeRows(VectorSchemaRoot source, int[] selectedIndices) {
+        if (selectedIndices == null) {
+            return materializePrefix(source, source.getRowCount());
+        }
         BufferAllocator allocator = allocatorOf(source);
         List<FieldVector> sourceVectors = source.getFieldVectors();
         List<FieldVector> outVectors = new ArrayList<>(sourceVectors.size());
@@ -1396,7 +1992,46 @@ public final class ArrowQuery implements AutoCloseable {
         return new VectorSchemaRoot(new Schema(outFields), outVectors, outRowCount);
     }
 
-    private VectorSchemaRoot buildProjection(CompiledPlan p, VectorSchemaRoot filtered) {
+    /**
+     * Copies row range {@code [0, length)} of every column of
+     * {@code source} into a fresh, independent {@code VectorSchemaRoot},
+     * using one {@link TransferPair#splitAndTransfer} buffer-level copy per
+     * column rather than a per-row {@code copyFromSafe} loop. Used for two
+     * distinct, unrelated-looking cases that both happen to be "keep a
+     * contiguous prefix, in order": a query with no {@code WHERE} clause at
+     * all ({@code length == source.getRowCount()}, called from
+     * {@link #materializeRows} for its {@code selectedIndices == null}
+     * sentinel), and {@code LIMIT n} ({@code length == n}, called directly
+     * from {@link #runPlan}). See this class's "No-WHERE and LIMIT fast
+     * paths".
+     *
+     * <p>{@code length} must not exceed {@code source.getRowCount()} —
+     * both call sites already guarantee this ({@code source.getRowCount()}
+     * itself, or a {@code LIMIT} already checked to be smaller).
+     */
+    private static VectorSchemaRoot materializePrefix(VectorSchemaRoot source, int length) {
+        BufferAllocator allocator = allocatorOf(source);
+        List<FieldVector> sourceVectors = source.getFieldVectors();
+        List<FieldVector> outVectors = new ArrayList<>(sourceVectors.size());
+        List<Field> outFields = new ArrayList<>(sourceVectors.size());
+        try {
+            for (FieldVector src : sourceVectors) {
+                TransferPair tp = src.getTransferPair(allocator);
+                tp.splitAndTransfer(0, length);
+                FieldVector dst = (FieldVector) tp.getTo();
+                outVectors.add(dst);
+                outFields.add(dst.getField());
+            }
+        } catch (RuntimeException | Error e) {
+            for (FieldVector v : outVectors) {
+                closeQuietly(v);
+            }
+            throw e;
+        }
+        return new VectorSchemaRoot(new Schema(outFields), outVectors, length);
+    }
+
+    private static VectorSchemaRoot buildProjection(CompiledPlan p, VectorSchemaRoot filtered, NullPolicy nullPolicy) {
         BufferAllocator allocator = allocatorOf(filtered);
         int rowCount = filtered.getRowCount();
         List<Field> outFields = new ArrayList<>(p.projections.size());
@@ -1418,24 +2053,24 @@ public final class ArrowQuery implements AutoCloseable {
                     }
                     if (proj.outputName.equals(src.getField().getName())) {
                         // No rename: reuse the vector filtered() already
-                        // built for us instead of allocating a fresh one
-                        // and copying every row through copyFromSafe - the
-                        // exact optimization implA's own projection loop
-                        // already relies on for this (overwhelmingly
-                        // common) case.
+                        // built for us instead of allocating a fresh one -
+                        // the exact optimization already relied on for
+                        // this (overwhelmingly common) case.
                         out = src;
                         reused.add(src);
                     } else {
-                        Field outField = new Field(proj.outputName, src.getField().getFieldType(), src.getField().getChildren());
-                        out = outField.createVector(allocator);
-                        if (rowCount > 0) {
-                            out.setInitialCapacity(rowCount);
-                        }
-                        out.allocateNew();
-                        for (int i = 0; i < rowCount; i++) {
-                            out.copyFromSafe(i, i, src);
-                        }
-                        out.setValueCount(rowCount);
+                        // Renamed passthrough (e.g. SELECT x AS y): still
+                        // an independent copy (the same source column
+                        // referenced twice under different names must
+                        // never share one mutable vector -- see this
+                        // class's "Column aliasing"), but a straight,
+                        // already-contiguous [0, rowCount) duplication is
+                        // exactly what a single TransferPair-based buffer
+                        // copy handles -- no per-row copyFromSafe loop
+                        // needed at all.
+                        TransferPair tp = src.getTransferPair(proj.outputName, allocator);
+                        tp.splitAndTransfer(0, rowCount);
+                        out = (FieldVector) tp.getTo();
                     }
                 } else if (p.float64) {
                     Float8Vector out8 = new Float8Vector(proj.outputName, allocator);
@@ -1478,6 +2113,19 @@ public final class ArrowQuery implements AutoCloseable {
     // compiled plan model
     // =====================================================================
 
+    /**
+     * A compiled, immutable execution plan for one schema shape, with a
+     * reference-counted lifecycle: {@link #acquire()} before use,
+     * {@link #release()} exactly once when done (always paired via
+     * try/finally at every call site), {@link #retire()} when superseded.
+     * A plan's {@code compiledEvaluators} are only ever actually closed
+     * once it has been both retired AND has no outstanding acquired
+     * references — see this class's own javadoc and {@code ArrowQuery}'s
+     * "Thread-safety" for why this is what makes concurrent
+     * {@code close()}/{@code withBackend()}/schema-driven recompilation
+     * safe against another thread's in-flight {@code execute()} call still
+     * using the plan being replaced.
+     */
     private static final class CompiledPlan {
 
         final long fingerprint;
@@ -1497,22 +2145,19 @@ public final class ArrowQuery implements AutoCloseable {
         final ArrowExpressionEvaluator havingFused;
         final PredicateNode havingNode;
         // Parallel to stmt.orderBy(), in the same (sort-priority) order.
-        // For a grouped query, every entry is a plain (non-passthrough)
-        // compiled evaluator operating on the final grouped result. For a
-        // non-grouped query, an entry may instead be a passthrough marker
-        // (see OrderByPlan) -- ORDER BY there runs against the
-        // pre-projection filtered root, where a bare-column reference is
-        // both common and worth optimizing. See buildPlan's ORDER BY
-        // comment.
         final List<OrderByPlan> orderByPlans;
         // Every distinct compiled evaluator this plan owns, deduplicated by
         // rendered ParserNG text (see buildPlan's compiledCache) -- the
-        // *sole* owner responsible for closing each one exactly once, even
-        // though the very same instance may also be referenced by
-        // fusedPredicate, a leaf inside maskPredicateRoot/havingNode, an
-        // entry of projections/groupPlan, and/or orderByEvaluators. See
-        // "Expression deduplication" in this class's javadoc.
+        // *sole* set closed by closeIfReady() below, even though the very
+        // same instance may also be referenced by fusedPredicate, a leaf
+        // inside maskPredicateRoot/havingNode, an entry of
+        // projections/groupPlan, and/or orderByPlans. See "Expression
+        // deduplication" in ArrowQuery's javadoc.
         final List<ArrowExpressionEvaluator> compiledEvaluators;
+
+        private int refCount = 0;
+        private boolean retired = false;
+        private boolean closed = false;
 
         CompiledPlan(long fingerprint, boolean float64, ArrowExpressionEvaluator fusedPredicate,
                 PredicateNode maskPredicateRoot, List<ProjectionPlan> projections, GroupPlan groupPlan,
@@ -1531,9 +2176,45 @@ public final class ArrowQuery implements AutoCloseable {
             this.compiledEvaluators = compiledEvaluators;
         }
 
-        void close() {
-            for (ArrowExpressionEvaluator e : compiledEvaluators) {
-                e.close();
+        /**
+         * Acquires a usable reference to this plan for the duration of one
+         * {@code execute(...)}-family call. Returns {@code false} (never
+         * throws) if this plan has already been fully retired-and-closed —
+         * which can only happen if the caller held a stale reference
+         * across a race with a concurrent recompilation/close; the
+         * caller's correct response is to look the plan up again (see
+         * {@code ArrowQuery#ensurePlan}), not to treat this as an error.
+         */
+        synchronized boolean acquire() {
+            if (closed) {
+                return false;
+            }
+            refCount++;
+            return true;
+        }
+
+        /** Releases one reference acquired via {@link #acquire()}. */
+        synchronized void release() {
+            refCount--;
+            closeIfReady();
+        }
+
+        /**
+         * Marks this plan superseded. Its evaluators are closed immediately
+         * if nothing currently holds an acquired reference, or deferred
+         * until the last such reference is {@link #release()}d.
+         */
+        synchronized void retire() {
+            retired = true;
+            closeIfReady();
+        }
+
+        private void closeIfReady() {
+            if (retired && refCount == 0 && !closed) {
+                closed = true;
+                for (ArrowExpressionEvaluator e : compiledEvaluators) {
+                    e.close();
+                }
             }
         }
     }
@@ -1625,6 +2306,85 @@ public final class ArrowQuery implements AutoCloseable {
             this.passthrough = passthrough;
             this.sourceColumnName = sourceColumnName;
             this.evaluator = evaluator;
+        }
+    }
+
+    /**
+     * Per-{@code ArrowQuery} scratch state for
+     * {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}: one scratch
+     * vector per computed {@link ProjectionPlan} (lazily allocated, grown —
+     * never shrunk — on demand) plus one dedicated scratch vector for the
+     * {@code WHERE} predicate's own evaluation output. Tied to a specific
+     * {@link CompiledPlan} instance ({@code forPlan}) so a schema-driven
+     * recompilation can never leave a stale scratch vector sized or typed
+     * for a plan that no longer exists — {@link ArrowQuery#scratchFor}
+     * checks {@code forPlan} identity and rebuilds on a mismatch. This
+     * mutable state is exactly why
+     * {@link #execute(VectorSchemaRoot, VectorSchemaRoot)} is documented as
+     * not safe for concurrent use on the same {@code ArrowQuery} instance —
+     * see that class's "Thread-safety".
+     */
+    private static final class ReusableScratch {
+
+        final CompiledPlan forPlan;
+        final FieldVector[] perProjection;
+        private FieldVector predicateScratch;
+
+        ReusableScratch(CompiledPlan forPlan, int projectionCount) {
+            this.forPlan = forPlan;
+            this.perProjection = new FieldVector[projectionCount];
+        }
+
+        FieldVector forProjection(int index, int rowCount, boolean float64, BufferAllocator allocator) {
+            FieldVector v = perProjection[index];
+            if (v == null || v.getValueCapacity() < rowCount) {
+                if (v != null) {
+                    closeQuietly(v);
+                }
+                v = float64
+                        ? new Float8Vector("__parser_ng_sql_reuse_scratch__", allocator)
+                        : new Float4Vector("__parser_ng_sql_reuse_scratch__", allocator);
+                if (float64) {
+                    ((Float8Vector) v).allocateNew(rowCount);
+                } else {
+                    ((Float4Vector) v).allocateNew(rowCount);
+                }
+                perProjection[index] = v;
+            }
+            v.setValueCount(rowCount);
+            return v;
+        }
+
+        FieldVector predicateScratch(int rowCount, boolean float64, BufferAllocator allocator) {
+            FieldVector v = predicateScratch;
+            if (v == null || v.getValueCapacity() < rowCount) {
+                if (v != null) {
+                    closeQuietly(v);
+                }
+                v = float64
+                        ? new Float8Vector("__parser_ng_sql_reuse_predicate_scratch__", allocator)
+                        : new Float4Vector("__parser_ng_sql_reuse_predicate_scratch__", allocator);
+                if (float64) {
+                    ((Float8Vector) v).allocateNew(rowCount);
+                } else {
+                    ((Float4Vector) v).allocateNew(rowCount);
+                }
+                predicateScratch = v;
+            }
+            v.setValueCount(rowCount);
+            return v;
+        }
+
+        void close() {
+            for (FieldVector v : perProjection) {
+                if (v != null) {
+                    closeQuietly(v);
+                }
+            }
+            if (predicateScratch != null) {
+                closeQuietly(predicateScratch);
+                predicateScratch = null;
+            }
         }
     }
 

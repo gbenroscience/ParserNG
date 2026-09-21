@@ -31,7 +31,7 @@
         <!-- Same requirement as parser-ng-arrow: Vector API / jdk.incubator.vector -->
         <maven.compiler.release>22</maven.compiler.release>
         <arrow.version>19.0.0</arrow.version>
-        <upstream.version>3.0.6</upstream.version>
+        <upstream.version>3.0.7</upstream.version>
     </properties>
 
     <dependencies>

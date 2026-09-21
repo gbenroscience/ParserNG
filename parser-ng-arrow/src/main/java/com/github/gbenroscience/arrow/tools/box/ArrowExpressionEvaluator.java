@@ -5,6 +5,7 @@ import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 
 import java.util.Map;
+import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.Float4Vector;
 
 /**
@@ -12,64 +13,71 @@ import org.apache.arrow.vector.Float4Vector;
  * (CPU, SIMD-vectorized) and {@link ArrowGpuBulkEvaluator} (GPU, CUDA or
  * OpenCL).
  *
- * <p>Code written against this interface does not need to know or care which
+ * <p>
+ * Code written against this interface does not need to know or care which
  * backend actually compiled and evaluates the expression. The same call sites
  * work whether the instance underneath is running on the CPU worker pool or
  * dispatching computation to a GPU device.</p>
  *
  * <h2>Getting an instance</h2>
  *
- * <p>Build instances through {@link ArrowExpressionEvaluators} rather than
+ * <p>
+ * Build instances through {@link ArrowExpressionEvaluators} rather than
  * choosing between {@link ArrowBulkEvaluator#compile} and
- * {@link ArrowGpuBulkEvaluator#compile} directly at each call site. This
- * makes the backend a one-line configuration change via an
+ * {@link ArrowGpuBulkEvaluator#compile} directly at each call site. This makes
+ * the backend a one-line configuration change via an
  * {@link ArrowExecutionBackend} value instead of requiring a call-site
  * rewrite.</p>
  *
  * <h2>Evaluation and filtering</h2>
  *
- * <p>The primary operation of this interface is bulk expression evaluation:
- * one output value is produced for every input row.</p>
+ * <p>
+ * The primary operation of this interface is bulk expression evaluation: one
+ * output value is produced for every input row.</p>
  *
- * <p>The interface also supports {@link #filter(VectorSchemaRoot, NullPolicy)}
- * for compiled boolean expressions. Filtering is deliberately part of this
- * contract because it is a logical Arrow operation that can be implemented
- * by both the CPU/SIMD and GPU backends.</p>
+ * <p>
+ * The interface also supports {@link #filter(VectorSchemaRoot, NullPolicy)} for
+ * compiled boolean expressions. Filtering is deliberately part of this contract
+ * because it is a logical Arrow operation that can be implemented by both the
+ * CPU/SIMD and GPU backends.</p>
  *
- * <p>For filtering, the compiled ParserNG expression is evaluated as a
- * predicate over the Arrow columns. Internally, an implementation may
- * evaluate the predicate into a SIMD/GPU mask or another selection
- * representation and then materialize the selected rows into an Arrow
- * {@link VectorSchemaRoot}. The selection representation is an implementation
- * detail and is not exposed by this interface.</p>
+ * <p>
+ * For filtering, the compiled ParserNG expression is evaluated as a predicate
+ * over the Arrow columns. Internally, an implementation may evaluate the
+ * predicate into a SIMD/GPU mask or another selection representation and then
+ * materialize the selected rows into an Arrow {@link VectorSchemaRoot}. The
+ * selection representation is an implementation detail and is not exposed by
+ * this interface.</p>
  *
- * <p>Two further operations build on top of evaluation and filtering, both
+ * <p>
+ * Two further operations build on top of evaluation and filtering, both
  * implemented once as {@code default} methods on this interface (neither
  * backend needs its own override): {@link #project(VectorSchemaRoot, String,
- * NullPolicy)} evaluates this expression over every row and appends the
- * result as a new named column — the projection counterpart to
- * {@code filter}'s row-selection — and {@link #filterProject(VectorSchemaRoot,
- * ArrowExpressionEvaluator, String, NullPolicy)} fuses the two: it filters
- * with this evaluator's predicate first, then evaluates a second
- * ("projection") expression only over the rows that survived, so the
- * projection never spends SIMD/GPU work on rows that are about to be
- * discarded.</p>
+ * NullPolicy)} evaluates this expression over every row and appends the result
+ * as a new named column — the projection counterpart to {@code filter}'s
+ * row-selection — and {@link #filterProject(VectorSchemaRoot,
+ * ArrowExpressionEvaluator, String, NullPolicy)} fuses the two: it filters with
+ * this evaluator's predicate first, then evaluates a second ("projection")
+ * expression only over the rows that survived, so the projection never spends
+ * SIMD/GPU work on rows that are about to be discarded.</p>
  *
- * <p>This is intentionally a filtering/projection-oriented expression
- * interface rather than a SQL/query engine. Operations such as joins,
- * grouping, sorting, aggregation, and SQL parsing are outside the scope of
- * this contract.</p>
+ * <p>
+ * This is intentionally a filtering/projection-oriented expression interface
+ * rather than a SQL/query engine. Operations such as joins, grouping, sorting,
+ * aggregation, and SQL parsing are outside the scope of this contract.</p>
  *
  * <h2>Binding, null handling, thread safety</h2>
  *
- * <p>Identical across both implementations. See
- * {@link ArrowBulkEvaluator}'s and {@link ArrowGpuBulkEvaluator}'s class
- * javadocs for the full contract, including name-based variable binding via
+ * <p>
+ * Identical across both implementations. See {@link ArrowBulkEvaluator}'s and
+ * {@link ArrowGpuBulkEvaluator}'s class javadocs for the full contract,
+ * including name-based variable binding via
  * {@code MathExpression.getSlotItems()}, supported Arrow vector types,
  * {@link NullPolicy} semantics, and each backend's own concurrency rules.</p>
  *
- * <p>Always {@link #close()} when the evaluator is no longer required.
- * Use try-with-resources where practical.</p>
+ * <p>
+ * Always {@link #close()} when the evaluator is no longer required. Use
+ * try-with-resources where practical.</p>
  */
 public interface ArrowExpressionEvaluator extends AutoCloseable {
 
@@ -77,7 +85,8 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * Evaluates the compiled expression, writing one result per row into
      * {@code output}.
      *
-     * <p>The expression is evaluated using the backend represented by this
+     * <p>
+     * The expression is evaluated using the backend represented by this
      * evaluator. The caller is responsible for providing a destination vector
      * that is correctly sized for the input row count.</p>
      *
@@ -91,9 +100,8 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
             NullPolicy nullPolicy);
 
     /**
-     * Convenience overload for
-     * {@link #evaluate(Map, Float8Vector, NullPolicy)} using
-     * {@link NullPolicy#IGNORE}.
+     * Convenience overload for {@link #evaluate(Map, Float8Vector, NullPolicy)}
+     * using {@link NullPolicy#IGNORE}.
      *
      * @param columns Arrow columns, keyed by variable name
      * @param output pre-sized destination vector
@@ -109,8 +117,9 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * Evaluates the compiled expression, writing one result per row into
      * {@code output}.
      *
-     * <p>This overload operates on Arrow {@link Float4Vector} columns and
-     * produces a float result for every input row.</p>
+     * <p>
+     * This overload operates on Arrow {@link Float4Vector} columns and produces
+     * a float result for every input row.</p>
      *
      * @param columns Arrow columns, keyed by the variable name they bind to
      * @param output pre-sized destination vector
@@ -122,9 +131,8 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
             NullPolicy nullPolicy);
 
     /**
-     * Convenience overload for
-     * {@link #evaluate(Map, Float4Vector, NullPolicy)} using
-     * {@link NullPolicy#IGNORE}.
+     * Convenience overload for {@link #evaluate(Map, Float4Vector, NullPolicy)}
+     * using {@link NullPolicy#IGNORE}.
      *
      * @param columns Arrow columns, keyed by variable name
      * @param output pre-sized destination vector
@@ -135,12 +143,46 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
 
         evaluate(columns, output, NullPolicy.IGNORE);
     }
+ /**
+     * Convenience overload for
+     * {@link #evaluate(VectorSchemaRoot, FieldVector, NullPolicy)} using
+     * {@link NullPolicy#IGNORE}.
+     *
+     * @param root Arrow record batch containing the required input columns
+     * @param output pre-sized destination vector
+     * @param nullPolicy
+     */
+    default void evaluate(
+            VectorSchemaRoot root,
+            FieldVector output, NullPolicy nullPolicy) {
+        if (output instanceof Float8Vector f8out) {
+            evaluate(root, f8out, nullPolicy);
+        }else if (output instanceof Float4Vector f4out) {
+            evaluate(root, f4out, nullPolicy);
+        }else{
+            throw new ArrowBindingException("Can't evaluate columns that are neither Float8Vectors nor Float4Vectors");
+        }
+    }
+    /**
+     * Convenience overload for
+     * {@link #evaluate(VectorSchemaRoot, FieldVector, NullPolicy)} using
+     * {@link NullPolicy#IGNORE}.
+     *
+     * @param root Arrow record batch containing the required input columns
+     * @param output pre-sized destination vector
+     */
+    default void evaluate(
+            VectorSchemaRoot root,
+            FieldVector output) {
+        evaluate(root, output, NullPolicy.IGNORE);
+    }
 
     /**
      * Evaluates the compiled expression against the columns contained in
      * {@code root}, resolving each required variable by name.
      *
-     * <p>This is the record-batch convenience form of the map-based
+     * <p>
+     * This is the record-batch convenience form of the map-based
      * {@link #evaluate(Map, Float8Vector, NullPolicy)} operation.</p>
      *
      * @param root Arrow record batch containing the required input columns
@@ -171,8 +213,9 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * Evaluates the compiled expression against the columns contained in
      * {@code root}, resolving each required variable by name.
      *
-     * <p>This overload operates on float Arrow columns and produces a float
-     * result for every input row.</p>
+     * <p>
+     * This overload operates on float Arrow columns and produces a float result
+     * for every input row.</p>
      *
      * @param root Arrow record batch containing the required input columns
      * @param output pre-sized destination vector
@@ -199,26 +242,30 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
     }
 
     /**
-     * Filters an Arrow record batch using this evaluator's compiled
-     * expression as a boolean predicate.
+     * Filters an Arrow record batch using this evaluator's compiled expression
+     * as a boolean predicate.
      *
-     * <p>The expression represented by this evaluator is evaluated once for
-     * each row in {@code root}. Rows for which the predicate evaluates to
-     * {@code true} are retained; rows for which it evaluates to
-     * {@code false} are discarded.</p>
+     * <p>
+     * The expression represented by this evaluator is evaluated once for each
+     * row in {@code root}. Rows for which the predicate evaluates to
+     * {@code true} are retained; rows for which it evaluates to {@code false}
+     * are discarded.</p>
      *
-     * <p>This operation is deliberately defined on the compiled evaluator
-     * rather than accepting a {@code MathExpression} argument. The evaluator
-     * already represents a compiled ParserNG expression, so the expression
-     * does not need to be extracted, converted back into source text, or
-     * reparsed when filtering is requested.</p>
+     * <p>
+     * This operation is deliberately defined on the compiled evaluator rather
+     * than accepting a {@code MathExpression} argument. The evaluator already
+     * represents a compiled ParserNG expression, so the expression does not
+     * need to be extracted, converted back into source text, or reparsed when
+     * filtering is requested.</p>
      *
-     * <p>Implementations are expected to exploit their native execution
-     * strategy when evaluating the predicate. The CPU implementation may
-     * evaluate the predicate using SIMD vector operations, while the GPU
-     * implementation may evaluate it on the selected GPU backend.</p>
+     * <p>
+     * Implementations are expected to exploit their native execution strategy
+     * when evaluating the predicate. The CPU implementation may evaluate the
+     * predicate using SIMD vector operations, while the GPU implementation may
+     * evaluate it on the selected GPU backend.</p>
      *
-     * <p>A typical implementation will conceptually perform:</p>
+     * <p>
+     * A typical implementation will conceptually perform:</p>
      *
      * <pre>
      * Arrow columns
@@ -236,49 +283,52 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * Arrow result batch
      * </pre>
      *
-     * <p>The selection mask or equivalent intermediate representation is an
+     * <p>
+     * The selection mask or equivalent intermediate representation is an
      * implementation detail and is not exposed by this interface. This leaves
      * room for the CPU and GPU implementations to use different selection
      * mechanisms without changing the public API.</p>
      *
-     * <p>The returned {@link VectorSchemaRoot} contains the selected rows and
-     * therefore may contain fewer rows than the input. If no rows satisfy
-     * the predicate, an empty result batch is returned.</p>
+     * <p>
+     * The returned {@link VectorSchemaRoot} contains the selected rows and
+     * therefore may contain fewer rows than the input. If no rows satisfy the
+     * predicate, an empty result batch is returned.</p>
      *
-     * <p>The schema and column ordering of the result should correspond to the
+     * <p>
+     * The schema and column ordering of the result should correspond to the
      * input {@code root}. Implementations must preserve row correspondence
      * across all columns when materializing the selected rows.</p>
      *
-     * <p>Predicate null handling is governed by {@link NullPolicy}. The exact
+     * <p>
+     * Predicate null handling is governed by {@link NullPolicy}. The exact
      * treatment of null predicate values must be consistent with the
      * implementation's documented {@code NullPolicy} contract.</p>
      *
      * @param root Arrow record batch containing the columns referenced by the
-     *             compiled predicate
+     * compiled predicate
      * @param nullPolicy how Arrow validity bitmaps and null predicate values
-     *                   are handled
+     * are handled
      * @return a new Arrow record batch containing only rows for which the
-     *         compiled predicate evaluates to true
+     * compiled predicate evaluates to true
      * @throws IllegalArgumentException if {@code root} does not contain a
-     *                                  required variable or otherwise violates
-     *                                  the evaluator's input contract
+     * required variable or otherwise violates the evaluator's input contract
      */
     VectorSchemaRoot filter(
             VectorSchemaRoot root,
             NullPolicy nullPolicy);
 
     /**
-     * Convenience overload for
-     * {@link #filter(VectorSchemaRoot, NullPolicy)} using
-     * {@link NullPolicy#IGNORE}.
+     * Convenience overload for {@link #filter(VectorSchemaRoot, NullPolicy)}
+     * using {@link NullPolicy#IGNORE}.
      *
-     * <p>This is the preferred form for callers that do not require explicit
+     * <p>
+     * This is the preferred form for callers that do not require explicit
      * null-policy selection.</p>
      *
      * @param root Arrow record batch containing the columns referenced by the
-     *             compiled predicate
+     * compiled predicate
      * @return a new Arrow record batch containing only rows for which the
-     *         compiled predicate evaluates to true
+     * compiled predicate evaluates to true
      */
     default VectorSchemaRoot filter(VectorSchemaRoot root) {
         return filter(root, NullPolicy.IGNORE);
@@ -290,53 +340,56 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * columns as {@code root}, plus one new trailing column named
      * {@code outputFieldName} holding this expression's per-row result.
      *
-     * <p>This is the projection counterpart to {@link #filter}: where
+     * <p>
+     * This is the projection counterpart to {@link #filter}: where
      * {@code filter} keeps all columns but drops rows, {@code project} keeps
      * all rows but adds a column — the Arrow analogue of a SQL
      * {@code SELECT *, <expr> AS outputFieldName}.
      *
      * <h2>Implementation</h2>
-     * This is a {@code default} method implemented once, here, in terms of
-     * the backend-agnostic {@link #evaluate(VectorSchemaRoot, Float8Vector,
+     * This is a {@code default} method implemented once, here, in terms of the
+     * backend-agnostic {@link #evaluate(VectorSchemaRoot, Float8Vector,
      * NullPolicy)} / {@link #evaluate(VectorSchemaRoot, Float4Vector,
      * NullPolicy)} primitives every implementation already provides — neither
      * {@link ArrowBulkEvaluator} nor {@link ArrowGpuBulkEvaluator} needs its
-     * own override to support this. A backend is of course free to override
-     * it later with something more specialized (e.g. a GPU kernel that writes
-     * the projected column without a separate host-visible round trip), but
-     * nothing about correctness depends on that.
+     * own override to support this. A backend is of course free to override it
+     * later with something more specialized (e.g. a GPU kernel that writes the
+     * projected column without a separate host-visible round trip), but nothing
+     * about correctness depends on that.
      *
-     * <p>Row precision (float64 vs. float32) is inferred from {@code root}
-     * itself, exactly as {@link #filter} already does: if every existing
-     * column in {@code root} is a {@link Float8Vector}, the projected column
-     * is computed and appended as a {@link Float8Vector}; otherwise it is
-     * computed and appended as a {@link Float4Vector}. As with {@code filter},
-     * this means the caller is responsible for having compiled this evaluator
-     * for the precision that matches {@code root} — a float64 batch handed to
-     * an evaluator compiled via {@code compileF32(...)} will throw
-     * {@link IllegalStateException} out of {@code evaluate(...)}, exactly as
-     * it would from a direct {@code evaluate} call.
+     * <p>
+     * Row precision (float64 vs. float32) is inferred from {@code root} itself,
+     * exactly as {@link #filter} already does: if every existing column in
+     * {@code root} is a {@link Float8Vector}, the projected column is computed
+     * and appended as a {@link Float8Vector}; otherwise it is computed and
+     * appended as a {@link Float4Vector}. As with {@code filter}, this means
+     * the caller is responsible for having compiled this evaluator for the
+     * precision that matches {@code root} — a float64 batch handed to an
+     * evaluator compiled via {@code compileF32(...)} will throw
+     * {@link IllegalStateException} out of {@code evaluate(...)}, exactly as it
+     * would from a direct {@code evaluate} call.
      *
-     * <p>The existing columns of {@code root} are reused directly in the
-     * returned batch — not copied — since projection does not change the row
-     * count or row order; only the new column is freshly allocated and
-     * computed. This makes {@code project} considerably cheaper than
-     * {@code filter} for large batches.
+     * <p>
+     * The existing columns of {@code root} are reused directly in the returned
+     * batch — not copied — since projection does not change the row count or
+     * row order; only the new column is freshly allocated and computed. This
+     * makes {@code project} considerably cheaper than {@code filter} for large
+     * batches.
      *
-     * @param root Arrow record batch containing the columns referenced by
-     * this compiled expression
-     * @param outputFieldName name for the new column holding this
-     * expression's result; must not already exist in {@code root}
+     * @param root Arrow record batch containing the columns referenced by this
+     * compiled expression
+     * @param outputFieldName name for the new column holding this expression's
+     * result; must not already exist in {@code root}
      * @param nullPolicy how Arrow validity bitmaps are handled — see
      * {@link NullPolicy}
      * @return a new Arrow record batch with {@code root}'s columns plus the
      * projected column, over all of {@code root}'s rows
-     * @throws NullPointerException if {@code root}, {@code outputFieldName},
-     * or {@code nullPolicy} is null
+     * @throws NullPointerException if {@code root}, {@code outputFieldName}, or
+     * {@code nullPolicy} is null
      * @throws ArrowBindingException if {@code root} has no columns (there is
-     * then no allocator to build the projected column from), if
-     * {@code root} already has a column named {@code outputFieldName}, or if
-     * a required variable's column is missing or of the wrong vector type
+     * then no allocator to build the projected column from), if {@code root}
+     * already has a column named {@code outputFieldName}, or if a required
+     * variable's column is missing or of the wrong vector type
      */
     default VectorSchemaRoot project(VectorSchemaRoot root, String outputFieldName, NullPolicy nullPolicy) {
         if (root == null) {
@@ -372,10 +425,10 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * Convenience overload for {@link #project(VectorSchemaRoot, String,
      * NullPolicy)} using {@link NullPolicy#IGNORE}.
      *
-     * @param root Arrow record batch containing the columns referenced by
-     * this compiled expression
-     * @param outputFieldName name for the new column holding this
-     * expression's result; must not already exist in {@code root}
+     * @param root Arrow record batch containing the columns referenced by this
+     * compiled expression
+     * @param outputFieldName name for the new column holding this expression's
+     * result; must not already exist in {@code root}
      * @return a new Arrow record batch with {@code root}'s columns plus the
      * projected column, over all of {@code root}'s rows
      */
@@ -409,44 +462,47 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * Arrow batch (M rows, original columns + projected column)
      * </pre>
      *
-     * <p>The "fusion" here is deliberate and is the entire point of this
-     * method over calling {@link #filter} and then {@link #project}
-     * separately: the projection expression never runs over a row that the
-     * predicate is going to discard. For an expensive projection and a
-     * selective predicate this can be a large win — {@code filter(root)}
-     * followed by {@code projectionEvaluator.project(filtered, name)} would
-     * pay for row selection once and projection once too, but only after this
-     * method's approach of shrinking the batch <i>before</i> projecting; doing
-     * the two steps in the other order, or projecting over all N rows before
-     * filtering, wastes work on rows that are thrown away.
+     * <p>
+     * The "fusion" here is deliberate and is the entire point of this method
+     * over calling {@link #filter} and then {@link #project} separately: the
+     * projection expression never runs over a row that the predicate is going
+     * to discard. For an expensive projection and a selective predicate this
+     * can be a large win — {@code filter(root)} followed by
+     * {@code projectionEvaluator.project(filtered, name)} would pay for row
+     * selection once and projection once too, but only after this method's
+     * approach of shrinking the batch <i>before</i> projecting; doing the two
+     * steps in the other order, or projecting over all N rows before filtering,
+     * wastes work on rows that are thrown away.
      *
-     * <p>{@code projection} may be compiled against any backend — it does not
-     * need to match {@code this} evaluator's backend. A CPU {@code SIMD}
-     * predicate can drive a {@code GPU}-evaluated projection, or vice versa;
-     * each half of the pipeline dispatches through its own {@code evaluate}
-     * independently. Both {@code this} and {@code projection} must, however,
-     * each individually be compiled for the precision (float64/float32) that
-     * matches {@code root} — see {@link #project}'s precision note, which
-     * applies identically here to both halves of the pipeline.
+     * <p>
+     * {@code projection} may be compiled against any backend — it does not need
+     * to match {@code this} evaluator's backend. A CPU {@code SIMD} predicate
+     * can drive a {@code GPU}-evaluated projection, or vice versa; each half of
+     * the pipeline dispatches through its own {@code evaluate} independently.
+     * Both {@code this} and {@code projection} must, however, each individually
+     * be compiled for the precision (float64/float32) that matches {@code root}
+     * — see {@link #project}'s precision note, which applies identically here
+     * to both halves of the pipeline.
      *
-     * <p>Truthiness, and {@link NullPolicy#PROPAGATE} predicate-null
-     * semantics for the filtering stage, are identical to {@link #filter}.
-     * {@code nullPolicy} is also passed through to the projection stage,
-     * governing whether the projected column's validity bitmap propagates
-     * nulls from {@code projection}'s own required columns over the
-     * surviving rows.
+     * <p>
+     * Truthiness, and {@link NullPolicy#PROPAGATE} predicate-null semantics for
+     * the filtering stage, are identical to {@link #filter}. {@code nullPolicy}
+     * is also passed through to the projection stage, governing whether the
+     * projected column's validity bitmap propagates nulls from
+     * {@code projection}'s own required columns over the surviving rows.
      *
-     * <p>If no rows survive the predicate, an empty (zero-row) batch is
-     * returned with {@code root}'s original schema plus the projected field —
+     * <p>
+     * If no rows survive the predicate, an empty (zero-row) batch is returned
+     * with {@code root}'s original schema plus the projected field —
      * {@code projection} is still invoked, with a zero row count, so that a
      * projection expression with side effects in {@code evaluate} sees a
      * consistent call, but no actual computation occurs.
      *
-     * @param root Arrow record batch containing the columns referenced by
-     * both {@code this} predicate and {@code projection}
-     * @param projection compiled expression evaluated over the rows that
-     * pass this evaluator's predicate; must not be {@code null} and must not
-     * be closed
+     * @param root Arrow record batch containing the columns referenced by both
+     * {@code this} predicate and {@code projection}
+     * @param projection compiled expression evaluated over the rows that pass
+     * this evaluator's predicate; must not be {@code null} and must not be
+     * closed
      * @param outputFieldName name for the new column holding
      * {@code projection}'s result; must not already exist in {@code root}
      * @param nullPolicy how Arrow validity bitmaps and null predicate values
@@ -457,8 +513,8 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * @throws NullPointerException if {@code root}, {@code projection},
      * {@code outputFieldName}, or {@code nullPolicy} is null
      * @throws ArrowBindingException if {@code root} has no columns, if
-     * {@code root} already has a column named {@code outputFieldName}, or if
-     * a required variable's column (for either {@code this} or
+     * {@code root} already has a column named {@code outputFieldName}, or if a
+     * required variable's column (for either {@code this} or
      * {@code projection}) is missing or of the wrong vector type
      */
     default VectorSchemaRoot filterProject(
@@ -528,10 +584,10 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * ArrowExpressionEvaluator, String, NullPolicy)} using
      * {@link NullPolicy#IGNORE}.
      *
-     * @param root Arrow record batch containing the columns referenced by
-     * both {@code this} predicate and {@code projection}
-     * @param projection compiled expression evaluated over the rows that
-     * pass this evaluator's predicate
+     * @param root Arrow record batch containing the columns referenced by both
+     * {@code this} predicate and {@code projection}
+     * @param projection compiled expression evaluated over the rows that pass
+     * this evaluator's predicate
      * @param outputFieldName name for the new column holding
      * {@code projection}'s result; must not already exist in {@code root}
      * @return a new Arrow record batch containing only the rows for which
@@ -547,28 +603,27 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * Ad-hoc, SQL-{@code WHERE}/{@code SELECT}-shaped filter + multi-column
      * projection, run on this evaluator's own execution backend.
      *
-     * <p>This is the instance-method mirror of
-     * {@link ArrowExpressionEvaluators#filterProject(VectorSchemaRoot, String,
+     * <p>
+     * This is the instance-method mirror of      {@link ArrowExpressionEvaluators#filterProject(VectorSchemaRoot, String,
      * ArrowExecutionBackend, NullPolicy, String...)}, provided here purely for
      * convenience so code already holding an {@link ArrowExpressionEvaluator}
-     * doesn't need a separate reference to {@link ArrowExpressionEvaluators}
-     * to run an unrelated ad-hoc query on the same backend. For example:
+     * doesn't need a separate reference to {@link ArrowExpressionEvaluators} to
+     * run an unrelated ad-hoc query on the same backend. For example:
      * <pre>
      * VectorSchemaRoot result = someEvaluator.filterProject(
      *         root,
      *         "x &gt; 10 &amp;&amp; y &lt; 20",
      *         "x", "y", "x * y", "sqrt(x*x + y*y)");
-     * </pre>
-     * behaves identically to calling
-     * {@code ArrowExpressionEvaluators.filterProject(root, "x > 10 && y < 20",
+     * </pre> behaves identically to calling      {@code ArrowExpressionEvaluators.filterProject(root, "x > 10 && y < 20",
      * someEvaluator.backend(), NullPolicy.IGNORE, "x", "y", "x * y", "sqrt(x*x
      * + y*y)")} — this method's entire body is that one delegating call.
      *
-     * <h2>{@code this} evaluator's own compiled expression is not used here</h2>
+     * <h2>{@code this} evaluator's own compiled expression is not used
+     * here</h2>
      * Read that again before reaching for this method: unlike every other
-     * method on this interface, {@code this} instance's own expression takes
-     * no part in the computation — it is not the predicate, and it is not one
-     * of the projections. {@code predicateExpr} and every entry in
+     * method on this interface, {@code this} instance's own expression takes no
+     * part in the computation — it is not the predicate, and it is not one of
+     * the projections. {@code predicateExpr} and every entry in
      * {@code projections} are compiled fresh from their raw text (or, for a
      * bare column name, resolved as a zero-copy passthrough — see the static
      * method's javadoc for the full passthrough-vs-computed rule), exactly as
@@ -576,35 +631,32 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * evaluator instance actually contributes is the answer to
      * {@link #backend()} — which backend the predicate and every computed
      * projection get compiled and dispatched against. If you don't specifically
-     * want "run this ad-hoc query on the same backend as an evaluator I
-     * already have on hand," calling
-     * {@link ArrowExpressionEvaluators#filterProject(VectorSchemaRoot, String,
+     * want "run this ad-hoc query on the same backend as an evaluator I already
+     * have on hand," calling      {@link ArrowExpressionEvaluators#filterProject(VectorSchemaRoot, String,
      * ArrowExecutionBackend, NullPolicy, String...)} directly is no less
      * capable and doesn't require holding an unrelated evaluator instance
      * around to call it.
      *
      * <h2>No compilation reuse</h2>
-     * This offers no performance advantage over the static method — it
-     * compiles {@code predicateExpr} and every non-passthrough projection
-     * fresh on every call, and closes them again before returning, precisely
-     * as {@link ArrowExpressionEvaluators#filterProject} does. For a
+     * This offers no performance advantage over the static method — it compiles
+     * {@code predicateExpr} and every non-passthrough projection fresh on every
+     * call, and closes them again before returning, precisely as
+     * {@link ArrowExpressionEvaluators#filterProject} does. For a
      * predicate/projection set that will run repeatedly over many batches,
-     * compile once and reuse instances via
-     * {@link #filterProject(VectorSchemaRoot, ArrowExpressionEvaluator,
+     * compile once and reuse instances via      {@link #filterProject(VectorSchemaRoot, ArrowExpressionEvaluator,
      * String, NullPolicy)} instead.
      *
      * @param root Arrow record batch to filter and project
-     * @param predicateExpr ParserNG boolean expression selecting rows;
-     * compiled fresh against {@link #backend()}
+     * @param predicateExpr ParserNG boolean expression selecting rows; compiled
+     * fresh against {@link #backend()}
      * @param nullPolicy how Arrow validity bitmaps are handled, for both the
      * filtering stage and every computed projection column
      * @param projections one or more ParserNG expressions naming the output
-     * columns, in order — see
-     * {@link ArrowExpressionEvaluators#filterProject(VectorSchemaRoot, String,
+     * columns, in order — see      {@link ArrowExpressionEvaluators#filterProject(VectorSchemaRoot, String,
      * ArrowExecutionBackend, NullPolicy, String...)} for the passthrough vs.
      * computed column rule; must contain at least one entry
-     * @return a new batch containing exactly the requested projection
-     * columns, over exactly the rows selected by {@code predicateExpr}
+     * @return a new batch containing exactly the requested projection columns,
+     * over exactly the rows selected by {@code predicateExpr}
      * @throws NullPointerException if {@code root}, {@code predicateExpr}, or
      * {@code nullPolicy} is null, or if any individual projection string is
      * null
@@ -629,12 +681,12 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
      * NullPolicy, String...)} using {@link NullPolicy#IGNORE}.
      *
      * @param root Arrow record batch to filter and project
-     * @param predicateExpr ParserNG boolean expression selecting rows;
-     * compiled fresh against {@link #backend()}
+     * @param predicateExpr ParserNG boolean expression selecting rows; compiled
+     * fresh against {@link #backend()}
      * @param projections one or more ParserNG expressions naming the output
      * columns, in order; must contain at least one entry
-     * @return a new batch containing exactly the requested projection
-     * columns, over exactly the rows selected by {@code predicateExpr}
+     * @return a new batch containing exactly the requested projection columns,
+     * over exactly the rows selected by {@code predicateExpr}
      * @throws java.lang.Throwable if {@code predicateExpr} or any projection
      * expression fails to compile, or if evaluation fails
      */
@@ -654,15 +706,14 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
 
     /**
      * Returns {@code true} if this expression references no variables at all,
-     * for example a bare numeric literal or a fully constant-folded
-     * expression.
+     * for example a bare numeric literal or a fully constant-folded expression.
      *
-     * <p>Both backends handle constant expressions the same way: the
-     * GPU/SIMD engine is never touched, and the output is filled directly
-     * through the ordinary scalar path.</p>
+     * <p>
+     * Both backends handle constant expressions the same way: the GPU/SIMD
+     * engine is never touched, and the output is filled directly through the
+     * ordinary scalar path.</p>
      *
-     * @return {@code true} when the expression is independent of input
-     *         columns
+     * @return {@code true} when the expression is independent of input columns
      */
     boolean isConstantExpression();
 
@@ -676,10 +727,10 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
     /**
      * Identifies the execution backend actually used by this evaluator.
      *
-     * <p>For an evaluator compiled with
-     * {@link ArrowExecutionBackend#GPU_AUTO}, this reflects whichever
-     * concrete backend was actually selected, such as CUDA or OpenCL, rather
-     * than returning {@code GPU_AUTO}.</p>
+     * <p>
+     * For an evaluator compiled with {@link ArrowExecutionBackend#GPU_AUTO},
+     * this reflects whichever concrete backend was actually selected, such as
+     * CUDA or OpenCL, rather than returning {@code GPU_AUTO}.</p>
      *
      * @return the actual execution backend
      */
@@ -688,12 +739,13 @@ public interface ArrowExpressionEvaluator extends AutoCloseable {
     /**
      * Releases this evaluator's resources.
      *
-     * <p>For the CPU implementation this may release worker-pool resources.
-     * For the GPU implementation this may release device buffers, command
-     * queues, compiled kernels, or other backend-specific resources.</p>
+     * <p>
+     * For the CPU implementation this may release worker-pool resources. For
+     * the GPU implementation this may release device buffers, command queues,
+     * compiled kernels, or other backend-specific resources.</p>
      *
-     * <p>Do not call this method while another thread may still be inside
-     * {@link #evaluate(Map, Float8Vector, NullPolicy)},
+     * <p>
+     * Do not call this method while another thread may still be inside      {@link #evaluate(Map, Float8Vector, NullPolicy)},
      * {@link #evaluate(Map, Float4Vector, NullPolicy)},
      * {@link #evaluate(VectorSchemaRoot, Float8Vector, NullPolicy)},
      * {@link #evaluate(VectorSchemaRoot, Float4Vector, NullPolicy)},
