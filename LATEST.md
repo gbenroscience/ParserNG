@@ -1,7 +1,13 @@
 # ParserNG
 
+### ParserNG 3.0.8 is out on maven-central
+ A huge speed update over the first edition of `parser-ng-sql`. Race fixes and alloc. updates, further cementing the zero copy promises of the module.
+Now brings the full power of `parser-ng-arrow` to the user, by introducing consierably lesser overhead while allowing `parser-ng-arrow` do its work on the substrate data. Now comes with an execute(args) overload that allows you to use reusable output buffers for even greater speed.
+Approaches Gandiva speed on simple arithmetic/sqrt/logic and beats it by 10x to 30x on every other thing. No LLVM, No JNI. Pure Java.
+
+
 ### ParserNG 3.0.7 is out on maven-central
-   A SQL-shaped front end over parser-ng-arrow: SELECT ... FROM ... [WHERE ...] compiles to a vectorized Arrow filter/projection pipeline built on ArrowExpressionEvaluators. 
+   Introduces `parser-ng-sql`, a new extension which is a SQL-shaped front end over parser-ng-arrow: SELECT ... FROM ... [WHERE ...] compiles to a vectorized Arrow filter/projection pipeline built on ArrowExpressionEvaluators. 
 This is deliberately NOT a database - no JOIN, INSERT, UPDATE, DELETE, transactions. 
 It exists purely to make SQL a convenient surface syntax for describing vectorized Arrow computations that parser-ng-arrow already knows how to run.
 ### ParserNG 3.0.6 is out on maven-central

@@ -8,14 +8,14 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>3.0.7</version>
+        <version>3.0.8</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>parser-ng-arrow</artifactId>
     <packaging>jar</packaging>
     <name>parser-ng-arrow</name> 
-    <version>3.0.7</version>
+    <version>3.0.8</version>
     <description>
         ParserNg's integration with Apache Arrow - setting our sights on Big Data.
         filter, project and filterProject added in v3.0.6

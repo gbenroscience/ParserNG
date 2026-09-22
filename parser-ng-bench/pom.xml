@@ -4,11 +4,11 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>3.0.7</version>
+        <version>3.0.8</version>
     </parent>
     <artifactId>parser-ng-bench</artifactId>
     <name>parser-ng-bench</name>
-    <version>3.0.7</version>
+    <version>3.0.8</version>
     <description>
         Local benchmark suite for ParserNG and its extensions.
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034

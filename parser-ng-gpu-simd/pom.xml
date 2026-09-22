@@ -8,12 +8,12 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>3.0.7</version>
+        <version>3.0.8</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-gpu-simd</artifactId>
-    <version>3.0.7</version>
+    <version>3.0.8</version>
     <packaging>jar</packaging>
     <name>parser-ng-gpu-simd</name>
     <description>

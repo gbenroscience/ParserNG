@@ -7,9 +7,9 @@ Arrow integration, parser-ng-arrow. It compiles a SQL statement once into a
 small set of ParserNG expression evaluators, then lets you run that compiled
 query against as many `VectorSchemaRoot` batches as you like. It is not, and
 is not trying to become, a database: there is no catalog, no `JOIN`, no
-`INSERT`/`UPDATE`/`DELETE`, no transactions. There is exactly one job —
+`INSERT`/`UPDATE`/`DELETE`, no transactions. There is exactly one job;
 turning a `SELECT` statement into a fast, reusable, vectorized computation
-over an Arrow batch you already have in hand — and it is built to do that
+over an Arrow batch you already have in hand; and it is built to do that
 job well rather than to do many jobs adequately.
 
 ```java
@@ -56,18 +56,18 @@ repository and is published to Maven Central alongside it.
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-sql</artifactId>
-    <version>3.0.7</version>
+    <version>3.0.8</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation("com.github.gbenroscience:parser-ng-sql:3.0.7")
+implementation("com.github.gbenroscience:parser-ng-sql:3.0.8")
 ```
 
 parser-ng-sql depends on `parser-ng-arrow`, `parser-ng`, `parser-ng-simd`, and
-`parser-ng-gpu-simd` transitively — a plain dependency declaration pulls in
+`parser-ng-gpu-simd` transitively; a plain dependency declaration pulls in
 everything needed to compile and run a query, including Apache Arrow's own
 `arrow-vector` artifact. Requires JDK 22 or later.
 
@@ -105,13 +105,13 @@ try (VectorSchemaRoot result = ArrowSql.execute(root,
 
 ParserNG's Arrow integration already gives you fast, vectorized `filter`,
 `project`, and `filterProject` operations driven by expression strings. What
-it doesn't give you is a convenient way to *describe* those operations —
+it doesn't give you is a convenient way to *describe* those operations;
 you're writing predicate and projection text by hand, keeping track of which
 columns feed which computation, and re-deriving the same expression twice if
 you need it in both a filter and a projection. SQL is a format almost every
 engineer already knows for exactly that kind of description. parser-ng-sql
 takes that familiar syntax and compiles it straight down to the same
-`ArrowExpressionEvaluator`s you'd have written by hand — nothing about the
+`ArrowExpressionEvaluator`s you'd have written by hand; nothing about the
 underlying computation changes, only how convenient it is to say what you
 want.
 
@@ -129,8 +129,8 @@ FROM table_reference
 [LIMIT integer_literal]
 ```
 
-Every arithmetic expression anywhere in a query — a `SELECT` item, a `WHERE`
-operand, an aggregate's argument, an `ORDER BY` key — is ordinary ParserNG
+Every arithmetic expression anywhere in a query; a `SELECT` item, a `WHERE`
+operand, an aggregate's argument, an `ORDER BY` key; is ordinary ParserNG
 expression syntax: `+ - * / % ^`, parentheses, and any ParserNG function
 (`sqrt`, `sin`, `erf`, `if`, and everything else ParserNG registers).
 Column names are looked up directly against the `VectorSchemaRoot` you pass
@@ -146,7 +146,7 @@ Every column of the input batch, unchanged.
 ```sql
 SELECT x, y FROM data
 ```
-A column subset — no computation, no filtering.
+A column subset; no computation, no filtering.
 
 ```sql
 SELECT x, y, sqrt(x*x + y*y) AS magnitude FROM data
@@ -173,7 +173,7 @@ SELECT x, y FROM data
 WHERE (x > 20 AND y < 90) OR (x < 5 AND y > 50)
 ```
 
-A `WHERE` operand can itself be a parenthesized boolean condition — useful
+A `WHERE` operand can itself be a parenthesized boolean condition; useful
 for feeding a boolean result into an otherwise-arithmetic position, like a
 `CASE` condition built by hand or a nested `if`:
 
@@ -184,11 +184,11 @@ SELECT x, if(x > 50, 1, 0) AS high_flag FROM data
 ### CASE / WHEN
 
 Both the *searched* and *simple* forms of `CASE` are supported. Every
-`CASE` must end in an explicit `ELSE` — there is no numeric `NULL` literal
+`CASE` must end in an explicit `ELSE`; there is no numeric `NULL` literal
 for a missing branch to fall back to, so a missing `ELSE` is rejected at
 compile time with a clear message rather than failing confusingly later.
 
-**Searched form** — a `WHEN` clause per condition, evaluated in order:
+**Searched form**; a `WHEN` clause per condition, evaluated in order:
 
 ```sql
 SELECT
@@ -202,7 +202,7 @@ FROM data
 WHERE x > 0
 ```
 
-**Simple form** — one operand, compared for equality against each `WHEN`
+**Simple form**; one operand, compared for equality against each `WHEN`
 value:
 
 ```sql
@@ -217,12 +217,12 @@ FROM data
 ```
 
 `CASE category WHEN 1 THEN ...` is exactly equivalent to hand-writing
-`CASE WHEN category = 1 THEN ...` — the simple form is pure convenience,
+`CASE WHEN category = 1 THEN ...`; the simple form is pure convenience,
 not a different capability.
 
 ### CAST
 
-`CAST(expression AS type)` supports numeric target types — since every
+`CAST(expression AS type)` supports numeric target types; since every
 ParserNG value is already a floating-point number under the hood, `CAST`
 here means "how should this number be interpreted," not a general type
 system:
@@ -232,7 +232,7 @@ SELECT reading, CAST(reading AS INT) AS truncated FROM data
 ```
 
 `INT`, `INTEGER`, `SMALLINT`, `BIGINT`, and `LONG` all truncate toward
-zero — `-2.7` becomes `-2`, not `-3`, matching a Java `(long)` cast, not
+zero; `-2.7` becomes `-2`, not `-3`, matching a Java `(long)` cast, not
 mathematical floor. `DOUBLE`, `FLOAT`, `REAL`, `NUMERIC`, and `DECIMAL` are
 a no-op identity, since that's already the representation in use. Any other
 target type is rejected at compile time with a clear message rather than
@@ -243,7 +243,7 @@ silently doing nothing useful.
 `SUM`, `COUNT`, `AVG`, `MIN`, and `MAX` are recognized wherever they appear
 as a top-level `SELECT`-item function call. `COUNT(*)` counts every row in
 a group; every other aggregate skips `null` inputs, matching standard SQL
-aggregate semantics — including that `SUM`/`AVG`/`MIN`/`MAX` over a group
+aggregate semantics; including that `SUM`/`AVG`/`MIN`/`MAX` over a group
 with no non-null values come back `null`, while `COUNT` comes back `0`.
 
 ```sql
@@ -258,7 +258,7 @@ FROM data
 GROUP BY category
 ```
 
-An aggregate query needs no explicit `GROUP BY` at all — with none present,
+An aggregate query needs no explicit `GROUP BY` at all; with none present,
 the whole (filtered) input is treated as a single implicit group, exactly
 as plain SQL does:
 
@@ -269,7 +269,7 @@ WHERE reading > 0
 ```
 
 A grouped query's non-aggregate `SELECT` items must match a `GROUP BY` key
-expression exactly — the usual SQL rule that a plain column in the select
+expression exactly; the usual SQL rule that a plain column in the select
 list of a grouped query has to be functionally determined by the grouping
 key. This is checked once, at compile time:
 
@@ -290,7 +290,7 @@ ORDER BY category, subcategory
 
 ### HAVING
 
-`HAVING` filters groups by an aggregate result, after grouping — the same
+`HAVING` filters groups by an aggregate result, after grouping; the same
 boolean-expression grammar as `WHERE`, evaluated against the grouped
 result rather than individual rows:
 
@@ -317,12 +317,12 @@ Multiple sort keys, mixed direction, are supported:
 SELECT category, reading FROM data ORDER BY category ASC, reading DESC
 ```
 
-`NULL`s sort last regardless of `ASC`/`DESC` — a `null` is "unknown," not
+`NULL`s sort last regardless of `ASC`/`DESC`; a `null` is "unknown," not
 the smallest or largest value.
 
 For a query with no `GROUP BY`, `ORDER BY` conceptually sorts the
 `FROM`/`WHERE` row set before the `SELECT` list narrows it down to a
-smaller list of columns — so it can name a column that isn't even in the
+smaller list of columns; so it can name a column that isn't even in the
 `SELECT` list:
 
 ```sql
@@ -380,13 +380,13 @@ transitively.
 
 ### Compile once, execute many
 
-`ArrowQuery.compile(sql)` only parses the SQL text — cheap, and independent
+`ArrowQuery.compile(sql)` only parses the SQL text; cheap, and independent
 of any particular Arrow schema. The actual ParserNG expression evaluators
 are compiled lazily on the first call to `execute`, because whether
 ParserNG compiles `float64` or `float32` kernels depends on the column
 types of the batch you pass in. Once built, that compiled plan is cached
 and reused on every subsequent `execute` call against a batch with the
-same schema — the SQL parsing and expression compilation genuinely happen
+same schema; the SQL parsing and expression compilation genuinely happen
 once, no matter how many batches you run through it:
 
 ```java
@@ -399,12 +399,12 @@ try (ArrowQuery reusable = ArrowQuery.compile(
 ```
 
 The plan is cached by schema shape (column names and types), not by which
-`VectorSchemaRoot` instance you pass in — so this works exactly the same,
+`VectorSchemaRoot` instance you pass in; so this works exactly the same,
 and just as cheaply, when `batch1` and `batch2` are two different objects
 with the same column layout, which is the normal case for a streaming or
 per-request workload where a fresh batch arrives on every call. If a later
 `execute` call passes a batch with a genuinely different schema (different
-column names or types), the plan is transparently recompiled — you don't
+column names or types), the plan is transparently recompiled; you don't
 need to detect that yourself.
 
 ### Choosing an execution backend
@@ -431,7 +431,7 @@ ArrowQuery query = ArrowQuery.compile(sql)
 ```
 
 `NullPolicy.PROPAGATE` (the default) produces a computed value everywhere
-the inputs allow one, and `null` only where an input actually was —
+the inputs allow one, and `null` only where an input actually was;
 standard, predictable null propagation through arithmetic. Unlike
 `withBackend`, changing the null policy never requires recompilation.
 
@@ -441,7 +441,7 @@ standard, predictable null propagation through arithmetic. Unlike
 on every call. That's the right default, and it's what almost every
 application should use. But allocating and zeroing a new set of output
 vectors on every call is a real, measurable cost once you're running the
-same query thousands of times a second over similarly-sized batches — the
+same query thousands of times a second over similarly-sized batches; the
 kind of workload where you'd otherwise reach for a hand-tuned engine like
 Apache Gandiva, which preallocates its output once and writes into it
 repeatedly.
@@ -464,9 +464,9 @@ try (ArrowQuery query = ArrowQuery.compile(
 `allocateReusableOutput` builds an output root sized for up to `maxRows`
 rows per column, shaped and typed to match what the query produces.
 `execute(root, output)` then writes each call's result into that same
-buffer instead of allocating a new one. In steady state — once its
+buffer instead of allocating a new one. In steady state; once its
 internal scratch buffers have grown to the largest batch size you've
-passed — this overload performs no heap allocations at all, including for
+passed; this overload performs no heap allocations at all, including for
 a `WHERE`-narrowed selection.
 
 This comes with real constraints, by design:
@@ -478,7 +478,7 @@ This comes with real constraints, by design:
   failing confusingly mid-run. Use `execute(root)` for those queries.
 - **Not safe for concurrent use on a single `ArrowQuery` instance.** The
   reusable buffer and its scratch state belong to one query, one thread at
-  a time — this is the trade-off for the zero-allocation guarantee. If you
+  a time; this is the trade-off for the zero-allocation guarantee. If you
   need this on multiple threads, give each thread its own `ArrowQuery`
   (compiled from the same SQL text) and its own reusable output.
 - **Every column in `output` must already have capacity for at least
@@ -486,7 +486,7 @@ This comes with real constraints, by design:
   `allocateReusableOutput` exists specifically so you size it once,
   correctly, up front.
 
-Reach for this overload when you're in a tight, latency-sensitive loop —
+Reach for this overload when you're in a tight, latency-sensitive loop;
 streaming ingestion, a hot query re-run per incoming micro-batch, or a
 benchmark against an engine that itself preallocates its output. For
 everything else, `execute(root)` is simpler and just as fast in every way
@@ -496,8 +496,8 @@ that matters for typical usage.
 
 The first execution of any compiled expression pays a one-time JIT
 warm-up/classload cost, the same as any hot Java code path. If your
-service's very first real request needs to already be fast — rather than
-paying that cost on live traffic — call `warmup` once, right after
+service's very first real request needs to already be fast; rather than
+paying that cost on live traffic; call `warmup` once, right after
 compiling:
 
 ```java
@@ -508,7 +508,7 @@ try (ArrowQuery query = ArrowQuery.compile(sql)) {
 ```
 
 `warmup` builds a synthetic batch of the same schema as `schemaTemplate`
-(20,000 rows, repeated 8 times, by default — both configurable via the
+(20,000 rows, repeated 8 times, by default; both configurable via the
 overload that takes `rows` and `repetitions`), runs the real query against
 it the requested number of times, and discards the results. It primes the
 exact same cached plan your real traffic will use, so the JIT/classload
@@ -522,7 +522,7 @@ parser-ng-sql fits a performance-sensitive path:
 
 - **A passthrough column is never copied when the full column is kept.**
   `SELECT x, y FROM data` returns `x` and `y` as zero-copy references into
-  the already-filtered batch, not fresh row-by-row copies — copying only
+  the already-filtered batch, not fresh row-by-row copies; copying only
   happens where it's actually needed (a computed column, a passthrough
   column that's being row-narrowed by a `WHERE` clause, or one that's also
   being renamed while narrowed).
@@ -534,7 +534,7 @@ parser-ng-sql fits a performance-sensitive path:
 - **The compiled-plan cache check is allocation-free, and keyed by schema,
   not by object identity.** Confirming a cached plan still matches the
   current batch's schema is a handful of primitive comparisons, not a
-  fresh collection or wrapper object built on every call — and this holds
+  fresh collection or wrapper object built on every call; and this holds
   whether or not you're passing the exact same `VectorSchemaRoot` instance
   back in. A brand-new batch on every call, with the same column layout as
   the last one, still takes the fast, lock-free path.
@@ -545,7 +545,7 @@ parser-ng-sql fits a performance-sensitive path:
 - **For the tightest hot loops, the reusable-output overload adds no
   allocation overhead of its own on top of parser-ng-arrow.** See
   [Reusable output buffers](#reusable-output-buffers-zero-allocation-execution)
-  above — this is the overload to reach for when comparing against engines
+  above; this is the overload to reach for when comparing against engines
   that preallocate their output, such as Apache Gandiva, on cheap
   expressions (simple arithmetic, `sqrt`, and similar) where per-call
   fixed overhead matters most.
@@ -556,24 +556,24 @@ parser-ng-sql draws a clear line between two kinds of failure, and tries
 hard to keep problems on the compile-time side of that line rather than
 letting them surface as a confusing runtime failure:
 
-- **`SqlSyntaxException`** — the SQL text itself doesn't parse: a missing
+- **`SqlSyntaxException`**; the SQL text itself doesn't parse: a missing
   keyword, an unsupported `CAST` target type, a `CASE` with no `ELSE`. This
   is thrown as early as possible, from `ArrowQuery.compile`, before any
   ParserNG expression is even compiled.
-- **`ArrowSqlException`** — the SQL parsed fine, but compiling its
+- **`ArrowSqlException`**; the SQL parsed fine, but compiling its
   expressions against a particular batch's schema failed: a grouped
   query's `SELECT` item doesn't match a `GROUP BY` key, a cyclic
   `SELECT`-list alias reference, and similar shape mismatches that can
   only be detected once a real schema is in hand. Thrown from the first
   `execute` call against a given schema.
-- **`ArrowBindingException`** — thrown directly by parser-ng-arrow itself
+- **`ArrowBindingException`**; thrown directly by parser-ng-arrow itself
   when a compiled expression can't actually run against the data in front
   of it (a column genuinely missing from the batch, for instance).
-- **`UnsupportedOperationException`** — thrown by `execute(root, output)`
+- **`UnsupportedOperationException`**; thrown by `execute(root, output)`
   or `allocateReusableOutput` if the query uses `GROUP BY`, `HAVING`,
-  `ORDER BY`, or `LIMIT` — see
+  `ORDER BY`, or `LIMIT`; see
   [Reusable output buffers](#reusable-output-buffers-zero-allocation-execution).
-- **`IllegalArgumentException`** — thrown by `execute(root, output)` if
+- **`IllegalArgumentException`**; thrown by `execute(root, output)` if
   `output` doesn't match the query's column shape, or doesn't have enough
   per-column capacity for `root`'s row count.
 
@@ -581,31 +581,31 @@ letting them surface as a confusing runtime failure:
 
 parser-ng-sql deliberately does not implement:
 
-- `JOIN`, subqueries, or any multi-table concept — every query operates on
+- `JOIN`, subqueries, or any multi-table concept; every query operates on
   exactly one `VectorSchemaRoot` you already have in hand.
-- `INSERT`, `UPDATE`, `DELETE`, transactions, or a catalog of any kind —
+- `INSERT`, `UPDATE`, `DELETE`, transactions, or a catalog of any kind;
   there is no notion of a persistent table to mutate.
 - `DISTINCT`.
-- Non-numeric `CAST` targets or general string/text processing — every
+- Non-numeric `CAST` targets or general string/text processing; every
   value in a ParserNG expression is a floating-point number.
 
 None of these are missing by oversight. The goal is a fast, predictable way
 to describe a vectorized Arrow computation, not a general-purpose query
-engine — see the tagline at the top of this document.
+engine; see the tagline at the top of this document.
 
 ## Resource ownership and thread-safety
 
 An `ArrowQuery` owns whatever expression evaluators it has compiled and
-must be closed when no longer needed — a try-with-resources block, as in
+must be closed when no longer needed; a try-with-resources block, as in
 every example above, is the simplest way. Every `VectorSchemaRoot` returned
 by `execute(root)` is a fresh, independently-owned batch that the caller
 owns and must close in turn; parser-ng-sql never returns a view over, or a
 root that shares ownership with, the root you passed in (passthrough
 columns may share refcounted buffers with the input, exactly as Arrow's
-own `TransferPair` does — closing either side is always safe).
+own `TransferPair` does; closing either side is always safe).
 
 **`execute(VectorSchemaRoot)` is safe to call concurrently from multiple
-threads on the same `ArrowQuery`** — including concurrently with
+threads on the same `ArrowQuery`**; including concurrently with
 `withBackend`, `withNullPolicy`, and `close()`, and concurrently with the
 one-time recompilation that happens the first time a new schema shape is
 seen or the backend changes. The plan a given call uses is reference-
@@ -616,7 +616,7 @@ change made from another thread.
 
 **`execute(VectorSchemaRoot, VectorSchemaRoot)` (the reusable-output
 overload) and `allocateReusableOutput` are not safe for concurrent use on
-one `ArrowQuery` instance** — see
+one `ArrowQuery` instance**; see
 [Reusable output buffers](#reusable-output-buffers-zero-allocation-execution)
 above. Use one query instance per thread if you need this overload from
 more than one thread at a time; each instance can be compiled from the
