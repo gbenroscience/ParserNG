@@ -30,7 +30,6 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.TransferPair;
 
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -101,8 +100,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  * writes into a caller-owned buffer built by {@link #allocateReusableOutput};
  * it supports only queries without GROUP BY / HAVING / ORDER BY / LIMIT and is
  * <b>not</b> safe for concurrent use on one instance (one query per thread).
- * For benchmarking against engines that preallocate outputs (e.g. Gandiva),
- * use this overload.
+ * In steady state -- once its internal scratch buffers have grown to the
+ * batch size -- this overload performs no heap allocations at all, including
+ * for a {@code WHERE}-narrowed selection (the row-selection buffer is reused
+ * and only grows, never reallocated per call). The one exception is a
+ * {@code WHERE}/{@code HAVING} clause containing {@code IS [NOT] NULL}, whose
+ * leaf-by-leaf mask fallback (see {@link PredicateNode}) still allocates; that
+ * fallback is a correctness path, not a performance one. For benchmarking
+ * against engines that preallocate outputs (e.g. Gandiva), use this overload.
  *
  * <h2>Resource ownership</h2>
  * The query owns its compiled evaluators and must be {@link #close()}d. Every
@@ -115,9 +120,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * with {@link #close()}, {@link #withBackend} and schema-driven recompilation.
  * The plan a call uses is reference-counted lock-free ({@link CompiledPlan}):
  * a superseded plan's evaluators are closed only after the last in-flight call
- * releases it. The (root, plan) pair used by the identity fast path is
- * published as one immutable {@link PlanSlot}, so a caller can never observe a
- * new root paired with an old plan. A call in flight during
+ * releases it. The cache is a single volatile {@code CompiledPlan} field keyed
+ * purely by schema fingerprint (see {@link #fingerprintOf}), never by root
+ * identity, so a fresh {@link VectorSchemaRoot} instance of an
+ * already-compiled schema -- the common case in production, where every call
+ * gets a new batch -- still takes the lock-free fast path instead of falling
+ * through to synchronized recompilation. A call in flight during
  * {@code withBackend}/{@code withNullPolicy} completes with what it captured.
  *
  * <h2>Warming up</h2>
@@ -144,17 +152,43 @@ public final class ArrowQuery implements AutoCloseable {
     private volatile NullPolicy nullPolicy = NullPolicy.PROPAGATE;
 
     /**
-     * The current plan together with the root instance it was last matched
-     * against, published atomically. Null until first compile / after close.
+     * The most recently compiled plan, published as one volatile write and
+     * looked up purely by schema fingerprint (see {@link #fingerprintOf}) --
+     * deliberately NOT keyed by the input root's identity. Keying by root
+     * identity would force every call with a freshly-allocated (but
+     * same-schema) batch through the synchronized slow path; keying by
+     * fingerprint alone keeps that case on the lock-free, allocation-free
+     * fast path, which is the common case in production. Null until first
+     * compile / after close.
      */
-    private volatile PlanSlot slot;
+    private volatile CompiledPlan cachedPlan;
 
     /** Only touched by {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}; see class docs. */
     private volatile ReusableScratch reusableScratch;
 
+    /** Computed once from {@code stmt}; see {@link #requireReusableOutputSupportedShape()}. */
+    private final String reusableUnsupportedReason;
+
     private ArrowQuery(String sql, SelectStatement stmt) {
         this.sql = sql;
         this.stmt = stmt;
+        this.reusableUnsupportedReason = computeReusableUnsupportedReason(stmt);
+    }
+
+    private static String computeReusableUnsupportedReason(SelectStatement stmt) {
+        if (stmt.isGrouped()) {
+            return "GROUP BY";
+        }
+        if (stmt.having() != null) {
+            return "HAVING";
+        }
+        if (!stmt.orderBy().isEmpty()) {
+            return "ORDER BY";
+        }
+        if (stmt.limit() != null) {
+            return "LIMIT";
+        }
+        return null;
     }
 
     /**
@@ -337,9 +371,10 @@ public final class ArrowQuery implements AutoCloseable {
         CompiledPlan p = acquirePlan(root);
         try {
             int rowCount = root.getRowCount();
+            BufferAllocator allocator = allocatorOf(root);
             ReusableScratch scratch = scratchFor(p);
-            int[] selected = selectRowsReusable(p, root, effectiveNullPolicy, scratch);
-            int outRowCount = selected == null ? rowCount : selected.length;
+            int[] selected = selectRowsReusable(p, root, effectiveNullPolicy, scratch, allocator);
+            int outRowCount = selected == null ? rowCount : scratch.selectionCount;
             List<FieldVector> outVectors = reusableOutput.getFieldVectors();
 
             if (stmt.selectAll()) {
@@ -358,17 +393,13 @@ public final class ArrowQuery implements AutoCloseable {
                 ProjectionPlan proj = projections.get(i);
                 FieldVector out = outVectors.get(i);
                 if (proj.passthrough) {
-                    FieldVector src = root.getVector(proj.sourceColumnName);
-                    if (src == null) {
-                        throw new ArrowBindingException(
-                                "Column '" + proj.sourceColumnName + "' not found while projecting.");
-                    }
+                    FieldVector src = resolvePassthrough(root, proj.sourceColumnIndex, proj.sourceColumnName);
                     gatherInto(src, selected, out, outRowCount);
                 } else if (selected == null) {
                     out.setValueCount(rowCount);
                     proj.evaluator.evaluate(root, out, effectiveNullPolicy);
                 } else {
-                    FieldVector scratchVec = scratch.projectionScratch(rowCount, p.float64, allocatorOf(root));
+                    FieldVector scratchVec = scratch.projectionScratch(rowCount, p.float64, allocator);
                     proj.evaluator.evaluate(root, scratchVec, effectiveNullPolicy);
                     gatherInto(scratchVec, selected, out, outRowCount);
                 }
@@ -445,19 +476,9 @@ public final class ArrowQuery implements AutoCloseable {
     }
 
     private void requireReusableOutputSupportedShape() {
-        String why = null;
-        if (stmt.isGrouped()) {
-            why = "GROUP BY";
-        } else if (stmt.having() != null) {
-            why = "HAVING";
-        } else if (!stmt.orderBy().isEmpty()) {
-            why = "ORDER BY";
-        } else if (stmt.limit() != null) {
-            why = "LIMIT";
-        }
-        if (why != null) {
+        if (reusableUnsupportedReason != null) {
             throw new UnsupportedOperationException(
-                    "execute(root, reusableOutput)/allocateReusableOutput do not support " + why
+                    "execute(root, reusableOutput)/allocateReusableOutput do not support " + reusableUnsupportedReason
                             + " -- the output row count cannot be bounded by a fixed-capacity buffer. "
                             + "Use execute(root) instead.");
         }
@@ -481,7 +502,12 @@ public final class ArrowQuery implements AutoCloseable {
         }
     }
 
-    private synchronized ReusableScratch scratchFor(CompiledPlan p) {
+    /**
+     * Not synchronized: {@link #execute(VectorSchemaRoot, VectorSchemaRoot)} is
+     * documented as single-thread-only per instance, so this needs no lock --
+     * and taking one here would defeat the point of the zero-alloc hot path.
+     */
+    private ReusableScratch scratchFor(CompiledPlan p) {
         ReusableScratch s = reusableScratch;
         if (s == null || s.forPlan != p) {
             if (s != null) {
@@ -493,21 +519,74 @@ public final class ArrowQuery implements AutoCloseable {
         return s;
     }
 
+    /**
+     * Zero-allocation WHERE evaluation for the reusable-output path, steady
+     * state: once {@code scratch}'s buffers have grown to the batch size, no
+     * further allocations occur here. Returns {@code null} for "every row, in
+     * order" (read {@code root.getRowCount()} rows); otherwise returns
+     * {@code scratch}'s reusable selection buffer, which may be oversized from
+     * a larger previous call -- read only the first {@code scratch.selectionCount}
+     * entries.
+     *
+     * <p>The {@code IS [NOT] NULL} mask fallback still allocates a
+     * {@code boolean[]} per leaf (see {@link PredicateNode}); only the fused
+     * (no-IS-NULL) predicate path is allocation-free.
+     */
     private static int[] selectRowsReusable(
-            CompiledPlan p, VectorSchemaRoot root, NullPolicy nullPolicy, ReusableScratch scratch) {
+            CompiledPlan p, VectorSchemaRoot root, NullPolicy nullPolicy, ReusableScratch scratch,
+            BufferAllocator allocator) {
         if (p.fusedPredicate == null && p.maskPredicateRoot == null) {
             return null;
         }
-        int rowCount = root.getRowCount();
-        if (p.fusedPredicate != null) {
-            if (rowCount == 0) {
-                return EMPTY;
-            }
-            FieldVector out = scratch.predicateScratch(rowCount, p.float64, allocatorOf(root));
-            long[] bits = scratch.bits((rowCount + 63) >>> 6);
-            return evaluatePredicate(p.fusedPredicate, root, out, rowCount, p.float64, nullPolicy, bits);
+        if (p.maskPredicateRoot != null) {
+            boolean[] mask = p.maskPredicateRoot.evalMask(root, nullPolicy, p.float64);
+            return selectionFromMask(mask, scratch);
         }
-        return fromMask(p.maskPredicateRoot.evalMask(root, nullPolicy, p.float64));
+        int rowCount = root.getRowCount();
+        if (rowCount == 0) {
+            scratch.selectionCount = 0;
+            return EMPTY;
+        }
+        FieldVector out = scratch.predicateScratch(rowCount, p.float64, allocator);
+        long[] bits = scratch.bits((rowCount + 63) >>> 6);
+        p.fusedPredicate.evaluate(root, out, nullPolicy);
+        int count = countAndMark(out, bits, rowCount, p.float64);
+        if (count == rowCount) {
+            return null;
+        }
+        if (count == 0) {
+            scratch.selectionCount = 0;
+            return EMPTY;
+        }
+        int[] buf = scratch.selectionBuffer(count);
+        expandBitsInto(bits, buf, rowCount);
+        scratch.selectionCount = count;
+        return buf;
+    }
+
+    private static int[] selectionFromMask(boolean[] mask, ReusableScratch scratch) {
+        int count = 0;
+        for (boolean b : mask) {
+            if (b) {
+                count++;
+            }
+        }
+        if (count == mask.length) {
+            return null;
+        }
+        if (count == 0) {
+            scratch.selectionCount = 0;
+            return EMPTY;
+        }
+        int[] buf = scratch.selectionBuffer(count);
+        int idx = 0;
+        for (int i = 0; i < mask.length; i++) {
+            if (mask[i]) {
+                buf[idx++] = i;
+            }
+        }
+        scratch.selectionCount = count;
+        return buf;
     }
 
     // =====================================================================
@@ -525,10 +604,10 @@ public final class ArrowQuery implements AutoCloseable {
     }
 
     private synchronized void invalidatePlan() {
-        PlanSlot old = slot;
-        slot = null;
+        CompiledPlan old = cachedPlan;
+        cachedPlan = null;
         if (old != null) {
-            old.plan.retire();
+            old.retire();
         }
         ReusableScratch s = reusableScratch;
         if (s != null) {
@@ -541,27 +620,19 @@ public final class ArrowQuery implements AutoCloseable {
     // plan compilation (lazy, cached, schema-fingerprinted, ref-counted)
     // =====================================================================
 
-    /** Immutable (root identity, plan) pair, published as one volatile write. */
-    private static final class PlanSlot {
-
-        final WeakReference<VectorSchemaRoot> rootRef;
-        final CompiledPlan plan;
-
-        PlanSlot(VectorSchemaRoot root, CompiledPlan plan) {
-            this.rootRef = new WeakReference<>(root);
-            this.plan = plan;
-        }
-    }
-
     /** Returns the plan for {@code root}, already acquired; caller MUST release() it in a finally. */
     private CompiledPlan acquirePlan(VectorSchemaRoot root) {
-        // Lock-free, allocation-free fast path: same root instance re-executed.
-        PlanSlot s = slot;
-        if (s != null && s.rootRef.get() == root && s.plan.acquire()) {
-            return s.plan;
+        long fingerprint = fingerprintOf(root);
+        // Lock-free, allocation-free fast path: same schema fingerprint as the
+        // cached plan, regardless of whether `root` is the same instance. A new
+        // batch every call (same schema) is the common production case and must
+        // not fall through to the synchronized path below.
+        CompiledPlan p = cachedPlan;
+        if (p != null && p.fingerprint == fingerprint && p.acquire()) {
+            return p;
         }
         try {
-            return acquirePlanSlow(root);
+            return acquirePlanSlow(root, fingerprint);
         } catch (RuntimeException e) {
             throw e;
         } catch (Throwable t) {
@@ -570,20 +641,16 @@ public final class ArrowQuery implements AutoCloseable {
         }
     }
 
-    private synchronized CompiledPlan acquirePlanSlow(VectorSchemaRoot root) throws Throwable {
-        long fingerprint = fingerprintOf(root);
-        PlanSlot existing = slot;
-        if (existing != null && existing.plan.fingerprint == fingerprint && existing.plan.acquire()) {
-            if (existing.rootRef.get() != root) {
-                slot = new PlanSlot(root, existing.plan);
-            }
-            return existing.plan;
+    private synchronized CompiledPlan acquirePlanSlow(VectorSchemaRoot root, long fingerprint) throws Throwable {
+        CompiledPlan existing = cachedPlan;
+        if (existing != null && existing.fingerprint == fingerprint && existing.acquire()) {
+            return existing;
         }
         CompiledPlan fresh = buildPlan(root, fingerprint);
         fresh.acquire(); // brand new: never retired, always succeeds
-        slot = new PlanSlot(root, fresh); // plan and root become visible together
+        cachedPlan = fresh; // published once, fully built
         if (existing != null) {
-            existing.plan.retire(); // evaluators closed once in-flight users release it
+            existing.retire(); // evaluators closed once in-flight users release it
         }
         ReusableScratch s = reusableScratch;
         if (s != null) {
@@ -630,10 +697,11 @@ public final class ArrowQuery implements AutoCloseable {
                 for (SelectItem item : stmt.items()) {
                     String expr = item.exprText();
                     String outputName = item.outputName();
-                    if (root.getVector(expr) != null) {
-                        projections.add(new ProjectionPlan(outputName, true, expr, null));
+                    int idx = indexOfColumn(root, expr);
+                    if (idx >= 0) {
+                        projections.add(new ProjectionPlan(outputName, true, expr, idx, null));
                     } else {
-                        projections.add(new ProjectionPlan(outputName, false, null,
+                        projections.add(new ProjectionPlan(outputName, false, null, -1,
                                 compileCached(expr, backend, float64, compiledCache)));
                     }
                 }
@@ -872,6 +940,43 @@ public final class ArrowQuery implements AutoCloseable {
         return vectors.get(0).getAllocator();
     }
 
+    /** @return the index of the field named {@code name} within {@code root}, or -1 if absent. */
+    private static int indexOfColumn(VectorSchemaRoot root, String name) {
+        List<FieldVector> vectors = root.getFieldVectors();
+        for (int i = 0; i < vectors.size(); i++) {
+            if (vectors.get(i).getName().equals(name)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Resolves a passthrough projection's source column. The fast path is a
+     * direct positional lookup at {@code index} -- O(1), no string comparison
+     * against every column -- which is valid because {@link #fingerprintOf}
+     * folds column name and type via a sequential (order-sensitive) hash, so
+     * any root sharing a plan's fingerprint has its fields in the exact order
+     * the plan was compiled against. Falls back to a by-name scan only if that
+     * invariant is somehow violated (e.g. an astronomically unlikely
+     * fingerprint collision across differently-ordered schemas), so a bad
+     * assumption fails safe instead of silently reading the wrong column.
+     */
+    private static FieldVector resolvePassthrough(VectorSchemaRoot root, int index, String name) {
+        List<FieldVector> vectors = root.getFieldVectors();
+        if (index >= 0 && index < vectors.size()) {
+            FieldVector v = vectors.get(index);
+            if (v.getName().equals(name)) {
+                return v;
+            }
+        }
+        FieldVector v = root.getVector(name);
+        if (v == null) {
+            throw new ArrowBindingException("Column '" + name + "' not found while projecting.");
+        }
+        return v;
+    }
+
     private static void closeQuietly(FieldVector v) {
         try {
             v.close();
@@ -937,11 +1042,7 @@ public final class ArrowQuery implements AutoCloseable {
                 for (ProjectionPlan proj : p.projections) {
                     FieldVector out;
                     if (proj.passthrough) {
-                        FieldVector src = root.getVector(proj.sourceColumnName);
-                        if (src == null) {
-                            throw new ArrowBindingException(
-                                    "Column '" + proj.sourceColumnName + "' not found while projecting.");
-                        }
+                        FieldVector src = resolvePassthrough(root, proj.sourceColumnIndex, proj.sourceColumnName);
                         out = copyColumn(src, proj.outputName, selected, n, gather, allocator);
                     } else if (!gather) {
                         out = newFloat(proj.outputName, rowCount, p.float64, allocator);
@@ -1028,7 +1129,8 @@ public final class ArrowQuery implements AutoCloseable {
      * {@code selected == null}. Typed fast paths for float columns (including a
      * bulk buffer copy for the full-column case); generic {@code copyFromSafe}
      * otherwise. Nulls are always written explicitly, so {@code dst} need not
-     * be zeroed (required for reusable output buffers).
+     * be zeroed (required for reusable output buffers). Only {@code selected[0..n)}
+     * is ever read, so a caller-supplied {@code selected} may be oversized.
      */
     private static void gatherInto(FieldVector src, int[] selected, FieldVector dst, int n) {
         if (src instanceof Float8Vector s && dst instanceof Float8Vector d) {
@@ -1371,6 +1473,12 @@ public final class ArrowQuery implements AutoCloseable {
             ArrowExpressionEvaluator predicate, VectorSchemaRoot root, FieldVector out, int rowCount,
             boolean float64, NullPolicy nullPolicy, long[] bits) {
         predicate.evaluate(root, out, nullPolicy);
+        int count = countAndMark(out, bits, rowCount, float64);
+        return expandBits(bits, count, rowCount);
+    }
+
+    /** Evaluates a predicate output vector into a passing-row bitmask; returns the pass count. */
+    private static int countAndMark(FieldVector out, long[] bits, int rowCount, boolean float64) {
         int count = 0;
         if (float64) {
             Float8Vector o = (Float8Vector) out;
@@ -1389,7 +1497,7 @@ public final class ArrowQuery implements AutoCloseable {
                 }
             }
         }
-        return expandBits(bits, count, rowCount);
+        return count;
     }
 
     private static int[] expandBits(long[] bits, int count, int rowCount) {
@@ -1409,6 +1517,26 @@ public final class ArrowQuery implements AutoCloseable {
             }
         }
         return out;
+    }
+
+    /**
+     * Like {@link #expandBits}, but writes into a caller-supplied, possibly
+     * oversized {@code dest} (at least {@code count} entries) instead of
+     * allocating -- the zero-alloc counterpart used by the reusable-output
+     * path. Iterates only the words implied by {@code rowCount}, never
+     * {@code bits.length}, so a headroom-grown {@code bits} array (see
+     * {@link ReusableScratch#bits}) is safe to pass here.
+     */
+    private static void expandBitsInto(long[] bits, int[] dest, int rowCount) {
+        int idx = 0;
+        int words = (rowCount + 63) >>> 6;
+        for (int w = 0; w < words; w++) {
+            long b = bits[w];
+            while (b != 0) {
+                dest[idx++] = (w << 6) + Long.numberOfTrailingZeros(b);
+                b &= b - 1;
+            }
+        }
     }
 
     private static int[] fromMask(boolean[] mask) {
@@ -1611,12 +1739,21 @@ public final class ArrowQuery implements AutoCloseable {
         final String outputName;
         final boolean passthrough;
         final String sourceColumnName;
+        /**
+         * Positional index of {@code sourceColumnName} within the root this plan
+         * was compiled against, or -1 when not passthrough. See
+         * {@link #resolvePassthrough} for why this is safe to reuse positionally
+         * against any root sharing this plan's schema fingerprint.
+         */
+        final int sourceColumnIndex;
         final ArrowExpressionEvaluator evaluator;
 
-        ProjectionPlan(String outputName, boolean passthrough, String sourceColumnName, ArrowExpressionEvaluator evaluator) {
+        ProjectionPlan(String outputName, boolean passthrough, String sourceColumnName, int sourceColumnIndex,
+                ArrowExpressionEvaluator evaluator) {
             this.outputName = outputName;
             this.passthrough = passthrough;
             this.sourceColumnName = sourceColumnName;
+            this.sourceColumnIndex = sourceColumnIndex;
             this.evaluator = evaluator;
         }
     }
@@ -1682,9 +1819,12 @@ public final class ArrowQuery implements AutoCloseable {
     /**
      * Scratch state for {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}:
      * ONE full-batch scratch vector shared by every computed projection (they
-     * run sequentially: evaluate then gather), one predicate output vector and
-     * one predicate bitmask. All grown, never shrunk. Tied to a plan instance so
-     * recompilation can never leave stale-typed scratch behind.
+     * run sequentially: evaluate then gather), one predicate output vector, one
+     * predicate bitmask, and one row-selection index buffer. All grow with
+     * headroom (never shrink, never reallocate on a same-or-smaller batch), so
+     * steady-state execution against varying batch sizes performs no
+     * allocations. Tied to a plan instance so recompilation can never leave
+     * stale-typed scratch behind.
      */
     private static final class ReusableScratch {
 
@@ -1692,6 +1832,9 @@ public final class ArrowQuery implements AutoCloseable {
         private FieldVector projectionScratch;
         private FieldVector predicateScratch;
         private long[] bits;
+        private int[] selectionIndices = EMPTY;
+        /** Valid entry count in {@link #selectionIndices} after the most recent selection; the buffer may be larger. */
+        int selectionCount;
 
         ReusableScratch(CompiledPlan forPlan) {
             this.forPlan = forPlan;
@@ -1700,10 +1843,11 @@ public final class ArrowQuery implements AutoCloseable {
         FieldVector projectionScratch(int rowCount, boolean float64, BufferAllocator allocator) {
             FieldVector v = projectionScratch;
             if (v == null || v.getValueCapacity() < rowCount) {
+                int capacity = v == null ? rowCount : Math.max(rowCount, v.getValueCapacity() * 2);
                 if (v != null) {
                     closeQuietly(v);
                 }
-                v = newFloat("__parser_ng_sql_reuse_scratch__", rowCount, float64, allocator);
+                v = newFloat("__parser_ng_sql_reuse_scratch__", capacity, float64, allocator);
                 projectionScratch = v;
             }
             v.setValueCount(rowCount);
@@ -1713,24 +1857,34 @@ public final class ArrowQuery implements AutoCloseable {
         FieldVector predicateScratch(int rowCount, boolean float64, BufferAllocator allocator) {
             FieldVector v = predicateScratch;
             if (v == null || v.getValueCapacity() < rowCount) {
+                int capacity = v == null ? rowCount : Math.max(rowCount, v.getValueCapacity() * 2);
                 if (v != null) {
                     closeQuietly(v);
                 }
-                v = newFloat("__parser_ng_sql_reuse_predicate_scratch__", rowCount, float64, allocator);
+                v = newFloat("__parser_ng_sql_reuse_predicate_scratch__", capacity, float64, allocator);
                 predicateScratch = v;
             }
             v.setValueCount(rowCount);
             return v;
         }
 
-        /** @return a zeroed bitmask of at least {@code words} longs */
+        /** @return a bitmask of at least {@code words} longs, with those first {@code words} zeroed. */
         long[] bits(int words) {
             if (bits == null || bits.length < words) {
-                bits = new long[words];
+                bits = new long[Math.max(words, bits == null ? words : bits.length * 2)];
+                // freshly allocated array is already zero-filled by the JVM
             } else {
                 Arrays.fill(bits, 0, words, 0L);
             }
             return bits;
+        }
+
+        /** @return the reusable selection buffer, grown (with headroom) to hold at least {@code n} indices. */
+        int[] selectionBuffer(int n) {
+            if (selectionIndices.length < n) {
+                selectionIndices = new int[Math.max(n, selectionIndices.length * 2)];
+            }
+            return selectionIndices;
         }
 
         void close() {
@@ -1743,6 +1897,8 @@ public final class ArrowQuery implements AutoCloseable {
                 predicateScratch = null;
             }
             bits = null;
+            selectionIndices = EMPTY;
+            selectionCount = 0;
         }
     }
 
