@@ -38,6 +38,8 @@ query.close();
   - [Compile once, execute many](#compile-once-execute-many)
   - [Choosing an execution backend](#choosing-an-execution-backend)
   - [Null handling](#null-handling)
+  - [Reusable output buffers (zero-allocation execution)](#reusable-output-buffers-zero-allocation-execution)
+  - [Warming up](#warming-up)
 - [Performance notes](#performance-notes)
 - [Error handling](#error-handling)
 - [What's intentionally out of scope](#whats-intentionally-out-of-scope)
@@ -396,9 +398,14 @@ try (ArrowQuery reusable = ArrowQuery.compile(
 }
 ```
 
-If a later `execute` call passes a batch with a genuinely different schema
-(different column names or types), the plan is transparently recompiled —
-you don't need to detect that yourself.
+The plan is cached by schema shape (column names and types), not by which
+`VectorSchemaRoot` instance you pass in — so this works exactly the same,
+and just as cheaply, when `batch1` and `batch2` are two different objects
+with the same column layout, which is the normal case for a streaming or
+per-request workload where a fresh batch arrives on every call. If a later
+`execute` call passes a batch with a genuinely different schema (different
+column names or types), the plan is transparently recompiled — you don't
+need to detect that yourself.
 
 ### Choosing an execution backend
 
@@ -428,28 +435,120 @@ the inputs allow one, and `null` only where an input actually was —
 standard, predictable null propagation through arithmetic. Unlike
 `withBackend`, changing the null policy never requires recompilation.
 
+### Reusable output buffers (zero-allocation execution)
+
+`execute(VectorSchemaRoot)` allocates a fresh, independently-owned result
+on every call. That's the right default, and it's what almost every
+application should use. But allocating and zeroing a new set of output
+vectors on every call is a real, measurable cost once you're running the
+same query thousands of times a second over similarly-sized batches — the
+kind of workload where you'd otherwise reach for a hand-tuned engine like
+Apache Gandiva, which preallocates its output once and writes into it
+repeatedly.
+
+For exactly that situation, `ArrowQuery` offers a caller-owned-buffer
+overload:
+
+```java
+try (ArrowQuery query = ArrowQuery.compile(
+        "SELECT x, y, sqrt(x*x + y*y) AS distance FROM data WHERE x > 10");
+     VectorSchemaRoot output = query.allocateReusableOutput(schemaTemplate, /* maxRows */ 65_536)) {
+
+    for (VectorSchemaRoot batch : incomingBatches) {
+        query.execute(batch, output); // writes into `output`; no allocation once warmed up
+        // ... consume `output` before the next call overwrites it ...
+    }
+}
+```
+
+`allocateReusableOutput` builds an output root sized for up to `maxRows`
+rows per column, shaped and typed to match what the query produces.
+`execute(root, output)` then writes each call's result into that same
+buffer instead of allocating a new one. In steady state — once its
+internal scratch buffers have grown to the largest batch size you've
+passed — this overload performs no heap allocations at all, including for
+a `WHERE`-narrowed selection.
+
+This comes with real constraints, by design:
+
+- **Only supported for queries without `GROUP BY`, `HAVING`, `ORDER BY`, or
+  `LIMIT`.** Those clauses can change the output row count in ways a
+  fixed-capacity buffer can't safely bound; using this overload with one
+  of them throws `UnsupportedOperationException` immediately, rather than
+  failing confusingly mid-run. Use `execute(root)` for those queries.
+- **Not safe for concurrent use on a single `ArrowQuery` instance.** The
+  reusable buffer and its scratch state belong to one query, one thread at
+  a time — this is the trade-off for the zero-allocation guarantee. If you
+  need this on multiple threads, give each thread its own `ArrowQuery`
+  (compiled from the same SQL text) and its own reusable output.
+- **Every column in `output` must already have capacity for at least
+  `root.getRowCount()` rows.** Nothing is resized on your behalf;
+  `allocateReusableOutput` exists specifically so you size it once,
+  correctly, up front.
+
+Reach for this overload when you're in a tight, latency-sensitive loop —
+streaming ingestion, a hot query re-run per incoming micro-batch, or a
+benchmark against an engine that itself preallocates its output. For
+everything else, `execute(root)` is simpler and just as fast in every way
+that matters for typical usage.
+
+### Warming up
+
+The first execution of any compiled expression pays a one-time JIT
+warm-up/classload cost, the same as any hot Java code path. If your
+service's very first real request needs to already be fast — rather than
+paying that cost on live traffic — call `warmup` once, right after
+compiling:
+
+```java
+try (ArrowQuery query = ArrowQuery.compile(sql)) {
+    query.warmup(schemaTemplate); // synthetic data, same schema, same code paths
+    // ... query is now primed; the real cached plan is what warmup exercised ...
+}
+```
+
+`warmup` builds a synthetic batch of the same schema as `schemaTemplate`
+(20,000 rows, repeated 8 times, by default — both configurable via the
+overload that takes `rows` and `repetitions`), runs the real query against
+it the requested number of times, and discards the results. It primes the
+exact same cached plan your real traffic will use, so the JIT/classload
+cost is paid once, deliberately, at start-up rather than unpredictably on
+whichever request happens to be first in line.
+
 ## Performance notes
 
 A few design choices worth knowing about if you're deciding whether
 parser-ng-sql fits a performance-sensitive path:
 
-- **A passthrough column is never copied.** `SELECT x, y FROM data` returns
-  `x` and `y` as zero-copy references into the already-filtered batch, not
-  fresh row-by-row copies — copying only happens where it's actually
-  needed (a computed column, or a passthrough column that's also being
-  renamed).
+- **A passthrough column is never copied when the full column is kept.**
+  `SELECT x, y FROM data` returns `x` and `y` as zero-copy references into
+  the already-filtered batch, not fresh row-by-row copies — copying only
+  happens where it's actually needed (a computed column, a passthrough
+  column that's being row-narrowed by a `WHERE` clause, or one that's also
+  being renamed while narrowed).
 - **`GROUP BY` and aggregate arguments are evaluated in bulk, once, not per
   row and not per group.** Every `GROUP BY` key and every distinct
   aggregate argument is evaluated across the whole filtered batch in a
   single pass before grouping happens, so aggregation cost scales with the
   number of input rows, not with the number of distinct groups.
-- **The compiled-plan cache check itself is allocation-free.** Confirming
-  a cached plan still matches the current batch's schema is a handful of
-  primitive comparisons, not a fresh collection built on every call.
+- **The compiled-plan cache check is allocation-free, and keyed by schema,
+  not by object identity.** Confirming a cached plan still matches the
+  current batch's schema is a handful of primitive comparisons, not a
+  fresh collection or wrapper object built on every call — and this holds
+  whether or not you're passing the exact same `VectorSchemaRoot` instance
+  back in. A brand-new batch on every call, with the same column layout as
+  the last one, still takes the fast, lock-free path.
 - **A predicate or projection expression referenced more than once is
   compiled once.** If a `WHERE` clause resolves a `SELECT`-list alias back
   to the same expression a projection already needs, both share a single
   compiled evaluator rather than compiling it twice.
+- **For the tightest hot loops, the reusable-output overload adds no
+  allocation overhead of its own on top of parser-ng-arrow.** See
+  [Reusable output buffers](#reusable-output-buffers-zero-allocation-execution)
+  above — this is the overload to reach for when comparing against engines
+  that preallocate their output, such as Apache Gandiva, on cheap
+  expressions (simple arithmetic, `sqrt`, and similar) where per-call
+  fixed overhead matters most.
 
 ## Error handling
 
@@ -470,6 +569,13 @@ letting them surface as a confusing runtime failure:
 - **`ArrowBindingException`** — thrown directly by parser-ng-arrow itself
   when a compiled expression can't actually run against the data in front
   of it (a column genuinely missing from the batch, for instance).
+- **`UnsupportedOperationException`** — thrown by `execute(root, output)`
+  or `allocateReusableOutput` if the query uses `GROUP BY`, `HAVING`,
+  `ORDER BY`, or `LIMIT` — see
+  [Reusable output buffers](#reusable-output-buffers-zero-allocation-execution).
+- **`IllegalArgumentException`** — thrown by `execute(root, output)` if
+  `output` doesn't match the query's column shape, or doesn't have enough
+  per-column capacity for `root`'s row count.
 
 ## What's intentionally out of scope
 
@@ -492,11 +598,26 @@ engine — see the tagline at the top of this document.
 An `ArrowQuery` owns whatever expression evaluators it has compiled and
 must be closed when no longer needed — a try-with-resources block, as in
 every example above, is the simplest way. Every `VectorSchemaRoot` returned
-by `execute` is a fresh, independently-owned batch that the caller owns and
-must close in turn; parser-ng-sql never returns a view over, or a root
-that shares ownership with, the root you passed in.
+by `execute(root)` is a fresh, independently-owned batch that the caller
+owns and must close in turn; parser-ng-sql never returns a view over, or a
+root that shares ownership with, the root you passed in (passthrough
+columns may share refcounted buffers with the input, exactly as Arrow's
+own `TransferPair` does — closing either side is always safe).
 
-Configuring a query (`withBackend`/`withNullPolicy`) and calling `execute`
-concurrently from multiple threads is not supported. Calling `execute`
-concurrently once a query's configuration has stopped changing is only as
-safe as the underlying ParserNG evaluators' own backend.
+**`execute(VectorSchemaRoot)` is safe to call concurrently from multiple
+threads on the same `ArrowQuery`** — including concurrently with
+`withBackend`, `withNullPolicy`, and `close()`, and concurrently with the
+one-time recompilation that happens the first time a new schema shape is
+seen or the backend changes. The plan a given call uses is reference-
+counted and lock-free: a plan that's been superseded (by a schema change or
+a `withBackend` call) has its evaluators released only once every call
+still using it has finished, so no in-flight call is ever disrupted by a
+change made from another thread.
+
+**`execute(VectorSchemaRoot, VectorSchemaRoot)` (the reusable-output
+overload) and `allocateReusableOutput` are not safe for concurrent use on
+one `ArrowQuery` instance** — see
+[Reusable output buffers](#reusable-output-buffers-zero-allocation-execution)
+above. Use one query instance per thread if you need this overload from
+more than one thread at a time; each instance can be compiled from the
+same SQL text independently.
