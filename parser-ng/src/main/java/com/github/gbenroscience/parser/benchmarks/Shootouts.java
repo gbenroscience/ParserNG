@@ -196,13 +196,13 @@ public class Shootouts {
 
     public static void testJavaNativeParser(String expr, int n) {
         TwG g = new TwG();
-        double val = Math.pow(2, 3) + 4 % 2 - 5 - 6 - 7 * 8 + Maths.fact(5) + 2E-9 - 0.00002 + 70000 / Math.pow(32.34, 8) - 19 + g.permutation(9, 3) + g.combination(6, 5) + Math.pow(2, 2) + Math.pow(5, 3) - Math.pow(3, -1) / 2.53 + 3E-12;
+        double val = 2 - 12 + Math.pow(2, 3) + 4 % 2 - 5 - 6 - 7 * 8 + Maths.fact(5) + 2E-9 - 0.00002 + 70000 / Math.pow(32.34, 8) - 19 + g.permutation(9, 3) + g.combination(6, 5) + Math.pow(2, 2) + Math.pow(5, 3) - Math.pow(3, -1) / 2.53 + 3E-12 + 2 * -(-3);
 
         double[] deltas = new double[n];
         double N = n;
         for (int i = 0; i < N; i++) {
             deltas[i] = System.nanoTime();
-            val = Math.pow(2, 3) + 4 % 2 - 5 - 6 - 7 * 8 + Maths.fact(5) + 2E-9 - 0.00002 + 70000 / Math.pow(32.34, 8) - 19 + g.permutation(9, 3) + g.combination(6, 5) + Math.pow(2, 2) + Math.pow(5, 3) - Math.pow(3, -1) / 2.53 + 3E-12;
+            val = 2 - 12 + Math.pow(2, 3) + 4 % 2 - 5 - 6 - 7 * 8 + Maths.fact(5) + 2E-9 - 0.00002 + 70000 / Math.pow(32.34, 8) - 19 + g.permutation(9, 3) + g.combination(6, 5) + Math.pow(2, 2) + Math.pow(5, 3) - Math.pow(3, -1) / 2.53 + 3E-12 + 2 * -(-3);
             deltas[i] = System.nanoTime() - deltas[i];
         }
         double avg = findAverage(deltas);

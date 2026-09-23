@@ -832,7 +832,7 @@ public class MathExpression implements Savable, Solvable {
         MathScanner opScanner = new MathScanner(expression, this);
 
         this.commaAlias = opScanner.commaAlias;
-        scanner = opScanner.getScanner();
+        scanner = opScanner.getScanner();System.out.println("scanner: "+scanner);
         correctFunction = opScanner.isRunnable();
         parser_Result = opScanner.parser_Result;
         if (parser_Result == ParserResult.VALID) {

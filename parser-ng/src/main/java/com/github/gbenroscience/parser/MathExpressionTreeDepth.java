@@ -235,9 +235,10 @@ public class MathExpressionTreeDepth implements Savable {
      * use the raw, non-skipping {@link #peek()}/{@link #nextChar()} so that
      * whitespace still correctly terminates a number or identifier, and is
      * preserved verbatim as content inside a string literal.
+     * @param expression
      */
     public MathExpressionTreeDepth(String expression) {
-        this.expr = expression == null ? "" : expression;
+        this.expr = expression == null ? "" : expression.replace("-¹", String.valueOf(MathExpression.Token.INVERSE_DEF));
         this.pos = 0;
     }
 

@@ -73,6 +73,7 @@ public class MathScanner {
      */
     public MathScanner(String scannerInput, MathExpression me) throws InputMismatchException{
 
+        scannerInput = scannerInput.replace("-¹", "^-1");
         //±–
         /**
          * The loop looks for the occurrence of + and - operators that occur as
