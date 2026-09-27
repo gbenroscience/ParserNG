@@ -2,6 +2,7 @@ package com.github.gbenroscience.parser.ng.parquet.v1;
 
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.NodePlan;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.PredicateTranslator;
+import com.github.gbenroscience.parser.ng.parquet.v1.internal.RowFilterEvaluator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -36,12 +38,24 @@ import java.util.Set;
  * pushdown here only ever prunes -- the caller must still re-evaluate the original predicate against
  * every emitted batch; see {@link Predicate}'s Javadoc for the exact soundness contract.
  *
+ * <h2>Go-fast vs. go-slow: pushdown alone, or exactFilter()</h2>
+ * By default ({@code ParquetScan.pushdown(...)} without {@code .exactFilter()}), this class only
+ * prunes: an emitted batch may still contain non-matching rows and the caller must re-check. Calling
+ * {@code .exactFilter()} additionally routes every surviving row through a {@link RowFilterEvaluator}
+ * (built once, up front, by {@link com.github.gbenroscience.parser.ng.parquet.v1.internal.RowFilterEvaluator}) and emits
+ * only true matches, via {@link FilteredSource}. See {@code ParquetScan.exactFilter()}'s Javadoc for
+ * when each mode is the right choice, and {@link FilteredSource}'s Javadoc for exactly what exact
+ * mode costs relative to pruning-only.
+ *
  * <h2>Ownership</h2>
  * <ul>
- *   <li>Sequential mode ({@code parallelism == 1}): the reader owns ONE reusable {@link VectorSchemaRoot},
- *       reallocated only when a vector's capacity is too small. Steady state allocates no Arrow memory.</li>
+ *   <li>Sequential mode ({@code parallelism == 1}, no exactFilter): the reader owns ONE reusable
+ *       {@link VectorSchemaRoot}, reallocated only when a vector's capacity is too small. Steady state
+ *       allocates no Arrow memory.</li>
  *   <li>Parallel mode ({@code parallelism > 1}): each row group's batches are freshly allocated on a
  *       worker thread, since they cross a thread boundary; see {@link ParallelSource}.</li>
+ *   <li>{@code exactFilter()} mode: every emitted batch is freshly allocated via selective copy,
+ *       regardless of parallelism -- see {@link FilteredSource}.</li>
  *   <li>{@link #root()} is valid only until the next {@link #next()} or {@link #close()}.
  *       {@link #detach()} moves/hands off the current batch (no copy) to a root the CALLER owns and must
  *       close; the reader continues from its next batch.</li>
@@ -52,13 +66,15 @@ import java.util.Set;
  * A projected column may be a struct, a 3-level {@code LIST}/{@code MAP} (or the legacy 2-level/tuple
  * forms), or any nesting of these over supported primitive leaves. See {@code internal.NodePlan} /
  * {@code internal.LevelWalker} for how Parquet's repetition/definition levels become Arrow list offsets
- * and struct validity. Unsupported leaf types fail fast, naming the column.
+ * and struct validity. Unsupported leaf types fail fast, naming the column. {@code exactFilter()}
+ * predicates, unlike pushdown predicates, are restricted to flat top-level columns only -- see
+ * {@link RowFilterEvaluator}'s Javadoc.
  *
  * <h2>Zero-copy vs. copy</h2>
- * Values are decompressed and decoded by parquet-java, then written once into Arrow buffers: decode plus
- * one copy, not zero-copy. Only {@link #detach()} and downstream transfer are zero-copy. Per-value calls
- * into parquet-java's {@code ColumnReader} are the throughput ceiling here; parquet-java exposes no batch
- * decode API.
+ * Values are decompressed and decoded by the native decode engine, then written once into Arrow
+ * buffers: decode plus one copy, not zero-copy. Only {@link #detach()} and downstream transfer are
+ * zero-copy (exactFilter mode's selective-copy batches can still be detached zero-copy from this
+ * point on; the copy already happened building them, not on detach).
  */
 public final class ParquetBatchReader implements AutoCloseable {
 
@@ -68,7 +84,8 @@ public final class ParquetBatchReader implements AutoCloseable {
     private boolean closed;
 
     ParquetBatchReader(Path file, List<String> columns, Predicate predicate, int batchSize,
-                       boolean metricsOn, long maxRowGroupBytes, int parallelism, BufferAllocator allocator) {
+                       boolean metricsOn, long maxRowGroupBytes, int parallelism, boolean exactFilter,
+                       Map<String, CustomPredicate> customPredicates, BufferAllocator allocator) {
         if (allocator == null) throw new NullPointerException("allocator");
         this.file = file;
         ParquetFileReader probeOrFiltered = null;
@@ -98,6 +115,16 @@ public final class ParquetBatchReader implements AutoCloseable {
             NodePlan nodePlan = NodePlan.build(projected, descriptors, file);
             List<Field> fields = nodePlan.fields();
 
+            // Validated -- and, if invalid, thrown -- before opening any row-group reader/worker: an
+            // exactFilter() request that cannot actually be honored (predicate touches a nested column,
+            // or a column outside the projection) should fail before this scan does any I/O, not after.
+            RowFilterEvaluator exactEvaluator = null;
+            if (exactFilter) {
+                Set<String> flatLeafNames = new HashSet<>();
+                for (NodePlan.Node top : nodePlan.tops()) if (top instanceof NodePlan.Leaf) flatLeafNames.add(top.name);
+                exactEvaluator = new RowFilterEvaluator(predicate, fields, flatLeafNames, customPredicates, file);
+            }
+
             ScanMetrics m = null;
             if (metricsOn) {
                 m = new ScanMetrics();
@@ -106,12 +133,13 @@ public final class ParquetBatchReader implements AutoCloseable {
             }
             this.metrics = m;
 
+            BatchSource built;
             if (parallelism <= 1) {
                 filtered.setRequestedSchema(projected);
                 RowGroupDecoder decoder = new RowGroupDecoder(
                         file, filtered, projected, nodePlan, descriptors, maxRowGroupBytes, m);
                 probeOrFiltered = null; // ownership moves to the decoder
-                this.source = new SequentialSource(file, decoder, fields, allocator, batchSize);
+                built = new SequentialSource(file, decoder, fields, allocator, batchSize);
             } else {
                 List<BlockMetaData> survivorBlocks = filtered.getRowGroups();
                 List<BlockMetaData> allBlocks = filtered.getFooter().getBlocks();
@@ -121,9 +149,10 @@ public final class ParquetBatchReader implements AutoCloseable {
                 for (int i = 0; i < allBlocks.size(); i++) if (survivorSet.containsKey(allBlocks.get(i))) ordinals.add(i);
                 filtered.close(); // parallel workers open their own readers; this one is no longer needed
                 probeOrFiltered = null;
-                this.source = new ParallelSource(file, projected, descriptors, nodePlan, fields,
+                built = new ParallelSource(file, projected, descriptors, nodePlan, fields,
                         ordinals, filter, parallelism, batchSize, maxRowGroupBytes, allocator, m);
             }
+            this.source = (exactEvaluator != null) ? new FilteredSource(built, exactEvaluator, allocator) : built;
         } catch (IOException e) {
             closeQuietly(probeOrFiltered);
             throw new ParquetScanException("Cannot open Parquet file", file, -1, null, e);

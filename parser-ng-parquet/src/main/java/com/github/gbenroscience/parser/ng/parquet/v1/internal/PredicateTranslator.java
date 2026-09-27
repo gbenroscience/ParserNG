@@ -17,7 +17,8 @@ import java.util.Set;
 
 /**
  * Translates a {@link Predicate} into a parquet-java {@link FilterPredicate} used ONLY for pruning.
- * Returns {@code null} when nothing can be safely pushed. See {@link Predicate} for the soundness rules.
+ * Returns {@code null} when nothing can be safely pushed. See {@link Predicate} for the soundness
+ * rules, and {@link #negate} for specifically how {@link Predicate.Not} is handled.
  */
 public final class PredicateTranslator {
 
@@ -39,7 +40,71 @@ public final class PredicateTranslator {
         if (p instanceof Predicate.Cmp c) return cmp(c, schema);
         if (p instanceof Predicate.In in) return inList(in, schema);
         if (p instanceof Predicate.IsNull n) return isNull(n, schema);
+        if (p instanceof Predicate.Not not) {
+            Predicate inner = not.inner();
+            // Fast path: these four leaf types never push regardless of negation (see their own
+            // Javadoc), so there is no point building the De Morgan expansion just to discover that.
+            // Not required for correctness -- translate()'s fallthrough already returns null for any
+            // of these -- purely an optimization for the common "Not wrapping one directly" case.
+            if (inner instanceof Predicate.ColCmp || inner instanceof Predicate.Like
+                    || inner instanceof Predicate.Regex || inner instanceof Predicate.Custom) {
+                return null;
+            }
+            return translate(negate(inner), schema);
+        }
+        // Predicate.ColCmp / Predicate.Like / Predicate.Regex / Predicate.Custom: none of parquet-java's
+        // FilterApi has any concept of these (column-to-column, patterns, or an opaque caller callback),
+        // so they always fall through here -- never pushed, always sound (see Predicate's Javadoc for
+        // exactly why each one is a hard limit of pruning, not a translation gap).
         return null;
+    }
+
+    /**
+     * Rewrites {@code NOT(p)} to negation-normal form -- De Morgan's laws pushing the negation down
+     * to each leaf -- rather than ever handing parquet-java's {@code FilterApi} a literal
+     * {@code not(...)}. This is deliberate, not merely equivalent: negating a range comparison is
+     * exactly the case parquet-java's own {@code LogicalInverseRewriter} exists to handle carefully
+     * for statistics-based pruning (raw {@code not()} composed with stats-based row-group filtering
+     * is a well-documented parquet-java footgun). Rewriting here, before translation, removes any
+     * dependency on that being applied correctly downstream: every leaf this method ever hands
+     * {@link #translate} is already a plain, non-negated comparison.
+     *
+     * <p>{@link Predicate.In} has no direct negated counterpart in parquet-java's algebra, so
+     * {@code NOT(c IN (v1, v2, ...))} expands to an {@link Predicate.And} chain of {@code c != v1},
+     * {@code c != v2}, ... -- the same expansion {@code parser-ng-sql}'s own WHERE-clause splitter
+     * already performs upstream, mirrored here for callers who build a raw {@link Predicate} directly
+     * without going through that layer.
+     */
+    private static Predicate negate(Predicate p) {
+        if (p instanceof Predicate.And a) return Predicate.or(negate(a.left()), negate(a.right()));
+        if (p instanceof Predicate.Or o) return Predicate.and(negate(o.left()), negate(o.right()));
+        if (p instanceof Predicate.Not n) return n.inner(); // double negation cancels
+        if (p instanceof Predicate.Cmp c) return new Predicate.Cmp(c.column(), flip(c.op()), c.value());
+        if (p instanceof Predicate.In in) {
+            Predicate acc = null;
+            for (Object v : in.values()) {
+                Predicate ne = Predicate.ne(in.column(), v);
+                acc = (acc == null) ? ne : Predicate.and(acc, ne);
+            }
+            return acc; // In's compact constructor rejects an empty values list, so acc is never null here
+        }
+        if (p instanceof Predicate.IsNull n) return new Predicate.IsNull(n.column(), !n.negated());
+        // ColCmp / Like / Regex / Custom: never pushed regardless of sign. Wrapping in Not rather than
+        // returning the bare node is not load-bearing for correctness here (translate()'s own
+        // fallthrough already returns null for any of these, wrapped or not) -- it just keeps this
+        // method's output uniformly "a Predicate", not "a Predicate, except sometimes still negated."
+        return new Predicate.Not(p);
+    }
+
+    private static Predicate.Op flip(Predicate.Op op) {
+        return switch (op) {
+            case EQ -> Predicate.Op.NE;
+            case NE -> Predicate.Op.EQ;
+            case LT -> Predicate.Op.GE;
+            case LE -> Predicate.Op.GT;
+            case GT -> Predicate.Op.LE;
+            case GE -> Predicate.Op.LT;
+        };
     }
 
     private static PrimitiveType prim(MessageType schema, String col) {
