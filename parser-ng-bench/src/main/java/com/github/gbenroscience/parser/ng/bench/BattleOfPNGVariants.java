@@ -81,7 +81,6 @@ public class BattleOfPNGVariants {
 
     private ExecutorService janinoParallelExecutor;
     private Phaser barrier;
- 
 
     // Zero-allocation side-effect sinks to prevent JIT dead-code elimination
     private double[] workerResultSink;
@@ -165,7 +164,7 @@ public class BattleOfPNGVariants {
     private double[] vars;
     private JaninoMathFunction fastEvaluator;
 
-    SIMDCommandF64.SIMDVectorCompositeExpression simdComd; 
+    SIMDCommandF64.SIMDVectorCompositeExpression simdComd;
 
     // SIMDCommandSegmentF64's off-heap/zero-copy MemorySegment evaluator,
     // compiled from the same expression/varCount as simdComd above.
@@ -258,7 +257,6 @@ public class BattleOfPNGVariants {
 
         // Exactly 2 permanent parties: 1 Master JMH thread + 1 Dedicated Background Worker
         this.barrier = new Phaser(2);
- 
 
         // Result sinks sized exactly to the split data constraints
         final int mid = dataSize / 2;
@@ -448,7 +446,7 @@ public class BattleOfPNGVariants {
 
     private void setupParserNG(MathExpression me) {
         try {
-            simdComd = SIMDCommandF64.getEvaluator(me); 
+            simdComd = SIMDCommandF64.getEvaluator(me);
         } catch (Throwable ex) {
             System.getLogger(BattleOfPNGVariants.class.getName()).log(System.Logger.Level.ERROR, (String) null, ex);
         }
@@ -615,7 +613,7 @@ public class BattleOfPNGVariants {
              */
 
             // 4. Fluent, modern JMH Configuration
-            Options configurations = new OptionsBuilder() // assuming 'opt' was meant to be new OptionsBuilder()
+              Options configurations = new OptionsBuilder() // assuming 'opt' was meant to be new OptionsBuilder()
                     .include(BattleOfPNGVariants.class.getSimpleName())
                     .mode(Mode.AverageTime)
                     .timeUnit(TimeUnit.NANOSECONDS)
@@ -640,7 +638,30 @@ public class BattleOfPNGVariants {
                     // , "-XX:+LogCompilation", "-XX:+PrintInlining"
                     )
                     .build();
-
+             
+// 4. Fluent, modern JMH Configuration
+/*
+            Options configurations = new OptionsBuilder()
+                    .include(BattleOfPNGVariants.class.getSimpleName() + "\\.parserNGSimdVec$") // isolate the non-parallel path first
+                    .mode(Mode.AverageTime)
+                    .timeUnit(TimeUnit.NANOSECONDS)
+                    .warmupIterations(5)
+                    .warmupTime(TimeValue.milliseconds(1000L))
+                    .measurementIterations(5)
+                    .measurementTime(TimeValue.milliseconds(1000L))
+                    .forks(3)
+                    .addProfiler(org.openjdk.jmh.profile.GCProfiler.class)
+                    .jvmArgs("-Xms8g", "-Xmx8g", "-Dbenchmark.index=" + index)
+                    .jvmArgsAppend(
+                            "--add-modules", "jdk.incubator.vector",
+                            "-XX:ReservedCodeCacheSize=512m",
+                            "-XX:-UseCompressedOops",
+                            "-XX:+UnlockDiagnosticVMOptions",
+                            "-XX:+DebugNonSafepoints",
+                            "-XX:+UseG1GC",
+                            "-XX:StartFlightRecording=filename=parallel-alloc-%p.jfr,settings=profile,dumponexit=true"
+                    )
+                    .build();*/
             new Runner(configurations).run();
 
         } catch (NumberFormatException e) {

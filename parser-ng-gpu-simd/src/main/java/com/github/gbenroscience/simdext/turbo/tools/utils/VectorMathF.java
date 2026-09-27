@@ -761,49 +761,50 @@ public final class VectorMathF {
         }
 
         final float first = scratch[offset];
+        final int vl = F_SPECIES.length();
+        final int bound = F_SPECIES.loopBound(n);
+        int i = 0;
+
+        // See the double-precision VectorMath.isExponentUniform for why the
+        // early `return false` inside the loop was removed: a data-dependent
+        // branch inside a vectorized loop defeats C2's escape analysis for
+        // the whole inlined region (PowCommand -> this method -> the sibling
+        // AddCommand/UnaryMathCommand calls inlined beside it), forcing the
+        // Vector API's boxed VectorSupport fallback instead of the true
+        // intrinsic. Accumulating the mismatch mask and testing it once,
+        // after the loop, is semantically identical and keeps the whole
+        // method scalarizable.
         if (Float.isNaN(first)) {
             // All must be NaN
-            final int vl = F_SPECIES.length();
-            int i = 0;
-            int bound = F_SPECIES.loopBound(n);
+            VectorMask<Float> mismatch = F_SPECIES.maskAll(false);
             for (; i < bound; i += vl) {
                 FloatVector v = FloatVector.fromArray(F_SPECIES, scratch, offset + i);
-                if (v.compare(VectorOperators.EQ, v).anyTrue()) {
-                    return false;
-                }
+                mismatch = mismatch.or(v.compare(VectorOperators.EQ, v));
             }
             int remaining = n - i;
             if (remaining > 0) {
                 var mask = F_SPECIES.indexInRange(0, remaining);
                 FloatVector v = FloatVector.fromArray(F_SPECIES, scratch, offset + i, mask);
-                if (v.compare(VectorOperators.EQ, v, mask).anyTrue()) {
-                    return false;
-                }
+                mismatch = mismatch.or(v.compare(VectorOperators.EQ, v, mask));
             }
-            return true;
+            return !mismatch.anyTrue();
         }
 
         final FloatVector target = FloatVector.broadcast(F_SPECIES, first);
-        final int vl = F_SPECIES.length();
-        int i = 0;
-        int bound = F_SPECIES.loopBound(n);
+        VectorMask<Float> mismatch = F_SPECIES.maskAll(false);
 
         for (; i < bound; i += vl) {
             FloatVector v = FloatVector.fromArray(F_SPECIES, scratch, offset + i);
-            if (v.compare(VectorOperators.NE, target).anyTrue()) {
-                return false;
-            }
+            mismatch = mismatch.or(v.compare(VectorOperators.NE, target));
         }
 
         int remaining = n - i;
         if (remaining > 0) {
             var mask = F_SPECIES.indexInRange(0, remaining);
             FloatVector v = FloatVector.fromArray(F_SPECIES, scratch, offset + i, mask);
-            if (v.compare(VectorOperators.NE, target, mask).anyTrue()) {
-                return false;
-            }
+            mismatch = mismatch.or(v.compare(VectorOperators.NE, target, mask));
         }
-        return true;
+        return !mismatch.anyTrue();
     }
 
     public static void evaluateVariableExponent(float[] base, int bOffset, float[] exp, int eOffset,

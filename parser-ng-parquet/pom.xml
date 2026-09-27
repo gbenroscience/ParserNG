@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.github.gbenroscience</groupId>
+        <artifactId>parser-ng-parent</artifactId>
+        <version>3.0.8</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>parser-ng-parquet</artifactId>
+    <packaging>jar</packaging>
+    <name>parser-ng-parquet</name>
+    <version>3.0.8</version>
+    <description>
+        ParserNG's Parquet storage layer: projection, predicate-driven row-group pruning and
+        allocation-conscious decoding into Apache Arrow VectorSchemaRoot batches.
+        SQL-agnostic and execution-agnostic: it neither parses SQL nor evaluates expressions.
+    </description>
+    <url>https://github.com/gbenroscience/ParserNG</url>
+
+    <properties>
+        <exec.mainClass>com.github.gbenroscience.parser.ng.parquet.ParserNgParquet</exec.mainClass>
+        <maven.compiler.release>22</maven.compiler.release>
+        <maven.compiler.source>22</maven.compiler.source>
+        <maven.compiler.target>22</maven.compiler.target> 
+        <!-- Keep in lock-step with parser-ng-arrow so both modules share one Arrow runtime. -->
+        <arrow.version>19.0.0</arrow.version>
+        <!-- Latest parquet-java at time of writing (Aug 2026). Re-verify before release. -->
+        <parquet.version>1.18.0</parquet.version>
+        <!-- parquet-hadoop needs Hadoop's Configuration/codec classes at runtime. VERIFY this pin. -->
+        <hadoop.version>3.4.1</hadoop.version>
+        
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-vector</artifactId>
+            <version>${arrow.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-memory-netty</artifactId>
+            <version>${arrow.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-hadoop</artifactId>
+            <version>${parquet.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client-api</artifactId>
+            <version>${hadoop.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client-runtime</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Test only: the SQL/Arrow modules are NEVER a compile dependency of this module. -->
+        <dependency>
+            <groupId>com.github.gbenroscience</groupId>
+            <artifactId>parser-ng-sql</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.3</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                    <!-- FIX: Enable the vector API module for source compilation -->
+                    <compilerArgs>
+                        <arg>--add-modules</arg>
+                        <arg>jdk.incubator.vector</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.3.1</version>
+                <configuration>
+                    <!-- Same flags as parser-ng-arrow so the SQL integration test can run. -->
+                    <argLine>
+                        --add-modules=jdk.incubator.vector
+                        --enable-native-access=ALL-UNNAMED
+                        --add-opens=java.base/java.nio=ALL-UNNAMED
+                        --add-opens=java.base/java.util=ALL-UNNAMED
+                        --add-opens=java.base/java.lang=ALL-UNNAMED
+                        -Dio.netty.tryReflectionSetAccessible=true
+                        -Darrow.allocation.manager.type=Netty
+                    </argLine>
+                    <!-- REMOVED: compilerArgs from surefire plugin (invalid tag here) -->
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <executable>java</executable>
+                    <longModulepath>false</longModulepath>
+                    <arguments>
+                        <!-- This forces Maven to feed the incubator flags to the JVM on Shift+F6 -->
+                        <argument>--add-modules=jdk.incubator.vector</argument>
+                        <argument>--enable-native-access=ALL-UNNAMED</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>${exec.mainClass}</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
+
+        </plugins>
+    </build>
+
+</project>

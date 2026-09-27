@@ -17,7 +17,7 @@ import java.lang.foreign.ValueLayout;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JMH benchmark comparing every storage path {@link SIMDEngineEvaluator} now
+ * JMH benchmark comparing every storage path {@link SIMDCommandF32}, {@link SIMDCommandF64}, {@link SIMDCommandSegmentF32}, {@link SIMDCommandSegmentF64} now
  * supports, on two representative expressions:
  *
  * <ul>
@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * Run standalone with:
  * <pre>
- *   java -jar benchmarks.jar SIMDEngineEvaluatorBenchmark
+ *   java -jar benchmarks.jar SIMDCommandBenchmark
  * </pre> or via the {@code main} method below, or wire it into your existing
  * JMH build (annotation processor requires the {@code jmh-generator-annprocess}
  * dependency on the compile classpath).
@@ -51,7 +51,7 @@ import java.util.concurrent.TimeUnit;
     "--add-modules=jdk.incubator.vector",
     "--enable-preview"
 })
-public class SIMDEngineFloatBenchmark {
+public class SIMDCommandBenchmark {
 
     private static final String EXPR_ARITH = "(x * y + x) / (y + 1)";
     private static final String EXPR_TRIG = "sin(x) * cos(y) + sqrt(x * x + y * y)";
@@ -312,7 +312,7 @@ public class SIMDEngineFloatBenchmark {
 
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()
-                .include(SIMDEngineFloatBenchmark.class.getSimpleName())
+                .include(SIMDCommandBenchmark.class.getSimpleName())
                 .build();
         new Runner(opt).run();
     }

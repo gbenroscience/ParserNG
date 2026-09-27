@@ -760,49 +760,51 @@ public final class VectorMath {
         }
 
         final double first = scratch[offset];
+        final int vl = SPECIES.length();
+        final int bound = SPECIES.loopBound(n);
+        int i = 0;
+
+        // NOTE: the per-iteration `if (...anyTrue()) return false;` early exit
+        // that used to live in both branches below is gone on purpose. A
+        // data-dependent branch inside a vectorized loop defeats C2's escape
+        // analysis for the whole inlined region (PowCommand -> this method
+        // -> the sibling AddCommand/UnaryMathCommand calls inlined beside
+        // it), which was forcing the Vector API's boxed VectorSupport
+        // fallback for the entire block instead of the true intrinsic.
+        // Accumulating the mismatch mask and testing it once, after the
+        // loop, is semantically identical and keeps the whole method
+        // scalarizable.
         if (Double.isNaN(first)) {
             // All must be NaN
-            final int vl = SPECIES.length();
-            int i = 0;
-            int bound = SPECIES.loopBound(n);
+            VectorMask<Double> mismatch = SPECIES.maskAll(false);
             for (; i < bound; i += vl) {
                 DoubleVector v = DoubleVector.fromArray(SPECIES, scratch, offset + i);
-                if (v.compare(VectorOperators.EQ, v).anyTrue()) {
-                    return false;
-                }
+                mismatch = mismatch.or(v.compare(VectorOperators.EQ, v));
             }
             int remaining = n - i;
             if (remaining > 0) {
                 var mask = SPECIES.indexInRange(0, remaining);
                 DoubleVector v = DoubleVector.fromArray(SPECIES, scratch, offset + i, mask);
-                if (v.compare(VectorOperators.EQ, v, mask).anyTrue()) {
-                    return false;
-                }
+                mismatch = mismatch.or(v.compare(VectorOperators.EQ, v, mask));
             }
-            return true;
+            return !mismatch.anyTrue();
         }
 
         final DoubleVector target = DoubleVector.broadcast(SPECIES, first);
-        final int vl = SPECIES.length();
-        int i = 0;
-        int bound = SPECIES.loopBound(n);
+        VectorMask<Double> mismatch = SPECIES.maskAll(false);
 
         for (; i < bound; i += vl) {
             DoubleVector v = DoubleVector.fromArray(SPECIES, scratch, offset + i);
-            if (v.compare(VectorOperators.NE, target).anyTrue()) {
-                return false;
-            }
+            mismatch = mismatch.or(v.compare(VectorOperators.NE, target));
         }
 
         int remaining = n - i;
         if (remaining > 0) {
             var mask = SPECIES.indexInRange(0, remaining);
             DoubleVector v = DoubleVector.fromArray(SPECIES, scratch, offset + i, mask);
-            if (v.compare(VectorOperators.NE, target, mask).anyTrue()) {
-                return false;
-            }
+            mismatch = mismatch.or(v.compare(VectorOperators.NE, target, mask));
         }
-        return true;
+        return !mismatch.anyTrue();
     }
 
     public static void evaluateVariableExponent(double[] base, int bOffset, double[] exp, int eOffset,
