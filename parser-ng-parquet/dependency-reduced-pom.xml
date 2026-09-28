@@ -145,6 +145,10 @@
           <artifactId>parser-ng-arrow</artifactId>
           <groupId>com.github.gbenroscience</groupId>
         </exclusion>
+        <exclusion>
+          <artifactId>parser-ng-parquet</artifactId>
+          <groupId>com.github.gbenroscience</groupId>
+        </exclusion>
       </exclusions>
     </dependency>
     <dependency>

@@ -114,6 +114,8 @@ public final class FastColumnCursor implements ColumnReader {
 
     private DictionaryCache dictionary;
     private long consumedCount = 0;
+    /** Decompressed bytes of every dictionary/data page this cursor has loaded so far (see {@link #pageBytesLoaded()}). */
+    private long pageBytesLoaded = 0;
 
     private int[] pageDef = new int[0];
     private int[] pageRep = new int[0];
@@ -156,6 +158,7 @@ public final class FastColumnCursor implements ColumnReader {
         DictionaryPage dictPage = pageReader.readDictionaryPage();
         if (dictPage != null) {
             dictionary = new DictionaryCache(dictPage, physical, file, columnName);
+            pageBytesLoaded += dictPage.getUncompressedSize();
         }
         if (totalValueCount > 0) {
             loadNextNonEmptyPage();
@@ -164,6 +167,15 @@ public final class FastColumnCursor implements ColumnReader {
     }
 
     @Override public ColumnDescriptor getDescriptor() { return descriptor; }
+
+    /**
+     * Total decompressed payload bytes of the dictionary page and every data page loaded so far (data pages
+     * include their repetition/definition level streams). Monotonic; pages are loaded lazily, so this is only
+     * complete once the column chunk has been fully consumed. Plain field, not atomic: same single-thread
+     * ownership as the rest of this class. Feeds {@code ScanMetrics#uncompressedBytesDecoded()}.
+     */
+    public long pageBytesLoaded() { return pageBytesLoaded; }
+
     @Override public long getTotalValueCount() { return totalValueCount; }
     @Override public int getCurrentDefinitionLevel() { return pageDef[pagePos]; }
     @Override public int getCurrentRepetitionLevel() { return pageRep[pagePos]; }
@@ -261,6 +273,7 @@ public final class FastColumnCursor implements ColumnReader {
                     + "if this page is reaching this class still compressed, it is being used against a different "
                     + "PageReadStore source than it was designed for", file, -1, columnName, null);
         }
+        pageBytesLoaded += raw.length;
         int count = page.getValueCount();
         pageCount = count;
         ensureLevelCapacity(count);
@@ -315,6 +328,7 @@ public final class FastColumnCursor implements ColumnReader {
                         + "readNextFilteredRowGroup() are expected to already be decompressed", file, -1, columnName, null);
             }
             byte[] raw = page.getData().toByteArray();
+            pageBytesLoaded += page.getRepetitionLevels().size() + page.getDefinitionLevels().size() + raw.length;
             ByteReader br = new ByteReader();
             br.wrap(raw, 0, raw.length);
             setUpValueDecode(br, raw.length, page.getDataEncoding(), count);

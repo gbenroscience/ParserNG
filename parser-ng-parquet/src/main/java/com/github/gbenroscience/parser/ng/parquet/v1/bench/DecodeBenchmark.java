@@ -13,8 +13,8 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Locale;
 
 /**
@@ -27,14 +27,15 @@ import java.util.Locale;
  *      com.github.gbenroscience.parser.ng.parquet.v1.bench.DecodeBenchmark
  * }</pre>
  *
- * <p><b>This has not been run.</b> The environment this was written in has no Maven and no
- * Parquet/Arrow/Hadoop jars available (network access is restricted to a small allowlist that does
- * not include Maven Central), so there is no way to produce a real number here. Every claim
- * elsewhere in this module about this engine's throughput is architectural reasoning plus two
- * standalone microbenchmarks of individual decode kernels in isolation (see
- * {@code SimdBulkDecode}'s class doc) — neither is a substitute for actually running this class.
- * This file exists so that running it is a five-minute exercise once the module is built somewhere
- * with real dependencies, not a research project.
+ * <p><b>Verification status of the byte-counter revision.</b> Compiled and run end to end against real
+ * parquet-java 1.13.1 / Arrow 12.0.1 jars (the versions bundled with PySpark 3.5.3 -- the only real jars
+ * reachable where this was written), NOT the pom's parquet 1.18.0 / Arrow 19.0.0; two classes absent from
+ * 1.13 ({@code LocalInputFile}/{@code LocalOutputFile}) were replaced by minimal local shims for that run.
+ * On that stack the counters were cross-checked against the Parquet footer: full-scan decoded bytes equal
+ * the footer's uncompressed column-chunk sizes to within page-header overhead (99.96-99.99%), compressed
+ * bytes equal the footer's chunk sizes exactly, sequential and parallel scans report identical bytes, and
+ * projection and row-group/page pruning shrink them as expected. It has <em>not</em> been run on 1.18.0 /
+ * Arrow 19; the sanity check in {@link #run} prints a loud warning if a byte counter comes back zero.
  *
  * <h2>What this measures, and why each scenario is here</h2>
  * <ul>
@@ -56,9 +57,29 @@ import java.util.Locale;
  *       specific inference has not been exercised until this file runs).</li>
  * </ul>
  *
- * <p>Reported per scenario: elapsed wall time, rows/sec, approximate MB/sec (file size on disk /
- * elapsed time -- a rough proxy, not bytes actually decoded, since compression ratio and projection
- * both change how much of the file is actually touched), and the scan's {@link ScanMetrics}.
+ * <h2>What "MB/s" means here (measured, not estimated)</h2>
+ * Earlier revisions divided the fixture's file size on disk by elapsed time. That is wrong for exactly
+ * the scenarios that matter: a projected scan never touches most of the file, and a pruned scan skips
+ * whole row groups and pages, yet both were credited with the full file. This revision reads the byte
+ * counters {@link ScanMetrics} now records inside the decode path and divides each by the same
+ * wall-clock time (the median timed run, so rows/s and every MB/s column describe the same run):
+ * <ul>
+ *   <li><b>decoded MB/s</b> -- {@link ScanMetrics#uncompressedBytesDecoded()}: decompressed page bytes
+ *       (dictionary + data pages, incl. rep/def levels) actually loaded by the decode engine. Respects
+ *       projection and page pruning exactly. <b>This is the number to quote as decode throughput.</b></li>
+ *   <li><b>disk MB/s</b> -- {@link ScanMetrics#compressedBytesRead()}: as-stored (compressed) bytes of the
+ *       projected column chunks of the row groups that were read. An upper bound when page-level pruning
+ *       skips pages inside a surviving row group. Compare with decoded MB/s for the compression ratio.</li>
+ *   <li><b>arrow MB/s</b> -- {@link ScanMetrics#arrowBytesProduced()}: Arrow buffer bytes materialized,
+ *       i.e. what a downstream consumer receives.</li>
+ * </ul>
+ * All rates are <em>warm-cache, end-to-end wall clock</em> (open file, read, decompress, decode, close):
+ * the fixtures were just written, so the OS page cache serves the reads. They are not cold-disk numbers.
+ * Rows/s is still the best cross-scenario comparison (a nested row and a flat row are different sizes);
+ * MB/s is the best cross-<em>engine</em> comparison.
+ *
+ * <p>Reported per scenario: elapsed wall time, rows/sec, the three MB/s figures above, and the scan's
+ * {@link ScanMetrics}.
  *
  * <p>The three fixture files (flat, selectivity, nested -- 5M + 5M + 1M rows total, written by
  * {@link RandomParquetFiles#write} / {@link #writeSelectivityFixture}) live in one temp directory
@@ -157,13 +178,11 @@ public final class DecodeBenchmark {
     }
 
     private static void run(BufferAllocator alloc, String label, Path file, Config cfg, long expectedRows) throws IOException {
-        long fileSize = Files.size(file);
-
         for (int i = 0; i < WARMUP_ITERS; i++) drain(alloc, cfg.apply(ParquetScan.scan(file)));
 
-        List<Long> nanos = new ArrayList<>();
-        ScanMetrics lastMetrics = null;
-        long lastRows = 0;
+        long[] nanos = new long[TIMED_ITERS];
+        long[] rowsPerIter = new long[TIMED_ITERS];
+        ScanMetrics[] metricsPerIter = new ScanMetrics[TIMED_ITERS];
         for (int i = 0; i < TIMED_ITERS; i++) {
             ParquetScan scan = cfg.apply(ParquetScan.scan(file)).withMetrics(true);
             long t0 = System.nanoTime();
@@ -173,24 +192,45 @@ public final class DecodeBenchmark {
                     VectorSchemaRoot root = r.root();
                     rows += root.getRowCount(); // touch the batch; nothing else to "consume" in a pure decode benchmark
                 }
-                lastRows = rows;
-                lastMetrics = r.metrics();
+                rowsPerIter[i] = rows;
+                // Read while the reader is still open; for parallel scans every worker has finished by the
+                // time next() returned false (the window is drained via Future.get()).
+                metricsPerIter[i] = r.metrics();
             }
-            nanos.add(System.nanoTime() - t0);
+            nanos[i] = System.nanoTime() - t0;
         }
 
-        long median = nanos.stream().sorted().toList().get(nanos.size() / 2);
-        double seconds = median / 1e9;
-        double rowsPerSec = lastRows / seconds;
-        double mbPerSec = (fileSize / (1024.0 * 1024.0)) / seconds;
+        // Report ONE run end to end: the median-time iteration's wall time, rows and metrics together, so
+        // rows/s and every MB/s column come from the same run (bytes are deterministic, time is not).
+        Integer[] order = new Integer[TIMED_ITERS];
+        for (int i = 0; i < order.length; i++) order[i] = i;
+        Arrays.sort(order, Comparator.comparingLong(i -> nanos[i]));
+        int mid = order[TIMED_ITERS / 2];
 
-        System.out.printf(Locale.ROOT, "%-32s %10d rows  %8.3f s  %,12.0f rows/s  %8.1f MB/s  %s%n",
-                label, lastRows, seconds, rowsPerSec, mbPerSec, lastMetrics);
+        double seconds = nanos[mid] / 1e9;
+        long rows = rowsPerIter[mid];
+        ScanMetrics m = metricsPerIter[mid];
+        double rowsPerSec = rows / seconds;
+        double decodedMBps = mb(m.uncompressedBytesDecoded()) / seconds;
+        double diskMBps = mb(m.compressedBytesRead()) / seconds;
+        double arrowMBps = mb(m.arrowBytesProduced()) / seconds;
 
-        if (expectedRows > 0 && Math.abs(lastRows - expectedRows) > Math.max(1, expectedRows / 100)) {
+        System.out.printf(Locale.ROOT, "%-32s %10d rows  %8.3f s  %,12.0f rows/s  %11.1f  %10.1f  %10.1f  %s%n",
+                label, rows, seconds, rowsPerSec, decodedMBps, diskMBps, arrowMBps, m);
+
+        if (m.uncompressedBytesDecoded() <= 0 || m.compressedBytesRead() <= 0 || m.arrowBytesProduced() <= 0) {
+            System.out.println("  ^ WARNING: a byte counter is zero (decoded=" + m.uncompressedBytesDecoded()
+                    + ", disk=" + m.compressedBytesRead() + ", arrow=" + m.arrowBytesProduced()
+                    + ") -- the MB/s columns above are NOT valid; byte accounting is not wired as expected");
+        }
+        if (expectedRows > 0 && Math.abs(rows - expectedRows) > Math.max(1, expectedRows / 100)) {
             System.out.printf(Locale.ROOT, "  ^ WARNING: expected ~%d rows, got %d -- check the fixture/predicate before trusting this number%n",
-                    expectedRows, lastRows);
+                    expectedRows, rows);
         }
+    }
+
+    private static double mb(long bytes) {
+        return bytes / (1024.0 * 1024.0);
     }
 
     private static void drain(BufferAllocator alloc, ParquetScan scan) {
@@ -202,7 +242,7 @@ public final class DecodeBenchmark {
     }
 
     private static void printHeader() {
-        System.out.printf(Locale.ROOT, "%-32s %10s  %8s  %14s  %9s  %s%n",
-                "scenario", "rows", "median s", "rows/s", "MB/s", "metrics");
+        System.out.printf(Locale.ROOT, "%-32s %10s  %8s  %14s  %11s  %10s  %10s  %s%n",
+                "scenario", "rows", "median s", "rows/s", "decodedMB/s", "diskMB/s", "arrowMB/s", "metrics");
     }
 }

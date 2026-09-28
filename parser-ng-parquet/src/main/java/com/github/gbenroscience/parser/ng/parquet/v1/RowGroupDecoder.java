@@ -10,12 +10,16 @@ import org.apache.parquet.column.ColumnReader;
 import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.schema.MessageType;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.apache.arrow.vector.complex.StructVector;
 
 /**
@@ -76,6 +80,8 @@ final class RowGroupDecoder implements AutoCloseable {
     private final ScanMetrics metrics; // may be null
 
     private final ColumnReader[] readers;
+    private final FastColumnCursor[] cursors;   // same objects as readers[]; typed so page-byte counters are reachable
+    private final Set<ColumnPath> projectedPaths; // leaf paths of the projection; null when metrics are off
     private final long[] consumed;
     private final int[][] repBuf;
     private final int[][] defBuf;
@@ -87,6 +93,7 @@ final class RowGroupDecoder implements AutoCloseable {
 
     private long remaining;
     private int rgIndex = -1;
+    private long pageBytesReported; // portion of the current row group's cursors' pageBytesLoaded already added to metrics
 
     RowGroupDecoder(Path file, ParquetFileReader reader, MessageType projected, NodePlan nodePlan,
                     ColumnDescriptor[] descs, long maxRowGroupBytes, ScanMetrics metrics) {
@@ -98,6 +105,13 @@ final class RowGroupDecoder implements AutoCloseable {
         this.maxRowGroupBytes = maxRowGroupBytes;
         this.metrics = metrics;
         this.readers = new ColumnReader[descs.length];
+        this.cursors = new FastColumnCursor[descs.length];
+        if (metrics != null) {
+            this.projectedPaths = new HashSet<>();
+            for (ColumnDescriptor d : descs) projectedPaths.add(ColumnPath.get(d.getPath()));
+        } else {
+            this.projectedPaths = null;
+        }
         this.consumed = new long[descs.length];
         this.repBuf = new int[descs.length][];
         this.defBuf = new int[descs.length][];
@@ -145,7 +159,8 @@ final class RowGroupDecoder implements AutoCloseable {
         for (int c = 0; c < descs.length; c++) {
             String colName = String.join(".", descs[c].getPath());
             try {
-                readers[c] = new FastColumnCursor(descs[c], pages, file, colName);
+                cursors[c] = new FastColumnCursor(descs[c], pages, file, colName);
+                readers[c] = cursors[c];
             } catch (RuntimeException e) {
                 // Constructing a cursor decodes the column's dictionary page (if any) and its first
                 // data page eagerly (see FastColumnCursor's constructor), so a corrupt/desynced page
@@ -158,7 +173,18 @@ final class RowGroupDecoder implements AutoCloseable {
         }
         Arrays.fill(consumed, 0L);
         remaining = pages.getRowCount();
-        if (metrics != null) metrics.rowGroupsRead.increment();
+        if (metrics != null) {
+            metrics.rowGroupsRead.increment();
+            // On-disk (compressed) size of exactly the projected column chunks of this row group, from the footer.
+            // Upper bound when column-index pruning skips pages inside it -- see ScanMetrics#compressedBytesRead.
+            long compressed = 0;
+            for (ColumnChunkMetaData cc : block.getColumns()) {
+                if (projectedPaths.contains(cc.getPath())) compressed += cc.getTotalSize();
+            }
+            metrics.compressedBytesRead.add(compressed);
+            pageBytesReported = 0L;
+            reportPageBytes(); // dictionary pages + each column's eagerly-loaded first data page
+        }
     }
 
     /** Allocates or clears vectors so each can hold {@code cap} top-level rows. */
@@ -205,7 +231,19 @@ final class RowGroupDecoder implements AutoCloseable {
             metrics.decodeNanos.add(System.nanoTime() - t0);
             metrics.rowsRead.add(n);
             metrics.batches.increment();
+            reportPageBytes(); // pages pulled in lazily while filling this batch
+            long arrow = 0L;
+            for (FieldVector v : vecs) arrow += v.getBufferSize();
+            metrics.arrowBytesProduced.add(arrow);
         }
+    }
+
+    /** Adds the page bytes the current row group's cursors have loaded since the last call (delta, so nothing is double counted). */
+    private void reportPageBytes() {
+        long loaded = 0L;
+        for (FastColumnCursor c : cursors) loaded += c.pageBytesLoaded();
+        metrics.uncompressedBytesDecoded.add(loaded - pageBytesReported);
+        pageBytesReported = loaded;
     }
 
     // ------------------------------------------------------------ nested reading

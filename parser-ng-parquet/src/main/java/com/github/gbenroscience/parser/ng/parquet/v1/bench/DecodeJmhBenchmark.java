@@ -4,6 +4,7 @@ import com.github.gbenroscience.parser.ng.parquet.util.RandomParquetFiles;
 import com.github.gbenroscience.parser.ng.parquet.v1.ParquetBatchReader;
 import com.github.gbenroscience.parser.ng.parquet.v1.ParquetScan;
 import com.github.gbenroscience.parser.ng.parquet.v1.Predicate;
+import com.github.gbenroscience.parser.ng.parquet.v1.ScanMetrics;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -70,21 +71,42 @@ import java.util.Map;
  * {@code totalOps / totalTime} (ops/sec), so by the same normalization rule the aux counter becomes
  * {@code totalCounterSum / totalTime} — rows per second, directly, landing in the
  * hundreds-of-thousands-to-millions range where JMH's formatter never needs scientific notation at
- * all. A {@code megabytes} aux counter is added alongside {@code rows} for the same reason, giving a
- * genuine, correctly-scaled MB/sec column.
+ * all. Byte-valued aux counters ({@code decodedMB} and friends, below) ride the same mechanism for the
+ * same reason, giving genuine, correctly-scaled MB/sec columns.
  *
- * <h2>What the MB/sec number is, and specifically is not</h2>
- * {@code ScanMetrics} has no "bytes actually decoded" counter (see this module's feature matrix —
- * this was a known, named gap long before this benchmark existed), so MB/sec here is necessarily
- * file-size-on-disk divided by time, the same honest approximation {@code DecodeBenchmark} already
- * uses. This is most misleading for exactly the scenario you would most want to trust it on:
- * {@link #selectivePredicateSeq}, where pruning means only a fraction of the file's pages are ever
- * decoded, but the numerator used here is still the WHOLE file's size — so that scenario's MB/sec
- * will read far higher than what was actually processed. Read {@code selectivePredicateSeq}'s
- * rows/sec as the trustworthy number and its MB/sec as "how fast this would be if the whole file had
- * been this selective," not as measured decode throughput. A real per-scenario bytes-decoded counter
- * would need instrumenting {@code RowGroupDecoder}/{@code ScanMetrics} directly — a real, legitimate
- * enhancement, and a separate piece of work from fixing this benchmark's units.
+ * <h2>What the MB/sec numbers are: measured bytes, not file size</h2>
+ * The previous revision credited every invocation with the fixture's whole on-disk size. That
+ * overstated exactly the scenarios you most want to trust: {@link #flatProjectedSeq} decodes 2 of 7
+ * columns and {@link #selectivePredicateSeq} skips most row groups and pages, yet both were charged
+ * for the full file. This revision enables {@code ScanMetrics} on every scan and feeds JMH's
+ * {@code @AuxCounters} from the counters the decode path now records:
+ * <ul>
+ *   <li>{@code decodedMB} -- {@code ScanMetrics#uncompressedBytesDecoded()}: decompressed page bytes
+ *       (dictionary + data pages, incl. rep/def levels) actually loaded by the decode engine. Respects
+ *       projection and page pruning exactly. <b>Quote this one as decode throughput (MB/s).</b></li>
+ *   <li>{@code compressedMB} -- {@code ScanMetrics#compressedBytesRead()}: as-stored bytes of the
+ *       projected column chunks of the row groups read (an upper bound under page-level pruning, since
+ *       the footer only knows whole column chunks). Divide {@code decodedMB} by it for the compression
+ *       ratio.</li>
+ *   <li>{@code arrowMB} -- {@code ScanMetrics#arrowBytesProduced()}: Arrow buffer bytes materialized.</li>
+ * </ul>
+ * Each is normalized by JMH per second of measured time (see the {@code Mode.Throughput} section above),
+ * so the printed score is directly MB/s. These are <b>warm-cache, end-to-end</b> rates: every scan opens
+ * the file, reads, decompresses, decodes and closes, and the fixtures were just written so the OS page
+ * cache serves the reads. They are not cold-disk numbers.
+ *
+ * <p><b>Measurement overhead:</b> enabling metrics costs a couple of {@code System.nanoTime()} calls, a
+ * handful of {@code LongAdder} increments and one {@code getBufferSize()} pass per batch (default batch:
+ * 32,768 rows), i.e. noise next to decoding that many rows. It is applied uniformly to every scenario, so
+ * relative comparisons are unaffected; if you want the absolute floor, compare rows/s against a run of
+ * the previous revision.
+ *
+ * <p><b>Verification status:</b> the byte counters this class reads were verified against real
+ * parquet-java 1.13.1 / Arrow 12.0.1 jars (see {@link DecodeBenchmark}'s class Javadoc for what was
+ * cross-checked, and for the version caveat: not yet run on the pom's 1.18.0 / Arrow 19). This JMH class
+ * itself was compiled against hand-written stubs of the JMH API and has <em>not</em> been executed under
+ * real JMH, so the {@code @AuxCounters} wiring is verified only by the same reasoning as the previous
+ * revision. {@code main}'s summary marks any scenario whose byte counters came back zero as invalid.
  *
  * <h2>Everything else, unchanged from the previous revision</h2>
  * <ul>
@@ -148,9 +170,6 @@ public class DecodeJmhBenchmark {
     Path flatFile;
     Path selectivityFile;
     Path nestedFile;
-    double flatFileMB;
-    double selectivityFileMB;
-    double nestedFileMB;
     BufferAllocator allocator;
 
     static final int FLAT_ROWS = 5_000_000;
@@ -171,12 +190,6 @@ public class DecodeJmhBenchmark {
             RandomParquetFiles.write(nestedFile, RandomParquetFiles.SAMPLE_NESTED_SCHEMA, NESTED_ROWS,
                     RandomParquetFiles.Config.defaults().seed(7).collectionSize(0, 8).rowGroupSize(8L * 1024 * 1024));
 
-            // Cached once here rather than re-stat'd every invocation -- Files.size() is cheap, but
-            // there is no reason to pay it millions of times across a multi-minute run.
-            flatFileMB = toMB(Files.size(flatFile));
-            selectivityFileMB = toMB(Files.size(selectivityFile));
-            nestedFileMB = toMB(Files.size(nestedFile));
-
             allocator = new RootAllocator();
         } catch (IOException | RuntimeException e) {
             // JMH does not call @TearDown for a trial whose @Setup didn't complete, so a failure
@@ -188,9 +201,7 @@ public class DecodeJmhBenchmark {
         }
     }
 
-    private static double toMB(long bytes) {
-        return bytes / (1024.0 * 1024.0);
-    }
+    private static final double BYTES_PER_MB = 1024.0 * 1024.0;
 
     @TearDown(Level.Trial)
     public void tearDown() {
@@ -245,54 +256,64 @@ public class DecodeJmhBenchmark {
 
     // ------------------------------------------------------------ rows/sec + MB/sec, via JMH aux counters
     /**
-     * Accumulates rows and (approximate, on-disk) megabytes read within one measured iteration; JMH
-     * divides each by the iteration's elapsed time under {@code Mode.Throughput} (see this class's
-     * Javadoc for why that specific mode is load-bearing here, not incidental) and reports the
-     * results as {@code rows/s} and {@code megabytes/s} next to the primary {@code ops/s} score.
+     * Accumulates rows and MEASURED megabytes within one measured iteration; JMH divides each by the
+     * iteration's elapsed time under {@code Mode.Throughput} (see this class's Javadoc for why that
+     * specific mode is load-bearing here, not incidental) and reports the results as {@code rows/s},
+     * {@code decodedMB/s}, {@code compressedMB/s} and {@code arrowMB/s} next to the primary
+     * {@code ops/s} score.
+     *
+     * <p>Deliberately has NO public no-argument methods returning a number: JMH would treat those as
+     * additional counters. {@link #add} takes parameters and returns void, so it is not one.
      */
     @State(Scope.Thread)
     @AuxCounters(AuxCounters.Type.OPERATIONS)
     public static class Counters {
 
         public long rows;
-        public double megabytes;
+        public double decodedMB;
+        public double compressedMB;
+        public double arrowMB;
 
         @Setup(Level.Iteration)
         public void reset() {
             rows = 0;
-            megabytes = 0;
+            decodedMB = 0;
+            compressedMB = 0;
+            arrowMB = 0;
+        }
+
+        void add(long scanRows, ScanMetrics m) {
+            rows += scanRows;
+            decodedMB += m.uncompressedBytesDecoded() / BYTES_PER_MB;
+            compressedMB += m.compressedBytesRead() / BYTES_PER_MB;
+            arrowMB += m.arrowBytesProduced() / BYTES_PER_MB;
         }
     }
 
     // ------------------------------------------------------------ scenarios
     @Benchmark
     public void flatFullScanSeq(Counters counter, Blackhole bh) throws IOException {
-        counter.rows += drain(ParquetScan.scan(flatFile), bh);
-        counter.megabytes += flatFileMB;
+        drain(ParquetScan.scan(flatFile), bh, counter);
     }
 
     @Benchmark
     public void flatProjectedSeq(Counters counter, Blackhole bh) throws IOException {
-        counter.rows += drain(ParquetScan.scan(flatFile).select("id", "value"), bh);
-        counter.megabytes += flatFileMB; // still the whole file's on-disk size -- see class Javadoc's MB/sec caveat
+        drain(ParquetScan.scan(flatFile).select("id", "value"), bh, counter);
     }
 
     @Benchmark
     public void flatFullScanParallel2(Counters counter, Blackhole bh) throws IOException {
-        counter.rows += drain(ParquetScan.scan(flatFile).parallelism(2), bh);
-        counter.megabytes += flatFileMB;
+        drain(ParquetScan.scan(flatFile).parallelism(2), bh, counter);
     }
 
     @Benchmark
     public void flatFullScanParallel4(Counters counter, Blackhole bh) throws IOException {
-        counter.rows += drain(ParquetScan.scan(flatFile).parallelism(4), bh);
-        counter.megabytes += flatFileMB;
+        drain(ParquetScan.scan(flatFile).parallelism(4), bh, counter);
     }
 
     @Benchmark
     public void flatFullScanParallel8(Counters counter, Blackhole bh) throws IOException {
-        counter.rows += drain(ParquetScan.scan(flatFile).parallelism(8), bh);
-        counter.megabytes += flatFileMB;
+        drain(ParquetScan.scan(flatFile).parallelism(8), bh, counter);
     }
 
     /**
@@ -300,45 +321,47 @@ public class DecodeJmhBenchmark {
      * slightly around 500,000 depending on where row-group/page boundaries fall relative to the
      * bucket cutoff (pruning here is pushdown-only, so it returns a SUPERSET, not the exact match
      * count); {@link Counters#rows} reports whatever was actually read, so this is measured honestly
-     * rather than assumed. The MB/sec figure for this scenario specifically should be read as "what
-     * throughput would look like if the whole file were this selective," NOT as measured decode
-     * throughput — see this class's Javadoc's MB/sec section.
+     * rather than assumed. Its MB/s is now measured too: only the pages of the row groups/pages that
+     * survived pruning are counted, so {@code decodedMB/s} is a real decode rate for this scenario, no
+     * longer the inflated "as if the whole file were this selective" figure of earlier revisions.
      */
     @Benchmark
     public void selectivePredicateSeq(Counters counter, Blackhole bh) throws IOException {
-        counter.rows += drain(ParquetScan.scan(selectivityFile).pushdown(Predicate.ge("bucket", 9L)), bh);
-        counter.megabytes += selectivityFileMB;
+        drain(ParquetScan.scan(selectivityFile).pushdown(Predicate.ge("bucket", 9L)), bh, counter);
     }
 
     @Benchmark
     public void nestedFullScanSeq(Counters counter, Blackhole bh) throws IOException {
-        counter.rows += drain(ParquetScan.scan(nestedFile), bh);
-        counter.megabytes += nestedFileMB;
+        drain(ParquetScan.scan(nestedFile), bh, counter);
     }
 
     @Benchmark
     public void nestedFullScanParallel4(Counters counter, Blackhole bh) throws IOException {
-        counter.rows += drain(ParquetScan.scan(nestedFile).parallelism(4), bh);
-        counter.megabytes += nestedFileMB;
+        drain(ParquetScan.scan(nestedFile).parallelism(4), bh, counter);
     }
 
     /**
-     * Drives one full scan to completion: pull every batch, touch nothing but the row count.
+     * Drives one full scan to completion: pull every batch, touch nothing but the row count, then
+     * record the scan's rows and measured bytes into {@code counter}.
      * {@link Blackhole#consume} guards that touch against dead-code elimination; the decode work
      * itself (filling the {@code FieldVector}s inside {@code r.next()}) is a side effect of file I/O
      * and of mutating Arrow buffers reachable from the caller, which the JIT cannot eliminate
      * regardless.
+     *
+     * <p>Metrics are read after the last {@code next()} and before {@code close()}. For parallel scans
+     * every worker has finished by then ({@code next()} only returns false after draining every
+     * row-group future), so nothing is still being counted.
      */
-    private long drain(ParquetScan scan, Blackhole bh) throws IOException {
+    private void drain(ParquetScan scan, Blackhole bh, Counters counter) throws IOException {
         long rows = 0;
-        try (ParquetBatchReader r = scan.open(allocator)) {
+        try (ParquetBatchReader r = scan.withMetrics(true).open(allocator)) {
             while (r.next()) {
                 int n = r.root().getRowCount();
                 bh.consume(n);
                 rows += n;
             }
+            counter.add(rows, r.metrics());
         }
-        return rows;
     }
 
     // ------------------------------------------------------------ standalone entry point
@@ -348,17 +371,15 @@ public class DecodeJmhBenchmark {
      * option parser for {@code -wi}/{@code -i}/{@code -f} (see this class's Javadoc for the
      * {@code -Pjmh} packaging route, which gets the full JMH CLI instead).
      *
-     * <p>After the run, prints one extra summary line per benchmark converting JMH's own raw results
-     * into the exact units asked for (rows/sec, MB/sec) plus an average-ms-per-scan figure derived
-     * from the (correctly-scaled, under {@code Throughput}) ops/sec — this is a plain division WE
-     * perform on JMH's own already-correct numbers, not a second attempt at getting
-     * {@code @AuxCounters} to compute something under a mode it does not natively support (see this
-     * class's Javadoc for why {@code AverageTime} + {@code @AuxCounters} was the actual bug last
-     * time). {@code getSecondaryResults()}'s exact key/lookup shape ({@link RunResult}/{@link Result}
-     * are long-stable, well-known parts of JMH's public API, but were not checked against a compiler
-     * in the environment this was written in) is the one piece of this method worth a skeptical look
-     * if the summary table's rows/MB columns come out empty rather than populated -- the benchmark
-     * run itself and JMH's own raw printed table do not depend on this method at all.
+     * <p>After the run, prints one summary line per benchmark laying JMH's own aux-counter scores out
+     * side by side (rows/sec and the three measured MB/sec figures) next to ops/sec for
+     * cross-checking. Nothing is re-derived here: under {@code Throughput}, JMH already divides each
+     * counter by measured time (see this class's Javadoc for why {@code AverageTime} +
+     * {@code @AuxCounters} was the actual bug two revisions ago).
+     *
+     * <p>{@code getSecondaryResults()}' key lookup ({@link #scoreOf}) is the one piece of this method not
+     * exercised against real JMH; if the summary's columns come out {@code n/a}, look there first. The
+     * benchmark run itself and JMH's own raw printed table do not depend on this method at all.
      */
     public static void main(String[] args) throws RunnerException {
         ChainedOptionsBuilder b = new OptionsBuilder().include(DecodeJmhBenchmark.class.getSimpleName());
@@ -382,23 +403,30 @@ public class DecodeJmhBenchmark {
 
     private static void printSummary(Collection<RunResult> results) {
         System.out.println();
-        System.out.println("=== Derived summary (rows/sec, MB/sec, ms/scan) ===");
-        System.out.printf(Locale.ROOT, "%-28s %14s %12s %12s%n", "benchmark", "ops/sec", "rows/sec", "MB/sec");
+        System.out.println("=== Summary (all rates per second of measured time) ===");
+        System.out.printf(Locale.ROOT, "%-26s %10s %14s %13s %12s %11s%n",
+                "benchmark", "ops/sec", "rows/sec", "decodedMB/s", "diskMB/s", "arrowMB/s");
         for (RunResult r : results) {
             String name = r.getParams().getBenchmark();
             String shortName = name.substring(name.lastIndexOf('.') + 1);
             double opsPerSec = r.getPrimaryResult().getScore(); // Mode.Throughput -> already ops/sec
             Map<String, Result> secondary = r.getSecondaryResults();
-            Double rowsPerSec = scoreOf(secondary, "rows");
-            Double mbPerSec = scoreOf(secondary, "megabytes");
-            System.out.printf(Locale.ROOT, "%-28s %14.4f %12s %12s%n",
+            Double decoded = scoreOf(secondary, "decodedMB");
+            System.out.printf(Locale.ROOT, "%-26s %10.4f %14s %13s %12s %11s%s%n",
                     shortName, opsPerSec,
-                    rowsPerSec == null ? "n/a" : String.format(Locale.ROOT, "%,.0f", rowsPerSec),
-                    mbPerSec == null ? "n/a" : String.format(Locale.ROOT, "%,.1f", mbPerSec));
+                    fmt(scoreOf(secondary, "rows")),
+                    fmt(decoded),
+                    fmt(scoreOf(secondary, "compressedMB")),
+                    fmt(scoreOf(secondary, "arrowMB")),
+                    (decoded == null || decoded <= 0) ? "   <-- INVALID: byte counters missing/zero" : "");
         }
-        System.out.println("(rows/sec and MB/sec above come directly from JMH's own @AuxCounters scores under "
-                + "Mode.Throughput -- ops/sec is JMH's raw primary result, included for cross-checking, not "
-                + "an extra derivation.)");
+        System.out.println("decodedMB/s = decompressed page bytes actually decoded (quote this as decode throughput); "
+                + "diskMB/s = as-stored bytes of the projected column chunks read (upper bound under page pruning); "
+                + "arrowMB/s = Arrow bytes produced. Warm OS page cache, end-to-end per scan.");
+    }
+
+    private static String fmt(Double v) {
+        return v == null ? "n/a" : String.format(Locale.ROOT, "%,.1f", v);
     }
 
     private static Double scoreOf(Map<String, Result> secondary, String label) {

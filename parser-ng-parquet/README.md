@@ -339,7 +339,7 @@ non-JMH harness and should be re-measured on your hardware.
 | DELTA_* and BYTE_STREAM_SPLIT encodings | clear error, not yet |
 | Predicate pushdown / exact filtering on nested columns | not yet |
 | Metadata inspection (footer only) | yes (`ParquetFileInfo`) |
-| Metrics (row groups in file/skipped/read, rows, batches, decode time, parallelism) | yes; bytes/pages not available |
+| Metrics (row groups in file/skipped/read, rows, batches, decode time, parallelism, bytes decoded / read from disk / Arrow produced) | yes; page counts not available |
 | Bounded parallel row-group decoding | yes (`parallelism(n)`), ordering preserved |
 | SIMD bulk decode for PLAIN required fixed-width columns | yes |
 | JMH benchmarks | yes (`DecodeJmhBenchmark`); results in [Benchmarks](#benchmarks) |
@@ -423,9 +423,14 @@ skips 2 of its 3 row groups.
 * **Projection pays off.** Decoding 2 of 7 columns is about 3.7-4.1x faster than the full scan, more than
   the 3.5x you would expect from column count alone, because the skipped columns include the string and
   nullable ones.
-* **Rows per second is the figure to compare.** The harness's `megabytes` counter is a proxy that
-  multiplies rows by a fixed bytes-per-row constant per fixture; it is not measured throughput and is
-  omitted above.
+* **Rows per second is the figure to compare across scenarios; MB/s is now measured, not estimated.**
+  The rows/s table above predates the byte counters. `ScanMetrics` now reports `uncompressedBytesDecoded()`
+  (decompressed page bytes actually decoded, respecting projection and page pruning),
+  `compressedBytesRead()` (as-stored bytes of the projected column chunks read; an upper bound under
+  page-level pruning) and `arrowBytesProduced()`. Both benchmarks divide those by wall-clock time and print
+  `decodedMB/s`, `diskMB/s` and `arrowMB/s` alongside rows/s. Quote `decodedMB/s` as decode throughput.
+  These are warm-page-cache, end-to-end rates. Re-run on your hardware to fill in an MB/s column; none is
+  claimed here.
 * **Numbers are hardware-specific.** These come from a low-power laptop CPU with AVX2 (256-bit vectors).
   Re-measure on your target hardware before drawing conclusions; nothing here was compared against other
   Parquet readers.
