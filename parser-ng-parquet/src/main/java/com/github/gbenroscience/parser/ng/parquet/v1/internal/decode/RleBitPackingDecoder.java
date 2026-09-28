@@ -19,9 +19,13 @@ public final class RleBitPackingDecoder {
      * regardless, by construction, not by any padding convention the caller has to get right.
      */
     public static void decode(ByteReader br, int bitWidth, int[] out, int count) {
+        if (count <= 0) return;
         if (bitWidth == 0) {
             java.util.Arrays.fill(out, 0, count, 0);
             return;
+        }
+        if (bitWidth < 0 || bitWidth > 32) {
+            throw new IllegalArgumentException("invalid RLE/bit-packing bit width " + bitWidth);
         }
         int valueByteWidth = (bitWidth + 7) >>> 3;
         int produced = 0;
@@ -36,7 +40,7 @@ public final class RleBitPackingDecoder {
             } else {
                 int groupCount8 = header >>> 1;
                 br.readBitPackedGroups(bitWidth, groupCount8, out, produced, count - produced);
-                produced += Math.min(groupCount8 * 8, count - produced);
+                produced += (int) Math.min((long) groupCount8 * 8L, count - produced); // long: groupCount8 is attacker-controlled
             }
         }
     }

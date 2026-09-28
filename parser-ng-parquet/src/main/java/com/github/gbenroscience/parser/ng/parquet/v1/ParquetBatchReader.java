@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -103,9 +102,7 @@ public final class ParquetBatchReader implements AutoCloseable {
             // sequential mode (below), and the same filter + flag are threaded into ParallelSource
             // for each of its worker readers, so both modes get identical pruning behavior -- see
             // RowGroupDecoder's class Javadoc for exactly how the decode loop stays correct either way.
-            ParquetReadOptions opts = ParquetReadOptions.builder()
-                    .useStatsFilter(true).useDictionaryFilter(true).useBloomFilter(true)
-                    .useColumnIndexFilter(true).withRecordFilter(filter).build();
+            ParquetReadOptions opts = newReadOptions(filter);
 
             ParquetFileReader filtered = ParquetFileReader.open(new LocalInputFile(file), opts);
             probeOrFiltered = filtered;
@@ -141,16 +138,16 @@ public final class ParquetBatchReader implements AutoCloseable {
                 probeOrFiltered = null; // ownership moves to the decoder
                 built = new SequentialSource(file, decoder, fields, allocator, batchSize);
             } else {
+                // Workers address row groups by position in the reader's surviving-block list (what
+                // readFilteredRowGroup(int) indexes), NOT by footer ordinal. Record each survivor's file
+                // offset so every worker can verify its own pruning produced this exact list.
                 List<BlockMetaData> survivorBlocks = filtered.getRowGroups();
-                List<BlockMetaData> allBlocks = filtered.getFooter().getBlocks();
-                IdentityHashMap<BlockMetaData, Boolean> survivorSet = new IdentityHashMap<>();
-                for (BlockMetaData b : survivorBlocks) survivorSet.put(b, Boolean.TRUE);
-                List<Integer> ordinals = new ArrayList<>(survivorBlocks.size());
-                for (int i = 0; i < allBlocks.size(); i++) if (survivorSet.containsKey(allBlocks.get(i))) ordinals.add(i);
+                long[] survivorStartingPos = new long[survivorBlocks.size()];
+                for (int i = 0; i < survivorStartingPos.length; i++) survivorStartingPos[i] = survivorBlocks.get(i).getStartingPos();
                 filtered.close(); // parallel workers open their own readers; this one is no longer needed
                 probeOrFiltered = null;
                 built = new ParallelSource(file, projected, descriptors, nodePlan, fields,
-                        ordinals, filter, parallelism, batchSize, maxRowGroupBytes, allocator, m);
+                        survivorStartingPos, filter, parallelism, batchSize, maxRowGroupBytes, allocator, m);
             }
             this.source = (exactEvaluator != null) ? new FilteredSource(built, exactEvaluator, allocator) : built;
         } catch (IOException e) {
@@ -161,6 +158,19 @@ public final class ParquetBatchReader implements AutoCloseable {
             if (e instanceof ParquetScanException) throw e;
             throw new ParquetScanException("Invalid or unsupported Parquet file", file, -1, null, e);
         }
+    }
+
+    /**
+     * The one place scan read options are built, used by this class's own reader and by every
+     * {@link ParallelSource} worker (a fresh instance per call; see the note there on why they are not shared).
+     * Parallel addressing requires every reader to compute the SAME surviving row-group list, so all
+     * pruning switches are pinned explicitly here rather than left to library defaults that could differ
+     * between call sites or parquet-java versions.
+     */
+    static ParquetReadOptions newReadOptions(FilterCompat.Filter filter) {
+        return ParquetReadOptions.builder()
+                .useStatsFilter(true).useDictionaryFilter(true).useBloomFilter(true)
+                .useColumnIndexFilter(true).withRecordFilter(filter).build();
     }
 
     private static MessageType project(MessageType schema, List<String> columns) {

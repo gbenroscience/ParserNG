@@ -44,7 +44,7 @@ import org.apache.arrow.vector.complex.StructVector;
  * what makes this swap possible without touching the nested-type assembly logic.
  *
  * <h2>Page-level (column-index) pruning</h2>
- * Both {@link #nextFilteredRowGroup()} and {@link #readRowGroup} go through parquet-java's
+ * Both {@link #nextFilteredRowGroup()} and {@link #readFilteredRowGroup} go through parquet-java's
  * <em>filtered</em> row-group entry points ({@code readNextFilteredRowGroup()} /
  * {@code readFilteredRowGroup(int)}), not the unfiltered ones: a row group that survives
  * row-group-level pruning (stats/dictionary/Bloom filter, decided once up front) can still have
@@ -140,15 +140,35 @@ final class RowGroupDecoder implements AutoCloseable {
     }
 
     /**
-     * Parallel mode: a specific row group by its ordinal in the footer, with the same page-level
-     * pruning as {@link #nextFilteredRowGroup()} — the reader was opened with the record filter and
+     * Parallel mode: a specific row group by its index in <b>this reader's own row-group list</b>
+     * ({@link ParquetFileReader#getRowGroups()}), with the same page-level pruning as
+     * {@link #nextFilteredRowGroup()} -- the reader was opened with the record filter and
      * {@code useColumnIndexFilter(true)} exactly like the sequential path; only the access pattern
-     * (random by ordinal, for a pooled/reused reader) differs.
+     * (random access, for a pooled/reused reader) differs.
+     *
+     * <p><b>The index is NOT a footer ordinal.</b> {@code ParquetFileReader.readFilteredRowGroup(int)} indexes
+     * the reader's row-group list <em>after</em> stats/dictionary/Bloom-filter pruning, which is shorter than
+     * (and shifted relative to) the footer's block list whenever pruning dropped anything. Passing a footer
+     * ordinal there reads the wrong row group, or a group that does not exist, which surfaced as
+     * "Failed to begin decoding column ..." only for {@code parallelism > 1} combined with a pushdown that
+     * pruned at least one row group. Both the read and the block metadata used for the size guard and the
+     * metrics are therefore taken from the same list by the same index.
+     *
+     * @param filteredIndex position in {@code getRowGroups()}; also reported as the row-group index in errors
      */
-    void readRowGroup(int footerOrdinal, int survivorIndex) throws IOException {
-        PageReadStore pages = reader.readFilteredRowGroup(footerOrdinal);
-        rgIndex = survivorIndex;
-        begin(pages, reader.getFooter().getBlocks().get(footerOrdinal));
+    void readFilteredRowGroup(int filteredIndex) throws IOException {
+        List<BlockMetaData> blocks = reader.getRowGroups();
+        if (filteredIndex < 0 || filteredIndex >= blocks.size()) {
+            throw new ParquetScanException("Row group index " + filteredIndex + " out of range: reader holds "
+                    + blocks.size() + " surviving row group(s)", file, filteredIndex, null, null);
+        }
+        rgIndex = filteredIndex;
+        PageReadStore pages = reader.readFilteredRowGroup(filteredIndex);
+        if (pages == null) { // fully pruned at page level: nothing to decode
+            remaining = 0;
+            return;
+        }
+        begin(pages, blocks.get(filteredIndex));
     }
 
     private void begin(PageReadStore pages, BlockMetaData block) {

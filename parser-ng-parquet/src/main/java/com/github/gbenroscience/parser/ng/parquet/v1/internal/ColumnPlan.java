@@ -1,6 +1,7 @@
 package com.github.gbenroscience.parser.ng.parquet.v1.internal;
 
 import com.github.gbenroscience.parser.ng.parquet.v1.ParquetScanException;
+import com.github.gbenroscience.parser.ng.parquet.v1.internal.decode.FastColumnCursor;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.types.DateUnit;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
@@ -23,9 +24,19 @@ import java.nio.file.Path;
  * <p>Scope of this class (flat, non-repeated primitive columns only): anything else throws a
  * {@link ParquetScanException} naming the column and the reason. Nothing is ever coerced silently.
  *
- * <p>Hot loop: no boxing. One virtual {@code ColumnReader} call per value (parquet-java's public
- * API has no batch decode) plus one direct Arrow {@code set}. A null is left as an unset validity
- * bit; the value slot is never written, so null is never turned into 0/false/"".
+ * <p>Hot loop: no boxing. A null is left as an unset validity bit; the value slot is never written,
+ * so null is never turned into 0/false/"".
+ *
+ * <h2>Two decode loops</h2>
+ * <ul>
+ *   <li><b>Bulk</b> (fixed-width numeric kinds when the reader is a {@link FastColumnCursor}): the cursor hands
+ *       over one page segment at a time as decoded arrays plus definition levels, and each segment is written
+ *       to Arrow in a single tight typed loop -- no per-value {@code consume()}, getter or physical-type
+ *       {@code switch}. Nullable columns scatter the dense present values by definition level.</li>
+ *   <li><b>Per value</b> (BOOL, UTF8, BINARY, or any other {@link ColumnReader} implementation): one virtual
+ *       {@code ColumnReader} call per value plus one direct Arrow {@code set}.</li>
+ * </ul>
+ * This class is stateless and shared across decoder threads; all scratch lives in the cursor.
  */
 public final class ColumnPlan {
 
@@ -114,6 +125,10 @@ public final class ColumnPlan {
 
     /** Fills {@code v[0..n)} from {@code cr}; the caller sets value count / row count. */
     public void fill(ColumnReader cr, int n, FieldVector v) {
+        if (cr instanceof FastColumnCursor fc && fc.supportsBulk() && isBulkKind()) {
+            fillBulk(fc, n, v);
+            return;
+        }
         final int maxDef = this.maxDef;
         switch (kind) {
             case INT32: {
@@ -212,6 +227,94 @@ public final class ColumnPlan {
             }
             default:
                 throw new IllegalStateException("unhandled kind " + kind);
+        }
+    }
+
+    private boolean isBulkKind() {
+        switch (kind) {
+            case INT32: case INT8: case INT16: case DATE_DAY: case INT64: case TIMESTAMP: case FLOAT: case DOUBLE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** Drains {@code n} entries of a flat numeric column a page segment at a time; see the class Javadoc. */
+    private void fillBulk(FastColumnCursor fc, int n, FieldVector v) {
+        int at = 0;
+        while (at < n) {
+            final int m = fc.beginBulk(n - at);
+            writeSegment(fc, m, at, v);
+            fc.endBulk();
+            at += m;
+        }
+    }
+
+    private void writeSegment(FastColumnCursor fc, int m, int at, FieldVector v) {
+        final int maxDef = this.maxDef;
+        final int base = fc.bulkBase();
+        final boolean required = maxDef == 0;
+        final int[] defs = fc.bulkDefs();
+        final int d0 = fc.bulkDefBase();
+        switch (kind) {
+            case INT32: {
+                final IntVector o = (IntVector) v;
+                final int[] a = fc.bulkInts();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                break;
+            }
+            case DATE_DAY: {
+                final DateDayVector o = (DateDayVector) v;
+                final int[] a = fc.bulkInts();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                break;
+            }
+            case INT16: {
+                final SmallIntVector o = (SmallIntVector) v;
+                final int[] a = fc.bulkInts();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, (short) a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, (short) a[j++]); }
+                break;
+            }
+            case INT8: {
+                final TinyIntVector o = (TinyIntVector) v;
+                final int[] a = fc.bulkInts();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, (byte) a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, (byte) a[j++]); }
+                break;
+            }
+            case INT64: {
+                final BigIntVector o = (BigIntVector) v;
+                final long[] a = fc.bulkLongs();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                break;
+            }
+            case TIMESTAMP: {
+                final TimeStampVector o = (TimeStampVector) v;
+                final long[] a = fc.bulkLongs();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                break;
+            }
+            case FLOAT: {
+                final Float4Vector o = (Float4Vector) v;
+                final float[] a = fc.bulkFloats();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                break;
+            }
+            case DOUBLE: {
+                final Float8Vector o = (Float8Vector) v;
+                final double[] a = fc.bulkDoubles();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                break;
+            }
+            default:
+                throw new IllegalStateException("not a bulk kind: " + kind);
         }
     }
 

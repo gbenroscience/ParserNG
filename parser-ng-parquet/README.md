@@ -320,11 +320,15 @@ Pages are decoded by a native cursor (`internal.decode.FastColumnCursor`) that r
 directly instead of going through parquet-java's converter-bound `ColumnReaderImpl`, with an RLE /
 bit-packing decoder for levels and dictionary indexes, and a `DictionaryCache` that decodes each
 dictionary page once so gathering a dictionary value is an array index rather than a per-row object.
-For PLAIN-encoded, little-endian, fixed-width numeric columns that are structurally REQUIRED
-(`maxDefinitionLevel == 0`), `SimdBulkDecode` decodes a whole page at a time using the Vector API, which
-is why `jdk.incubator.vector` is needed at compile time and run time. The numbers quoted in its source
-(roughly 2x to 3.7x faster than the scalar loop for bulk int32/double decode) come from an informal,
-non-JMH harness and should be re-measured on your hardware.
+For PLAIN-encoded, little-endian, fixed-width numeric columns (int32/int64/float/double), required or
+nullable, `SimdBulkDecode` decodes a whole page's present values at a time using the Vector API, which
+is why `jdk.incubator.vector` is needed at compile time and run time. Flat numeric columns are then
+written to Arrow one page segment at a time (a tight typed loop, or a single typed gather for dictionary
+pages, scattering by definition level when the column is nullable) instead of one virtual call per value.
+Bit-unpacking of levels and dictionary indexes bounds-checks once per run rather than once per byte and has
+dedicated paths for bit widths 1 and 2-8. The numbers quoted in `SimdBulkDecode`'s source (roughly 2x to 3.7x
+faster than the scalar loop for bulk int32/double decode) come from an informal, non-JMH harness and
+should be re-measured on your hardware.
 
 ## Feature matrix
 | Area | Status |
@@ -341,7 +345,7 @@ non-JMH harness and should be re-measured on your hardware.
 | Metadata inspection (footer only) | yes (`ParquetFileInfo`) |
 | Metrics (row groups in file/skipped/read, rows, batches, decode time, parallelism, bytes decoded / read from disk / Arrow produced) | yes; page counts not available |
 | Bounded parallel row-group decoding | yes (`parallelism(n)`), ordering preserved |
-| SIMD bulk decode for PLAIN required fixed-width columns | yes |
+| SIMD bulk decode for PLAIN fixed-width numeric columns (required and nullable) | yes |
 | JMH benchmarks | yes (`DecodeJmhBenchmark`); results in [Benchmarks](#benchmarks) |
 | Writer | **removed from scope** |
 | Encryption, checksum verification toggles | not yet |
@@ -354,7 +358,7 @@ non-JMH harness and should be re-measured on your hardware.
 * Parallel mode: each row group's output batches are freshly allocated, by design.
 * `exactFilter()` mode: every emitted batch is freshly allocated by selective copy, regardless of
   parallelism, and every surviving row is evaluated once.
-* Nullable and nested columns pay per-value level handling beyond the flat, REQUIRED fast path.
+* Nested columns, and BOOLEAN/string/binary columns, still pay per-value handling beyond the flat numeric bulk path.
   No head-to-head comparison against native (C++/Rust) Parquet readers has been run.
 
 ## Benchmarks
@@ -392,54 +396,92 @@ and JDK, not in hardware.
 | JMH | 1.37, 2 forks, 2 x 1 s warmup + 5 x 1 s measurement (10 samples) | same |
 | Fixtures | flat: 5,000,000 rows x 7 columns (22 row groups); nested: 1,000,000 rows (7 row groups); selectivity: 5,000,000 rows (3 row groups) | same |
 
-Throughput in **millions of rows per second** (higher is better), JMH score with its 99.9% confidence
-interval. The system was otherwise idle for these runs.
+Each cell is the JMH score with its 99.9% confidence interval (10 samples). **Mrows/s** is millions of
+rows per second; **decoded MB/s** is `ScanMetrics.uncompressedBytesDecoded()` divided by wall-clock time,
+in MiB/s (1 MB = 1,048,576 bytes), i.e. decompressed page bytes actually decoded, respecting projection and
+page pruning. Higher is better for both.
 
-| Scenario | Windows 10 (JDK 24) | WSL2 (JDK 26) |
-|---|---|---|
-| Flat, full scan, sequential | 3.70 ± 0.10 | 3.64 ± 0.12 |
-| Flat, full scan, parallelism 2 | 4.81 ± 1.06 | 5.37 ± 0.49 |
-| Flat, full scan, parallelism 4 | 6.08 ± 0.47 | 6.60 ± 0.52 |
-| Flat, full scan, parallelism 8 | 5.72 ± 0.65 | 5.93 ± 1.18 |
-| Flat, projected (2 of 7 columns), sequential | 13.51 ± 3.38 | 14.97 ± 1.86 |
-| Nested, full scan, sequential | 1.83 ± 0.03 | 1.79 ± 0.08 |
-| Nested, full scan, parallelism 4 | 2.55 ± 0.18 | 2.69 ± 0.28 |
-| Flat, selective predicate (~10%), sequential | 10.32 ± 0.39 | 8.85 ± 0.45 |
+| Scenario | Windows 10 (JDK 24) Mrows/s | Windows 10 decoded MB/s | WSL2 (JDK 26) Mrows/s | WSL2 decoded MB/s |
+|---|---|---|---|---|
+| Flat, full scan, sequential | 4.05 ± 0.11 | 150.8 ± 4.1 | 4.02 ± 0.12 | 149.7 ± 4.3 |
+| Flat, full scan, parallelism 2 | 5.76 ± 0.48 | 214.7 ± 17.7 | 5.69 ± 0.52 | 212.2 ± 19.3 |
+| Flat, full scan, parallelism 4 | 6.79 ± 0.37 | 253.2 ± 13.9 | 6.73 ± 1.18 | 250.8 ± 44.2 |
+| Flat, full scan, parallelism 8 | 5.06 ± 1.84 | 188.5 ± 68.4 | 6.54 ± 0.65 | 243.6 ± 24.4 |
+| Flat, projected (2 of 7 columns), sequential | 16.18 ± 1.17 | 230.8 ± 16.7 | 15.36 ± 1.25 | 219.1 ± 17.8 |
+| Nested, full scan, sequential | 1.88 ± 0.06 | 101.5 ± 3.1 | 1.68 ± 0.29 | 90.6 ± 15.4 |
+| Nested, full scan, parallelism 4 | 2.36 ± 0.52 | 127.2 ± 27.9 | 2.69 ± 0.38 | 145.1 ± 20.4 |
+| Flat, selective predicate (~10%), sequential | 11.27 ± 0.52 | 86.0 ± 4.0 | 9.28 ± 0.63 | 70.8 ± 4.8 |
 
 The selective row counts rows *emitted* (about 519,800 per scan: a superset of the ~500,000 that
 match, because pushdown prunes at row-group and page granularity), not rows in the file; the scan
 skips 2 of its 3 row groups.
 
+The other two byte counters, in MB/s from the same runs (scores only; the confidence intervals are of the
+same relative width as the decoded column above). `disk` is `compressedBytesRead()`: as-stored bytes of
+the projected column chunks read, an upper bound under page-level pruning. `arrow` is
+`arrowBytesProduced()`: Arrow buffer bytes materialized.
+
+| Scenario | Windows 10 disk MB/s | Windows 10 arrow MB/s | WSL2 disk MB/s | WSL2 arrow MB/s |
+|---|---|---|---|---|
+| Flat, full scan, sequential | 136.3 | 167.4 | 135.3 | 166.1 |
+| Flat, full scan, parallelism 2 | 194.1 | 238.3 | 191.9 | 235.6 |
+| Flat, full scan, parallelism 4 | 228.9 | 281.0 | 226.8 | 278.4 |
+| Flat, full scan, parallelism 8 | 170.4 | 209.3 | 220.2 | 270.4 |
+| Flat, projected (2 of 7 columns), sequential | 200.4 | 250.7 | 190.2 | 238.0 |
+| Nested, full scan, sequential | 91.8 | 115.6 | 81.9 | 103.1 |
+| Nested, full scan, parallelism 4 | 115.0 | 144.8 | 131.2 | 165.2 |
+| Flat, selective predicate (~10%), sequential | 71.2 | 174.7 | 58.6 | 143.8 |
+
 **How to read these numbers**
-* **The two environments agree.** Everything except the selective scan is within about 12% between the
-  columns, which is inside the error bars for most rows. The selective scan runs for only tens of
-  milliseconds, so fixed per-scan costs (opening the file, reading the footer, filesystem access) weigh
-  more there and it is the scenario where an OS difference is most likely to show.
-* **Parallel scaling is modest and saturates at the hardware.** Speedup over sequential is roughly
-  1.3-1.5x at parallelism 2, 1.6-1.8x at 4, and no better at 8, on a 2-core / 4-thread chip. Nested
-  columns gain about 1.4-1.5x at parallelism 4. Choose `parallelism(n)` at or below your logical CPU
-  count; more threads only add contention. Parallel results also have wider error bars than sequential
-  ones.
-* **Projection pays off.** Decoding 2 of 7 columns is about 3.7-4.1x faster than the full scan, more than
-  the 3.5x you would expect from column count alone, because the skipped columns include the string and
-  nullable ones.
-* **Rows per second is the figure to compare across scenarios; MB/s is now measured, not estimated.**
-  The rows/s table above predates the byte counters. `ScanMetrics` now reports `uncompressedBytesDecoded()`
-  (decompressed page bytes actually decoded, respecting projection and page pruning),
-  `compressedBytesRead()` (as-stored bytes of the projected column chunks read; an upper bound under
-  page-level pruning) and `arrowBytesProduced()`. Both benchmarks divide those by wall-clock time and print
-  `decodedMB/s`, `diskMB/s` and `arrowMB/s` alongside rows/s. Quote `decodedMB/s` as decode throughput.
-  These are warm-page-cache, end-to-end rates. Re-run on your hardware to fill in an MB/s column; none is
-  claimed here.
+* **The two environments agree closely on most rows.** Sequential, parallelism 2 and parallelism 4 flat
+  scans are within about 1.2% of each other; the projected scan is within about 5%. Where they differ, the
+  confidence intervals usually overlap: parallelism 8 (Windows 5.06 ± 1.84 against WSL2 6.54 ± 0.65) and the
+  two nested scans (Windows is 12% ahead sequentially and 12% behind at parallelism 4, both within the
+  wide intervals). The one difference the intervals do not explain is the selective scan: Windows is about
+  21% faster (11.27 ± 0.52 against 9.28 ± 0.63 Mrows/s). That scan runs for only tens of milliseconds, so
+  fixed per-scan costs (opening the file, reading the footer, filesystem access) weigh more there, which
+  makes an OS-layer difference most likely to show; this run does not isolate the cause.
+* **Parallel scaling is modest and saturates at the hardware.** On a 2-core / 4-thread chip, flat scans
+  gain about 1.42x at parallelism 2 and about 1.68x at parallelism 4 in both environments (rows/s over the
+  sequential run). Parallelism 8 is no better than 4: WSL2 measured 1.63x, and Windows measured 1.25x but
+  with a relative error of about 36%, so treat that single figure as unreliable rather than as a
+  Windows-specific slowdown. Nested scans at parallelism 4 gained 1.25x (Windows) and 1.60x (WSL2), with
+  wide intervals in both, so this run only supports "roughly 1.3-1.6x". Choose `parallelism(n)` at or
+  below your logical CPU count; more threads only add contention. Parallel results have wider error bars
+  than sequential ones.
+* **Projection pays off.** Decoding 2 of 7 columns is about 3.8-4.0x faster than the full scan in rows/s,
+  a little more than the 3.5x column-count ratio alone would suggest. Decoded MB/s also *rises* (about 150
+  to 220-231 MB/s) rather than falling, which is consistent with the skipped columns (strings, booleans,
+  nullable columns) being the slower per-byte paths; this run does not measure per-column cost directly.
+* **Decoded MB/s is a decode rate, not a scan rate, and it is only comparable within a fixture.** It counts
+  decompressed page bytes, so it depends on row width and encoding. The flat fixture decodes about 39 bytes
+  per row, the projected scan about 15, the nested fixture about 56, and the selective fixture only about 8
+  (its `id` column is 8 plain bytes and its 10-value `bucket` column is dictionary-encoded down to a few
+  index bytes). That is why the selective scan has the second-highest rows/s but the lowest decoded MB/s.
+  Compare rows/s across scenarios that differ in pruning or projection, and decoded MB/s between runs of
+  the same scenario or between environments.
+* **Best measured decode throughput is about 250 MB/s** (flat, parallelism 4, both environments); the
+  sequential flat scan runs at about 150 MB/s. Parallel scans decode the same bytes per row as sequential
+  ones (39.08 bytes/row at every parallelism, derived from these results), so the counters do not
+  double-count under parallelism.
+* **Arrow bytes exceed decoded bytes when decoding expands data.** About 1.1x for the flat and nested
+  scans, and about 2.0x for the selective scan, where the dictionary-encoded `bucket` column is expanded
+  to full 8-byte Arrow values (16.25 Arrow bytes per row against 8 decoded).
+* **Compression is weak on this data.** Decoded/disk is only 1.1-1.2x because the fixtures come from
+  `RandomParquetFiles`, which writes uniformly random values; the disk MB/s figures characterize that
+  data, not typical real files. `compressedBytesRead()` counts whole column chunks of surviving row
+  groups, so it overstates the bytes touched when page-level pruning skips pages inside them.
+* **JMH prints every one of these rows with the unit `ops/s`.** The aux-counter rows (`:rows`,
+  `:decodedMB`, `:compressedMB`, `:arrowMB`) are per second of the named quantity, not operations; read
+  `:rows` as rows/s and the `MB` rows as MB/s.
+* **These are warm-page-cache, end-to-end rates**, from a single machine and one benchmark run per
+  environment. Re-run on your hardware before drawing conclusions.
 * **Numbers are hardware-specific.** These come from a low-power laptop CPU with AVX2 (256-bit vectors).
-  Re-measure on your target hardware before drawing conclusions; nothing here was compared against other
-  Parquet readers.
+  Nothing here was compared against other Parquet readers.
 
 ## Use with parser-ng-sql
-See the separate `parser-ng-sql-parquet` module for the bridge (`ScanPlanner`, `PredicateConverter`,
-`ParquetSql`), which derives projected columns and a pruning predicate from a parsed `SelectStatement`.
-Its planner is unit-tested against the real `sqlv1.ast` classes; the execution path that calls
-`ArrowQuery` has not been run. `parser-ng-sql` is a test-scope dependency here only; this module never
+See the separate `parquet` package of the `parser-ng-sql` module for the bridge (`ScanPlanner`, `PredicateConverter`,
+`ParquetSql`), which derives projected columns and a pruning predicate from a parsed `SelectStatement`. `parser-ng-sql` is a test-scope dependency here only; this module never
 depends on the SQL or Arrow-query modules at compile time.
 
 ## Build
@@ -468,6 +510,6 @@ and Arrow's Netty allocator cannot initialize without it. Without `-Dio.netty.no
 `UnsupportedOperationException` from `EmptyByteBuf.memoryAddress`. The flag is harmless on older JDKs. If
 it is not enough on your JDK, also try `--sun-misc-unsafe-memory-access=allow`.
 
-Verify `parquet.version` (1.18.0), `arrow.version` (19.0.0, kept equal to parser-ng-arrow),
+Verify `parquet.version` (1.18.0), `arrow.version` (19.0.0, kept equal to parser-ng-arrow's arrow version),
 `hadoop.version` (3.4.1), and `jmh.version` (1.37) before release. JMH is a `provided` dependency, so it
 is not pulled in by consumers of the jar.

@@ -122,8 +122,10 @@ public final class RowFilterEvaluator {
                 case BOOL -> cmpLong(((BitVector) v).get(row), op, numLit);
                 case INT8 -> cmpLong(((TinyIntVector) v).get(row), op, numLit);
                 case INT16 -> cmpLong(((SmallIntVector) v).get(row), op, numLit);
-                case INT32, DATE_DAY -> cmpLong(((IntVector) v).get(row), op, numLit);
-                case INT64, TIMESTAMP -> cmpLong(((BigIntVector) v).get(row), op, numLit);
+                case INT32 -> cmpLong(((IntVector) v).get(row), op, numLit);
+                case DATE_DAY -> cmpLong(((DateDayVector) v).get(row), op, numLit); // DateDayVector is NOT an IntVector
+                case INT64 -> cmpLong(((BigIntVector) v).get(row), op, numLit);
+                case TIMESTAMP -> cmpLong(((TimeStampVector) v).get(row), op, numLit); // every unit/tz variant extends TimeStampVector, none extends BigIntVector
                 case FLOAT -> cmpDouble(((Float4Vector) v).get(row), op, floatLit);
                 case DOUBLE -> cmpDouble(((Float8Vector) v).get(row), op, doubleLit);
                 case UTF8 -> cmpString(readUtf8((VarCharVector) v, row), op, strLit);
@@ -151,8 +153,10 @@ public final class RowFilterEvaluator {
                 case BOOL -> numSet.contains((long) ((BitVector) v).get(row));
                 case INT8 -> numSet.contains((long) ((TinyIntVector) v).get(row));
                 case INT16 -> numSet.contains((long) ((SmallIntVector) v).get(row));
-                case INT32, DATE_DAY -> numSet.contains((long) ((IntVector) v).get(row));
-                case INT64, TIMESTAMP -> numSet.contains(((BigIntVector) v).get(row));
+                case INT32 -> numSet.contains((long) ((IntVector) v).get(row));
+                case DATE_DAY -> numSet.contains((long) ((DateDayVector) v).get(row));
+                case INT64 -> numSet.contains(((BigIntVector) v).get(row));
+                case TIMESTAMP -> numSet.contains(((TimeStampVector) v).get(row));
                 case FLOAT -> floatSet.contains(((Float4Vector) v).get(row));
                 case DOUBLE -> doubleSet.contains(((Float8Vector) v).get(row));
                 case UTF8 -> strSet.contains(readUtf8((VarCharVector) v, row));
@@ -184,8 +188,10 @@ public final class RowFilterEvaluator {
                 case BOOL -> cmpLong(((BitVector) l).get(row), op, ((BitVector) r).get(row));
                 case INT8 -> cmpLong(((TinyIntVector) l).get(row), op, ((TinyIntVector) r).get(row));
                 case INT16 -> cmpLong(((SmallIntVector) l).get(row), op, ((SmallIntVector) r).get(row));
-                case INT32, DATE_DAY -> cmpLong(((IntVector) l).get(row), op, ((IntVector) r).get(row));
-                case INT64, TIMESTAMP -> cmpLong(((BigIntVector) l).get(row), op, ((BigIntVector) r).get(row));
+                case INT32 -> cmpLong(((IntVector) l).get(row), op, ((IntVector) r).get(row));
+                case DATE_DAY -> cmpLong(((DateDayVector) l).get(row), op, ((DateDayVector) r).get(row));
+                case INT64 -> cmpLong(((BigIntVector) l).get(row), op, ((BigIntVector) r).get(row));
+                case TIMESTAMP -> cmpLong(((TimeStampVector) l).get(row), op, ((TimeStampVector) r).get(row));
                 case FLOAT -> cmpDouble(((Float4Vector) l).get(row), op, ((Float4Vector) r).get(row));
                 case DOUBLE -> cmpDouble(((Float8Vector) l).get(row), op, ((Float8Vector) r).get(row));
                 case UTF8 -> cmpString(readUtf8((VarCharVector) l, row), op, readUtf8((VarCharVector) r, row));

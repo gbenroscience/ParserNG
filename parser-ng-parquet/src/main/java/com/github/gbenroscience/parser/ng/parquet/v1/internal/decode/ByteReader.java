@@ -1,5 +1,9 @@
 package com.github.gbenroscience.parser.ng.parquet.v1.internal.decode;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.nio.ByteOrder;
+
 /**
  * Mutable cursor over a {@code byte[]} page buffer. Every method advances {@link #pos} and returns
  * a primitive; nothing here allocates. Replaces pulling values one at a time through parquet-column's
@@ -84,56 +88,119 @@ public final class ByteReader {
         return v;
     }
 
+    /** Little-endian 64-bit view over a {@code byte[]}: one load covers a whole 8-value group for bit widths 2..8. */
+    private static final VarHandle LONG_LE = MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.LITTLE_ENDIAN);
+
     /**
-     * Reads {@code groupCount8 * 8} bit-packed values from the input, in order — but writes only
+     * Reads {@code groupCount8 * 8} bit-packed values from the input, in order -- but writes only
      * the first {@code maxWrite} of them into {@code out[offset..offset+maxWrite)}; any beyond that
-     * are decoded (to keep {@link #pos} correctly advanced for whatever follows in the page) and
-     * then discarded, never written.
+     * are skipped (never decoded, never written) and {@link #pos} is advanced past them so whatever
+     * follows in the page is still read from the right place.
      *
-     * <p>This is a correctness requirement, not an optimization: {@code groupCount8} comes directly
-     * from an unsigned varint in the file (the bit-packed run header) and is never validated against
-     * the page's own remaining value count before this method runs. A well-formed encoder never
-     * writes a run larger than needed to cover its remaining values, but the Parquet format does not
-     * forbid it, and every Parquet file here is treated as untrusted input — correctness cannot
-     * depend on encoders being well-behaved. A prior revision assumed the overshoot from a single
-     * run was bounded to at most 7 slots (true only for a *minimally*-sized run) and pre-padded
-     * output arrays to {@code count} rounded up to a multiple of 8 accordingly. That assumption
-     * failed in production on a real file (count == 20000, an exact multiple of 8, giving zero
-     * padding at all) and — more seriously — admits an unbounded-allocation path against a crafted
-     * file declaring an oversized {@code groupCount8}: fuzzing 5,000 random streams that occasionally
-     * over-allocate a run's group count found 1,205 failures under the old padding scheme, and zero
-     * under this one. Bounding the write by the actual destination capacity, unconditionally, removes
-     * both problems: there is no padding convention for a caller to get wrong, and no run size,
-     * however large or maliciously chosen, can write outside {@code out} or force an allocation sized
-     * by an attacker-controlled value.
+     * <p>This bound is a correctness requirement, not an optimization: {@code groupCount8} comes
+     * directly from an unsigned varint in the file (the bit-packed run header) and is never validated
+     * against the page's own remaining value count before this method runs. A well-formed encoder never
+     * writes a run larger than needed, but the format does not forbid it, and every Parquet file here is
+     * treated as untrusted input. No run size, however large, can write outside {@code out} or force an
+     * allocation sized by an attacker-controlled value.
      *
-     * <p>Reading is bounds-checked the same way: a {@code groupCount8} large enough to demand more
-     * input bytes than remain in this page's logical region throws {@link Corrupt} at the first byte
-     * past {@link #limit}, instead of silently reading into whatever bytes happen to follow in the
-     * backing array (the next column's page bytes, if this {@code buf} is shared/reused, or simply
-     * garbage past the true page).
+     * <h2>Bounds checking: once per run, not once per byte</h2>
+     * A run of {@code groupCount8} groups occupies exactly {@code groupCount8 * bitWidth} input bytes
+     * (8 values of {@code bitWidth} bits each, per group). That length is computed in {@code long}
+     * arithmetic (so a hostile {@code groupCount8} cannot overflow {@code int}) and checked against
+     * {@link #limit} <em>once, up front</em>; if the run does not fit, {@link Corrupt} is thrown before a
+     * single byte is consumed. After that check every byte the loops below touch is known to lie inside
+     * the logical page, so the inner loops carry no per-byte {@code require}. The observable contract is
+     * unchanged from the per-byte version (a truncated run throws {@link Corrupt}); it is simply reported
+     * at the start of the run rather than at the first missing byte.
+     *
+     * <h2>Fast paths</h2>
+     * <ul>
+     *   <li>{@code bitWidth == 0}: no input bytes, zero fill.</li>
+     *   <li>{@code bitWidth == 1} (definition levels of an optional flat column, boolean-like
+     *       dictionaries): one input byte yields 8 values by shift-and-mask, no bit buffer.</li>
+     *   <li>{@code bitWidth 2..8} (small dictionaries, deeper level streams): a group is at most 64 bits,
+     *       so one little-endian 64-bit load holds all 8 values.</li>
+     *   <li>{@code bitWidth 9..32}: generic 64-bit accumulator loop.</li>
+     * </ul>
      */
     public void readBitPackedGroups(int bitWidth, int groupCount8, int[] out, int offset, int maxWrite) {
-        int total = groupCount8 * 8;
-        int toWrite = Math.min(total, Math.max(maxWrite, 0));
+        final long totalValues = (long) groupCount8 * 8L;
+        final int toWrite = (int) Math.min(totalValues, Math.max(maxWrite, 0));
         if (bitWidth == 0) {
             java.util.Arrays.fill(out, offset, offset + toWrite, 0);
             return;
         }
-        long bitBuffer = 0;
-        int bitsInBuffer = 0, produced = 0;
-        int mask = (bitWidth == 32) ? -1 : (1 << bitWidth) - 1;
-        while (produced < total) {
-            while (bitsInBuffer < bitWidth) {
-                require(1);
-                bitBuffer |= (long) (buf[pos++] & 0xFF) << bitsInBuffer;
-                bitsInBuffer += 8;
+        if (bitWidth < 0 || bitWidth > 32) {
+            throw new IllegalArgumentException("invalid bit width " + bitWidth);
+        }
+        final long needBytes = (long) groupCount8 * bitWidth;
+        if (pos < 0 || needBytes > (long) limit - pos) {
+            throw new Corrupt(pos, (int) Math.min(needBytes, Integer.MAX_VALUE), limit, buf.length);
+        }
+
+        final byte[] b = buf;
+        int p = pos;
+        int o = offset;
+        final int fullGroups = toWrite >>> 3;
+
+        if (bitWidth == 1) {
+            for (int g = 0; g < fullGroups; g++, o += 8) {
+                final int x = b[p++] & 0xFF;
+                out[o] = x & 1;
+                out[o + 1] = (x >>> 1) & 1;
+                out[o + 2] = (x >>> 2) & 1;
+                out[o + 3] = (x >>> 3) & 1;
+                out[o + 4] = (x >>> 4) & 1;
+                out[o + 5] = (x >>> 5) & 1;
+                out[o + 6] = (x >>> 6) & 1;
+                out[o + 7] = (x >>> 7) & 1;
             }
-            int v = (int) (bitBuffer & mask);
-            if (produced < toWrite) out[offset + produced] = v;
-            produced++;
-            bitBuffer >>>= bitWidth;
-            bitsInBuffer -= bitWidth;
+        } else if (bitWidth <= 8) {
+            final int mask = (1 << bitWidth) - 1;
+            final int lastWideLoadStart = b.length - 8; // a 64-bit load at p needs p <= b.length - 8
+            for (int g = 0; g < fullGroups; g++, o += 8, p += bitWidth) {
+                if (p <= lastWideLoadStart) {
+                    final long x = (long) LONG_LE.get(b, p);
+                    out[o] = (int) x & mask;
+                    out[o + 1] = (int) (x >>> bitWidth) & mask;
+                    out[o + 2] = (int) (x >>> (2 * bitWidth)) & mask;
+                    out[o + 3] = (int) (x >>> (3 * bitWidth)) & mask;
+                    out[o + 4] = (int) (x >>> (4 * bitWidth)) & mask;
+                    out[o + 5] = (int) (x >>> (5 * bitWidth)) & mask;
+                    out[o + 6] = (int) (x >>> (6 * bitWidth)) & mask;
+                    out[o + 7] = (int) (x >>> (7 * bitWidth)) & mask;
+                } else {
+                    unpack(b, p, bitWidth, out, o, 8); // last few groups of the buffer: byte-wise, never reads past b.length
+                }
+            }
+        } else {
+            for (int g = 0; g < fullGroups; g++, o += 8, p += bitWidth) {
+                unpack(b, p, bitWidth, out, o, 8);
+            }
+        }
+
+        final int tail = toWrite & 7;
+        if (tail != 0) {
+            // A partial group is only possible when maxWrite ends inside a run; decode just the values wanted.
+            unpack(b, fullGroups * bitWidth + pos, bitWidth, out, o, tail);
+        }
+        pos += (int) needBytes; // skip the whole run, including any values beyond maxWrite
+    }
+
+    /** Unpacks {@code n} (<= 8) LSB-first {@code bitWidth}-bit values starting at {@code b[p]}. Caller has bounds-checked the run. */
+    private static void unpack(byte[] b, int p, int bitWidth, int[] out, int o, int n) {
+        final int mask = (bitWidth == 32) ? -1 : (1 << bitWidth) - 1;
+        long acc = 0;
+        int bits = 0;
+        for (int i = 0; i < n; i++) {
+            while (bits < bitWidth) {
+                acc |= (long) (b[p++] & 0xFF) << bits;
+                bits += 8;
+            }
+            out[o + i] = (int) acc & mask;
+            acc >>>= bitWidth;
+            bits -= bitWidth;
         }
     }
 }

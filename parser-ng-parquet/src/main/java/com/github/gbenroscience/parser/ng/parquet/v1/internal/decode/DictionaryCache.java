@@ -79,6 +79,31 @@ public final class DictionaryCache {
     public float getFloat(int idx) { return floats[idx]; }
     public double getDouble(int idx) { return doubles[idx]; }
 
+    /**
+     * Bulk gathers: {@code out[i] = dictionary[idx[from + i]]} for {@code i in [0, n)}. A tight typed loop with no
+     * per-value dispatch. An out-of-range index (corrupt page) surfaces as {@link ArrayIndexOutOfBoundsException};
+     * the caller ({@link FastColumnCursor}) converts that into a {@code ParquetScanException} with file/column context.
+     */
+    public void gatherInts(int[] idx, int from, int[] out, int n) {
+        final int[] d = ints;
+        for (int i = 0; i < n; i++) out[i] = d[idx[from + i]];
+    }
+
+    public void gatherLongs(int[] idx, int from, long[] out, int n) {
+        final long[] d = longs;
+        for (int i = 0; i < n; i++) out[i] = d[idx[from + i]];
+    }
+
+    public void gatherFloats(int[] idx, int from, float[] out, int n) {
+        final float[] d = floats;
+        for (int i = 0; i < n; i++) out[i] = d[idx[from + i]];
+    }
+
+    public void gatherDoubles(int[] idx, int from, double[] out, int n) {
+        final double[] d = doubles;
+        for (int i = 0; i < n; i++) out[i] = d[idx[from + i]];
+    }
+
     public byte[] binData() { return binData; }
     public int binOffset(int idx) { return binOffsets[idx]; }
     public int binLength(int idx) { return binOffsets[idx + 1] - binOffsets[idx]; }

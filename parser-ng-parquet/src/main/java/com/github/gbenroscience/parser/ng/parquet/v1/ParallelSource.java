@@ -10,6 +10,7 @@ import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.io.LocalInputFile;
 import org.apache.parquet.schema.MessageType;
 
@@ -40,13 +41,18 @@ import java.util.concurrent.TimeUnit;
  * </ul>
  * Each worker owns one {@link ParquetFileReader} for its own file handle and codec state (parquet-java's
  * decompressors are not safe to share across threads), obtained by re-opening the file once per worker.
- * Row-group-level survivorship was already decided once, up front, by the caller ({@code survivorOrdinals}
- * is exactly the row groups this scan needs to visit), so each worker reader jumps straight to its
- * assigned ordinal via {@link RowGroupDecoder#readRowGroup} rather than re-deriving that decision. It is,
- * however, opened with the <em>same</em> record filter and {@code useColumnIndexFilter(true)} as the
- * sequential path, so {@code readFilteredRowGroup} can still prune pages within an already-decided
- * row group — page-level pruning is not row-group-level pruning and both modes need it independently.
- * See {@link RowGroupDecoder}'s class Javadoc for how the decode loop stays correct either way.
+ *
+ * <h2>Row-group addressing</h2>
+ * Every worker reader is opened with the <em>same</em> record filter and {@code useColumnIndexFilter(true)}
+ * as the sequential path, so each one applies the same row-group-level pruning at open time and ends up with
+ * the same surviving row-group list ({@link ParquetFileReader#getRowGroups()}). Work is addressed by
+ * <b>position in that list</b> -- exactly what {@code ParquetFileReader.readFilteredRowGroup(int)} indexes --
+ * not by footer ordinal; see {@link RowGroupDecoder#readFilteredRowGroup}. Because the address is only
+ * meaningful if every worker's list matches the one the caller computed, each worker verifies its list against
+ * {@code expectedStartingPos} (the surviving blocks' file offsets, in order) at construction and fails fast on
+ * any mismatch instead of silently decoding the wrong data. The same reader then prunes pages within the
+ * row group via {@code readFilteredRowGroup}. See {@link RowGroupDecoder}'s class Javadoc for how the decode
+ * loop stays correct either way.
  *
  * <p>Unlike {@link SequentialSource}, each row group's batches are freshly allocated (not reused), since
  * they are produced on a worker thread and handed to the consumer thread. This trades some allocation for
@@ -68,9 +74,8 @@ final class ParallelSource implements BatchSource {
     private final BufferAllocator allocator;
     private final int batchSize;
     private final Schema schema;
-    private final int[] ordinals;
-    private int nextOrdinalPos;
-    private int survivorCounter;
+    private final int survivorCount;
+    private int nextIndex;
 
     private List<VectorSchemaRoot> currentBatchList;
     private int currentBatchPos;
@@ -80,7 +85,7 @@ final class ParallelSource implements BatchSource {
     private boolean closed;
 
     ParallelSource(Path file, MessageType projected, ColumnDescriptor[] descs, NodePlan nodePlan,
-                   List<Field> fields, List<Integer> survivorOrdinals, FilterCompat.Filter filter,
+                   List<Field> fields, long[] expectedStartingPos, FilterCompat.Filter filter,
                    int parallelism, int batchSize, long maxRowGroupBytes,
                    BufferAllocator allocator, ScanMetrics metrics) {
         this.file = file;
@@ -89,7 +94,7 @@ final class ParallelSource implements BatchSource {
         this.batchSize = batchSize;
         this.schema = new Schema(fields);
         this.windowSize = parallelism + 1;
-        this.ordinals = survivorOrdinals.stream().mapToInt(Integer::intValue).toArray();
+        this.survivorCount = expectedStartingPos.length;
         if (metrics != null) metrics.parallelism = parallelism;
 
         this.pool = new ArrayBlockingQueue<>(parallelism);
@@ -109,17 +114,26 @@ final class ParallelSource implements BatchSource {
                 // was upheld for the ParquetFileReader/RowGroupDecoder objects themselves (one each per
                 // worker, pooled, never checked out by two threads at once) but was being silently
                 // violated one layer up, by handing every worker's reader the same options instance.
-                ParquetReadOptions workerOpts = ParquetReadOptions.builder()
-                        .useColumnIndexFilter(true).withRecordFilter(filter).build();
+                ParquetReadOptions workerOpts = ParquetBatchReader.newReadOptions(filter);
                 ParquetFileReader r = ParquetFileReader.open(new LocalInputFile(file), workerOpts);
-                r.setRequestedSchema(projected);
-                RowGroupDecoder d = new RowGroupDecoder(file, r, projected, nodePlan, descs, maxRowGroupBytes, metrics);
+                RowGroupDecoder d;
+                try {
+                    verifySurvivors(r, expectedStartingPos);
+                    r.setRequestedSchema(projected);
+                    d = new RowGroupDecoder(file, r, projected, nodePlan, descs, maxRowGroupBytes, metrics);
+                } catch (RuntimeException e) {
+                    try { r.close(); } catch (IOException | RuntimeException ignored) { }
+                    throw e;
+                }
                 allDecoders.add(d);
                 pool.add(d);
             }
         } catch (IOException e) {
             for (RowGroupDecoder d : allDecoders) d.close();
             throw new ParquetScanException("Cannot open parallel Parquet workers", file, -1, null, e);
+        } catch (RuntimeException e) {
+            for (RowGroupDecoder d : allDecoders) d.close();
+            throw e;
         }
 
         this.executor = Executors.newFixedThreadPool(parallelism, r -> {
@@ -128,20 +142,36 @@ final class ParallelSource implements BatchSource {
             return t;
         });
 
-        for (int i = 0; i < windowSize && nextOrdinalPos < ordinals.length; i++) submitNext();
+        for (int i = 0; i < windowSize && nextIndex < survivorCount; i++) submitNext();
+    }
+
+    /**
+     * Fails fast if this worker's surviving row-group list is not the list the caller computed: index-based
+     * addressing is only sound if they are identical, in order.
+     */
+    private void verifySurvivors(ParquetFileReader r, long[] expectedStartingPos) {
+        List<BlockMetaData> mine = r.getRowGroups();
+        boolean ok = mine.size() == expectedStartingPos.length;
+        for (int i = 0; ok && i < expectedStartingPos.length; i++) {
+            ok = mine.get(i).getStartingPos() == expectedStartingPos[i];
+        }
+        if (!ok) {
+            throw new ParquetScanException("Parallel worker's row-group pruning disagrees with the scan's ("
+                    + mine.size() + " vs " + expectedStartingPos.length + " surviving row groups, or different blocks); "
+                    + "the file may have changed while being scanned", file, -1, null, null);
+        }
     }
 
     private void submitNext() {
-        final int ordinal = ordinals[nextOrdinalPos++];
-        final int survivorIndex = survivorCounter++;
-        window.addLast(executor.submit(() -> decodeOneRowGroup(ordinal, survivorIndex)));
+        final int index = nextIndex++;
+        window.addLast(executor.submit(() -> decodeOneRowGroup(index)));
     }
 
-    private List<VectorSchemaRoot> decodeOneRowGroup(int ordinal, int survivorIndex) throws Exception {
+    private List<VectorSchemaRoot> decodeOneRowGroup(int index) throws Exception {
         RowGroupDecoder d = pool.take();
         List<VectorSchemaRoot> out = new ArrayList<>();
         try {
-            d.readRowGroup(ordinal, survivorIndex);
+            d.readFilteredRowGroup(index);
             while (d.remaining() > 0) {
                 int n = (int) Math.min(batchSize, d.remaining());
                 FieldVector[] arr = new FieldVector[fields.size()];
@@ -198,7 +228,7 @@ final class ParallelSource implements BatchSource {
                         : new ParquetScanException("Parallel decode failed", file, -1, null, c);
             }
             currentBatchPos = 0;
-            if (nextOrdinalPos < ordinals.length) submitNext();
+            if (nextIndex < survivorCount) submitNext();
         }
     }
 

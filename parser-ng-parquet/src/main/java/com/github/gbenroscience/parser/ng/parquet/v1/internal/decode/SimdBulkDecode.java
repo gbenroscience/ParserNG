@@ -18,9 +18,10 @@ import java.nio.ByteOrder;
  * ({@code reinterpretAsX()}) with no shift/mask/OR: on a little-endian host, the raw little-endian
  * bytes on disk and the JVM's in-register lane layout for that reinterpret are the same bit
  * pattern, so this is a legitimate zero-arithmetic decode, not a coincidence that happens to look
- * right on one input. It is applied only when a column's {@code maxDefinitionLevel == 0}, i.e. the
- * column is structurally REQUIRED — there is no per-page null-count check, so this never has to
- * reason about which entries are absent.
+ * right on one input. A page stores values only for its <em>present</em> entries, so the caller passes
+ * the page's present-value count (equal to the entry count for a REQUIRED column, smaller for a
+ * nullable one) and the kernels decode exactly that many; scattering the dense result back to entry
+ * positions by definition level is the caller's job (see {@code FastColumnCursor}).
  *
  * <h2>Measured (informal, not JMH — see caveats)</h2>
  * On the development machine (AVX-512, 512-bit vectors, 16 int / 8 long / 8 double lanes),
