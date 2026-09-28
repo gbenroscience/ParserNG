@@ -59,6 +59,13 @@ import java.util.Locale;
  * <p>Reported per scenario: elapsed wall time, rows/sec, approximate MB/sec (file size on disk /
  * elapsed time -- a rough proxy, not bytes actually decoded, since compression ratio and projection
  * both change how much of the file is actually touched), and the scan's {@link ScanMetrics}.
+ *
+ * <p>The three fixture files (flat, selectivity, nested -- 5M + 5M + 1M rows total, written by
+ * {@link RandomParquetFiles#write} / {@link #writeSelectivityFixture}) live in one temp directory
+ * created at the top of {@link #main}, and are deleted, best-effort, in a {@code finally} block
+ * around the whole run -- including when fixture generation or a scan throws partway through, so a
+ * failed run doesn't leave 5M+5M+1M rows of Parquet fixtures behind either. See
+ * {@link #deleteFixtures}.
  */
 public final class DecodeBenchmark {
 
@@ -68,36 +75,61 @@ public final class DecodeBenchmark {
     public static void main(String[] args) throws IOException {
         Path dir = Files.createTempDirectory("parser-ng-parquet-bench");
         System.out.println("Fixtures in " + dir);
+        try {
+            int flatRows = args.length > 0 ? Integer.parseInt(args[0]) : 5_000_000;
+            int nestedRows = args.length > 1 ? Integer.parseInt(args[1]) : 1_000_000;
 
-        int flatRows = args.length > 0 ? Integer.parseInt(args[0]) : 5_000_000;
-        int nestedRows = args.length > 1 ? Integer.parseInt(args[1]) : 1_000_000;
+            Path flatFile = dir.resolve("flat.parquet");
+            RandomParquetFiles.write(flatFile, RandomParquetFiles.SAMPLE_FLAT_SCHEMA, flatRows,
+                    RandomParquetFiles.Config.defaults().seed(42).rowGroupSize(8L * 1024 * 1024));
 
-        Path flatFile = dir.resolve("flat.parquet");
-        RandomParquetFiles.write(flatFile, RandomParquetFiles.SAMPLE_FLAT_SCHEMA, flatRows,
-                RandomParquetFiles.Config.defaults().seed(42).rowGroupSize(8L * 1024 * 1024));
+            Path selectivityFile = dir.resolve("selectivity.parquet");
+            writeSelectivityFixture(selectivityFile, flatRows);
 
-        Path selectivityFile = dir.resolve("selectivity.parquet");
-        writeSelectivityFixture(selectivityFile, flatRows);
+            Path nestedFile = dir.resolve("nested.parquet");
+            RandomParquetFiles.write(nestedFile, RandomParquetFiles.SAMPLE_NESTED_SCHEMA, nestedRows,
+                    RandomParquetFiles.Config.defaults().seed(7).collectionSize(0, 8).rowGroupSize(8L * 1024 * 1024));
 
-        Path nestedFile = dir.resolve("nested.parquet");
-        RandomParquetFiles.write(nestedFile, RandomParquetFiles.SAMPLE_NESTED_SCHEMA, nestedRows,
-                RandomParquetFiles.Config.defaults().seed(7).collectionSize(0, 8).rowGroupSize(8L * 1024 * 1024));
+            try (BufferAllocator alloc = new RootAllocator()) {
+                printHeader();
 
-        try (BufferAllocator alloc = new RootAllocator()) {
-            printHeader();
+                run(alloc, "flat/full-scan/seq", flatFile, s -> s, flatRows);
+                run(alloc, "flat/projected(2 of 7)/seq", flatFile, s -> s.select("id", "value"), flatRows);
+                run(alloc, "flat/full-scan/parallel(2)", flatFile, s -> s.parallelism(2), flatRows);
+                run(alloc, "flat/full-scan/parallel(4)", flatFile, s -> s.parallelism(4), flatRows);
+                run(alloc, "flat/full-scan/parallel(8)", flatFile, s -> s.parallelism(8), flatRows);
 
-            run(alloc, "flat/full-scan/seq", flatFile, s -> s, flatRows);
-            run(alloc, "flat/projected(2 of 7)/seq", flatFile, s -> s.select("id", "value"), flatRows);
-            run(alloc, "flat/full-scan/parallel(2)", flatFile, s -> s.parallelism(2), flatRows);
-            run(alloc, "flat/full-scan/parallel(4)", flatFile, s -> s.parallelism(4), flatRows);
-            run(alloc, "flat/full-scan/parallel(8)", flatFile, s -> s.parallelism(8), flatRows);
+                // ~10% selectivity by construction -- see writeSelectivityFixture.
+                run(alloc, "selective-predicate(~10%)/seq", selectivityFile,
+                        s -> s.pushdown(Predicate.ge("bucket", 9L)), flatRows / 10);
 
-            // ~10% selectivity by construction -- see writeSelectivityFixture.
-            run(alloc, "selective-predicate(~10%)/seq", selectivityFile,
-                    s -> s.pushdown(Predicate.ge("bucket", 9L)), flatRows / 10);
+                run(alloc, "nested/full-scan/seq", nestedFile, s -> s, nestedRows);
+                run(alloc, "nested/full-scan/parallel(4)", nestedFile, s -> s.parallelism(4), nestedRows);
+            }
+        } finally {
+            // Best-effort: a fixture-generation or scan failure above must not leave 5M+5M+1M rows
+            // of Parquet fixtures sitting in the OS temp directory. deleteFixtures() logs and swallows
+            // its own IOExceptions rather than throwing, so it never masks whatever exception (if any)
+            // is already propagating out of the try block above.
+            deleteFixtures(dir);
+        }
+    }
 
-            run(alloc, "nested/full-scan/seq", nestedFile, s -> s, nestedRows);
-            run(alloc, "nested/full-scan/parallel(4)", nestedFile, s -> s.parallelism(4), nestedRows);
+    /** Recursively deletes {@code dir} (and everything under it), best-effort: a failure here is
+     *  logged to stderr, never thrown, so cleanup can never turn a successful benchmark run into a
+     *  failed process exit, and never replaces/masks a real exception from the run itself when
+     *  called from a {@code finally} block. */
+    private static void deleteFixtures(Path dir) {
+        try (var paths = Files.walk(dir)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException e) {
+                    System.err.println("Warning: failed to delete benchmark fixture " + p + ": " + e);
+                }
+            });
+        } catch (IOException e) {
+            System.err.println("Warning: failed to walk benchmark fixture directory " + dir + " for cleanup: " + e);
         }
     }
 

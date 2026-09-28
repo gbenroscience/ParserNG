@@ -33,7 +33,9 @@
         <parquet.version>1.18.0</parquet.version>
         <!-- parquet-hadoop needs Hadoop's Configuration/codec classes at runtime. VERIFY this pin. -->
         <hadoop.version>3.4.1</hadoop.version>
-        
+        <!-- JMH: keep core and the annotation processor in lock-step. -->
+        <jmh.version>1.37</jmh.version>
+
     </properties>
 
     <dependencies>
@@ -65,6 +67,24 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!--
+          JMH for DecodeJmhBenchmark. "provided": needed to compile/run the benchmark class (which
+          lives in src/main/java alongside DecodeBenchmark, matching this module's existing
+          convention) without being pulled in as a runtime dependency of consumers of this jar.
+        -->
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-core</artifactId>
+            <version>${jmh.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-generator-annprocess</artifactId>
+            <version>${jmh.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- Test only: the SQL/Arrow modules are NEVER a compile dependency of this module. -->
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
@@ -93,6 +113,18 @@
                         <arg>--add-modules</arg>
                         <arg>jdk.incubator.vector</arg>
                     </compilerArgs>
+                    <!--
+                      Explicit annotation processor path for JMH's @Benchmark code generator.
+                      Without this, DecodeJmhBenchmark compiles but JMH's Runner/Main can't find
+                      the generated *_jmhType/*_jmhTest classes at run time.
+                    -->
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.openjdk.jmh</groupId>
+                            <artifactId>jmh-generator-annprocess</artifactId>
+                            <version>${jmh.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
                 </configuration>
             </plugin>
             <plugin>
@@ -133,5 +165,68 @@
 
         </plugins>
     </build>
+
+    <profiles>
+       
+        <profile>
+            <id>jmh</id>
+            <dependencies>
+                <!-- Force JMH onto the compile/runtime classpath for the shade step -->
+                <dependency>
+                    <groupId>org.openjdk.jmh</groupId>
+                    <artifactId>jmh-core</artifactId>
+                    <version>${jmh.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>org.openjdk.jmh</groupId>
+                    <artifactId>jmh-generator-annprocess</artifactId>
+                    <version>${jmh.version}</version>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <version>3.6.0</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>shade</goal>
+                                </goals>
+                                <configuration>
+                                    <finalName>benchmarks</finalName>
+                                    <transformers>
+                                        <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                            <mainClass>org.openjdk.jmh.Main</mainClass>
+                                        </transformer>
+                                    </transformers>
+                                    <filters>
+                                        <filter>
+                                            <artifact>*:*</artifact>
+                                            <excludes>
+                                                <exclude>META-INF/*.SF</exclude>
+                                                <exclude>META-INF/*.DSA</exclude>
+                                                <exclude>META-INF/*.RSA</exclude>
+                                            </excludes>
+                                        </filter>
+                                    </filters>
+                                    <!-- Make sure JMH is included even if it was provided in the main dependencies -->
+                                    <artifactSet>
+                                        <includes>
+                                            <include>org.openjdk.jmh:jmh-core</include>
+                                            <include>org.openjdk.jmh:jmh-generator-annprocess</include>
+                                            <include>*:*</include> <!-- keep everything else -->
+                                        </includes>
+                                    </artifactSet>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>
