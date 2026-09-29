@@ -5,6 +5,7 @@ import com.github.gbenroscience.parser.ng.parquet.v1.internal.decode.FastColumnC
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.types.DateUnit;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
+import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
@@ -15,6 +16,8 @@ import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.LogicalTypeAnnotation.*;
 import org.apache.parquet.schema.PrimitiveType;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 
@@ -40,16 +43,27 @@ import java.nio.file.Path;
  */
 public final class ColumnPlan {
 
-    enum Kind { BOOL, INT8, INT16, INT32, DATE_DAY, INT64, TIMESTAMP, FLOAT, DOUBLE, UTF8, BINARY }
+    enum Kind { BOOL, INT8, INT16, INT32, DATE_DAY, INT64, TIMESTAMP, FLOAT, DOUBLE, UTF8, BINARY, DECIMAL }
+
+    /** Which physical type a DECIMAL-kind column's unscaled value is read from; meaningless for every other {@link Kind}. */
+    private enum DecimalSource { INT32, INT64, BYTES }
 
     private final Kind kind;
     private final int maxDef;
     private final Field field;
+    private final DecimalSource decimalSource;
+    private final int decimalScale;
 
     private ColumnPlan(Kind kind, int maxDef, Field field) {
+        this(kind, maxDef, field, null, 0);
+    }
+
+    private ColumnPlan(Kind kind, int maxDef, Field field, DecimalSource decimalSource, int decimalScale) {
         this.kind = kind;
         this.maxDef = maxDef;
         this.field = field;
+        this.decimalSource = decimalSource;
+        this.decimalScale = decimalScale;
     }
 
     public Field field() { return field; }
@@ -71,6 +85,8 @@ public final class ColumnPlan {
         LogicalTypeAnnotation lt = pt.getLogicalTypeAnnotation();
         Kind k;
         ArrowType at;
+        DecimalSource decSrc = null;
+        int decScale = 0;
         switch (pt.getPrimitiveTypeName()) {
             case BOOLEAN:
                 needNoLogical(lt, file, name);
@@ -81,22 +97,35 @@ public final class ColumnPlan {
                 else if (lt instanceof IntLogicalTypeAnnotation i && i.isSigned() && i.getBitWidth() == 32) { k = Kind.INT32; at = new ArrowType.Int(32, true); }
                 else if (lt instanceof IntLogicalTypeAnnotation i && i.isSigned() && i.getBitWidth() == 16) { k = Kind.INT16; at = new ArrowType.Int(16, true); }
                 else if (lt instanceof IntLogicalTypeAnnotation i && i.isSigned() && i.getBitWidth() == 8) { k = Kind.INT8; at = new ArrowType.Int(8, true); }
-                else throw unsupported(file, name, "INT32 with logical type " + lt + " (unsigned ints, DECIMAL, TIME not supported yet)");
+                else if (lt instanceof DecimalLogicalTypeAnnotation dec) {
+                    k = Kind.DECIMAL; at = new ArrowType.Decimal(dec.getPrecision(), dec.getScale(), 128);
+                    decSrc = DecimalSource.INT32; decScale = dec.getScale();
+                }
+                else throw unsupported(file, name, "INT32 with logical type " + lt + " (unsigned ints, TIME not supported yet)");
                 break;
             case INT64:
                 if (lt == null || (lt instanceof IntLogicalTypeAnnotation i && i.isSigned() && i.getBitWidth() == 64)) {
                     k = Kind.INT64; at = new ArrowType.Int(64, true);
                 } else if (lt instanceof TimestampLogicalTypeAnnotation ts) {
                     k = Kind.TIMESTAMP;
-                    org.apache.arrow.vector.types.TimeUnit u;
+                    TimeUnit u;
                     switch (ts.getUnit()) {
-                        case MILLIS: u = org.apache.arrow.vector.types.TimeUnit.MILLISECOND; break;
-                        case MICROS: u = org.apache.arrow.vector.types.TimeUnit.MICROSECOND; break;
-                        default: u = org.apache.arrow.vector.types.TimeUnit.NANOSECOND; break;
+                        case MILLIS: u = TimeUnit.MILLISECOND; break;
+                        case MICROS: u = TimeUnit.MICROSECOND; break;
+                        default: u = TimeUnit.NANOSECOND; break;
                     }
                     at = new ArrowType.Timestamp(u, ts.isAdjustedToUTC() ? "UTC" : null);
-                } else throw unsupported(file, name, "INT64 with logical type " + lt + " (unsigned ints, DECIMAL, TIME not supported yet)");
+                } else if (lt instanceof DecimalLogicalTypeAnnotation dec) {
+                    k = Kind.DECIMAL; at = new ArrowType.Decimal(dec.getPrecision(), dec.getScale(), 128);
+                    decSrc = DecimalSource.INT64; decScale = dec.getScale();
+                } else throw unsupported(file, name, "INT64 with logical type " + lt + " (unsigned ints, TIME not supported yet)");
                 break;
+            case INT96:
+                // Deprecated legacy timestamp type; no LogicalTypeAnnotation exists for it (it predates
+                // that mechanism). See FastColumnCursor's INT96 case / Int96Timestamp for the byte layout
+                // this assumes and the nanos-since-epoch conversion every reader here relies on.
+                needNoLogical(lt, file, name);
+                k = Kind.TIMESTAMP; at = new ArrowType.Timestamp(TimeUnit.NANOSECOND, "UTC"); break;
             case FLOAT:
                 needNoLogical(lt, file, name);
                 k = Kind.FLOAT; at = new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE); break;
@@ -107,12 +136,22 @@ public final class ColumnPlan {
                 if (lt == null) { k = Kind.BINARY; at = ArrowType.Binary.INSTANCE; }
                 else if (lt instanceof StringLogicalTypeAnnotation || lt instanceof EnumLogicalTypeAnnotation
                         || lt instanceof JsonLogicalTypeAnnotation) { k = Kind.UTF8; at = ArrowType.Utf8.INSTANCE; }
-                else throw unsupported(file, name, "BINARY with logical type " + lt + " (DECIMAL, BSON not supported yet)");
+                else if (lt instanceof DecimalLogicalTypeAnnotation dec) {
+                    k = Kind.DECIMAL; at = new ArrowType.Decimal(dec.getPrecision(), dec.getScale(), 128);
+                    decSrc = DecimalSource.BYTES; decScale = dec.getScale();
+                }
+                else throw unsupported(file, name, "BINARY with logical type " + lt + " (BSON not supported yet)");
+                break;
+            case FIXED_LEN_BYTE_ARRAY:
+                if (lt instanceof DecimalLogicalTypeAnnotation dec) {
+                    k = Kind.DECIMAL; at = new ArrowType.Decimal(dec.getPrecision(), dec.getScale(), 128);
+                    decSrc = DecimalSource.BYTES; decScale = dec.getScale();
+                } else throw unsupported(file, name, "FIXED_LEN_BYTE_ARRAY with logical type " + lt + " (only DECIMAL supported; UUID not supported yet)");
                 break;
             default:
-                throw unsupported(file, name, pt.getPrimitiveTypeName() + " (INT96 / FIXED_LEN_BYTE_ARRAY / UUID / DECIMAL not supported yet)");
+                throw unsupported(file, name, pt.getPrimitiveTypeName() + " (not supported yet)");
         }
-        return new ColumnPlan(k, maxDef, new Field(name, new FieldType(nullable, at, null), null));
+        return new ColumnPlan(k, maxDef, new Field(name, new FieldType(nullable, at, null), null), decSrc, decScale);
     }
 
     private static void needNoLogical(LogicalTypeAnnotation lt, Path file, String name) {
@@ -225,9 +264,38 @@ public final class ColumnPlan {
                 }
                 break;
             }
+            case DECIMAL: {
+                DecimalVector o = (DecimalVector) v;
+                for (int i = 0; i < n; i++) {
+                    if (maxDef == 0 || cr.getCurrentDefinitionLevel() == maxDef) o.set(i, decimalOf(cr));
+                    cr.consume();
+                }
+                break;
+            }
             default:
                 throw new IllegalStateException("unhandled kind " + kind);
         }
+    }
+
+    /**
+     * Reconstructs a DECIMAL column's current value as a {@link BigDecimal}. Correctness-first, not
+     * bulk-decoded (unlike the fixed-width numeric kinds -- see {@link #isBulkKind()}): every physical
+     * source Parquet allows for DECIMAL needs its own reassembly (a plain scaled long for INT32/INT64,
+     * a big-endian two's-complement byte array -- per parquet-format's LogicalTypes.md -- for BINARY/
+     * FIXED_LEN_BYTE_ARRAY), and {@link DecimalVector#set(int, BigDecimal)} is the one Arrow API that
+     * accepts all three uniformly without this class having to hand-roll 128-bit arithmetic.
+     */
+    private BigDecimal decimalOf(ColumnReader cr) {
+        return switch (decimalSource) {
+            case INT32 -> BigDecimal.valueOf(cr.getInteger(), decimalScale);
+            case INT64 -> BigDecimal.valueOf(cr.getLong(), decimalScale);
+            case BYTES -> {
+                ByteBuffer bb = cr.getBinary().toByteBuffer();
+                byte[] raw = new byte[bb.remaining()];
+                bb.get(raw);
+                yield new BigDecimal(new BigInteger(raw), decimalScale); // BigInteger(byte[]) is big-endian two's complement -- matches the spec exactly
+            }
+        };
     }
 
     private boolean isBulkKind() {
@@ -342,6 +410,14 @@ public final class ColumnPlan {
             case BINARY: {
                 ByteBuffer bb = cr.getBinary().toByteBuffer();
                 ((VarBinaryVector) v).setSafe(i, bb, bb.position(), bb.remaining());
+                break;
+            }
+            case DECIMAL: {
+                DecimalVector dv = (DecimalVector) v;
+                // DecimalVector has no setSafe(int, BigDecimal) overload (unlike the fixed-width numeric
+                // vectors above) -- grow capacity ourselves first, exactly what setSafe would do internally.
+                while (dv.getValueCapacity() <= i) dv.reAlloc();
+                dv.set(i, decimalOf(cr));
                 break;
             }
             default: throw new IllegalStateException("unhandled kind " + kind);

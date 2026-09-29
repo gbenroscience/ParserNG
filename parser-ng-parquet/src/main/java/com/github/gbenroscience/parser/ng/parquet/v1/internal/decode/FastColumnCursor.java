@@ -140,11 +140,15 @@ public final class FastColumnCursor implements ColumnReader {
 
     private boolean pageIsDictionary;
     private boolean bulkPlain; // true for the current page: values already sit in one of the scratch arrays below
+    private boolean pageIsMaterializedBinary; // true for the current page: DELTA_LENGTH_BYTE_ARRAY / DELTA_BYTE_ARRAY (see matBinary)
     private int[] idxBuf = new int[0];
     private int[] intScratch = new int[0];
     private long[] longScratch = new long[0];
     private float[] floatScratch = new float[0];
     private double[] doubleScratch = new double[0];
+    private long[] deltaScratch = new long[0]; // decode(...) output for DELTA_BINARY_PACKED, before narrowing into intScratch/longScratch
+    private final MaterializedBinary matBinary = new MaterializedBinary(); // backs DELTA_LENGTH_BYTE_ARRAY / DELTA_BYTE_ARRAY (see pageIsMaterializedBinary)
+    private final int typeLength; // meaningful only for FIXED_LEN_BYTE_ARRAY; getTypeLength() is harmless to read otherwise
     private final ByteReader valueBytes = new ByteReader();
 
     // bulk-segment state (see beginBulk/endBulk)
@@ -175,12 +179,13 @@ public final class FastColumnCursor implements ColumnReader {
         };
         this.file = file;
         this.columnName = columnName;
+        this.typeLength = descriptor.getPrimitiveType().getTypeLength();
         this.pageReader = pages.getPageReader(descriptor);
         this.totalValueCount = pageReader.getTotalValueCount();
 
         DictionaryPage dictPage = pageReader.readDictionaryPage();
         if (dictPage != null) {
-            dictionary = new DictionaryCache(dictPage, physical, file, columnName);
+            dictionary = new DictionaryCache(dictPage, physical, file, columnName, typeLength);
             pageBytesLoaded += dictPage.getUncompressedSize();
         }
         if (totalValueCount > 0) {
@@ -383,16 +388,53 @@ public final class FastColumnCursor implements ColumnReader {
      */
     private void setUpValueDecode(ByteReader br, int dataLen, Encoding enc, int count) {
         boolean dict = enc == Encoding.PLAIN_DICTIONARY || enc == Encoding.RLE_DICTIONARY;
-        if (!dict && enc != Encoding.PLAIN) {
-            throw new ParquetScanException("Unsupported value encoding " + enc
-                    + " (only PLAIN and dictionary are decoded natively; DELTA*/BYTE_STREAM_SPLIT are not)",
-                    file, -1, columnName, null);
-        }
         pageIsDictionary = dict;
+        pageIsMaterializedBinary = false;
         boolBitPos = 0;
         bulkPlain = false;
         denseBefore = 0;
         final int present = countPresent(count);
+        if (enc == Encoding.DELTA_BINARY_PACKED) {
+            // Only INT32/INT64 carry this encoding (parquet-format Encodings.md); reuses the existing
+            // bulk-decode path (see the class Javadoc's "Two decode loops") by landing its output in the
+            // very same intScratch/longScratch arrays PLAIN's SIMD path fills, so beginBulk()/bulkInts()/
+            // bulkLongs() and the plain per-value getters below need no DELTA-specific branch at all.
+            if (physical != PrimitiveType.PrimitiveTypeName.INT32 && physical != PrimitiveType.PrimitiveTypeName.INT64) {
+                throw new ParquetScanException("DELTA_BINARY_PACKED is not valid for physical type " + physical,
+                        file, -1, columnName, null);
+            }
+            if (present == 0) return;
+            if (deltaScratch.length < present) deltaScratch = new long[present];
+            bulkPlain = true;
+            if (physical == PrimitiveType.PrimitiveTypeName.INT32) {
+                if (intScratch.length < present) intScratch = new int[present];
+                DeltaBinaryPackedDecoder.decodeInts(br, deltaScratch, intScratch, present);
+            } else {
+                if (longScratch.length < present) longScratch = new long[present];
+                DeltaBinaryPackedDecoder.decode(br, deltaScratch, present);
+                System.arraycopy(deltaScratch, 0, longScratch, 0, present);
+            }
+            return;
+        }
+        if (enc == Encoding.DELTA_LENGTH_BYTE_ARRAY || enc == Encoding.DELTA_BYTE_ARRAY) {
+            if (physical != PrimitiveType.PrimitiveTypeName.BINARY) {
+                throw new ParquetScanException(enc + " is not valid for physical type " + physical,
+                        file, -1, columnName, null);
+            }
+            pageIsMaterializedBinary = true;
+            if (present == 0) return;
+            if (enc == Encoding.DELTA_LENGTH_BYTE_ARRAY) {
+                DeltaByteArrayDecoder.decodeLengthByteArray(br, present, matBinary);
+            } else {
+                DeltaByteArrayDecoder.decodeByteArray(br, present, matBinary);
+            }
+            return;
+        }
+        if (!dict && enc != Encoding.PLAIN) {
+            throw new ParquetScanException("Unsupported value encoding " + enc
+                    + " (PLAIN, dictionary and DELTA_BINARY_PACKED/DELTA_LENGTH_BYTE_ARRAY/DELTA_BYTE_ARRAY "
+                    + "are decoded natively; BYTE_STREAM_SPLIT is not)", file, -1, columnName, null);
+        }
         if (dict) {
             if (dictionary == null) {
                 throw corruptPage("Dictionary-encoded data page but the column chunk has no dictionary page", null);
@@ -537,6 +579,11 @@ public final class FastColumnCursor implements ColumnReader {
             }
         } else if (pageIsDictionary) {
             gatherDictionary(idxBuf[denseBefore]);
+        } else if (pageIsMaterializedBinary) {
+            final int d = denseBefore;
+            curBinData = matBinary.data;
+            curBinOff = matBinary.offsets[d];
+            curBinLen = matBinary.offsets[d + 1] - matBinary.offsets[d];
         } else {
             readPlain();
         }
@@ -551,7 +598,8 @@ public final class FastColumnCursor implements ColumnReader {
             case INT64 -> curLong = dictionary.getLong(idx);
             case FLOAT -> curFloat = dictionary.getFloat(idx);
             case DOUBLE -> curDouble = dictionary.getDouble(idx);
-            case BINARY -> { curBinData = dictionary.binData(); curBinOff = dictionary.binOffset(idx); curBinLen = dictionary.binLength(idx); }
+            case BINARY, FIXED_LEN_BYTE_ARRAY -> { curBinData = dictionary.binData(); curBinOff = dictionary.binOffset(idx); curBinLen = dictionary.binLength(idx); }
+            case INT96 -> curLong = dictionary.getLong(idx); // pre-converted to epoch nanos at dictionary-page decode time, see DictionaryCache
             default -> throw new ParquetScanException("Dictionary encoding not supported for " + physical, file, -1, columnName, null);
         }
     }
@@ -575,8 +623,22 @@ public final class FastColumnCursor implements ColumnReader {
                 curBool = bit != 0;
                 boolBitPos++;
             }
+            case FIXED_LEN_BYTE_ARRAY -> {
+                curBinData = valueBytes.buf;
+                curBinOff = valueBytes.pos;
+                curBinLen = typeLength;
+                valueBytes.pos += typeLength;
+            }
+            case INT96 -> {
+                // PLAIN encoding of INT96 is "12 bytes little endian" (parquet-format Encodings.md): read
+                // as the two little-endian fields the legacy convention actually splits it into -- see
+                // Int96Timestamp's Javadoc for why this specific split is the only one worth supporting.
+                long nanosOfDay = valueBytes.readLongLE();
+                int julianDay = valueBytes.readIntLE();
+                curLong = Int96Timestamp.toEpochNanos(nanosOfDay, julianDay);
+            }
             default -> throw new ParquetScanException(
-                    "Physical type " + physical + " is not supported by the native decode engine yet (INT96/FIXED_LEN_BYTE_ARRAY)",
+                    "Physical type " + physical + " is not supported by the native decode engine yet",
                     file, -1, columnName, null);
         }
     }

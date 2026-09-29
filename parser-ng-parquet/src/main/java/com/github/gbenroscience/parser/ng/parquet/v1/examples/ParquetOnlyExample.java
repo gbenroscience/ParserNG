@@ -21,11 +21,7 @@ import java.nio.file.Path;
 /**
  * Runnable walkthrough of {@code parser-ng-parquet} used on its own, with no SQL layer at all: this
  * is the module a hand-written scan, a stream processor, or a different query engine entirely would
- * call directly. Every example below is real, working code against this module's actual public API
- * (not pseudocode) — <b>but has not been executed</b>, for the same reason nothing else in this
- * module has: no Maven, no Parquet/Arrow/Hadoop jars, in the environment this was written in. Run it
- * with:
- *
+ * call directly.
  * <pre>{@code
  * mvn -pl parser-ng-parquet test-compile
  * java --add-modules jdk.incubator.vector -cp <test-classes>:<classes>:<deps> \

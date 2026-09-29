@@ -27,7 +27,7 @@ public final class DictionaryCache {
     private byte[] binData;
     private int[] binOffsets; // length size+1
 
-    public DictionaryCache(DictionaryPage page, PrimitiveType.PrimitiveTypeName physical, Path file, String column) {
+    public DictionaryCache(DictionaryPage page, PrimitiveType.PrimitiveTypeName physical, Path file, String column, int typeLength) {
         this.physical = physical;
         try {
             byte[] raw = page.getBytes().toByteArray();
@@ -64,6 +64,29 @@ public final class DictionaryCache {
                         dataPos += len;
                     }
                     binOffsets[n] = dataPos;
+                }
+                case FIXED_LEN_BYTE_ARRAY -> {
+                    // PLAIN dictionary entries for FIXED_LEN_BYTE_ARRAY carry no length prefix (unlike
+                    // BINARY): every entry is exactly typeLength bytes, back to back.
+                    binOffsets = new int[n + 1];
+                    binData = new byte[n * typeLength];
+                    for (int i = 0; i < n; i++) {
+                        System.arraycopy(raw, br.pos, binData, i * typeLength, typeLength);
+                        br.pos += typeLength;
+                        binOffsets[i] = i * typeLength;
+                    }
+                    binOffsets[n] = n * typeLength;
+                }
+                case INT96 -> {
+                    // See Int96Timestamp's Javadoc: converted to epoch nanoseconds once here, so
+                    // FastColumnCursor.gatherDictionary's INT96 case is a plain array read, exactly like
+                    // every other dictionary-encoded fixed-width type.
+                    longs = new long[n];
+                    for (int i = 0; i < n; i++) {
+                        long nanosOfDay = br.readLongLE();
+                        int julianDay = br.readIntLE();
+                        longs[i] = Int96Timestamp.toEpochNanos(nanosOfDay, julianDay);
+                    }
                 }
                 default -> throw new ParquetScanException("Dictionary encoding not supported for " + physical, file, -1, column, null);
             }

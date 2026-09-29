@@ -88,6 +88,81 @@ public final class ByteReader {
         return v;
     }
 
+    /**
+     * ULEB128 into a {@code long}, for DELTA_BINARY_PACKED header/block fields (block size, miniblock
+     * count and value count fit comfortably in an {@code int} and could use {@link #readUnsignedVarInt()},
+     * but the zigzag-encoded first-value/min-delta fields are full 64-bit quantities for INT64 columns).
+     */
+    public long readUnsignedVarLong() {
+        long v = 0;
+        int shift = 0, b;
+        do {
+            require(1);
+            b = buf[pos++] & 0xFF;
+            v |= (long) (b & 0x7F) << shift;
+            shift += 7;
+            if (shift > 70) throw new Corrupt(pos, 1, limit, buf.length); // malformed: no terminating byte within a sane width
+        } while ((b & 0x80) != 0);
+        return v;
+    }
+
+    /** {@code (n >>> 1) ^ -(n & 1)} -- standard zigzag decode, shared by every DELTA_* decoder. */
+    public static long zigZagDecode(long n) {
+        return (n >>> 1) ^ -(n & 1);
+    }
+
+    /**
+     * Generic LSB-first bit-unpacking for widths up to 64, into a {@code long[]}. Used only by the
+     * DELTA_* decoders (see {@code DeltaBinaryPackedDecoder}), whose miniblocks can carry up to
+     * 64-bit-wide unsigned deltas for INT64 columns -- wider than {@link #readBitPackedGroups} (int[],
+     * capped at 32 bits) supports. Correctness-first: a straightforward byte-at-a-time unpack rather
+     * than {@link #readBitPackedGroups}'s vectorized 64-bit-load fast paths, since this path has not
+     * been benchmarked (see the class Javadoc's general bounds-checking rationale, which applies here
+     * identically: every byte still comes from an untrusted page).
+     *
+     * <p>Always consumes exactly {@code groupCount8 * 8} values' worth of bytes ({@code groupCount8 *
+     * bitWidth} bytes), even when {@code maxWrite} is smaller -- matching {@link #readBitPackedGroups}'s
+     * contract, and required here because a DELTA_BINARY_PACKED miniblock is always fully present in the
+     * stream (padded with zeros) regardless of how many of its values a final, partial block actually uses.
+     */
+    public void readBitPackedGroupsLong(int bitWidth, int groupCount8, long[] out, int offset, int maxWrite) {
+        final long totalValues = (long) groupCount8 * 8L;
+        final int toWrite = (int) Math.min(totalValues, Math.max(maxWrite, 0));
+        if (bitWidth == 0) {
+            java.util.Arrays.fill(out, offset, offset + toWrite, 0L);
+            return;
+        }
+        if (bitWidth < 0 || bitWidth > 64) {
+            throw new IllegalArgumentException("invalid bit width " + bitWidth);
+        }
+        final long needBytes = (long) groupCount8 * bitWidth;
+        if (pos < 0 || needBytes > (long) limit - pos) {
+            throw new Corrupt(pos, (int) Math.min(needBytes, Integer.MAX_VALUE), limit, buf.length);
+        }
+        final byte[] b = buf;
+        int bytePos = pos, bitPos = 0, o = offset;
+        for (int v = 0; v < toWrite; v++) {
+            long value = 0;
+            int bitsFilled = 0;
+            int bp = bytePos, bitp = bitPos;
+            while (bitsFilled < bitWidth) {
+                int avail = 8 - bitp;
+                int take = Math.min(avail, bitWidth - bitsFilled);
+                int chunk = (b[bp] & 0xFF) >>> bitp;
+                chunk &= (take == 8) ? 0xFF : ((1 << take) - 1);
+                value |= ((long) chunk) << bitsFilled;
+                bitsFilled += take;
+                bitp += take;
+                if (bitp == 8) { bitp = 0; bp++; }
+            }
+            out[o++] = value;
+            final int totalBit = bitPos + bitWidth;
+            bytePos += totalBit / 8;
+            bitPos = totalBit % 8;
+        }
+        pos += (int) needBytes; // skip the whole run, including any values beyond maxWrite -- see contract note above
+    }
+
     /** Little-endian 64-bit view over a {@code byte[]}: one load covers a whole 8-value group for bit widths 2..8. */
     private static final VarHandle LONG_LE = MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.LITTLE_ENDIAN);
 
