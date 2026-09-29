@@ -56,14 +56,14 @@ repository and is published to Maven Central alongside it.
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-sql</artifactId>
-    <version>3.0.8</version>
+    <version>3.0.9</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation("com.github.gbenroscience:parser-ng-sql:3.0.8")
+implementation("com.github.gbenroscience:parser-ng-sql:3.0.9")
 ```
 
 parser-ng-sql depends on `parser-ng-arrow`, `parser-ng`, `parser-ng-simd`, and

@@ -7,14 +7,14 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>3.0.8</version>
+        <version>3.0.9</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>parser-ng-parquet</artifactId>
     <packaging>jar</packaging>
     <name>parser-ng-parquet</name>
-    <version>3.0.8</version>
+    <version>3.0.9</version>
     <description>
         ParserNG's Parquet storage layer: projection, predicate-driven row-group pruning and
         allocation-conscious decoding into Apache Arrow VectorSchemaRoot batches.
