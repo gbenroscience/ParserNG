@@ -43,7 +43,8 @@ import java.nio.file.Path;
  */
 public final class ColumnPlan {
 
-    enum Kind { BOOL, INT8, INT16, INT32, DATE_DAY, INT64, TIMESTAMP, FLOAT, DOUBLE, UTF8, BINARY, DECIMAL }
+    enum Kind { BOOL, INT8, INT16, INT32, DATE_DAY, INT64, TIMESTAMP, FLOAT, DOUBLE, UTF8, BINARY, DECIMAL,
+                UINT8, UINT16, UINT32, UINT64, UUID }
 
     /** Which physical type a DECIMAL-kind column's unscaled value is read from; meaningless for every other {@link Kind}. */
     private enum DecimalSource { INT32, INT64, BYTES }
@@ -101,7 +102,14 @@ public final class ColumnPlan {
                     k = Kind.DECIMAL; at = new ArrowType.Decimal(dec.getPrecision(), dec.getScale(), 128);
                     decSrc = DecimalSource.INT32; decScale = dec.getScale();
                 }
-                else throw unsupported(file, name, "INT32 with logical type " + lt + " (unsigned ints, TIME not supported yet)");
+                // Unsigned INT(8|16|32, false) are stored as INT32 physical (parquet-format
+                // LogicalTypes.md, "Unsigned Integers"); UINT_64 is INT64 physical -- see that case below.
+                // Decoded exactly like their signed counterparts (PLAIN/dictionary/DELTA_BINARY_PACKED
+                // are bit-pattern-agnostic to signedness); only the resulting Arrow vector type differs.
+                else if (lt instanceof IntLogicalTypeAnnotation i && !i.isSigned() && i.getBitWidth() == 32) { k = Kind.UINT32; at = new ArrowType.Int(32, false); }
+                else if (lt instanceof IntLogicalTypeAnnotation i && !i.isSigned() && i.getBitWidth() == 16) { k = Kind.UINT16; at = new ArrowType.Int(16, false); }
+                else if (lt instanceof IntLogicalTypeAnnotation i && !i.isSigned() && i.getBitWidth() == 8) { k = Kind.UINT8; at = new ArrowType.Int(8, false); }
+                else throw unsupported(file, name, "INT32 with logical type " + lt + " (TIME not supported yet)");
                 break;
             case INT64:
                 if (lt == null || (lt instanceof IntLogicalTypeAnnotation i && i.isSigned() && i.getBitWidth() == 64)) {
@@ -118,7 +126,9 @@ public final class ColumnPlan {
                 } else if (lt instanceof DecimalLogicalTypeAnnotation dec) {
                     k = Kind.DECIMAL; at = new ArrowType.Decimal(dec.getPrecision(), dec.getScale(), 128);
                     decSrc = DecimalSource.INT64; decScale = dec.getScale();
-                } else throw unsupported(file, name, "INT64 with logical type " + lt + " (unsigned ints, TIME not supported yet)");
+                } else if (lt instanceof IntLogicalTypeAnnotation i && !i.isSigned() && i.getBitWidth() == 64) {
+                    k = Kind.UINT64; at = new ArrowType.Int(64, false);
+                } else throw unsupported(file, name, "INT64 with logical type " + lt + " (TIME not supported yet)");
                 break;
             case INT96:
                 // Deprecated legacy timestamp type; no LogicalTypeAnnotation exists for it (it predates
@@ -146,7 +156,15 @@ public final class ColumnPlan {
                 if (lt instanceof DecimalLogicalTypeAnnotation dec) {
                     k = Kind.DECIMAL; at = new ArrowType.Decimal(dec.getPrecision(), dec.getScale(), 128);
                     decSrc = DecimalSource.BYTES; decScale = dec.getScale();
-                } else throw unsupported(file, name, "FIXED_LEN_BYTE_ARRAY with logical type " + lt + " (only DECIMAL supported; UUID not supported yet)");
+                } else if (lt instanceof UUIDLogicalTypeAnnotation) {
+                    // UUID annotates FIXED_LEN_BYTE_ARRAY(16) only (parquet-format LogicalTypes.md); a
+                    // writer claiming UUID on any other width is itself non-conformant, so this is a
+                    // corrupt/unsupported-file error, not a "not implemented yet" one.
+                    if (pt.getTypeLength() != 16) {
+                        throw unsupported(file, name, "UUID logical type on a FIXED_LEN_BYTE_ARRAY(" + pt.getTypeLength() + ") column (must be 16)");
+                    }
+                    k = Kind.UUID; at = new ArrowType.FixedSizeBinary(16);
+                } else throw unsupported(file, name, "FIXED_LEN_BYTE_ARRAY with logical type " + lt + " (only DECIMAL/UUID supported)");
                 break;
             default:
                 throw unsupported(file, name, pt.getPrimitiveTypeName() + " (not supported yet)");
@@ -272,9 +290,60 @@ public final class ColumnPlan {
                 }
                 break;
             }
+            // Unsigned ints: identical decode to their signed counterparts (see forPrimitive's
+            // Javadoc note) -- only the Arrow vector type differs, so these mirror INT8/INT16/INT32/
+            // INT64 exactly, just writing into Uint1Vector/Uint2Vector/Uint4Vector/Uint8Vector.
+            case UINT8: {
+                UInt1Vector o = (UInt1Vector) v;
+                for (int i = 0; i < n; i++) {
+                    if (maxDef == 0 || cr.getCurrentDefinitionLevel() == maxDef) o.set(i, (byte) cr.getInteger());
+                    cr.consume();
+                }
+                break;
+            }
+            case UINT16: {
+                UInt2Vector o = (UInt2Vector) v;
+                for (int i = 0; i < n; i++) {
+                    if (maxDef == 0 || cr.getCurrentDefinitionLevel() == maxDef) o.set(i, (short) cr.getInteger());
+                    cr.consume();
+                }
+                break;
+            }
+            case UINT32: {
+                UInt4Vector o = (UInt4Vector) v;
+                for (int i = 0; i < n; i++) {
+                    if (maxDef == 0 || cr.getCurrentDefinitionLevel() == maxDef) o.set(i, cr.getInteger());
+                    cr.consume();
+                }
+                break;
+            }
+            case UINT64: {
+                UInt8Vector o = (UInt8Vector) v;
+                for (int i = 0; i < n; i++) {
+                    if (maxDef == 0 || cr.getCurrentDefinitionLevel() == maxDef) o.set(i, cr.getLong());
+                    cr.consume();
+                }
+                break;
+            }
+            case UUID: {
+                FixedSizeBinaryVector o = (FixedSizeBinaryVector) v;
+                for (int i = 0; i < n; i++) {
+                    if (maxDef == 0 || cr.getCurrentDefinitionLevel() == maxDef) o.set(i, uuidBytes(cr));
+                    cr.consume();
+                }
+                break;
+            }
             default:
                 throw new IllegalStateException("unhandled kind " + kind);
         }
+    }
+
+    /** Copies the current FIXED_LEN_BYTE_ARRAY(16) value's raw bytes out; {@code cr.getBinary()}'s buffer is not guaranteed to survive past the next read. */
+    private byte[] uuidBytes(ColumnReader cr) {
+        ByteBuffer bb = cr.getBinary().toByteBuffer();
+        byte[] raw = new byte[16];
+        bb.get(raw);
+        return raw;
     }
 
     /**
@@ -301,6 +370,7 @@ public final class ColumnPlan {
     private boolean isBulkKind() {
         switch (kind) {
             case INT32: case INT8: case INT16: case DATE_DAY: case INT64: case TIMESTAMP: case FLOAT: case DOUBLE:
+            case UINT8: case UINT16: case UINT32: case UINT64: // same physical decode as their signed counterparts
                 return true;
             default:
                 return false;
@@ -381,6 +451,34 @@ public final class ColumnPlan {
                 else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
                 break;
             }
+            case UINT32: {
+                final UInt4Vector o = (UInt4Vector) v;
+                final int[] a = fc.bulkInts();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                break;
+            }
+            case UINT16: {
+                final UInt2Vector o = (UInt2Vector) v;
+                final int[] a = fc.bulkInts();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, (short) a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, (short) a[j++]); }
+                break;
+            }
+            case UINT8: {
+                final UInt1Vector o = (UInt1Vector) v;
+                final int[] a = fc.bulkInts();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, (byte) a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, (byte) a[j++]); }
+                break;
+            }
+            case UINT64: {
+                final UInt8Vector o = (UInt8Vector) v;
+                final long[] a = fc.bulkLongs();
+                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
+                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                break;
+            }
             default:
                 throw new IllegalStateException("not a bulk kind: " + kind);
         }
@@ -418,6 +516,16 @@ public final class ColumnPlan {
                 // vectors above) -- grow capacity ourselves first, exactly what setSafe would do internally.
                 while (dv.getValueCapacity() <= i) dv.reAlloc();
                 dv.set(i, decimalOf(cr));
+                break;
+            }
+            case UINT8: ((UInt1Vector) v).setSafe(i, (byte) cr.getInteger()); break;
+            case UINT16: ((UInt2Vector) v).setSafe(i, (short) cr.getInteger()); break;
+            case UINT32: ((UInt4Vector) v).setSafe(i, cr.getInteger()); break;
+            case UINT64: ((UInt8Vector) v).setSafe(i, cr.getLong()); break;
+            case UUID: {
+                FixedSizeBinaryVector fv = (FixedSizeBinaryVector) v;
+                while (fv.getValueCapacity() <= i) fv.reAlloc(); // FixedSizeBinaryVector.setSafe(int,byte[]) does not exist either -- same pattern as DECIMAL above
+                fv.set(i, uuidBytes(cr));
                 break;
             }
             default: throw new IllegalStateException("unhandled kind " + kind);

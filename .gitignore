@@ -9,6 +9,7 @@ src/main/java/.DS_Store
 *.rtf
 *.log
 *.swp
+*.zip
 sql-layer-specs.txt
 parser-ng-pro/*.txt
 .specstory

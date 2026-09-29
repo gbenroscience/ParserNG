@@ -76,9 +76,10 @@ import java.nio.file.Path;
  * not been tested against a real file compressed with SNAPPY/GZIP/ZSTD</b> — doing so, specifically,
  * is the single most valuable test to run before trusting this class on compressed production data.
  *
- * <p>Unsupported and rejected by name rather than silently mis-decoded: {@code DELTA_BINARY_PACKED},
- * {@code DELTA_LENGTH_BYTE_ARRAY}, {@code DELTA_BYTE_ARRAY}, {@code BYTE_STREAM_SPLIT},
- * {@code INT96}/{@code FIXED_LEN_BYTE_ARRAY} physical types.
+ * <p>Value encodings decoded natively: {@code PLAIN}, dictionary ({@code PLAIN_DICTIONARY}/{@code RLE_DICTIONARY}),
+ * {@code RLE} (BOOLEAN only &mdash; the encoding Data Page V2 writers use for booleans), {@code DELTA_BINARY_PACKED},
+ * {@code DELTA_LENGTH_BYTE_ARRAY}, {@code DELTA_BYTE_ARRAY} and {@code BYTE_STREAM_SPLIT}. Any other encoding is
+ * rejected by name rather than silently mis-decoded.
  *
  * <p>Not thread-safe; one instance per column per row group per {@code RowGroupDecoder}
  * (constructed fresh in {@code begin()} for every row group, matching {@code ColumnReaderImpl}'s own
@@ -141,6 +142,7 @@ public final class FastColumnCursor implements ColumnReader {
     private boolean pageIsDictionary;
     private boolean bulkPlain; // true for the current page: values already sit in one of the scratch arrays below
     private boolean pageIsMaterializedBinary; // true for the current page: DELTA_LENGTH_BYTE_ARRAY / DELTA_BYTE_ARRAY (see matBinary)
+    private boolean pageIsBooleanRle; // true for the current page: BOOLEAN values RLE-encoded (Data Page V2 default); dense 0/1 flags sit in idxBuf
     private int[] idxBuf = new int[0];
     private int[] intScratch = new int[0];
     private long[] longScratch = new long[0];
@@ -390,10 +392,37 @@ public final class FastColumnCursor implements ColumnReader {
         boolean dict = enc == Encoding.PLAIN_DICTIONARY || enc == Encoding.RLE_DICTIONARY;
         pageIsDictionary = dict;
         pageIsMaterializedBinary = false;
+        pageIsBooleanRle = false;
         boolBitPos = 0;
         bulkPlain = false;
         denseBefore = 0;
         final int present = countPresent(count);
+        if (enc == Encoding.RLE) {
+            // parquet-format Encodings.md: RLE as a *value* encoding is defined for BOOLEAN only (it is what
+            // Data Page V2 writers, e.g. pyarrow >= 14, emit for boolean columns). Unlike RLE_DICTIONARY there
+            // is no bit-width byte (the width is fixed at 1), but like the level streams the hybrid runs are
+            // preceded by a 4-byte little-endian byte length.
+            if (physical != PrimitiveType.PrimitiveTypeName.BOOLEAN) {
+                throw new ParquetScanException("RLE value encoding is not valid for physical type " + physical,
+                        file, -1, columnName, null);
+            }
+            pageIsBooleanRle = true;
+            if (present == 0) return;
+            if (dataLen < 4) {
+                throw corruptPage("RLE boolean page holds " + dataLen + " value bytes, too few for its length prefix", null);
+            }
+            int runsLen = br.readIntLE();
+            if (runsLen < 0 || runsLen > dataLen - 4) {
+                throw corruptPage("RLE boolean page declares " + runsLen + " run bytes but only " + (dataLen - 4)
+                        + " remain after the length prefix", null);
+            }
+            if (idxBuf.length < present) idxBuf = new int[present];
+            ByteReader runs = new ByteReader();
+            runs.wrap(br.buf, br.pos, runsLen);
+            RleBitPackingDecoder.decode(runs, 1, idxBuf, present);
+            br.pos += runsLen;
+            return;
+        }
         if (enc == Encoding.DELTA_BINARY_PACKED) {
             // Only INT32/INT64 carry this encoding (parquet-format Encodings.md); reuses the existing
             // bulk-decode path (see the class Javadoc's "Two decode loops") by landing its output in the
@@ -430,10 +459,53 @@ public final class FastColumnCursor implements ColumnReader {
             }
             return;
         }
+        if (enc == Encoding.BYTE_STREAM_SPLIT) {
+            // Valid for INT32/INT64/FLOAT/DOUBLE (original scope) and, since PARQUET-2414,
+            // FIXED_LEN_BYTE_ARRAY -- see ByteStreamSplitDecoder's Javadoc for the byte layout. Every
+            // fixed-width case lands in the very same scratch arrays PLAIN's bulk path fills (bulkPlain
+            // = true), exactly like the DELTA_BINARY_PACKED branch above; FIXED_LEN_BYTE_ARRAY goes
+            // through the same MaterializedBinary path as DELTA_LENGTH_BYTE_ARRAY/DELTA_BYTE_ARRAY, since
+            // it is equally not zero-copy (each value's bytes are scattered across all typeLength streams).
+            if (present == 0) return;
+            switch (physical) {
+                case INT32 -> {
+                    bulkPlain = true;
+                    if (intScratch.length < present) intScratch = new int[present];
+                    ByteStreamSplitDecoder.decodeInts(br.buf, br.pos, intScratch, present);
+                    br.pos += present * 4;
+                }
+                case INT64 -> {
+                    bulkPlain = true;
+                    if (longScratch.length < present) longScratch = new long[present];
+                    ByteStreamSplitDecoder.decodeLongs(br.buf, br.pos, longScratch, present);
+                    br.pos += present * 8;
+                }
+                case FLOAT -> {
+                    bulkPlain = true;
+                    if (floatScratch.length < present) floatScratch = new float[present];
+                    ByteStreamSplitDecoder.decodeFloats(br.buf, br.pos, floatScratch, present);
+                    br.pos += present * 4;
+                }
+                case DOUBLE -> {
+                    bulkPlain = true;
+                    if (doubleScratch.length < present) doubleScratch = new double[present];
+                    ByteStreamSplitDecoder.decodeDoubles(br.buf, br.pos, doubleScratch, present);
+                    br.pos += present * 8;
+                }
+                case FIXED_LEN_BYTE_ARRAY -> {
+                    pageIsMaterializedBinary = true;
+                    ByteStreamSplitDecoder.decodeFixed(br.buf, br.pos, present, typeLength, matBinary);
+                    br.pos += present * typeLength;
+                }
+                default -> throw new ParquetScanException("BYTE_STREAM_SPLIT is not valid for physical type " + physical,
+                        file, -1, columnName, null);
+            }
+            return;
+        }
         if (!dict && enc != Encoding.PLAIN) {
             throw new ParquetScanException("Unsupported value encoding " + enc
-                    + " (PLAIN, dictionary and DELTA_BINARY_PACKED/DELTA_LENGTH_BYTE_ARRAY/DELTA_BYTE_ARRAY "
-                    + "are decoded natively; BYTE_STREAM_SPLIT is not)", file, -1, columnName, null);
+                    + " (PLAIN, dictionary, RLE for BOOLEAN, DELTA_BINARY_PACKED/DELTA_LENGTH_BYTE_ARRAY/"
+                    + "DELTA_BYTE_ARRAY and BYTE_STREAM_SPLIT are decoded natively)", file, -1, columnName, null);
         }
         if (dict) {
             if (dictionary == null) {
@@ -577,6 +649,8 @@ public final class FastColumnCursor implements ColumnReader {
                 case DOUBLE -> curDouble = doubleScratch[d];
                 default -> throw new IllegalStateException("bulkPlain implies a fixed-width numeric physical type: " + physical);
             }
+        } else if (pageIsBooleanRle) {
+            curBool = idxBuf[denseBefore] != 0;
         } else if (pageIsDictionary) {
             gatherDictionary(idxBuf[denseBefore]);
         } else if (pageIsMaterializedBinary) {

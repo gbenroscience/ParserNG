@@ -278,10 +278,16 @@ A leaf that cannot be pushed simply prunes nothing, which is always sound.
 | BINARY | `Binary` |
 | BINARY + STRING/ENUM/JSON | `Utf8` |
 
-Unsupported leaves (DECIMAL, TIME, UUID, INT96, FIXED_LEN_BYTE_ARRAY, unsigned ints, BSON) fail fast,
-naming the column, whether flat or nested. The native decoder also rejects the `DELTA_BINARY_PACKED`,
-`DELTA_LENGTH_BYTE_ARRAY`, `DELTA_BYTE_ARRAY`, and `BYTE_STREAM_SPLIT` encodings by name rather than
-mis-decoding them.
+DECIMAL (INT32-, INT64-, and FIXED_LEN_BYTE_ARRAY-backed) and INT96 legacy timestamps are supported.
+`DELTA_BINARY_PACKED`, `DELTA_LENGTH_BYTE_ARRAY`, and `DELTA_BYTE_ARRAY` are also decoded correctly.
+Remaining unsupported leaves (TIME, UUID, raw/non-DECIMAL FIXED_LEN_BYTE_ARRAY such as a UUID or fixed
+binary column, unsigned ints, BSON) fail fast, naming the column, whether flat or nested. The native
+decoder also still rejects the `BYTE_STREAM_SPLIT` encoding by name rather than mis-decoding it.
+
+BOOLEAN columns decode under both data page versions: PLAIN (bit-packed) in V1 pages and the
+length-prefixed RLE value encoding that the Parquet spec uses for booleans in V2 pages (pyarrow's default
+under `data_page_version="2.0"` since Arrow 14). RLE is accepted as a value encoding for BOOLEAN only; on any
+other physical type it fails fast with a named error.
 
 ## Nested types
 Handled: structs, 3-level `LIST`/`MAP` (and the legacy 2-level / "tuple" list encodings), bare
@@ -339,8 +345,11 @@ should be re-measured on your hardware.
 | Exact row filtering (`exactFilter()`), incl. `Not`, `Like`, `Regex`, `ColCmp`, `Custom` | yes (flat top-level columns only) |
 | Flat primitive types (see Supported types) | yes |
 | Nested: struct, LIST (3-level + legacy), MAP, bare repeated, arbitrary nesting | yes |
-| DECIMAL, TIME, UUID, INT96, FLBA, unsigned ints (flat or nested) | clear error, not yet |
-| DELTA_* and BYTE_STREAM_SPLIT encodings | clear error, not yet |
+| DECIMAL (INT32/INT64/FLBA-backed), INT96 legacy timestamps | yes |
+| DELTA_BINARY_PACKED, DELTA_LENGTH_BYTE_ARRAY, DELTA_BYTE_ARRAY | yes |
+| TIME, UUID, raw (non-DECIMAL) FLBA, unsigned ints, BSON (flat or nested) | clear error, not yet |
+| BYTE_STREAM_SPLIT encoding | clear error, not yet |
+| BOOLEAN columns in V1 (PLAIN) and V2 (RLE) data pages | yes |
 | Predicate pushdown / exact filtering on nested columns | not yet |
 | Metadata inspection (footer only) | yes (`ParquetFileInfo`) |
 | Metrics (row groups in file/skipped/read, rows, batches, decode time, parallelism, bytes decoded / read from disk / Arrow produced) | yes; page counts not available |
@@ -359,7 +368,7 @@ should be re-measured on your hardware.
 * `exactFilter()` mode: every emitted batch is freshly allocated by selective copy, regardless of
   parallelism, and every surviving row is evaluated once.
 * Nested columns, and BOOLEAN/string/binary columns, still pay per-value handling beyond the flat numeric bulk path.
-  No head-to-head comparison against native (C++/Rust) Parquet readers has been run.
+  See [Compared to other readers](#compared-to-other-readers) for a head-to-head against parquet-java and pyarrow.
 
 ## Benchmarks
 Two drivers live in `v1.bench`, both over the same eight scenarios (full flat scan, projected scan,
@@ -477,7 +486,60 @@ the projected column chunks read, an upper bound under page-level pruning. `arro
 * **These are warm-page-cache, end-to-end rates**, from a single machine and one benchmark run per
   environment. Re-run on your hardware before drawing conclusions.
 * **Numbers are hardware-specific.** These come from a low-power laptop CPU with AVX2 (256-bit vectors).
-  Nothing here was compared against other Parquet readers.
+  See [Compared to other readers](#compared-to-other-readers) below for how this stacks up against
+  parquet-java and pyarrow on different hardware.
+
+### Compared to other readers
+
+A third-party spot check (not the JMH results above, not the same machine, not the same methodology;
+see caveats below) against two references: `parquet-java`'s own `ParquetReader<Group>` (the standard
+JVM Parquet baseline: what Hive, Trino's legacy path, and Spark's non-vectorized fallback all run), and
+pyarrow (Arrow's own C++ engine: yes, actually native code, not just "native" in the JVM-marketing
+sense of the word). Both read the identical files this module wrote/read.
+
+**vs. parquet-java** (typed accessor on the parquet-java side, not `toString()`, to keep it fair):
+
+| Workload | parser-ng-parquet | parquet-java | speedup |
+|---|---|---|---|
+| Single INT64 column, PLAIN, no nulls | 57-71M rows/s | 10.8M rows/s | ~5.3-6.6x |
+| 7-column mix, SNAPPY, 15% null | 4.7-4.8M rows/s | 1.27M rows/s | ~3.7-3.8x |
+
+**vs. pyarrow:**
+
+| Workload | parser-ng-parquet | pyarrow | gap |
+|---|---|---|---|
+| Single INT64 column, PLAIN, no nulls, uncompressed | 57-71M rows/s | 257M rows/s | ~3.6-4.5x |
+| + SNAPPY | 47M rows/s | 255M rows/s | ~5.4x |
+| + 15% nulls, uncompressed | 53M rows/s | 139M rows/s | ~2.65x |
+| STRING column, PLAIN | 18M rows/s | 60M rows/s | ~3.25x |
+| BOOLEAN column | 47M rows/s | 131M rows/s | ~2.8x |
+| 7-column mix, SNAPPY, 15% null (stable across repeats) | 4.7-4.8M rows/s | 10-11M rows/s | ~2.1-2.3x |
+
+**Takeaways, and where the gap to pyarrow actually comes from:**
+* Against the standard JVM baseline this module explicitly bypasses, the win is large and consistent
+  (3.7-6.6x), and it's structural, not just algorithmic: `parquet-java`'s row-based reader allocates a
+  boxed value object per field per row, which this module's columnar Arrow-vector write avoids entirely.
+* Against pyarrow, the realistic multi-column workload has the *smallest* relative gap (~2x) of anything
+  tested; pyarrow pays real per-column/per-null overhead there too (its own throughput drops roughly
+  25x from its clean-numeric ceiling), so there's less native headroom to chase in that regime than the
+  single-column numbers suggest.
+* Even in the cleanest possible case (uncompressed, no nulls, single numeric column, where the SIMD
+  bulk-decode path is fully engaged and there's no decompression or GC pressure to speak of), a
+  persistent ~3.6-4.5x gap remains. That floor is architectural (bounds-checked buffer writes, JIT-compiled
+  vs. ahead-of-time-compiled code, no whole-program optimization), not something this module's own
+  allocation pattern explains: a JFR allocation profile plus a direct microbenchmark (reused vs.
+  freshly-allocated decompression output buffer, at realistic page sizes) showed buffer reuse saving only
+  0-12% of decode time, so this is not a case of "just pool the buffers and it'll match native." The
+  Vector API decode kernels themselves are allocation-light; the bulk of GC-visible allocation traces to
+  `parquet-java`'s own page-I/O layer underneath (`BytesInput`/codec wrapping), which both this module and
+  raw `parquet-java` inherit equally.
+
+**Caveats (read before citing these numbers):** run on a shared cloud VM (Intel Xeon, single logical CPU
+exposed to the JVM, AVX-512, a different generation than the AVX2 laptop used for the JMH results above),
+not the author's own hardware; pyarrow 25.0.1 from PyPI; 2M-row synthetic fixtures, not the
+`RandomParquetFiles` fixtures used elsewhere in this document; warmup + median-of-N timing, not
+JMH fork isolation. Directionally repeatable (checked via repeated runs), but re-measure on your own
+target hardware before treating any specific multiplier as load-bearing.
 
 ## Use with parser-ng-sql
 See the separate `parquet` package of the `parser-ng-sql` module for the bridge (`ScanPlanner`, `PredicateConverter`,

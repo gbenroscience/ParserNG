@@ -7,26 +7,35 @@ import com.github.gbenroscience.parser.ng.parquet.v1.Predicate;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.DateDayVector;
+import org.apache.arrow.vector.DecimalVector;
 import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.FixedSizeBinaryVector;
 import org.apache.arrow.vector.Float4Vector;
 import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.SmallIntVector;
 import org.apache.arrow.vector.TimeStampVector;
 import org.apache.arrow.vector.TinyIntVector;
+import org.apache.arrow.vector.UInt1Vector;
+import org.apache.arrow.vector.UInt2Vector;
+import org.apache.arrow.vector.UInt4Vector;
+import org.apache.arrow.vector.UInt8Vector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -99,20 +108,25 @@ public final class RowFilterEvaluator {
     }
 
     /** Kind of the Arrow column being compared -- resolved once at compile time, not per row. */
-    private enum Kind { BOOL, INT8, INT16, INT32, DATE_DAY, INT64, TIMESTAMP, FLOAT, DOUBLE, UTF8 }
+    private enum Kind { BOOL, INT8, INT16, INT32, DATE_DAY, INT64, TIMESTAMP, FLOAT, DOUBLE, UTF8,
+                         UINT8, UINT16, UINT32, UINT64, DECIMAL, UUID }
 
     private final class CmpNode implements Node {
         final int colIndex;
         final Kind kind;
         final Predicate.Op op;
-        final long numLit;      // BOOL(0/1)/INT8/16/32/DATE_DAY/INT64/TIMESTAMP
+        final long numLit;      // BOOL(0/1)/INT8/16/32/DATE_DAY/INT64/TIMESTAMP/UINT8/16/32(widened non-negative)/UINT64(raw bit pattern)
         final float floatLit;   // FLOAT
         final double doubleLit; // DOUBLE
         final String strLit;    // UTF8
+        final BigDecimal decLit; // DECIMAL
+        final byte[] uuidLit;    // UUID
 
-        CmpNode(int colIndex, Kind kind, Predicate.Op op, long numLit, float floatLit, double doubleLit, String strLit) {
+        CmpNode(int colIndex, Kind kind, Predicate.Op op, long numLit, float floatLit, double doubleLit,
+                String strLit, BigDecimal decLit, byte[] uuidLit) {
             this.colIndex = colIndex; this.kind = kind; this.op = op;
             this.numLit = numLit; this.floatLit = floatLit; this.doubleLit = doubleLit; this.strLit = strLit;
+            this.decLit = decLit; this.uuidLit = uuidLit;
         }
 
         public boolean eval(VectorSchemaRoot batch, int row) {
@@ -129,6 +143,15 @@ public final class RowFilterEvaluator {
                 case FLOAT -> cmpDouble(((Float4Vector) v).get(row), op, floatLit);
                 case DOUBLE -> cmpDouble(((Float8Vector) v).get(row), op, doubleLit);
                 case UTF8 -> cmpString(readUtf8((VarCharVector) v, row), op, strLit);
+                // UINT8/16/32 always fit as a non-negative long once masked -- ordinary signed cmpLong
+                // is then exact, no unsigned-comparison special-casing needed (see the class's literal
+                // coercion notes). Only UINT64 can exceed Long.MAX_VALUE and genuinely needs one.
+                case UINT8 -> cmpLong(((UInt1Vector) v).get(row) & 0xFFL, op, numLit);
+                case UINT16 -> cmpLong(((UInt2Vector) v).get(row) & 0xFFFFL, op, numLit);
+                case UINT32 -> cmpLong(((UInt4Vector) v).get(row) & 0xFFFFFFFFL, op, numLit);
+                case UINT64 -> cmpUnsignedLong(((UInt8Vector) v).get(row), op, numLit);
+                case DECIMAL -> cmpBigDecimal(((DecimalVector) v).getObject(row), op, decLit);
+                case UUID -> cmpUuid(uuidBytes((FixedSizeBinaryVector) v, row), op, uuidLit); // op is EQ/NE only -- enforced at compile time
             };
         }
     }
@@ -136,14 +159,19 @@ public final class RowFilterEvaluator {
     private final class InNode implements Node {
         final int colIndex;
         final Kind kind;
-        final Set<Long> numSet;     // BOOL/INT8/16/32/DATE_DAY/INT64/TIMESTAMP
+        final Set<Long> numSet;     // BOOL/INT8/16/32/DATE_DAY/INT64/TIMESTAMP/UINT8/16/32(widened)/UINT64(raw bit pattern)
         final Set<Float> floatSet;  // FLOAT
         final Set<Double> doubleSet; // DOUBLE
         final Set<String> strSet;   // UTF8
+        final List<BigDecimal> decList; // DECIMAL -- BigDecimal.equals() is scale-sensitive (1.50 != 1.5), so a
+                                         // HashSet would silently miss matches; linear-scan with compareTo()==0 instead
+        final List<byte[]> uuidList;    // UUID -- byte[] has no useful equals/hashCode either, same reasoning
 
-        InNode(int colIndex, Kind kind, Set<Long> numSet, Set<Float> floatSet, Set<Double> doubleSet, Set<String> strSet) {
+        InNode(int colIndex, Kind kind, Set<Long> numSet, Set<Float> floatSet, Set<Double> doubleSet,
+               Set<String> strSet, List<BigDecimal> decList, List<byte[]> uuidList) {
             this.colIndex = colIndex; this.kind = kind;
             this.numSet = numSet; this.floatSet = floatSet; this.doubleSet = doubleSet; this.strSet = strSet;
+            this.decList = decList; this.uuidList = uuidList;
         }
 
         public boolean eval(VectorSchemaRoot batch, int row) {
@@ -160,6 +188,25 @@ public final class RowFilterEvaluator {
                 case FLOAT -> floatSet.contains(((Float4Vector) v).get(row));
                 case DOUBLE -> doubleSet.contains(((Float8Vector) v).get(row));
                 case UTF8 -> strSet.contains(readUtf8((VarCharVector) v, row));
+                // Equality is bit-pattern equality regardless of signed/unsigned interpretation, so IN
+                // needs none of CmpNode's unsigned-comparison care -- the raw widened/bit-pattern value
+                // (see numLit's Javadoc above) is exactly what went into numSet, so contains() just works.
+                case UINT8 -> numSet.contains(((UInt1Vector) v).get(row) & 0xFFL);
+                case UINT16 -> numSet.contains(((UInt2Vector) v).get(row) & 0xFFFFL);
+                case UINT32 -> numSet.contains(((UInt4Vector) v).get(row) & 0xFFFFFFFFL);
+                case UINT64 -> numSet.contains(((UInt8Vector) v).get(row));
+                case DECIMAL -> {
+                    BigDecimal got = ((DecimalVector) v).getObject(row);
+                    boolean found = false;
+                    for (BigDecimal cand : decList) if (got.compareTo(cand) == 0) { found = true; break; }
+                    yield found;
+                }
+                case UUID -> {
+                    byte[] got = uuidBytes((FixedSizeBinaryVector) v, row);
+                    boolean found = false;
+                    for (byte[] cand : uuidList) if (Arrays.equals(got, cand)) { found = true; break; }
+                    yield found;
+                }
             };
         }
     }
@@ -195,6 +242,12 @@ public final class RowFilterEvaluator {
                 case FLOAT -> cmpDouble(((Float4Vector) l).get(row), op, ((Float4Vector) r).get(row));
                 case DOUBLE -> cmpDouble(((Float8Vector) l).get(row), op, ((Float8Vector) r).get(row));
                 case UTF8 -> cmpString(readUtf8((VarCharVector) l, row), op, readUtf8((VarCharVector) r, row));
+                case UINT8 -> cmpLong(((UInt1Vector) l).get(row) & 0xFFL, op, ((UInt1Vector) r).get(row) & 0xFFL);
+                case UINT16 -> cmpLong(((UInt2Vector) l).get(row) & 0xFFFFL, op, ((UInt2Vector) r).get(row) & 0xFFFFL);
+                case UINT32 -> cmpLong(((UInt4Vector) l).get(row) & 0xFFFFFFFFL, op, ((UInt4Vector) r).get(row) & 0xFFFFFFFFL);
+                case UINT64 -> cmpUnsignedLong(((UInt8Vector) l).get(row), op, ((UInt8Vector) r).get(row));
+                case DECIMAL -> cmpBigDecimal(((DecimalVector) l).getObject(row), op, ((DecimalVector) r).getObject(row));
+                case UUID -> cmpUuid(uuidBytes((FixedSizeBinaryVector) l, row), op, uuidBytes((FixedSizeBinaryVector) r, row));
             };
         }
     }
@@ -247,13 +300,20 @@ public final class RowFilterEvaluator {
         if (kind == Kind.BOOL && c.op() != Predicate.Op.EQ && c.op() != Predicate.Op.NE) {
             throw new ParquetScanException("Only EQ/NE are meaningful on a BOOLEAN column", file, -1, c.column(), null);
         }
+        if (kind == Kind.UUID && c.op() != Predicate.Op.EQ && c.op() != Predicate.Op.NE) {
+            throw new ParquetScanException("Only EQ/NE are supported on a UUID column (no defined total order "
+                    + "is applied here -- see kindOf's Javadoc)", file, -1, c.column(), null);
+        }
         return switch (kind) {
-            case BOOL -> new CmpNode(idx, kind, c.op(), boolLit(c.value(), c.column()) ? 1 : 0, 0, 0, null);
-            case INT8, INT16, INT32, DATE_DAY -> new CmpNode(idx, kind, c.op(), numericLitAsLong(c.value(), kind, c.column()), 0, 0, null);
-            case INT64, TIMESTAMP -> new CmpNode(idx, kind, c.op(), numericLitAsLong(c.value(), kind, c.column()), 0, 0, null);
-            case FLOAT -> new CmpNode(idx, kind, c.op(), 0, floatLitValue(c.value(), c.column()), 0, null);
-            case DOUBLE -> new CmpNode(idx, kind, c.op(), 0, 0, doubleLitValue(c.value(), c.column()), null);
-            case UTF8 -> new CmpNode(idx, kind, c.op(), 0, 0, 0, stringLit(c.value(), c.column()));
+            case BOOL -> new CmpNode(idx, kind, c.op(), boolLit(c.value(), c.column()) ? 1 : 0, 0, 0, null, null, null);
+            case INT8, INT16, INT32, DATE_DAY -> new CmpNode(idx, kind, c.op(), numericLitAsLong(c.value(), kind, c.column()), 0, 0, null, null, null);
+            case INT64, TIMESTAMP -> new CmpNode(idx, kind, c.op(), numericLitAsLong(c.value(), kind, c.column()), 0, 0, null, null, null);
+            case UINT8, UINT16, UINT32, UINT64 -> new CmpNode(idx, kind, c.op(), unsignedLitAsLong(c.value(), kind, c.column()), 0, 0, null, null, null);
+            case FLOAT -> new CmpNode(idx, kind, c.op(), 0, floatLitValue(c.value(), c.column()), 0, null, null, null);
+            case DOUBLE -> new CmpNode(idx, kind, c.op(), 0, 0, doubleLitValue(c.value(), c.column()), null, null, null);
+            case UTF8 -> new CmpNode(idx, kind, c.op(), 0, 0, 0, stringLit(c.value(), c.column()), null, null);
+            case DECIMAL -> new CmpNode(idx, kind, c.op(), 0, 0, 0, null, bigDecimalLit(c.value(), c.column()), null);
+            case UUID -> new CmpNode(idx, kind, c.op(), 0, 0, 0, null, null, uuidLitBytes(c.value(), c.column()));
         };
     }
 
@@ -261,10 +321,15 @@ public final class RowFilterEvaluator {
         int idx = resolveFlat(in.column(), indexOf, flatLeafNames, file);
         Kind kind = kindOf(fields.get(idx), file);
         Set<Long> nums = null; Set<Float> floats = null; Set<Double> doubles = null; Set<String> strs = null;
+        List<BigDecimal> decs = null; List<byte[]> uuids = null;
         switch (kind) {
             case BOOL, INT8, INT16, INT32, DATE_DAY, INT64, TIMESTAMP -> {
                 nums = new HashSet<>();
                 for (Object v : in.values()) nums.add(numericLitAsLong(v, kind, in.column()));
+            }
+            case UINT8, UINT16, UINT32, UINT64 -> {
+                nums = new HashSet<>();
+                for (Object v : in.values()) nums.add(unsignedLitAsLong(v, kind, in.column()));
             }
             case FLOAT -> {
                 floats = new HashSet<>();
@@ -278,8 +343,16 @@ public final class RowFilterEvaluator {
                 strs = new HashSet<>();
                 for (Object v : in.values()) strs.add(stringLit(v, in.column()));
             }
+            case DECIMAL -> {
+                decs = new java.util.ArrayList<>();
+                for (Object v : in.values()) decs.add(bigDecimalLit(v, in.column()));
+            }
+            case UUID -> {
+                uuids = new java.util.ArrayList<>();
+                for (Object v : in.values()) uuids.add(uuidLitBytes(v, in.column()));
+            }
         }
-        return new InNode(idx, kind, nums, floats, doubles, strs);
+        return new InNode(idx, kind, nums, floats, doubles, strs, decs, uuids);
     }
 
     private Node compileColCmp(Predicate.ColCmp cc, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, Path file) {
@@ -293,6 +366,9 @@ public final class RowFilterEvaluator {
         }
         if (lk == Kind.BOOL && cc.op() != Predicate.Op.EQ && cc.op() != Predicate.Op.NE) {
             throw new ParquetScanException("Only EQ/NE are meaningful between two BOOLEAN columns", file, -1, cc.left(), null);
+        }
+        if (lk == Kind.UUID && cc.op() != Predicate.Op.EQ && cc.op() != Predicate.Op.NE) {
+            throw new ParquetScanException("Only EQ/NE are supported between two UUID columns", file, -1, cc.left(), null);
         }
         return new ColCmpNode(li, ri, lk, cc.op());
     }
@@ -356,11 +432,25 @@ public final class RowFilterEvaluator {
         if (at instanceof ArrowType.Date) return Kind.DATE_DAY;
         if (at instanceof ArrowType.Timestamp) return Kind.TIMESTAMP;
         if (at instanceof ArrowType.Int i) {
+            // getIsSigned() matters here: an unsigned column's vector is UInt1/2/4/8Vector, none of
+            // which IS-A TinyIntVector/SmallIntVector/IntVector/BigIntVector -- treating it as the
+            // signed Kind by bit width alone would compile fine and then throw ClassCastException on
+            // the first row evaluated (or, worse, if the two vector families ever did share a common
+            // cast target, silently apply signed comparison semantics to an unsigned column).
+            if (i.getIsSigned()) {
+                return switch (i.getBitWidth()) {
+                    case 8 -> Kind.INT8;
+                    case 16 -> Kind.INT16;
+                    case 32 -> Kind.INT32;
+                    case 64 -> Kind.INT64;
+                    default -> throw unsupported(f, file);
+                };
+            }
             return switch (i.getBitWidth()) {
-                case 8 -> Kind.INT8;
-                case 16 -> Kind.INT16;
-                case 32 -> Kind.INT32;
-                case 64 -> Kind.INT64;
+                case 8 -> Kind.UINT8;
+                case 16 -> Kind.UINT16;
+                case 32 -> Kind.UINT32;
+                case 64 -> Kind.UINT64;
                 default -> throw unsupported(f, file);
             };
         }
@@ -372,6 +462,15 @@ public final class RowFilterEvaluator {
             };
         }
         if (at instanceof ArrowType.Utf8) return Kind.UTF8;
+        if (at instanceof ArrowType.Decimal) return Kind.DECIMAL;
+        if (at instanceof ArrowType.FixedSizeBinary fsb) {
+            // 16 bytes is, in this reader, only ever produced for the UUID logical type (see
+            // ColumnPlan.forPrimitive) -- no other FIXED_LEN_BYTE_ARRAY use produces a bare
+            // FixedSizeBinary Arrow type (DECIMAL on FIXED_LEN_BYTE_ARRAY maps to ArrowType.Decimal
+            // instead), so this check is exact, not a heuristic.
+            if (fsb.getByteWidth() == 16) return Kind.UUID;
+            throw unsupported(f, file);
+        }
         throw unsupported(f, file);
     }
 
@@ -422,6 +521,55 @@ public final class RowFilterEvaluator {
         return s;
     }
 
+    /**
+     * UINT8/16/32 literals are widened to their non-negative long representation (matching what
+     * {@code CmpNode}/{@code InNode} mask the vector's own value down to -- see those classes'
+     * {@code numLit} Javadoc), rejecting negative Java literals as almost certainly a mistake (a
+     * negative int/long was never a valid unsigned value to begin with).
+     *
+     * <p>UINT64 is a real, stated limitation: values above {@link Long#MAX_VALUE} exist in a valid
+     * UINT64 column but cannot be written as an ordinary non-negative Java {@code long} literal at
+     * all -- expressing one would require accepting the value's raw two's-complement bit pattern as a
+     * negative {@code long}, which is exactly the kind of "looks like a bug, might be intentional"
+     * ambiguity this method refuses to guess through. Only the bottom half of UINT64's range
+     * (0..Long.MAX_VALUE) is reachable as a literal here.
+     */
+    private static long unsignedLitAsLong(Object v, Kind kind, String column) {
+        long raw;
+        if (v instanceof Integer i) raw = i;
+        else if (v instanceof Long l) raw = l;
+        else throw badLiteral(column, v, "Integer or Long (non-negative)");
+        if (raw < 0) {
+            throw badLiteral(column, v, kind == Kind.UINT64
+                    ? "a non-negative Long (values above Long.MAX_VALUE are not expressible as a literal here)"
+                    : "a non-negative Integer or Long");
+        }
+        long max = switch (kind) {
+            case UINT8 -> 0xFFL;
+            case UINT16 -> 0xFFFFL;
+            case UINT32 -> 0xFFFFFFFFL;
+            default -> Long.MAX_VALUE; // UINT64: already checked non-negative above, nothing tighter to enforce
+        };
+        if (raw > max) throw badLiteral(column, v, "a value representable in " + kind);
+        return raw;
+    }
+
+    /** No rescaling: {@code cmpBigDecimal}/{@code cmpUuid} below compare by value ({@code compareTo}/{@code compareTo}==0), not by {@code equals()}, so a literal's scale need not match the column's. */
+    private static BigDecimal bigDecimalLit(Object v, String column) {
+        if (!(v instanceof BigDecimal d)) throw badLiteral(column, v, "BigDecimal");
+        return d;
+    }
+
+    /** Accepts a {@link UUID} literal directly, encoded exactly as Parquet's UUID logical type does: 16 bytes, big-endian, most-significant-bits first (RFC 4122 layout -- the same one {@code UUID.toString()} reflects). */
+    private static byte[] uuidLitBytes(Object v, String column) {
+        if (!(v instanceof UUID u)) throw badLiteral(column, v, "java.util.UUID");
+        byte[] b = new byte[16];
+        long msb = u.getMostSignificantBits(), lsb = u.getLeastSignificantBits();
+        for (int i = 0; i < 8; i++) b[i] = (byte) (msb >>> (8 * (7 - i)));
+        for (int i = 0; i < 8; i++) b[8 + i] = (byte) (lsb >>> (8 * (7 - i)));
+        return b;
+    }
+
     private static ParquetScanException badLiteral(String column, Object value, String expected) {
         return new ParquetScanException("exactFilter() literal for '" + column + "' must be " + expected
                 + ", was " + (value == null ? "null" : value.getClass().getSimpleName()), null, -1, column, null);
@@ -456,5 +604,34 @@ public final class RowFilterEvaluator {
             case LT -> c < 0; case LE -> c <= 0;
             case GT -> c > 0; case GE -> c >= 0;
         };
+    }
+
+    /** The one comparison in this class that genuinely cannot use {@code cmpLong}: UINT64 values above {@link Long#MAX_VALUE} have their sign bit set as a raw {@code long}, so ordinary {@code <}/{@code >} would misorder them against smaller values. */
+    private static boolean cmpUnsignedLong(long a, Predicate.Op op, long b) {
+        int c = Long.compareUnsigned(a, b);
+        return switch (op) {
+            case EQ -> c == 0; case NE -> c != 0;
+            case LT -> c < 0; case LE -> c <= 0;
+            case GT -> c > 0; case GE -> c >= 0;
+        };
+    }
+
+    private static boolean cmpBigDecimal(BigDecimal a, Predicate.Op op, BigDecimal b) {
+        int c = a.compareTo(b); // value comparison, not equals() -- 1.50 and 1.5 compare equal here, as they should
+        return switch (op) {
+            case EQ -> c == 0; case NE -> c != 0;
+            case LT -> c < 0; case LE -> c <= 0;
+            case GT -> c > 0; case GE -> c >= 0;
+        };
+    }
+
+    /** {@code op} is guaranteed EQ or NE by the compile-time checks in {@code compileCmp}/{@code compileColCmp} -- no ordering case to handle. */
+    private static boolean cmpUuid(byte[] a, Predicate.Op op, byte[] b) {
+        boolean eq = Arrays.equals(a, b);
+        return op == Predicate.Op.EQ ? eq : !eq;
+    }
+
+    private static byte[] uuidBytes(FixedSizeBinaryVector v, int row) {
+        return v.get(row); // FixedSizeBinaryVector.get returns a fresh copy, safe to hand to Arrays.equals/store
     }
 }

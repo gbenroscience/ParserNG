@@ -10,6 +10,8 @@ import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.LocalDate;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -158,6 +160,56 @@ public final class PredicateTranslator {
                 && v instanceof String s) ? Binary.fromString(s) : null;
     }
 
+    // ---- DECIMAL literal coercion --------------------------------------------------------------
+    //
+    // Deliberately scoped narrower than exactFilter()'s RowFilterEvaluator, which -- operating on
+    // already-decoded Arrow values in plain Java, with zero dependency on parquet-java's own stats
+    // comparators -- can safely support ordering on every DECIMAL physical source. Pushdown here
+    // cannot, for a reason worth spelling out rather than silently under-supporting: a pushed
+    // FilterPredicate's row-group pruning decision is made by comparing against a MIN/MAX statistic
+    // that parquet-java's own writer computed using ITS OWN comparator for the column's logical type,
+    // and pushed literal values only ever get compared using each column()'s natural Java Comparable
+    // ordering (Integer/Long's, or Binary's own unsigned-lexicographic byte ordering). For an INT32/
+    // INT64-backed DECIMAL, unscaled-value ordering under signed Integer/Long comparison IS decimal
+    // ordering (same scale, by construction below) -- safe, so full ordering is pushed. For a BINARY/
+    // FIXED_LEN_BYTE_ARRAY-backed DECIMAL, the bytes are a big-endian two's-complement signed integer
+    // (parquet-format LogicalTypes.md), and Binary's unsigned-lexicographic byte comparator does NOT
+    // agree with signed numeric ordering for negative values (a negative number's leading 0xFF-filled
+    // byte sorts as "large" under unsigned comparison) -- so only EQ/NE are pushed for those, since
+    // exact-byte equality is correct regardless of which comparator is used to test it.
+    //
+    // Also NOT pushed here at all, for reasons that belong with each: unsigned ints (uncertain whether
+    // parquet-java's own StatisticsFilter and the value-level comparator agree on unsigned ordering
+    // without being able to compile against it and check -- see this class's own conservative-by-default
+    // stance) and UUID (no numeric ordering is defined for it in the first place; exactFilter() supports
+    // its EQ/NE, which is all a UUID predicate should ever need).
+
+    private static Integer asDecimalInt32(LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec, Object v) {
+        if (!(v instanceof BigDecimal d) || d.scale() != dec.getScale()) return null;
+        try { return d.unscaledValue().intValueExact(); } catch (ArithmeticException e) { return null; }
+    }
+
+    private static Long asDecimalInt64(LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec, Object v) {
+        if (!(v instanceof BigDecimal d) || d.scale() != dec.getScale()) return null;
+        try { return d.unscaledValue().longValueExact(); } catch (ArithmeticException e) { return null; }
+    }
+
+    /** BINARY: minimal-length big-endian two's complement (the spec's own BINARY decimal encoding). FIXED_LEN_BYTE_ARRAY: the same, sign-extended/padded to the column's exact width. */
+    private static Binary asDecimalBytes(PrimitiveType pt, LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec, Object v) {
+        if (!(v instanceof BigDecimal d) || d.scale() != dec.getScale()) return null;
+        byte[] minimal = d.unscaledValue().toByteArray();
+        if (pt.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY) {
+            int width = pt.getTypeLength();
+            if (minimal.length > width) return null; // literal has more precision than this column's fixed width can hold
+            byte[] padded = new byte[width];
+            byte fill = (byte) (d.signum() < 0 ? -1 : 0);
+            java.util.Arrays.fill(padded, fill);
+            System.arraycopy(minimal, 0, padded, width - minimal.length, minimal.length);
+            return Binary.fromConstantByteArray(padded);
+        }
+        return Binary.fromConstantByteArray(minimal);
+    }
+
     // ---- leaves ----
 
     private static FilterPredicate cmp(Predicate.Cmp c, MessageType schema) {
@@ -169,11 +221,21 @@ public final class PredicateTranslator {
         switch (pt.getPrimitiveTypeName()) {
             case INT32: {
                 Integer x = asInt32(pt, v);
-                return x == null ? null : ord(FilterApi.intColumn(n), op, x);
+                if (x != null) return ord(FilterApi.intColumn(n), op, x);
+                if (pt.getLogicalTypeAnnotation() instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec) {
+                    Integer u = asDecimalInt32(dec, v);
+                    return u == null ? null : ord(FilterApi.intColumn(n), op, u); // full ordering safe -- see this class's DECIMAL section
+                }
+                return null;
             }
             case INT64: {
                 Long x = asInt64(pt, v);
-                return x == null ? null : ord(FilterApi.longColumn(n), op, x);
+                if (x != null) return ord(FilterApi.longColumn(n), op, x);
+                if (pt.getLogicalTypeAnnotation() instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec) {
+                    Long u = asDecimalInt64(dec, v);
+                    return u == null ? null : ord(FilterApi.longColumn(n), op, u);
+                }
+                return null;
             }
             case FLOAT: {
                 Float x = asFloat(pt, v);
@@ -191,14 +253,27 @@ public final class PredicateTranslator {
             }
             case BINARY: {
                 Binary x = asString(pt, v);
-                if (x == null) return null;
-                if (op == Predicate.Op.EQ) return FilterApi.eq(FilterApi.binaryColumn(n), x);
-                if (op == Predicate.Op.NE) return FilterApi.notEq(FilterApi.binaryColumn(n), x);
-                return null; // no string range pushdown, see Predicate javadoc
+                if (x != null) {
+                    if (op == Predicate.Op.EQ) return FilterApi.eq(FilterApi.binaryColumn(n), x);
+                    if (op == Predicate.Op.NE) return FilterApi.notEq(FilterApi.binaryColumn(n), x);
+                    return null; // no string range pushdown, see Predicate javadoc
+                }
+                return decimalBytesEqNe(pt, n, op, v);
             }
+            case FIXED_LEN_BYTE_ARRAY:
+                return decimalBytesEqNe(pt, n, op, v);
             default:
                 return null;
         }
+    }
+
+    /** EQ/NE only, for the reason spelled out at length next to {@link #asDecimalBytes}. */
+    private static FilterPredicate decimalBytesEqNe(PrimitiveType pt, String n, Predicate.Op op, Object v) {
+        if (!(pt.getLogicalTypeAnnotation() instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec)) return null;
+        if (op != Predicate.Op.EQ && op != Predicate.Op.NE) return null;
+        Binary x = asDecimalBytes(pt, dec, v);
+        if (x == null) return null;
+        return op == Predicate.Op.EQ ? FilterApi.eq(FilterApi.binaryColumn(n), x) : FilterApi.notEq(FilterApi.binaryColumn(n), x);
     }
 
     private static <T extends Comparable<T>, C extends Operators.Column<T> & Operators.SupportsLtGt>
@@ -219,13 +294,25 @@ public final class PredicateTranslator {
         if (pt == null) return null;
         String n = in.column();
         List<?> vals = in.values();
+        LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec =
+                pt.getLogicalTypeAnnotation() instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation d ? d : null;
         switch (pt.getPrimitiveTypeName()) {
             case INT32: {
+                if (dec != null) {
+                    Set<Integer> s = new LinkedHashSet<>();
+                    for (Object o : vals) { Integer x = asDecimalInt32(dec, o); if (x == null) return null; s.add(x); }
+                    return FilterApi.in(FilterApi.intColumn(n), s);
+                }
                 Set<Integer> s = new LinkedHashSet<>();
                 for (Object o : vals) { Integer x = asInt32(pt, o); if (x == null) return null; s.add(x); }
                 return FilterApi.in(FilterApi.intColumn(n), s);
             }
             case INT64: {
+                if (dec != null) {
+                    Set<Long> s = new LinkedHashSet<>();
+                    for (Object o : vals) { Long x = asDecimalInt64(dec, o); if (x == null) return null; s.add(x); }
+                    return FilterApi.in(FilterApi.longColumn(n), s);
+                }
                 Set<Long> s = new LinkedHashSet<>();
                 for (Object o : vals) { Long x = asInt64(pt, o); if (x == null) return null; s.add(x); }
                 return FilterApi.in(FilterApi.longColumn(n), s);
@@ -241,8 +328,19 @@ public final class PredicateTranslator {
                 return FilterApi.in(FilterApi.floatColumn(n), s);
             }
             case BINARY: {
+                if (dec != null) {
+                    Set<Binary> s = new LinkedHashSet<>();
+                    for (Object o : vals) { Binary x = asDecimalBytes(pt, dec, o); if (x == null) return null; s.add(x); }
+                    return FilterApi.in(FilterApi.binaryColumn(n), s);
+                }
                 Set<Binary> s = new LinkedHashSet<>();
                 for (Object o : vals) { Binary x = asString(pt, o); if (x == null) return null; s.add(x); }
+                return FilterApi.in(FilterApi.binaryColumn(n), s);
+            }
+            case FIXED_LEN_BYTE_ARRAY: {
+                if (dec == null) return null;
+                Set<Binary> s = new LinkedHashSet<>();
+                for (Object o : vals) { Binary x = asDecimalBytes(pt, dec, o); if (x == null) return null; s.add(x); }
                 return FilterApi.in(FilterApi.binaryColumn(n), s);
             }
             default:
@@ -263,6 +361,7 @@ public final class PredicateTranslator {
             case DOUBLE: return neg ? FilterApi.notEq(FilterApi.doubleColumn(n), (Double) null) : FilterApi.eq(FilterApi.doubleColumn(n), (Double) null);
             case BOOLEAN: return neg ? FilterApi.notEq(FilterApi.booleanColumn(n), (Boolean) null) : FilterApi.eq(FilterApi.booleanColumn(n), (Boolean) null);
             case BINARY: return neg ? FilterApi.notEq(FilterApi.binaryColumn(n), (Binary) null) : FilterApi.eq(FilterApi.binaryColumn(n), (Binary) null);
+            case FIXED_LEN_BYTE_ARRAY: return neg ? FilterApi.notEq(FilterApi.binaryColumn(n), (Binary) null) : FilterApi.eq(FilterApi.binaryColumn(n), (Binary) null);
             default: return null;
         }
     }
