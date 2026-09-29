@@ -6,11 +6,10 @@ import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
-import org.apache.parquet.io.LocalInputFile;
+import org.apache.parquet.io.InputFile;
 import org.apache.parquet.schema.Type;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,7 +18,7 @@ import java.util.stream.Collectors;
 
 /** Footer-only metadata inspection: reads the footer, never a data page. */
 public record ParquetFileInfo(
-        Path file, long fileSizeBytes, long rowCount, String schema, String createdBy,
+        ParquetSource source, long fileSizeBytes, long rowCount, String schema, String createdBy,
         Map<String, String> keyValueMetadata, List<RowGroupInfo> rowGroups,
         List<String> topLevelColumns, List<String> primitiveColumns) {
 
@@ -39,8 +38,21 @@ public record ParquetFileInfo(
                                   String min, String max, Long nullCount,
                                   boolean hasColumnIndex, boolean hasOffsetIndex, boolean hasBloomFilter) { }
 
+    /** The local file, or {@code null} if this info was read from a non-local {@link ParquetSource}; see {@link #source()}. */
+    public Path file() { return source.localPath(); }
+
     public static ParquetFileInfo read(Path file) {
-        try (ParquetFileReader r = ParquetFileReader.open(new LocalInputFile(file), ParquetReadOptions.builder().build())) {
+        return read(ParquetSource.of(file));
+    }
+
+    /** Reads the footer of any {@link InputFile} (object store, custom storage, ...). */
+    public static ParquetFileInfo read(InputFile file) {
+        return read(ParquetSource.of(file));
+    }
+
+    public static ParquetFileInfo read(ParquetSource file) {
+        if (file == null) throw new NullPointerException("file");
+        try (ParquetFileReader r = ParquetFileReader.open(file.input(), ParquetReadOptions.builder().build())) {
             ParquetMetadata md = r.getFooter();
             List<RowGroupInfo> rgs = new ArrayList<>();
             int i = 0;
@@ -62,7 +74,7 @@ public record ParquetFileInfo(
                 rgs.add(new RowGroupInfo(i++, b.getRowCount(), b.getTotalByteSize(), List.copyOf(cols)));
             }
             long rows = md.getBlocks().stream().mapToLong(BlockMetaData::getRowCount).sum();
-            return new ParquetFileInfo(file, Files.size(file), rows, md.getFileMetaData().getSchema().toString(),
+            return new ParquetFileInfo(file, file.input().getLength(), rows, md.getFileMetaData().getSchema().toString(),
                     md.getFileMetaData().getCreatedBy(), Map.copyOf(md.getFileMetaData().getKeyValueMetaData()),
                     List.copyOf(rgs),
                     md.getFileMetaData().getSchema().getFields().stream().map(Type::getName).toList(),

@@ -19,7 +19,7 @@ import org.apache.parquet.schema.PrimitiveType;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
+import com.github.gbenroscience.parser.ng.parquet.v1.ParquetSource;
 
 /**
  * Per-column mapping Parquet -> Arrow plus the primitive decode loop.
@@ -70,7 +70,7 @@ public final class ColumnPlan {
     public Field field() { return field; }
 
     /** Flat (top-level, non-repeated) column. Anything nested is planned by {@link NodePlan} instead. */
-    public static ColumnPlan of(ColumnDescriptor d, Path file) {
+    public static ColumnPlan of(ColumnDescriptor d, ParquetSource file) {
         String name = d.getPath()[0];
         if (d.getPath().length > 1) throw unsupported(file, name, "nested column reached the flat planner");
         if (d.getMaxRepetitionLevel() > 0) throw unsupported(file, name, "repeated column reached the flat planner");
@@ -82,7 +82,7 @@ public final class ColumnPlan {
      *
      * @param maxDef the leaf's maximum definition level (a value is present iff def >= maxDef)
      */
-    public static ColumnPlan forPrimitive(PrimitiveType pt, String name, boolean nullable, int maxDef, Path file) {
+    public static ColumnPlan forPrimitive(PrimitiveType pt, String name, boolean nullable, int maxDef, ParquetSource file) {
         LogicalTypeAnnotation lt = pt.getLogicalTypeAnnotation();
         Kind k;
         ArrowType at;
@@ -172,11 +172,11 @@ public final class ColumnPlan {
         return new ColumnPlan(k, maxDef, new Field(name, new FieldType(nullable, at, null), null), decSrc, decScale);
     }
 
-    private static void needNoLogical(LogicalTypeAnnotation lt, Path file, String name) {
+    private static void needNoLogical(LogicalTypeAnnotation lt, ParquetSource file, String name) {
         if (lt != null) throw unsupported(file, name, "logical type " + lt + " on this physical type");
     }
 
-    private static ParquetScanException unsupported(Path file, String col, String why) {
+    private static ParquetScanException unsupported(ParquetSource file, String col, String why) {
         return new ParquetScanException("Unsupported Parquet column: " + why, file, -1, col, null);
     }
 

@@ -5,7 +5,7 @@ import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
-import java.nio.file.Path;
+import com.github.gbenroscience.parser.ng.parquet.v1.ParquetSource;
 
 /**
  * Decodes one column chunk's {@link DictionaryPage} exactly once (dictionary pages are always
@@ -27,7 +27,7 @@ public final class DictionaryCache {
     private byte[] binData;
     private int[] binOffsets; // length size+1
 
-    public DictionaryCache(DictionaryPage page, PrimitiveType.PrimitiveTypeName physical, Path file, String column, int typeLength) {
+    public DictionaryCache(DictionaryPage page, PrimitiveType.PrimitiveTypeName physical, ParquetSource file, String column, int typeLength) {
         this.physical = physical;
         try {
             byte[] raw = page.getBytes().toByteArray();

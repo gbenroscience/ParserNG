@@ -11,7 +11,7 @@ import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 
-import java.nio.file.Path;
+import com.github.gbenroscience.parser.ng.parquet.v1.ParquetSource;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -122,13 +122,12 @@ public final class NodePlan {
 
     // ------------------------------------------------------------------ builder
 
-    public static NodePlan build(MessageType projected, ColumnDescriptor[] descriptors, Path file) {
+    public static NodePlan build(MessageType projected, ColumnDescriptor[] descriptors, ParquetSource file) {
         Builder b = new Builder(file);
         Node[] tops = new Node[projected.getFieldCount()];
         for (int i = 0; i < tops.length; i++) tops[i] = b.build(projected.getType(i), new State(0, 0, 0));
         if (b.leaves.size() != descriptors.length) {
-            throw new ParquetScanException("Internal error: planned " + b.leaves.size() + " leaves but the schema has "
-                    + descriptors.length, file);
+            throw new ParquetScanException("Internal error: planned " + b.leaves.size() + " leaves but the schema has "  + descriptors.length, file); 
         }
         for (Leaf l : b.leaves) {
             ColumnDescriptor d = descriptors[l.leafIndex];
@@ -146,12 +145,12 @@ public final class NodePlan {
     private record State(int rep, int def, int reach) { }
 
     private static final class Builder {
-        final Path file;
+        final ParquetSource file;
         final List<Leaf> leaves = new ArrayList<>();
         final List<Node> containers = new ArrayList<>();
         int nextId = 0;
 
-        Builder(Path file) { this.file = file; }
+        Builder(ParquetSource file) { this.file = file; }
 
         Node build(Type t, State s) {
             if (t.isRepetition(Type.Repetition.REPEATED)) return bareRepeated(t, s);

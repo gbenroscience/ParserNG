@@ -43,7 +43,7 @@ class ParquetScanExceptionTest {
 
     @Test
     void nullFileIsToleratedInTheMessage() {
-        ParquetScanException e = new ParquetScanException("Unknown column", null, -1, "c", null);
+        ParquetScanException e = new ParquetScanException("Unknown column", (Path) null, -1, "c", null);
         assertTrue(e.getMessage().contains("file=null"));
         assertNull(e.file());
     }

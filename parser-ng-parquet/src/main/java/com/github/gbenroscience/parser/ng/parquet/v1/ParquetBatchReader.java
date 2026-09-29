@@ -13,12 +13,10 @@ import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
-import org.apache.parquet.io.LocalInputFile;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -77,12 +75,12 @@ import java.util.Set;
  */
 public final class ParquetBatchReader implements AutoCloseable {
 
-    private final Path file;
+    private final ParquetSource file;
     private final BatchSource source;
     private final ScanMetrics metrics; // null when disabled
     private boolean closed;
 
-    ParquetBatchReader(Path file, List<String> columns, Predicate predicate, int batchSize,
+    ParquetBatchReader(ParquetSource file, List<String> columns, Predicate predicate, int batchSize,
                        boolean metricsOn, long maxRowGroupBytes, int parallelism, boolean exactFilter,
                        Map<String, CustomPredicate> customPredicates, BufferAllocator allocator) {
         if (allocator == null) throw new NullPointerException("allocator");
@@ -90,7 +88,7 @@ public final class ParquetBatchReader implements AutoCloseable {
         ParquetFileReader probeOrFiltered = null;
         try {
             MessageType fileSchema;
-            try (ParquetFileReader probe = ParquetFileReader.open(new LocalInputFile(file), ParquetReadOptions.builder().build())) {
+            try (ParquetFileReader probe = ParquetFileReader.open(file.input(), ParquetReadOptions.builder().build())) {
                 fileSchema = probe.getFooter().getFileMetaData().getSchema();
             }
 
@@ -104,7 +102,7 @@ public final class ParquetBatchReader implements AutoCloseable {
             // RowGroupDecoder's class Javadoc for exactly how the decode loop stays correct either way.
             ParquetReadOptions opts = newReadOptions(filter);
 
-            ParquetFileReader filtered = ParquetFileReader.open(new LocalInputFile(file), opts);
+            ParquetFileReader filtered = ParquetFileReader.open(file.input(), opts);
             probeOrFiltered = filtered;
             MessageType projected = project(fileSchema, columns);
             List<ColumnDescriptor> colList = projected.getColumns();
@@ -180,7 +178,7 @@ public final class ParquetBatchReader implements AutoCloseable {
         for (String c : columns) {
             if (!schema.containsField(c)) {
                 throw new ParquetScanException("Unknown column; available: " + schema.getFields().stream()
-                        .map(Type::getName).toList(), null, -1, c, null);
+                        .map(Type::getName).toList(), (ParquetSource) null, -1, c, null);
             }
             if (seen.add(c)) fs.add(schema.getType(c));
         }

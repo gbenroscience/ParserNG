@@ -15,7 +15,6 @@ import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.schema.MessageType;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -71,7 +70,7 @@ import org.apache.arrow.vector.complex.StructVector;
  */
 final class RowGroupDecoder implements AutoCloseable {
 
-    private final Path file;
+    private final ParquetSource file;
     private final ParquetFileReader reader;
     private final MessageType projected;
     private final NodePlan nodePlan;
@@ -95,7 +94,7 @@ final class RowGroupDecoder implements AutoCloseable {
     private int rgIndex = -1;
     private long pageBytesReported; // portion of the current row group's cursors' pageBytesLoaded already added to metrics
 
-    RowGroupDecoder(Path file, ParquetFileReader reader, MessageType projected, NodePlan nodePlan,
+    RowGroupDecoder(ParquetSource file, ParquetFileReader reader, MessageType projected, NodePlan nodePlan,
                     ColumnDescriptor[] descs, long maxRowGroupBytes, ScanMetrics metrics) {
         this.file = file;
         this.reader = reader;

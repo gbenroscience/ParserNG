@@ -234,6 +234,37 @@ values are a function of the row index (see `DecodeBenchmark.writeSelectivityFix
 A runnable walkthrough covering examples 1, 2, 5, and 6 lives in
 `v1/examples/ParquetOnlyExample.java`.
 
+## Storage
+
+`ParquetScan.scan(Path)` reads a local file. Every other storage goes through a `ParquetSource`, which wraps
+parquet-java's `InputFile` plus a display name used in errors:
+
+```java
+ParquetScan.scan(path)                                             // local file
+ParquetScan.scan(myInputFile)                                      // any parquet-java InputFile
+ParquetScan.scan(ParquetSource.of(myInputFile, "gs://b/k.parquet"))// same, with an explicit name
+ParquetScan.scan(ParquetSource.hadoop("s3a://bucket/key.parquet", conf))   // any Hadoop FileSystem URI
+ParquetFileInfo.read(ParquetSource.hadoop("hdfs://nn/data/x.parquet", conf))
+```
+
+`ParquetSource.hadoop` accepts any scheme Hadoop can resolve (`hdfs://`, `s3a://`, `gs://`, `abfss://`,
+`file://`). The Hadoop connector for the scheme is **not bundled**: add `hadoop-aws` (S3A), the GCS connector
+or `hadoop-azure` yourself, and pass credentials and endpoints in the `Configuration`. Nothing else supplies
+them.
+
+* **Ranged reads.** Only the projected column chunks of surviving row groups are requested from the
+  `InputFile`; a projection or a pruned-away row group shows up as fewer bytes fetched (covered by
+  `ParquetSourceTest` with a byte-counting `InputFile`).
+* **Concurrency.** `InputFile.newStream()` is called repeatedly and, with `parallelism(n)`, concurrently
+  (a probe, the main reader, and one reader per worker), so the implementation must support that.
+* **Footer cost.** Each of those readers parses the footer itself, so a remote scan reads the footer once per
+  reader rather than once per scan. Sharing one parsed footer is not implemented yet; for high-latency
+  storage prefer `parallelism(1)` for small files.
+* **Not verified against real cloud storage.** The abstraction is tested with a local counting `InputFile`
+  and a `file://` Hadoop URI only. S3A, GCS, ABFS and HDFS were not exercised, and retry/timeout behaviour is
+  whatever the connector provides.
+* **Errors** name the source (`ParquetScanException.source()`); `file()` is non-null only for local files.
+
 ## Predicates
 
 `Predicate` is a sealed, dependency-free model (no Arrow or Parquet types). What each node can do:
@@ -259,7 +290,7 @@ A leaf that cannot be pushed simply prunes nothing, which is always sound.
   root the caller must close.
 * **Nulls.** Validity bits are preserved at every level (leaf, struct, list); a null slot is never
   written as 0/false/""/empty-list.
-* **Errors** are `ParquetScanException` carrying file / row group (index among surviving row groups) /
+* **Errors** are `ParquetScanException` carrying source (path or URI) / row group (index among surviving row groups) /
   column. No partial data is ever returned silently.
 * **Ordering is unaffected by parallelism.** Row groups are decoded out of order across worker threads
   but always *delivered* in file order, and batches within a row group in order, so parallel and
@@ -352,6 +383,9 @@ should be re-measured on your hardware.
 | BOOLEAN columns in V1 (PLAIN) and V2 (RLE) data pages | yes |
 | Predicate pushdown / exact filtering on nested columns | not yet |
 | Metadata inspection (footer only) | yes (`ParquetFileInfo`) |
+| Local files (`Path`) | yes |
+| Any parquet-java `InputFile`; Hadoop URIs (`hdfs://`, `s3a://`, `gs://`, `abfss://`) via `ParquetSource` | yes (connector jars are yours to add; only local and `file://` exercised) |
+| One shared footer read per scan on remote storage | not yet (each reader reads it) |
 | Metrics (row groups in file/skipped/read, rows, batches, decode time, parallelism, bytes decoded / read from disk / Arrow produced) | yes; page counts not available |
 | Bounded parallel row-group decoding | yes (`parallelism(n)`), ordering preserved |
 | SIMD bulk decode for PLAIN fixed-width numeric columns (required and nullable) | yes |

@@ -8,14 +8,13 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.util.TransferPair;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Single-threaded scan that reuses one root's buffers for every batch. */
 final class SequentialSource implements BatchSource {
 
-    private final Path file;
+    private final ParquetSource file;
     private final RowGroupDecoder decoder;
     private final BufferAllocator allocator;
     private final int batchSize;
@@ -23,7 +22,7 @@ final class SequentialSource implements BatchSource {
     private final VectorSchemaRoot root;
     private boolean closed;
 
-    SequentialSource(Path file, RowGroupDecoder decoder, List<Field> fields, BufferAllocator allocator, int batchSize) {
+    SequentialSource(ParquetSource file, RowGroupDecoder decoder, List<Field> fields, BufferAllocator allocator, int batchSize) {
         this.file = file;
         this.decoder = decoder;
         this.allocator = allocator;

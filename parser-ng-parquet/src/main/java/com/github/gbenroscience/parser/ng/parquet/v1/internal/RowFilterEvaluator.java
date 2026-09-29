@@ -27,7 +27,7 @@ import org.apache.arrow.vector.types.pojo.Field;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
+import com.github.gbenroscience.parser.ng.parquet.v1.ParquetSource;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -74,7 +74,7 @@ public final class RowFilterEvaluator {
     private final Node root;
 
     public RowFilterEvaluator(Predicate predicate, List<Field> fields, Set<String> flatLeafNames,
-                               Map<String, CustomPredicate> customPredicates, Path file) {
+                               Map<String, CustomPredicate> customPredicates, ParquetSource file) {
         Map<String, Integer> indexOf = new HashMap<>();
         for (int i = 0; i < fields.size(); i++) indexOf.put(fields.get(i).getName(), i);
         Map<String, CustomPredicate> customs = customPredicates == null ? Map.of() : customPredicates;
@@ -277,7 +277,7 @@ public final class RowFilterEvaluator {
     // =====================================================================
 
     private Node compile(Predicate p, List<Field> fields, Map<String, Integer> indexOf,
-                          Set<String> flatLeafNames, Map<String, CustomPredicate> customs, Path file) {
+                          Set<String> flatLeafNames, Map<String, CustomPredicate> customs, ParquetSource file) {
         if (p instanceof Predicate.And a) return new AndNode(compile(a.left(), fields, indexOf, flatLeafNames, customs, file), compile(a.right(), fields, indexOf, flatLeafNames, customs, file));
         if (p instanceof Predicate.Or o) return new OrNode(compile(o.left(), fields, indexOf, flatLeafNames, customs, file), compile(o.right(), fields, indexOf, flatLeafNames, customs, file));
         if (p instanceof Predicate.Not n) return new NotNode(compile(n.inner(), fields, indexOf, flatLeafNames, customs, file));
@@ -294,7 +294,7 @@ public final class RowFilterEvaluator {
         throw new ParquetScanException("Unrecognized Predicate node " + p.getClass(), file, -1, null, null);
     }
 
-    private Node compileCmp(Predicate.Cmp c, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, Path file) {
+    private Node compileCmp(Predicate.Cmp c, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
         int idx = resolveFlat(c.column(), indexOf, flatLeafNames, file);
         Kind kind = kindOf(fields.get(idx), file);
         if (kind == Kind.BOOL && c.op() != Predicate.Op.EQ && c.op() != Predicate.Op.NE) {
@@ -317,7 +317,7 @@ public final class RowFilterEvaluator {
         };
     }
 
-    private Node compileIn(Predicate.In in, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, Path file) {
+    private Node compileIn(Predicate.In in, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
         int idx = resolveFlat(in.column(), indexOf, flatLeafNames, file);
         Kind kind = kindOf(fields.get(idx), file);
         Set<Long> nums = null; Set<Float> floats = null; Set<Double> doubles = null; Set<String> strs = null;
@@ -355,7 +355,7 @@ public final class RowFilterEvaluator {
         return new InNode(idx, kind, nums, floats, doubles, strs, decs, uuids);
     }
 
-    private Node compileColCmp(Predicate.ColCmp cc, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, Path file) {
+    private Node compileColCmp(Predicate.ColCmp cc, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
         int li = resolveFlat(cc.left(), indexOf, flatLeafNames, file);
         int ri = resolveFlat(cc.right(), indexOf, flatLeafNames, file);
         Kind lk = kindOf(fields.get(li), file), rk = kindOf(fields.get(ri), file);
@@ -373,19 +373,19 @@ public final class RowFilterEvaluator {
         return new ColCmpNode(li, ri, lk, cc.op());
     }
 
-    private Node compileLike(Predicate.Like lk, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, Path file) {
+    private Node compileLike(Predicate.Like lk, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
         int idx = resolveFlat(lk.column(), indexOf, flatLeafNames, file);
         requireUtf8(fields.get(idx), file);
         return new LikeNode(idx, lk.compiled());
     }
 
-    private Node compileRegex(Predicate.Regex rx, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, Path file) {
+    private Node compileRegex(Predicate.Regex rx, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
         int idx = resolveFlat(rx.column(), indexOf, flatLeafNames, file);
         requireUtf8(fields.get(idx), file);
         return new RegexNode(idx, rx.pattern());
     }
 
-    private Node compileCustom(Predicate.Custom cu, Map<String, Integer> indexOf, Map<String, CustomPredicate> customs, Path file) {
+    private Node compileCustom(Predicate.Custom cu, Map<String, Integer> indexOf, Map<String, CustomPredicate> customs, ParquetSource file) {
         CustomPredicate impl = customs.get(cu.id());
         if (impl == null) {
             throw new ParquetScanException("exactFilter() references custom predicate id '" + cu.id()
@@ -404,7 +404,7 @@ public final class RowFilterEvaluator {
         return new CustomNode(impl);
     }
 
-    private int resolveFlat(String column, Map<String, Integer> indexOf, Set<String> flatLeafNames, Path file) {
+    private int resolveFlat(String column, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
         if (!flatLeafNames.contains(column)) {
             throw new ParquetScanException(
                     "exactFilter() requires every predicate column to be a flat, top-level column; "
@@ -419,14 +419,14 @@ public final class RowFilterEvaluator {
         return idx;
     }
 
-    private void requireUtf8(Field f, Path file) {
+    private void requireUtf8(Field f, ParquetSource file) {
         if (kindOf(f, file) != Kind.UTF8) {
             throw new ParquetScanException("LIKE/regex predicates require a STRING column; '" + f.getName()
                     + "' is " + f.getType(), file, -1, f.getName(), null);
         }
     }
 
-    private Kind kindOf(Field f, Path file) {
+    private Kind kindOf(Field f, ParquetSource file) {
         ArrowType at = f.getType();
         if (at instanceof ArrowType.Bool) return Kind.BOOL;
         if (at instanceof ArrowType.Date) return Kind.DATE_DAY;
@@ -474,7 +474,7 @@ public final class RowFilterEvaluator {
         throw unsupported(f, file);
     }
 
-    private ParquetScanException unsupported(Field f, Path file) {
+    private ParquetScanException unsupported(Field f, ParquetSource file) {
         return new ParquetScanException(
                 "exactFilter() does not support filtering column '" + f.getName() + "' of type " + f.getType()
                 + " (raw BINARY without STRING/ENUM/JSON annotation is not filterable exactly either -- "
@@ -572,7 +572,7 @@ public final class RowFilterEvaluator {
 
     private static ParquetScanException badLiteral(String column, Object value, String expected) {
         return new ParquetScanException("exactFilter() literal for '" + column + "' must be " + expected
-                + ", was " + (value == null ? "null" : value.getClass().getSimpleName()), null, -1, column, null);
+                + ", was " + (value == null ? "null" : value.getClass().getSimpleName()), (ParquetSource) null, -1, column, null);
     }
 
     private static String readUtf8(VarCharVector v, int row) {

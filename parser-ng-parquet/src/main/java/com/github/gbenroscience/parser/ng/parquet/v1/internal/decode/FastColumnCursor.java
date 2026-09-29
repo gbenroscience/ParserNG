@@ -10,7 +10,7 @@ import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
-import java.nio.file.Path;
+import com.github.gbenroscience.parser.ng.parquet.v1.ParquetSource;
 
 /**
  * Native column decode engine used in place of {@code org.apache.parquet.column.impl.ColumnReaderImpl}:
@@ -122,7 +122,7 @@ public final class FastColumnCursor implements ColumnReader {
     private final PageReader pageReader;
     private final int maxDef, maxRep;
     private final PrimitiveType.PrimitiveTypeName physical;
-    private final Path file;
+    private final ParquetSource file;
     private final String columnName;
     private final long totalValueCount;
     private final boolean bulkEligible; // physical is a fixed-width numeric type (PLAIN pages are SIMD-decoded up front)
@@ -170,7 +170,7 @@ public final class FastColumnCursor implements ColumnReader {
     private byte[] curBinData;
     private int curBinOff, curBinLen;
 
-    public FastColumnCursor(ColumnDescriptor descriptor, PageReadStore pages, Path file, String columnName) {
+    public FastColumnCursor(ColumnDescriptor descriptor, PageReadStore pages, ParquetSource file, String columnName) {
         this.descriptor = descriptor;
         this.maxDef = descriptor.getMaxDefinitionLevel();
         this.maxRep = descriptor.getMaxRepetitionLevel();

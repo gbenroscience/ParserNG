@@ -11,11 +11,9 @@ import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
-import org.apache.parquet.io.LocalInputFile;
 import org.apache.parquet.schema.MessageType;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
@@ -64,7 +62,7 @@ import java.util.concurrent.TimeUnit;
  */
 final class ParallelSource implements BatchSource {
 
-    private final Path file;
+    private final ParquetSource file;
     private final ExecutorService executor;
     private final BlockingQueue<RowGroupDecoder> pool;
     private final List<RowGroupDecoder> allDecoders;
@@ -84,7 +82,7 @@ final class ParallelSource implements BatchSource {
     private boolean finished;
     private boolean closed;
 
-    ParallelSource(Path file, MessageType projected, ColumnDescriptor[] descs, NodePlan nodePlan,
+    ParallelSource(ParquetSource file, MessageType projected, ColumnDescriptor[] descs, NodePlan nodePlan,
                    List<Field> fields, long[] expectedStartingPos, FilterCompat.Filter filter,
                    int parallelism, int batchSize, long maxRowGroupBytes,
                    BufferAllocator allocator, ScanMetrics metrics) {
@@ -115,7 +113,7 @@ final class ParallelSource implements BatchSource {
                 // worker, pooled, never checked out by two threads at once) but was being silently
                 // violated one layer up, by handing every worker's reader the same options instance.
                 ParquetReadOptions workerOpts = ParquetBatchReader.newReadOptions(filter);
-                ParquetFileReader r = ParquetFileReader.open(new LocalInputFile(file), workerOpts);
+                ParquetFileReader r = ParquetFileReader.open(file.input(), workerOpts);
                 RowGroupDecoder d;
                 try {
                     verifySurvivors(r, expectedStartingPos);
@@ -137,7 +135,7 @@ final class ParallelSource implements BatchSource {
         }
 
         this.executor = Executors.newFixedThreadPool(parallelism, r -> {
-            Thread t = new Thread(r, "parquet-scan-" + file.getFileName());
+            Thread t = new Thread(r, "parquet-scan-" + file.shortName());
             t.setDaemon(true);
             return t;
         });
