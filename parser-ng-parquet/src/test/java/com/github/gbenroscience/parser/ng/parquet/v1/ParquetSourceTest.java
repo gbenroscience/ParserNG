@@ -137,6 +137,24 @@ class ParquetSourceTest {
                 "pruned scan read " + pruned.bytesRead + " bytes, full scan " + full.bytesRead);
     }
 
+    @Test
+    void parallelWorkersShareOneFooterRead() throws IOException {
+        long footerLen;
+        try (var ch = java.nio.channels.FileChannel.open(flat)) {
+            ByteBuffer tail = ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            ch.read(tail, ch.size() - 8);
+            footerLen = tail.getInt(0) & 0xFFFFFFFFL;
+        }
+        CountingInputFile one = new CountingInputFile(flat);
+        countRows(ParquetScan.scan(one).select("id").parallelism(1));
+        CountingInputFile four = new CountingInputFile(flat);
+        countRows(ParquetScan.scan(four).select("id").parallelism(4));
+        // Same data either way; if each of the 4 workers re-read the footer the difference would be >= 3 footers.
+        assertTrue(four.bytesRead.get() - one.bytesRead.get() < 2 * footerLen,
+                "parallel scan read " + (four.bytesRead.get() - one.bytesRead.get()) + " extra bytes; footer is "
+                        + footerLen + " bytes");
+    }
+
     // ================================================================ errors name the source
 
     @Test

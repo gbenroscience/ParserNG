@@ -13,6 +13,7 @@ import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 
@@ -87,10 +88,9 @@ public final class ParquetBatchReader implements AutoCloseable {
         this.file = file;
         ParquetFileReader probeOrFiltered = null;
         try {
-            MessageType fileSchema;
-            try (ParquetFileReader probe = ParquetFileReader.open(file.input(), ParquetReadOptions.builder().build())) {
-                fileSchema = probe.getFooter().getFileMetaData().getSchema();
-            }
+            // The footer is read and parsed exactly once per scan; every reader below is opened over it.
+            ParquetMetadata footer = file.readFooter();
+            MessageType fileSchema = footer.getFileMetaData().getSchema();
 
             FilterCompat.Filter filter = FilterCompat.NOOP;
             FilterPredicate fp = PredicateTranslator.translate(predicate, fileSchema);
@@ -102,7 +102,7 @@ public final class ParquetBatchReader implements AutoCloseable {
             // RowGroupDecoder's class Javadoc for exactly how the decode loop stays correct either way.
             ParquetReadOptions opts = newReadOptions(filter);
 
-            ParquetFileReader filtered = ParquetFileReader.open(file.input(), opts);
+            ParquetFileReader filtered = file.openReader(footer, opts);
             probeOrFiltered = filtered;
             MessageType projected = project(fileSchema, columns);
             List<ColumnDescriptor> colList = projected.getColumns();
@@ -144,7 +144,7 @@ public final class ParquetBatchReader implements AutoCloseable {
                 for (int i = 0; i < survivorStartingPos.length; i++) survivorStartingPos[i] = survivorBlocks.get(i).getStartingPos();
                 filtered.close(); // parallel workers open their own readers; this one is no longer needed
                 probeOrFiltered = null;
-                built = new ParallelSource(file, projected, descriptors, nodePlan, fields,
+                built = new ParallelSource(file, footer, projected, descriptors, nodePlan, fields,
                         survivorStartingPos, filter, parallelism, batchSize, maxRowGroupBytes, allocator, m);
             }
             this.source = (exactEvaluator != null) ? new FilteredSource(built, exactEvaluator, allocator) : built;

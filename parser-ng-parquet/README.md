@@ -5,7 +5,7 @@ Read-only storage layer for ParserNG: Parquet file -> projected, row-group-prune
 parallel across row groups and optionally filtered exactly, row by row. It does not parse SQL
 (parser-ng-sql) and does not evaluate expressions (parser-ng-arrow). There is no writer.
 
-* **Coordinates:** `com.github.gbenroscience:parser-ng-parquet:3.0.8`
+* **Coordinates:** `com.github.gbenroscience:parser-ng-parquet:3.0.9`
 * **Requires:** JDK 22+ with the incubator Vector API (`--add-modules jdk.incubator.vector`), Arrow 19.0.0,
   parquet-java 1.18.0, Hadoop client 3.4.1
 * **Verified on:** JDK 24 (Windows 10) and JDK 26 (CentOS Stream 9 under WSL2). On **JDK 25 and newer** you
@@ -256,10 +256,10 @@ them.
   `InputFile`; a projection or a pruned-away row group shows up as fewer bytes fetched (covered by
   `ParquetSourceTest` with a byte-counting `InputFile`).
 * **Concurrency.** `InputFile.newStream()` is called repeatedly and, with `parallelism(n)`, concurrently
-  (a probe, the main reader, and one reader per worker), so the implementation must support that.
-* **Footer cost.** Each of those readers parses the footer itself, so a remote scan reads the footer once per
-  reader rather than once per scan. Sharing one parsed footer is not implemented yet; for high-latency
-  storage prefer `parallelism(1)` for small files.
+  (one stream for the footer, one per reader), so the implementation must support that.
+* **Footer cost.** The footer is read and parsed once per scan and handed to the main reader and to every
+  parallel worker, so a remote scan pays one footer fetch regardless of `parallelism`
+  (`ParquetSourceTest.parallelWorkersShareOneFooterRead`). `ParquetFileInfo.read` is a separate, single read.
 * **Not verified against real cloud storage.** The abstraction is tested with a local counting `InputFile`
   and a `file://` Hadoop URI only. S3A, GCS, ABFS and HDFS were not exercised, and retry/timeout behaviour is
   whatever the connector provides.
@@ -308,12 +308,18 @@ A leaf that cannot be pushed simply prunes nothing, which is always sound.
 | FLOAT / DOUBLE | `FloatingPoint(SINGLE/DOUBLE)` |
 | BINARY | `Binary` |
 | BINARY + STRING/ENUM/JSON | `Utf8` |
+| UINT8/16/32/64 | `Int(8/16/32/64, unsigned)` |
+| FIXED_LEN_BYTE_ARRAY(16) + UUID | `FixedSizeBinary(16)` |
 
 DECIMAL (INT32-, INT64-, and FIXED_LEN_BYTE_ARRAY-backed) and INT96 legacy timestamps are supported.
-`DELTA_BINARY_PACKED`, `DELTA_LENGTH_BYTE_ARRAY`, and `DELTA_BYTE_ARRAY` are also decoded correctly.
-Remaining unsupported leaves (TIME, UUID, raw/non-DECIMAL FIXED_LEN_BYTE_ARRAY such as a UUID or fixed
-binary column, unsigned ints, BSON) fail fast, naming the column, whether flat or nested. The native
-decoder also still rejects the `BYTE_STREAM_SPLIT` encoding by name rather than mis-decoding it.
+`DELTA_BINARY_PACKED`, `DELTA_LENGTH_BYTE_ARRAY`, and `DELTA_BYTE_ARRAY` are also decoded correctly, and so
+is `BYTE_STREAM_SPLIT` (INT32, INT64, FLOAT, DOUBLE, and FIXED_LEN_BYTE_ARRAY — the full PARQUET-2414
+scope, not just the original FLOAT/DOUBLE). Unsigned integers (UINT8/16/32/64) decode to Arrow's
+unsigned `Int` types, and UUID (FIXED_LEN_BYTE_ARRAY(16) with the UUID logical type) decodes to
+`FixedSizeBinary(16)` — `exactFilter()` supports EQ/NE on a UUID column, which is all it should ever
+need since no numeric ordering is defined for it. Remaining unsupported leaves (TIME, raw/non-DECIMAL
+FIXED_LEN_BYTE_ARRAY such as a plain fixed-binary column, BSON) fail fast, naming the column, whether
+flat or nested.
 
 BOOLEAN columns decode under both data page versions: PLAIN (bit-packed) in V1 pages and the
 length-prefixed RLE value encoding that the Parquet spec uses for booleans in V2 pages (pyarrow's default
@@ -378,14 +384,15 @@ should be re-measured on your hardware.
 | Nested: struct, LIST (3-level + legacy), MAP, bare repeated, arbitrary nesting | yes |
 | DECIMAL (INT32/INT64/FLBA-backed), INT96 legacy timestamps | yes |
 | DELTA_BINARY_PACKED, DELTA_LENGTH_BYTE_ARRAY, DELTA_BYTE_ARRAY | yes |
-| TIME, UUID, raw (non-DECIMAL) FLBA, unsigned ints, BSON (flat or nested) | clear error, not yet |
-| BYTE_STREAM_SPLIT encoding | clear error, not yet |
+| BYTE_STREAM_SPLIT (INT32, INT64, FLOAT, DOUBLE, FIXED_LEN_BYTE_ARRAY) | yes |
+| UINT8/16/32/64, UUID | yes |
+| TIME, raw (non-DECIMAL) FLBA, BSON (flat or nested) | clear error, not yet |
 | BOOLEAN columns in V1 (PLAIN) and V2 (RLE) data pages | yes |
 | Predicate pushdown / exact filtering on nested columns | not yet |
 | Metadata inspection (footer only) | yes (`ParquetFileInfo`) |
 | Local files (`Path`) | yes |
 | Any parquet-java `InputFile`; Hadoop URIs (`hdfs://`, `s3a://`, `gs://`, `abfss://`) via `ParquetSource` | yes (connector jars are yours to add; only local and `file://` exercised) |
-| One shared footer read per scan on remote storage | not yet (each reader reads it) |
+| One footer read per scan on any storage, shared by all readers and workers | yes |
 | Metrics (row groups in file/skipped/read, rows, batches, decode time, parallelism, bytes decoded / read from disk / Arrow produced) | yes; page counts not available |
 | Bounded parallel row-group decoding | yes (`parallelism(n)`), ordering preserved |
 | SIMD bulk decode for PLAIN fixed-width numeric columns (required and nullable) | yes |
@@ -581,7 +588,7 @@ See the separate `parquet` package of the `parser-ng-sql` module for the bridge 
 depends on the SQL or Arrow-query modules at compile time.
 
 ## Build
-Add `<module>parser-ng-parquet</module>` to the parent POM (`parser-ng-parent`, version 3.0.8), then:
+Add `<module>parser-ng-parquet</module>` to the parent POM (`parser-ng-parent`, version 3.0.9), then:
 
 ```bash
 mvn -pl parser-ng-parquet -am package

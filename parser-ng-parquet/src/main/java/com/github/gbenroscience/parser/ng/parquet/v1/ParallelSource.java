@@ -11,6 +11,7 @@ import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.MessageType;
 
 import java.io.IOException;
@@ -82,7 +83,7 @@ final class ParallelSource implements BatchSource {
     private boolean finished;
     private boolean closed;
 
-    ParallelSource(ParquetSource file, MessageType projected, ColumnDescriptor[] descs, NodePlan nodePlan,
+    ParallelSource(ParquetSource file, ParquetMetadata footer, MessageType projected, ColumnDescriptor[] descs, NodePlan nodePlan,
                    List<Field> fields, long[] expectedStartingPos, FilterCompat.Filter filter,
                    int parallelism, int batchSize, long maxRowGroupBytes,
                    BufferAllocator allocator, ScanMetrics metrics) {
@@ -113,7 +114,7 @@ final class ParallelSource implements BatchSource {
                 // worker, pooled, never checked out by two threads at once) but was being silently
                 // violated one layer up, by handing every worker's reader the same options instance.
                 ParquetReadOptions workerOpts = ParquetBatchReader.newReadOptions(filter);
-                ParquetFileReader r = ParquetFileReader.open(file.input(), workerOpts);
+                ParquetFileReader r = file.openReader(footer, workerOpts);
                 RowGroupDecoder d;
                 try {
                     verifySurvivors(r, expectedStartingPos);

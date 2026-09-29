@@ -24,9 +24,13 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import static com.github.gbenroscience.parser.ng.parquet.v1.ParquetTestData.*;
+import org.apache.parquet.io.InputFile;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** End-to-end tests of {@link ParquetScan} and {@link ParquetBatchReader} against real Parquet files. */
+/**
+ * End-to-end tests of {@link ParquetScan} and {@link ParquetBatchReader}
+ * against real Parquet files.
+ */
 class ParquetScanTest {
 
     @TempDir
@@ -44,7 +48,6 @@ class ParquetScanTest {
     }
 
     // ================================================================ full-scan correctness
-
     @Test
     void fullScanReturnsEveryValueOfEveryColumnIncludingNulls() {
         assertScanEqualsRows(ParquetScan.scan(flat), ROWS);
@@ -85,7 +88,6 @@ class ParquetScanTest {
     }
 
     // ================================================================ schema mapping
-
     @Test
     void arrowSchemaMirrorsTheParquetSchema() {
         try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).open(a)) {
@@ -106,11 +108,9 @@ class ParquetScanTest {
     }
 
     // ================================================================ projection
-
     @Test
     void selectProjectsOnlyTheRequestedColumnsInTheRequestedOrder() {
-        try (BufferAllocator a = new RootAllocator();
-             ParquetBatchReader r = ParquetScan.scan(flat).select("name", "id").open(a)) {
+        try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).select("name", "id").open(a)) {
             assertEquals(List.of("name", "id"), r.schema().getFields().stream().map(Field::getName).toList());
             assertTrue(r.next());
             assertEquals(2, r.root().getFieldVectors().size());
@@ -119,8 +119,7 @@ class ParquetScanTest {
 
     @Test
     void selectingTheSameColumnTwiceProjectsItOnce() {
-        try (BufferAllocator a = new RootAllocator();
-             ParquetBatchReader r = ParquetScan.scan(flat).select("id", "id").open(a)) {
+        try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).select("id", "id").open(a)) {
             assertEquals(1, r.schema().getFields().size());
         }
         assertEquals(allIds(), ids(ParquetScan.scan(flat).select("id", "id")));
@@ -147,25 +146,26 @@ class ParquetScanTest {
 
     private static long decodedBytes(ParquetScan scan) {
         try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = scan.open(a)) {
-            while (r.next()) { /* drain */ }
+            while (r.next()) {
+                /* drain */ }
             return r.metrics().uncompressedBytesDecoded();
         }
     }
 
     // ================================================================ batching
-
     @Test
     void batchSizeBoundsEveryBatchAndOrderIsPreserved() {
         List<Long> ids = new ArrayList<>();
         int batches = 0;
-        try (BufferAllocator a = new RootAllocator();
-             ParquetBatchReader r = ParquetScan.scan(flat).select("id").batchSize(100).open(a)) {
+        try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).select("id").batchSize(100).open(a)) {
             while (r.next()) {
                 batches++;
                 VectorSchemaRoot b = r.root();
                 assertTrue(b.getRowCount() >= 1 && b.getRowCount() <= 100, "rows=" + b.getRowCount());
                 BigIntVector v = (BigIntVector) b.getVector("id");
-                for (int i = 0; i < b.getRowCount(); i++) ids.add(v.get(i));
+                for (int i = 0; i < b.getRowCount(); i++) {
+                    ids.add(v.get(i));
+                }
             }
         }
         assertEquals(allIds(), ids);
@@ -189,7 +189,6 @@ class ParquetScanTest {
     }
 
     // ================================================================ parallelism
-
     @Test
     void parallelismLargerThanTheRowGroupCountStillWorks() {
         assertEquals(allIds(), ids(ParquetScan.scan(flat).select("id").parallelism(64)));
@@ -202,16 +201,16 @@ class ParquetScanTest {
     }
 
     // ================================================================ pruning (pushdown only)
-
     @Test
     void pushdownPrunesRowGroupsButNeverDropsAMatchingRow() {
-        try (BufferAllocator a = new RootAllocator();
-             ParquetBatchReader r = ParquetScan.scan(flat).select("id").pushdown(Predicate.gt("id", 4_000L))
-                     .withMetrics(true).open(a)) {
+        try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).select("id").pushdown(Predicate.gt("id", 4_000L))
+                .withMetrics(true).open(a)) {
             List<Long> got = new ArrayList<>();
             while (r.next()) {
                 BigIntVector v = (BigIntVector) r.root().getVector("id");
-                for (int i = 0; i < r.root().getRowCount(); i++) got.add(v.get(i));
+                for (int i = 0; i < r.root().getRowCount(); i++) {
+                    got.add(v.get(i));
+                }
             }
             ScanMetrics m = r.metrics();
             assertTrue(m.rowGroupsSkipped() > 0, "sorted ids: the early row groups cannot contain id > 4000");
@@ -223,9 +222,8 @@ class ParquetScanTest {
 
     @Test
     void pushdownThatMatchesNothingSkipsEveryRowGroup() {
-        try (BufferAllocator a = new RootAllocator();
-             ParquetBatchReader r = ParquetScan.scan(flat).select("id").pushdown(Predicate.gt("id", 1_000_000L))
-                     .withMetrics(true).open(a)) {
+        try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).select("id").pushdown(Predicate.gt("id", 1_000_000L))
+                .withMetrics(true).open(a)) {
             assertFalse(r.next());
             assertEquals(r.metrics().rowGroupsInFile(), r.metrics().rowGroupsSkipped());
             assertEquals(0, r.metrics().rowsRead());
@@ -251,7 +249,6 @@ class ParquetScanTest {
     }
 
     // ================================================================ metrics
-
     @Test
     void metricsAreAbsentUnlessRequested() {
         try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).open(a)) {
@@ -267,7 +264,9 @@ class ParquetScanTest {
         ParquetFileInfo info = ParquetFileInfo.read(flat);
         try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).batchSize(500).withMetrics(true).open(a)) {
             int batches = 0;
-            while (r.next()) batches++;
+            while (r.next()) {
+                batches++;
+            }
             ScanMetrics m = r.metrics();
             assertNotNull(m);
             assertEquals(N, m.rowsRead());
@@ -286,14 +285,14 @@ class ParquetScanTest {
     @Test
     void metricsReportTheParallelismUsed() {
         try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).parallelism(3).withMetrics(true).open(a)) {
-            while (r.next()) { /* drain */ }
+            while (r.next()) {
+                /* drain */ }
             assertEquals(3, r.metrics().parallelism());
             assertEquals(N, r.metrics().rowsRead());
         }
     }
 
     // ================================================================ detach / ownership
-
     @Test
     void detachHandsOverTheBatchAndTheReaderContinuesFromTheNextOne() {
         try (BufferAllocator alloc = new RootAllocator()) {
@@ -311,7 +310,9 @@ class ParquetScanTest {
             try (VectorSchemaRoot d = detached) {
                 BigIntVector v = (BigIntVector) d.getVector("id");
                 assertEquals(firstRows, d.getRowCount());
-                for (int i = 0; i < firstRows; i++) assertEquals(i, v.get(i), "detached data survives reader close");
+                for (int i = 0; i < firstRows; i++) {
+                    assertEquals(i, v.get(i), "detached data survives reader close");
+                }
             }
             assertEquals(0L, alloc.getAllocatedMemory());
         }
@@ -322,7 +323,8 @@ class ParquetScanTest {
         for (int parallelism : new int[]{1, 3}) {
             try (BufferAllocator alloc = new RootAllocator()) {
                 ParquetBatchReader r = ParquetScan.scan(flat).parallelism(parallelism).open(alloc);
-                while (r.next()) { /* drain */ }
+                while (r.next()) {
+                    /* drain */ }
                 r.close();
                 assertEquals(0L, alloc.getAllocatedMemory(), "parallelism=" + parallelism);
             }
@@ -354,14 +356,14 @@ class ParquetScanTest {
     @Test
     void endOfDataIsStable() {
         try (BufferAllocator alloc = new RootAllocator(); ParquetBatchReader r = ParquetScan.scan(flat).select("id").open(alloc)) {
-            while (r.next()) { /* drain */ }
+            while (r.next()) {
+                /* drain */ }
             assertFalse(r.next());
             assertFalse(r.next());
         }
     }
 
     // ================================================================ guards & failures
-
     @Test
     void maxRowGroupBytesRejectsOversizedRowGroups() {
         try (BufferAllocator alloc = new RootAllocator()) {
@@ -415,11 +417,11 @@ class ParquetScanTest {
         assertThrows(NullPointerException.class, () -> ParquetScan.scan(flat).open(null));
     }
 
-    // ================================================================ builder contract
-
+    // builder contract
     @Test
     void builderRejectsInvalidArguments() {
-        //assertThrows(NullPointerException.class, () -> ParquetScan.scan(null));
+        assertThrows(NullPointerException.class, () -> ParquetScan.scan(((InputFile)null)) ); 
+
         ParquetScan s = ParquetScan.scan(flat);
         assertThrows(IllegalArgumentException.class, s::select);
         assertThrows(IllegalArgumentException.class, () -> s.select((String[]) null));

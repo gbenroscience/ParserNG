@@ -1,9 +1,13 @@
 package com.github.gbenroscience.parser.ng.parquet.v1;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.parquet.ParquetReadOptions;
+import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.io.InputFile;
 import org.apache.parquet.io.LocalInputFile;
+import org.apache.parquet.io.SeekableInputStream;
 
 import java.io.IOException;
 import java.net.URI;
@@ -25,9 +29,9 @@ import java.nio.file.Path;
  *       pass, never from anything else.</li>
  * </ul>
  *
- * <p>The {@code InputFile} is opened afresh for every reader this module creates (a probe, the main
- * reader and, with {@code parallelism > 1}, one per worker), so {@link InputFile#newStream()} must be
- * safe to call repeatedly and concurrently.
+ * <p>A scan reads and parses the footer once, then opens one stream per reader (the main reader and, with
+ * {@code parallelism > 1}, one per worker), so {@link InputFile#newStream()} must be safe to call
+ * repeatedly and concurrently.
  */
 public final class ParquetSource {
 
@@ -80,6 +84,32 @@ public final class ParquetSource {
     public static ParquetSource hadoop(URI uri, Configuration conf) {
         if (uri == null) throw new NullPointerException("uri");
         return hadoop(uri.toString(), conf);
+    }
+
+    /**
+     * Reads and parses the footer over one short-lived stream. A scan does this exactly once and hands the
+     * result to every reader it opens via {@link #openReader}, so the footer is fetched once per scan rather
+     * than once per reader (which matters when each fetch is a network round trip).
+     */
+    ParquetMetadata readFooter() throws IOException {
+        try (SeekableInputStream in = input.newStream()) {
+            return ParquetFileReader.readFooter(input, ParquetReadOptions.builder().build(), in);
+        }
+    }
+
+    /**
+     * Opens a reader over its own fresh stream using an already-parsed {@code footer}; the reader owns and
+     * closes the stream. Row-group filtering from {@code options} is applied to the footer's blocks by the
+     * reader itself, exactly as when it parses the footer on its own.
+     */
+    ParquetFileReader openReader(ParquetMetadata footer, ParquetReadOptions options) throws IOException {
+        SeekableInputStream in = input.newStream();
+        try {
+            return ParquetFileReader.open(input, footer, options, in);
+        } catch (IOException | RuntimeException e) {
+            try { in.close(); } catch (IOException suppressed) { e.addSuppressed(suppressed); }
+            throw e;
+        }
     }
 
     /** The parquet-java input this scan reads through. */

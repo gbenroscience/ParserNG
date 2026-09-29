@@ -127,7 +127,8 @@ public final class NodePlan {
         Node[] tops = new Node[projected.getFieldCount()];
         for (int i = 0; i < tops.length; i++) tops[i] = b.build(projected.getType(i), new State(0, 0, 0));
         if (b.leaves.size() != descriptors.length) {
-            throw new ParquetScanException("Internal error: planned " + b.leaves.size() + " leaves but the schema has "  + descriptors.length, file); 
+            throw new ParquetScanException("Internal error: planned " + b.leaves.size() + " leaves but the schema has "
+                    + descriptors.length, file);
         }
         for (Leaf l : b.leaves) {
             ColumnDescriptor d = descriptors[l.leafIndex];
