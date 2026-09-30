@@ -179,7 +179,7 @@
           JDK 24+: Arrow 19's Netty allocator fails in NettyAllocationManager.<clinit>
           (EmptyByteBuf.memoryAddress -> UnsupportedOperationException), so every test that touches
           RootAllocator errors out. Use Arrow's Unsafe allocator instead.
-          The --sun-misc-unsafe-memory-access flag only exists on newer JDKs, hence it lives here.
+          The -sun-misc-unsafe-memory-access flag only exists on newer JDKs, hence it lives here.
         -->
         <profile>
             <id>jdk24plus</id>
