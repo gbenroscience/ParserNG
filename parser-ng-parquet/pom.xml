@@ -26,7 +26,7 @@
         <exec.mainClass>com.github.gbenroscience.parser.ng.parquet.ParserNgParquet</exec.mainClass>
         <maven.compiler.release>22</maven.compiler.release>
         <maven.compiler.source>22</maven.compiler.source>
-        <maven.compiler.target>22</maven.compiler.target> 
+        <maven.compiler.target>22</maven.compiler.target>
         <!-- Keep in lock-step with parser-ng-arrow so both modules share one Arrow runtime. -->
         <arrow.version>19.0.0</arrow.version>
         <!-- Latest parquet-java at time of writing (Aug 2026). Re-verify before release. -->
@@ -36,6 +36,13 @@
         <!-- JMH: keep core and the annotation processor in lock-step. -->
         <jmh.version>1.37</jmh.version>
 
+        <!--
+          Arrow allocation manager used by surefire. Defaults to Netty; the jdk24plus profile
+          switches it to Unsafe because Arrow 19's Netty allocator fails on JDK 24+.
+        -->
+        <arrow.alloc>Netty</arrow.alloc>
+        <!-- Extra JVM flags that only exist on newer JDKs. Empty by default; set in jdk24plus. -->
+        <jdk.extra.args></jdk.extra.args>
     </properties>
 
     <dependencies>
@@ -85,13 +92,13 @@
             <scope>provided</scope>
         </dependency>
 
-<!--         Test only: the SQL/Arrow modules are NEVER a compile dependency of this module. 
+        <!-- Test only: the SQL/Arrow modules are NEVER a compile dependency of this module. -->
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng-sql</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
-        </dependency>-->
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -108,7 +115,7 @@
                 <version>3.13.0</version>
                 <configuration>
                     <release>${maven.compiler.release}</release>
-                    <!-- FIX: Enable the vector API module for source compilation -->
+                    <!-- Enable the vector API module for source compilation -->
                     <compilerArgs>
                         <arg>--add-modules</arg>
                         <arg>jdk.incubator.vector</arg>
@@ -140,9 +147,9 @@
                         --add-opens=java.base/java.util=ALL-UNNAMED
                         --add-opens=java.base/java.lang=ALL-UNNAMED
                         -Dio.netty.tryReflectionSetAccessible=true
-                        -Darrow.allocation.manager.type=Netty
+                        -Darrow.allocation.manager.type=${arrow.alloc}
+                        ${jdk.extra.args}
                     </argLine>
-                    <!-- REMOVED: compilerArgs from surefire plugin (invalid tag here) -->
                 </configuration>
             </plugin>
             <plugin>
@@ -167,7 +174,32 @@
     </build>
 
     <profiles>
-       
+
+        <!--
+          JDK 24+: Arrow 19's Netty allocator fails in NettyAllocationManager.<clinit>
+          (EmptyByteBuf.memoryAddress -> UnsupportedOperationException), so every test that touches
+          RootAllocator errors out. Use Arrow's Unsafe allocator instead.
+          The --sun-misc-unsafe-memory-access flag only exists on newer JDKs, hence it lives here.
+        -->
+        <profile>
+            <id>jdk24plus</id>
+            <activation>
+                <jdk>[24,)</jdk>
+            </activation>
+            <properties>
+                <arrow.alloc>Unsafe</arrow.alloc>
+                <jdk.extra.args>--sun-misc-unsafe-memory-access=allow</jdk.extra.args>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.arrow</groupId>
+                    <artifactId>arrow-memory-unsafe</artifactId>
+                    <version>${arrow.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+
         <profile>
             <id>jmh</id>
             <dependencies>
