@@ -31,14 +31,20 @@ jobs:
             echo "Java 25 detected → Building all modules, but skipping parser-ng-gpu-simd tests"
             # 1. Build and install all modules into local .m2 without running tests
             mvn -B --update-snapshots clean install -Dgpg.skip -DskipTests
-            # 2. Run tests for all modules EXCEPT parser-ng-gpu-simd
+            
+            # 2. Run tests for all modules EXCEPT parser-ng-gpu-simd with JDK 25 memory access configurations
+            JDK_JAVA_OPTIONS="--add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED" \
+            MAVEN_OPTS="-DargLine=\"--add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED\"" \
             mvn -B test -pl "!parser-ng-gpu-simd"
             
           elif [ "${{ matrix.java-version }}" -ge 22 ]; then
             echo "Java 22-24 detected → Building core + CPU SIMD + GPU SIMD + Arrow, but skipping parser-ng-gpu-simd tests"
             # 1. Build without tests (excluding bench)
             mvn -B --update-snapshots clean install -Dgpg.skip -pl "!parser-ng-bench" -DskipTests
-            # 2. Run tests excluding both bench AND gpu-simd
+            
+            # 2. Run tests excluding both bench AND gpu-simd with modern JDK memory overrides
+            JDK_JAVA_OPTIONS="--add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED" \
+            MAVEN_OPTS="-DargLine=\"--add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED\"" \
             mvn -B test -pl "!parser-ng-bench,!parser-ng-gpu-simd"
             
           elif [ "${{ matrix.java-version }}" -eq 21 ]; then
