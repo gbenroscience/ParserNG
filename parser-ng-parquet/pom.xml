@@ -85,13 +85,13 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- Test only: the SQL/Arrow modules are NEVER a compile dependency of this module. -->
+<!--         Test only: the SQL/Arrow modules are NEVER a compile dependency of this module. 
         <dependency>
             <groupId>com.github.gbenroscience</groupId>
             <artifactId>parser-ng-sql</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
-        </dependency>
+        </dependency>-->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
