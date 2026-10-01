@@ -68,7 +68,9 @@ public record SelectStatement(
         List<OrderItem> orderBy,
         Integer limit,
         TableKind tableKind,
-        List<String> tablePaths) {
+        List<String> tablePaths,
+        boolean distinct,
+        int offset) {
 
     /**
      * How the {@code FROM} clause named its source. {@link #NAME} is a bare
@@ -82,9 +84,23 @@ public record SelectStatement(
     /**
      * Compatibility constructor for a plain {@link TableKind#NAME} source.
      */
+    /** A statement without {@code OFFSET}. */
+    public SelectStatement(boolean selectAll, List<SelectItem> items, String table, BoolExpr where,
+            List<String> groupBy, BoolExpr having, List<OrderItem> orderBy, Integer limit,
+            TableKind tableKind, List<String> tablePaths, boolean distinct) {
+        this(selectAll, items, table, where, groupBy, having, orderBy, limit, tableKind, tablePaths, distinct, 0);
+    }
+
+    /** A statement without {@code SELECT DISTINCT}. */
+    public SelectStatement(boolean selectAll, List<SelectItem> items, String table, BoolExpr where,
+            List<String> groupBy, BoolExpr having, List<OrderItem> orderBy, Integer limit,
+            TableKind tableKind, List<String> tablePaths) {
+        this(selectAll, items, table, where, groupBy, having, orderBy, limit, tableKind, tablePaths, false, 0);
+    }
+
     public SelectStatement(boolean selectAll, List<SelectItem> items, String table, BoolExpr where,
             List<String> groupBy, BoolExpr having, List<OrderItem> orderBy, Integer limit) {
-        this(selectAll, items, table, where, groupBy, having, orderBy, limit, TableKind.NAME, List.of());
+        this(selectAll, items, table, where, groupBy, having, orderBy, limit, TableKind.NAME, List.of(), false, 0);
     }
 
     public SelectStatement {
@@ -106,6 +122,9 @@ public record SelectStatement(
         }
         if (having != null && groupBy.isEmpty() && items.stream().noneMatch(SelectItem::isAggregate)) {
             throw new IllegalArgumentException("HAVING requires GROUP BY or at least one aggregate SELECT item");
+        }
+        if (offset < 0) {
+            throw new IllegalArgumentException("OFFSET must be non-negative, was " + offset);
         }
         if (limit != null && limit < 0) {
             throw new IllegalArgumentException("LIMIT must be non-negative, was " + limit);

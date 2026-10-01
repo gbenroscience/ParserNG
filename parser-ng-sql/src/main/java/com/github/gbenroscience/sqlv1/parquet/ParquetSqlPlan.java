@@ -89,6 +89,11 @@ public final class ParquetSqlPlan implements AutoCloseable {
     private long maxMaterializedRows;
     private ScanMetrics lastMetrics;
     private long roundedValues;
+    /** Non-null when this query is folded in Java (DISTINCT, non-numeric aggregates): see {@link FoldQuery}. */
+    private FoldQuery fold;
+    /** The statement with COALESCE/NULLIF calls replaced by derived-column names; {@code stmt} when there are none. */
+    private SelectStatement rstmt;
+    private ParquetSqlPlan foldInner;
 
     ParquetSqlPlan(String sql, SelectStatement stmt, List<Path> files, ParquetSqlOptions options, boolean explainOnly) {
         this.sql = sql;
@@ -140,17 +145,30 @@ public final class ParquetSqlPlan implements AutoCloseable {
         this.exact = ex != null;
         this.plan = exact ? new ScanPlanner.ScanPlan(sp.columns(), ex, sp.streamable(), sp.materializeReason(), sp.limit(), false) : sp;
 
-        NativeLeaves.Result nl = (stmt.where() == null || exact) ? null : NativeLeaves.rewrite(stmt.where(), schema);
-        this.masks = nl == null ? List.of() : nl.masks();
+        ScalarFns.Result sf = ScalarFns.rewrite(stmt, schema);
+        this.rstmt = sf.stmt();
+        NativeLeaves.Result nl = (rstmt.where() == null || exact) ? null : NativeLeaves.rewrite(rstmt.where(), schema, sf.masks().size());
+        List<NativeLeaves.Mask> allMasks = new ArrayList<>(sf.masks());
+        if (nl != null) allMasks.addAll(nl.masks());
+        this.masks = List.copyOf(allMasks);
         this.engineWhere = nl == null ? null : nl.where();
 
-        this.grouped = stmt.isGrouped();
+        if (FoldQuery.needed(stmt, schema)) {
+            this.fold = new FoldQuery(stmt, schema, arrowSchema);
+            this.foldInner = new ParquetSqlPlan(sql, fold.inner(), files, options, false);
+            this.grouped = false;
+            this.engineless = false;
+            this.engine = null;
+            return;
+        }
+
+        this.grouped = rstmt.isGrouped();
         ArrowQuery q = null;
         boolean bare = false;
         try {
             if (grouped) {
-                SelectStatement eng = new SelectStatement(stmt.selectAll(), stmt.items(), stmt.table(), engineWhere,
-                        stmt.groupBy(), stmt.having(), stmt.orderBy(), stmt.limit());
+                SelectStatement eng = new SelectStatement(rstmt.selectAll(), rstmt.items(), rstmt.table(), engineWhere,
+                        rstmt.groupBy(), rstmt.having(), rstmt.orderBy(), effLimit());
                 Set<String> grefs = new LinkedHashSet<>(ColumnRefs.referencedBy(eng));
                 grefs.addAll(maskColumns());
                 addNumeric(grefs);
@@ -159,10 +177,10 @@ public final class ParquetSqlPlan implements AutoCloseable {
             } else {
                 List<SelectItem> computed = new ArrayList<>();
                 Set<String> refs = new LinkedHashSet<>();
-                if (stmt.selectAll()) {
+                if (rstmt.selectAll()) {
                     for (String c : schema.names()) outs.add(new Out(c, c));
                 } else {
-                    for (SelectItem it : stmt.items()) {
+                    for (SelectItem it : rstmt.items()) {
                         String t = it.exprText().trim();
                         if (schema.has(t)) {
                             outs.add(new Out(it.outputName(), t));
@@ -175,11 +193,11 @@ public final class ParquetSqlPlan implements AutoCloseable {
                 }
                 refs.addAll(ColumnRefs.referencedBy(engineWhere)); // native leaves are masks: their columns are not numeric refs
                 refs.addAll(maskColumns()); // except numeric masks, which read the widened column
-                for (OrderItem o : stmt.orderBy()) ColumnRefs.identifiers(o.exprText(), refs);
+                for (OrderItem o : rstmt.orderBy()) ColumnRefs.identifiers(o.exprText(), refs);
                 addNumeric(refs);
 
                 boolean sameNames = outs.stream().allMatch(o -> o.column() != null && o.column().equals(o.name()));
-                bare = computed.isEmpty() && engineWhere == null && stmt.orderBy().isEmpty() && sameNames;
+                bare = computed.isEmpty() && engineWhere == null && rstmt.orderBy().isEmpty() && sameNames;
                 if (!bare) {
                     List<SelectItem> items = new ArrayList<>(computed);
                     if (topNEligible()) {
@@ -189,7 +207,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
                         for (SelectItem c : computed) {
                             if (!numericColumns.contains(c.outputName())) bind.put(c.outputName(), c.exprText());
                         }
-                        List<OrderItem> ob = stmt.orderBy();
+                        List<OrderItem> ob = rstmt.orderBy();
                         sortDesc = new boolean[ob.size()];
                         for (int k = 0; k < ob.size(); k++) {
                             String name = "pngsortk" + NativeLeaves.maskName(k).substring("pngmask".length());
@@ -205,8 +223,8 @@ public final class ParquetSqlPlan implements AutoCloseable {
                         }
                     }
                     items.add(SelectItem.plain(NumericViews.ROW_ID, NumericViews.ROW_ID));
-                    SelectStatement es = new SelectStatement(false, items, stmt.table(), engineWhere,
-                            List.of(), null, stmt.orderBy(), stmt.limit());
+                    SelectStatement es = new SelectStatement(false, items, rstmt.table(), engineWhere,
+                            List.of(), null, rstmt.orderBy(), effLimit());
                     q = ArrowQuery.compile(sql, es);
                 }
             }
@@ -218,20 +236,26 @@ public final class ParquetSqlPlan implements AutoCloseable {
         this.engine = q;
     }
 
+    /** {@code LIMIT + OFFSET}: rows to produce before the offset is dropped, or {@code null} for no limit. */
+    private Integer effLimit() {
+        Integer l = plan.limit();
+        return l == null ? null : (int) Math.min(Integer.MAX_VALUE, (long) l + stmt.offset());
+    }
+
     /**
      * Bounded top-N applies to a non-grouped {@code ORDER BY ... LIMIT n} whose n fits the
      * materialization cap: see {@link TopN}.
      */
     private boolean topNEligible() {
-        Integer lim = plan.limit();
+        Integer lim = effLimit();
         return lim != null && lim >= 1 && lim <= maxMaterializedRows && lim <= 1_000_000
-                && !grouped && !stmt.orderBy().isEmpty();
+                && !grouped && !rstmt.orderBy().isEmpty();
     }
 
     /** Numeric columns read (widened) by two-valued numeric masks. */
     private Set<String> maskColumns() {
         Set<String> s = new LinkedHashSet<>();
-        for (NativeLeaves.Mask m : masks) if (m.widenedColumn() != null) s.add(m.widenedColumn());
+        for (NativeLeaves.Mask m : masks) s.addAll(m.widenedColumns());
         return s;
     }
 
@@ -316,8 +340,15 @@ public final class ParquetSqlPlan implements AutoCloseable {
             b.append("rows in footer: ").append(totalRows).append('\n');
             return b.toString();
         }
+        if (fold != null) {
+            b.append("mode: fold in Java (").append(stmt.distinct() ? "SELECT DISTINCT" : "aggregates the numeric engine cannot do")
+                    .append("); not streamable, the inner scan below is\n");
+            b.append("inner scan:\n");
+            for (String line : foldInner.explain().split("\n")) b.append("  ").append(line).append('\n');
+            return b.toString();
+        }
         b.append("mode: ").append(plan.streamable() ? "stream"
-                : !sortKeys.isEmpty() ? "bounded top-" + plan.limit() + " (keeps at most " + 2L * plan.limit() + " candidate rows)"
+                : !sortKeys.isEmpty() ? "bounded top-" + effLimit() + " (keeps at most " + 2L * effLimit() + " candidate rows)"
                 : "materialize (" + plan.materializeReason() + ")").append('\n');
         b.append("columns decoded: ").append(plan.columns() == null ? "*" : plan.columns()).append('\n');
         if (stmt.where() == null) {
@@ -342,7 +373,10 @@ public final class ParquetSqlPlan implements AutoCloseable {
         for (Out o : outs) if (o.column() != null) pass.add(o.column() + " (" + schema.kind(o.column()) + ")");
         b.append("passthrough columns (native type): ").append(pass).append('\n');
         b.append("engine: ").append(engine == null ? "none (pure projection, zero-copy)" : grouped ? "aggregate over widened columns" : "filter/project/sort + row-index gather").append('\n');
-        b.append("limit: ").append(plan.limit()).append('\n');
+        b.append("limit: ").append(plan.limit()).append(stmt.offset() > 0 ? ", offset: " + stmt.offset() : "").append('\n');
+        for (NativeLeaves.Mask m : masks) {
+            if (m instanceof ScalarFns.ScalarMask) b.append("derived column ").append(m.name).append(": ").append(m.description).append('\n');
+        }
         return b.toString();
     }
 
@@ -352,18 +386,22 @@ public final class ParquetSqlPlan implements AutoCloseable {
      * Only for {@link ScanPlanner.ScanPlan#streamable() streamable} queries.
      */
     public void stream(BufferAllocator allocator, Consumer<VectorSchemaRoot> sink) {
+        if (fold != null) {
+            throw new UnsupportedOperationException("SELECT DISTINCT and non-numeric aggregates are folded over the whole scan. Use execute().");
+        }
         if (!plan.streamable()) {
             throw new UnsupportedOperationException(
                     "Query cannot be streamed batch-by-batch: " + plan.materializeReason() + ". Use execute().");
         }
         lastMetrics = null;
         if (plan.metadataOnly()) {
-            if (plan.limit() != null && plan.limit() < 1) return;
+            if ((plan.limit() != null && plan.limit() < 1) || stmt.offset() > 0) return;
             VectorSchemaRoot r = footerAnswer(allocator);
             try { sink.accept(r); } finally { r.close(); }
             return;
         }
         long remaining = plan.limit() == null ? Long.MAX_VALUE : plan.limit();
+        long skip = stmt.offset();
         if (remaining == 0) return;
         for (Path f : files) {
             if (remaining <= 0) break;
@@ -373,12 +411,23 @@ public final class ParquetSqlPlan implements AutoCloseable {
                     Batch b = process(r.root(), views, allocator);
                     try {
                         int rows = b.root().getRowCount();
-                        if (rows > remaining) {
-                            b.root().setRowCount((int) remaining);
-                            rows = (int) remaining;
+                        int from = 0;
+                        if (skip > 0) {
+                            from = (int) Math.min(skip, rows);
+                            skip -= from;
                         }
-                        remaining -= rows;
-                        if (rows > 0) sink.accept(b.root());
+                        int avail = (int) Math.min(rows - from, remaining);
+                        remaining -= avail;
+                        if (avail > 0) {
+                            if (from == 0) {
+                                if (avail < rows) b.root().setRowCount(avail);
+                                sink.accept(b.root());
+                            } else {
+                                try (VectorSchemaRoot window = b.root().slice(from, avail)) {
+                                    sink.accept(window);
+                                }
+                            }
+                        }
                     } finally {
                         if (b.owned()) b.root().close();
                     }
@@ -395,7 +444,38 @@ public final class ParquetSqlPlan implements AutoCloseable {
      * {@link ParquetSqlOptions#maxMaterializedRows()}).
      */
     public VectorSchemaRoot execute(BufferAllocator allocator) {
+        return applyWindow(executeRaw(allocator));
+    }
+
+    /**
+     * Drops the first {@code OFFSET} rows and anything past {@code LIMIT}. Every path produces at
+     * most {@code LIMIT + OFFSET} rows, so this is a zero-copy slice (buffers are shared, and the
+     * original root is released).
+     */
+    private VectorSchemaRoot applyWindow(VectorSchemaRoot r) {
+        int off = stmt.offset();
+        Integer lim = stmt.limit();
+        int rows = r.getRowCount();
+        if (off == 0 && (lim == null || rows <= lim)) return r;
+        int from = Math.min(off, rows);
+        int len = (int) Math.min(rows - from, lim == null ? Long.MAX_VALUE : lim);
+        try {
+            return r.slice(from, len);
+        } finally {
+            r.close();
+        }
+    }
+
+    private VectorSchemaRoot executeRaw(BufferAllocator allocator) {
         lastMetrics = null;
+        if (fold != null) {
+            try {
+                return fold.execute(allocator, foldInner, maxMaterializedRows);
+            } finally {
+                lastMetrics = foldInner.lastMetrics();
+                roundedValues += foldInner.roundedValues();
+            }
+        }
         if (plan.metadataOnly()) return footerAnswer(allocator);
         if (!sortKeys.isEmpty()) return executeTopN(allocator);
 
@@ -445,7 +525,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
 
     /** Bounded {@code ORDER BY ... LIMIT n}: each batch's engine answer is merged into a {@link TopN}. */
     private VectorSchemaRoot executeTopN(BufferAllocator allocator) {
-        try (TopN top = new TopN(allocator, plan.limit(), outs.size(), sortDesc)) {
+        try (TopN top = new TopN(allocator, effLimit(), outs.size(), sortDesc)) {
             for (Path f : files) {
                 try (ParquetBatchReader r = scanFor(f).open(allocator);
                      NumericViews views = views(allocator, f)) {
@@ -467,7 +547,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
     }
 
     /** A zero-row result with the output columns, for a top-N query that matched nothing. */
-    private VectorSchemaRoot emptyResult(BufferAllocator alloc) {
+    VectorSchemaRoot emptyResult(BufferAllocator alloc) {
         List<FieldVector> vecs = new ArrayList<>(outs.size());
         try {
             for (Out o : outs) {
@@ -489,8 +569,16 @@ public final class ParquetSqlPlan implements AutoCloseable {
         return new VectorSchemaRoot(vecs);
     }
 
+    /** Output column names, in order. */
+    List<String> outputNames() {
+        List<String> n = new ArrayList<>(outs.size());
+        for (Out o : outs) n.add(o.name());
+        return n;
+    }
+
     @Override
     public void close() {
+        if (foldInner != null) foldInner.close();
         if (engine != null) engine.close();
     }
 
@@ -567,7 +655,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
     /** Whole-table copy for a pure projection executed in materialize mode (zero-copy buffer sharing). */
     private VectorSchemaRoot copyAll(VectorSchemaRoot combined, BufferAllocator alloc) {
         int n = combined.getRowCount();
-        if (plan.limit() != null) n = (int) Math.min(n, plan.limit());
+        if (effLimit() != null) n = Math.min(n, effLimit());
         List<FieldVector> vecs = new ArrayList<>(outs.size());
         List<Field> fields = new ArrayList<>(outs.size());
         for (Out o : outs) {

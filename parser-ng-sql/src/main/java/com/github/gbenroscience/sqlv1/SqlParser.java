@@ -37,6 +37,7 @@ import java.util.Locale;
  *         [HAVING boolean_expression]
  *         [ORDER BY order_item (',' order_item)*]
  *         [LIMIT integer_literal]
+ *         [OFFSET integer_literal [ROW | ROWS]]   (also accepted before LIMIT; contextual, so a column may be named offset)
  * table_reference
  *     ::= identifier
  *       | string_literal                          -- a file path (ParquetSql only)
@@ -323,6 +324,14 @@ public final class SqlParser {
         boolean selectAll = false;
         List<SelectItem> items = new ArrayList<>();
 
+        // DISTINCT is contextual (an identifier), so a column literally named distinct still works:
+        // it is the keyword only when something that can start a select item follows it.
+        boolean distinct = false;
+        if (isDistinctWord() && !isTerminatorAfterWord()) {
+            advance();
+            distinct = true;
+        }
+
         if (peekType() == TokenType.STAR) {
             advance();
             selectAll = true;
@@ -396,6 +405,12 @@ public final class SqlParser {
         }
 
         Integer limit = null;
+        int offset = 0;
+        boolean offsetSeen = false;
+        if (isOffsetWord()) { // OFFSET m [LIMIT n]
+            offset = parseOffset();
+            offsetSeen = true;
+        }
         if (peekType() == TokenType.LIMIT) {
             advance();
             Token n = expect(TokenType.NUMBER, "Expected a non-negative integer after LIMIT");
@@ -409,11 +424,15 @@ public final class SqlParser {
             }
         }
 
+        if (!offsetSeen && isOffsetWord()) { // LIMIT n OFFSET m
+            offset = parseOffset();
+        }
+
         expect(TokenType.EOF, "Unexpected trailing input after a complete query");
 
         try {
             return new SelectStatement(selectAll, items, table, where, groupBy, having, orderBy, limit,
-                    tableKind, tablePaths);
+                    tableKind, tablePaths, distinct, offset);
         } catch (IllegalArgumentException invalidShape) {
             throw new SqlSyntaxException(invalidShape.getMessage(), 0);
         }
@@ -497,9 +516,20 @@ public final class SqlParser {
         if (peekType() == TokenType.STAR) {
             error(func + "(*) is not valid; only COUNT(*) is");
         }
+        boolean distinct = false;
+        if (isDistinctWord() && !isTerminatorAfterWord()) {
+            if (func != AggFunc.COUNT) {
+                error("DISTINCT is supported only as COUNT(DISTINCT expr), not " + func);
+            }
+            advance();
+            distinct = true;
+            if (peekType() == TokenType.STAR) {
+                error("COUNT(DISTINCT *) is not valid; name the column to count distinct values of");
+            }
+        }
         String argExpr = parseValueExpression();
         expect(TokenType.RPAREN, "Expected ')' to close " + func + "(...)");
-        return new AggregateSpec(func, argExpr, false);
+        return new AggregateSpec(func, argExpr, false, distinct);
     }
 
     // =====================================================================
@@ -808,6 +838,9 @@ public final class SqlParser {
         while (true) {
             switch (peekType()) {
                 case IDENTIFIER: {
+                    if (sb.length() > 0 && atTrailingOffset()) {
+                        return sb.toString(); // an operand cannot follow an operand: this is the OFFSET clause
+                    }
                     Token idTok = advance();
                     if (peekType() == TokenType.LPAREN) {
                         appendToken(sb, buildFunctionCallText(idTok.text()));
@@ -1042,6 +1075,60 @@ public final class SqlParser {
     // =====================================================================
     // token-stream plumbing
     // =====================================================================
+
+    /** True if the current token is the identifier {@code OFFSET} (any case). */
+    private boolean isOffsetWord() {
+        return peekType() == TokenType.IDENTIFIER && "offset".equalsIgnoreCase(peek().text());
+    }
+
+    /**
+     * True at a trailing {@code OFFSET m} clause: {@code OFFSET}, a number, then end of input or
+     * {@code LIMIT}. Only that exact shape ends an expression, so a column named {@code offset} is
+     * still an ordinary identifier everywhere else.
+     */
+    private boolean atTrailingOffset() {
+        if (!isOffsetWord() || pos + 2 >= tokens.size()) return false;
+        if (tokens.get(pos + 1).type() != TokenType.NUMBER) return false;
+        TokenType after = tokens.get(pos + 2).type();
+        return after == TokenType.EOF || after == TokenType.LIMIT;
+    }
+
+    /** Parses {@code OFFSET m [ROW|ROWS]} at the cursor; {@code m} must be a plain non-negative integer. */
+    private int parseOffset() {
+        advance(); // OFFSET
+        Token n = expect(TokenType.NUMBER, "Expected a non-negative integer after OFFSET");
+        if (n.text().indexOf('.') >= 0) {
+            throw new SqlSyntaxException("OFFSET must be a plain integer, not '" + n.text() + "'", n.start());
+        }
+        int offset;
+        try {
+            offset = Integer.parseInt(n.text());
+        } catch (NumberFormatException overflow) {
+            throw new SqlSyntaxException("OFFSET value '" + n.text() + "' is out of range", n.start());
+        }
+        if (peekType() == TokenType.IDENTIFIER
+                && ("row".equalsIgnoreCase(peek().text()) || "rows".equalsIgnoreCase(peek().text()))) {
+            advance();
+        }
+        return offset;
+    }
+
+    /** True if the current token is the identifier {@code DISTINCT} (any case). */
+    private boolean isDistinctWord() {
+        return peekType() == TokenType.IDENTIFIER && "distinct".equalsIgnoreCase(peek().text());
+    }
+
+    /**
+     * True if the token after the current one cannot start a select item or aggregate argument
+     * ({@code ,}, {@code FROM}, {@code AS}, {@code )}, end of input), which makes a preceding
+     * {@code distinct} an ordinary column name.
+     */
+    private boolean isTerminatorAfterWord() {
+        if (pos + 1 >= tokens.size()) return true;
+        TokenType t = tokens.get(pos + 1).type();
+        return t == TokenType.COMMA || t == TokenType.FROM || t == TokenType.AS
+                || t == TokenType.RPAREN || t == TokenType.EOF;
+    }
 
     private Token peek() {
         return tokens.get(pos);

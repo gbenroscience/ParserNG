@@ -129,7 +129,7 @@ final class NumericViews implements AutoCloseable {
             }
             NativeLeaves.Mask mk = masks.get(m);
             VectorSchemaRoot in = source;
-            if (mk.widenedColumn() != null) {
+            if (!mk.widenedColumns().isEmpty()) {
                 if (widenedRoot == null) {
                     widenedRoot = new VectorSchemaRoot(new Schema(new ArrayList<>(fields)), new ArrayList<>(vecs), n);
                 }

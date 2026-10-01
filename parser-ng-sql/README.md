@@ -636,6 +636,42 @@ that directory or the query fails.
   compare as doubles, nulls last in both directions, ties keep file order. `n` must be at most
   `maxMaterializedRows` and 1,000,000; otherwise, and for `ORDER BY` with no `LIMIT`, every matching row is
   materialized. `explain()` reports `bounded top-n`.
+* **`SELECT DISTINCT`, `COUNT(DISTINCT col)`, `COUNT(col)` on any column, and `MIN`/`MAX` over strings, dates,
+  timestamps and booleans** are folded in Java over the native batches of an inner scan that keeps your `FROM`
+  and `WHERE` (so row-group pruning and native predicates apply). Rules:
+  * Without `GROUP BY` only; `GROUP BY` or `HAVING` with these fails with a named error.
+  * Every aggregate argument must be a plain column; `COUNT(*)`, `SUM`, `AVG` and numeric `MIN`/`MAX` may
+    appear in the same query. `COUNT`, `SUM`, `AVG` and numeric `MIN`/`MAX` return `Float8` (as the numeric
+    engine does); string, date, timestamp and boolean `MIN`/`MAX` keep the column type. Strings compare in
+    UTF-8 byte order. Aggregates over no rows give `COUNT` 0 and the others null. A 64-bit integer or decimal
+    beyond 2^53 fails loudly.
+  * `SELECT DISTINCT` accepts columns and numeric expressions, `ORDER BY` select-list columns or aliases
+    (nulls last, ties in file order) and `LIMIT`. Without `ORDER BY`, `LIMIT n` stops the scan after `n`
+    distinct rows. Distinct rows are held in memory, capped by `maxMaterializedRows`. `-0.0` equals `0.0` and
+    nulls equal each other.
+  * `DISTINCT` is a keyword only where a select item can follow it, so a column named `distinct` still works.
+    `SUM(DISTINCT x)` and `AVG(DISTINCT x)` are syntax errors; `ArrowQuery` itself rejects both forms.
+  * These queries cannot be streamed (`stream()` throws); keys are boxed, so this path is correct and bounded
+    but not zero-allocation.
+* **`OFFSET`**: `LIMIT n OFFSET m`, `OFFSET m LIMIT n` and a bare `OFFSET m` (optionally followed by `ROW` or
+  `ROWS`) are accepted by the bridge. Every execution path produces at most `LIMIT + OFFSET` rows and the
+  first `m` are then dropped by a zero-copy slice, so a bounded top-N keeps `n + m` candidates and a
+  streamed scan skips `m` rows and stops after `n`. `OFFSET` without `ORDER BY` skips rows in file order,
+  which is not a stable order across files, as in any SQL engine. `OFFSET` is a keyword only as a trailing
+  clause (`OFFSET`, an integer, then the end or `LIMIT`), so a column named `offset` still works.
+  `ArrowQuery` itself rejects `OFFSET` rather than ignore it.
+* **`COALESCE(a, b, ...)` and `NULLIF(a, b)`** work over numeric columns, numeric literals, `NULL` and each
+  other (`COALESCE(NULLIF(a, 0), b)`), in the select list, `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY` and
+  inside aggregates. ParserNG has no notion of null, so each call is evaluated by the bridge per batch over
+  the widened columns (nulls preserved) into a derived `Float8` column, and the engine reads that column;
+  `explain()` lists the derived columns. `COALESCE` returns the first non-null argument; `NULLIF(a, b)` is
+  null when `a` is null or equals `b` (by double value; a null `b` never equals `a`). The output column is
+  named after the original text (`COALESCE(a, 0)`) unless aliased, and is `Float8` even for an integer
+  column. Not supported, with a named error: string, date, timestamp or boolean arguments, an expression as an
+  argument (`COALESCE(a + b, 0)`; write `COALESCE(a, 0) + COALESCE(b, 0)`), and a call as the operand of
+  `IS NULL`, `LIKE`, `REGEXP` or a boolean test. Under `OR`, a predicate over a derived column follows the
+  engine's null propagation like any numeric expression leaf. A `COALESCE` predicate is never pushed to
+  Parquet row-group pruning.
 * **`SELECT COUNT(*)`** (only `COUNT(*)` items, no `WHERE`, `GROUP BY`, `HAVING` or `ORDER BY`)
   is answered from the footer row count: no data page is decoded and `lastMetrics()` is `null`.
 
@@ -728,6 +764,8 @@ buffers and row-index buffer are reused.
 | `EXPLAIN` | yes |
 | `COUNT(*)` from the footer, no decode | yes |
 | Bounded top-N for `ORDER BY ... LIMIT n` | yes |
+| `SELECT DISTINCT`, `COUNT(DISTINCT col)` | yes (no `GROUP BY`) |
+| `COUNT(col)` any type; `MIN`/`MAX` over string, date, timestamp, boolean | yes (no `GROUP BY`) |
 | Scan options exposed | yes |
 | Precision error for int64 beyond 2^53 | yes |
 | Boolean, string, date, timestamp `WHERE` predicates, `IS [NOT] TRUE/FALSE`, `IS NULL` on any column | yes |
@@ -740,9 +778,11 @@ buffers and row-index buffer are reused.
 | Timestamp row-group pruning | not yet (needs a parser-ng-parquet change) |
 | Quoted identifiers (`"my col"`) | not yet |
 | Nested field access (`s.field`, `items[0]`, `m['k']`) and `CARDINALITY` | not yet (whole struct can be selected) |
-| `COUNT(col)`, `COUNT(DISTINCT)`, `SELECT DISTINCT`, `MIN`/`MAX` from statistics | not yet (`MIN`/`MAX`/`COUNT(col)` run through the engine on numeric columns) |
-| Bounded top-N for `ORDER BY ... LIMIT` | not yet (materializes surviving rows) |
-| `COALESCE`, `NULLIF`, `OFFSET` | not yet |
+| `MIN`/`MAX`/`COUNT(col)` answered from footer statistics | not yet (they scan the column; numeric ones run in the engine, the rest are folded) |
+| `GROUP BY` with `DISTINCT` or non-numeric aggregates | not yet (named error) |
+| `LIMIT n OFFSET m`, `OFFSET m [LIMIT n]` | yes (bridge only; `ArrowQuery` rejects `OFFSET`) |
+| `COALESCE`, `NULLIF` over numeric columns and literals | yes (bridge only; result is `Float8`) |
+| `COALESCE`/`NULLIF` over strings, dates, timestamps, or with expression arguments | not yet (named error) |
 
 ## What's intentionally out of scope
 

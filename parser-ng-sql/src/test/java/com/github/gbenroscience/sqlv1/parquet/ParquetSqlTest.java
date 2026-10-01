@@ -571,4 +571,265 @@ class ParquetSqlTest {
             assertTrue(p.explain().contains("materialize"), "no LIMIT: every row is needed\n" + p.explain());
         }
     }
+
+    // ---------------------------------------------------------------- DISTINCT and non-numeric aggregates
+
+    private VectorSchemaRoot runSql(BufferAllocator a, String sql) throws Exception {
+        return ParquetSql.execute(main(), sql, a);
+    }
+
+    @Test
+    void countOfAColumnCountsNonNullsForAnyType() throws Exception {
+        long names = 0, flags = 0;
+        for (int i = 0; i < ROWS; i++) { if (i % 11 != 0) names++; if (i % 7 != 0) flags++; }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*), COUNT(name), COUNT(flag), COUNT(day) FROM t")) {
+            assertEquals(1, r.getRowCount());
+            assertEquals(ROWS, ((Float8Vector) r.getVector("COUNT(*)")).get(0), 0.0);
+            assertEquals(names, ((Float8Vector) r.getVector("COUNT(name)")).get(0), 0.0);
+            assertEquals(flags, ((Float8Vector) r.getVector("COUNT(flag)")).get(0), 0.0);
+            assertEquals(ROWS, ((Float8Vector) r.getVector("COUNT(day)")).get(0), 0.0);
+        }
+    }
+
+    @Test
+    void countDistinctOverStringAndDateAndNumeric() throws Exception {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        java.util.Set<Integer> days = new java.util.HashSet<>(), i32s = new java.util.HashSet<>();
+        for (int i = 0; i < ROWS; i++) {
+            if (i % 11 != 0) names.add("n" + i);
+            days.add(19000 + i % 365);
+            if (i % 10 != 0) i32s.add(i % 100);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(DISTINCT name) AS dn, COUNT(DISTINCT day) AS dd, COUNT(DISTINCT i32) AS di FROM t")) {
+            assertEquals(names.size(), ((Float8Vector) r.getVector("dn")).get(0), 0.0);
+            assertEquals(days.size(), ((Float8Vector) r.getVector("dd")).get(0), 0.0);
+            assertEquals(i32s.size(), ((Float8Vector) r.getVector("di")).get(0), 0.0);
+        }
+    }
+
+    @Test
+    void minMaxOverStringDateTimestampKeepTheColumnType() throws Exception {
+        String lo = null, hi = null;
+        for (int i = 0; i < ROWS; i++) {
+            if (i % 11 == 0) continue;
+            String n = "n" + i;
+            if (lo == null || n.compareTo(lo) < 0) lo = n;
+            if (hi == null || n.compareTo(hi) > 0) hi = n;
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT MIN(name) AS lo, MAX(name) AS hi, MIN(day) AS d0, MAX(day) AS d1, MAX(ts) AS t1, MIN(id) AS i0 FROM t")) {
+            assertEquals(lo, new String(((VarCharVector) r.getVector("lo")).get(0), StandardCharsets.UTF_8));
+            assertEquals(hi, new String(((VarCharVector) r.getVector("hi")).get(0), StandardCharsets.UTF_8));
+            assertEquals(19000, ((DateDayVector) r.getVector("d0")).get(0));
+            assertEquals(19000 + 364, ((DateDayVector) r.getVector("d1")).get(0));
+            assertEquals(ParquetFixtures.TS_BASE + (ROWS - 1) * 1_000_000L, ((TimeStampVector) r.getVector("t1")).get(0));
+            assertEquals(0.0, ((Float8Vector) r.getVector("i0")).get(0), 0.0);
+        }
+    }
+
+    @Test
+    void foldedAggregatesHonourTheWhereAndPruneRowGroups() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT COUNT(name), MAX(name) FROM t WHERE id >= 19000");
+             VectorSchemaRoot r = p.execute(a)) {
+            long n = 0;
+            for (int i = 19000; i < ROWS; i++) if (i % 11 != 0) n++;
+            assertEquals(n, ((Float8Vector) r.getVector("COUNT(name)")).get(0), 0.0);
+            assertNotNull(p.lastMetrics());
+            assertTrue(p.lastMetrics().rowGroupsSkipped() > 0, "WHERE id >= 19000 must skip row groups");
+        }
+    }
+
+    @Test
+    void aggregatesOverNoRowsAreZeroAndNull() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(name) AS c, MAX(name) AS m, COUNT(DISTINCT day) AS d FROM t WHERE id < 0")) {
+            assertEquals(1, r.getRowCount());
+            assertEquals(0.0, ((Float8Vector) r.getVector("c")).get(0), 0.0);
+            assertTrue(r.getVector("m").isNull(0));
+            assertEquals(0.0, ((Float8Vector) r.getVector("d")).get(0), 0.0);
+        }
+    }
+
+    @Test
+    void selectDistinctReturnsEachValueOnceIncludingNull() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT DISTINCT flag FROM t")) {
+            assertEquals(3, r.getRowCount(), "true, false and null");
+            java.util.Set<Object> seen = new java.util.HashSet<>();
+            for (int i = 0; i < 3; i++) seen.add(r.getVector("flag").getObject(i));
+            assertEquals(3, seen.size());
+            assertTrue(seen.contains(null) && seen.contains(Boolean.TRUE) && seen.contains(Boolean.FALSE));
+        }
+    }
+
+    @Test
+    void selectDistinctWithOrderByAndLimit() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT DISTINCT day FROM t ORDER BY day LIMIT 3")) {
+            assertEquals(3, r.getRowCount());
+            for (int i = 0; i < 3; i++) assertEquals(19000 + i, ((DateDayVector) r.getVector("day")).get(i));
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT DISTINCT i32 AS v FROM t ORDER BY v DESC LIMIT 2")) {
+            assertEquals(2, r.getRowCount());
+            assertEquals(99, ((IntVector) r.getVector("v")).get(0));
+            assertEquals(98, ((IntVector) r.getVector("v")).get(1));
+        }
+    }
+
+    @Test
+    void selectDistinctLimitWithoutOrderByStopsEarlyAndCountsDistinct() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT DISTINCT day FROM t LIMIT 5");
+             VectorSchemaRoot r = p.execute(a)) {
+            assertEquals(5, r.getRowCount());
+            java.util.Set<Object> seen = new java.util.HashSet<>();
+            for (int i = 0; i < 5; i++) seen.add(r.getVector("day").getObject(i));
+            assertEquals(5, seen.size());
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT DISTINCT day, flag FROM t WHERE id < 0")) {
+            assertEquals(0, r.getRowCount());
+            assertNotNull(r.getVector("day"));
+        }
+    }
+
+    @Test
+    void foldedQueriesRejectWhatTheyCannotDoWithNamedErrors() throws Exception {
+        ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT flag, COUNT(DISTINCT name) FROM t GROUP BY flag")) { }
+        });
+        assertTrue(e.getMessage().contains("GROUP BY"), e.getMessage());
+        e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT COUNT(DISTINCT name), SUM(id + 1) FROM t")) { }
+        });
+        assertTrue(e.getMessage().contains("plain column"), e.getMessage());
+        e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT DISTINCT id FROM t ORDER BY i32")) { }
+        });
+        assertTrue(e.getMessage().contains("select-list"), e.getMessage());
+        assertThrows(UnsupportedOperationException.class, () -> {
+            try (ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT DISTINCT day FROM t")) {
+                p.stream(new RootAllocator(), x -> { });
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------- OFFSET
+
+    @Test
+    void offsetWithOrderByAndLimitWindowsTheSortedRows() throws Exception {
+        assertEquals(List.of(10L, 11L, 12L, 13L, 14L), runIds("SELECT id FROM t ORDER BY id LIMIT 5 OFFSET 10", ParquetSqlOptions.defaults().withBatchSize(1000)));
+        // descending order is 19999 ... 0, so skipping 19999 rows leaves only id 0
+        assertEquals(List.of(0L), runIds("SELECT id FROM t ORDER BY id DESC LIMIT 3 OFFSET 19999", ParquetSqlOptions.defaults()));
+        assertEquals(List.of(19997L, 19996L), runIds("SELECT id FROM t ORDER BY id DESC LIMIT 2 OFFSET 2", ParquetSqlOptions.defaults()));
+        assertEquals(List.of(), runIds("SELECT id FROM t ORDER BY id LIMIT 3 OFFSET 20000", ParquetSqlOptions.defaults()));
+    }
+
+    @Test
+    void offsetWithoutOrderByOrLimit() throws Exception {
+        assertEquals(List.of(102L, 103L, 104L), runIds("SELECT id FROM t WHERE id >= 100 LIMIT 3 OFFSET 2", ParquetSqlOptions.defaults()));
+        assertEquals(List.of(19998L, 19999L), runIds("SELECT id FROM t OFFSET 19998", ParquetSqlOptions.defaults()));
+        assertEquals(List.of(), runIds("SELECT id FROM t OFFSET 20000", ParquetSqlOptions.defaults()));
+    }
+
+    @Test
+    void offsetAlsoAppliesWhenStreaming() throws Exception {
+        List<Long> got = new ArrayList<>();
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT id FROM t LIMIT 2500 OFFSET 1500", ParquetSqlOptions.defaults().withBatchSize(1000))) {
+            p.stream(a, root -> {
+                BigIntVector id = (BigIntVector) root.getVector("id");
+                for (int i = 0; i < root.getRowCount(); i++) got.add(id.get(i));
+            });
+        }
+        assertEquals(2500, got.size());
+        assertEquals(1500L, got.get(0));
+        assertEquals(3999L, got.get(got.size() - 1));
+    }
+
+    @Test
+    void offsetOnASingleRowAggregateYieldsNoRows() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) FROM t OFFSET 1")) {
+            assertEquals(0, r.getRowCount());
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) FROM t LIMIT 1 OFFSET 0")) {
+            assertEquals(1, r.getRowCount());
+        }
+    }
+
+    @Test
+    void offsetWithDistinct() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT DISTINCT day FROM t ORDER BY day LIMIT 3 OFFSET 2")) {
+            assertEquals(3, r.getRowCount());
+            for (int i = 0; i < 3; i++) assertEquals(19002 + i, ((DateDayVector) r.getVector("day")).get(i));
+        }
+    }
+
+    // ---------------------------------------------------------------- COALESCE / NULLIF
+
+    @Test
+    void coalesceInTheSelectListKeepsNullSemanticsAndNames() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT id, COALESCE(i32, -1) AS v, COALESCE(i32, 0) + 1 FROM t WHERE id < 25 ORDER BY id")) {
+            assertEquals(25, r.getRowCount());
+            Float8Vector v = (Float8Vector) r.getVector("v");
+            Float8Vector w = (Float8Vector) r.getVector("COALESCE(i32, 0) + 1");
+            for (int i = 0; i < 25; i++) {
+                double expected = i % 10 == 0 ? -1 : i % 100;
+                assertEquals(expected, v.get(i), 0.0, "row " + i);
+                assertEquals((i % 10 == 0 ? 0 : i % 100) + 1, w.get(i), 0.0, "row " + i);
+            }
+        }
+    }
+
+    @Test
+    void coalesceAndNullifInWhere() throws Exception {
+        long zero = 0, kept = 0;
+        for (int i = 0; i < ROWS; i++) {
+            if (i % 10 == 0) zero++;                       // null i32 coalesces to 0
+            if (i % 10 != 0 && i % 100 != 5 && i % 100 > 0) kept++; // NULLIF(i32, 5) > 0
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE COALESCE(i32, 0) = 0")) {
+            assertEquals(zero, ((Float8Vector) r.getVector("c")).get(0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE NULLIF(i32, 5) > 0")) {
+            assertEquals(kept, ((Float8Vector) r.getVector("c")).get(0), 0.0);
+        }
+    }
+
+    @Test
+    void coalesceInsideAggregatesAndOrderBy() throws Exception {
+        double sum = 0;
+        for (int i = 0; i < ROWS; i++) if (i % 10 != 0) sum += i % 100;
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT SUM(COALESCE(i32, 0)) AS s FROM t")) {
+            assertEquals(sum, ((Float8Vector) r.getVector("s")).get(0), 0.0);
+        }
+        // nulls coalesce to -1 so they sort first ascending; ties keep file order
+        assertEquals(List.of(0L, 10L, 20L), runIds("SELECT id FROM t ORDER BY COALESCE(i32, -1) LIMIT 3", ParquetSqlOptions.defaults().withBatchSize(1000)));
+    }
+
+    @Test
+    void coalesceUnderOrKeepsTheOtherBranch() throws Exception {
+        List<Long> expect = new ArrayList<>();
+        for (long i = 0; i < ROWS; i++) if ((i % 10 == 0 ? 0 : i % 100) > 98 || i < 3) expect.add(i);
+        assertEquals(expect, runIds("SELECT id FROM t WHERE COALESCE(i32, 0) > 98 OR id < 3", ParquetSqlOptions.defaults()));
+    }
+
+    @Test
+    void coalesceOverAStringColumnFailsWithANamedError() throws Exception {
+        ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT COALESCE(name, 'x') FROM t")) { }
+        });
+        assertTrue(e.getMessage().contains("STRING"), e.getMessage());
+    }
 }
