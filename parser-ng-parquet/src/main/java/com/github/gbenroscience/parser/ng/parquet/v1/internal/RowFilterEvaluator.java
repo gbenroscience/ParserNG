@@ -22,8 +22,12 @@ import org.apache.arrow.vector.UInt4Vector;
 import org.apache.arrow.vector.UInt8Vector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.StructVector;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
+
+import org.apache.parquet.schema.MessageType;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -72,9 +76,23 @@ import java.util.regex.Pattern;
 public final class RowFilterEvaluator {
 
     private final Node root;
+    /** Projected Parquet schema used to resolve nested paths; null means flat top-level columns only. */
+    private final MessageType schema;
 
+    /** Flat top-level columns only (no nested paths). */
     public RowFilterEvaluator(Predicate predicate, List<Field> fields, Set<String> flatLeafNames,
                                Map<String, CustomPredicate> customPredicates, ParquetSource file) {
+        this(predicate, fields, flatLeafNames, customPredicates, file, null);
+    }
+
+    /**
+     * @param schema the projected Parquet schema; with it, a leaf may be named by a dotted path into a struct,
+     *               list or map (see {@link ColumnPaths}), evaluated with "some element satisfies" semantics
+     *               when a list lies on the path
+     */
+    public RowFilterEvaluator(Predicate predicate, List<Field> fields, Set<String> flatLeafNames,
+                               Map<String, CustomPredicate> customPredicates, ParquetSource file, MessageType schema) {
+        this.schema = schema;
         Map<String, Integer> indexOf = new HashMap<>();
         for (int i = 0; i < fields.size(); i++) indexOf.put(fields.get(i).getName(), i);
         Map<String, CustomPredicate> customs = customPredicates == null ? Map.of() : customPredicates;
@@ -107,12 +125,60 @@ public final class RowFilterEvaluator {
         public boolean eval(VectorSchemaRoot b, int row) { return !inner.eval(b, row); }
     }
 
+    /** A test applied to one leaf position: vector {@code v}, index {@code i} (an element index inside lists). */
+    private interface LeafTest {
+        boolean test(FieldVector v, int i);
+
+        /** Result when the leaf is null because a struct above it is null (comparisons: false; IS NULL: true). */
+        boolean nullResult();
+    }
+
+    /**
+     * The route from a batch row to a leaf, resolved once at compile time. Flat columns take the original
+     * one-vector path. Below a struct the leaf is null whenever the struct is; below a list every element of
+     * the row's range is visited and the row matches if ANY element passes (a null or empty list has none).
+     */
+    private static final class Access {
+        final int top;
+        final ColumnPaths.Step[] steps;
+        final Field leafField;
+
+        Access(int top, List<ColumnPaths.Step> steps, Field leafField) {
+            this.top = top;
+            this.steps = steps.toArray(new ColumnPaths.Step[0]);
+            this.leafField = leafField;
+        }
+
+        boolean any(VectorSchemaRoot batch, int row, LeafTest t) {
+            FieldVector v = batch.getVector(top);
+            if (steps.length == 0) return t.test(v, row);
+            return walk(v, row, 0, t);
+        }
+
+        private boolean walk(FieldVector v, int idx, int s, LeafTest t) {
+            if (s == steps.length) return t.test(v, idx);
+            ColumnPaths.Step st = steps[s];
+            if (st.kind() == ColumnPaths.StepKind.FIELD) {
+                if (v.isNull(idx)) return t.nullResult();
+                FieldVector child = (FieldVector) ((StructVector) v).getChild(st.name());
+                return walk(child, idx, s + 1, t);
+            }
+            ListVector lv = (ListVector) v; // MapVector is a ListVector
+            if (lv.isNull(idx)) return false;
+            FieldVector data = lv.getDataVector();
+            for (int e = lv.getElementStartIndex(idx), end = lv.getElementEndIndex(idx); e < end; e++) {
+                if (walk(data, e, s + 1, t)) return true;
+            }
+            return false;
+        }
+    }
+
     /** Kind of the Arrow column being compared -- resolved once at compile time, not per row. */
     private enum Kind { BOOL, INT8, INT16, INT32, DATE_DAY, INT64, TIMESTAMP, FLOAT, DOUBLE, UTF8,
                          UINT8, UINT16, UINT32, UINT64, DECIMAL, UUID }
 
-    private final class CmpNode implements Node {
-        final int colIndex;
+    private final class CmpNode implements Node, LeafTest {
+        final Access access;
         final Kind kind;
         final Predicate.Op op;
         final long numLit;      // BOOL(0/1)/INT8/16/32/DATE_DAY/INT64/TIMESTAMP/UINT8/16/32(widened non-negative)/UINT64(raw bit pattern)
@@ -122,15 +188,18 @@ public final class RowFilterEvaluator {
         final BigDecimal decLit; // DECIMAL
         final byte[] uuidLit;    // UUID
 
-        CmpNode(int colIndex, Kind kind, Predicate.Op op, long numLit, float floatLit, double doubleLit,
+        CmpNode(Access access, Kind kind, Predicate.Op op, long numLit, float floatLit, double doubleLit,
                 String strLit, BigDecimal decLit, byte[] uuidLit) {
-            this.colIndex = colIndex; this.kind = kind; this.op = op;
+            this.access = access; this.kind = kind; this.op = op;
             this.numLit = numLit; this.floatLit = floatLit; this.doubleLit = doubleLit; this.strLit = strLit;
             this.decLit = decLit; this.uuidLit = uuidLit;
         }
 
-        public boolean eval(VectorSchemaRoot batch, int row) {
-            FieldVector v = batch.getVector(colIndex);
+        public boolean eval(VectorSchemaRoot batch, int row) { return access.any(batch, row, this); }
+
+        public boolean nullResult() { return false; }
+
+        public boolean test(FieldVector v, int row) {
             if (v.isNull(row)) return false; // NULL compared to anything: unknown -> excluded, even for NE
             return switch (kind) {
                 case BOOL -> cmpLong(((BitVector) v).get(row), op, numLit);
@@ -156,8 +225,8 @@ public final class RowFilterEvaluator {
         }
     }
 
-    private final class InNode implements Node {
-        final int colIndex;
+    private final class InNode implements Node, LeafTest {
+        final Access access;
         final Kind kind;
         final Set<Long> numSet;     // BOOL/INT8/16/32/DATE_DAY/INT64/TIMESTAMP/UINT8/16/32(widened)/UINT64(raw bit pattern)
         final Set<Float> floatSet;  // FLOAT
@@ -167,15 +236,18 @@ public final class RowFilterEvaluator {
                                          // HashSet would silently miss matches; linear-scan with compareTo()==0 instead
         final List<byte[]> uuidList;    // UUID -- byte[] has no useful equals/hashCode either, same reasoning
 
-        InNode(int colIndex, Kind kind, Set<Long> numSet, Set<Float> floatSet, Set<Double> doubleSet,
+        InNode(Access access, Kind kind, Set<Long> numSet, Set<Float> floatSet, Set<Double> doubleSet,
                Set<String> strSet, List<BigDecimal> decList, List<byte[]> uuidList) {
-            this.colIndex = colIndex; this.kind = kind;
+            this.access = access; this.kind = kind;
             this.numSet = numSet; this.floatSet = floatSet; this.doubleSet = doubleSet; this.strSet = strSet;
             this.decList = decList; this.uuidList = uuidList;
         }
 
-        public boolean eval(VectorSchemaRoot batch, int row) {
-            FieldVector v = batch.getVector(colIndex);
+        public boolean eval(VectorSchemaRoot batch, int row) { return access.any(batch, row, this); }
+
+        public boolean nullResult() { return false; }
+
+        public boolean test(FieldVector v, int row) {
             if (v.isNull(row)) return false;
             return switch (kind) {
                 case BOOL -> numSet.contains((long) ((BitVector) v).get(row));
@@ -211,11 +283,11 @@ public final class RowFilterEvaluator {
         }
     }
 
-    private record IsNullNode(int colIndex, boolean negated) implements Node {
-        public boolean eval(VectorSchemaRoot batch, int row) {
-            boolean isNull = batch.getVector(colIndex).isNull(row);
-            return negated != isNull;
-        }
+    /** IS NULL / IS NOT NULL. Below a null struct the leaf counts as null; below a list, "some element is [not] null". */
+    private record IsNullNode(Access access, boolean negated) implements Node, LeafTest {
+        public boolean eval(VectorSchemaRoot batch, int row) { return access.any(batch, row, this); }
+        public boolean nullResult() { return !negated; }
+        public boolean test(FieldVector v, int row) { return negated != v.isNull(row); }
     }
 
     /** Both columns already validated (at compile time) to resolve to the same {@link Kind}. */
@@ -252,17 +324,19 @@ public final class RowFilterEvaluator {
         }
     }
 
-    private record LikeNode(int colIndex, Pattern compiled) implements Node {
-        public boolean eval(VectorSchemaRoot batch, int row) {
-            FieldVector v = batch.getVector(colIndex);
+    private record LikeNode(Access access, Pattern compiled) implements Node, LeafTest {
+        public boolean eval(VectorSchemaRoot batch, int row) { return access.any(batch, row, this); }
+        public boolean nullResult() { return false; }
+        public boolean test(FieldVector v, int row) {
             if (v.isNull(row)) return false;
             return compiled.matcher(readUtf8((VarCharVector) v, row)).matches();
         }
     }
 
-    private record RegexNode(int colIndex, Pattern pattern) implements Node {
-        public boolean eval(VectorSchemaRoot batch, int row) {
-            FieldVector v = batch.getVector(colIndex);
+    private record RegexNode(Access access, Pattern pattern) implements Node, LeafTest {
+        public boolean eval(VectorSchemaRoot batch, int row) { return access.any(batch, row, this); }
+        public boolean nullResult() { return false; }
+        public boolean test(FieldVector v, int row) {
             if (v.isNull(row)) return false;
             return pattern.matcher(readUtf8((VarCharVector) v, row)).find();
         }
@@ -284,8 +358,7 @@ public final class RowFilterEvaluator {
         if (p instanceof Predicate.Cmp c) return compileCmp(c, fields, indexOf, flatLeafNames, file);
         if (p instanceof Predicate.In in) return compileIn(in, fields, indexOf, flatLeafNames, file);
         if (p instanceof Predicate.IsNull n) {
-            int idx = resolveFlat(n.column(), indexOf, flatLeafNames, file);
-            return new IsNullNode(idx, n.negated());
+            return new IsNullNode(resolveAccess(n.column(), fields, indexOf, flatLeafNames, file), n.negated());
         }
         if (p instanceof Predicate.ColCmp cc) return compileColCmp(cc, fields, indexOf, flatLeafNames, file);
         if (p instanceof Predicate.Like lk) return compileLike(lk, fields, indexOf, flatLeafNames, file);
@@ -295,8 +368,8 @@ public final class RowFilterEvaluator {
     }
 
     private Node compileCmp(Predicate.Cmp c, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
-        int idx = resolveFlat(c.column(), indexOf, flatLeafNames, file);
-        Kind kind = kindOf(fields.get(idx), file);
+        Access idx = resolveAccess(c.column(), fields, indexOf, flatLeafNames, file);
+        Kind kind = kindOf(idx.leafField, file);
         if (kind == Kind.BOOL && c.op() != Predicate.Op.EQ && c.op() != Predicate.Op.NE) {
             throw new ParquetScanException("Only EQ/NE are meaningful on a BOOLEAN column", file, -1, c.column(), null);
         }
@@ -318,8 +391,8 @@ public final class RowFilterEvaluator {
     }
 
     private Node compileIn(Predicate.In in, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
-        int idx = resolveFlat(in.column(), indexOf, flatLeafNames, file);
-        Kind kind = kindOf(fields.get(idx), file);
+        Access idx = resolveAccess(in.column(), fields, indexOf, flatLeafNames, file);
+        Kind kind = kindOf(idx.leafField, file);
         Set<Long> nums = null; Set<Float> floats = null; Set<Double> doubles = null; Set<String> strs = null;
         List<BigDecimal> decs = null; List<byte[]> uuids = null;
         switch (kind) {
@@ -374,14 +447,14 @@ public final class RowFilterEvaluator {
     }
 
     private Node compileLike(Predicate.Like lk, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
-        int idx = resolveFlat(lk.column(), indexOf, flatLeafNames, file);
-        requireUtf8(fields.get(idx), file);
+        Access idx = resolveAccess(lk.column(), fields, indexOf, flatLeafNames, file);
+        requireUtf8(idx.leafField, file);
         return new LikeNode(idx, lk.compiled());
     }
 
     private Node compileRegex(Predicate.Regex rx, List<Field> fields, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
-        int idx = resolveFlat(rx.column(), indexOf, flatLeafNames, file);
-        requireUtf8(fields.get(idx), file);
+        Access idx = resolveAccess(rx.column(), fields, indexOf, flatLeafNames, file);
+        requireUtf8(idx.leafField, file);
         return new RegexNode(idx, rx.pattern());
     }
 
@@ -404,10 +477,53 @@ public final class RowFilterEvaluator {
         return new CustomNode(impl);
     }
 
+    /**
+     * A leaf named by a flat top-level column, or (when a schema was supplied) by a dotted path into a struct,
+     * list or map. The path's top-level column must be part of the projection. Fails at construction, naming
+     * the column, if it resolves to nothing usable.
+     */
+    private Access resolveAccess(String column, List<Field> fields, Map<String, Integer> indexOf,
+                                 Set<String> flatLeafNames, ParquetSource file) {
+        if (flatLeafNames.contains(column)) {
+            int idx = resolveFlat(column, indexOf, flatLeafNames, file);
+            return new Access(idx, List.of(), fields.get(idx));
+        }
+        ColumnPaths.Resolved r = schema == null ? null : ColumnPaths.resolve(schema, column);
+        if (r == null) {
+            throw new ParquetScanException(
+                    "exactFilter() predicate column '" + column + "' is not a leaf of the projected columns"
+                    + (schema == null ? " (only flat top-level columns are supported here)"
+                                      : "; use a flat column or a dotted path to a primitive leaf, e.g. \"user.address.zip\""
+                                        + " or \"items.price\""), file, -1, column, null);
+        }
+        Integer top = indexOf.get(r.topLevel());
+        if (top == null) {
+            throw new ParquetScanException(
+                    "exactFilter() requires every predicate column to also be part of the projection "
+                    + "(select(...)); '" + r.topLevel() + "' (top level of '" + column + "') is not selected",
+                    file, -1, column, null);
+        }
+        Field f = fields.get(top);
+        for (ColumnPaths.Step st : r.steps()) {
+            if (st.kind() == ColumnPaths.StepKind.LIST) {
+                f = f.getChildren().get(0);
+            } else {
+                Field next = null;
+                for (Field c : f.getChildren()) if (c.getName().equals(st.name())) { next = c; break; }
+                if (next == null) {
+                    throw new ParquetScanException("Internal error: no Arrow field '" + st.name() + "' on the route to '"
+                            + column + "'", file, -1, column, null);
+                }
+                f = next;
+            }
+        }
+        return new Access(top, r.steps(), f);
+    }
+
     private int resolveFlat(String column, Map<String, Integer> indexOf, Set<String> flatLeafNames, ParquetSource file) {
         if (!flatLeafNames.contains(column)) {
             throw new ParquetScanException(
-                    "exactFilter() requires every predicate column to be a flat, top-level column; "
+                    "exactFilter() requires every predicate column to be a flat, top-level column here; "
                     + "'" + column + "' is nested or does not exist", file, -1, column, null);
         }
         Integer idx = indexOf.get(column);

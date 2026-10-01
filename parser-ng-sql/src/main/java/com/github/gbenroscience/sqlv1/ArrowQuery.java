@@ -203,6 +203,18 @@ public final class ArrowQuery implements AutoCloseable {
         return new ArrowQuery(sql, stmt);
     }
 
+    /**
+     * Compiles an already-built statement (used by the Parquet bridge, which
+     * rewrites a parsed statement rather than re-rendering SQL text).
+     *
+     * @param label text shown in error messages in place of the SQL
+     * @param stmt the statement
+     * @return the query
+     */
+    public static ArrowQuery compile(String label, SelectStatement stmt) {
+        return new ArrowQuery(label, stmt);
+    }
+
     /** @return the parsed statement backing this query */
     public SelectStatement statement() {
         return stmt;

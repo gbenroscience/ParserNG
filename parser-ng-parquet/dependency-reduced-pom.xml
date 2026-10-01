@@ -3,12 +3,12 @@
   <parent>
     <artifactId>parser-ng-parent</artifactId>
     <groupId>com.github.gbenroscience</groupId>
-    <version>3.0.8</version>
+    <version>3.0.9</version>
   </parent>
   <modelVersion>4.0.0</modelVersion>
   <artifactId>parser-ng-parquet</artifactId>
   <name>parser-ng-parquet</name>
-  <version>3.0.8</version>
+  <version>3.0.9</version>
   <description>ParserNG's Parquet storage layer: projection, predicate-driven row-group pruning and
         allocation-conscious decoding into Apache Arrow VectorSchemaRoot batches.
         SQL-agnostic and execution-agnostic: it neither parses SQL nor evaluates expressions.</description>
@@ -43,7 +43,8 @@
                         --add-opens=java.base/java.util=ALL-UNNAMED
                         --add-opens=java.base/java.lang=ALL-UNNAMED
                         -Dio.netty.tryReflectionSetAccessible=true
-                        -Darrow.allocation.manager.type=Netty</argLine>
+                        -Darrow.allocation.manager.type=${arrow.alloc}
+                        ${jdk.extra.args}</argLine>
         </configuration>
       </plugin>
       <plugin>
@@ -65,6 +66,21 @@
     </plugins>
   </build>
   <profiles>
+    <profile>
+      <id>jdk24plus</id>
+      <dependencies>
+        <dependency>
+          <groupId>org.apache.arrow</groupId>
+          <artifactId>arrow-memory-unsafe</artifactId>
+          <version>${arrow.version}</version>
+          <scope>runtime</scope>
+        </dependency>
+      </dependencies>
+      <properties>
+        <jdk.extra.args>--sun-misc-unsafe-memory-access=allow</jdk.extra.args>
+        <arrow.alloc>Unsafe</arrow.alloc>
+      </properties>
+    </profile>
     <profile>
       <id>jmh</id>
       <build>
@@ -124,34 +140,6 @@
   </profiles>
   <dependencies>
     <dependency>
-      <groupId>com.github.gbenroscience</groupId>
-      <artifactId>parser-ng-sql</artifactId>
-      <version>3.0.8</version>
-      <scope>test</scope>
-      <exclusions>
-        <exclusion>
-          <artifactId>parser-ng</artifactId>
-          <groupId>com.github.gbenroscience</groupId>
-        </exclusion>
-        <exclusion>
-          <artifactId>parser-ng-simd</artifactId>
-          <groupId>com.github.gbenroscience</groupId>
-        </exclusion>
-        <exclusion>
-          <artifactId>parser-ng-gpu-simd</artifactId>
-          <groupId>com.github.gbenroscience</groupId>
-        </exclusion>
-        <exclusion>
-          <artifactId>parser-ng-arrow</artifactId>
-          <groupId>com.github.gbenroscience</groupId>
-        </exclusion>
-        <exclusion>
-          <artifactId>parser-ng-parquet</artifactId>
-          <groupId>com.github.gbenroscience</groupId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <version>5.10.3</version>
@@ -178,6 +166,7 @@
     <exec.mainClass>com.github.gbenroscience.parser.ng.parquet.ParserNgParquet</exec.mainClass>
     <maven.compiler.target>22</maven.compiler.target>
     <maven.compiler.source>22</maven.compiler.source>
+    <arrow.alloc>Netty</arrow.alloc>
     <arrow.version>19.0.0</arrow.version>
     <parquet.version>1.18.0</parquet.version>
     <hadoop.version>3.4.1</hadoop.version>

@@ -36,7 +36,8 @@ import java.util.List;
  * {@code SqlParser})
  * @param items the SELECT list, in source order; empty iff
  * {@link #selectAll()} is {@code true}
- * @param table the identifier named after {@code FROM}
+ * @param table the identifier named after {@code FROM}, or the first quoted
+ * path for the {@code FILE}/{@code READ_PARQUET} forms
  * @param where the parsed {@code WHERE} clause, already normalized to
  * negation-normal form (see {@link BoolExprs#toNnf(BoolExpr)}), or
  * {@code null} if the query has no {@code WHERE} clause
@@ -51,6 +52,9 @@ import java.util.List;
  * order; empty if the query has no {@code ORDER BY} clause
  * @param limit the {@code LIMIT} row cap, or {@code null} if the query has
  * no {@code LIMIT} clause
+ * @param tableKind how {@code FROM} named its source
+ * @param tablePaths the quoted path(s) for {@link TableKind#FILE} and
+ * {@link TableKind#READ_PARQUET}; empty for {@link TableKind#NAME}
  *
  * @author GBEMIRO
  */
@@ -62,12 +66,35 @@ public record SelectStatement(
         List<String> groupBy,
         BoolExpr having,
         List<OrderItem> orderBy,
-        Integer limit) {
+        Integer limit,
+        TableKind tableKind,
+        List<String> tablePaths) {
+
+    /**
+     * How the {@code FROM} clause named its source. {@link #NAME} is a bare
+     * identifier (ignored by {@code ArrowQuery}, resolvable through a
+     * registry by {@code ParquetSql}); {@link #FILE} is a quoted path
+     * ({@code FROM 'data/x.parquet'}); {@link #READ_PARQUET} is the table
+     * function form ({@code FROM read_parquet('data/*.parquet')}).
+     */
+    public enum TableKind { NAME, FILE, READ_PARQUET }
+
+    /**
+     * Compatibility constructor for a plain {@link TableKind#NAME} source.
+     */
+    public SelectStatement(boolean selectAll, List<SelectItem> items, String table, BoolExpr where,
+            List<String> groupBy, BoolExpr having, List<OrderItem> orderBy, Integer limit) {
+        this(selectAll, items, table, where, groupBy, having, orderBy, limit, TableKind.NAME, List.of());
+    }
 
     public SelectStatement {
         items = List.copyOf(items);
         groupBy = List.copyOf(groupBy);
         orderBy = List.copyOf(orderBy);
+        tablePaths = List.copyOf(tablePaths);
+        if (tableKind == null) {
+            throw new IllegalArgumentException("tableKind must not be null");
+        }
         if (selectAll && !items.isEmpty()) {
             throw new IllegalArgumentException("selectAll queries must not also carry select items");
         }

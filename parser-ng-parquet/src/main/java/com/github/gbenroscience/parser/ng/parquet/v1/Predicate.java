@@ -29,7 +29,24 @@ import java.util.regex.PatternSyntaxException;
  *       currently contributes no pruning.
  * </ul>
  *
- * <h2>What is actually pushed down for pruning (unchanged from before this revision)</h2>
+ * <h2>Naming a nested column</h2>
+ * A {@link Cmp}/{@link In}/{@link IsNull}/{@link Like}/{@link Regex} column is a flat top-level column or a
+ * dotted path to one primitive leaf inside a struct, list or map. Both the physical Parquet path
+ * ({@code "items.list.element.price"}, {@code "attrs.key_value.value"}) and the logical path that skips the
+ * synthetic wrapper ({@code "items.element.price"}, {@code "attrs.value"}, or for a struct element simply
+ * {@code "items.price"}) are accepted. A top-level column whose own name contains a dot keeps that meaning;
+ * names containing dots below the top level cannot be addressed.
+ * <ul>
+ *   <li><b>Through structs only:</b> one value per row. A null struct on the way makes the leaf null (so
+ *       {@code IS NULL} is true and comparisons are false). Pushed to parquet-java like a flat column.</li>
+ *   <li><b>Through a list or map:</b> a row holds zero or more values, and a predicate means "at least one
+ *       element satisfies it"; a null or empty list satisfies nothing. {@code IS NULL} means some element is
+ *       null, {@code IS NOT NULL} some element is non-null. {@code NOT} negates that whole statement (no
+ *       element satisfies it), it does not flip each element. Pruned from footer statistics by
+ *       {@code internal.RepeatedStatsPruner}; parquet-java itself cannot filter repeated columns.</li>
+ * </ul>
+ *
+ * <h2>What is actually pushed down for pruning</h2>
  * A {@link Cmp}/{@link In}/{@link IsNull} leaf is translated only when the literal's Java type is an
  * exact/widening match for the column's physical + logical type; otherwise that leaf is silently NOT
  * used for pruning (never coerced). {@link And} drops untranslatable sides (sound: still a superset);
@@ -117,7 +134,8 @@ public sealed interface Predicate {
      * yields no pruning for this leaf, soundly), but a first-class, exactly-evaluated leaf under
      * {@code exactFilter()}: both columns must resolve to the same Arrow type (no cross-type
      * numeric widening — consistent with this model's "never coerce" rule everywhere else), and both
-     * must be flat, top-level, and part of the projection, exactly like a {@link Cmp}'s single column.
+     * must be flat, top-level, and part of the projection (unlike a {@link Cmp}'s column, a {@link ColCmp}
+     * column cannot be a nested path).
      */
     record ColCmp(String left, Op op, String right) implements Predicate {
         public ColCmp {

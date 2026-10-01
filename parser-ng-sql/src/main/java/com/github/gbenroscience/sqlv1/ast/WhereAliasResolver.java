@@ -91,6 +91,12 @@ public final class WhereAliasResolver {
                 new InExpr(substitute(target, aliasToExpr), values.stream().map(v -> substitute(v, aliasToExpr)).toList(),
                         negated);
             case IsNullExpr(var target, var negated) -> new IsNullExpr(substitute(target, aliasToExpr), negated);
+            case LikeExpr(var target, var pattern, var escape, var ci, var negated) ->
+                new LikeExpr(substitute(target, aliasToExpr), pattern, escape, ci, negated);
+            case RegexExpr(var target, var pattern, var negated) ->
+                new RegexExpr(substitute(target, aliasToExpr), pattern, negated);
+            case TruthExpr(var target, var value, var negated) ->
+                new TruthExpr(substitute(target, aliasToExpr), value, negated);
         };
     }
 

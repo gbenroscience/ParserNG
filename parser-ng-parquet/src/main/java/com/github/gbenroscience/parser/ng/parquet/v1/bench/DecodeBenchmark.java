@@ -184,9 +184,9 @@ public final class DecodeBenchmark {
         long[] rowsPerIter = new long[TIMED_ITERS];
         ScanMetrics[] metricsPerIter = new ScanMetrics[TIMED_ITERS];
         for (int i = 0; i < TIMED_ITERS; i++) {
-            ParquetScan scan = cfg.apply(ParquetScan.scan(file)).withMetrics(true);
+            ParquetScan scan = cfg.apply(ParquetScan.scan(file)).withMetrics(true).pinWorkerThreads(false);
             long t0 = System.nanoTime();
-            try (ParquetBatchReader r = scan.open(alloc)) {
+            try (ParquetBatchReader r = scan.open(alloc)) { 
                 long rows = 0;
                 while (r.next()) {
                     VectorSchemaRoot root = r.root();

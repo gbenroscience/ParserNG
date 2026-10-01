@@ -110,10 +110,18 @@ class PredicateTranslatorTest {
     }
 
     @Test
-    void unknownNestedAndDottedColumnsAreNotPushed() {
+    void unknownAndNonLeafColumnsAreNotPushed() {
         assertNull(tr(Predicate.eq("nope", 1L)));
         assertNull(tr(Predicate.eq("pt", 1.0d)), "a group column has no statistics to prune on");
-        assertNull(tr(Predicate.eq("pt.x", 1.0d)), "dotted paths are ambiguous");
+        assertNull(tr(Predicate.eq("pt.nope", 1.0d)), "unknown field under a struct");
+        assertNull(tr(Predicate.eq("pt.x.y", 1.0d)), "cannot descend below a primitive");
+    }
+
+    @Test
+    void structNestedLeafIsPushedUnderItsDottedPath() {
+        FilterPredicate fp = tr(Predicate.gt("pt.x", 1.0d));
+        assertNotNull(fp);
+        assertTrue(fp.toString().contains("pt.x"), fp.toString());
     }
 
     @Test

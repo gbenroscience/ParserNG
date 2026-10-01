@@ -60,6 +60,14 @@
  * {@code HAVING} / {@code ORDER BY} / {@code LIMIT}" section.</li>
  * </ol>
  *
+ * <h2>Parquet files</h2>
+ * The sub-package {@code com.github.gbenroscience.sqlv1.parquet} runs the same
+ * grammar over Parquet files through parser-ng-parquet: {@code FROM 'file.parquet'},
+ * {@code FROM read_parquet('glob')} or a registered name. Expressions, {@code WHERE},
+ * {@code GROUP BY} and {@code ORDER BY} use numeric columns; every column type can
+ * be selected as-is. {@code SELECT COUNT(*)} with no {@code WHERE} reads only the
+ * footer. See the README section "Querying Parquet files".
+ *
  * <h2>Where to start</h2>
  * {@link com.github.gbenroscience.sqlv1.ArrowSql} for one-off queries;
  * {@link com.github.gbenroscience.sqlv1.ArrowQuery} for anything executed

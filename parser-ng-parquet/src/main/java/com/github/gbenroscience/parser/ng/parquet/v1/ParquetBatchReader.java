@@ -2,6 +2,7 @@ package com.github.gbenroscience.parser.ng.parquet.v1;
 
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.NodePlan;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.PredicateTranslator;
+import com.github.gbenroscience.parser.ng.parquet.v1.internal.RepeatedStatsPruner;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.RowFilterEvaluator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -28,13 +29,12 @@ import java.util.Set;
  * Streams a Parquet file as Arrow batches: primitives and nested (struct/list/map) columns alike.
  *
  * <h2>Pruning</h2>
- * Row-group-level pruning (statistics/dictionary/Bloom filter) happens once, up front, against the
- * footer, in both modes. Page-level pruning (column indexes) happens too, in both modes: sequential
- * mode's one reader and every one of parallel mode's worker readers are opened with the same
- * translated predicate and {@code useColumnIndexFilter(true)}, and both read row groups through
- * parquet-java's <em>filtered</em> entry points (see {@link RowGroupDecoder}'s Javadoc). Either way,
- * pushdown here only ever prunes -- the caller must still re-evaluate the original predicate against
- * every emitted batch; see {@link Predicate}'s Javadoc for the exact soundness contract.
+ * Row-group-level pruning happens once, up front, against the footer, in both modes: parquet-java's
+ * statistics/dictionary/Bloom filters for flat and struct-nested leaves, plus footer-statistics pruning
+ * for leaves inside lists and maps ({@code internal.RepeatedStatsPruner}). Page-level pruning (column
+ * indexes) is deliberately off, see {@link #newReadOptions}. Either way, pushdown here only ever prunes --
+ * the caller must still re-evaluate the original predicate against every emitted batch; see
+ * {@link Predicate}'s Javadoc for the exact soundness contract.
  *
  * <h2>Go-fast vs. go-slow: pushdown alone, or exactFilter()</h2>
  * By default ({@code ParquetScan.pushdown(...)} without {@code .exactFilter()}), this class only
@@ -64,9 +64,11 @@ import java.util.Set;
  * A projected column may be a struct, a 3-level {@code LIST}/{@code MAP} (or the legacy 2-level/tuple
  * forms), or any nesting of these over supported primitive leaves. See {@code internal.NodePlan} /
  * {@code internal.LevelWalker} for how Parquet's repetition/definition levels become Arrow list offsets
- * and struct validity. Unsupported leaf types fail fast, naming the column. {@code exactFilter()}
- * predicates, unlike pushdown predicates, are restricted to flat top-level columns only -- see
- * {@link RowFilterEvaluator}'s Javadoc.
+ * and struct validity. Unsupported leaf types fail fast, naming the column. Predicates may name a leaf
+ * inside a struct, list or map by a dotted path (for example {@code "user.address.zip"} or
+ * {@code "items.price"}), both for pruning and for {@code exactFilter()}; a leaf under a list means
+ * "some element satisfies it". See {@code internal.ColumnPaths}, {@code internal.RepeatedStatsPruner} and
+ * {@link RowFilterEvaluator}.
  *
  * <h2>Zero-copy vs. copy</h2>
  * Values are decompressed and decoded by the native decode engine, then written once into Arrow
@@ -83,7 +85,7 @@ public final class ParquetBatchReader implements AutoCloseable {
 
     ParquetBatchReader(ParquetSource file, List<String> columns, Predicate predicate, int batchSize,
                        boolean metricsOn, long maxRowGroupBytes, int parallelism, boolean exactFilter,
-                       Map<String, CustomPredicate> customPredicates, BufferAllocator allocator) {
+                       Map<String, CustomPredicate> customPredicates, boolean pinWorkerThreads, BufferAllocator allocator) {
         if (allocator == null) throw new NullPointerException("allocator");
         this.file = file;
         ParquetFileReader probeOrFiltered = null;
@@ -92,17 +94,21 @@ public final class ParquetBatchReader implements AutoCloseable {
             ParquetMetadata footer = file.readFooter();
             MessageType fileSchema = footer.getFileMetaData().getSchema();
 
+            // Row-group pruning happens in two independent stages, both only ever removing groups that provably
+            // hold no match. Stage 1 (here): predicates over leaves inside lists/maps, which parquet-java's own
+            // filter cannot express, are checked against footer statistics and the losers are dropped from the
+            // footer every reader is then opened over. Stage 2 (below): parquet-java's stats/dictionary/Bloom
+            // filter for flat and struct-nested leaves. A group is read only if both stages allow it.
+            ParquetMetadata scanFooter = RepeatedStatsPruner.prune(predicate, footer);
+
             FilterCompat.Filter filter = FilterCompat.NOOP;
             FilterPredicate fp = PredicateTranslator.translate(predicate, fileSchema);
             if (fp != null) filter = FilterCompat.get(fp);
-            // useColumnIndexFilter(true): page-level pruning within a surviving row group, not just
-            // row-group-level pruning. This reader is reused directly as the decode reader in
-            // sequential mode (below), and the same filter + flag are threaded into ParallelSource
-            // for each of its worker readers, so both modes get identical pruning behavior -- see
-            // RowGroupDecoder's class Javadoc for exactly how the decode loop stays correct either way.
+            // The same filter is threaded into ParallelSource for each of its worker readers, so both modes
+            // prune identically (see newReadOptions for why page-level pruning is deliberately off).
             ParquetReadOptions opts = newReadOptions(filter);
 
-            ParquetFileReader filtered = file.openReader(footer, opts);
+            ParquetFileReader filtered = file.openReader(scanFooter, opts);
             probeOrFiltered = filtered;
             MessageType projected = project(fileSchema, columns);
             List<ColumnDescriptor> colList = projected.getColumns();
@@ -117,13 +123,13 @@ public final class ParquetBatchReader implements AutoCloseable {
             if (exactFilter) {
                 Set<String> flatLeafNames = new HashSet<>();
                 for (NodePlan.Node top : nodePlan.tops()) if (top instanceof NodePlan.Leaf) flatLeafNames.add(top.name);
-                exactEvaluator = new RowFilterEvaluator(predicate, fields, flatLeafNames, customPredicates, file);
+                exactEvaluator = new RowFilterEvaluator(predicate, fields, flatLeafNames, customPredicates, file, projected);
             }
 
             ScanMetrics m = null;
             if (metricsOn) {
                 m = new ScanMetrics();
-                m.rowGroupsInFile = filtered.getFooter().getBlocks().size();
+                m.rowGroupsInFile = footer.getBlocks().size(); // the file's own count, before either pruning stage
                 m.rowGroupsAfterPruning = filtered.getRowGroups().size();
             }
             this.metrics = m;
@@ -144,8 +150,8 @@ public final class ParquetBatchReader implements AutoCloseable {
                 for (int i = 0; i < survivorStartingPos.length; i++) survivorStartingPos[i] = survivorBlocks.get(i).getStartingPos();
                 filtered.close(); // parallel workers open their own readers; this one is no longer needed
                 probeOrFiltered = null;
-                built = new ParallelSource(file, footer, projected, descriptors, nodePlan, fields,
-                        survivorStartingPos, filter, parallelism, batchSize, maxRowGroupBytes, allocator, m);
+                built = new ParallelSource(file, scanFooter, projected, descriptors, nodePlan, fields,
+                        survivorStartingPos, filter, parallelism, pinWorkerThreads, batchSize, maxRowGroupBytes, allocator, m);
             }
             this.source = (exactEvaluator != null) ? new FilteredSource(built, exactEvaluator, allocator) : built;
         } catch (IOException e) {
@@ -164,11 +170,21 @@ public final class ParquetBatchReader implements AutoCloseable {
      * Parallel addressing requires every reader to compute the SAME surviving row-group list, so all
      * pruning switches are pinned explicitly here rather than left to library defaults that could differ
      * between call sites or parquet-java versions.
+     *
+     * <p><b>Column-index (page-level) pruning is deliberately OFF.</b> With it on, parquet-java hands back a
+     * page store holding only the pages that overlap the surviving row ranges. Pages are kept whole, and each
+     * column's pages start on its own row boundaries, so different columns of the same row group can begin at
+     * different rows, and a column can hold rows outside the ranges. {@code RowGroupDecoder} reads each column
+     * straight from the first retained page and never consults the store's row-index selection, so with
+     * trimmed pages the columns of one batch could belong to different rows. Row-group pruning (statistics,
+     * dictionary, Bloom filter, and {@link RepeatedStatsPruner}) has no such hazard, because a group is read
+     * whole or not at all. Re-enabling this needs the decoder to honour the row ranges per column, including
+     * for list columns where a page may only be skipped at a record boundary.
      */
     static ParquetReadOptions newReadOptions(FilterCompat.Filter filter) {
         return ParquetReadOptions.builder()
                 .useStatsFilter(true).useDictionaryFilter(true).useBloomFilter(true)
-                .useColumnIndexFilter(true).withRecordFilter(filter).build();
+                .useColumnIndexFilter(false).withRecordFilter(filter).build();
     }
 
     private static MessageType project(MessageType schema, List<String> columns) {

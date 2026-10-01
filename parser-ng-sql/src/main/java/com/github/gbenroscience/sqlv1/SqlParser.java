@@ -10,6 +10,9 @@ import com.github.gbenroscience.sqlv1.ast.ComparisonExpr;
 import com.github.gbenroscience.sqlv1.ast.CompOp;
 import com.github.gbenroscience.sqlv1.ast.InExpr;
 import com.github.gbenroscience.sqlv1.ast.IsNullExpr;
+import com.github.gbenroscience.sqlv1.ast.LikeExpr;
+import com.github.gbenroscience.sqlv1.ast.RegexExpr;
+import com.github.gbenroscience.sqlv1.ast.TruthExpr;
 import com.github.gbenroscience.sqlv1.ast.NotExpr;
 import com.github.gbenroscience.sqlv1.ast.OrderItem;
 import com.github.gbenroscience.sqlv1.ast.OrExpr;
@@ -34,6 +37,10 @@ import java.util.Locale;
  *         [HAVING boolean_expression]
  *         [ORDER BY order_item (',' order_item)*]
  *         [LIMIT integer_literal]
+ * table_reference
+ *     ::= identifier
+ *       | string_literal                          -- a file path (ParquetSql only)
+ *       | read_parquet '(' string_literal (',' string_literal)* ')'   -- ParquetSql only
  * select_list
  *     ::= '*'
  *       | select_item (',' select_item)*
@@ -56,6 +63,10 @@ import java.util.Locale;
  * predicate
  *     ::= comparison
  *       | expression 'IS' ['NOT'] 'NULL'
+ *       | expression 'IS' ['NOT'] ('TRUE' | 'FALSE')
+ *       | expression ['NOT'] ('LIKE' | 'ILIKE') expression ['ESCAPE' expression]
+ *       | expression ['NOT'] ('REGEXP' | 'RLIKE') expression
+ *       | identifier                     -- bare boolean, WHERE/HAVING only; means identifier = TRUE
  *       | expression ['NOT'] 'BETWEEN' expression 'AND' expression
  *       | expression ['NOT'] 'IN' '(' expression_list ')'
  *       | '(' boolean_expression ')'
@@ -324,12 +335,36 @@ public final class SqlParser {
         }
 
         expect(TokenType.FROM, "Expected FROM after the select list");
-        String table = expectIdentifier("Expected a table/source identifier after FROM");
+        List<String> tablePaths = new ArrayList<>();
+        SelectStatement.TableKind tableKind = SelectStatement.TableKind.NAME;
+        String table;
+        if (peekType() == TokenType.STRING) {
+            tableKind = SelectStatement.TableKind.FILE;
+            table = advance().text();
+            tablePaths.add(table);
+        } else {
+            table = expectIdentifier("Expected a table name, a quoted file path or read_parquet('...') after FROM");
+            if (peekType() == TokenType.LPAREN) {
+                if (!"read_parquet".equalsIgnoreCase(table)) {
+                    throw new SqlSyntaxException("Unknown table function '" + table
+                            + "'; only read_parquet('path' [, 'path']*) is supported", peek().start());
+                }
+                advance();
+                tableKind = SelectStatement.TableKind.READ_PARQUET;
+                tablePaths.add(expect(TokenType.STRING, "read_parquet expects quoted path strings").text());
+                while (peekType() == TokenType.COMMA) {
+                    advance();
+                    tablePaths.add(expect(TokenType.STRING, "read_parquet expects quoted path strings").text());
+                }
+                expect(TokenType.RPAREN, "Expected ')' to close read_parquet(");
+                table = tablePaths.get(0);
+            }
+        }
 
         BoolExpr where = null;
         if (peekType() == TokenType.WHERE) {
             advance();
-            where = BoolExprs.toNnf(parseBooleanExpression());
+            where = BoolExprs.toNnf(parseTopLevelCondition());
         }
 
         List<String> groupBy = new ArrayList<>();
@@ -346,7 +381,7 @@ public final class SqlParser {
         BoolExpr having = null;
         if (peekType() == TokenType.HAVING) {
             advance();
-            having = BoolExprs.toNnf(parseBooleanExpression());
+            having = BoolExprs.toNnf(parseTopLevelCondition());
         }
 
         List<OrderItem> orderBy = new ArrayList<>();
@@ -377,7 +412,8 @@ public final class SqlParser {
         expect(TokenType.EOF, "Unexpected trailing input after a complete query");
 
         try {
-            return new SelectStatement(selectAll, items, table, where, groupBy, having, orderBy, limit);
+            return new SelectStatement(selectAll, items, table, where, groupBy, having, orderBy, limit,
+                    tableKind, tablePaths);
         } catch (IllegalArgumentException invalidShape) {
             throw new SqlSyntaxException(invalidShape.getMessage(), 0);
         }
@@ -469,6 +505,24 @@ public final class SqlParser {
     // =====================================================================
     // boolean_expression / or_expression / and_expression / not_expression
     // =====================================================================
+
+    /** True only while parsing a top-level WHERE/HAVING condition, where a bare column may act as a boolean. */
+    private boolean bareBooleanOk;
+
+    /**
+     * Parses a WHERE/HAVING condition. Only here is a bare identifier accepted as a boolean
+     * ({@code WHERE flag}); everywhere else the boolean-first trial of {@link #parseValueExpression()}
+     * relies on a plain {@code x} <em>failing</em> to parse as a condition, so it must stay an error.
+     */
+    private BoolExpr parseTopLevelCondition() {
+        boolean saved = bareBooleanOk;
+        bareBooleanOk = true;
+        try {
+            return parseBooleanExpression();
+        } finally {
+            bareBooleanOk = saved;
+        }
+    }
 
     private BoolExpr parseBooleanExpression() {
         return parseOrExpression();
@@ -564,18 +618,29 @@ public final class SqlParser {
                     advance();
                     negated = true;
                 }
-                expect(TokenType.NULL, "Expected NULL after IS" + (negated ? " NOT" : ""));
+                if (peekType() == TokenType.TRUE || peekType() == TokenType.FALSE) {
+                    boolean value = advance().type() == TokenType.TRUE;
+                    return new TruthExpr(left, value, negated);
+                }
+                expect(TokenType.NULL, "Expected NULL, TRUE or FALSE after IS" + (negated ? " NOT" : ""));
                 return new IsNullExpr(left, negated);
             }
             case NOT: {
                 advance();
-                if (peekType() == TokenType.BETWEEN) {
-                    return parseBetweenTail(left, true);
+                switch (peekType()) {
+                    case BETWEEN:
+                        return parseBetweenTail(left, true);
+                    case IN:
+                        return parseInTail(left, true);
+                    case LIKE:
+                    case ILIKE:
+                        return parseLikeTail(left, true);
+                    case REGEXP:
+                    case RLIKE:
+                        return parseRegexTail(left, true);
+                    default:
+                        error("Expected BETWEEN, IN, LIKE, ILIKE or REGEXP after NOT");
                 }
-                if (peekType() == TokenType.IN) {
-                    return parseInTail(left, true);
-                }
-                error("Expected BETWEEN or IN after NOT");
                 break;
             }
             case BETWEEN: {
@@ -584,10 +649,65 @@ public final class SqlParser {
             case IN: {
                 return parseInTail(left, false);
             }
+            case LIKE:
+            case ILIKE: {
+                return parseLikeTail(left, false);
+            }
+            case REGEXP:
+            case RLIKE: {
+                return parseRegexTail(left, false);
+            }
+            case AND:
+            case OR:
+            case RPAREN:
+            case EOF:
+            case GROUP:
+            case HAVING:
+            case ORDER:
+            case LIMIT:
+            case THEN:
+            case ELSE:
+            case END:
+            case WHEN: {
+                // A bare boolean value used as a condition ("WHERE flag"): sugar for "flag = TRUE",
+                // so NOT flag normalizes to flag <> TRUE and keeps SQL three-valued null handling.
+                if (bareBooleanOk && isBareOperand(left)) {
+                    return new ComparisonExpr(left, CompOp.EQ, "TRUE");
+                }
+                error("Expected a comparison operator, IS, BETWEEN, IN, LIKE, ILIKE or REGEXP");
+                break;
+            }
             default:
-                error("Expected a comparison operator, IS, BETWEEN, or IN");
+                error("Expected a comparison operator, IS, BETWEEN, IN, LIKE, ILIKE or REGEXP");
         }
         throw new AssertionError("unreachable: error() always throws");
+    }
+
+    /** True if {@code text} is a single identifier: the only shape accepted as a bare boolean condition. */
+    private static boolean isBareOperand(String text) {
+        String t = text.trim();
+        if (t.isEmpty() || !(Character.isLetter(t.charAt(0)) || t.charAt(0) == '_')) return false;
+        for (int i = 1; i < t.length(); i++) {
+            char ch = t.charAt(i);
+            if (!(Character.isLetterOrDigit(ch) || ch == '_')) return false;
+        }
+        return true;
+    }
+
+    private BoolExpr parseLikeTail(String left, boolean negated) {
+        boolean ci = advance().type() == TokenType.ILIKE;
+        String pattern = buildExpressionText();
+        String escape = null;
+        if (peekType() == TokenType.ESCAPE) {
+            advance();
+            escape = buildExpressionText();
+        }
+        return new LikeExpr(left, pattern, escape, ci, negated);
+    }
+
+    private BoolExpr parseRegexTail(String left, boolean negated) {
+        advance(); // REGEXP or RLIKE
+        return new RegexExpr(left, buildExpressionText(), negated);
     }
 
     private BoolExpr parseBetweenTail(String left, boolean negated) {
@@ -654,11 +774,15 @@ public final class SqlParser {
     private String tryParseNestedCondition() {
         int mark = pos;
         BoolExpr cond;
+        boolean savedBare = bareBooleanOk;
+        bareBooleanOk = false; // a plain identifier must fail this trial so the caller falls back to an expression
         try {
             cond = BoolExprs.toNnf(parseBooleanExpression());
         } catch (SqlSyntaxException notABooleanCondition) {
             pos = mark;
             return null;
+        } finally {
+            bareBooleanOk = savedBare;
         }
         if (BoolExprs.containsIsNull(cond)) {
             throw new SqlSyntaxException(

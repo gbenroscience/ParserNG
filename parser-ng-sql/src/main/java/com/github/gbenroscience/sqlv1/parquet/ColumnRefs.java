@@ -60,6 +60,13 @@ final class ColumnRefs {
         return ids;
     }
 
+    /** Every identifier a boolean expression could read as a column. */
+    static Set<String> referencedBy(BoolExpr e) {
+        Set<String> ids = new LinkedHashSet<>();
+        if (e != null) collect(e, ids);
+        return ids;
+    }
+
     private static void collect(BoolExpr e, Set<String> ids) {
         if (e == null) return;
         switch (e) {
@@ -70,6 +77,9 @@ final class ColumnRefs {
             case BetweenExpr(var t, var lo, var hi, var neg) -> { identifiers(t, ids); identifiers(lo, ids); identifiers(hi, ids); }
             case InExpr(var t, var vs, var neg) -> { identifiers(t, ids); for (String v : vs) identifiers(v, ids); }
             case IsNullExpr(var t, var neg) -> identifiers(t, ids);
+            case LikeExpr(var t, var pat, var esc, var ci, var neg) -> { identifiers(t, ids); identifiers(pat, ids); }
+            case RegexExpr(var t, var pat, var neg) -> { identifiers(t, ids); identifiers(pat, ids); }
+            case TruthExpr(var t, var v, var neg) -> identifiers(t, ids);
         }
     }
 

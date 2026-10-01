@@ -317,6 +317,23 @@ public class DecodeJmhBenchmark {
     }
 
     /**
+     * Pinned twins of the parallel scenarios above, identical except for
+     * {@code pinWorkerThreads(true)}: compare each with its unpinned counterpart on YOUR hardware to decide
+     * whether pinning is a net win. Run on a quiet machine; if pinning could not be applied (macOS, native
+     * access blocked, restricted cpuset) these silently measure the unpinned path, so also check
+     * {@code ScanMetrics.workersPinned()}.
+     */
+    @Benchmark
+    public void flatFullScanParallel4Pinned(Counters counter, Blackhole bh) throws IOException {
+        drain(ParquetScan.scan(flatFile).parallelism(4).pinWorkerThreads(true), bh, counter);
+    }
+
+    @Benchmark
+    public void flatFullScanParallel8Pinned(Counters counter, Blackhole bh) throws IOException {
+        drain(ParquetScan.scan(flatFile).parallelism(8).pinWorkerThreads(true), bh, counter);
+    }
+
+    /**
      * ~10% selectivity by construction -- see {@link #writeSelectivityFixture}. Row count varies
      * slightly around 500,000 depending on where row-group/page boundaries fall relative to the
      * bucket cutoff (pruning here is pushdown-only, so it returns a SUPERSET, not the exact match
@@ -338,6 +355,11 @@ public class DecodeJmhBenchmark {
     @Benchmark
     public void nestedFullScanParallel4(Counters counter, Blackhole bh) throws IOException {
         drain(ParquetScan.scan(nestedFile).parallelism(4), bh, counter);
+    }
+
+    @Benchmark
+    public void nestedFullScanParallel4Pinned(Counters counter, Blackhole bh) throws IOException {
+        drain(ParquetScan.scan(nestedFile).parallelism(4).pinWorkerThreads(true), bh, counter);
     }
 
     /**

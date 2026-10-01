@@ -58,6 +58,9 @@ public final class BoolExprs {
             case BetweenExpr b -> b;
             case InExpr i -> i;
             case IsNullExpr n -> n;
+            case LikeExpr l -> l;
+            case RegexExpr r -> r;
+            case TruthExpr t -> t;
         };
     }
 
@@ -76,6 +79,9 @@ public final class BoolExprs {
             case BetweenExpr b -> b.negate();
             case InExpr i -> i.negate();
             case IsNullExpr n -> n.negate();
+            case LikeExpr l -> l.negate();
+            case RegexExpr r -> r.negate();
+            case TruthExpr t -> t.negate();
         };
     }
 
@@ -92,6 +98,9 @@ public final class BoolExprs {
             case BetweenExpr b -> false;
             case InExpr i -> false;
             case IsNullExpr n -> true;
+            case LikeExpr l -> true;   // needs the leaf-by-leaf path: not renderable as one fused expression
+            case RegexExpr r -> true;
+            case TruthExpr t -> true;
         };
     }
 
@@ -130,6 +139,12 @@ public final class BoolExprs {
                     "IS [NOT] NULL has no ParserNG rendering; ArrowQuery must evaluate "
                     + "IsNullExpr leaves directly against Arrow validity bitmaps instead "
                     + "of calling renderLeaf/renderFused on them.");
+            case LikeExpr l -> throw new IllegalArgumentException(
+                    "LIKE/ILIKE is string-typed and has no ParserNG rendering; it is supported only through ParquetSql.");
+            case RegexExpr r -> throw new IllegalArgumentException(
+                    "REGEXP/RLIKE is string-typed and has no ParserNG rendering; it is supported only through ParquetSql.");
+            case TruthExpr t -> throw new IllegalArgumentException(
+                    "IS [NOT] TRUE/FALSE is boolean-typed and has no ParserNG rendering; it is supported only through ParquetSql.");
             case AndExpr a -> throw new IllegalArgumentException("renderLeaf called on an AndExpr; not a leaf");
             case OrExpr o -> throw new IllegalArgumentException("renderLeaf called on an OrExpr; not a leaf");
             case NotExpr n -> throw new IllegalArgumentException(

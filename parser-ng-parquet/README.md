@@ -5,7 +5,7 @@ Read-only storage layer for ParserNG: Parquet file -> projected, row-group-prune
 parallel across row groups and optionally filtered exactly, row by row. It does not parse SQL
 (parser-ng-sql) and does not evaluate expressions (parser-ng-arrow). There is no writer.
 
-* **Coordinates:** `com.github.gbenroscience:parser-ng-parquet:3.0.9`
+* **Coordinates:** `com.github.gbenroscience:parser-ng-parquet:3.0.8`
 * **Requires:** JDK 22+ with the incubator Vector API (`--add-modules jdk.incubator.vector`), Arrow 19.0.0,
   parquet-java 1.18.0, Hadoop client 3.4.1
 * **Verified on:** JDK 24 (Windows 10) and JDK 26 (CentOS Stream 9 under WSL2). On **JDK 25 and newer** you
@@ -34,11 +34,12 @@ until `open(allocator)` (or `forEachBatch`).
 | Builder method | Purpose | Default |
 |---|---|---|
 | `select(String...)` | Top-level columns to decode (may be nested columns) | all columns |
-| `pushdown(Predicate)` | Pruning predicate (row groups + pages) | none |
+| `pushdown(Predicate)` | Pruning predicate (row groups; flat, struct and list leaves) | none |
 | `exactFilter()` | Also filter rows exactly; needs `pushdown` first | off |
 | `withCustomPredicate(id, impl)` | Register the test behind a `Predicate.custom(id, ...)` leaf | none |
 | `batchSize(int)` | Max rows per batch | 32,768 |
 | `parallelism(int)` | Row groups decoded concurrently | 1 (sequential) |
+| `pinWorkerThreads(boolean)` | Pin parallel decoder threads to CPUs (best-effort, Linux/Windows, needs native access); ignored at `parallelism(1)` | off |
 | `withMetrics(boolean)` | Collect `ScanMetrics` | off |
 | `maxRowGroupBytes(long)` | Reject surviving row groups whose uncompressed size exceeds this (untrusted-input guard) | 2 GiB |
 
@@ -104,8 +105,9 @@ try (BufferAllocator alloc = new RootAllocator();
 When this scan is the last stage that filters (ad hoc queries, tests), `exactFilter()` re-tests every
 row that survives pruning and emits only true matches. It also unlocks predicate types that can never
 be pushed for pruning: `Not`, `Like`/`ilike`, `Regex`, `ColCmp`, and `Custom`. Every column the
-predicate touches must be flat, top-level, and part of the projection, otherwise `open` throws a
-`ParquetScanException` naming the column.
+predicate touches must name a primitive leaf (a flat column, or a dotted path into a struct, list or map;
+see [Predicates](#predicates)) whose top-level column is part of the projection, otherwise `open` throws a
+`ParquetScanException` naming the column. `ColCmp` still needs two flat top-level columns.
 
 ```java
 Predicate p = Predicate.and(
@@ -271,16 +273,47 @@ them.
 
 | Node (factory) | Pruning via `pushdown` | Exact via `exactFilter()` |
 |---|---|---|
-| `Cmp` (`eq/ne/lt/le/gt/ge`) | yes, flat columns, exact/widening literal type match only; string ranges and NaN are never pushed | yes |
+| `Cmp` (`eq/ne/lt/le/gt/ge`) | yes, flat, struct-nested and list-nested leaves, exact/widening literal type match only; string ranges and NaN are never pushed; list leaves: `EQ`, ranges and (non-floating) `NE` from footer statistics | yes |
 | `In` (`in`) | yes | yes |
-| `IsNull` (`isNull/isNotNull`) | yes | yes |
+| `IsNull` (`isNull/isNotNull`) | yes for flat leaves and `IS NOT NULL`; `IS NULL` is not pruned below an optional struct or inside a list | yes |
 | `And` / `Or` (`and/or`) | yes (`And` drops untranslatable sides; `Or` is dropped entirely if either side is untranslatable) | yes |
 | `Not` (`not`) | yes, rewritten with De Morgan's laws, never a raw Parquet `not()` | yes |
 | `ColCmp` (`colEq`, `colLt`, ...) | never (statistics describe one column at a time) | yes; both columns must have the same Arrow type |
-| `Like` (`like/ilike`), `Regex` (`regex`) | never | yes (Java regex semantics for `Regex`) |
+| `Like` (`like/ilike`), `Regex` (`regex`) | never | yes (Java regex semantics for `Regex`); the column may be a nested path |
 | `Custom` (`custom`) | never (inert without `exactFilter()`) | yes, via `withCustomPredicate` |
 
 A leaf that cannot be pushed simply prunes nothing, which is always sound.
+
+### Nested columns in predicates
+
+A `Cmp`, `In`, `IsNull`, `Like` or `Regex` column may be a dotted path to one primitive leaf inside a struct,
+list or map, for both pruning and `exactFilter()`:
+
+```java
+Predicate.eq("user.address.zip", "10001")          // through structs: one value per row
+Predicate.gt("items.price", 100L)                  // through a list of structs: SOME element > 100
+Predicate.eq("tags.element", "vip")                // list of primitives
+Predicate.eq("attrs.value", 7L)                    // map value
+```
+
+A list may be written physically (`items.list.element.price`, `attrs.key_value.value`) or logically
+(`items.element.price`, `attrs.value`, or for struct elements simply `items.price`). A top-level column whose
+own name contains a dot keeps that meaning; names with dots below the top level cannot be addressed.
+
+* **Through structs only.** One value per row; a null struct on the way makes the leaf null, so `IS NULL` is true
+  and comparisons are false (the module-wide null rule). Pushed to parquet-java like a flat column, so
+  statistics, dictionary and Bloom filters all apply.
+* **Through a list or map.** A row holds zero or more values, and the predicate means "at least one element
+  satisfies it"; a null or empty list satisfies nothing. `IS NULL` means some element is null. `NOT` negates
+  the whole statement ("no element satisfies it"), not each element. Two leaves under the same list are two
+  independent "some element" tests, not a test on one shared element. parquet-java's `FilterApi` rejects
+  repeated columns, so these leaves are pruned by this module from footer statistics
+  (`internal.RepeatedStatsPruner`): a row group is dropped when no element of its column chunk can satisfy the
+  comparison. A negated list leaf is never pruned on, because "some element `<= 5`" is not the negation of
+  "some element `> 5`" (an empty list satisfies the second, not the first).
+* **`select` still takes top-level columns.** A predicate on `items.price` under `exactFilter()` needs `items`
+  projected, and the whole `items` column is decoded. Pruning alone (`pushdown` without `exactFilter()`) needs
+  no projection of the predicate's columns at all.
 
 ## Contracts
 * **Pushdown is pruning, never filtering.** Without `exactFilter()`, emitted batches may contain
@@ -308,18 +341,12 @@ A leaf that cannot be pushed simply prunes nothing, which is always sound.
 | FLOAT / DOUBLE | `FloatingPoint(SINGLE/DOUBLE)` |
 | BINARY | `Binary` |
 | BINARY + STRING/ENUM/JSON | `Utf8` |
-| UINT8/16/32/64 | `Int(8/16/32/64, unsigned)` |
-| FIXED_LEN_BYTE_ARRAY(16) + UUID | `FixedSizeBinary(16)` |
 
 DECIMAL (INT32-, INT64-, and FIXED_LEN_BYTE_ARRAY-backed) and INT96 legacy timestamps are supported.
-`DELTA_BINARY_PACKED`, `DELTA_LENGTH_BYTE_ARRAY`, and `DELTA_BYTE_ARRAY` are also decoded correctly, and so
-is `BYTE_STREAM_SPLIT` (INT32, INT64, FLOAT, DOUBLE, and FIXED_LEN_BYTE_ARRAY — the full PARQUET-2414
-scope, not just the original FLOAT/DOUBLE). Unsigned integers (UINT8/16/32/64) decode to Arrow's
-unsigned `Int` types, and UUID (FIXED_LEN_BYTE_ARRAY(16) with the UUID logical type) decodes to
-`FixedSizeBinary(16)` — `exactFilter()` supports EQ/NE on a UUID column, which is all it should ever
-need since no numeric ordering is defined for it. Remaining unsupported leaves (TIME, raw/non-DECIMAL
-FIXED_LEN_BYTE_ARRAY such as a plain fixed-binary column, BSON) fail fast, naming the column, whether
-flat or nested.
+`DELTA_BINARY_PACKED`, `DELTA_LENGTH_BYTE_ARRAY`, and `DELTA_BYTE_ARRAY` are also decoded correctly.
+Remaining unsupported leaves (TIME, UUID, raw/non-DECIMAL FIXED_LEN_BYTE_ARRAY such as a UUID or fixed
+binary column, unsigned ints, BSON) fail fast, naming the column, whether flat or nested. The native
+decoder also still rejects the `BYTE_STREAM_SPLIT` encoding by name rather than mis-decoding it.
 
 BOOLEAN columns decode under both data page versions: PLAIN (bit-packed) in V1 pages and the
 length-prefixed RLE value encoding that the Parquet spec uses for booleans in V2 pages (pyarrow's default
@@ -336,18 +363,28 @@ Parquet/Arrow). `internal.NodePlan` builds one level-aware plan per projected to
 Arrow leaf vector, and replays the retained levels through `LevelWalker` to build every ancestor list's
 offsets and struct validity bitmap.
 
-**Not implemented for nested columns:** predicate pushdown (pruning targets flat leaf columns only; a
-predicate naming a path under a nested column is simply never pushed, which is safe, just not an
-optimization) and `exactFilter()` (predicate columns must be flat and top-level; only a `Custom`
-leaf's touched columns may be nested). Deeply and irregularly nested schemas have been reasoned through and unit-tested at the `LevelWalker`
+Predicates over nested leaves (pruning and `exactFilter()`) are described under
+[Predicates](#predicates). Only decoding of a nested column is whole-column: there is no leaf-level
+projection yet, so selecting `items` decodes every field of every element. Deeply and irregularly nested schemas have been reasoned through and unit-tested at the `LevelWalker`
 level (list-of-list, struct-with-null-parent, struct-inside-list). End to end, the benchmarks scan nested
 files written by parquet-java (struct plus list of strings); there is no value-level cross-check against
 another Parquet reader yet.
 
 ## Pruning and parallel reading
 Row-group pruning (min/max statistics, dictionary filter, Bloom filter) happens once up front against
-the footer. Page-level pruning via column indexes is also enabled in both sequential and parallel mode.
+the footer, in two independent stages that each only remove row groups that provably hold no match:
+footer-statistics pruning of predicates over leaves inside lists and maps, then parquet-java's statistics,
+dictionary and Bloom filters for flat and struct-nested leaves. A row group is read only if both allow it.
 Either way, `pushdown` alone only prunes.
+
+**Page-level (column-index) pruning is off.** With it on, parquet-java returns only the pages that overlap the
+surviving row ranges; pages are kept whole and each column paginates on its own row boundaries, so the columns
+of one row group can start at different rows. The decoder reads each column from its first retained page and
+does not apply the page store's row-index selection, so trimmed pages could pair values from different rows.
+Whole row groups are therefore the unit of pruning. This was inferred from parquet-java's behaviour and could
+not be run in the environment that made the change; `PagePruningAlignmentTest` covers the one-big-row-group,
+many-small-pages case. Restoring page-level pruning means making the decoder honour the row ranges per
+column, with skips at record boundaries for list columns.
 
 `parallelism(n)` decodes up to `n` row groups concurrently, each on its own worker thread with its own
 `ParquetFileReader` (parquet-java's per-codec decompressors aren't safe to share across threads).
@@ -357,6 +394,27 @@ freshly allocated, since they cross a thread boundary. Concurrency is bounded tw
 decoders exist, and at most `n + 1` row groups are ever in flight, so a slow consumer can't let
 decoded-but-unconsumed batches pile up. The caller/planner chooses `n`; nothing adapts it to file size,
 CPU count, or I/O characteristics.
+
+### Optional: pinning worker threads to CPUs
+
+`pinWorkerThreads(true)` pins each parallel decoder thread to its own logical CPU, spread over distinct
+physical cores first (SMT siblings are used only once every core has a worker). **It is off by default**
+because whether it helps depends on the machine and the workload, and it can make a scan slower.
+
+* Only the `parallelism(n)` worker threads with `n > 1` are pinned. Sequential decoding runs on the caller's
+  thread, which this library never pins, so the flag does nothing at `parallelism(1)`.
+* Best-effort and silent: Linux (`sched_setaffinity`) and Windows (`SetThreadAffinityMask`) only, and it needs
+  `--enable-native-access=ALL-UNNAMED` on the JVM command line. On macOS, with native access blocked, or when
+  the OS or a container cpuset refuses a CPU, the affected workers stay unpinned; results never change and
+  nothing throws. On Linux only CPUs the process is allowed to use are considered. On Windows only processor
+  group 0 (64 logical CPUs) is handled.
+* Pinned threads cannot migrate away from a busy core, so it can hurt when the consumer thread, other scans,
+  GC or other processes share the chosen cores. It is aimed at long, steady decode on a mostly dedicated
+  machine.
+* To decide whether it pays off for you: `ScanMetrics.workersPinned()` (with `withMetrics(true)`) tells you how
+  many workers were actually pinned, and the JMH benchmarks `flatFullScanParallel4Pinned`,
+  `flatFullScanParallel8Pinned` and `nestedFullScanParallel4Pinned` are identical to their unpinned
+  counterparts except for the flag. No measurement of its effect has been made yet.
 
 ## Decode engine
 Pages are decoded by a native cursor (`internal.decode.FastColumnCursor`) that reads page bytes
@@ -378,23 +436,25 @@ should be re-measured on your hardware.
 |---|---|
 | Projection (top-level columns, undecoded columns skipped) | yes |
 | Row-group pruning: min/max stats, dictionary, Bloom (via parquet-java) | yes |
-| Page/column-index pruning | yes (sequential and parallel) |
-| Exact row filtering (`exactFilter()`), incl. `Not`, `Like`, `Regex`, `ColCmp`, `Custom` | yes (flat top-level columns only) |
+| Row-group pruning on struct-nested leaves (dotted path) | yes (via parquet-java) |
+| Row-group pruning on leaves inside LIST/MAP ("some element" meaning) | yes (footer statistics; `EQ`/`IN`/ranges/`IS NOT NULL`, no negation) |
+| Page/column-index pruning | off (see Pruning); whole row groups only |
+| Exact row filtering (`exactFilter()`), incl. `Not`, `Like`, `Regex`, `ColCmp`, `Custom` | yes; nested paths for all but `ColCmp` (flat top-level only) |
 | Flat primitive types (see Supported types) | yes |
 | Nested: struct, LIST (3-level + legacy), MAP, bare repeated, arbitrary nesting | yes |
 | DECIMAL (INT32/INT64/FLBA-backed), INT96 legacy timestamps | yes |
 | DELTA_BINARY_PACKED, DELTA_LENGTH_BYTE_ARRAY, DELTA_BYTE_ARRAY | yes |
-| BYTE_STREAM_SPLIT (INT32, INT64, FLOAT, DOUBLE, FIXED_LEN_BYTE_ARRAY) | yes |
-| UINT8/16/32/64, UUID | yes |
-| TIME, raw (non-DECIMAL) FLBA, BSON (flat or nested) | clear error, not yet |
+| TIME, UUID, raw (non-DECIMAL) FLBA, unsigned ints, BSON (flat or nested) | clear error, not yet |
+| BYTE_STREAM_SPLIT encoding | clear error, not yet |
 | BOOLEAN columns in V1 (PLAIN) and V2 (RLE) data pages | yes |
-| Predicate pushdown / exact filtering on nested columns | not yet |
+| Leaf-level projection (decode only the fields a predicate or query needs) | not yet: `select` is top-level |
 | Metadata inspection (footer only) | yes (`ParquetFileInfo`) |
 | Local files (`Path`) | yes |
 | Any parquet-java `InputFile`; Hadoop URIs (`hdfs://`, `s3a://`, `gs://`, `abfss://`) via `ParquetSource` | yes (connector jars are yours to add; only local and `file://` exercised) |
 | One footer read per scan on any storage, shared by all readers and workers | yes |
 | Metrics (row groups in file/skipped/read, rows, batches, decode time, parallelism, bytes decoded / read from disk / Arrow produced) | yes; page counts not available |
 | Bounded parallel row-group decoding | yes (`parallelism(n)`), ordering preserved |
+| Optional CPU pinning of parallel workers (`pinWorkerThreads`) | yes, off by default, unmeasured; Linux/Windows only |
 | SIMD bulk decode for PLAIN fixed-width numeric columns (required and nullable) | yes |
 | JMH benchmarks | yes (`DecodeJmhBenchmark`); results in [Benchmarks](#benchmarks) |
 | Writer | **removed from scope** |
@@ -468,7 +528,7 @@ skips 2 of its 3 row groups.
 
 The other two byte counters, in MB/s from the same runs (scores only; the confidence intervals are of the
 same relative width as the decoded column above). `disk` is `compressedBytesRead()`: as-stored bytes of
-the projected column chunks read, an upper bound under page-level pruning. `arrow` is
+the projected column chunks read (whole chunks: page-level pruning is off). `arrow` is
 `arrowBytesProduced()`: Arrow buffer bytes materialized.
 
 | Scenario | Windows 10 disk MB/s | Windows 10 arrow MB/s | WSL2 disk MB/s | WSL2 arrow MB/s |
@@ -588,7 +648,7 @@ See the separate `parquet` package of the `parser-ng-sql` module for the bridge 
 depends on the SQL or Arrow-query modules at compile time.
 
 ## Build
-Add `<module>parser-ng-parquet</module>` to the parent POM (`parser-ng-parent`, version 3.0.9), then:
+Add `<module>parser-ng-parquet</module>` to the parent POM (`parser-ng-parent`, version 3.0.8), then:
 
 ```bash
 mvn -pl parser-ng-parquet -am package

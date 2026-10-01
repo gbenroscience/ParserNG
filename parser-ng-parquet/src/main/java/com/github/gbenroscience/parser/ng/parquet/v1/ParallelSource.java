@@ -1,5 +1,6 @@
 package com.github.gbenroscience.parser.ng.parquet.v1;
 
+import com.github.gbenroscience.parser.ng.parquet.v1.internal.CpuPinner;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.NodePlan;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.FieldVector;
@@ -23,6 +24,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
@@ -85,7 +87,7 @@ final class ParallelSource implements BatchSource {
 
     ParallelSource(ParquetSource file, ParquetMetadata footer, MessageType projected, ColumnDescriptor[] descs, NodePlan nodePlan,
                    List<Field> fields, long[] expectedStartingPos, FilterCompat.Filter filter,
-                   int parallelism, int batchSize, long maxRowGroupBytes,
+                   int parallelism, boolean pinWorkers, int batchSize, long maxRowGroupBytes,
                    BufferAllocator allocator, ScanMetrics metrics) {
         this.file = file;
         this.fields = fields;
@@ -135,8 +137,29 @@ final class ParallelSource implements BatchSource {
             throw e;
         }
 
+        // Opt-in, best-effort CPU pinning of the worker threads only (never the caller's thread). CpuPinner is not
+        // even loaded unless requested, and any failure to set it up leaves the workers unpinned.
+        int[] pinOrder = null;
+        if (pinWorkers) {
+            try {
+                pinOrder = CpuPinner.pinOrder();
+            } catch (Throwable t) {
+                pinOrder = null;
+            }
+        }
+        final int[] cpus = pinOrder;
+        final AtomicInteger workerSeq = new AtomicInteger();
         this.executor = Executors.newFixedThreadPool(parallelism, r -> {
-            Thread t = new Thread(r, "parquet-scan-" + file.shortName());
+            final int seq = workerSeq.getAndIncrement();
+            Runnable body = r;
+            if (cpus != null && cpus.length > 0) {
+                final int cpu = cpus[seq % cpus.length];
+                body = () -> {
+                    if (CpuPinner.pinCurrentThread(cpu) && metrics != null) metrics.workersPinned.increment();
+                    r.run();
+                };
+            }
+            Thread t = new Thread(body, "parquet-scan-" + file.shortName());
             t.setDaemon(true);
             return t;
         });

@@ -54,10 +54,11 @@ public final class ParquetScan {
     private final int parallelism;
     private final boolean exactFilter;
     private final Map<String, CustomPredicate> customPredicates; // never null; empty by default
+    private final boolean pinWorkerThreads;
 
     private ParquetScan(ParquetSource file, List<String> columns, Predicate predicate, int batchSize,
                         boolean metrics, long maxRowGroupBytes, int parallelism, boolean exactFilter,
-                        Map<String, CustomPredicate> customPredicates) {
+                        Map<String, CustomPredicate> customPredicates, boolean pinWorkerThreads) {
         this.file = file;
         this.columns = columns;
         this.predicate = predicate;
@@ -67,6 +68,7 @@ public final class ParquetScan {
         this.parallelism = parallelism;
         this.exactFilter = exactFilter;
         this.customPredicates = customPredicates;
+        this.pinWorkerThreads = pinWorkerThreads;
     }
 
     /** Scans a local file. */
@@ -83,24 +85,26 @@ public final class ParquetScan {
     public static ParquetScan scan(ParquetSource file) {
         if (file == null) throw new NullPointerException("file");
         return new ParquetScan(file, null, null, DEFAULT_BATCH_SIZE, false, DEFAULT_MAX_ROW_GROUP_BYTES,
-                DEFAULT_PARALLELISM, false, Map.of());
+                DEFAULT_PARALLELISM, false, Map.of(), false);
     }
 
     /** Top-level columns to read. Unlisted columns are never decoded. Must be non-empty. */
     public ParquetScan select(String... cols) {
         if (cols == null || cols.length == 0) throw new IllegalArgumentException("select() needs at least one column");
-        return new ParquetScan(file, List.copyOf(Arrays.asList(cols)), predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates);
+        return new ParquetScan(file, List.copyOf(Arrays.asList(cols)), predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
     }
 
     /**
-     * Pruning predicate. By default this is a pruning hint ONLY — the result is a SUPERSET, and the
+     * Pruning predicate. Columns may be flat, or dotted paths into structs, lists and maps (see
+     * {@link Predicate}); leaves under a list are pruned from footer statistics with "some element" meaning.
+     * By default this is a pruning hint ONLY — the result is a SUPERSET, and the
      * caller must still apply the same condition itself (see class Javadoc's example, and
      * {@link Predicate}). Replaces any earlier predicate; combine with {@link Predicate#and}.
      * Chain {@link #exactFilter()} onto this call to make the scan itself apply the condition
      * exactly instead.
      */
     public ParquetScan pushdown(Predicate p) {
-        return new ParquetScan(file, columns, p, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates);
+        return new ParquetScan(file, columns, p, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
     }
 
     /**
@@ -116,12 +120,12 @@ public final class ParquetScan {
         if (impl == null) throw new NullPointerException("impl");
         Map<String, CustomPredicate> updated = new LinkedHashMap<>(customPredicates);
         updated.put(id, impl);
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, Map.copyOf(updated));
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, Map.copyOf(updated), pinWorkerThreads);
     }
 
     /**
      * Go-slow, exact mode: escalates {@link #pushdown} from a pruning hint to a real row filter.
-     * Row-group and page-level pruning still happen exactly as before (this is additive, not a
+     * Row-group pruning still happens exactly as before (this is additive, not a
      * replacement), but every row that survives pruning is then tested against the predicate again,
      * and only true matches are emitted — see {@code FilteredSource} for the mechanism and its cost.
      *
@@ -134,10 +138,14 @@ public final class ParquetScan {
      * result.
      *
      * <h2>Requirements, checked at {@link #open}</h2>
-     * Every column the predicate touches must (a) be flat and top-level — not inside a struct or a
-     * repeated/list/map field — and (b) also be part of the projection ({@link #select}, or the
-     * default "select everything"), with the sole exception of a {@link Predicate.Custom} leaf's
-     * {@code touchedColumns} (need not be flat — see that record's Javadoc). A {@link Predicate.Not},
+     * Every column a {@link Predicate.Cmp}, {@link Predicate.In}, {@link Predicate.IsNull},
+     * {@link Predicate.Like} or {@link Predicate.Regex} leaf touches must name a primitive leaf: a flat
+     * top-level column, or a dotted path into a struct, list or map ({@code "user.address.zip"},
+     * {@code "items.price"}; see {@link Predicate} for the spellings and the "some element" meaning of a
+     * path through a list). Its top-level column must be part of the projection ({@link #select}, or the
+     * default "select everything"). {@link Predicate.ColCmp} still requires two flat top-level columns, and
+     * a {@link Predicate.Custom} leaf's {@code touchedColumns} need only be projected (see that record's
+     * Javadoc). A {@link Predicate.Not},
      * {@link Predicate.ColCmp}, {@link Predicate.Like}, and {@link Predicate.Regex} are all fully
      * supported here even though none of them can ever be pushed for pruning — see {@link Predicate}'s
      * Javadoc on exactly which node types pushdown can and cannot use. A predicate that fails either
@@ -149,22 +157,22 @@ public final class ParquetScan {
      */
     public ParquetScan exactFilter() {
         if (predicate == null) throw new IllegalStateException("exactFilter() needs a predicate — call pushdown(...) first");
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, true, customPredicates);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, true, customPredicates, pinWorkerThreads);
     }
 
     public ParquetScan batchSize(int rows) {
         if (rows <= 0) throw new IllegalArgumentException("batchSize must be positive");
-        return new ParquetScan(file, columns, predicate, rows, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates);
+        return new ParquetScan(file, columns, predicate, rows, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
     }
 
     public ParquetScan withMetrics(boolean enabled) {
-        return new ParquetScan(file, columns, predicate, batchSize, enabled, maxRowGroupBytes, parallelism, exactFilter, customPredicates);
+        return new ParquetScan(file, columns, predicate, batchSize, enabled, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
     }
 
     /** Rejects any surviving row group whose declared uncompressed size exceeds this. */
     public ParquetScan maxRowGroupBytes(long bytes) {
         if (bytes <= 0) throw new IllegalArgumentException("maxRowGroupBytes must be positive");
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, bytes, parallelism, exactFilter, customPredicates);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, bytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
     }
 
     /**
@@ -177,15 +185,41 @@ public final class ParquetScan {
      */
     public ParquetScan parallelism(int rowGroupsAtOnce) {
         if (rowGroupsAtOnce <= 0) throw new IllegalArgumentException("parallelism must be positive");
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, rowGroupsAtOnce, exactFilter, customPredicates);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, rowGroupsAtOnce, exactFilter, customPredicates, pinWorkerThreads);
     }
+
+    /**
+     * Opt-in, best-effort pinning of the parallel decoder threads to CPUs, one logical CPU per worker, spread
+     * over distinct physical cores first (SMT siblings only after every core has a worker). Off by default,
+     * because whether it helps is workload- and machine-dependent and it can hurt.
+     *
+     * <ul>
+     *   <li>Only the decoder threads created for {@link #parallelism} {@code > 1} are pinned. With
+     *       {@code parallelism == 1} decoding runs on the caller's own thread, which is never pinned by this
+     *       library, so the flag has no effect there.</li>
+     *   <li>Linux and Windows only, and only if the JVM was started with
+     *       {@code --enable-native-access=ALL-UNNAMED}. Anything else (macOS, blocked native access, a
+     *       cpuset that refuses the CPU, more than 64 Windows CPUs in group 0) leaves the affected workers
+     *       unpinned and the scan otherwise unchanged; it never throws or changes results.</li>
+     *   <li>A pinned thread cannot be moved off a busy core. If the consumer thread, other scans, GC or other
+     *       processes compete for the same cores it can be slower than leaving the scheduler free.</li>
+     *   <li>Check {@link ScanMetrics#workersPinned()} (needs {@link #withMetrics}) to see how many workers were
+     *       actually pinned, and compare wall time with and without the flag on your own hardware.</li>
+     * </ul>
+     */
+    public ParquetScan pinWorkerThreads(boolean pin) {
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pin);
+    }
+
+    /** Whether {@link #pinWorkerThreads} was requested (default false). */
+    public boolean pinsWorkerThreads() { return pinWorkerThreads; }
 
     /**
      * Opens the scan. The caller owns {@code allocator} (it must outlive the reader and any detached
      * roots); the returned reader owns its file handle(s) and must be closed.
      */
     public ParquetBatchReader open(BufferAllocator allocator) {
-        return new ParquetBatchReader(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, allocator);
+        return new ParquetBatchReader(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, allocator);
     }
 
     /** Convenience loop; each batch is valid only for the duration of the callback. */

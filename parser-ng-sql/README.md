@@ -42,6 +42,7 @@ query.close();
   - [Warming up](#warming-up)
 - [Performance notes](#performance-notes)
 - [Error handling](#error-handling)
+- [Querying Parquet files](#querying-parquet-files)
 - [What's intentionally out of scope](#whats-intentionally-out-of-scope)
 - [Resource ownership and thread-safety](#resource-ownership-and-thread-safety)
 
@@ -56,14 +57,14 @@ repository and is published to Maven Central alongside it.
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-sql</artifactId>
-    <version>3.0.9</version>
+    <version>3.0.8</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation("com.github.gbenroscience:parser-ng-sql:3.0.9")
+implementation("com.github.gbenroscience:parser-ng-sql:3.0.8")
 ```
 
 parser-ng-sql depends on `parser-ng-arrow`, `parser-ng`, `parser-ng-simd`, and
@@ -577,6 +578,172 @@ letting them surface as a confusing runtime failure:
   `output` doesn't match the query's column shape, or doesn't have enough
   per-column capacity for `root`'s row count.
 
+## Querying Parquet files
+
+`com.github.gbenroscience.sqlv1.parquet` runs the same SQL over Parquet files through
+[parser-ng-parquet](../parser-ng-parquet). parser-ng-parquet never depends on this module;
+the bridge lives here.
+
+### Quick start
+
+```java
+ParquetSql sql = ParquetSql.create(ParquetSqlOptions.defaults().withParallelism(4))
+        .register("events", Path.of("data/events.parquet"));
+
+try (BufferAllocator alloc = new RootAllocator();
+     ParquetSqlPlan plan = sql.plan(
+         "SELECT id, name, x * 2 AS x2 FROM events WHERE x > 100 AND id < 5000")) {
+    plan.stream(alloc, batch -> consume(batch));   // bounded memory
+    System.out.println(plan.lastMetrics());        // row groups skipped, rows read, ...
+    System.out.println(plan.explain());
+}
+
+// One-shot, no registration; the path is the source:
+try (VectorSchemaRoot r = sql.execute("SELECT COUNT(*) FROM 'data/events.parquet'", alloc)) { ... }
+```
+
+`EXPLAIN SELECT ...` returns the plan as a one-column result named `plan`.
+
+### How `FROM` is resolved
+
+| Form | Resolution |
+| --- | --- |
+| `FROM 'dir/file.parquet'` | The quoted text is the file. Always resolved. |
+| `FROM read_parquet('dir/*.parquet', 'other.parquet')` | One or more paths or globs, expanded and sorted. All files must have identical column names and types for the columns the query reads, else a named error. |
+| `FROM events` | Looked up among tables passed to `register(name, pathOrGlob)`. An unregistered name is an error. |
+| `ParquetSql.plan(file, sql)` with `FROM anything` | The name is ignored and `file` is the source (the original behaviour). Combining an explicit file with a quoted path in the SQL is rejected as ambiguous. |
+| `ArrowSql` / `ArrowQuery` (in memory) | The name is never resolved; it is documentation only. |
+
+**Security.** A path in SQL text is an unauthenticated file read on the machine running the
+query. If any user-influenced SQL can reach `ParquetSql`, set
+`ParquetSqlOptions.withAllowedRoot(dir)`: every file, after symlink resolution, must live under
+that directory or the query fails.
+
+### What runs where
+
+* **Numeric work** (expressions, `WHERE`, `GROUP BY`, aggregates, `ORDER BY`) runs in
+  `ArrowQuery`'s vectorized double kernels. Only the numeric columns a query actually touches are
+  widened to double, into buffers reused across batches.
+* **Every column can be selected as-is** in its native Arrow type. Such passthrough columns never
+  enter the engine: the engine emits surviving row indices and the native batch is gathered by
+  index. A pure projection of plain columns skips the engine and hands the reader's batch through
+  with no copy.
+* **Row-group pruning** uses a superset predicate derived from the `WHERE`. The full `WHERE` is
+  always re-evaluated, unless you opt into `withExactFilter(true)` and the whole `WHERE` converts
+  with exactly the SQL semantics (see below).
+* **`ORDER BY ... LIMIT n`** (no `GROUP BY`) is a bounded top-N: each batch is sorted and cut to `n`, and the
+  bridge keeps at most about `2n` candidate rows however many rows match. Ordering is the engine's: keys
+  compare as doubles, nulls last in both directions, ties keep file order. `n` must be at most
+  `maxMaterializedRows` and 1,000,000; otherwise, and for `ORDER BY` with no `LIMIT`, every matching row is
+  materialized. `explain()` reports `bounded top-n`.
+* **`SELECT COUNT(*)`** (only `COUNT(*)` items, no `WHERE`, `GROUP BY`, `HAVING` or `ORDER BY`)
+  is answered from the footer row count: no data page is decoded and `lastMetrics()` is `null`.
+
+### Type matrix
+
+| Parquet type | Arrow vector | `SELECT` as-is | In expressions / `WHERE` / `ORDER BY` / `GROUP BY` | Pruning pushed |
+| --- | --- | --- | --- | --- |
+| INT32, INT(8/16) | Int / SmallInt / TinyInt | native | yes (widened to double, exact) | yes |
+| INT64 | BigInt | native, exact | yes; a value beyond 2^53 is an error (see below) | yes |
+| UINT8/16/32 | UInt1/2/4 | native | yes (exact) | no |
+| UINT64 | UInt8 | native | yes; beyond 2^53 is an error | no |
+| FLOAT | Float4 | native | yes (float to double is exact) | yes (bounds rounded outward) |
+| DOUBLE | Float8 | native | yes, no copy | yes |
+| DECIMAL (INT32/INT64/FLBA/BINARY) | Decimal128 | native, exact | yes, as double (lossy past about 15 significant digits; error beyond 2^53 unscaled) | yes, for columns up to 15 digits (INT32/INT64-backed: ranges; BINARY/FLBA-backed: `=` and `<>` only); never in exactFilter mode |
+| BOOLEAN | Bit | native | `WHERE` only: `flag`, `= TRUE/FALSE`, `IS [NOT] TRUE/FALSE`, `IN`, `IS NULL`; not in arithmetic | no |
+| STRING / ENUM / JSON | VarChar | native | `WHERE` only: `= <> < <= > >=`, `IN`, `BETWEEN`, `LIKE`, `ILIKE`, `REGEXP`, `IS NULL`; no string functions | yes (`=`, `<>`, `IN` only; no string range pruning) |
+| BINARY, UUID | VarBinary / FixedSizeBinary | native | clear error | no |
+| DATE | DateDay | native | `WHERE` only: comparisons, `IN`, `BETWEEN`, `IS NULL`, with `DATE '...'` or an ISO string | yes |
+| TIMESTAMP (all units, UTC or local), INT96 | TimeStamp | native | `WHERE` only: comparisons, `IN`, `BETWEEN`, `IS NULL`, with `TIMESTAMP '...'` | no (needs a parser-ng-parquet translator change) |
+| struct / list / map | nested | native (whole struct decoded) | clear error | no |
+
+A clear error names the column, its type and the clause, for example
+`Column 'name' is STRING and cannot be used in an expression, WHERE, GROUP BY or ORDER BY.`
+
+**Precision rule.** A double holds integers exactly up to 2^53. When widening an int64, uint64 or
+decimal for arithmetic would round, the query fails and names the column, value and file. Opt in to
+rounding with `withInt64Policy(ROUND_TO_DOUBLE)`; `plan.roundedValues()` counts how many values were
+rounded. Selecting such a column as-is is always exact. Nulls are preserved exactly, never replaced
+by a sentinel.
+
+**Aggregates return `DOUBLE`** (the engine's convention), including `COUNT`. Exact up to 2^53.
+
+**`OR` and nulls.** String, boolean, date, timestamp and `IS NULL` leaves are two-valued (null gives false), so `OR` is correct for them. When the `WHERE` contains an `OR`, simple numeric leaves (a column against a numeric literal, `BETWEEN`, `IN`) are also evaluated as two-valued masks over the widened column, so `a > 5 OR b > 5` keeps a row where `a` is null but `b > 5`. A numeric leaf that is an expression (`a + 1 > 5`) is still evaluated by `ArrowQuery` with null propagation, so under an `OR` it can drop a row whose other branch is true when an input is null. `AND`-only filters keep the fused engine path and are unaffected.
+
+### Predicates on strings, booleans, dates and timestamps
+
+These run in the bridge, directly on the Arrow vectors, and feed the engine a 0/1 mask. Nothing is
+allocated per row except `REGEXP` (one `String` per non-null row).
+
+* **Strings.** `=`, `<>`, `<`, `<=`, `>`, `>=`, `IN`, `BETWEEN` and their negations; quotes escape as `''`.
+  Ordering is unsigned UTF-8 byte order (code point order), not locale collation.
+* **`LIKE` / `NOT LIKE` / `ILIKE`** with `%` (any run) and `_` (exactly one character, a whole UTF-8
+  sequence), optional `ESCAPE 'c'` (no escape character unless you give one). Matching is bytewise with fast
+  paths for equality, prefix, suffix and substring. **`ILIKE` folds ASCII letters only**; `'É'` does not match `'é'`.
+* **`REGEXP` / `RLIKE`**: `java.util.regex` `find()` (matches anywhere). Invalid patterns fail at plan time.
+* **Nulls.** A null never matches `LIKE`, `NOT LIKE`, `=`, `<>`, `IN`, `NOT IN`. `x NOT IN (..., NULL)` never matches.
+  `IS [NOT] TRUE/FALSE` and `IS [NOT] NULL` are two-valued: `IS NOT TRUE` keeps nulls.
+* **Booleans.** `WHERE flag` means `flag = TRUE`; `NOT flag` means `flag <> TRUE`, so nulls stay excluded.
+  Only `=` and `<>` are allowed against `TRUE`/`FALSE`.
+* **Dates.** `DATE '2024-01-31'`, or an ISO string literal, against a DATE column.
+* **Timestamps.** `TIMESTAMP '2024-01-31 12:00:00[.fraction]'`, optional `Z` or `+HH:MM`, or an ISO string.
+  A column adjusted to UTC compares by instant (a literal without a zone is read as UTC). A column that is
+  not adjusted to UTC holds wall-clock time: a zoned literal is an error (ambiguous). All units (seconds to
+  nanoseconds) and INT96 work, and a literal finer than the column unit compares exactly (`=` cannot match).
+* **Clear errors** name the column and type: `name = 5`, `id = 'x'`, `flag < TRUE`, two non-numeric columns
+  compared with each other, `LIKE` on a non-string column, binary and nested columns in `WHERE`.
+* **Not pushed to Parquet:** `LIKE`, `REGEXP`, boolean tests and timestamps. String and date comparisons are
+  pushed as a pruning hint only; the predicate is always re-evaluated.
+* `WHERE x` on a numeric column now parses (as `x = TRUE`) and then fails with a type error; it used to be a
+  syntax error.
+
+### Scan options
+
+`ParquetSqlOptions`: `parallelism`, `batchSize`, `maxRowGroupBytes` (unset means parser-ng-parquet's
+own defaults, so the modules cannot drift), `metrics` (default on), `exactFilter` (default off),
+`maxMaterializedRows` (default 20,000,000), `int64Policy`, `allowedRoot`.
+
+`exactFilter` lets the scan do the row filtering and drops the `WHERE` from the engine. It applies
+only when every leaf converts exactly: numeric columns only, float32 literals exactly representable,
+int64 literals within 2^53, no dropped branches. Otherwise it is not applied and `explain()` says so.
+The parser-ng-parquet README explains the cost of exact filtering.
+
+### Memory and modes
+
+Queries without `ORDER BY`, `GROUP BY` or aggregates are streamable: `stream()` processes one batch
+at a time in bounded memory and stops reading once `LIMIT` is met. `ORDER BY` and grouped queries
+materialize the rows that survive row-group pruning (capped by `maxMaterializedRows`, which fails
+loudly) and run the engine once. Streaming allocates one small result root per batch; the widened
+buffers and row-index buffer are reused.
+
+### Feature status
+
+| Feature | Status |
+| --- | --- |
+| `SELECT` any column type as-is, across row groups, with nulls | yes |
+| Numeric expressions, `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT` | yes |
+| Row-group pruning for int, long, float, double, date, string equality and short decimals, with correct literal typing | yes |
+| `FROM 'path'`, `read_parquet('glob')`, `register(name, path)` | yes |
+| Allow-listed root for paths | yes |
+| `EXPLAIN` | yes |
+| `COUNT(*)` from the footer, no decode | yes |
+| Bounded top-N for `ORDER BY ... LIMIT n` | yes |
+| Scan options exposed | yes |
+| Precision error for int64 beyond 2^53 | yes |
+| Boolean, string, date, timestamp `WHERE` predicates, `IS [NOT] TRUE/FALSE`, `IS NULL` on any column | yes |
+| Exact decimal predicates | not yet (compared as double) |
+| Arithmetic on strings, dates, timestamps | clear error |
+| `LIKE`, `ILIKE` (ASCII folding), `REGEXP`, `ESCAPE` | yes |
+| String functions (`LOWER`, `UPPER`, `LENGTH`, `TRIM`, `SUBSTRING`, `CONCAT`) | not yet |
+| `DATE '...'`, `TIMESTAMP '...'` literals | yes |
+| `CAST` to date/timestamp/decimal, `EXTRACT`, `INTERVAL` | not yet |
+| Timestamp row-group pruning | not yet (needs a parser-ng-parquet change) |
+| Quoted identifiers (`"my col"`) | not yet |
+| Nested field access (`s.field`, `items[0]`, `m['k']`) and `CARDINALITY` | not yet (whole struct can be selected) |
+| `COUNT(col)`, `COUNT(DISTINCT)`, `SELECT DISTINCT`, `MIN`/`MAX` from statistics | not yet (`MIN`/`MAX`/`COUNT(col)` run through the engine on numeric columns) |
+| Bounded top-N for `ORDER BY ... LIMIT` | not yet (materializes surviving rows) |
+| `COALESCE`, `NULLIF`, `OFFSET` | not yet |
+
 ## What's intentionally out of scope
 
 parser-ng-sql deliberately does not implement:
@@ -587,7 +754,11 @@ parser-ng-sql deliberately does not implement:
   there is no notion of a persistent table to mutate.
 - `DISTINCT`.
 - Non-numeric `CAST` targets or general string/text processing; every
-  value in a ParserNG expression is a floating-point number.
+  value in a ParserNG expression is a floating-point number. Over Parquet,
+  string, boolean, date and timestamp predicates are supported; string functions,
+  casts to temporal types and decimal predicates are not yet (see the feature status table above).
+- Multi-table queries. `read_parquet('glob')` reads several files as one
+  table with one schema; it is not a join.
 
 None of these are missing by oversight. The goal is a fast, predictable way
 to describe a vectorized Arrow computation, not a general-purpose query

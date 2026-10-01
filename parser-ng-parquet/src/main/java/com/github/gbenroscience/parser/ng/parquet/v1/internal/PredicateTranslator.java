@@ -21,6 +21,12 @@ import java.util.Set;
  * Translates a {@link Predicate} into a parquet-java {@link FilterPredicate} used ONLY for pruning.
  * Returns {@code null} when nothing can be safely pushed. See {@link Predicate} for the soundness
  * rules, and {@link #negate} for specifically how {@link Predicate.Not} is handled.
+ *
+ * <p>Leaves may name a flat column or a leaf reached only through structs ({@code "user.address.zip"}).
+ * Leaves under a list or map are never handed to parquet-java (its {@code FilterApi} rejects repeated
+ * columns); {@link RepeatedStatsPruner} prunes those from footer statistics instead. Because a leaf that
+ * is not translated here is simply dropped (or, under an {@code Or}, drops the whole {@code Or}), the
+ * rewrite in {@link #negate} can never flip a repeated leaf's "some element" meaning into a different one.
  */
 public final class PredicateTranslator {
 
@@ -109,10 +115,23 @@ public final class PredicateTranslator {
         };
     }
 
-    private static PrimitiveType prim(MessageType schema, String col) {
-        if (col.indexOf('.') >= 0 || !schema.containsField(col)) return null; // dotted paths are ambiguous
-        Type t = schema.getType(col);
-        return t.isPrimitive() ? t.asPrimitiveType() : null;
+    /**
+     * Resolves a predicate column to a leaf parquet-java can filter on: a flat column, or a leaf reached only
+     * through structs (dotted path, see {@link ColumnPaths}). Returns null for anything else, which simply
+     * means "nothing pushed for this leaf" (always sound):
+     * <ul>
+     *   <li>unknown or non-leaf columns;</li>
+     *   <li>leaves under a LIST/MAP/bare {@code repeated} field: parquet-java's {@code FilterApi} rejects
+     *       repeated columns outright, so those are pruned separately by {@link RepeatedStatsPruner};</li>
+     *   <li>names containing a dot in any path component, which {@code FilterApi}'s dotted column names
+     *       cannot express unambiguously.</li>
+     * </ul>
+     */
+    private static ColumnPaths.Resolved pushable(MessageType schema, String col) {
+        ColumnPaths.Resolved r = ColumnPaths.resolve(schema, col);
+        if (r == null || r.repeated()) return null;
+        for (String part : r.physicalPath()) if (part.indexOf('.') >= 0) return null;
+        return r;
     }
 
     private static boolean signedInt(LogicalTypeAnnotation lt, int width) {
@@ -121,7 +140,7 @@ public final class PredicateTranslator {
 
     // ---- literal coercion: exact or exactly-widening only; null => not pushable ----
 
-    private static Integer asInt32(PrimitiveType pt, Object v) {
+    static Integer asInt32(PrimitiveType pt, Object v) {
         LogicalTypeAnnotation lt = pt.getLogicalTypeAnnotation();
         if (lt == null || signedInt(lt, 32)) return v instanceof Integer i ? i : null;
         if (lt instanceof LogicalTypeAnnotation.DateLogicalTypeAnnotation) {
@@ -133,7 +152,7 @@ public final class PredicateTranslator {
         return null;
     }
 
-    private static Long asInt64(PrimitiveType pt, Object v) {
+    static Long asInt64(PrimitiveType pt, Object v) {
         LogicalTypeAnnotation lt = pt.getLogicalTypeAnnotation();
         if (lt != null && !signedInt(lt, 64)) return null;
         if (v instanceof Long l) return l;
@@ -141,12 +160,12 @@ public final class PredicateTranslator {
         return null;
     }
 
-    private static Float asFloat(PrimitiveType pt, Object v) {
+    static Float asFloat(PrimitiveType pt, Object v) {
         if (pt.getLogicalTypeAnnotation() != null || !(v instanceof Float f) || f.isNaN()) return null;
         return f;
     }
 
-    private static Double asDouble(PrimitiveType pt, Object v) {
+    static Double asDouble(PrimitiveType pt, Object v) {
         if (pt.getLogicalTypeAnnotation() != null) return null;
         Double d = null;
         if (v instanceof Double x) d = x;
@@ -155,7 +174,7 @@ public final class PredicateTranslator {
         return (d == null || d.isNaN()) ? null : d;
     }
 
-    private static Binary asString(PrimitiveType pt, Object v) {
+    static Binary asString(PrimitiveType pt, Object v) {
         return (pt.getLogicalTypeAnnotation() instanceof LogicalTypeAnnotation.StringLogicalTypeAnnotation
                 && v instanceof String s) ? Binary.fromString(s) : null;
     }
@@ -184,12 +203,12 @@ public final class PredicateTranslator {
     // stance) and UUID (no numeric ordering is defined for it in the first place; exactFilter() supports
     // its EQ/NE, which is all a UUID predicate should ever need).
 
-    private static Integer asDecimalInt32(LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec, Object v) {
+    static Integer asDecimalInt32(LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec, Object v) {
         if (!(v instanceof BigDecimal d) || d.scale() != dec.getScale()) return null;
         try { return d.unscaledValue().intValueExact(); } catch (ArithmeticException e) { return null; }
     }
 
-    private static Long asDecimalInt64(LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec, Object v) {
+    static Long asDecimalInt64(LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec, Object v) {
         if (!(v instanceof BigDecimal d) || d.scale() != dec.getScale()) return null;
         try { return d.unscaledValue().longValueExact(); } catch (ArithmeticException e) { return null; }
     }
@@ -213,9 +232,10 @@ public final class PredicateTranslator {
     // ---- leaves ----
 
     private static FilterPredicate cmp(Predicate.Cmp c, MessageType schema) {
-        PrimitiveType pt = prim(schema, c.column());
-        if (pt == null) return null;
-        String n = c.column();
+        ColumnPaths.Resolved r = pushable(schema, c.column());
+        if (r == null) return null;
+        PrimitiveType pt = r.leaf();
+        String n = r.physicalDotted();
         Object v = c.value();
         Predicate.Op op = c.op();
         switch (pt.getPrimitiveTypeName()) {
@@ -290,9 +310,10 @@ public final class PredicateTranslator {
     }
 
     private static FilterPredicate inList(Predicate.In in, MessageType schema) {
-        PrimitiveType pt = prim(schema, in.column());
-        if (pt == null) return null;
-        String n = in.column();
+        ColumnPaths.Resolved r = pushable(schema, in.column());
+        if (r == null) return null;
+        PrimitiveType pt = r.leaf();
+        String n = r.physicalDotted();
         List<?> vals = in.values();
         LogicalTypeAnnotation.DecimalLogicalTypeAnnotation dec =
                 pt.getLogicalTypeAnnotation() instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation d ? d : null;
@@ -350,10 +371,19 @@ public final class PredicateTranslator {
 
     /** IS NULL == eq(col, null); IS NOT NULL == notEq(col, null) in parquet's filter algebra. */
     private static FilterPredicate isNull(Predicate.IsNull p, MessageType schema) {
-        PrimitiveType pt = prim(schema, p.column());
-        if (pt == null) return null;
-        String n = p.column();
+        ColumnPaths.Resolved r = pushable(schema, p.column());
+        if (r == null) return null;
+        PrimitiveType pt = r.leaf();
+        String n = r.physicalDotted();
         boolean neg = p.negated();
+        // IS NULL must also match rows whose leaf is null only because an enclosing struct is null. Whether a
+        // column chunk's null count includes those is up to the writer, and pruning on "zero nulls" would be
+        // unsound if it does not, so IS NULL is not pushed below an optional struct. IS NOT NULL is always safe
+        // (it only prunes a chunk that is entirely null).
+        if (!neg && schema.getColumnDescription(r.physicalPath()).getMaxDefinitionLevel()
+                > (pt.isRepetition(org.apache.parquet.schema.Type.Repetition.OPTIONAL) ? 1 : 0)) {
+            return null;
+        }
         switch (pt.getPrimitiveTypeName()) {
             case INT32: return neg ? FilterApi.notEq(FilterApi.intColumn(n), (Integer) null) : FilterApi.eq(FilterApi.intColumn(n), (Integer) null);
             case INT64: return neg ? FilterApi.notEq(FilterApi.longColumn(n), (Long) null) : FilterApi.eq(FilterApi.longColumn(n), (Long) null);

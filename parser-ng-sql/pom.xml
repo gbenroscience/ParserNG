@@ -19,6 +19,8 @@
     <description>
         A SQL-shaped front end over parser-ng-arrow: SELECT ... FROM ... [WHERE ...] compiles
         to a vectorized Arrow filter/projection pipeline built on ArrowExpressionEvaluators.
+        Over Parquet files (via parser-ng-parquet) the same SQL runs with row-group pruning, footer-only
+        COUNT(*), and any column type selectable as-is; expressions and predicates are numeric.
         This is deliberately NOT a database - no JOIN, INSERT, UPDATE, DELETE, transactions. 
         It exists purely to make SQL a convenient surface
         syntax for describing vectorized Arrow computations that parser-ng-arrow already knows

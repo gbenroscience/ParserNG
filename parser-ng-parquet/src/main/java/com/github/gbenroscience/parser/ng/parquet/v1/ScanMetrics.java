@@ -16,12 +16,12 @@ import java.util.concurrent.atomic.LongAdder;
  *   <li>{@link #uncompressedBytesDecoded()} -- <b>the headline decode-throughput numerator.</b> Bytes of
  *       Parquet page payload (dictionary pages + data pages, including repetition/definition level
  *       streams) actually handed to the decode engine, after decompression. Counted when a page is loaded,
- *       so projection and page-level (column-index) pruning are respected exactly: a column that is not
- *       selected, or a page that is skipped, contributes nothing.</li>
+ *       so projection and row-group pruning are respected exactly: a column that is not selected, or a
+ *       row group that is pruned, contributes nothing.</li>
  *   <li>{@link #compressedBytesRead()} -- on-disk (compressed, as-stored) size of the projected column
  *       chunks of every row group that was decoded, taken from the footer. This is what the storage layer had
- *       to deliver. It is an <em>upper bound</em> when page-level pruning skips pages inside a surviving row
- *       group (the footer only knows whole column chunks). Divide by wall time for "I/O + decompress +
+ *       to deliver. (Column chunks are read whole: page-level pruning is off, see
+ *       {@code ParquetBatchReader#newReadOptions}.) Divide by wall time for "I/O + decompress +
  *       decode" throughput; compare against {@code uncompressedBytesDecoded} for the effective
  *       compression ratio.</li>
  *   <li>{@link #arrowBytesProduced()} -- bytes of Arrow buffers materialized (sum of
@@ -49,6 +49,7 @@ public final class ScanMetrics {
     final LongAdder compressedBytesRead = new LongAdder();
     final LongAdder uncompressedBytesDecoded = new LongAdder();
     final LongAdder arrowBytesProduced = new LongAdder();
+    final LongAdder workersPinned = new LongAdder();
 
     public long rowGroupsInFile() { return rowGroupsInFile; }
     public long rowGroupsAfterPruning() { return rowGroupsAfterPruning; }
@@ -67,6 +68,13 @@ public final class ScanMetrics {
     public long uncompressedBytesDecoded() { return uncompressedBytesDecoded.sum(); }
     /** Arrow buffer bytes materialized across all emitted batches. */
     public long arrowBytesProduced() { return arrowBytesProduced.sum(); }
+    /**
+     * Parallel decoder threads the OS actually pinned to a CPU (always 0 unless
+     * {@code ParquetScan.pinWorkerThreads(true)} and {@code parallelism > 1}). Pinning is best-effort, so compare
+     * this with {@link #parallelism()} to know whether an A/B measurement really ran pinned. Counted as each
+     * worker starts, so it can still be rising while the first batches are being produced.
+     */
+    public long workersPinned() { return workersPinned.sum(); }
 
     @Override
     public String toString() {

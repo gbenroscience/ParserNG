@@ -42,31 +42,22 @@ import org.apache.arrow.vector.complex.StructVector;
  * already typed against the {@code ColumnReader} interface, not a concrete class, which is exactly
  * what makes this swap possible without touching the nested-type assembly logic.
  *
- * <h2>Page-level (column-index) pruning</h2>
+ * <h2>Page-level (column-index) pruning: off, and why this class cannot yet accept it</h2>
  * Both {@link #nextFilteredRowGroup()} and {@link #readFilteredRowGroup} go through parquet-java's
  * <em>filtered</em> row-group entry points ({@code readNextFilteredRowGroup()} /
- * {@code readFilteredRowGroup(int)}), not the unfiltered ones: a row group that survives
- * row-group-level pruning (stats/dictionary/Bloom filter, decided once up front) can still have
- * individual pages skipped inside it via the file's column indexes, when the reader was opened with
- * {@code useColumnIndexFilter(true)} and a record filter. The row count this class ever sees
- * ({@code pages.getRowCount()} in {@link #begin}, {@code cr.getTotalValueCount()} in
- * {@link #readLeaf}) is read directly off the {@link PageReadStore}/{@link ColumnReader} that
- * pruning already produced, never off static footer metadata — so this decode loop needs no special
- * case for "some pages were skipped": a page-pruned row group simply presents fewer values to begin
- * with, through the exact same calls as an unpruned one. This holds identically for
- * {@link FastColumnCursor}, since it reads its own value/level counts off the {@link PageReadStore}
- * it was constructed against, not off static footer metadata either.
+ * {@code readFilteredRowGroup(int)}), but the readers are opened with {@code useColumnIndexFilter(false)}
+ * (see {@code ParquetBatchReader#newReadOptions}), so those calls return whole row groups that survived
+ * row-group-level pruning (statistics, dictionary, Bloom filter and the footer-statistics stage for list
+ * columns), all decided up front.
  *
- * <p><b>One interaction worth a targeted test before relying on it under real load:</b> Parquet's
- * column-index page-skip range computation is defined and verified against flat, non-repeated
- * columns; this module has not been able to confirm (no compiler, no test run available while
- * writing this) that parquet-java computes equally precise skip ranges for a row group that also
- * contains a {@code LIST} or {@code struct} column in the read set, where a page boundary does not
- * necessarily align with a record boundary the same way it does for a flat column. The safe case
- * either way: parquet-java either computes a correct (possibly less precise) row range for such a
- * row group, or does not attempt page pruning for it — both leave this class's own bookkeeping
- * intact. What is <em>not</em> yet verified is whether pruning is as <em>effective</em> in that
- * mixed case as it is for an all-flat row group.
+ * <p>With column-index filtering ON, parquet-java would return only the pages overlapping the surviving row
+ * ranges. Pages are kept whole and each column's pages start on that column's own row boundaries, so columns
+ * of one row group could begin at different rows and hold rows outside the ranges. This class reads every
+ * column from its first retained page ({@link #begin} takes the row count from {@code pages.getRowCount()})
+ * and never applies the store's row-index selection, so with trimmed pages the columns of one batch could
+ * describe different rows. Turning page-level pruning back on requires teaching {@link FastColumnCursor} to
+ * skip to the selected rows per column, and for list columns to skip only at record boundaries (where a
+ * repetition level of 0 starts a new row); until then whole row groups are the unit of pruning.
  */
 final class RowGroupDecoder implements AutoCloseable {
 
@@ -126,9 +117,8 @@ final class RowGroupDecoder implements AutoCloseable {
     long remaining() { return remaining; }
 
     /**
-     * Sequential mode: next row group that survived the reader's own row-group-level filter, with
-     * page-level (column-index) pruning applied within it if the reader was opened with
-     * {@code useColumnIndexFilter(true)} and a record filter.
+     * Sequential mode: next row group that survived the reader's own row-group-level filter, read whole
+     * (page-level pruning is off; see the class Javadoc).
      */
     boolean nextFilteredRowGroup() throws IOException {
         PageReadStore pages = reader.readNextFilteredRowGroup();
@@ -140,9 +130,9 @@ final class RowGroupDecoder implements AutoCloseable {
 
     /**
      * Parallel mode: a specific row group by its index in <b>this reader's own row-group list</b>
-     * ({@link ParquetFileReader#getRowGroups()}), with the same page-level pruning as
+     * ({@link ParquetFileReader#getRowGroups()}), read whole exactly like
      * {@link #nextFilteredRowGroup()} -- the reader was opened with the record filter and
-     * {@code useColumnIndexFilter(true)} exactly like the sequential path; only the access pattern
+     * {@code useColumnIndexFilter(false)} exactly like the sequential path; only the access pattern
      * (random access, for a pooled/reused reader) differs.
      *
      * <p><b>The index is NOT a footer ordinal.</b> {@code ParquetFileReader.readFilteredRowGroup(int)} indexes

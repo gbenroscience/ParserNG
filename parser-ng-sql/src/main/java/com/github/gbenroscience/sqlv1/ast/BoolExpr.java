@@ -34,5 +34,6 @@ package com.github.gbenroscience.sqlv1.ast;
  * @author GBEMIRO
  */
 public sealed interface BoolExpr
-        permits AndExpr, OrExpr, NotExpr, ComparisonExpr, BetweenExpr, InExpr, IsNullExpr {
+        permits AndExpr, OrExpr, NotExpr, ComparisonExpr, BetweenExpr, InExpr, IsNullExpr,
+        LikeExpr, RegexExpr, TruthExpr {
 }
