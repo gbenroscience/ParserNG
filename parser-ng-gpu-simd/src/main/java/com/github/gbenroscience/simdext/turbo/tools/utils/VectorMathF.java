@@ -1273,37 +1273,42 @@ public final class VectorMathF {
         }
     }
 
-    public static void ceil(int base, int n, float[] s) {
-        int limit = SPECIES_F.loopBound(n);
-        int k = 0;
+ public static void ceil(int base, int n, float[] s) {
+    int limit = SPECIES_F.loopBound(n);
+    int k = 0;
 
-        for (; k < limit; k += SPECIES_F.length()) {
-            FloatVector v = FloatVector.fromArray(SPECIES_F, s, base + k);
+    for (; k < limit; k += SPECIES_F.length()) {
+        FloatVector v = FloatVector.fromArray(SPECIES_F, s, base + k);
 
-            // False for |v| >= 2^23 (already integral), and also false for
-            // +-Infinity and NaN (any compare against NaN is false) -- one guard
-            // covers all three "leave as-is" cases.
-            var inSafeRange = v.abs().compare(VectorOperators.LT, SAFE_INTEGRAL_BOUND_F);
-            // Preserves -0.0f's sign, which the F2I/I2F round trip would otherwise flip to +0.0f.
-            var isZero = v.compare(VectorOperators.EQ, 0.0f);
-            var passthrough = inSafeRange.not().or(isZero);
+        // False for |v| >= 2^23 (already integral), and also false for
+        // +-Infinity and NaN (any compare against NaN is false) -- one guard
+        // covers all three "leave as-is" cases.
+        var inSafeRange = v.abs().compare(VectorOperators.LT, SAFE_INTEGRAL_BOUND_F);
+        // Preserves -0.0f's sign, which the F2I/I2F round trip would otherwise flip to +0.0f.
+        var isZero = v.compare(VectorOperators.EQ, 0.0f);
+        var passthrough = inSafeRange.not().or(isZero);
 
-            FloatVector truncated = (FloatVector) v.convert(VectorOperators.F2I, 0)
-                    .convert(VectorOperators.I2F, 0);
+        FloatVector truncated = (FloatVector) v.convert(VectorOperators.F2I, 0)
+                .convert(VectorOperators.I2F, 0);
 
-            var truncatedLow = truncated.compare(VectorOperators.LT, v);
-            FloatVector ceiled = truncated.blend(truncated.add(1.0f), truncatedLow);
+        var truncatedLow = truncated.compare(VectorOperators.LT, v);
+        FloatVector ceiled = truncated.blend(truncated.add(1.0f), truncatedLow);
 
-            FloatVector result = ceiled.blend(v, passthrough);
-            result.intoArray(s, base + k);
-        }
+        // For -1 < v < 0 the truncation is +0.0f, but Math.ceil gives -0.0.
+        // Restore the sign for negative inputs whose ceiling is zero.
+        var negToZero = v.compare(VectorOperators.LT, 0.0f)
+                .and(ceiled.compare(VectorOperators.EQ, 0.0f));
+        ceiled = ceiled.blend(-0.0f, negToZero);
 
-        for (; k < n; k++) {
-            // Math.ceil only has a double overload -- cast back, or this silently widens the array's type intent.
-            s[base + k] = (float) Math.ceil(s[base + k]);
-        }
+        FloatVector result = ceiled.blend(v, passthrough);
+        result.intoArray(s, base + k);
     }
 
+    for (; k < n; k++) {
+        // Math.ceil only has a double overload -- cast back, or this silently widens the array's type intent.
+        s[base + k] = (float) Math.ceil(s[base + k]);
+    }
+}
     public static void floor(int base, int n, float[] s) {
         int limit = SPECIES_F.loopBound(n);
         int k = 0;

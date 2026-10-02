@@ -15,7 +15,7 @@
  */
 package com.github.gbenroscience.simd.turbo.tools.utils;
 
-import com.github.gbenroscience.math.Maths; 
+import com.github.gbenroscience.math.Maths;
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.LongVector;
 import jdk.incubator.vector.VectorMask;
@@ -1251,6 +1251,12 @@ public final class VectorMath {
 
             var truncatedLow = truncated.compare(VectorOperators.LT, v);
             DoubleVector ceiled = truncated.blend(truncated.add(1.0), truncatedLow);
+
+            // For -1 < v < 0 the truncation is +0.0, but Math.ceil gives -0.0.
+            // Restore the sign for negative inputs whose ceiling is zero.
+            var negToZero = v.compare(VectorOperators.LT, 0.0)
+                    .and(ceiled.compare(VectorOperators.EQ, 0.0));
+            ceiled = ceiled.blend(-0.0, negToZero);
 
             DoubleVector result = ceiled.blend(v, passthrough);
             result.intoArray(s, base + k);
