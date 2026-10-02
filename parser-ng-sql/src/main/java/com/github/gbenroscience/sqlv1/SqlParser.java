@@ -38,6 +38,9 @@ import java.util.Locale;
  *         [ORDER BY order_item (',' order_item)*]
  *         [LIMIT integer_literal]
  *         [OFFSET integer_literal [ROW | ROWS]]   (also accepted before LIMIT; contextual, so a column may be named offset)
+ * identifier
+ *     ::= name | '"' chars '"' | '`' chars '`'      -- a delimited identifier; the delimiter is doubled to include it
+ * expression extras: a '||' b (string concatenation); string functions are ordinary calls handled by ParquetSql
  * table_reference
  *     ::= identifier
  *       | string_literal                          -- a file path (ParquetSql only)
@@ -465,6 +468,8 @@ public final class SqlParser {
             if (peekType() == TokenType.AS) {
                 advance();
                 alias = expectIdentifier("Expected an alias identifier after AS");
+            } else {
+                alias = readableName(agg.defaultOutputName());
             }
             return SelectItem.aggregate(agg, alias);
         }
@@ -477,6 +482,8 @@ public final class SqlParser {
         if (peekType() == TokenType.AS) {
             advance();
             alias = expectIdentifier("Expected an alias identifier after AS");
+        } else {
+            alias = readableName(expr);
         }
         return SelectItem.plain(expr, alias);
     }
@@ -849,6 +856,9 @@ public final class SqlParser {
                     }
                     break;
                 }
+                case QUOTED_IDENTIFIER:
+                    appendToken(sb, QuotedIdentifiers.reference(advance().text()));
+                    break;
                 case NUMBER:
                 case TRUE:
                 case FALSE:
@@ -873,6 +883,7 @@ public final class SqlParser {
                 case STAR:
                 case PERCENT:
                 case CARET:
+                case CONCAT_OP:
                     appendToken(sb, advance().text());
                     break;
                 default:
@@ -1061,6 +1072,14 @@ public final class SqlParser {
      * ParserNG-safe single-quoted text, doubling any embedded {@code '}
      * exactly as {@link SqlLexer} itself accepts on the way in.
      */
+    /**
+     * The default output name of an item whose text holds quoted-identifier references, with the
+     * real names put back; {@code null} (keep the text as the name) when there are none.
+     */
+    private static String readableName(String text) {
+        return QuotedIdentifiers.containsReference(text) ? QuotedIdentifiers.decodeAll(text) : null;
+    }
+
     private static String quoteStringLiteral(String decoded) {
         return "'" + decoded.replace("'", "''") + "'";
     }
@@ -1150,6 +1169,9 @@ public final class SqlParser {
     }
 
     private String expectIdentifier(String message) {
+        if (peekType() == TokenType.QUOTED_IDENTIFIER) {
+            return advance().text();
+        }
         return expect(TokenType.IDENTIFIER, message).text();
     }
 

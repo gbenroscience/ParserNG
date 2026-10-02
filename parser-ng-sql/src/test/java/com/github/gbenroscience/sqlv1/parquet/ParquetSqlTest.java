@@ -41,6 +41,35 @@ class ParquetSqlTest {
         return main;
     }
 
+    private static final int AWKWARD_ROWS = 100;
+    private static Path awkward;
+
+    private static synchronized Path awkward() throws IOException {
+        if (awkward == null) {
+            main();
+            awkward = dir.resolve("awkward.parquet");
+            ParquetFixtures.writeAwkward(awkward, AWKWARD_ROWS);
+        }
+        return awkward;
+    }
+
+    private static final int AWKWARD_LARGE_ROWS = 5_000;
+    private static Path awkwardLarge;
+
+    /** The same columns over many row groups, for pruning. */
+    private static synchronized Path awkwardLarge() throws IOException {
+        if (awkwardLarge == null) {
+            main();
+            awkwardLarge = dir.resolve("awkward-large.parquet");
+            ParquetFixtures.writeAwkward(awkwardLarge, AWKWARD_LARGE_ROWS);
+        }
+        return awkwardLarge;
+    }
+
+    private VectorSchemaRoot runAwkward(BufferAllocator a, String sql) throws Exception {
+        return ParquetSql.execute(awkward(), sql, a);
+    }
+
     private static String str(VectorSchemaRoot r, String col, int i) {
         VarCharVector v = (VarCharVector) r.getVector(col);
         return v.isNull(i) ? null : new String(v.get(i), StandardCharsets.UTF_8);
@@ -831,5 +860,218 @@ class ParquetSqlTest {
             try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT COALESCE(name, 'x') FROM t")) { }
         });
         assertTrue(e.getMessage().contains("STRING"), e.getMessage());
+    }
+
+    // ---------------------------------------------------------------- string functions
+
+    private static String nameOf(int i) { return i % 11 == 0 ? null : "n" + i; }
+
+    @Test
+    void upperInTheSelectListNullInNullOut() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT id, UPPER(name) AS u, LOWER(name) || '!' FROM t WHERE id < 30 ORDER BY id")) {
+            assertEquals(30, r.getRowCount());
+            for (int i = 0; i < 30; i++) {
+                String n = nameOf(i);
+                assertEquals(n == null ? null : n.toUpperCase(), str(r, "u", i), "row " + i);
+                assertEquals(n == null ? null : n + "!", str(r, "LOWER(name) || '!'", i), "row " + i);
+            }
+        }
+    }
+
+    @Test
+    void stringFunctionsInWhereUseTheNativeStringKernels() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE UPPER(name) = 'N5'")) {
+            assertEquals(1.0, ((Float8Vector) r.getVector("c")).get(0), 0.0);
+        }
+        long like = 0, sub = 0;
+        for (int i = 0; i < ROWS; i++) {
+            String n = nameOf(i);
+            if (n != null && n.startsWith("n1")) like++;
+            if (n != null && n.length() > 1 && n.charAt(1) == '1') sub++;
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE UPPER(name) LIKE 'N1%'")) {
+            assertEquals(like, ((Float8Vector) r.getVector("c")).get(0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE SUBSTRING(name, 2, 1) = '1'")) {
+            assertEquals(sub, ((Float8Vector) r.getVector("c")).get(0), 0.0);
+        }
+    }
+
+    @Test
+    void lengthIsNumericSoItWorksInArithmeticAggregatesAndOrderBy() throws Exception {
+        long three = 0;
+        double sum = 0;
+        for (int i = 0; i < ROWS; i++) {
+            String n = nameOf(i);
+            if (n == null) continue;
+            sum += n.length();
+            if (n.length() == 3) three++;
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE LENGTH(name) = 3")) {
+            assertEquals(three, ((Float8Vector) r.getVector("c")).get(0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT SUM(LENGTH(name)) AS s FROM t")) {
+            assertEquals(sum, ((Float8Vector) r.getVector("s")).get(0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT id, LENGTH(name) + 1 AS l FROM t WHERE id < 12 ORDER BY id")) {
+            assertEquals(12, r.getRowCount());
+            assertTrue(r.getVector("l").isNull(0), "LENGTH of a null name is null");
+            assertEquals(3.0, ((Float8Vector) r.getVector("l")).get(1), 0.0, "row 1 is n1: length 2, plus 1");
+        }
+        // names with 6 characters are ids 10000.., ties keep file order
+        assertEquals(List.of(10000L, 10001L, 10002L),
+                runIds("SELECT id FROM t WHERE name IS NOT NULL ORDER BY LENGTH(name) DESC LIMIT 3", ParquetSqlOptions.defaults().withBatchSize(1000)));
+    }
+
+    @Test
+    void stringPredicateUnderOrKeepsTheOtherBranch() throws Exception {
+        assertEquals(List.of(0L, 1L, 2L, 5L), runIds("SELECT id FROM t WHERE UPPER(name) = 'N5' OR id < 3", ParquetSqlOptions.defaults()));
+    }
+
+    @Test
+    void aProjectionOfOnlyDerivedStringsWorksAndStreams() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT UPPER(name) FROM t LIMIT 3")) {
+            assertEquals(3, r.getRowCount());
+            assertTrue(r.getVector("UPPER(name)").isNull(0));
+            assertEquals("N1", str(r, "UPPER(name)", 1));
+            assertEquals("N2", str(r, "UPPER(name)", 2));
+        }
+        List<String> got = new ArrayList<>();
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT id, TRIM(name || ' ') AS t FROM t LIMIT 2500 OFFSET 1500", ParquetSqlOptions.defaults().withBatchSize(1000))) {
+            p.stream(a, root -> {
+                for (int i = 0; i < root.getRowCount(); i++) got.add(str(root, "t", i));
+            });
+        }
+        assertEquals(2500, got.size());
+        assertEquals(nameOf(1500), got.get(0));
+        assertEquals(nameOf(3999), got.get(got.size() - 1));
+    }
+
+    @Test
+    void stringFunctionsRejectWhatTheyCannotDoWithNamedErrors() throws Exception {
+        ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT id FROM t ORDER BY LOWER(name) LIMIT 3")) { }
+        });
+        assertTrue(e.getMessage().contains("ORDER BY"), e.getMessage());
+        e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT LOWER(id) FROM t")) { }
+        });
+        assertTrue(e.getMessage().contains("INT64"), e.getMessage());
+    }
+
+    @Test
+    void explainListsTheDerivedColumns() throws Exception {
+        try (ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT id FROM t WHERE LENGTH(name) > 3 AND UPPER(name) = 'N5'")) {
+            String ex = p.explain();
+            assertTrue(ex.contains("derived column"), ex);
+            assertTrue(ex.contains("derived string columns"), ex);
+        }
+    }
+
+    // ---------------------------------------------------------------- quoted identifiers
+
+    @Test
+    void quotedColumnsAreSelectedUnderTheirRealNames() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT \"my col\", \"1st\", `a-b` FROM t WHERE id < 3 ORDER BY id")) {
+            assertEquals(3, r.getRowCount());
+            assertEquals(2, ((IntVector) r.getVector("my col")).get(1));
+            assertEquals("v2", str(r, "1st", 2));
+            assertEquals(2, ((IntVector) r.getVector("a-b")).get(2));
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT * FROM t WHERE id = 4")) {
+            assertEquals(5, r.getFieldVectors().size());
+            assertEquals(8, ((IntVector) r.getVector("my col")).get(0));
+        }
+    }
+
+    @Test
+    void quotedNumericColumnsWorkInExpressionsWhereAndAggregates() throws Exception {
+        double sum = 0;
+        for (int i = 0; i < AWKWARD_ROWS; i++) sum += 2 * i;
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT SUM(\"my col\") AS s, MAX(\"select\") AS m FROM t")) {
+            assertEquals(sum, ((Float8Vector) r.getVector("s")).get(0), 0.0);
+            assertEquals(990.0, ((Float8Vector) r.getVector("m")).get(0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT \"select\" + 1 AS x, \"my col\" * 2 FROM t WHERE id = 2")) {
+            assertEquals(21.0, ((Float8Vector) r.getVector("x")).get(0), 0.0);
+            assertEquals(8.0, ((Float8Vector) r.getVector("my col * 2")).get(0), 0.0, "the default output name shows the real name");
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT id FROM t WHERE \"my col\" > 190")) {
+            assertEquals(4, r.getRowCount());
+        }
+    }
+
+    @Test
+    void quotedColumnsPruneRowGroupsAndSortAndLimit() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT id FROM t WHERE \"my col\" >= 190")) {
+            assertEquals(5, r.getRowCount());
+        }
+        // "my col" = 2 * id, so >= 9990 keeps ids 4995..4999 and the earlier row groups can be skipped
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(awkwardLarge(), "SELECT id FROM t WHERE \"my col\" >= 9990");
+             VectorSchemaRoot r = p.execute(a)) {
+            assertEquals(5, r.getRowCount());
+            assertTrue(p.lastMetrics().rowGroupsInFile() > 1, "the fixture must have several row groups: " + p.lastMetrics());
+            assertTrue(p.lastMetrics().rowGroupsSkipped() > 0, "pushdown must use the real column name: " + p.lastMetrics());
+        }
+        assertEquals(List.of(99L, 98L), runAwkwardIds("SELECT id FROM t ORDER BY \"my col\" DESC LIMIT 2"));
+    }
+
+    private List<Long> runAwkwardIds(String sql) throws Exception {
+        try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runAwkward(a, sql)) {
+            List<Long> out = new ArrayList<>();
+            for (int i = 0; i < r.getRowCount(); i++) out.add(((BigIntVector) r.getVector("id")).get(i));
+            return out;
+        }
+    }
+
+    @Test
+    void quotedStringColumnsWorkInNativePredicatesFoldsAndStringFunctions() throws Exception {
+        assertEquals(List.of(7L), runAwkwardIds("SELECT id FROM t WHERE \"1st\" = 'v7'"));
+        assertEquals(11, runAwkwardIds("SELECT id FROM t WHERE \"1st\" LIKE 'v1%'").size(), "v1, v10..v19 and nothing else below 100");
+        long threes = 0;
+        for (int i = 0; i < AWKWARD_ROWS; i++) if (i % 7 == 3) threes++;
+        assertEquals(threes, runAwkwardIds("SELECT id FROM t WHERE `a-b` = 3").size());
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT COUNT(DISTINCT \"1st\") AS d, MAX(\"1st\") AS m FROM t")) {
+            assertEquals(100.0, ((Float8Vector) r.getVector("d")).get(0), 0.0);
+            assertEquals("v99", new String(((VarCharVector) r.getVector("m")).get(0), StandardCharsets.UTF_8));
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT UPPER(\"1st\") AS u, LENGTH(\"1st\") AS l FROM t WHERE id = 42")) {
+            assertEquals("V42", str(r, "u", 0));
+            assertEquals(3.0, ((Float8Vector) r.getVector("l")).get(0), 0.0);
+        }
+    }
+
+    @Test
+    void anUnknownQuotedColumnOrAQuotedAliasReferenceFailsWithTheRealName() throws Exception {
+        ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runAwkward(a, "SELECT \"no such\" FROM t")) { }
+        });
+        assertTrue(e.getMessage().contains("no such"), e.getMessage());
+        e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runAwkward(a, "SELECT id AS \"my alias\" FROM t ORDER BY \"my alias\"")) { }
+        });
+        assertTrue(e.getMessage().contains("my alias"), e.getMessage());
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT id AS \"my alias\" FROM t WHERE id < 2")) {
+            assertNotNull(r.getVector("my alias"), "a quoted alias can name an output");
+        }
     }
 }

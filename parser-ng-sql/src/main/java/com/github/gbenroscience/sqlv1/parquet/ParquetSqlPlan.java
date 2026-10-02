@@ -10,6 +10,7 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.Float8Vector;
+import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -93,6 +94,8 @@ public final class ParquetSqlPlan implements AutoCloseable {
     private FoldQuery fold;
     /** The statement with COALESCE/NULLIF calls replaced by derived-column names; {@code stmt} when there are none. */
     private SelectStatement rstmt;
+    /** Derived string columns (LOWER, CONCAT, ...) added to every scan batch; null when the query has none. */
+    private StringFns.Holder derived;
     private ParquetSqlPlan foldInner;
 
     ParquetSqlPlan(String sql, SelectStatement stmt, List<Path> files, ParquetSqlOptions options, boolean explainOnly) {
@@ -138,17 +141,23 @@ public final class ParquetSqlPlan implements AutoCloseable {
             }
         }
         this.arrowSchema = s;
-        this.schema = TableSchema.of(s);
-        ScanPlanner.ScanPlan sp = ScanPlanner.plan(stmt, first.topLevelColumns(), first.primitiveColumns(), schema);
+        TableSchema fileSchema = TableSchema.of(s);
+        ScanPlanner.ScanPlan sp = ScanPlanner.plan(stmt, first.topLevelColumns(), first.primitiveColumns(), fileSchema);
 
-        Predicate ex = options.exactFilter() && stmt.where() != null ? PredicateConverter.convertExact(stmt.where(), schema) : null;
+        Predicate ex = options.exactFilter() && stmt.where() != null ? PredicateConverter.convertExact(stmt.where(), fileSchema) : null;
         this.exact = ex != null;
         this.plan = exact ? new ScanPlanner.ScanPlan(sp.columns(), ex, sp.streamable(), sp.materializeReason(), sp.limit(), false) : sp;
 
-        ScalarFns.Result sf = ScalarFns.rewrite(stmt, schema);
-        this.rstmt = sf.stmt();
-        NativeLeaves.Result nl = (rstmt.where() == null || exact) ? null : NativeLeaves.rewrite(rstmt.where(), schema, sf.masks().size());
+        checkQuotedReferences(stmt, fileSchema);
+        ScalarFns.Result sf = ScalarFns.rewrite(stmt, fileSchema);
+        StringFns.Result sr = StringFns.rewrite(sf.stmt(), fileSchema, sf.masks().size());
+        this.schema = fileSchema.withVirtual(sr.virtual());
+        this.rstmt = sr.stmt();
+        this.derived = sr.strings().isEmpty() ? null : new StringFns.Holder(sr.strings());
+        NativeLeaves.Result nl = (rstmt.where() == null || exact) ? null
+                : NativeLeaves.rewrite(rstmt.where(), schema, sf.masks().size() + sr.used());
         List<NativeLeaves.Mask> allMasks = new ArrayList<>(sf.masks());
+        allMasks.addAll(sr.masks());
         if (nl != null) allMasks.addAll(nl.masks());
         this.masks = List.copyOf(allMasks);
         this.engineWhere = nl == null ? null : nl.where();
@@ -183,7 +192,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
                     for (SelectItem it : rstmt.items()) {
                         String t = it.exprText().trim();
                         if (schema.has(t)) {
-                            outs.add(new Out(it.outputName(), t));
+                            outs.add(new Out(it.outputName(), com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(t)));
                         } else {
                             ColumnRefs.identifiers(it.exprText(), refs);
                             computed.add(SelectItem.plain(it.exprText(), it.outputName()));
@@ -260,19 +269,33 @@ public final class ParquetSqlPlan implements AutoCloseable {
     }
 
     /**
+     * A quoted identifier must name a column of the file. A quoted alias defined with {@code AS "x"} names an
+     * output only, so referencing it in {@code WHERE}, {@code ORDER BY} and so on fails here, with its real name.
+     */
+    private static void checkQuotedReferences(SelectStatement st, TableSchema fileSchema) {
+        for (String r : ColumnRefs.referencedBy(st)) {
+            String real = com.github.gbenroscience.sqlv1.QuotedIdentifiers.decode(r);
+            if (real != null && !fileSchema.hasFileColumn(r)) {
+                throw new ParquetSqlException("Unknown column \"" + real + "\". A quoted alias defined with AS can only name an output;"
+                        + " it cannot be referenced in WHERE, ORDER BY or other clauses, so repeat its expression instead");
+            }
+        }
+    }
+
+    /**
      * Registers the numeric columns the engine must see. {@code refs} holds every identifier used
      * in an expression, WHERE, GROUP BY or ORDER BY; a schema column among them must be numeric.
      * Columns that are only SELECTed as-is never appear here.
      */
     private void addNumeric(Set<String> refs) {
-        for (String c : schema.names()) {
-            if (!refs.contains(c)) continue;
-            ColumnKind k = schema.kind(c);
+        for (String r : refs) {
+            if (!schema.hasFileColumn(r)) continue; // a function name, a derived column or an alias, not a file column
+            ColumnKind k = schema.kind(r);
             if (!k.numeric()) {
-                throw new ParquetSqlException("Column '" + c + "' is " + k
+                throw new ParquetSqlException("Column '" + com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(r) + "' is " + k
                         + " and cannot be used in an expression, WHERE, GROUP BY or ORDER BY." + NOT_NUMERIC_HINT);
             }
-            numericColumns.add(c);
+            if (!numericColumns.contains(r)) numericColumns.add(r);
         }
     }
 
@@ -375,8 +398,11 @@ public final class ParquetSqlPlan implements AutoCloseable {
         b.append("engine: ").append(engine == null ? "none (pure projection, zero-copy)" : grouped ? "aggregate over widened columns" : "filter/project/sort + row-index gather").append('\n');
         b.append("limit: ").append(plan.limit()).append(stmt.offset() > 0 ? ", offset: " + stmt.offset() : "").append('\n');
         for (NativeLeaves.Mask m : masks) {
-            if (m instanceof ScalarFns.ScalarMask) b.append("derived column ").append(m.name).append(": ").append(m.description).append('\n');
+            if (m instanceof ScalarFns.ScalarMask || m instanceof StringFns.LengthMask) {
+                b.append("derived column ").append(m.name).append(": ").append(m.description).append('\n');
+            }
         }
+        if (derived != null) b.append("derived string columns: evaluated per batch over the UTF-8 bytes (see StringFns)\n");
         return b.toString();
     }
 
@@ -386,6 +412,14 @@ public final class ParquetSqlPlan implements AutoCloseable {
      * Only for {@link ScanPlanner.ScanPlan#streamable() streamable} queries.
      */
     public void stream(BufferAllocator allocator, Consumer<VectorSchemaRoot> sink) {
+        try {
+            streamRaw(allocator, sink);
+        } finally {
+            if (derived != null) derived.release();
+        }
+    }
+
+    private void streamRaw(BufferAllocator allocator, Consumer<VectorSchemaRoot> sink) {
         if (fold != null) {
             throw new UnsupportedOperationException("SELECT DISTINCT and non-numeric aggregates are folded over the whole scan. Use execute().");
         }
@@ -444,7 +478,11 @@ public final class ParquetSqlPlan implements AutoCloseable {
      * {@link ParquetSqlOptions#maxMaterializedRows()}).
      */
     public VectorSchemaRoot execute(BufferAllocator allocator) {
-        return applyWindow(executeRaw(allocator));
+        try {
+            return applyWindow(executeRaw(allocator));
+        } finally {
+            if (derived != null) derived.release();
+        }
     }
 
     /**
@@ -506,9 +544,10 @@ public final class ParquetSqlPlan implements AutoCloseable {
                 combined.setRowCount((int) rows);
                 try (NumericViews views = views(allocator, files.get(0))) {
                     if (grouped) {
-                        VectorSchemaRoot res = engine.execute(views == null ? emptyRoot(combined.getRowCount()) : views.bind(combined));
+                        // through process(), so derived string columns (LOWER, CONCAT, ...) are added to the batch first
+                        Batch gb = process(combined, views, allocator);
                         if (views != null) roundedValues += views.roundedValues();
-                        return res;
+                        return gb.root();
                     }
                     if (engineless) return copyAll(combined, allocator);
                     Batch b = process(combined, views, allocator);
@@ -555,8 +594,12 @@ public final class ParquetSqlPlan implements AutoCloseable {
                 if (o.column() == null) {
                     v = new Float8Vector(o.name(), alloc);
                 } else {
-                    Field sf = arrowSchema.findField(o.column());
-                    v = new Field(o.name(), sf.getFieldType(), sf.getChildren()).createVector(alloc);
+                    if (schema.isVirtual(o.column())) {
+                        v = new VarCharVector(o.name(), alloc);
+                    } else {
+                        Field sf = arrowSchema.findField(o.column());
+                        v = new Field(o.name(), sf.getFieldType(), sf.getChildren()).createVector(alloc);
+                    }
                 }
                 v.allocateNew();
                 v.setValueCount(0);
@@ -579,6 +622,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
     @Override
     public void close() {
         if (foldInner != null) foldInner.close();
+        if (derived != null) derived.close();
         if (engine != null) engine.close();
     }
 
@@ -590,7 +634,8 @@ public final class ParquetSqlPlan implements AutoCloseable {
         return new NumericViews(alloc, numericColumns, schema, options.int64Policy(), !grouped, file.toString(), masks);
     }
 
-    private Batch process(VectorSchemaRoot src, NumericViews views, BufferAllocator alloc) {
+    private Batch process(VectorSchemaRoot scanned, NumericViews views, BufferAllocator alloc) {
+        VectorSchemaRoot src = derived == null ? scanned : derived.extend(scanned, alloc);
         int n = src.getRowCount();
         if (grouped) {
             return new Batch(engine.execute(views == null ? emptyRoot(n) : views.bind(src)), true);

@@ -73,7 +73,8 @@ public final class ScanPlanner {
      */
     static List<String> columnsFor(SelectStatement st, Collection<String> fileColumns, Collection<String> readableColumns) {
         if (st.selectAll()) return null;
-        Set<String> referenced = ColumnRefs.referencedBy(st);
+        Set<String> referenced = new java.util.HashSet<>();
+        for (String r : ColumnRefs.referencedBy(st)) referenced.add(com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(r));
         List<String> columns = new ArrayList<>();
         for (String c : fileColumns) if (referenced.contains(c)) columns.add(c);
         if (columns.isEmpty()) {

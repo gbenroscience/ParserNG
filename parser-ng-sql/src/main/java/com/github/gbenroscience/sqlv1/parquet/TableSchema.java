@@ -1,5 +1,6 @@
 package com.github.gbenroscience.sqlv1.parquet;
 
+import com.github.gbenroscience.sqlv1.QuotedIdentifiers;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -18,6 +19,8 @@ final class TableSchema {
     private final Map<String, ColumnKind> kinds = new LinkedHashMap<>();
     private final Map<String, ArrowType> types = new LinkedHashMap<>();
     private final Map<String, int[]> decimals = new LinkedHashMap<>();
+    /** Derived columns computed by the bridge per batch (string function results); never listed by {@link #names()}. */
+    private final Map<String, ColumnKind> virtual = new LinkedHashMap<>();
 
     private TableSchema() { }
 
@@ -59,16 +62,17 @@ final class TableSchema {
 
     /** @return the kind, or {@code null} if the file has no such top-level column */
     ColumnKind kind(String column) {
-        return kinds.get(column);
+        ColumnKind k = virtual.get(column);
+        return k != null ? k : kinds.get(QuotedIdentifiers.real(column));
     }
 
     /** @return {@code {precision, scale}} of a DECIMAL column, or {@code null} for any other column */
     int[] decimal(String column) {
-        return decimals.get(column);
+        return decimals.get(QuotedIdentifiers.real(column));
     }
 
     ArrowType type(String column) {
-        return types.get(column);
+        return types.get(QuotedIdentifiers.real(column));
     }
 
     /** @return top-level column names in file order */
@@ -76,8 +80,31 @@ final class TableSchema {
         return new java.util.ArrayList<>(kinds.keySet());
     }
 
+    /** True for a file column (a quoted-identifier reference counts as its real name) or a derived column. */
     boolean has(String column) {
-        return kinds.containsKey(column);
+        return virtual.containsKey(column) || kinds.containsKey(QuotedIdentifiers.real(column));
+    }
+
+    /** True only for a column of the file itself. */
+    boolean hasFileColumn(String column) {
+        return kinds.containsKey(QuotedIdentifiers.real(column));
+    }
+
+    /** True for a derived column. */
+    boolean isVirtual(String column) {
+        return virtual.containsKey(column);
+    }
+
+    /** A copy that also knows the derived columns {@code extra}. */
+    TableSchema withVirtual(Map<String, ColumnKind> extra) {
+        if (extra.isEmpty()) return this;
+        TableSchema t = new TableSchema();
+        t.kinds.putAll(kinds);
+        t.types.putAll(types);
+        t.decimals.putAll(decimals);
+        t.virtual.putAll(virtual);
+        t.virtual.putAll(extra);
+        return t;
     }
 
     /** Test factory: kinds plus {@code {precision, scale}} for the named DECIMAL columns. */

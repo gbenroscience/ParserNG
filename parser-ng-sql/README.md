@@ -660,6 +660,46 @@ that directory or the query fails.
   which is not a stable order across files, as in any SQL engine. `OFFSET` is a keyword only as a trailing
   clause (`OFFSET`, an integer, then the end or `LIMIT`), so a column named `offset` still works.
   `ArrowQuery` itself rejects `OFFSET` rather than ignore it.
+* **String functions.** `LOWER(s)`, `UPPER(s)`, `TRIM(s)`, `SUBSTRING(s, start [, count])` (alias `SUBSTR`),
+  `CONCAT(a, b, ...)`, `a || b`, and `LENGTH(s)` (aliases `CHAR_LENGTH`, `CHARACTER_LENGTH`) and
+  `OCTET_LENGTH(s)`. ParserNG evaluates doubles and cannot hold a string, so the bridge evaluates these
+  itself, directly over the UTF-8 bytes of the Arrow vectors, and only the results meet the engine.
+  * `LENGTH`/`OCTET_LENGTH` return a number (`Float8`, null for a null string), so they work everywhere a
+    number does: arithmetic, `WHERE`, `ORDER BY`, `GROUP BY`, `HAVING` and inside aggregates
+    (`SUM(LENGTH(name))`).
+  * The others return a string. They work in the select list and as the operand of a string predicate
+    (`WHERE LOWER(name) = 'x'`, `LIKE`, `ILIKE`, `REGEXP`, `IN`, `BETWEEN`, `IS NULL`), and nest
+    (`UPPER(TRIM(SUBSTRING(a || b, 2, 5)))`). The output column is `VarChar`, named after the original text
+    unless aliased.
+  * Arguments are string columns, string literals, numeric literals (taken as their text) and other string
+    expressions. A non-string column is an error that names it. `SUBSTRING` start and count must be integer
+    literals.
+  * Semantics: a null argument gives null, except `CONCAT`, which skips nulls (all null gives the empty
+    string), while `||` gives null if any operand is null. `LENGTH` counts characters (UTF-8 code points),
+    `OCTET_LENGTH` bytes. `SUBSTRING` is 1-based by character; positions before 1 count as in PostgreSQL
+    (`SUBSTRING('abc', 0, 2)` is `'a'`), a start past the end gives the empty string, a negative count is an
+    error. `TRIM` removes spaces (U+0020) at both ends. `LOWER`/`UPPER` fold ASCII by byte and use
+    `String.toLowerCase(Locale.ROOT)`/`toUpperCase` only for a value with a non-ASCII byte, so `UPPER('Straße')`
+    is `'STRASSE'`.
+  * Not supported, with a named error: a string-valued expression as an `ORDER BY` or `GROUP BY` key, as an
+    aggregate argument (`COUNT(DISTINCT LOWER(name))`), or mixed with arithmetic (`LOWER(a) + 1`); the
+    `SUBSTRING(s FROM n FOR m)` and `TRIM(BOTH ... FROM ...)` forms; `LTRIM`/`RTRIM`; numeric columns inside
+    `CONCAT`. A string predicate over a function is never pushed to row-group pruning.
+  * Cost: each derived column is evaluated for every row of a batch, including rows the `WHERE` later drops,
+    into a reusable vector. Buffers are reused, so steady state allocates nothing per row except for a value
+    with non-ASCII bytes under `LOWER`/`UPPER`. `explain()` lists the derived columns.
+* **Quoted identifiers.** `"my col"` and `` `my col` `` name a column whose name is not a plain identifier
+  (spaces, hyphens, a leading digit, a reserved word, non-ASCII letters); a doubled delimiter stands for
+  itself (`"a""b"`). They work in the select list, `WHERE`, `GROUP BY`, `ORDER BY`, aggregates, `DISTINCT`
+  and inside string functions. A quoted alias (`AS "out name"`) names an output only; referencing it in
+  `WHERE` or `ORDER BY` is an error that names it, so repeat the expression instead.
+  **Breaking change:** double quotes used to be string literals. String literals are single-quoted only
+  now, and `FROM "x"` is the table name `x` (use `FROM 'path'` for a file path or glob). ParserNG only knows
+  plain identifiers, so a quoted name that is not one is written into the expression text as a letters-only
+  reference (`pngq`, the UTF-8 bytes as letters, `z`) that carries its own meaning; the bridge resolves it
+  back to the real column for scanning, pruning and output names. `ArrowSql` alone does not resolve
+  references, only `ParquetSql` does. A double column with a quoted name is copied once per batch into the
+  engine's input instead of shared by reference.
 * **`COALESCE(a, b, ...)` and `NULLIF(a, b)`** work over numeric columns, numeric literals, `NULL` and each
   other (`COALESCE(NULLIF(a, 0), b)`), in the select list, `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY` and
   inside aggregates. ParserNG has no notion of null, so each call is evaluated by the bridge per batch over
@@ -687,7 +727,7 @@ that directory or the query fails.
 | DOUBLE | Float8 | native | yes, no copy | yes |
 | DECIMAL (INT32/INT64/FLBA/BINARY) | Decimal128 | native, exact | yes, as double (lossy past about 15 significant digits; error beyond 2^53 unscaled) | yes, for columns up to 15 digits (INT32/INT64-backed: ranges; BINARY/FLBA-backed: `=` and `<>` only); never in exactFilter mode |
 | BOOLEAN | Bit | native | `WHERE` only: `flag`, `= TRUE/FALSE`, `IS [NOT] TRUE/FALSE`, `IN`, `IS NULL`; not in arithmetic | no |
-| STRING / ENUM / JSON | VarChar | native | `WHERE` only: `= <> < <= > >=`, `IN`, `BETWEEN`, `LIKE`, `ILIKE`, `REGEXP`, `IS NULL`; no string functions | yes (`=`, `<>`, `IN` only; no string range pruning) |
+| STRING / ENUM / JSON | VarChar | native | `WHERE` and the select list: `= <> < <= > >=`, `IN`, `BETWEEN`, `LIKE`, `ILIKE`, `REGEXP`, `IS NULL`, and the string functions below | yes (`=`, `<>`, `IN` only; no string range pruning) |
 | BINARY, UUID | VarBinary / FixedSizeBinary | native | clear error | no |
 | DATE | DateDay | native | `WHERE` only: comparisons, `IN`, `BETWEEN`, `IS NULL`, with `DATE '...'` or an ISO string | yes |
 | TIMESTAMP (all units, UTC or local), INT96 | TimeStamp | native | `WHERE` only: comparisons, `IN`, `BETWEEN`, `IS NULL`, with `TIMESTAMP '...'` | no (needs a parser-ng-parquet translator change) |
@@ -772,11 +812,12 @@ buffers and row-index buffer are reused.
 | Exact decimal predicates | not yet (compared as double) |
 | Arithmetic on strings, dates, timestamps | clear error |
 | `LIKE`, `ILIKE` (ASCII folding), `REGEXP`, `ESCAPE` | yes |
-| String functions (`LOWER`, `UPPER`, `LENGTH`, `TRIM`, `SUBSTRING`, `CONCAT`) | not yet |
+| String functions `LOWER`, `UPPER`, `TRIM`, `SUBSTRING`/`SUBSTR`, `CONCAT`, `||`, `LENGTH`/`CHAR_LENGTH`/`OCTET_LENGTH` | yes (bridge only; see the string functions section) |
+| String-valued expressions as `ORDER BY`/`GROUP BY` keys or aggregate arguments, or in arithmetic | not yet (named error) |
 | `DATE '...'`, `TIMESTAMP '...'` literals | yes |
 | `CAST` to date/timestamp/decimal, `EXTRACT`, `INTERVAL` | not yet |
 | Timestamp row-group pruning | not yet (needs a parser-ng-parquet change) |
-| Quoted identifiers (`"my col"`) | not yet |
+| Quoted identifiers (`"my col"`, `` `my col` ``) | yes (bridge only; double quotes are no longer string literals, see below) |
 | Nested field access (`s.field`, `items[0]`, `m['k']`) and `CARDINALITY` | not yet (whole struct can be selected) |
 | `MIN`/`MAX`/`COUNT(col)` answered from footer statistics | not yet (they scan the column; numeric ones run in the engine, the rest are folded) |
 | `GROUP BY` with `DISTINCT` or non-numeric aggregates | not yet (named error) |
@@ -795,8 +836,8 @@ parser-ng-sql deliberately does not implement:
 - `DISTINCT`.
 - Non-numeric `CAST` targets or general string/text processing; every
   value in a ParserNG expression is a floating-point number. Over Parquet,
-  string, boolean, date and timestamp predicates are supported; string functions,
-  casts to temporal types and decimal predicates are not yet (see the feature status table above).
+  string, boolean, date and timestamp predicates and the string functions are supported; casts to
+  temporal types and exact decimal predicates are not yet (see the feature status table above).
 - Multi-table queries. `read_parquet('glob')` reads several files as one
   table with one schema; it is not a join.
 

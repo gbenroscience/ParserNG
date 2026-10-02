@@ -7,8 +7,11 @@ import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.LocalOutputFile;
 import org.apache.parquet.io.api.Binary;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.MessageTypeParser;
+import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
+import org.apache.parquet.schema.Types;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -69,6 +72,34 @@ final class ParquetFixtures {
                 g.append("dec32", i * 100 + 5);
                 g.append("dec64", i * 10_000L);
                 g.append("decf", Binary.fromConstantByteArray(signed(BigInteger.valueOf(i), 9)));
+                w.write(g);
+            }
+        }
+    }
+
+    /**
+     * Columns whose names are not plain identifiers, for the quoted-identifier tests, over several row groups:
+     * {@code id} int64 = i, {@code "my col"} int32 = 2i, {@code "1st"} string = "v" + i, {@code "select"} int64 = 10i,
+     * {@code "a-b"} int32 = i % 7.
+     */
+    static void writeAwkward(Path file, int rows) throws IOException {
+        MessageType t = Types.buildMessage()
+                .required(PrimitiveTypeName.INT64).named("id")
+                .required(PrimitiveTypeName.INT32).named("my col")
+                .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("1st")
+                .required(PrimitiveTypeName.INT64).named("select")
+                .required(PrimitiveTypeName.INT32).named("a-b")
+                .named("awkward");
+        SimpleGroupFactory f = new SimpleGroupFactory(t);
+        try (ParquetWriter<Group> w = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(t)
+                .withCompressionCodec(CompressionCodecName.UNCOMPRESSED).withRowGroupSize(16 * 1024).build()) {
+            for (int i = 0; i < rows; i++) {
+                Group g = f.newGroup();
+                g.append("id", (long) i);
+                g.append("my col", 2 * i);
+                g.append("1st", "v" + i);
+                g.append("select", 10L * i);
+                g.append("a-b", i % 7);
                 w.write(g);
             }
         }

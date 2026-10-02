@@ -468,7 +468,11 @@ final class NativeLeaves {
 
     private static FieldVector vec(VectorSchemaRoot src, String col) {
         FieldVector v = src.getVector(col);
-        if (v == null) throw new ParquetSqlException("Column '" + col + "' is missing from the scan");
+        if (v == null) { // a quoted-identifier reference names the file column by its real name
+            String real = com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(col);
+            if (!real.equals(col)) v = src.getVector(real);
+        }
+        if (v == null) throw new ParquetSqlException("Column '" + com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(col) + "' is missing from the scan");
         return v;
     }
 

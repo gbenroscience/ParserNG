@@ -158,7 +158,7 @@ final class FoldQuery {
         if (stmt.selectAll()) names.addAll(schema.names());
         else for (SelectItem it : stmt.items()) names.add(it.outputName());
         for (OrderItem o : stmt.orderBy()) {
-            if (!names.contains(o.exprText().trim())) {
+            if (!names.contains(com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(o.exprText().trim()))) {
                 throw new ParquetSqlException("ORDER BY " + o.exprText() + " with SELECT DISTINCT must name a select-list column or alias (one of " + names + ")");
             }
         }
@@ -282,7 +282,7 @@ final class FoldQuery {
         boolean[] desc = new boolean[k];
         for (int i = 0; i < k; i++) {
             OrderItem o = stmt.orderBy().get(i);
-            pos[i] = names.indexOf(o.exprText().trim());
+            pos[i] = names.indexOf(com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(o.exprText().trim()));
             desc[i] = o.descending();
             if (pos[i] < 0) throw new ParquetSqlException("ORDER BY " + o.exprText() + " is not an output column of this DISTINCT query");
         }
@@ -352,7 +352,7 @@ final class FoldQuery {
             ColumnKind k = schema.kind(col);
             if (a.func() == AggFunc.COUNT) return a.distinct() ? new CountDistinct(name, col, maxRows) : new CountCol(name, col);
             if (k.numeric()) return new NumAgg(name, col, a.func(), k);
-            return new Extreme(name, col, a.func() == AggFunc.MAX, arrow.findField(col));
+            return new Extreme(name, col, a.func() == AggFunc.MAX, arrow.findField(com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(col)));
         }
     }
 
