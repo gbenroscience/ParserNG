@@ -4,6 +4,7 @@ import com.github.gbenroscience.parser.ng.parquet.v1.internal.NodePlan;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.PredicateTranslator;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.RepeatedStatsPruner;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.RowFilterEvaluator;
+import com.github.gbenroscience.parser.ng.parquet.v1.internal.codec.PanamaSnappyCodecFactory;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -15,6 +16,7 @@ import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.hadoop.util.HadoopCodecs;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 
@@ -182,9 +184,15 @@ public final class ParquetBatchReader implements AutoCloseable {
      * for list columns where a page may only be skipped at a record boundary.
      */
     static ParquetReadOptions newReadOptions(FilterCompat.Filter filter) {
-        return ParquetReadOptions.builder()
+        ParquetReadOptions.Builder b = ParquetReadOptions.builder()
                 .useStatsFilter(true).useDictionaryFilter(true).useBloomFilter(true)
-                .useColumnIndexFilter(false).withRecordFilter(filter).build();
+                .useColumnIndexFilter(false).withRecordFilter(filter);
+        // Opt-in until benchmarked end to end: -Dparserng.snappy=panama serves SNAPPY from the pure-Java decoder.
+        // A fresh factory per call, like the options themselves: decompressors are never shared across threads.
+        if ("panama".equals(System.getProperty("parserng.snappy"))) {
+            b.withCodecFactory(new PanamaSnappyCodecFactory(HadoopCodecs.newFactory(0)));
+        }
+        return b.build();
     }
 
     private static MessageType project(MessageType schema, List<String> columns) {
