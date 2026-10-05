@@ -91,11 +91,15 @@ public final class ParquetSqlPlan implements AutoCloseable {
     private ScanMetrics lastMetrics;
     private long roundedValues;
     /** Non-null when this query is folded in Java (DISTINCT, non-numeric aggregates): see {@link FoldQuery}. */
-    private FoldQuery fold;
+    private Folder fold;
     /** The statement with COALESCE/NULLIF calls replaced by derived-column names; {@code stmt} when there are none. */
     private SelectStatement rstmt;
     /** Derived string columns (LOWER, CONCAT, ...) added to every scan batch; null when the query has none. */
-    private StringFns.Holder derived;
+    private DerivedColumns.Holder derived;
+    /** The derived columns, in fill order (for explain and the schema). */
+    private List<DerivedColumns.Column> derivedCols = List.of();
+    /** Non-null when the whole answer comes from the Parquet footer: see {@link FooterAggregates}. */
+    private FooterAggregates.Answer footer;
     private ParquetSqlPlan foldInner;
 
     ParquetSqlPlan(String sql, SelectStatement stmt, List<Path> files, ParquetSqlOptions options, boolean explainOnly) {
@@ -108,8 +112,10 @@ public final class ParquetSqlPlan implements AutoCloseable {
 
         long rows = 0;
         ParquetFileInfo first = null;
+        List<ParquetFileInfo> infos = new ArrayList<>();
         for (Path f : files) {
             ParquetFileInfo info = ParquetFileInfo.read(f);
+            infos.add(info);
             if (first == null) first = info;
             else if (!first.topLevelColumns().equals(info.topLevelColumns())) {
                 throw new ParquetSqlException("Schema mismatch: " + f + " has columns " + info.topLevelColumns()
@@ -148,28 +154,75 @@ public final class ParquetSqlPlan implements AutoCloseable {
         this.exact = ex != null;
         this.plan = exact ? new ScanPlanner.ScanPlan(sp.columns(), ex, sp.streamable(), sp.materializeReason(), sp.limit(), false) : sp;
 
-        checkQuotedReferences(stmt, fileSchema);
-        ScalarFns.Result sf = ScalarFns.rewrite(stmt, fileSchema);
-        StringFns.Result sr = StringFns.rewrite(sf.stmt(), fileSchema, sf.masks().size());
-        this.schema = fileSchema.withVirtual(sr.virtual());
-        this.rstmt = sr.stmt();
-        this.derived = sr.strings().isEmpty() ? null : new StringFns.Holder(sr.strings());
-        NativeLeaves.Result nl = (rstmt.where() == null || exact) ? null
-                : NativeLeaves.rewrite(rstmt.where(), schema, sf.masks().size() + sr.used());
-        List<NativeLeaves.Mask> allMasks = new ArrayList<>(sf.masks());
-        allMasks.addAll(sr.masks());
-        if (nl != null) allMasks.addAll(nl.masks());
-        this.masks = List.copyOf(allMasks);
-        this.engineWhere = nl == null ? null : nl.where();
-
-        if (FoldQuery.needed(stmt, schema)) {
-            this.fold = new FoldQuery(stmt, schema, arrowSchema);
-            this.foldInner = new ParquetSqlPlan(sql, fold.inner(), files, options, false);
+        FooterAggregates.Answer fa = FooterAggregates.tryAnswer(stmt, fileSchema, infos);
+        if (fa != null) {
+            this.footer = fa;
+            this.schema = fileSchema;
+            this.rstmt = stmt;
+            this.masks = List.of();
+            this.engineWhere = null;
             this.grouped = false;
             this.engineless = false;
             this.engine = null;
             return;
         }
+
+        checkQuotedReferences(stmt, fileSchema);
+
+        // Folded queries (DISTINCT, GROUP BY over non-numeric keys, COUNT(DISTINCT), string aggregates) are decided
+        // before any rewriting: their inner scan is a plain projection that does its own rewriting.
+        if (FoldQuery.needed(stmt, fileSchema)) {
+            this.fold = stmt.groupBy().isEmpty() ? new FoldQuery(stmt, fileSchema, arrowSchema) : new GroupFold(stmt, fileSchema);
+            this.foldInner = new ParquetSqlPlan(sql, fold.inner(), files, options, false);
+            this.schema = fileSchema;
+            this.rstmt = stmt;
+            this.masks = List.of();
+            this.engineWhere = null;
+            this.grouped = false;
+            this.engineless = false;
+            this.engine = null;
+            return;
+        }
+
+        // Rewriters run in dependency order; each sees the derived columns of the ones before it and continues
+        // their mask numbering, so every name the engine sees is unique.
+        List<DerivedColumns.Column> dcols = new ArrayList<>();
+        List<NativeLeaves.Mask> allMasks = new ArrayList<>();
+        int used = 0;
+        NestedFns.Result nr = NestedFns.rewrite(stmt, fileSchema, s, used);
+        SelectStatement cur = nr.stmt();
+        dcols.addAll(nr.columns());
+        allMasks.addAll(nr.masks());
+        used += nr.used();
+        TableSchema sch = fileSchema.withVirtual(dcols);
+        CastFns.Result cr = CastFns.rewrite(cur, sch, used);
+        cur = cr.stmt();
+        allMasks.addAll(cr.masks());
+        used += cr.used();
+        TemporalFns.Result tr = TemporalFns.rewrite(cur, sch, used);
+        cur = tr.stmt();
+        dcols.addAll(tr.columns());
+        allMasks.addAll(tr.masks());
+        used += tr.used();
+        sch = fileSchema.withVirtual(dcols);
+        StringFns.Result sr = StringFns.rewrite(cur, sch, used);
+        cur = sr.stmt();
+        dcols.addAll(sr.columns());
+        allMasks.addAll(sr.masks());
+        used += sr.used();
+        sch = fileSchema.withVirtual(dcols);
+        ScalarFns.Result sf = ScalarFns.rewrite(cur, sch, used);
+        cur = sf.stmt();
+        allMasks.addAll(sf.masks());
+        used += sf.masks().size();
+        this.schema = sch;
+        this.rstmt = cur;
+        this.derivedCols = List.copyOf(dcols);
+        this.derived = dcols.isEmpty() ? null : new DerivedColumns.Holder(dcols);
+        NativeLeaves.Result nl = (rstmt.where() == null || exact) ? null : NativeLeaves.rewrite(rstmt.where(), schema, used);
+        if (nl != null) allMasks.addAll(nl.masks());
+        this.masks = List.copyOf(allMasks);
+        this.engineWhere = nl == null ? null : nl.where();
 
         this.grouped = rstmt.isGrouped();
         ArrowQuery q = null;
@@ -275,7 +328,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
     private static void checkQuotedReferences(SelectStatement st, TableSchema fileSchema) {
         for (String r : ColumnRefs.referencedBy(st)) {
             String real = com.github.gbenroscience.sqlv1.QuotedIdentifiers.decode(r);
-            if (real != null && !fileSchema.hasFileColumn(r)) {
+            if (real != null && !fileSchema.hasFileColumn(r) && !NestedFns.isPath(real, fileSchema)) {
                 throw new ParquetSqlException("Unknown column \"" + real + "\". A quoted alias defined with AS can only name an output;"
                         + " it cannot be referenced in WHERE, ORDER BY or other clauses, so repeat its expression instead");
             }
@@ -289,7 +342,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
      */
     private void addNumeric(Set<String> refs) {
         for (String r : refs) {
-            if (!schema.hasFileColumn(r)) continue; // a function name, a derived column or an alias, not a file column
+            if (!schema.has(r)) continue; // a function name or an alias, not a column
             ColumnKind k = schema.kind(r);
             if (!k.numeric()) {
                 throw new ParquetSqlException("Column '" + com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(r) + "' is " + k
@@ -363,8 +416,13 @@ public final class ParquetSqlPlan implements AutoCloseable {
             b.append("rows in footer: ").append(totalRows).append('\n');
             return b.toString();
         }
+        if (footer != null) {
+            b.append("mode: footer statistics (COUNT/MIN/MAX answered from the Parquet footer, no data page is read)\n");
+            return b.toString();
+        }
         if (fold != null) {
-            b.append("mode: fold in Java (").append(stmt.distinct() ? "SELECT DISTINCT" : "aggregates the numeric engine cannot do")
+            b.append("mode: fold in Java (").append(stmt.distinct() ? "SELECT DISTINCT"
+                    : !stmt.groupBy().isEmpty() ? "GROUP BY the numeric engine cannot do" : "aggregates the numeric engine cannot do")
                     .append("); not streamable, the inner scan below is\n");
             b.append("inner scan:\n");
             for (String line : foldInner.explain().split("\n")) b.append("  ").append(line).append('\n');
@@ -402,7 +460,10 @@ public final class ParquetSqlPlan implements AutoCloseable {
                 b.append("derived column ").append(m.name).append(": ").append(m.description).append('\n');
             }
         }
-        if (derived != null) b.append("derived string columns: evaluated per batch over the UTF-8 bytes (see StringFns)\n");
+        for (DerivedColumns.Column c : derivedCols) {
+            b.append("derived column ").append(c.name).append(" (").append(c.kind).append("): ").append(c.text)
+                    .append(" [evaluated per batch; never pushed to row-group pruning]\n");
+        }
         return b.toString();
     }
 
@@ -420,6 +481,16 @@ public final class ParquetSqlPlan implements AutoCloseable {
     }
 
     private void streamRaw(BufferAllocator allocator, Consumer<VectorSchemaRoot> sink) {
+        if (footer != null) {
+            if ((plan.limit() != null && plan.limit() < 1) || stmt.offset() > 0) return;
+            VectorSchemaRoot r = footer.toRoot(allocator);
+            try {
+                sink.accept(r);
+            } finally {
+                r.close();
+            }
+            return;
+        }
         if (fold != null) {
             throw new UnsupportedOperationException("SELECT DISTINCT and non-numeric aggregates are folded over the whole scan. Use execute().");
         }
@@ -506,6 +577,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
 
     private VectorSchemaRoot executeRaw(BufferAllocator allocator) {
         lastMetrics = null;
+        if (footer != null) return footer.toRoot(allocator);
         if (fold != null) {
             try {
                 return fold.execute(allocator, foldInner, maxMaterializedRows);
@@ -595,7 +667,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
                     v = new Float8Vector(o.name(), alloc);
                 } else {
                     if (schema.isVirtual(o.column())) {
-                        v = new VarCharVector(o.name(), alloc);
+                        v = new Field(o.name(), org.apache.arrow.vector.types.pojo.FieldType.nullable(schema.type(o.column())), null).createVector(alloc);
                     } else {
                         Field sf = arrowSchema.findField(o.column());
                         v = new Field(o.name(), sf.getFieldType(), sf.getChildren()).createVector(alloc);
@@ -610,6 +682,23 @@ public final class ParquetSqlPlan implements AutoCloseable {
             throw e;
         }
         return new VectorSchemaRoot(vecs);
+    }
+
+    /** The Arrow field of each output column, in order (a computed column is a nullable double). */
+    List<Field> outputFields() {
+        List<Field> r = new ArrayList<>(outs.size());
+        for (Out o : outs) {
+            if (o.column() == null) {
+                r.add(new Field(o.name(), org.apache.arrow.vector.types.pojo.FieldType.nullable(
+                        new org.apache.arrow.vector.types.pojo.ArrowType.FloatingPoint(org.apache.arrow.vector.types.FloatingPointPrecision.DOUBLE)), null));
+            } else if (schema.isVirtual(o.column())) {
+                r.add(new Field(o.name(), org.apache.arrow.vector.types.pojo.FieldType.nullable(schema.type(o.column())), null));
+            } else {
+                Field sf = arrowSchema.findField(o.column());
+                r.add(new Field(o.name(), sf.getFieldType(), sf.getChildren()));
+            }
+        }
+        return r;
     }
 
     /** Output column names, in order. */

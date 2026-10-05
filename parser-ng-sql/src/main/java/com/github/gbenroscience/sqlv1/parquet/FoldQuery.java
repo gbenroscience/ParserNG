@@ -61,7 +61,7 @@ import java.util.Set;
  * keys are boxed (one object per value), so this path is correct and bounded but not zero-allocation.
  * Not thread safe.
  */
-final class FoldQuery {
+final class FoldQuery implements Folder {
 
     /** Thrown from the sink to end the scan early; never escapes {@link #execute}. */
     private static final class StopScan extends RuntimeException {
@@ -77,19 +77,41 @@ final class FoldQuery {
     private final Schema arrow;
     private final boolean aggregates;
 
-    /** @return true if {@code st} must be folded rather than sent to the numeric engine */
+    /**
+     * @return true if {@code st} must be folded rather than sent to the numeric engine: {@code SELECT DISTINCT},
+     *     {@code COUNT(DISTINCT x)}, an aggregate over a string, date, timestamp or boolean, or, with
+     *     {@code GROUP BY}, such a group key
+     */
     static boolean needed(SelectStatement st, TableSchema schema) {
         if (st.distinct()) return true;
+        for (String g : st.groupBy()) {
+            if (nonNumeric(aliasTarget(st, g), schema)) return true;
+        }
         for (SelectItem it : st.items()) {
             if (!it.isAggregate()) continue;
             AggregateSpec a = it.aggregate();
             if (a.distinct()) return true;
-            if (!a.star()) {
-                ColumnKind k = schema.kind(a.argExprText().trim());
-                if (k != null && !k.numeric()) return true;
-            }
+            if (!a.star() && nonNumeric(a.argExprText(), schema)) return true;
         }
         return false;
+    }
+
+    private static String aliasTarget(SelectStatement st, String g) {
+        String t = g.trim();
+        for (SelectItem it : st.items()) {
+            if (!it.isAggregate() && it.alias() != null && it.alias().equals(t)) return it.exprText();
+        }
+        return t;
+    }
+
+    /** True if {@code text} is a column or expression whose value is not a number. */
+    static boolean nonNumeric(String text, TableSchema schema) {
+        String t = text.trim();
+        ColumnKind k = schema.kind(t);
+        if (k != null) return !k.numeric();
+        // LENGTH(...) and EXTRACT(...) are numeric whatever they contain
+        String bare = TemporalFns.stripCalls(StringFns.stripCalls(t, StringFns.LENGTH_NAMES), java.util.Set.of("EXTRACT"));
+        return StringFns.hasStringCall(bare) || TemporalFns.producesTemporal(bare);
     }
 
     FoldQuery(SelectStatement stmt, TableSchema schema, Schema arrow) {
@@ -106,7 +128,8 @@ final class FoldQuery {
     }
 
     /** The plain projection the scan runs: the aggregate argument columns, or the select list. */
-    SelectStatement inner() {
+    @Override
+    public SelectStatement inner() {
         List<SelectItem> items = new ArrayList<>();
         if (aggregates) {
             Set<String> cols = new LinkedHashSet<>();
@@ -172,7 +195,8 @@ final class FoldQuery {
      * @param maxRows cap on distinct rows held in memory
      * @return the result; the caller closes it
      */
-    VectorSchemaRoot execute(BufferAllocator alloc, ParquetSqlPlan inner, long maxRows) {
+    @Override
+    public VectorSchemaRoot execute(BufferAllocator alloc, ParquetSqlPlan inner, long maxRows) {
         return aggregates ? executeAggregates(alloc, inner, maxRows) : executeDistinct(alloc, inner, maxRows);
     }
 
@@ -317,7 +341,7 @@ final class FoldQuery {
     }
 
     /** Value identity for DISTINCT: byte arrays by content, {@code -0.0} equal to {@code 0.0}. */
-    private static Object norm(Object o) {
+    static Object norm(Object o) {
         if (o instanceof byte[] b) return ByteBuffer.wrap(b);
         if (o instanceof Double d && d == 0.0) return 0.0;
         if (o instanceof Float f && f == 0.0f) return 0.0f;
@@ -352,7 +376,9 @@ final class FoldQuery {
             ColumnKind k = schema.kind(col);
             if (a.func() == AggFunc.COUNT) return a.distinct() ? new CountDistinct(name, col, maxRows) : new CountCol(name, col);
             if (k.numeric()) return new NumAgg(name, col, a.func(), k);
-            return new Extreme(name, col, a.func() == AggFunc.MAX, arrow.findField(com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(col)));
+            org.apache.arrow.vector.types.pojo.Field src = schema.pathField(col);
+            if (src == null) src = arrow.findField(com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(col));
+            return new Extreme(name, col, a.func() == AggFunc.MAX, src);
         }
     }
 
@@ -489,7 +515,7 @@ final class FoldQuery {
         }
     }
 
-    private static long readLong(FieldVector v, int i) {
+    static long readLong(FieldVector v, int i) {
         if (v instanceof DateDayVector d) return d.get(i);
         if (v instanceof DateMilliVector d) return d.get(i);
         if (v instanceof TimeStampVector t) return t.get(i);
@@ -498,7 +524,7 @@ final class FoldQuery {
     }
 
     /** One numeric value as a double; a 64-bit integer or decimal beyond 2^53 fails loudly rather than rounding. */
-    private static double read(FieldVector v, int i, String column, ColumnKind kind) {
+    static double read(FieldVector v, int i, String column, ColumnKind kind) {
         double d;
         if (v instanceof Float8Vector x) d = x.get(i);
         else if (v instanceof Float4Vector x) d = x.get(i);

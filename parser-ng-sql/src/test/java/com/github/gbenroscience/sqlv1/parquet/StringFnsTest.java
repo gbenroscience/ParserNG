@@ -47,10 +47,10 @@ class StringFnsTest {
         try (RootAllocator a = new RootAllocator();
              VarCharVector n = vec(a, "name", NAMES);
              VarCharVector o = vec(a, "other", OTHERS);
-             StringFns.Holder h = new StringFns.Holder(r.strings())) {
+             DerivedColumns.Holder h = new DerivedColumns.Holder(r.columns())) {
             VectorSchemaRoot src = new VectorSchemaRoot(List.of(n, o));
             VectorSchemaRoot ext = h.extend(src, a);
-            VarCharVector out = (VarCharVector) ext.getVector(r.strings().get(0).name);
+            VarCharVector out = (VarCharVector) ext.getVector(r.columns().get(0).name);
             List<String> res = new ArrayList<>();
             for (int i = 0; i < NAMES.size(); i++) res.add(out.isNull(i) ? null : new String(out.get(i), StandardCharsets.UTF_8));
             return res;
@@ -152,19 +152,32 @@ class StringFnsTest {
     @Test
     void callsAreReplacedByDerivedColumnsAndOutputNamesAreKept() {
         var r = rw("SELECT LOWER(name) AS l, id FROM t WHERE LOWER(name) = 'abc' AND LENGTH(name) > 3 AND UPPER(name) LIKE 'A%'");
-        assertEquals(2, r.strings().size(), "LOWER is shared, UPPER is the second");
+        assertEquals(2, r.columns().size(), "LOWER is shared, UPPER is the second");
         assertEquals(1, r.masks().size());
         assertEquals("l", r.stmt().items().get(0).alias());
-        assertEquals(r.strings().get(0).name, r.stmt().items().get(0).exprText());
-        assertEquals(ColumnKind.STRING, r.virtual().get(r.strings().get(0).name));
+        assertEquals(r.columns().get(0).name, r.stmt().items().get(0).exprText());
+        assertEquals(ColumnKind.STRING, r.columns().get(0).kind);
         assertEquals(3, r.used());
         assertEquals("LOWER(name)", rw("SELECT LOWER(name) FROM t").stmt().items().get(0).alias(), "the original text names the column");
+    }
+
+    private static final TableSchema WITH_INT = TableSchema.ofKinds(Map.of("name", ColumnKind.STRING, "n", ColumnKind.INT32, "x", ColumnKind.FLOAT64));
+
+    @Test
+    void castToVarcharAcceptsStringExpressionsAndIntegerColumns() {
+        var r = StringFns.rewrite(SqlParser.parse("SELECT CAST(n AS VARCHAR), CAST(UPPER(name) AS VARCHAR) FROM t"), WITH_INT, 0);
+        assertEquals(2, r.columns().size());
+        assertEquals("CAST(n AS VARCHAR)", r.stmt().items().get(0).alias());
+        assertEquals(ColumnKind.STRING, r.columns().get(0).kind);
+        ParquetSqlException e = assertThrows(ParquetSqlException.class,
+                () -> StringFns.rewrite(SqlParser.parse("SELECT CAST(x AS VARCHAR) FROM t"), WITH_INT, 0));
+        assertTrue(e.getMessage().contains("FLOAT64"), e.getMessage());
     }
 
     @Test
     void lengthWorksWhereANumberDoes() {
         var r = rw("SELECT LENGTH(name) + id AS z FROM t ORDER BY LENGTH(name) DESC");
-        assertTrue(r.strings().isEmpty());
+        assertTrue(r.columns().isEmpty());
         assertEquals(1, r.masks().size(), "one mask for both uses");
         assertEquals(r.masks().get(0).name, r.stmt().orderBy().get(0).exprText());
     }
@@ -173,7 +186,7 @@ class StringFnsTest {
     void statementsWithoutACallAreUntouchedAndLiteralsAreNotScanned() {
         var st = SqlParser.parse("SELECT name FROM t WHERE id > 1");
         assertSame(st, StringFns.rewrite(st, S, 0).stmt());
-        assertTrue(rw("SELECT name FROM t WHERE name = 'LOWER(x) || y'").strings().isEmpty());
+        assertTrue(rw("SELECT name FROM t WHERE name = 'LOWER(x) || y'").columns().isEmpty());
     }
 
     private static void assertNamed(String sql, String fragment) {
@@ -199,12 +212,12 @@ class StringFnsTest {
     void aQuotedColumnIsEvaluatedByItsRealName() {
         TableSchema q = TableSchema.ofKinds(Map.of("my col", ColumnKind.STRING));
         var r = StringFns.rewrite(SqlParser.parse("SELECT UPPER(\"my col\") FROM t"), q, 0);
-        assertEquals(1, r.strings().size());
+        assertEquals(1, r.columns().size());
         try (RootAllocator a = new RootAllocator();
              VarCharVector v = vec(a, "my col", List.of("ab", "c"));
-             StringFns.Holder h = new StringFns.Holder(r.strings())) {
+             DerivedColumns.Holder h = new DerivedColumns.Holder(r.columns())) {
             VectorSchemaRoot ext = h.extend(new VectorSchemaRoot(List.of(v)), a);
-            VarCharVector out = (VarCharVector) ext.getVector(r.strings().get(0).name);
+            VarCharVector out = (VarCharVector) ext.getVector(r.columns().get(0).name);
             assertEquals("AB", new String(out.get(0), StandardCharsets.UTF_8));
             assertEquals("C", new String(out.get(1), StandardCharsets.UTF_8));
         }

@@ -21,11 +21,15 @@ final class TableSchema {
     private final Map<String, int[]> decimals = new LinkedHashMap<>();
     /** Derived columns computed by the bridge per batch (string function results); never listed by {@link #names()}. */
     private final Map<String, ColumnKind> virtual = new LinkedHashMap<>();
+    /** The file's Arrow schema when known, so a nested-path reference can be classified; else null. */
+    private Schema arrow;
+    private final Map<String, ArrowType> virtualTypes = new LinkedHashMap<>();
 
     private TableSchema() { }
 
     static TableSchema of(Schema schema) {
         TableSchema t = new TableSchema();
+        t.arrow = schema;
         for (Field f : schema.getFields()) {
             t.kinds.put(f.getName(), kindOf(f.getType()));
             t.types.put(f.getName(), f.getType());
@@ -63,7 +67,21 @@ final class TableSchema {
     /** @return the kind, or {@code null} if the file has no such top-level column */
     ColumnKind kind(String column) {
         ColumnKind k = virtual.get(column);
-        return k != null ? k : kinds.get(QuotedIdentifiers.real(column));
+        if (k != null) return k;
+        String real = QuotedIdentifiers.real(column);
+        k = kinds.get(real);
+        if (k == null && arrow != null && !real.equals(column) && NestedFns.isPath(real, this)) {
+            org.apache.arrow.vector.types.pojo.Field leaf = NestedFns.leafField(real, this, arrow);
+            return leaf == null ? null : kindOf(leaf.getType());
+        }
+        return k;
+    }
+
+    /** The Arrow field a nested-path reference ends at, or null if {@code ref} is not a resolvable path. */
+    org.apache.arrow.vector.types.pojo.Field pathField(String ref) {
+        String real = QuotedIdentifiers.real(ref);
+        if (arrow == null || real.equals(ref) || !NestedFns.isPath(real, this)) return null;
+        return NestedFns.leafField(real, this, arrow);
     }
 
     /** @return {@code {precision, scale}} of a DECIMAL column, or {@code null} for any other column */
@@ -72,7 +90,8 @@ final class TableSchema {
     }
 
     ArrowType type(String column) {
-        return types.get(QuotedIdentifiers.real(column));
+        ArrowType v = virtualTypes.get(column);
+        return v != null ? v : types.get(QuotedIdentifiers.real(column));
     }
 
     /** @return top-level column names in file order */
@@ -95,15 +114,20 @@ final class TableSchema {
         return virtual.containsKey(column);
     }
 
-    /** A copy that also knows the derived columns {@code extra}. */
-    TableSchema withVirtual(Map<String, ColumnKind> extra) {
+    /** A copy that also knows the derived columns {@code extra} (name, kind and Arrow type). */
+    TableSchema withVirtual(java.util.List<DerivedColumns.Column> extra) {
         if (extra.isEmpty()) return this;
         TableSchema t = new TableSchema();
         t.kinds.putAll(kinds);
         t.types.putAll(types);
         t.decimals.putAll(decimals);
         t.virtual.putAll(virtual);
-        t.virtual.putAll(extra);
+        t.virtualTypes.putAll(virtualTypes);
+        t.arrow = arrow;
+        for (DerivedColumns.Column c : extra) {
+            t.virtual.put(c.name, c.kind);
+            if (c.type != null) t.virtualTypes.put(c.name, c.type);
+        }
         return t;
     }
 

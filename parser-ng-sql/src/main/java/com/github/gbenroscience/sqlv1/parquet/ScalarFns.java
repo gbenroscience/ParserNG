@@ -66,7 +66,12 @@ final class ScalarFns {
     }
 
     static Result rewrite(SelectStatement st, TableSchema schema) {
-        Ctx ctx = new Ctx(schema);
+        return rewrite(st, schema, 0);
+    }
+
+    /** @param firstIndex index of the first derived-column name, so names from other rewriters never collide */
+    static Result rewrite(SelectStatement st, TableSchema schema, int firstIndex) {
+        Ctx ctx = new Ctx(schema, firstIndex);
         UnaryOperator<String> f = ctx::rewriteText;
 
         List<SelectItem> items = new ArrayList<>(st.items().size());
@@ -229,8 +234,11 @@ final class ScalarFns {
         final Map<String, String> byText = new LinkedHashMap<>();
         boolean changed;
 
-        Ctx(TableSchema schema) {
+        final int base;
+
+        Ctx(TableSchema schema, int base) {
             this.schema = schema;
+            this.base = base;
         }
 
         String rewriteText(String text) {
@@ -259,7 +267,7 @@ final class ScalarFns {
             Set<String> cols = new LinkedHashSet<>();
             root.columns(cols);
             // Same name shape as every other engine-visible synthetic column; the WHERE rewriter continues the numbering.
-            String name = NativeLeaves.maskName(masks.size());
+            String name = NativeLeaves.maskName(base + masks.size());
             masks.add(new ScalarMask(name, callText, root, new ArrayList<>(cols)));
             byText.put(key, name);
             return name;

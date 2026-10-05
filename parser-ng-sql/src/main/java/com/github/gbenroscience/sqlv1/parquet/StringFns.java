@@ -77,24 +77,38 @@ final class StringFns {
     /**
      * @param stmt    the rewritten statement ({@code input} itself when there was nothing to rewrite)
      * @param masks   derived numeric columns ({@code LENGTH})
-     * @param strings derived string columns
-     * @param virtual the derived string columns' names and kinds, for {@link TableSchema#withVirtual}
+     * @param columns derived string columns, in the order they must be filled
      * @param used    how many mask names were consumed starting at {@code firstIndex}
      */
-    record Result(SelectStatement stmt, List<NativeLeaves.Mask> masks, List<Derived> strings,
-                  Map<String, ColumnKind> virtual, int used) { }
+    record Result(SelectStatement stmt, List<NativeLeaves.Mask> masks, List<DerivedColumns.Column> columns, int used) { }
 
-    /** One derived string column and the expression that fills it. */
-    static final class Derived {
-        final String name;
-        final String text;
+    /** A derived {@code VarChar} column: one string expression tree evaluated over the batch. */
+    static final class StringColumn extends DerivedColumns.Column {
         final SNode root;
 
-        Derived(String name, String text, SNode root) {
-            this.name = name;
-            this.text = text;
+        StringColumn(String name, String text, SNode root) {
+            super(name, text, ColumnKind.STRING, new org.apache.arrow.vector.types.pojo.ArrowType.Utf8());
             this.root = root;
         }
+
+        @Override org.apache.arrow.vector.FieldVector newVector(BufferAllocator alloc) {
+            return new VarCharVector(name, alloc);
+        }
+
+        @Override void fill(VectorSchemaRoot src, int n, org.apache.arrow.vector.FieldVector out) {
+            VarCharVector o = (VarCharVector) out;
+            root.bind(src);
+            for (int i = 0; i < n; i++) {
+                int len = root.eval(i);
+                if (len < 0) o.setNull(i);
+                else o.setSafe(i, root.buf, 0, len);
+            }
+        }
+    }
+
+    /** Parses {@code text} as one string expression over the columns of {@code schema} (used by {@link TemporalFns}). */
+    static SNode parseStringExpression(String text, TableSchema schema) {
+        return new Parser(text, schema, Set.of()).parseWhole();
     }
 
     static boolean containsCall(String text) {
@@ -127,12 +141,10 @@ final class StringFns {
         List<OrderItem> orderBy = new ArrayList<>(st.orderBy().size());
         for (OrderItem o : st.orderBy()) orderBy.add(new OrderItem(ctx.numericOnly(o.exprText(), "ORDER BY"), o.descending()));
 
-        if (!ctx.changed) return new Result(st, List.of(), List.of(), Map.of(), 0);
+        if (!ctx.changed) return new Result(st, List.of(), List.of(), 0);
         SelectStatement out = new SelectStatement(st.selectAll(), items, st.table(), where, groupBy, having, orderBy,
                 st.limit(), st.tableKind(), st.tablePaths(), st.distinct(), st.offset());
-        Map<String, ColumnKind> virtual = new LinkedHashMap<>();
-        for (Derived d : ctx.strings) virtual.put(d.name, ColumnKind.STRING);
-        return new Result(out, List.copyOf(ctx.masks), List.copyOf(ctx.strings), virtual, ctx.next - firstIndex);
+        return new Result(out, List.copyOf(ctx.masks), List.copyOf(ctx.strings), ctx.next - firstIndex);
     }
 
     private static BoolExpr mapBool(BoolExpr e, UnaryOperator<String> f) {
@@ -158,11 +170,27 @@ final class StringFns {
 
     private static final Set<String> STRING_FUNCS = Set.of("LOWER", "UPPER", "TRIM", "SUBSTRING", "SUBSTR", "CONCAT");
     private static final Set<String> LENGTH_FUNCS = Set.of("LENGTH", "CHAR_LENGTH", "CHARACTER_LENGTH", "OCTET_LENGTH");
+    static final Set<String> LENGTH_NAMES = LENGTH_FUNCS;
+
+    /** {@code text} with every call to a function of {@code names} replaced by {@code 0} (used to classify an expression). */
+    static String stripCalls(String text, Set<String> names) {
+        Call c = findCall(text, 0, names);
+        if (c == null) return text;
+        StringBuilder out = new StringBuilder();
+        int copied = 0;
+        while (c != null) {
+            out.append(text, copied, c.start()).append('0');
+            copied = c.end();
+            c = findCall(text, copied, names);
+        }
+        return out.append(text, copied, text.length()).toString();
+    }
+
 
     /** A call to a function of {@code names}: {@code [start, end)} spans {@code NAME(...)}; {@code argStart..argEnd} is the inside. */
-    private record Call(String func, int start, int end, int argStart, int argEnd) { }
+    record Call(String func, int start, int end, int argStart, int argEnd) { }
 
-    private static int skipString(String t, int start, char q) {
+    static int skipString(String t, int start, char q) {
         int i = start + 1, n = t.length();
         while (i < n) {
             if (t.charAt(i) == q) {
@@ -174,7 +202,7 @@ final class StringFns {
         return n;
     }
 
-    private static int matching(String t, int open) {
+    static int matching(String t, int open) {
         int depth = 0, n = t.length();
         for (int i = open; i < n; i++) {
             char c = t.charAt(i);
@@ -190,7 +218,7 @@ final class StringFns {
     }
 
     /** The first call at or after {@code from} to a function in {@code names}, outside string literals; null if none. */
-    private static Call findCall(String t, int from, Set<String> names) {
+    static Call findCall(String t, int from, Set<String> names) {
         int n = t.length(), i = from;
         while (i < n) {
             char c = t.charAt(i);
@@ -222,9 +250,21 @@ final class StringFns {
         return findCall(t, from, LENGTH_FUNCS);
     }
 
-    /** True if {@code t} has a string function call or a {@code ||} outside string literals. */
-    private static boolean hasStringCall(String t) {
-        if (findCall(t, 0, STRING_FUNCS) != null) return true;
+    private static final java.util.regex.Pattern VARCHAR_CAST = java.util.regex.Pattern.compile("(?is)\\s+AS\\s+VARCHAR\\s*$");
+
+    private static boolean hasVarcharCast(String t) {
+        int from = 0;
+        Call c;
+        while ((c = findCall(t, from, Set.of("CAST"))) != null) {
+            if (VARCHAR_CAST.matcher(t.substring(c.argStart(), c.argEnd())).find()) return true;
+            from = c.end();
+        }
+        return false;
+    }
+
+    /** True if {@code t} has a string function call, a {@code CAST(... AS VARCHAR)} or a {@code ||} outside string literals. */
+    static boolean hasStringCall(String t) {
+        if (findCall(t, 0, STRING_FUNCS) != null || hasVarcharCast(t)) return true;
         for (int i = 0; i < t.length(); i++) {
             char c = t.charAt(i);
             if (c == '\'' || c == '"') i = skipString(t, i, c) - 1;
@@ -240,7 +280,7 @@ final class StringFns {
         final int firstIndex;
         int next;
         final List<NativeLeaves.Mask> masks = new ArrayList<>();
-        final List<Derived> strings = new ArrayList<>();
+        final List<DerivedColumns.Column> strings = new ArrayList<>();
         final Map<String, String> byText = new LinkedHashMap<>();
         /** Names of the derived numeric columns, so a string function that is handed one can say why it fails. */
         final Set<String> numericNames = new java.util.HashSet<>();
@@ -262,7 +302,7 @@ final class StringFns {
             if (known != null) return known;
             SNode root = new Parser(t, schema, numericNames).parseWhole();
             String name = NativeLeaves.maskName(next++);
-            strings.add(new Derived(name, t, root));
+            strings.add(new StringColumn(name, t, root));
             byText.put(key, name);
             changed = true;
             return name;
@@ -381,12 +421,12 @@ final class StringFns {
                     sb.append(d);
                     i++;
                 }
-                return new Lit(sb.toString().getBytes(StandardCharsets.UTF_8));
+                return new LitNode(sb.toString().getBytes(StandardCharsets.UTF_8));
             }
             if (Character.isDigit(c) || ((c == '-' || c == '+') && i + 1 < t.length() && Character.isDigit(t.charAt(i + 1)))) {
                 int s = i++;
                 while (i < t.length() && (Character.isDigit(t.charAt(i)) || t.charAt(i) == '.')) i++;
-                return new Lit(t.substring(s, i).getBytes(StandardCharsets.UTF_8));
+                return new LitNode(t.substring(s, i).getBytes(StandardCharsets.UTF_8));
             }
             if (Character.isLetter(c) || c == '_') {
                 int s = i++;
@@ -461,6 +501,41 @@ final class StringFns {
                     expect(')');
                     return new Concat(parts.toArray(new SNode[0]), true);
                 }
+                case "CAST" -> {
+                    skipWs();
+                    SNode src = null;
+                    int save = i;
+                    if (i < t.length() && (Character.isLetter(t.charAt(i)) || t.charAt(i) == '_')) {
+                        int s0 = i++;
+                        while (i < t.length() && (Character.isLetterOrDigit(t.charAt(i)) || t.charAt(i) == '_')) i++;
+                        String word = t.substring(s0, i);
+                        ColumnKind k = schema.kind(word);
+                        skipWs();
+                        boolean bare = i < t.length() && (t.charAt(i) == 'A' || t.charAt(i) == 'a') && t.regionMatches(true, i, "AS", 0, 2);
+                        if (bare && k != null && k != ColumnKind.STRING) {
+                            if (k == ColumnKind.INT8 || k == ColumnKind.INT16 || k == ColumnKind.INT32 || k == ColumnKind.INT64) {
+                                src = new IntText(QuotedIdentifiers.real(word));
+                            } else {
+                                throw fail("CAST(" + QuotedIdentifiers.real(word) + " AS VARCHAR): column is " + k
+                                        + "; only string and integer columns can be cast to VARCHAR");
+                            }
+                        } else {
+                            i = save;
+                        }
+                    }
+                    if (src == null) src = concat();
+                    skipWs();
+                    if (!t.regionMatches(true, i, "AS", 0, 2)) throw fail("expected AS in CAST(... AS VARCHAR)");
+                    i += 2;
+                    skipWs();
+                    int w0 = i;
+                    while (i < t.length() && Character.isLetter(t.charAt(i))) i++;
+                    if (!t.substring(w0, i).equalsIgnoreCase("VARCHAR")) {
+                        throw fail("CAST to " + t.substring(w0, i).toUpperCase(Locale.ROOT) + " is not supported here; only CAST(... AS VARCHAR) is a string cast");
+                    }
+                    expect(')');
+                    return src;
+                }
                 case "LENGTH", "CHAR_LENGTH", "CHARACTER_LENGTH", "OCTET_LENGTH" ->
                         throw fail(f + " returns a number; it cannot be an argument of a string function");
                 default -> throw fail("'" + f + "' is not a string function this engine supports (LOWER, UPPER, TRIM, SUBSTRING, CONCAT, ||)");
@@ -507,15 +582,65 @@ final class StringFns {
         }
     }
 
-    private static final class Lit extends SNode {
+    static final class LitNode extends SNode {
         private final int len;
 
-        Lit(byte[] v) {
+        LitNode(byte[] v) {
             this.buf = v.length == 0 ? new byte[1] : v;
             this.len = v.length;
         }
 
         @Override int eval(int row) { return len; }
+
+        /** The literal's bytes. */
+        byte[] bytes() {
+            return java.util.Arrays.copyOf(buf, len);
+        }
+    }
+
+    /** An integer column as its decimal text, for {@code CAST(n AS VARCHAR)}. */
+    private static final class IntText extends SNode {
+        private final String name;
+        private FieldVector v;
+
+        IntText(String name) {
+            this.name = name;
+        }
+
+        @Override void bind(VectorSchemaRoot src) {
+            v = src.getVector(name);
+            if (v == null) throw new ParquetSqlException("Column '" + name + "' is missing from the scan");
+        }
+
+        @Override int eval(int row) {
+            if (v.isNull(row)) return -1;
+            long x;
+            if (v instanceof org.apache.arrow.vector.IntVector c) x = c.get(row);
+            else if (v instanceof org.apache.arrow.vector.BigIntVector c) x = c.get(row);
+            else if (v instanceof org.apache.arrow.vector.SmallIntVector c) x = c.get(row);
+            else if (v instanceof org.apache.arrow.vector.TinyIntVector c) x = c.get(row);
+            else throw new ParquetSqlException("Column '" + name + "' (" + v.getClass().getSimpleName() + ") is not a signed integer column");
+            byte[] out = room(20);
+            if (x == Long.MIN_VALUE) {
+                byte[] m = "-9223372036854775808".getBytes(StandardCharsets.US_ASCII);
+                System.arraycopy(m, 0, out, 0, m.length);
+                return m.length;
+            }
+            boolean neg = x < 0;
+            if (neg) x = -x;
+            int n = 0;
+            do {
+                out[n++] = (byte) ('0' + x % 10);
+                x /= 10;
+            } while (x != 0);
+            if (neg) out[n++] = '-';
+            for (int a = 0, b = n - 1; a < b; a++, b--) {
+                byte tmp = out[a];
+                out[a] = out[b];
+                out[b] = tmp;
+            }
+            return n;
+        }
     }
 
     private static final class Col extends SNode {
@@ -700,67 +825,6 @@ final class StringFns {
                     out.set(i, chars);
                 }
             }
-        }
-    }
-
-    /** The reusable derived {@code VarChar} vectors of one plan; released after every execution. */
-    static final class Holder implements AutoCloseable {
-        private final List<Derived> defs;
-        private VarCharVector[] vecs;
-        private BufferAllocator owner;
-
-        Holder(List<Derived> defs) {
-            this.defs = defs;
-        }
-
-        boolean isEmpty() {
-            return defs.isEmpty();
-        }
-
-        /** {@code src} plus one derived column per definition, evaluated for rows {@code [0, n)}. The result is a holder: do not close it. */
-        VectorSchemaRoot extend(VectorSchemaRoot src, BufferAllocator alloc) {
-            if (defs.isEmpty()) return src;
-            if (vecs == null || owner != alloc) {
-                release();
-                vecs = new VarCharVector[defs.size()];
-                owner = alloc;
-                for (int d = 0; d < vecs.length; d++) {
-                    vecs[d] = new VarCharVector(defs.get(d).name, alloc);
-                    vecs[d].allocateNew();
-                }
-            }
-            int n = src.getRowCount();
-            List<FieldVector> all = new ArrayList<>(src.getFieldVectors());
-            List<Field> fields = new ArrayList<>(all.size() + vecs.length);
-            for (FieldVector f : all) fields.add(f.getField());
-            for (int d = 0; d < vecs.length; d++) {
-                SNode root = defs.get(d).root;
-                VarCharVector out = vecs[d];
-                root.bind(src);
-                out.reset();
-                for (int i = 0; i < n; i++) {
-                    int len = root.eval(i);
-                    if (len < 0) out.setNull(i);
-                    else out.setSafe(i, root.buf, 0, len);
-                }
-                out.setValueCount(n);
-                all.add(out);
-                fields.add(out.getField());
-            }
-            return new VectorSchemaRoot(new Schema(fields), all, n);
-        }
-
-        void release() {
-            if (vecs != null) {
-                for (VarCharVector v : vecs) if (v != null) v.close();
-                vecs = null;
-                owner = null;
-            }
-        }
-
-        @Override
-        public void close() {
-            release();
         }
     }
 }

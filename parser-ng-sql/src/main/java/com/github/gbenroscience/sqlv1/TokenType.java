@@ -68,6 +68,9 @@ public enum TokenType {
     PERCENT,
     CARET,
     CONCAT_OP,  // '||' string concatenation
+    DOT,        // '.' in a nested field path (s.field)
+    LBRACKET,   // '[' of an element or key access (items[0], m['k'])
+    RBRACKET,
 
     // --- comparison operators ---
     EQ,         // '='

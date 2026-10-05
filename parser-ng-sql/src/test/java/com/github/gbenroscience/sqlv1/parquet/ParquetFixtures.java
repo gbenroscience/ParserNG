@@ -105,6 +105,80 @@ final class ParquetFixtures {
         }
     }
 
+    private static final MessageType NESTED = MessageTypeParser.parseMessageType(
+            "message nested {\n"
+            + "  required int64 id;\n"
+            + "  optional group s {\n"
+            + "    optional int32 n;\n"
+            + "    optional binary label (UTF8);\n"
+            + "    optional group inner { optional int32 deep; }\n"
+            + "  }\n"
+            + "  optional group nums (LIST) { repeated group list { optional int32 element; } }\n"
+            + "  optional group m (MAP) { repeated group key_value { required binary key (UTF8); optional int32 value; } }\n"
+            + "  optional group items (LIST) { repeated group list { optional group element {\n"
+            + "    optional int32 price; optional binary name (UTF8); } } }\n"
+            + "}\n");
+
+    /**
+     * Nested columns, for the nested-access tests. Row i: {@code s} is null when i%5==0, else
+     * {@code s.n = i} (null when i%9==0), {@code s.label = "L"+i} (null when i%8==0), {@code s.inner.deep = 2i}
+     * (inner null when i%3==0); {@code nums} is null when i%7==0, empty when i%4==0, else (i%3)+1 elements
+     * {@code i*10+k}; {@code m} is null when i%6==0, else {@code {"a": i, "b": 2i}} plus {@code "c": 7} when i is
+     * even; {@code items} is null when i%10==0, else two structs {@code (price=i, name="x"+i)} and
+     * {@code (price=i+1, name="y"+i)}.
+     */
+    static void writeNested(Path file, int rows) throws IOException {
+        SimpleGroupFactory f = new SimpleGroupFactory(NESTED);
+        try (ParquetWriter<Group> w = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(NESTED)
+                .withCompressionCodec(CompressionCodecName.UNCOMPRESSED).withDictionaryEncoding(false).build()) {
+            for (int i = 0; i < rows; i++) {
+                Group g = f.newGroup();
+                g.append("id", (long) i);
+                if (i % 5 != 0) {
+                    Group s = g.addGroup("s");
+                    if (i % 9 != 0) s.append("n", i);
+                    if (i % 8 != 0) s.append("label", "L" + i);
+                    if (i % 3 != 0) s.addGroup("inner").append("deep", 2 * i);
+                }
+                if (i % 7 != 0) {
+                    Group nums = g.addGroup("nums");
+                    if (i % 4 != 0) for (int k = 0; k <= i % 3; k++) nums.addGroup("list").append("element", i * 10 + k);
+                }
+                if (i % 6 != 0) {
+                    Group m = g.addGroup("m");
+                    m.addGroup("key_value").append("key", "a").append("value", i);
+                    m.addGroup("key_value").append("key", "b").append("value", 2 * i);
+                    if (i % 2 == 0) m.addGroup("key_value").append("key", "c").append("value", 7);
+                }
+                if (i % 10 != 0) {
+                    Group items = g.addGroup("items");
+                    Group e1 = items.addGroup("list").addGroup("element");
+                    e1.append("price", i).append("name", "x" + i);
+                    Group e2 = items.addGroup("list").addGroup("element");
+                    e2.append("price", i + 1).append("name", "y" + i);
+                }
+                w.write(g);
+            }
+        }
+    }
+
+    private static final MessageType STRINGS = MessageTypeParser.parseMessageType(
+            "message strings { required int64 id; optional binary v (STRING); }");
+
+    /** {@code id} = position, {@code v} = the given text (a null leaves it null), for the string-to-number cast tests. */
+    static void writeStrings(Path file, String... values) throws IOException {
+        SimpleGroupFactory f = new SimpleGroupFactory(STRINGS);
+        try (ParquetWriter<Group> w = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(STRINGS)
+                .withCompressionCodec(CompressionCodecName.UNCOMPRESSED).withDictionaryEncoding(false).build()) {
+            for (int i = 0; i < values.length; i++) {
+                Group g = f.newGroup();
+                g.append("id", (long) i);
+                if (values[i] != null) g.append("v", values[i]);
+                w.write(g);
+            }
+        }
+    }
+
     /** One int64 column holding a value above 2^53, for the precision-policy tests. */
     static void writeBigInt64(Path file) throws IOException {
         MessageType t = MessageTypeParser.parseMessageType("message b { required int64 id; required int64 big; }");

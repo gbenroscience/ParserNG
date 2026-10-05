@@ -178,6 +178,18 @@ public final class SqlLexer {
                 pos++;
                 return new Token(TokenType.EQ, "=", start, pos);
             }
+            case '.' -> {
+                pos++;
+                return new Token(TokenType.DOT, ".", start, pos);
+            }
+            case '[' -> {
+                pos++;
+                return new Token(TokenType.LBRACKET, "[", start, pos);
+            }
+            case ']' -> {
+                pos++;
+                return new Token(TokenType.RBRACKET, "]", start, pos);
+            }
             case '|' -> {
                 if (peekAt(pos + 1) == '|') {
                     pos += 2;

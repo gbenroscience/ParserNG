@@ -223,6 +223,9 @@ not a different capability.
 
 ### CAST
 
+> `ParquetSql` also evaluates `CAST(x AS DATE | TIMESTAMP | DECIMAL(p,s) | VARCHAR)`; see the date and time section of
+> the Parquet chapter. The numeric targets below are the same in both.
+
 `CAST(expression AS type)` supports numeric target types; since every
 ParserNG value is already a floating-point number under the hood, `CAST`
 here means "how should this number be interpreted," not a general type
@@ -639,8 +642,8 @@ that directory or the query fails.
 * **`SELECT DISTINCT`, `COUNT(DISTINCT col)`, `COUNT(col)` on any column, and `MIN`/`MAX` over strings, dates,
   timestamps and booleans** are folded in Java over the native batches of an inner scan that keeps your `FROM`
   and `WHERE` (so row-group pruning and native predicates apply). Rules:
-  * Without `GROUP BY` only; `GROUP BY` or `HAVING` with these fails with a named error.
-  * Every aggregate argument must be a plain column; `COUNT(*)`, `SUM`, `AVG` and numeric `MIN`/`MAX` may
+  * Without `GROUP BY` here; with `GROUP BY` see the next bullet. Without `GROUP BY` every aggregate argument
+    must be a plain column; `COUNT(*)`, `SUM`, `AVG` and numeric `MIN`/`MAX` may
     appear in the same query. `COUNT`, `SUM`, `AVG` and numeric `MIN`/`MAX` return `Float8` (as the numeric
     engine does); string, date, timestamp and boolean `MIN`/`MAX` keep the column type. Strings compare in
     UTF-8 byte order. Aggregates over no rows give `COUNT` 0 and the others null. A 64-bit integer or decimal
@@ -653,6 +656,33 @@ that directory or the query fails.
     `SUM(DISTINCT x)` and `AVG(DISTINCT x)` are syntax errors; `ArrowQuery` itself rejects both forms.
   * These queries cannot be streamed (`stream()` throws); keys are boxed, so this path is correct and bounded
     but not zero-allocation.
+* **`GROUP BY` the numeric engine cannot do** is folded too (`explain()` says `GROUP BY the numeric engine
+  cannot do`): a string, boolean, date or timestamp group key or key expression (`GROUP BY name`,
+  `GROUP BY LOWER(name)`, `GROUP BY day`, `GROUP BY CAST(ts AS DATE)`), `COUNT(DISTINCT x)`, `MIN`/`MAX` over
+  strings, dates, timestamps and booleans, and `SELECT DISTINCT` with `GROUP BY`. A grouped query with only
+  numeric keys and numeric aggregates still runs in the numeric engine.
+  * The scan is an inner projection of the group keys and aggregate arguments, so each may be any expression
+    the bridge understands (`COUNT(DISTINCT LOWER(name))`, `SUM(a + b)`, a nested field, a cast). Groups are
+    found by hashing the key values, and nulls form their own group. Keys keep their native type (a date key is
+    a `DATE` column), copied from the group's first row. Aggregates have the types and null rules described
+    above.
+  * `HAVING` combines comparisons, `BETWEEN`, `IN`, `IS NULL`, `AND`, `OR` and `NOT` over numeric aggregates
+    (by alias, or spelled out such as `COUNT(*)`, even when not selected) and numbers.
+  * `ORDER BY` names a select-list column, alias or aggregate (nulls last, ties in first-seen order). Without it
+    the groups come out in first-seen order. `GROUP BY` may name a select alias. `SELECT DISTINCT` removes
+    duplicate output rows after grouping. `LIMIT` and `OFFSET` apply to the result.
+  * Every select item must be a group key or an aggregate (a named error otherwise), `SELECT *` is rejected,
+    and the group count is capped by `maxMaterializedRows`. `SUM`/`AVG` over a string, date, timestamp or
+    boolean is a named error. A `HAVING` over a string, date or timestamp `MIN`/`MAX` is not supported.
+* **`CAST` of a string to a number.** `CAST(x AS INTEGER | SMALLINT | BIGINT | DOUBLE | FLOAT | REAL | NUMERIC |
+  DECIMAL)` where `x` is a string column, string literal, string function, `||` or nested string leaf parses the
+  value's bytes strictly into a `Float8` column. Integer targets accept `[+-]digits` and check the target's
+  range; the floating targets accept `[+-]digits[.digits][e[+-]digits]` (no `NaN`, `Infinity`, hex or suffixes).
+  Surrounding spaces are ignored, a null stays null, and anything else, an empty string included, fails with
+  an error naming the expression and the value. An integer beyond 2^53 is an error because a `Float8` cannot
+  hold it exactly. A cast of a number is unchanged. `ParquetSql` asks the parser to keep numeric casts as SQL
+  text (`SqlParser.parse(sql, true)`) so it can tell the two apart; `ArrowSql` still gets the desugared form.
+  Every row of a batch is parsed, including rows the `WHERE` later drops, so one bad value fails the query.
 * **`OFFSET`**: `LIMIT n OFFSET m`, `OFFSET m LIMIT n` and a bare `OFFSET m` (optionally followed by `ROW` or
   `ROWS`) are accepted by the bridge. Every execution path produces at most `LIMIT + OFFSET` rows and the
   first `m` are then dropped by a zero-copy slice, so a bounded top-N keeps `n + m` candidates and a
@@ -712,8 +742,57 @@ that directory or the query fails.
   `IS NULL`, `LIKE`, `REGEXP` or a boolean test. Under `OR`, a predicate over a derived column follows the
   engine's null propagation like any numeric expression leaf. A `COALESCE` predicate is never pushed to
   Parquet row-group pruning.
+* **Footer statistics.** With no `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY` or `DISTINCT`, a select list made only
+  of `COUNT(*)`, `COUNT(col)`, `MIN(col)` and `MAX(col)` over plain flat columns is answered from the
+  footer: no data page is decoded and `lastMetrics()` is `null` (`explain()` says `footer statistics`).
+  The answer is taken only when it is provably what a scan would give, and anything else is scanned as usual:
+  * `COUNT(*)` is the footer row count. `COUNT(col)` is values minus nulls and needs a null count for every
+    row group of every file, on any column type.
+  * `MIN`/`MAX` use the footer only for signed integers, `FLOAT`, `DOUBLE`, `DATE` and `BOOLEAN`. Strings and
+    binary (statistics may be truncated, or written in a wrong order by old writers), decimals, unsigned
+    integers and timestamps (statistics are stored as writer-dependent text) are always scanned.
+  * Every row group must carry usable min and max, or be all nulls. A row group with neither, a 64-bit
+    integer beyond 2^53 and a `NaN` statistic all fall back to the scan.
+  * Results use the engine's types: `Float8` for counts and numeric `MIN`/`MAX`, the column type for `DATE` and
+    `BOOLEAN`. No values gives `COUNT` 0 and a null `MIN`/`MAX`.
+* **Nested field access.** `s.field`, `s.inner.deep`, `items[0]` (zero-based), `m['key']`, `items[1].price`
+  and `CARDINALITY(list_or_map)`. Each path is resolved against the file's schema and replaced by a derived
+  column of the leaf's own type, filled per batch by walking the struct, list and map vectors and copying
+  with the vector's own `copyFromSafe`. From then on the leaf is an ordinary column: numeric leaves work in
+  expressions, aggregates, `GROUP BY` and `ORDER BY`; string, boolean, date and timestamp leaves work with the
+  native kernels, the string functions and the select list. The output column is named after the path
+  (`s.field`) unless aliased.
+  * A null anywhere along the path, an index past the end and a missing map key give null, never an error.
+  * A path through a list needs an index at that step; a map key is a string literal (an integer for an
+    integer-keyed map); on a duplicate key the first entry wins. A path must end at a value:
+    `CARDINALITY` takes a list or map and returns its size (`Float8`, null for a null list).
+  * Unknown fields, indexing a struct, a key on a list and similar mistakes fail with a named error that lists
+    the fields that exist. A field whose own name contains `.`, `[` or `]` cannot be addressed.
+  * Nested predicates are never pushed to row-group pruning (`explain()` says so). `SELECT s` still returns
+    the whole struct. `t.col` is read as a path, so a table alias prefix is not supported.
+* **Date and time.** `EXTRACT(field FROM x)`, `CAST(x AS DATE | TIMESTAMP | DECIMAL(p,s) | VARCHAR)` and
+  `INTERVAL`, evaluated by the bridge in whole microseconds (a nanosecond column is truncated to microseconds).
+  * `EXTRACT` fields: `YEAR QUARTER MONTH WEEK` (ISO) `DAY DOW` (0 = Sunday) `ISODOW` `DOY HOUR MINUTE SECOND`
+    (with fraction) `MILLISECOND MICROSECOND` (the seconds field scaled, as in PostgreSQL) and `EPOCH`. The
+    result is `Float8`, so it works anywhere a number does. A UTC-adjusted timestamp is read as its UTC wall clock.
+  * `CAST` to `DATE`: from a timestamp (truncated), a date, or a string `yyyy-MM-dd`. To `TIMESTAMP`: from a
+    date (midnight), a timestamp, or a string `yyyy-MM-dd[ T]HH:mm[:ss[.f]]` with no zone and at most 6 fraction
+    digits (more only if the rest are zeros). An invalid string fails with an error naming the expression and the
+    value. Results are `DATE` and `TIMESTAMP` (microseconds, no time zone) columns, so compare them with a
+    literal that has no zone suffix. `CAST(x AS VARCHAR)` takes a string expression or a signed integer column (other types are a named error) and gives a string. `CAST(n AS DECIMAL(p,s))` rounds half away from zero at scale `s` and fails
+    if the result needs more than `p - s` integer digits; it is `Float8`. `CAST(x AS DECIMAL)` with no
+    parameters, `INT` and `DOUBLE` are unchanged (see CAST above).
+  * `INTERVAL '3 days'`, `INTERVAL '1' MONTH`, `INTERVAL '1 year 2 months'` with units year, month, week, day,
+    hour, minute, second, millisecond, microsecond (a day is exactly 24 hours). Year and month steps are
+    calendar steps, clamped to the end of the month (`DATE '2024-01-31' + INTERVAL '1 month'` is
+    `2024-02-29`), and work on literals only. A column accepts the fixed-length units.
+  * Where a predicate operand is built only from literals (`ts >= TIMESTAMP '2024-01-31 12:00:00' - INTERVAL
+    '1 month'`, `d = CAST('2024-02-01' AS DATE)`) it is folded at planning time into one literal. Anything that
+    involves a column becomes a derived column evaluated per batch and is not pushed to row-group pruning.
+  * Not supported, with a named error: a month or year interval on a column, a time zone suffix combined with
+    `CAST` or `INTERVAL`, and mixing a date or time expression with arithmetic.
 * **`SELECT COUNT(*)`** (only `COUNT(*)` items, no `WHERE`, `GROUP BY`, `HAVING` or `ORDER BY`)
-  is answered from the footer row count: no data page is decoded and `lastMetrics()` is `null`.
+  is answered from the footer row count, as the first case of the footer statistics rule above.
 
 ### Type matrix
 
@@ -731,7 +810,7 @@ that directory or the query fails.
 | BINARY, UUID | VarBinary / FixedSizeBinary | native | clear error | no |
 | DATE | DateDay | native | `WHERE` only: comparisons, `IN`, `BETWEEN`, `IS NULL`, with `DATE '...'` or an ISO string | yes |
 | TIMESTAMP (all units, UTC or local), INT96 | TimeStamp | native | `WHERE` only: comparisons, `IN`, `BETWEEN`, `IS NULL`, with `TIMESTAMP '...'` | no (needs a parser-ng-parquet translator change) |
-| struct / list / map | nested | native (whole struct decoded) | clear error | no |
+| struct / list / map | nested | native (whole struct decoded); fields by path, see nested field access | a leaf by path (`s.field`, `items[0]`, `m['k']`), `CARDINALITY(list_or_map)`; the whole column is an error | no |
 
 A clear error names the column, its type and the clause, for example
 `Column 'name' is STRING and cannot be used in an expression, WHERE, GROUP BY or ORDER BY.`
@@ -804,8 +883,10 @@ buffers and row-index buffer are reused.
 | `EXPLAIN` | yes |
 | `COUNT(*)` from the footer, no decode | yes |
 | Bounded top-N for `ORDER BY ... LIMIT n` | yes |
-| `SELECT DISTINCT`, `COUNT(DISTINCT col)` | yes (no `GROUP BY`) |
-| `COUNT(col)` any type; `MIN`/`MAX` over string, date, timestamp, boolean | yes (no `GROUP BY`) |
+| `SELECT DISTINCT`, `COUNT(DISTINCT col)` | yes, with or without `GROUP BY` |
+| `COUNT(col)` any type; `MIN`/`MAX` over string, date, timestamp, boolean | yes, with or without `GROUP BY` |
+| `GROUP BY` a string, boolean, date or timestamp key or expression, with `HAVING` and `ORDER BY` | yes (folded in Java) |
+| `CAST` of a string to a number | yes (strict parse, named errors) |
 | Scan options exposed | yes |
 | Precision error for int64 beyond 2^53 | yes |
 | Boolean, string, date, timestamp `WHERE` predicates, `IS [NOT] TRUE/FALSE`, `IS NULL` on any column | yes |
@@ -815,12 +896,13 @@ buffers and row-index buffer are reused.
 | String functions `LOWER`, `UPPER`, `TRIM`, `SUBSTRING`/`SUBSTR`, `CONCAT`, `||`, `LENGTH`/`CHAR_LENGTH`/`OCTET_LENGTH` | yes (bridge only; see the string functions section) |
 | String-valued expressions as `ORDER BY`/`GROUP BY` keys or aggregate arguments, or in arithmetic | not yet (named error) |
 | `DATE '...'`, `TIMESTAMP '...'` literals | yes |
-| `CAST` to date/timestamp/decimal, `EXTRACT`, `INTERVAL` | not yet |
+| `EXTRACT(field FROM x)`, `CAST(x AS DATE / TIMESTAMP / DECIMAL(p,s) / VARCHAR)`, `INTERVAL` | yes (bridge only; see the date and time section) |
+| `CAST ... AS VARCHAR` of a non-integer, `TIMESTAMP WITH TIME ZONE` casts, `date_part`, `AGE`, `DATE_TRUNC` | not yet (named error) |
 | Timestamp row-group pruning | not yet (needs a parser-ng-parquet change) |
 | Quoted identifiers (`"my col"`, `` `my col` ``) | yes (bridge only; double quotes are no longer string literals, see below) |
-| Nested field access (`s.field`, `items[0]`, `m['k']`) and `CARDINALITY` | not yet (whole struct can be selected) |
-| `MIN`/`MAX`/`COUNT(col)` answered from footer statistics | not yet (they scan the column; numeric ones run in the engine, the rest are folded) |
-| `GROUP BY` with `DISTINCT` or non-numeric aggregates | not yet (named error) |
+| Nested field access (`s.field`, `items[0]`, `m['k']`) and `CARDINALITY` | yes (bridge only; never pushed to row-group pruning) |
+| `MIN`/`MAX`/`COUNT(col)` answered from footer statistics | yes, when provably exact (signed integers, floats, dates, booleans; see below) |
+| `HAVING` over a string, date or timestamp `MIN`/`MAX`; `GROUP BY` position (`GROUP BY 1`) | not yet (named error) |
 | `LIMIT n OFFSET m`, `OFFSET m [LIMIT n]` | yes (bridge only; `ArrowQuery` rejects `OFFSET`) |
 | `COALESCE`, `NULLIF` over numeric columns and literals | yes (bridge only; result is `Float8`) |
 | `COALESCE`/`NULLIF` over strings, dates, timestamps, or with expression arguments | not yet (named error) |
@@ -834,10 +916,10 @@ parser-ng-sql deliberately does not implement:
 - `INSERT`, `UPDATE`, `DELETE`, transactions, or a catalog of any kind;
   there is no notion of a persistent table to mutate.
 - `DISTINCT`.
-- Non-numeric `CAST` targets or general string/text processing; every
-  value in a ParserNG expression is a floating-point number. Over Parquet,
-  string, boolean, date and timestamp predicates and the string functions are supported; casts to
-  temporal types and exact decimal predicates are not yet (see the feature status table above).
+- General string/text processing in `ArrowSql`; every value in a ParserNG expression is a
+  floating-point number. Over Parquet, string, boolean, date and timestamp predicates, the string
+  functions, `CAST` to date, timestamp and decimal, `EXTRACT` and `INTERVAL` are supported by the bridge
+  (see the feature status table above).
 - Multi-table queries. `read_parquet('glob')` reads several files as one
   table with one schema; it is not a join.
 

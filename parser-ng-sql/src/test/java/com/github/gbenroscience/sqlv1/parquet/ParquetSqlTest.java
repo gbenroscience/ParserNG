@@ -41,6 +41,31 @@ class ParquetSqlTest {
         return main;
     }
 
+    private static final java.util.concurrent.atomic.AtomicInteger STRING_FILES = new java.util.concurrent.atomic.AtomicInteger();
+
+    private static Path strings(String... values) throws IOException {
+        main();
+        Path p = dir.resolve("strings-" + STRING_FILES.incrementAndGet() + ".parquet");
+        ParquetFixtures.writeStrings(p, values);
+        return p;
+    }
+
+    private static final int NESTED_ROWS = 60;
+    private static Path nested;
+
+    private static synchronized Path nested() throws IOException {
+        if (nested == null) {
+            main();
+            nested = dir.resolve("nested.parquet");
+            ParquetFixtures.writeNested(nested, NESTED_ROWS);
+        }
+        return nested;
+    }
+
+    private VectorSchemaRoot runNested(BufferAllocator a, String sql) throws Exception {
+        return ParquetSql.execute(nested(), sql, a);
+    }
+
     private static final int AWKWARD_ROWS = 100;
     private static Path awkward;
 
@@ -1072,6 +1097,525 @@ class ParquetSqlTest {
         try (BufferAllocator a = new RootAllocator();
              VectorSchemaRoot r = runAwkward(a, "SELECT id AS \"my alias\" FROM t WHERE id < 2")) {
             assertNotNull(r.getVector("my alias"), "a quoted alias can name an output");
+        }
+    }
+
+    // ---------------------------------------------------------------- nested field access
+
+    private static Integer intAt(VectorSchemaRoot r, String col, int row) {
+        return r.getVector(col).isNull(row) ? null : ((IntVector) r.getVector(col)).get(row);
+    }
+
+    private static Double dblAt(VectorSchemaRoot r, String col, int row) {
+        return r.getVector(col).isNull(row) ? null : ((Float8Vector) r.getVector(col)).get(row);
+    }
+
+    @Test
+    void structFieldsAreSelectedWithTheirOwnTypesNullsAlongThePathGiveNull() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT id, s.n, s.label, s.inner.deep FROM t ORDER BY id")) {
+            assertEquals(NESTED_ROWS, r.getRowCount());
+            for (int i = 0; i < NESTED_ROWS; i++) {
+                boolean noS = i % 5 == 0;
+                assertEquals(noS || i % 9 == 0 ? null : (Integer) i, intAt(r, "s.n", i), "s.n row " + i);
+                assertEquals(noS || i % 8 == 0 ? null : "L" + i, r.getVector("s.label").isNull(i) ? null : str(r, "s.label", i), "s.label row " + i);
+                assertEquals(noS || i % 3 == 0 ? null : (Integer) (2 * i), intAt(r, "s.inner.deep", i), "deep row " + i);
+            }
+        }
+    }
+
+    @Test
+    void listElementsByPositionAndCardinality() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT id, nums[0], nums[2], CARDINALITY(nums) AS c FROM t ORDER BY id")) {
+            for (int i = 0; i < NESTED_ROWS; i++) {
+                boolean absent = i % 7 == 0, empty = !absent && i % 4 == 0;
+                int size = absent ? -1 : empty ? 0 : (i % 3) + 1;
+                assertEquals(size < 1 ? null : (Integer) (i * 10), intAt(r, "nums[0]", i), "nums[0] row " + i);
+                assertEquals(size < 3 ? null : (Integer) (i * 10 + 2), intAt(r, "nums[2]", i), "nums[2] row " + i);
+                assertEquals(size < 0 ? null : (Double) (double) size, dblAt(r, "c", i), "cardinality row " + i);
+            }
+        }
+    }
+
+    @Test
+    void mapValuesByKeyAndMapCardinality() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT id, m['a'], m['c'], m['zzz'], CARDINALITY(m) AS c FROM t ORDER BY id")) {
+            for (int i = 0; i < NESTED_ROWS; i++) {
+                boolean absent = i % 6 == 0;
+                assertEquals(absent ? null : (Integer) i, intAt(r, "m['a']", i), "m['a'] row " + i);
+                assertEquals(absent || i % 2 != 0 ? null : (Integer) 7, intAt(r, "m['c']", i), "m['c'] row " + i);
+                assertNull(intAt(r, "m['zzz']", i), "a missing key is null");
+                assertEquals(absent ? null : (Double) (i % 2 == 0 ? 3.0 : 2.0), dblAt(r, "c", i), "map size row " + i);
+            }
+        }
+    }
+
+    @Test
+    void fieldsOfListElementsThatAreStructs() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT id, items[0].price, items[1].name, items[2].price FROM t ORDER BY id")) {
+            for (int i = 0; i < NESTED_ROWS; i++) {
+                boolean absent = i % 10 == 0;
+                assertEquals(absent ? null : (Integer) i, intAt(r, "items[0].price", i), "price row " + i);
+                assertEquals(absent ? null : "y" + i, r.getVector("items[1].name").isNull(i) ? null : str(r, "items[1].name", i), "name row " + i);
+                assertNull(intAt(r, "items[2].price", i), "past the end is null");
+            }
+        }
+    }
+
+    @Test
+    void nestedLeavesWorkInWhereOrderByAggregatesAndStringFunctions() throws Exception {
+        List<Long> expect = new ArrayList<>();
+        double sum = 0;
+        long labels = 0;
+        for (long i = 0; i < NESTED_ROWS; i++) {
+            boolean n = i % 5 != 0 && i % 9 != 0;
+            if (n && i > 50) expect.add(i);
+            if (n) sum += i;
+            if (i % 5 != 0 && i % 8 != 0) labels++;
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT id FROM t WHERE s.n > 50")) {
+            List<Long> got = new ArrayList<>();
+            for (int i = 0; i < r.getRowCount(); i++) got.add(((BigIntVector) r.getVector("id")).get(i));
+            assertEquals(expect, got);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT SUM(s.n) AS t FROM t")) {
+            assertEquals(sum, ((Float8Vector) r.getVector("t")).get(0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT COUNT(s.label) AS c FROM t")) {
+            assertEquals(labels, ((Float8Vector) r.getVector("c")).get(0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT id, s.n FROM t ORDER BY s.n DESC LIMIT 3")) {
+            assertEquals(List.of(59, 58, 57), List.of(intAt(r, "s.n", 0), intAt(r, "s.n", 1), intAt(r, "s.n", 2)));
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT id, UPPER(s.label) AS u FROM t WHERE LOWER(s.label) = 'l7'")) {
+            assertEquals(1, r.getRowCount());
+            assertEquals(7L, ((BigIntVector) r.getVector("id")).get(0));
+            assertEquals("L7", str(r, "u", 0));
+        }
+    }
+
+    @Test
+    void selectingAWholeStructStillWorks() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runNested(a, "SELECT id, s FROM t WHERE id < 4 ORDER BY id")) {
+            assertEquals(4, r.getRowCount());
+            assertNotNull(r.getVector("s"));
+        }
+    }
+
+    @Test
+    void anUnresolvablePathFailsWithTheFieldsThatExist() throws Exception {
+        ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runNested(a, "SELECT s.nope FROM t")) { }
+        });
+        assertTrue(e.getMessage().contains("no field 'nope'") && e.getMessage().contains("label"), e.getMessage());
+    }
+
+    @Test
+    void explainSaysNestedAccessIsEvaluatedPerBatchAndNotPruned() throws Exception {
+        try (ParquetSqlPlan p = ParquetSql.plan(nested(), "SELECT id FROM t WHERE s.n > 50")) {
+            String ex = p.explain();
+            assertTrue(ex.contains("derived column") && ex.contains("never pushed to row-group pruning"), ex);
+        }
+    }
+
+    // ---------------------------------------------------------------- EXTRACT, CAST, INTERVAL
+
+    private static LocalDateTime tsOf(int i) {
+        return LocalDateTime.ofEpochSecond(1_700_000_000L + i, 0, ZoneOffset.UTC);
+    }
+
+    @Test
+    void extractFromTimestampAndDateColumns() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT id, EXTRACT(YEAR FROM ts) AS y, EXTRACT(MONTH FROM ts) AS mo, EXTRACT(HOUR FROM ts) AS h,"
+                     + " EXTRACT(SECOND FROM ts) AS s, EXTRACT(DOW FROM day) AS dow, EXTRACT(DOY FROM day) AS doy FROM t WHERE id < 90 ORDER BY id")) {
+            for (int i = 0; i < 90; i++) {
+                LocalDateTime t = tsOf(i);
+                LocalDate d = LocalDate.ofEpochDay(19000 + i % 365);
+                assertEquals(t.getYear(), dblAt(r, "y", i), 0.0);
+                assertEquals(t.getMonthValue(), dblAt(r, "mo", i), 0.0);
+                assertEquals(t.getHour(), dblAt(r, "h", i), 0.0, "row " + i);
+                assertEquals(t.getSecond(), dblAt(r, "s", i), 1e-9, "row " + i);
+                assertEquals(d.getDayOfWeek().getValue() % 7, dblAt(r, "dow", i), 0.0);
+                assertEquals(d.getDayOfYear(), dblAt(r, "doy", i), 0.0);
+            }
+        }
+    }
+
+    @Test
+    void extractInWhereAndGroupBy() throws Exception {
+        long march = 0;
+        for (int i = 0; i < ROWS; i++) if (LocalDate.ofEpochDay(19000 + i % 365).getMonthValue() == 3) march++;
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE EXTRACT(MONTH FROM day) = 3")) {
+            assertEquals(march, dblAt(r, "c", 0), 0.0);
+        }
+    }
+
+    @Test
+    void castTimestampToDateComparesAgainstADateLiteral() throws Exception {
+        long next = 0;
+        for (int i = 0; i < ROWS; i++) if (tsOf(i).toLocalDate().equals(LocalDate.of(2023, 11, 15))) next++;
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE CAST(ts AS DATE) = DATE '2023-11-15'")) {
+            assertEquals(next, dblAt(r, "c", 0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT id, CAST(ts AS DATE) AS d FROM t WHERE id IN (0, 6400)")) {
+            assertEquals(2, r.getRowCount());
+            assertEquals((int) tsOf(0).toLocalDate().toEpochDay(), ((DateDayVector) r.getVector("d")).get(0));
+            assertEquals((int) tsOf(6400).toLocalDate().toEpochDay(), ((DateDayVector) r.getVector("d")).get(1));
+        }
+    }
+
+    @Test
+    void intervalLiteralArithmeticIsFoldedAndColumnArithmeticUsesFixedUnits() throws Exception {
+        // 2023-11-14 22:13:20 + 5 seconds + 5 seconds: rows 0..9 are strictly before 22:13:30
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE ts < TIMESTAMP '2023-11-14 22:13:25' + INTERVAL '5 seconds'")) {
+            assertEquals(10.0, dblAt(r, "c", 0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS c FROM t WHERE ts + INTERVAL '1 hour' < TIMESTAMP '2023-11-14 23:13:30'")) {
+            assertEquals(10.0, dblAt(r, "c", 0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT id, ts + INTERVAL '1 day' AS nxt FROM t WHERE id = 3")) {
+            assertEquals((1_700_000_000L + 3 + 86_400) * 1_000_000L, ((TimeStampVector) r.getVector("nxt")).get(0));
+        }
+    }
+
+    @Test
+    void castToDecimalRoundsHalfAwayFromZeroAtTheScale() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT id, CAST(f64 AS DECIMAL(12,0)) AS r0, CAST(f64 AS DECIMAL(12,1)) AS r1 FROM t WHERE id < 10 ORDER BY id")) {
+            for (int i = 0; i < 10; i++) {
+                double v = i * 1.5;
+                assertEquals(new java.math.BigDecimal(Double.toString(v)).setScale(0, java.math.RoundingMode.HALF_UP).doubleValue(), dblAt(r, "r0", i), 0.0, "row " + i);
+                assertEquals(v, dblAt(r, "r1", i), 1e-12);
+            }
+        }
+        ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT CAST(id AS DECIMAL(4,0)) FROM t")) { }
+        });
+        assertTrue(e.getMessage().contains("integer digits"), e.getMessage());
+    }
+
+    @Test
+    void anInvalidStringCastNamesTheValue() throws Exception {
+        ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT CAST(name AS DATE) FROM t WHERE id < 5")) { }
+        });
+        assertTrue(e.getMessage().contains("not a valid DATE") && e.getMessage().contains("n1"), e.getMessage());
+    }
+
+    // ---------------------------------------------------------------- footer statistics
+
+    @Test
+    void minMaxAndCountOfAColumnAreAnsweredFromTheFooter() throws Exception {
+        long names = 0, i32s = 0;
+        for (int i = 0; i < ROWS; i++) { if (i % 11 != 0) names++; if (i % 10 != 0) i32s++; }
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT COUNT(*) AS n, COUNT(name) AS cn, COUNT(i32) AS ci, MIN(id) AS lo, MAX(id) AS hi,"
+                     + " MIN(i32) AS ilo, MAX(i32) AS ihi, MIN(f64) AS flo, MAX(f64) AS fhi, MIN(day) AS d0, MAX(day) AS d1 FROM t");
+             VectorSchemaRoot r = p.execute(a)) {
+            assertTrue(p.explain().contains("footer statistics"), p.explain());
+            assertNull(p.lastMetrics(), "no data page was read");
+            assertEquals(ROWS, dblAt(r, "n", 0), 0.0);
+            assertEquals(names, dblAt(r, "cn", 0), 0.0);
+            assertEquals(i32s, dblAt(r, "ci", 0), 0.0);
+            assertEquals(0.0, dblAt(r, "lo", 0), 0.0);
+            assertEquals(ROWS - 1.0, dblAt(r, "hi", 0), 0.0);
+            assertEquals(1.0, dblAt(r, "ilo", 0), 0.0);
+            assertEquals(99.0, dblAt(r, "ihi", 0), 0.0);
+            assertEquals(0.0, dblAt(r, "flo", 0), 0.0);
+            assertEquals((ROWS - 1) * 1.5, dblAt(r, "fhi", 0), 0.0);
+            assertEquals(19000, ((DateDayVector) r.getVector("d0")).get(0));
+            assertEquals(19364, ((DateDayVector) r.getVector("d1")).get(0));
+        }
+    }
+
+    @Test
+    void footerAnswersAgreeWithAScanOfTheSameQuery() throws Exception {
+        // a WHERE that keeps every row forces the scan path; both must give the same numbers
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot foot = runSql(a, "SELECT MIN(id) AS lo, MAX(id) AS hi, COUNT(i32) AS ci, MIN(f32) AS f0, MAX(f32) AS f1 FROM t");
+             VectorSchemaRoot scan = runSql(a, "SELECT MIN(id) AS lo, MAX(id) AS hi, COUNT(i32) AS ci, MIN(f32) AS f0, MAX(f32) AS f1 FROM t WHERE id >= 0")) {
+            for (String c : new String[] {"lo", "hi", "ci", "f0", "f1"}) {
+                assertEquals(dblAt(scan, c, 0), dblAt(foot, c, 0), 0.0, c);
+            }
+        }
+    }
+
+    @Test
+    void whatTheFooterCannotProveIsScanned() throws Exception {
+        for (String sql : new String[] {
+                "SELECT MIN(name) FROM t",
+                "SELECT MAX(ts) FROM t",
+                "SELECT MIN(dec32) FROM t",
+                "SELECT SUM(id) FROM t",
+                "SELECT MIN(id) FROM t WHERE id > 5",
+                "SELECT COUNT(DISTINCT id) FROM t"}) {
+            try (ParquetSqlPlan p = ParquetSql.plan(main(), sql)) {
+                assertFalse(p.explain().contains("footer statistics"), sql + "\n" + p.explain());
+            }
+        }
+    }
+
+    @Test
+    void footerAnswersWorkAcrossFilesAndForAnEmptyColumn() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runAwkward(a, "SELECT MIN(\"my col\") AS lo, MAX(\"my col\") AS hi, COUNT(\"1st\") AS c FROM t")) {
+            assertEquals(0.0, dblAt(r, "lo", 0), 0.0);
+            assertEquals(2.0 * (AWKWARD_ROWS - 1), dblAt(r, "hi", 0), 0.0);
+            assertEquals(AWKWARD_ROWS, dblAt(r, "c", 0), 0.0);
+        }
+    }
+
+    // ---------------------------------------------------------------- CAST of a string to a number
+
+    @Test
+    void castingStringsToIntegersParsesEachValueAndKeepsNulls() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = ParquetSql.execute(strings("12", " 7 ", "-3", null, "+5"), "SELECT id, CAST(v AS INTEGER) AS n FROM t ORDER BY id", a)) {
+            assertEquals(5, r.getRowCount());
+            assertEquals(12.0, dblAt(r, "n", 0), 0.0);
+            assertEquals(7.0, dblAt(r, "n", 1), 0.0);
+            assertEquals(-3.0, dblAt(r, "n", 2), 0.0);
+            assertNull(dblAt(r, "n", 3));
+            assertEquals(5.0, dblAt(r, "n", 4), 0.0);
+        }
+    }
+
+    @Test
+    void castingStringsToDoubles() throws Exception {
+        double[] want = {1.5, 2, -0.25, 0.5, 1000, 3};
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = ParquetSql.execute(strings("1.5", "2", "-0.25", ".5", "1e3", "3."), "SELECT id, CAST(v AS DOUBLE) AS d FROM t ORDER BY id", a)) {
+            for (int i = 0; i < want.length; i++) assertEquals(want[i], dblAt(r, "d", i), 0.0, "row " + i);
+        }
+    }
+
+    @Test
+    void aCastStringIsAnOrdinaryNumberInWhereAndAggregates() throws Exception {
+        Path f = strings("12", " 7 ", "-3", null, "+5");
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = ParquetSql.execute(f, "SELECT SUM(CAST(v AS INTEGER)) AS s FROM t", a)) {
+            assertEquals(21.0, dblAt(r, "s", 0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = ParquetSql.execute(f, "SELECT id FROM t WHERE CAST(v AS INTEGER) > 5 ORDER BY id", a)) {
+            assertEquals(2, r.getRowCount());
+            assertEquals(0L, ((BigIntVector) r.getVector("id")).get(0));
+            assertEquals(1L, ((BigIntVector) r.getVector("id")).get(1));
+        }
+    }
+
+    @Test
+    void castingStringFunctionResultsToNumbers() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT id, CAST(SUBSTRING(name, 2, 3) AS INTEGER) AS k FROM t WHERE id IN (5, 12, 123, 1234) ORDER BY id")) {
+            assertEquals(5.0, dblAt(r, "k", 0), 0.0);
+            assertEquals(12.0, dblAt(r, "k", 1), 0.0);
+            assertEquals(123.0, dblAt(r, "k", 2), 0.0);
+            assertEquals(123.0, dblAt(r, "k", 3), 0.0);
+        }
+    }
+
+    @Test
+    void anInvalidStringCastFailsNamingTheExpressionAndTheValue() throws Exception {
+        for (String[] c : new String[][] {{"12", "abc", "not a valid integer", "abc"}, {"12", "12.7", "not a valid integer", "12.7"},
+                {"12", "3000000000", "out of range for INTEGER", "3000000000"}}) {
+            Path f = strings(c[0], c[1]);
+            ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+                try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = ParquetSql.execute(f, "SELECT CAST(v AS INTEGER) FROM t", a)) { }
+            });
+            assertTrue(e.getMessage().contains(c[2]) && e.getMessage().contains(c[3]) && e.getMessage().contains("CAST(v AS INTEGER)"), e.getMessage());
+        }
+        ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT CAST(name AS INTEGER) FROM t")) { }
+        });
+        assertTrue(e.getMessage().contains("not a valid integer") && e.getMessage().contains("'n1'"), e.getMessage());
+    }
+
+    @Test
+    void castingANumberStillTruncatesOrPassesThrough() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT CAST(f64 AS INTEGER) AS c, CAST(f64 AS DOUBLE) AS d FROM t WHERE id = 3")) {
+            assertEquals(4.0, dblAt(r, "c", 0), 0.0, "4.5 truncated toward zero");
+            assertEquals(4.5, dblAt(r, "d", 0), 0.0);
+        }
+    }
+
+    // ---------------------------------------------------------------- GROUP BY the numeric engine cannot do
+
+    private static Boolean flagOf(int i) { return i % 7 == 0 ? null : (Boolean) (i % 3 == 0); }
+
+    private static String flagKey(VectorSchemaRoot r, int row) {
+        return r.getVector("flag").isNull(row) ? "null" : String.valueOf(((BitVector) r.getVector("flag")).get(row) == 1);
+    }
+
+    @Test
+    void groupByABooleanWithCountDistinctAndStringExtremes() throws Exception {
+        java.util.Map<String, long[]> count = new java.util.LinkedHashMap<>();
+        java.util.Map<String, String[]> ext = new java.util.LinkedHashMap<>();
+        java.util.Map<String, java.util.Set<String>> names = new java.util.HashMap<>();
+        for (int i = 0; i < ROWS; i++) {
+            String k = String.valueOf(flagOf(i));
+            count.computeIfAbsent(k, x -> new long[1])[0]++;
+            String n = nameOf(i);
+            if (n == null) continue;
+            names.computeIfAbsent(k, x -> new java.util.HashSet<>()).add(n);
+            String[] e = ext.computeIfAbsent(k, x -> new String[] {n, n});
+            if (n.compareTo(e[0]) < 0) e[0] = n;
+            if (n.compareTo(e[1]) > 0) e[1] = n;
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT flag, COUNT(*) AS c, COUNT(DISTINCT name) AS d, MIN(name) AS lo, MAX(name) AS hi FROM t GROUP BY flag")) {
+            assertEquals(3, r.getRowCount());
+            assertEquals(List.of("null", "false", "true"), List.of(flagKey(r, 0), flagKey(r, 1), flagKey(r, 2)), "groups come out in first-seen order");
+            for (int i = 0; i < 3; i++) {
+                String k = flagKey(r, i);
+                assertEquals(count.get(k)[0], dblAt(r, "c", i), 0.0, k);
+                assertEquals(names.get(k).size(), dblAt(r, "d", i), 0.0, k);
+                assertEquals(ext.get(k)[0], str(r, "lo", i), k);
+                assertEquals(ext.get(k)[1], str(r, "hi", i), k);
+            }
+        }
+    }
+
+    @Test
+    void groupByAStringColumnWithOrderByAndLimit() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT name, COUNT(*) AS c FROM t WHERE id < 30 GROUP BY name ORDER BY name LIMIT 5")) {
+            assertEquals(5, r.getRowCount());
+            List<String> got = new ArrayList<>();
+            for (int i = 0; i < 5; i++) got.add(str(r, "name", i));
+            assertEquals(List.of("n1", "n10", "n12", "n13", "n14"), got);
+            for (int i = 0; i < 5; i++) assertEquals(1.0, dblAt(r, "c", i), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT name, COUNT(*) AS c FROM t WHERE id < 30 GROUP BY name")) {
+            assertEquals(28, r.getRowCount(), "27 distinct names and one null group");
+        }
+    }
+
+    @Test
+    void havingOrderByAndOffsetOverGroups() throws Exception {
+        long[] n = new long[3]; // null, false, true
+        for (int i = 0; i < ROWS; i++) { Boolean f = flagOf(i); n[f == null ? 0 : f ? 2 : 1]++; }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT flag, COUNT(*) AS c FROM t GROUP BY flag HAVING COUNT(*) > 5000 ORDER BY c DESC")) {
+            assertEquals(2, r.getRowCount());
+            assertEquals("false", flagKey(r, 0));
+            assertEquals(n[1], dblAt(r, "c", 0), 0.0);
+            assertEquals("true", flagKey(r, 1));
+            assertEquals(n[2], dblAt(r, "c", 1), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT flag, COUNT(*) AS c FROM t GROUP BY flag ORDER BY c LIMIT 1 OFFSET 1")) {
+            assertEquals(1, r.getRowCount());
+            assertEquals("true", flagKey(r, 0), "ascending sizes are null, true, false");
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT flag FROM t GROUP BY flag HAVING COUNT(*) BETWEEN 3000 AND 6000")) {
+            assertEquals(1, r.getRowCount(), "only the true group (5714 rows) is in range; HAVING may name an aggregate that is not selected");
+        }
+    }
+
+    @Test
+    void selectDistinctOverGroups() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT DISTINCT flag FROM t GROUP BY flag")) {
+            assertEquals(3, r.getRowCount());
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT DISTINCT COUNT(*) AS c FROM t WHERE id < 6 GROUP BY id % 2")) {
+            assertEquals(1, r.getRowCount(), "both parity groups hold 3 rows");
+        }
+    }
+
+    @Test
+    void groupByAStringExpressionOrAnAliasOfOne() throws Exception {
+        for (String sql : new String[] {
+                "SELECT LOWER(name) AS l, COUNT(*) AS c FROM t WHERE id < 12 GROUP BY LOWER(name)",
+                "SELECT LOWER(name) AS l, COUNT(*) AS c FROM t WHERE id < 12 GROUP BY l"}) {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, sql)) {
+                assertEquals(11, r.getRowCount(), sql + ": names n1..n10 plus the null group");
+                assertNotNull(r.getVector("l"));
+            }
+        }
+    }
+
+    @Test
+    void numericAggregatesPerNonNumericKeyKeepTheirTypes() throws Exception {
+        double[] sum = new double[3];
+        double[] favg = new double[3];
+        long[] cnt = new long[3], maxDay = {Long.MIN_VALUE, Long.MIN_VALUE, Long.MIN_VALUE}, withI32 = new long[3];
+        for (int i = 0; i < ROWS; i++) {
+            Boolean f = flagOf(i);
+            int g = f == null ? 0 : f ? 2 : 1;
+            cnt[g]++;
+            favg[g] += i * 1.5;
+            if (i % 10 != 0) { sum[g] += i % 100; withI32[g]++; }
+            maxDay[g] = Math.max(maxDay[g], 19000 + i % 365);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT flag, SUM(i32) AS s, AVG(f64) AS av, MAX(day) AS d FROM t GROUP BY flag")) {
+            for (int row = 0; row < 3; row++) {
+                String k = flagKey(r, row);
+                int g = k.equals("null") ? 0 : k.equals("false") ? 1 : 2;
+                assertEquals(sum[g], dblAt(r, "s", row), 1e-6, k);
+                assertEquals(favg[g] / cnt[g], dblAt(r, "av", row), 1e-6, k);
+                assertEquals((int) maxDay[g], ((DateDayVector) r.getVector("d")).get(row), k);
+            }
+        }
+    }
+
+    @Test
+    void groupByADateKeepsTheDateType() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT day, COUNT(*) AS c FROM t GROUP BY day ORDER BY day LIMIT 3")) {
+            assertEquals(3, r.getRowCount());
+            for (int i = 0; i < 3; i++) {
+                assertEquals(19000 + i, ((DateDayVector) r.getVector("day")).get(i));
+                assertEquals(55.0, dblAt(r, "c", i), 0.0, "20000 rows over 365 days: the first 165 days have 55");
+            }
+        }
+    }
+
+    @Test
+    void groupedFoldRejectsWhatItCannotDoWithNamedErrors() throws Exception {
+        String[][] cases = {
+                {"SELECT name, COUNT(*) FROM t GROUP BY flag", "GROUP BY"},
+                {"SELECT flag, SUM(name) FROM t GROUP BY flag", "not supported on a STRING"},
+                {"SELECT flag, COUNT(*) FROM t GROUP BY flag HAVING nonsense > 1", "HAVING operand"},
+                {"SELECT flag, COUNT(*) AS c FROM t GROUP BY flag ORDER BY name", "must name a select-list"},
+                {"SELECT * FROM t GROUP BY flag", "SELECT *"}};
+        for (String[] c : cases) {
+            ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
+                try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, c[0])) { }
+            }, c[0]);
+            assertTrue(e.getMessage().contains(c[1]), c[0] + " -> " + e.getMessage());
+        }
+    }
+
+    @Test
+    void numericOnlyGroupingStaysOnTheEngine() throws Exception {
+        try (ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT i32, COUNT(*) AS c FROM t GROUP BY i32")) {
+            assertFalse(p.explain().contains("fold in Java"), p.explain());
+        }
+        try (ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT flag, COUNT(*) FROM t GROUP BY flag")) {
+            assertTrue(p.explain().contains("GROUP BY the numeric engine cannot do"), p.explain());
         }
     }
 }
