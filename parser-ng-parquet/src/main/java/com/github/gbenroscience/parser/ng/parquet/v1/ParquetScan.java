@@ -55,10 +55,13 @@ public final class ParquetScan {
     private final boolean exactFilter;
     private final Map<String, CustomPredicate> customPredicates; // never null; empty by default
     private final boolean pinWorkerThreads;
+    /** null = no per-scan override, defer to the {@code -Dparserng.snappy} system property. See {@link #useJavaSnappyDecoder}. */
+    private final Boolean useJavaSnappyDecoder;
 
     private ParquetScan(ParquetSource file, List<String> columns, Predicate predicate, int batchSize,
                         boolean metrics, long maxRowGroupBytes, int parallelism, boolean exactFilter,
-                        Map<String, CustomPredicate> customPredicates, boolean pinWorkerThreads) {
+                        Map<String, CustomPredicate> customPredicates, boolean pinWorkerThreads,
+                        Boolean useJavaSnappyDecoder) {
         this.file = file;
         this.columns = columns;
         this.predicate = predicate;
@@ -69,6 +72,7 @@ public final class ParquetScan {
         this.exactFilter = exactFilter;
         this.customPredicates = customPredicates;
         this.pinWorkerThreads = pinWorkerThreads;
+        this.useJavaSnappyDecoder = useJavaSnappyDecoder;
     }
 
     /** Scans a local file. */
@@ -85,13 +89,13 @@ public final class ParquetScan {
     public static ParquetScan scan(ParquetSource file) {
         if (file == null) throw new NullPointerException("file");
         return new ParquetScan(file, null, null, DEFAULT_BATCH_SIZE, false, DEFAULT_MAX_ROW_GROUP_BYTES,
-                DEFAULT_PARALLELISM, false, Map.of(), false);
+                DEFAULT_PARALLELISM, false, Map.of(), false, null);
     }
 
     /** Top-level columns to read. Unlisted columns are never decoded. Must be non-empty. */
     public ParquetScan select(String... cols) {
         if (cols == null || cols.length == 0) throw new IllegalArgumentException("select() needs at least one column");
-        return new ParquetScan(file, List.copyOf(Arrays.asList(cols)), predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
+        return new ParquetScan(file, List.copyOf(Arrays.asList(cols)), predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
     }
 
     /**
@@ -104,7 +108,7 @@ public final class ParquetScan {
      * exactly instead.
      */
     public ParquetScan pushdown(Predicate p) {
-        return new ParquetScan(file, columns, p, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
+        return new ParquetScan(file, columns, p, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
     }
 
     /**
@@ -120,7 +124,7 @@ public final class ParquetScan {
         if (impl == null) throw new NullPointerException("impl");
         Map<String, CustomPredicate> updated = new LinkedHashMap<>(customPredicates);
         updated.put(id, impl);
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, Map.copyOf(updated), pinWorkerThreads);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, Map.copyOf(updated), pinWorkerThreads, useJavaSnappyDecoder);
     }
 
     /**
@@ -157,22 +161,22 @@ public final class ParquetScan {
      */
     public ParquetScan exactFilter() {
         if (predicate == null) throw new IllegalStateException("exactFilter() needs a predicate — call pushdown(...) first");
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, true, customPredicates, pinWorkerThreads);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, true, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
     }
 
     public ParquetScan batchSize(int rows) {
         if (rows <= 0) throw new IllegalArgumentException("batchSize must be positive");
-        return new ParquetScan(file, columns, predicate, rows, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
+        return new ParquetScan(file, columns, predicate, rows, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
     }
 
     public ParquetScan withMetrics(boolean enabled) {
-        return new ParquetScan(file, columns, predicate, batchSize, enabled, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
+        return new ParquetScan(file, columns, predicate, batchSize, enabled, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
     }
 
     /** Rejects any surviving row group whose declared uncompressed size exceeds this. */
     public ParquetScan maxRowGroupBytes(long bytes) {
         if (bytes <= 0) throw new IllegalArgumentException("maxRowGroupBytes must be positive");
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, bytes, parallelism, exactFilter, customPredicates, pinWorkerThreads);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, bytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
     }
 
     /**
@@ -185,7 +189,7 @@ public final class ParquetScan {
      */
     public ParquetScan parallelism(int rowGroupsAtOnce) {
         if (rowGroupsAtOnce <= 0) throw new IllegalArgumentException("parallelism must be positive");
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, rowGroupsAtOnce, exactFilter, customPredicates, pinWorkerThreads);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, rowGroupsAtOnce, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
     }
 
     /**
@@ -208,18 +212,38 @@ public final class ParquetScan {
      * </ul>
      */
     public ParquetScan pinWorkerThreads(boolean pin) {
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pin);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pin, useJavaSnappyDecoder);
     }
 
     /** Whether {@link #pinWorkerThreads} was requested (default false). */
     public boolean pinsWorkerThreads() { return pinWorkerThreads; }
 
     /**
+     * Per-scan override of which SNAPPY decompressor this scan uses, taking precedence over the
+     * {@code -Dparserng.snappy} system property for this scan only. {@code true} forces the pure-Java
+     * decoder (no native/JNI library involved -- see {@code internal.codec.SnappyDecompressor}),
+     * {@code false} forces the stock {@code snappy-java} (JNI-wrapped native) decoder regardless of the
+     * system property. Unset (the default) defers to the system property, which itself defaults to the
+     * stock decoder.
+     *
+     * <p>Independently correct either way (see {@code SnappyDecompressor}'s fuzz suite), but, as measured
+     * on the benchmarks in this module's README, not currently faster than the native decoder it can
+     * replace -- reach for this to avoid the native dependency, not for a performance win, until that
+     * changes.
+     */
+    public ParquetScan useJavaSnappyDecoder(boolean useJava) {
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJava);
+    }
+
+    /** This scan's SNAPPY-decoder override: {@code TRUE}/{@code FALSE} if {@link #useJavaSnappyDecoder} was called, else {@code null} (defers to the system property). */
+    public Boolean javaSnappyDecoderOverride() { return useJavaSnappyDecoder; }
+
+    /**
      * Opens the scan. The caller owns {@code allocator} (it must outlive the reader and any detached
      * roots); the returned reader owns its file handle(s) and must be closed.
      */
     public ParquetBatchReader open(BufferAllocator allocator) {
-        return new ParquetBatchReader(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, allocator);
+        return new ParquetBatchReader(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, allocator);
     }
 
     /** Convenience loop; each batch is valid only for the duration of the callback. */

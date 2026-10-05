@@ -231,7 +231,7 @@ final class RowGroupDecoder implements AutoCloseable {
                 }
             } catch (ParquetScanException e) {
                 throw e;
-            } catch (RuntimeException e) {e.printStackTrace();
+            } catch (RuntimeException e) {
                 throw new ParquetScanException("Failed decoding column", file, rgIndex, node.name, e);
             }
         }
