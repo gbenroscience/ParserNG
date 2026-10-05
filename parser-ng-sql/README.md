@@ -43,6 +43,7 @@ query.close();
 - [Performance notes](#performance-notes)
 - [Error handling](#error-handling)
 - [Querying Parquet files](#querying-parquet-files)
+- [Benchmarking and profiling ParquetSql](#benchmarking-and-profiling-parquetsql)
 - [What's intentionally out of scope](#whats-intentionally-out-of-scope)
 - [Resource ownership and thread-safety](#resource-ownership-and-thread-safety)
 
@@ -906,6 +907,60 @@ buffers and row-index buffer are reused.
 | `LIMIT n OFFSET m`, `OFFSET m [LIMIT n]` | yes (bridge only; `ArrowQuery` rejects `OFFSET`) |
 | `COALESCE`, `NULLIF` over numeric columns and literals | yes (bridge only; result is `Float8`) |
 | `COALESCE`/`NULLIF` over strings, dates, timestamps, or with expression arguments | not yet (named error) |
+
+## Benchmarking and profiling ParquetSql
+
+`com.github.gbenroscience.sqlv1.demo.ParquetSqlBenchmark` measures `ParquetSql` against what it is built on and
+says where the time goes. It lives with the other demos and reuses their methods: fixed-seed data written before
+any timing and a warm page cache (the parser-ng-parquet fair comparison), warm-up then calibrated reps with the
+median, min and max, and every answer consumed so the JIT cannot drop the work (`Benchmark`, `ExecBench`).
+
+**What each workload is.** One SQL query run three ways over the same file:
+
+| column | meaning |
+|---|---|
+| `sql ms` | `ParquetSql`, planned once and executed repeatedly (median per call) |
+| `direct ms` | the same answer from hand-written Java straight on parser-ng-parquet's Arrow batches, with the equivalent `select` and `pushdown` |
+| `sql/dir` | the cost of the SQL layer over a hand-written loop on the same scan: 1.0 is no overhead |
+| `raw ms`, `raw/sql` | the parquet-java `Group` reader (a few workloads), the baseline of the "3x to 5x" claim, and how many times slower it is than `ParquetSql` |
+| `plan ms` | building the plan (footer reads, rewriting, engine setup), timed on its own |
+| `alloc/call` | bytes allocated per call by the calling thread (a parallel scan's worker threads are not counted) |
+| `ok` | the three answers agree (checksum, relative tolerance 1e-9) and the allocator was empty afterwards (`MISMATCH` or `LEAK` otherwise, and the exit code is 1) |
+| `path` | which execution path the plan took (`footer statistics`, `stream`, `materialize`, `bounded top-N`, `fold in Java`) |
+
+The workloads cover each path: footer-only answers (`count-star`, `footer-stats`), a zero-copy projection, row-group
+pruning (`filter-pruned`), numeric filters and aggregates through the engine (`filter-numeric`, `agg-sum-avg`,
+`group-numeric`), derived columns (`coalesce-sum`, `extract-year`, `upper-eq`), the native string kernel
+(`like-native`), the Java folds (`group-string`, `count-distinct`) and bounded top-N (`top-100`). The data is
+`id` (increasing int64), `value` (double, 10% null), `qty` (int32, 5% null), `name` (1000 distinct strings, 5% null),
+`day` (date) and `flag` (boolean, 20% null).
+
+**Running it.** Use the same JVM flags as the tests. On JDK 24 and later add `-Darrow.allocation.manager.type=Unsafe`.
+
+```
+mvn -q -pl parser-ng-sql -am package -DskipTests
+mvn -q -pl parser-ng-sql exec:exec -Dexec.executable=java \
+  -Dexec.args="--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED \
+  --add-opens=java.base/java.nio=ALL-UNNAMED -classpath %classpath \
+  com.github.gbenroscience.sqlv1.demo.ParquetSqlBenchmark --rows 3000000"
+```
+
+Options: `--rows N`, `--codec UNCOMPRESSED|SNAPPY`, `--rowgroup-mb N`, `--batch N`, `--parallelism N`, `--only TEXT`,
+`--no-raw` (the Group baselines are slow), `--warmup N --reps N --min-rep-ms X`, `--explain` (print every plan),
+`--csv FILE`, `--keep`. Compare runs by changing one option at a time (`--parallelism 1` against the default shows
+what the parallel scan buys; `--codec SNAPPY` shows decompression).
+
+**Profiling.** `--profile TEXT --seconds S` runs the first matching workload under an in-process sampler
+(`StackSampler`) and prints self and inclusive time per layer (bridge, SQL engine, scan, expression engine, Arrow,
+parquet-java, JDK), the hottest methods and the threads that were running, and the allocation per call. Read it for
+"which layer owns the time" and for spotting a hot allocation site. It samples at safepoints, so for line-level
+truth attach JFR (`-XX:StartFlightRecording=duration=60s,filename=bench.jfr`) or async-profiler to the same run.
+
+**Reading the result.** A `sql/dir` close to 1.0 on a scan-bound workload means the layer adds almost nothing there;
+a large ratio on a small workload points at per-call fixed cost (`plan ms`, derived-column setup); a large
+`alloc/call` on a workload that should be zero-allocation points at the batch loop (the folds box their keys by
+design, and `plan.execute` allocates one result root per call). The numbers depend on the machine, the JVM and the
+data: run it where you will deploy before drawing conclusions.
 
 ## What's intentionally out of scope
 
