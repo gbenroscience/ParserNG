@@ -143,12 +143,11 @@ public final class FairCompareBenchmark {
     }
 
     // ---- parser-ng ------------------------------------------------------------
-
     private static long drainParserNg(java.nio.file.Path file, boolean multiCol) throws IOException {
         long rows = 0;
         long sink = 0;
         try (BufferAllocator alloc = new RootAllocator();
-             ParquetBatchReader r = ParquetScan.scan(file).open(alloc)) {
+             ParquetBatchReader r = ParquetScan.scan(file).useJavaSnappyDecoder(true).open(alloc)) {
             while (r.next()) {
                 VectorSchemaRoot root = r.root();
                 int n = root.getRowCount();
