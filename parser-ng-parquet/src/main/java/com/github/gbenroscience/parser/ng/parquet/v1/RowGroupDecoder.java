@@ -3,6 +3,7 @@ package com.github.gbenroscience.parser.ng.parquet.v1;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.LevelWalker;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.NodePlan;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.decode.FastColumnCursor;
+import com.github.gbenroscience.parser.ng.parquet.v1.internal.pages.OwnedRowGroupReader;
 import org.apache.arrow.vector.FieldVector; 
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -12,6 +13,7 @@ import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
+import org.apache.parquet.hadoop.util.HadoopCodecs;
 import org.apache.parquet.schema.MessageType;
 
 import java.io.IOException;
@@ -68,6 +70,11 @@ final class RowGroupDecoder implements AutoCloseable {
     private final ColumnDescriptor[] descs;
     private final long maxRowGroupBytes;
     private final ScanMetrics metrics; // may be null
+    /**
+     * Non-null only when {@code -Dparserng.ownPages=true}: this decoder then reads each row group's pages itself
+     * (see {@link OwnedRowGroupReader}) and only falls back to {@link #reader} for row groups it declines.
+     */
+    private final OwnedRowGroupReader owned;
 
     private final ColumnReader[] readers;
     private final FastColumnCursor[] cursors;   // same objects as readers[]; typed so page-byte counters are reachable
@@ -86,7 +93,8 @@ final class RowGroupDecoder implements AutoCloseable {
     private long pageBytesReported; // portion of the current row group's cursors' pageBytesLoaded already added to metrics
 
     RowGroupDecoder(ParquetSource file, ParquetFileReader reader, MessageType projected, NodePlan nodePlan,
-                    ColumnDescriptor[] descs, long maxRowGroupBytes, ScanMetrics metrics) {
+                    ColumnDescriptor[] descs, long maxRowGroupBytes, ScanMetrics metrics,
+                    Boolean useJavaSnappyDecoder) {
         this.file = file;
         this.reader = reader;
         this.projected = projected;
@@ -94,6 +102,10 @@ final class RowGroupDecoder implements AutoCloseable {
         this.descs = descs;
         this.maxRowGroupBytes = maxRowGroupBytes;
         this.metrics = metrics;
+        this.owned = OwnedRowGroupReader.enabled()
+                ? new OwnedRowGroupReader(file.input(), file.name(), HadoopCodecs.newFactory(0),
+                        ParquetBatchReader.useJavaSnappy(useJavaSnappyDecoder), maxRowGroupBytes)
+                : null;
         this.readers = new ColumnReader[descs.length];
         this.cursors = new FastColumnCursor[descs.length];
         if (metrics != null) {
@@ -121,6 +133,17 @@ final class RowGroupDecoder implements AutoCloseable {
      * (page-level pruning is off; see the class Javadoc).
      */
     boolean nextFilteredRowGroup() throws IOException {
+        if (owned != null) {
+            // Index-based so a declined row group can be read through parquet-java without disturbing the sequence.
+            List<BlockMetaData> blocks = reader.getRowGroups();
+            int idx = rgIndex + 1;
+            if (idx >= blocks.size()) return false;
+            PageReadStore owning = loadRowGroup(idx, blocks.get(idx));
+            if (owning == null) return false;
+            rgIndex = idx;
+            begin(owning, blocks.get(idx));
+            return true;
+        }
         PageReadStore pages = reader.readNextFilteredRowGroup();
         if (pages == null) return false;
         rgIndex++;
@@ -152,7 +175,7 @@ final class RowGroupDecoder implements AutoCloseable {
                     + blocks.size() + " surviving row group(s)", file, filteredIndex, null, null);
         }
         rgIndex = filteredIndex;
-        PageReadStore pages = reader.readFilteredRowGroup(filteredIndex);
+        PageReadStore pages = loadRowGroup(filteredIndex, blocks.get(filteredIndex));
         if (pages == null) { // fully pruned at page level: nothing to decode
             remaining = 0;
             return;
@@ -160,11 +183,25 @@ final class RowGroupDecoder implements AutoCloseable {
         begin(pages, blocks.get(filteredIndex));
     }
 
-    private void begin(PageReadStore pages, BlockMetaData block) {
+    /** One row group's pages: through {@link #owned} when enabled and willing, otherwise through parquet-java. */
+    private PageReadStore loadRowGroup(int index, BlockMetaData block) throws IOException {
+        if (owned != null) {
+            enforceRowGroupLimit(block, index); // before any I/O, so an oversized group is refused without being read
+            PageReadStore pages = owned.load(block, descs, index);
+            if (pages != null) return pages;
+        }
+        return reader.readFilteredRowGroup(index);
+    }
+
+    private void enforceRowGroupLimit(BlockMetaData block, int index) {
         if (block.getTotalByteSize() > maxRowGroupBytes) {
             throw new ParquetScanException("Row group declares " + block.getTotalByteSize()
-                    + " uncompressed bytes, above the configured limit " + maxRowGroupBytes, file, rgIndex, null, null);
+                    + " uncompressed bytes, above the configured limit " + maxRowGroupBytes, file, index, null, null);
         }
+    }
+
+    private void begin(PageReadStore pages, BlockMetaData block) {
+        enforceRowGroupLimit(block, rgIndex);
         for (int c = 0; c < descs.length; c++) {
             String colName = String.join(".", descs[c].getPath());
             try {
@@ -374,5 +411,6 @@ final class RowGroupDecoder implements AutoCloseable {
     @Override
     public void close() {
         try { reader.close(); } catch (IOException | RuntimeException ignored) { }
+        if (owned != null) owned.close();
     }
 }

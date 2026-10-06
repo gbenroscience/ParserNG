@@ -291,25 +291,27 @@ public final class FastColumnCursor implements ColumnReader {
     }
 
     private void decodeV1(DataPageV1 page) {
-        byte[] raw;
+        PageBytes pb;
         try {
-            raw = page.getBytes().toByteArray();
+            pb = PageBytes.of(page.getBytes());
         } catch (IOException e) {
             throw new ParquetScanException("Failed to read page bytes", file, -1, columnName, e);
         }
-        if (raw.length != page.getUncompressedSize()) {
-            throw new ParquetScanException("Page declares " + raw.length + " bytes but an uncompressed size of "
+        if (pb.len != page.getUncompressedSize()) {
+            throw new ParquetScanException("Page declares " + pb.len + " bytes but an uncompressed size of "
                     + page.getUncompressedSize() + " -- this decode engine expects PageReadStore obtained from "
                     + "ParquetFileReader.readNextRowGroup()/readNextFilteredRowGroup(), which decompresses eagerly; "
                     + "if this page is reaching this class still compressed, it is being used against a different "
                     + "PageReadStore source than it was designed for", file, -1, columnName, null);
         }
-        pageBytesLoaded += raw.length;
+        pageBytesLoaded += pb.len;
+        final byte[] raw = pb.buf;
+        final int end = pb.off + pb.len;
         int count = page.getValueCount();
         pageCount = count;
         ensureLevelCapacity(count);
         ByteReader br = new ByteReader();
-        br.wrap(raw, 0, raw.length);
+        br.wrap(raw, pb.off, pb.len);
 
         if (maxRep > 0) {
             int len = br.readIntLE();
@@ -329,7 +331,7 @@ public final class FastColumnCursor implements ColumnReader {
         } else {
             java.util.Arrays.fill(pageDef, 0, count, maxDef);
         }
-        setUpValueDecode(br, raw.length - br.pos, page.getValueEncoding(), count);
+        setUpValueDecode(br, end - br.pos, page.getValueEncoding(), count);
     }
 
     private void decodeV2(DataPageV2 page) {
@@ -358,11 +360,11 @@ public final class FastColumnCursor implements ColumnReader {
                         + "no decompressor by design (see class Javadoc); pages from ParquetFileReader.readNextRowGroup()/"
                         + "readNextFilteredRowGroup() are expected to already be decompressed", file, -1, columnName, null);
             }
-            byte[] raw = page.getData().toByteArray();
-            pageBytesLoaded += page.getRepetitionLevels().size() + page.getDefinitionLevels().size() + raw.length;
+            PageBytes pb = PageBytes.of(page.getData());
+            pageBytesLoaded += page.getRepetitionLevels().size() + page.getDefinitionLevels().size() + pb.len;
             ByteReader br = new ByteReader();
-            br.wrap(raw, 0, raw.length);
-            setUpValueDecode(br, raw.length, page.getDataEncoding(), count);
+            br.wrap(pb.buf, pb.off, pb.len);
+            setUpValueDecode(br, pb.len, page.getDataEncoding(), count);
         } catch (IOException e) {
             throw new ParquetScanException("Failed to decode Data Page V2", file, -1, columnName, e);
         }

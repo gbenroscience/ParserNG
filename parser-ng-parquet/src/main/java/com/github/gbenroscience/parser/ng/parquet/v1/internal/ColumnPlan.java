@@ -2,6 +2,7 @@ package com.github.gbenroscience.parser.ng.parquet.v1.internal;
 
 import com.github.gbenroscience.parser.ng.parquet.v1.ParquetScanException;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.decode.FastColumnCursor;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.types.DateUnit;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
@@ -19,6 +20,11 @@ import org.apache.parquet.schema.PrimitiveType;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.DoubleBuffer;
+import java.nio.FloatBuffer;
+import java.nio.IntBuffer;
+import java.nio.LongBuffer;
+import java.nio.ShortBuffer;
 import com.github.gbenroscience.parser.ng.parquet.v1.ParquetSource;
 
 /**
@@ -388,95 +394,91 @@ public final class ColumnPlan {
         }
     }
 
+    /**
+     * Writes one contiguous run of {@code n} already-decoded, already-present values at view-relative
+     * offset {@code viewOffset} (0 == this segment's first row, i.e. {@code at}). The view itself -- the
+     * one thing in this path that has real per-call cost (see {@link BulkVectorWriter}'s class doc) -- is
+     * built exactly once by the caller, outside the run loop, and handed in already positioned over the
+     * whole segment; every run after that is a zero-allocation absolute {@code put} into it.
+     */
+    @FunctionalInterface
+    private interface RunWriter {
+        void writeRun(int viewOffset, int base, int n);
+    }
+
+    /** {@code required}: one run, the whole segment. Nullable: one run per maximal stretch of present values. */
+    private void writeBulk(FastColumnCursor fc, int m, int at, boolean required, int maxDef, int base,
+                            ArrowBuf validity, RunWriter dataWriter) {
+        if (required) {
+            dataWriter.writeRun(0, base, m);
+            BulkVectorWriter.markValidRange(validity, at, m);
+            return;
+        }
+        final int[] defs = fc.bulkDefs();
+        final int d0 = fc.bulkDefBase();
+        int j = base, k = 0;
+        while (k < m) {
+            if (defs[d0 + k] != maxDef) { k++; continue; }
+            final int runStart = k;
+            while (k < m && defs[d0 + k] == maxDef) k++;
+            final int runLen = k - runStart;
+            dataWriter.writeRun(runStart, j, runLen);
+            BulkVectorWriter.markValidRange(validity, at + runStart, runLen);
+            j += runLen;
+        }
+    }
+
     private void writeSegment(FastColumnCursor fc, int m, int at, FieldVector v) {
         final int maxDef = this.maxDef;
         final int base = fc.bulkBase();
         final boolean required = maxDef == 0;
-        final int[] defs = fc.bulkDefs();
-        final int d0 = fc.bulkDefBase();
         switch (kind) {
-            case INT32: {
-                final IntVector o = (IntVector) v;
+            case INT32: case DATE_DAY: case UINT32: {
+                final BaseFixedWidthVector o = (BaseFixedWidthVector) v;
                 final int[] a = fc.bulkInts();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                final IntBuffer view = BulkVectorWriter.intView(o.getDataBuffer(), at, m);
+                writeBulk(fc, m, at, required, maxDef, base, o.getValidityBuffer(),
+                        (voff, vbase, vn) -> view.put(voff, a, vbase, vn));
                 break;
             }
-            case DATE_DAY: {
-                final DateDayVector o = (DateDayVector) v;
+            case INT16: case UINT16: {
+                final BaseFixedWidthVector o = (BaseFixedWidthVector) v;
                 final int[] a = fc.bulkInts();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                final ShortBuffer view = BulkVectorWriter.shortView(o.getDataBuffer(), at, m);
+                writeBulk(fc, m, at, required, maxDef, base, o.getValidityBuffer(),
+                        (voff, vbase, vn) -> BulkVectorWriter.putShortsNarrowing(view, voff, a, vbase, vn));
                 break;
             }
-            case INT16: {
-                final SmallIntVector o = (SmallIntVector) v;
+            case INT8: case UINT8: {
+                final BaseFixedWidthVector o = (BaseFixedWidthVector) v;
                 final int[] a = fc.bulkInts();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, (short) a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, (short) a[j++]); }
+                final ByteBuffer view = BulkVectorWriter.byteView(o.getDataBuffer(), at, m);
+                writeBulk(fc, m, at, required, maxDef, base, o.getValidityBuffer(),
+                        (voff, vbase, vn) -> BulkVectorWriter.putBytesNarrowing(view, voff, a, vbase, vn));
                 break;
             }
-            case INT8: {
-                final TinyIntVector o = (TinyIntVector) v;
-                final int[] a = fc.bulkInts();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, (byte) a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, (byte) a[j++]); }
-                break;
-            }
-            case INT64: {
-                final BigIntVector o = (BigIntVector) v;
+            case INT64: case TIMESTAMP: case UINT64: {
+                final BaseFixedWidthVector o = (BaseFixedWidthVector) v;
                 final long[] a = fc.bulkLongs();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
-                break;
-            }
-            case TIMESTAMP: {
-                final TimeStampVector o = (TimeStampVector) v;
-                final long[] a = fc.bulkLongs();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                final LongBuffer view = BulkVectorWriter.longView(o.getDataBuffer(), at, m);
+                writeBulk(fc, m, at, required, maxDef, base, o.getValidityBuffer(),
+                        (voff, vbase, vn) -> view.put(voff, a, vbase, vn));
                 break;
             }
             case FLOAT: {
                 final Float4Vector o = (Float4Vector) v;
                 final float[] a = fc.bulkFloats();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                final FloatBuffer view = BulkVectorWriter.floatView(o.getDataBuffer(), at, m);
+                writeBulk(fc, m, at, required, maxDef, base, o.getValidityBuffer(),
+                        (voff, vbase, vn) -> view.put(voff, a, vbase, vn));
                 break;
             }
             case DOUBLE: {
                 final Float8Vector o = (Float8Vector) v;
                 final double[] a = fc.bulkDoubles();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
-                break;
-            }
-            case UINT32: {
-                final UInt4Vector o = (UInt4Vector) v;
-                final int[] a = fc.bulkInts();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
-                break;
-            }
-            case UINT16: {
-                final UInt2Vector o = (UInt2Vector) v;
-                final int[] a = fc.bulkInts();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, (short) a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, (short) a[j++]); }
-                break;
-            }
-            case UINT8: {
-                final UInt1Vector o = (UInt1Vector) v;
-                final int[] a = fc.bulkInts();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, (byte) a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, (byte) a[j++]); }
-                break;
-            }
-            case UINT64: {
-                final UInt8Vector o = (UInt8Vector) v;
-                final long[] a = fc.bulkLongs();
-                if (required) { for (int k = 0; k < m; k++) o.set(at + k, a[base + k]); }
-                else { int j = base; for (int k = 0; k < m; k++) if (defs[d0 + k] == maxDef) o.set(at + k, a[j++]); }
+                final DoubleBuffer view = BulkVectorWriter.doubleView(o.getDataBuffer(), at, m);
+                writeBulk(fc, m, at, required, maxDef, base, o.getValidityBuffer(),
+                        (voff, vbase, vn) -> view.put(voff, a, vbase, vn));
                 break;
             }
             default:
