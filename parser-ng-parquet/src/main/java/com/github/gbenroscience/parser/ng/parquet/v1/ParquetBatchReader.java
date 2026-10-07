@@ -141,7 +141,7 @@ public final class ParquetBatchReader implements AutoCloseable {
             if (parallelism <= 1) {
                 filtered.setRequestedSchema(projected);
                 RowGroupDecoder decoder = new RowGroupDecoder(
-                        file, filtered, projected, nodePlan, descriptors, maxRowGroupBytes, m, useJavaSnappyDecoder);
+                        file, filtered, projected, nodePlan, descriptors, maxRowGroupBytes, m);
                 probeOrFiltered = null; // ownership moves to the decoder
                 built = new SequentialSource(file, decoder, fields, allocator, batchSize);
             } else {
@@ -194,16 +194,13 @@ public final class ParquetBatchReader implements AutoCloseable {
      * {@code null} to defer to the {@code -Dparserng.snappy=panama} system property (the pre-existing,
      * JVM-wide default both still fall back to). Explicit {@code TRUE}/{@code FALSE} here always wins.
      */
-    /** Whether this scan decodes SNAPPY in pure Java: its explicit override if set, else {@code -Dparserng.snappy=panama}. */
-    static boolean useJavaSnappy(Boolean override) {
-        return override != null ? override : "panama".equals(System.getProperty("parserng.snappy"));
-    }
-
     static ParquetReadOptions newReadOptions(FilterCompat.Filter filter, Boolean useJavaSnappyDecoder) {
         ParquetReadOptions.Builder b = ParquetReadOptions.builder()
                 .useStatsFilter(true).useDictionaryFilter(true).useBloomFilter(true)
                 .useColumnIndexFilter(false).withRecordFilter(filter);
-        boolean useJava = useJavaSnappy(useJavaSnappyDecoder);
+        boolean useJava = (useJavaSnappyDecoder != null)
+                ? useJavaSnappyDecoder
+                : "panama".equals(System.getProperty("parserng.snappy"));
         // A fresh factory per call, like the options themselves: decompressors are never shared across threads.
         if (useJava) {
             b.withCodecFactory(new PanamaSnappyCodecFactory(HadoopCodecs.newFactory(0)));

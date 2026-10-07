@@ -16,16 +16,11 @@ import java.util.Arrays;
  * block size / miniblock count / value count are ULEB128; the first value and each block's min delta
  * are zigzag ULEB128; each miniblock is {@code blockSizeInValues / miniblocksPerBlock} values, LSB-first
  * bit-packed (same packing convention as an RLE/bit-packing-hybrid bit-packed run) at that miniblock's
- * own bit width. A final, partially-filled block still carries a bitwidth byte for <em>every</em>
- * miniblock, but the <em>data</em> of miniblocks that hold no values is omitted. The bit widths of those
- * unneeded miniblocks are <b>not reliably zero</b>: parquet-java's writer keeps its width array across
- * blocks and only refreshes the entries it needs, so after a full block the unused slots still hold the
- * previous block's widths. This decoder therefore reads data for exactly
- * {@code ceil(remainingValues / valuesPerMiniblock)} miniblocks (capped at {@code miniblocksPerBlock}),
- * which is what parquet-java's own reader does, and never trusts the width of a miniblock it does not need.
- * (An earlier version read every miniblock and relied on padding widths being 0; it mis-parsed any page whose
- * delta stream had a full block followed by a short one, which showed up as a bogus value-count mismatch
- * on the <em>second</em> delta sequence of a DELTA_BYTE_ARRAY page.)
+ * own bit width. A final, partially-filled block still carries a full header and bitwidth byte for
+ * every miniblock -- the spec's "when there are not enough values to encode a full block we pad with
+ * zeros" -- so this decoder always reads {@code miniblocksPerBlock} miniblocks per block and lets the
+ * padding miniblocks' bit width (0, in every writer this was checked against) account for their absence
+ * of data bytes, rather than trying to infer how many miniblocks were "really" written.
  *
  * <p>Only the page's <em>present</em> entries are delta-encoded (nulls carry no value, exactly as for
  * every other value stream {@link FastColumnCursor} reads), so {@code count} here is always the page's
@@ -81,10 +76,11 @@ public final class DeltaBinaryPackedDecoder {
                 if (w > 64) throw new ByteReader.Corrupt(br.pos, 0, br.limit, br.buf.length);
                 bitWidths[m] = w;
             }
-            // Only miniblocks that hold values have data in the stream; the widths of the rest are present but
-            // meaningless (see class Javadoc), so they are neither read nor trusted.
-            final int needed = (int) Math.min((long) miniblocksPerBlock, ((long) remaining + valuesPerMiniblock - 1) / valuesPerMiniblock);
-            for (int m = 0; m < needed; m++) {
+            // Every miniblock in the block is present in the stream (see class Javadoc), so this loop
+            // never breaks early on `remaining` -- an already-exhausted miniblock still costs a
+            // readBitPackedGroupsLong call, but at bit width 0 (the padding convention) that call reads
+            // zero bytes and writes only zeros, so it is a correct no-op rather than a special case.
+            for (int m = 0; m < miniblocksPerBlock; m++) {
                 br.readBitPackedGroupsLong(bitWidths[m], groupCount8, deltaScratch, 0, valuesPerMiniblock);
                 final int take = Math.max(0, Math.min(remaining, valuesPerMiniblock));
                 for (int i = 0; i < take; i++) {

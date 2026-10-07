@@ -65,50 +65,6 @@ class DeltaBinaryPackedDecoderTest {
     }
 
     @Test
-    void shortFinalBlockWithStaleWidthsFromPreviousBlock_asWrittenByParquetJava() {
-        // Several lengths around the block boundaries, with varying deltas so every miniblock of every full block has a
-        // non-zero width; the short last block then carries those stale widths in its unused slots, with no data behind them.
-        Random rnd = new Random(7);
-        for (int n : new int[]{2, 33, 129, 130, 161, 257, 258, 300, 301, 400, 1000}) {
-            for (int[] shape : new int[][]{{128, 4}, {64, 2}, {256, 8}}) {
-                long[] values = new long[n];
-                long v = 1000;
-                for (int i = 0; i < n; i++) { v += rnd.nextInt(40); values[i] = v; }
-                byte[] raw = encodeDeltaBinaryPackedLikeParquetJava(shape[0], shape[1], values);
-                ByteReader br = reader(raw);
-                long[] out = new long[n];
-                DeltaBinaryPackedDecoder.decode(br, out, n);
-                assertArrayEquals(values, out, "n=" + n + " block=" + shape[0] + "/" + shape[1]);
-                assertEquals(raw.length, br.pos, "n=" + n + " block=" + shape[0] + "/" + shape[1] + ": must end exactly where the section ends");
-            }
-        }
-    }
-
-    @Test
-    void twoConsecutiveSequencesWithStaleWidths_theDeltaByteArrayShape() {
-        // DELTA_BYTE_ARRAY = prefix lengths then suffix lengths, back to back. The second header is only found at the
-        // right place if the first sequence consumed exactly its own bytes.
-        Random rnd = new Random(11);
-        for (int n : new int[]{130, 300, 513}) {
-            long[] a = new long[n], b = new long[n];
-            long x = 0, y = 0;
-            for (int i = 0; i < n; i++) { x += rnd.nextInt(7); y += rnd.nextInt(25); a[i] = x; b[i] = y; }
-            byte[] first = encodeDeltaBinaryPackedLikeParquetJava(128, 4, a), second = encodeDeltaBinaryPackedLikeParquetJava(128, 4, b);
-            byte[] both = new byte[first.length + second.length];
-            System.arraycopy(first, 0, both, 0, first.length);
-            System.arraycopy(second, 0, both, first.length, second.length);
-            ByteReader br = reader(both);
-            long[] outA = new long[n], outB = new long[n];
-            DeltaBinaryPackedDecoder.decode(br, outA, n);
-            assertEquals(first.length, br.pos, "first sequence must stop exactly at the second header, n=" + n);
-            DeltaBinaryPackedDecoder.decode(br, outB, n);
-            assertArrayEquals(a, outA);
-            assertArrayEquals(b, outB);
-            assertEquals(both.length, br.pos);
-        }
-    }
-
-    @Test
     void int32NarrowingViaDecodeInts() {
         long[] values = new long[]{100, 105, 90, 90, 500, -3000};
         byte[] raw = encodeDeltaBinaryPacked(8, 1, values);

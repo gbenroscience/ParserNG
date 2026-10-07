@@ -1232,7 +1232,7 @@ public class SIMDCommandF64 extends VectorTurboEvaluator {
                         case OP_ROUND ->
                             VectorMath::round; 
                         case OP_FLOOR ->
-                            VectorMath::floor;
+                            VectorMath::floor; 
 
                         // Standard Trig
                         case OP_SIN ->

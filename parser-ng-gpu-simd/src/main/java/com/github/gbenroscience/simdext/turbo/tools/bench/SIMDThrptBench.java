@@ -45,8 +45,7 @@ public class SIMDThrptBench {
         // Compile using the ParserNG Turbo Engine
         SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression evaluator;
         try {
-            evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression) 
-                    new SIMDVectorTurboEvaluator(me).compile();
+            evaluator = SIMDVectorTurboEvaluator.getEvaluator(me);
         } catch (Exception e) {
             System.err.println("Compilation failed. Ensure syntax and function support match ParserNG criteria.");
             e.printStackTrace();

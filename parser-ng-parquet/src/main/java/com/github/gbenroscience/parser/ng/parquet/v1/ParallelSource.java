@@ -121,7 +121,7 @@ final class ParallelSource implements BatchSource {
                 try {
                     verifySurvivors(r, expectedStartingPos);
                     r.setRequestedSchema(projected);
-                    d = new RowGroupDecoder(file, r, projected, nodePlan, descs, maxRowGroupBytes, metrics, useJavaSnappyDecoder);
+                    d = new RowGroupDecoder(file, r, projected, nodePlan, descs, maxRowGroupBytes, metrics);
                 } catch (RuntimeException e) {
                     try { r.close(); } catch (IOException | RuntimeException ignored) { }
                     throw e;

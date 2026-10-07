@@ -2039,4 +2039,16 @@ public final class VectorMath {
         }
     }
 
+        public static void fact(double[] src, int srcBase, double[] dest, int destBase, int n) {
+        int i = 0, limit = SPECIES.loopBound(n);
+        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
+        for (; i < limit; i += SPECIES.length()) {
+            DoubleVector x = DoubleVector.fromArray(SPECIES, src, srcBase + i);
+            DoubleVector expNegX = fastVectorExp(x.neg());
+            x.div(expNegX.add(ONE)).intoArray(dest, destBase + i);
+        }
+        for (; i < n; i++) {
+            dest[destBase + i] = Maths.swiglu(src[srcBase + i]);
+        }
+    }
 }

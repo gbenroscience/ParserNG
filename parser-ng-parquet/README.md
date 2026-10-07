@@ -431,38 +431,6 @@ dedicated paths for bit widths 1 and 2-8. The numbers quoted in `SimdBulkDecode`
 faster than the scalar loop for bulk int32/double decode) come from an informal, non-JMH harness and
 should be re-measured on your hardware.
 
-## Page-reading ownership (experimental, off by default)
-
-By default every row group's pages are read and decompressed inside `ParquetFileReader`; this module only
-decodes what that hands back. `-Dparserng.ownPages=true` makes `RowGroupDecoder` read the pages itself
-(`internal.pages.OwnedRowGroupReader`) and present them through the same `PageReadStore` contract, so the
-decode engine is unchanged:
-
-* one `readFully` per run of adjacent projected column chunks, into one reusable buffer (not an allocation
-  per chunk plus a `BytesInput` chain);
-* UNCOMPRESSED pages are zero-copy slices of that buffer;
-* compressed data pages decompress into one reusable array **per column** (steady state: no per-page
-  allocation); dictionary pages get their own array, since they live for the whole row group;
-* SNAPPY with `useJavaSnappyDecoder(true)` / `-Dparserng.snappy=panama` goes chunk buffer -> page buffer with
-  no `BytesInput` in between; every other codec (and stock SNAPPY) goes through parquet-java's own
-  decompressor. Data Page V2 is handled per spec (levels are never compressed; values only when `is_compressed`).
-
-**Safety.** Everything it hands out is valid only until the next row group is loaded, and that is
-*enforced*: a stale page reader or store throws `IllegalStateException` rather than decoding recycled bytes.
-`-Dparserng.ownPages.reuseBuffers=false` keeps the single-read / zero-copy chunk path but allocates per page,
-to isolate a suspected reuse problem. A row group it will not handle -- encrypted chunk, missing column,
-overlapping or out-of-file ranges, more than 1 GiB of chunk bytes -- is simply read through parquet-java
-instead (`OwnedRowGroupReader#fallbackCount`). Malformed pages surface as `ParquetDecodingException`
-naming file, row group and column; declared sizes are bounded (`maxRowGroupBytes`, and Snappy's maximum
-expansion ratio) *before* anything is allocated, so a hostile header cannot force a huge allocation.
-Not done, same as parquet-java's defaults: page CRC verification and column-index page pruning.
-
-**Status: not yet measured end to end.** `OwnedPagesScanTest` pins "same rows, same order" against the stock
-path across codecs x page versions x dictionary x parallelism. Measure before enabling: run
-`FairCompareJmhBenchmark` with and without `-Dparserng.ownPages=true` (and with `-Dparserng.snappy=panama`
-on top). If the profile shows the time is elsewhere (Arrow writes, string materialisation), this will not
-move the number.
-
 ## Feature matrix
 | Area | Status |
 |---|---|
