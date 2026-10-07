@@ -130,6 +130,47 @@ class OwnedPagesScanTest {
         assertEquals(baseline, scan(ParquetScan.scan(file).batchSize(97), true), "owned, odd batch size straddling page boundaries");
     }
 
+    /** Same as {@link #scan} but with every row group forced onto the windowed read path, with the given per-column window. */
+    private static List<String> scanWindowed(ParquetScan scan, long windowBytes) {
+        String prevMax = System.getProperty(OwnedRowGroupReader.PROP_MAX_BUFFERED);
+        String prevWin = System.getProperty(OwnedRowGroupReader.PROP_WINDOW);
+        System.setProperty(OwnedRowGroupReader.PROP_MAX_BUFFERED, "0");
+        System.setProperty(OwnedRowGroupReader.PROP_WINDOW, Long.toString(windowBytes));
+        try {
+            return scan(scan, true);
+        } finally {
+            if (prevMax == null) System.clearProperty(OwnedRowGroupReader.PROP_MAX_BUFFERED);
+            else System.setProperty(OwnedRowGroupReader.PROP_MAX_BUFFERED, prevMax);
+            if (prevWin == null) System.clearProperty(OwnedRowGroupReader.PROP_WINDOW);
+            else System.setProperty(OwnedRowGroupReader.PROP_WINDOW, prevWin);
+        }
+    }
+
+    @ParameterizedTest(name = "windowed: {0} {1} dictionary={2}")
+    @MethodSource("matrix")
+    void windowedReadsMatchParquetJava(CompressionCodecName codec, WriterVersion version, boolean dictionary) throws IOException {
+        Path file = write(codec, version, dictionary, ROWS);
+        List<String> baseline = scan(ParquetScan.scan(file), false);
+        assertEquals(ROWS, baseline.size(), "baseline sanity");
+        // 300 B is far below the 2 KiB pages (the window must grow to hold a page); 5000 B holds a couple of pages.
+        for (long window : new long[]{300, 5000}) {
+            assertEquals(baseline, scanWindowed(ParquetScan.scan(file), window), "windowed " + window + " B, stock snappy-java");
+            assertEquals(baseline, scanWindowed(ParquetScan.scan(file).useJavaSnappyDecoder(true), window), "windowed " + window + " B, pure-Java Snappy");
+            assertEquals(baseline, scanWindowed(ParquetScan.scan(file).useJavaSnappyDecoder(true).parallelism(3), window), "windowed " + window + " B, parallel");
+        }
+    }
+
+    @Test
+    void windowedProjectionAndTinyFilesMatch() throws IOException {
+        Path file = write(CompressionCodecName.SNAPPY, WriterVersion.PARQUET_1_0, true, ROWS);
+        ParquetScan sel = ParquetScan.scan(file).select("id", "payload");
+        assertEquals(scan(sel, false), scanWindowed(sel, 700));
+        for (int rows : new int[]{0, 1, 2, 17}) {
+            Path tiny = write(CompressionCodecName.SNAPPY, WriterVersion.PARQUET_2_0, true, rows);
+            assertEquals(scan(ParquetScan.scan(tiny), false), scanWindowed(ParquetScan.scan(tiny).useJavaSnappyDecoder(true), 300), "rows=" + rows);
+        }
+    }
+
     @Test
     void projectionReadsOnlyTheRequestedColumnsAndStillMatches() throws IOException {
         Path file = write(CompressionCodecName.SNAPPY, WriterVersion.PARQUET_1_0, true, ROWS);

@@ -18,26 +18,29 @@ import java.util.function.UnaryOperator;
  * <java.io.tmpdir>/parser-ng-pyarrow-compare and KEEPS them, so pyarrow_bench.py reads the very same files
  * from the same default location. Existing fixtures are reused; pass "regen" to rewrite them.
  *
- * Args (all optional): [flatRows=5000000] [nestedRows=1000000] [regen]
+ * Args (all optional): [flatRows=5000000] [nestedRows=1000000] [regen] [rowGroupMB=8]
+ * A rowGroupMB other than 8 uses its own folder (parser-ng-pyarrow-compare-rg<N>mb), so pass the same --dir to pyarrow_bench.py.
  */
 public class ScanFile {
     public static void main(String[] args) throws Exception {
         int flatRows = args.length > 0 ? Integer.parseInt(args[0]) : 5_000_000;
         int nestedRows = args.length > 1 ? Integer.parseInt(args[1]) : 1_000_000;
         boolean regen = args.length > 2 && args[2].equalsIgnoreCase("regen");
+        int rowGroupMb = args.length > 3 ? Integer.parseInt(args[3]) : 8;
+        long rowGroupBytes = rowGroupMb * 1024L * 1024L;
 
-        Path dir = Path.of(System.getProperty("java.io.tmpdir"), "parser-ng-pyarrow-compare");
+        Path dir = Path.of(System.getProperty("java.io.tmpdir"), rowGroupMb == 8 ? "parser-ng-pyarrow-compare" : "parser-ng-pyarrow-compare-rg" + rowGroupMb + "mb");
         Files.createDirectories(dir);
         Path flat = dir.resolve("flat.parquet"), nested = dir.resolve("nested.parquet");
         System.out.println("Fixtures dir: " + dir.toAbsolutePath());
 
         if (regen || !Files.exists(flat)) {
             RandomParquetFiles.write(flat, RandomParquetFiles.SAMPLE_FLAT_SCHEMA, flatRows,
-                    RandomParquetFiles.Config.defaults().seed(42).rowGroupSize(8L * 1024 * 1024));
+                    RandomParquetFiles.Config.defaults().seed(42).rowGroupSize(rowGroupBytes));
         }
         if (regen || !Files.exists(nested)) {
             RandomParquetFiles.write(nested, RandomParquetFiles.SAMPLE_NESTED_SCHEMA, nestedRows,
-                    RandomParquetFiles.Config.defaults().seed(7).collectionSize(0, 8).rowGroupSize(8L * 1024 * 1024));
+                    RandomParquetFiles.Config.defaults().seed(7).collectionSize(0, 8).rowGroupSize(rowGroupBytes));
         }
 
         try (BufferAllocator alloc = new RootAllocator()) {

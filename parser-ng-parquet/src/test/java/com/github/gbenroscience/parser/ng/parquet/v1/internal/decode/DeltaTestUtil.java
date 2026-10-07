@@ -87,6 +87,46 @@ final class DeltaTestUtil {
         return out.toByteArray();
     }
 
+    /**
+     * DELTA_BINARY_PACKED laid out the way parquet-java's writer does it: one bit-width array that persists across
+     * blocks and is only refreshed for the miniblocks a block actually uses, all {@code miniblocksPerBlock} widths
+     * written for every block (so the unused slots of a short final block keep the previous block's, usually
+     * non-zero, widths), but data written only for the miniblocks that hold values. {@link #encodeDeltaBinaryPacked}
+     * pads with zero widths instead, which is spec-legal but is not what real files contain.
+     */
+    static byte[] encodeDeltaBinaryPackedLikeParquetJava(int blockSize, int miniblocksPerBlock, long[] values) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        writeUVarInt(out, blockSize);
+        writeUVarInt(out, miniblocksPerBlock);
+        writeUVarInt(out, values.length);
+        writeZigZag(out, values[0]);
+        int per = blockSize / miniblocksPerBlock;
+        int[] widths = new int[miniblocksPerBlock];
+        int i = 1;
+        while (i < values.length) {
+            int n = Math.min(blockSize, values.length - i);
+            long[] d = new long[n];
+            long min = Long.MAX_VALUE;
+            for (int k = 0; k < n; k++) { d[k] = values[i + k] - values[i + k - 1]; min = Math.min(min, d[k]); }
+            for (int k = 0; k < n; k++) d[k] -= min;
+            int needed = (n + per - 1) / per;
+            for (int m = 0; m < needed; m++) {
+                long mask = 0;
+                for (int k = m * per; k < Math.min(n, (m + 1) * per); k++) mask |= d[k];
+                widths[m] = 64 - Long.numberOfLeadingZeros(mask);
+            }
+            writeZigZag(out, min);
+            for (int m = 0; m < miniblocksPerBlock; m++) out.write(widths[m]);            // all widths, stale ones included
+            for (int m = 0; m < needed; m++) {                                              // data only for miniblocks with values
+                long[] mini = new long[per];
+                for (int k = 0; k < per; k++) { int idx = m * per + k; mini[k] = idx < n ? d[idx] : 0; }
+                writeBitPacked(out, widths[m], mini);
+            }
+            i += n;
+        }
+        return out.toByteArray();
+    }
+
     static ByteReader reader(byte[] bytes) {
         ByteReader br = new ByteReader();
         br.wrap(bytes, 0, bytes.length);

@@ -61,10 +61,23 @@ import java.util.Map;
  * single-read / zero-copy chunk path but allocates a fresh array per decompressed page, which isolates a
  * suspected reuse problem.
  *
+ * <h2>Memory</h2>
+ * Per reader (so per parallel worker) the retained heap is, at most: the row group's projected chunk bytes (only
+ * while they total {@value #DEFAULT_MAX_BUFFERED_MIB} MiB or less, see below), plus one decompressed-page buffer per
+ * projected column. A row group whose projected chunks total more than {@code -Dparserng.ownPages.maxBuffered}
+ * bytes is instead read <b>windowed</b>: each column keeps only a small read-ahead window of its own chunk
+ * ({@code -Dparserng.ownPages.window}, default 1 MiB, shrunk when many columns are projected so that the windows
+ * together stay inside the budget; always at least as large as the largest page). A window is refilled from the
+ * file when the cursor reaches its end, keeping the unread tail, so the file is still read sequentially within
+ * every column and each byte is read once. {@code maxBuffered=0} forces windowed reads, a negative value
+ * disables them (the pre-windowing behaviour: one buffer for the whole row group, 1 GiB cap). See
+ * {@link #retainedBytes()}.
+ *
  * <h2>When it steps aside</h2>
  * {@link #load} returns {@code null} -- and the caller reads that row group through parquet-java, which then
  * produces its own diagnostics -- for anything unusual: an encrypted chunk, a projected column missing from the
- * row group, overlapping or out-of-file byte ranges, or a row group needing more than 1 GiB of chunk buffer.
+ * row group, overlapping or out-of-file byte ranges, or (only when windowing is disabled) a row group needing more
+ * than 1 GiB of chunk buffer.
  * {@link #fallbackCount()} reports how often that happened. Malformed pages <em>inside</em> a chunk surface lazily
  * as {@link ParquetDecodingException} (the cursor / {@code RowGroupDecoder} attach file, row group and column).
  *
@@ -85,7 +98,19 @@ public final class OwnedRowGroupReader implements AutoCloseable {
     /** Above this, a row group's chunk bytes are not buffered here; parquet-java's multi-buffer path takes over. */
     static final long MAX_CHUNK_BUFFER = 1L << 30;
     /** Per-buffer retention cap: a one-off giant page is allocated, used, and dropped rather than pinned forever. */
-    static final int MAX_RETAINED_BUFFER = 64 << 20;
+    static final int MAX_RETAINED_BUFFER = 16 << 20;
+    /** {@code -Dparserng.ownPages.maxBuffered=BYTES}: row groups whose projected chunks exceed this are read windowed. */
+    public static final String PROP_MAX_BUFFERED = "parserng.ownPages.maxBuffered";
+    /** {@code -Dparserng.ownPages.window=BYTES}: the largest per-column read-ahead window in windowed mode. */
+    public static final String PROP_WINDOW = "parserng.ownPages.window";
+    static final long DEFAULT_MAX_BUFFERED = 16L << 20;
+    static final int DEFAULT_MAX_BUFFERED_MIB = 16;
+    static final int DEFAULT_WINDOW = 1 << 20;
+    /** Windows are never shrunk below this by the many-columns rule (tests may go lower via the explicit constructor). */
+    static final int MIN_WINDOW = 128 << 10;
+    /** A page header is parsed from a probe this large first, then from larger and larger prefixes, up to the cap. */
+    static final int HEADER_PROBE = 4096;
+    static final int MAX_HEADER_BYTES = 4 << 20;
     /** Largest possible Snappy expansion is 64 output bytes per 3 input bytes (~21.4x); 22x plus slack is safe. */
     private static final long SNAPPY_MAX_RATIO = 22;
     private static final byte[] EMPTY = new byte[0];
@@ -100,11 +125,14 @@ public final class OwnedRowGroupReader implements AutoCloseable {
     private final boolean javaSnappy;
     private final boolean reuse;
     private final long maxPageBytes;
+    private final long maxBuffered;
+    private final int windowBytes;
 
     private SeekableInputStream in;
     private long fileLength = -1;
     private byte[] chunkBuf = EMPTY;
     private byte[][] pageBufs = new byte[0][];
+    private byte[][] winBufs = new byte[0][];
     private final PositionedInput headerIn = new PositionedInput();
     private final Map<CompressionCodecName, CompressionCodecFactory.BytesInputDecompressor> decompressors =
             new EnumMap<>(CompressionCodecName.class);
@@ -113,6 +141,7 @@ public final class OwnedRowGroupReader implements AutoCloseable {
     private boolean closed;
     private long fallbacks;
     private long rowGroupsLoaded;
+    private long windowedLoaded;
 
     /**
      * @param codecs        supplies decompressors for every codec this class does not decompress itself; released on {@link #close()}
@@ -121,6 +150,20 @@ public final class OwnedRowGroupReader implements AutoCloseable {
      */
     public OwnedRowGroupReader(InputFile input, String fileName, CompressionCodecFactory codecs,
                                boolean javaSnappy, long maxPageBytes) {
+        this(input, fileName, codecs, javaSnappy, maxPageBytes,
+                Long.getLong(PROP_MAX_BUFFERED, DEFAULT_MAX_BUFFERED),
+                (int) Math.max(1L, Math.min(Integer.MAX_VALUE >> 1, Long.getLong(PROP_WINDOW, DEFAULT_WINDOW))));
+    }
+
+    /**
+     * As above, with the memory knobs explicit (the system properties are only read by the shorter constructor).
+     *
+     * @param maxBuffered row groups whose projected chunks total more than this many bytes are read windowed;
+     *                    {@code 0} always windows, a negative value never does
+     * @param windowBytes the largest per-column read-ahead window in windowed mode
+     */
+    public OwnedRowGroupReader(InputFile input, String fileName, CompressionCodecFactory codecs,
+                               boolean javaSnappy, long maxPageBytes, long maxBuffered, int windowBytes) {
         if (input == null) throw new NullPointerException("input");
         if (codecs == null) throw new NullPointerException("codecs");
         this.input = input;
@@ -129,6 +172,8 @@ public final class OwnedRowGroupReader implements AutoCloseable {
         this.javaSnappy = javaSnappy;
         this.maxPageBytes = Math.min(maxPageBytes <= 0 ? Integer.MAX_VALUE : maxPageBytes, Integer.MAX_VALUE - 16L);
         this.reuse = Boolean.parseBoolean(System.getProperty(PROP_REUSE, "true"));
+        this.maxBuffered = maxBuffered;
+        this.windowBytes = Math.max(1, windowBytes);
     }
 
     /** How many row groups were declined (and so must be read by parquet-java). */
@@ -136,6 +181,21 @@ public final class OwnedRowGroupReader implements AutoCloseable {
 
     /** How many row groups this reader served itself. */
     public long loadedRowGroups() { return rowGroupsLoaded; }
+
+    /** How many of those were read windowed (see the class comment, "Memory"). */
+    public long windowedRowGroups() { return windowedLoaded; }
+
+    /**
+     * Bytes of heap this reader is currently holding on to for reuse: the chunk buffer, every pooled page buffer
+     * and every pooled read window. Dictionaries and pages above the retention cap are allocated per use and are
+     * not counted.
+     */
+    public long retainedBytes() {
+        long sum = chunkBuf.length;
+        for (byte[] b : pageBufs) if (b != null) sum += b.length;
+        for (byte[] b : winBufs) if (b != null) sum += b.length;
+        return sum;
+    }
 
     /**
      * Loads {@code block}'s chunks for {@code descs}.
@@ -172,7 +232,7 @@ public final class OwnedRowGroupReader implements AutoCloseable {
             size[i] = (int) len;
         }
 
-        // ---- 3. plan coalesced reads: sort by file offset, merge exactly-adjacent chunks --------------------
+        // ---- 3. order by file offset, reject overlaps, total the bytes ----------------------------------------
         final int[] order = new int[n];
         for (int i = 0; i < n; i++) order[i] = i;
         for (int i = 1; i < n; i++) { // insertion sort: n is the projected column count
@@ -181,50 +241,76 @@ public final class OwnedRowGroupReader implements AutoCloseable {
             while (j >= 0 && start[order[j]] > start[v]) { order[j + 1] = order[j]; j--; }
             order[j + 1] = v;
         }
-        final int[] bufOff = new int[n];
         long total = 0;
-        final long[] gStart = new long[n];
-        final int[] gLen = new int[n];
-        final int[] gBuf = new int[n];
-        int groups = 0;
+        int nonEmpty = 0;
         long prevEnd = Long.MIN_VALUE;
         for (int k = 0; k < n; k++) {
             int i = order[k];
-            if (size[i] == 0) { bufOff[i] = 0; continue; } // nothing to read; the pager yields no pages
-            if (start[i] < prevEnd) return declined();      // overlapping ranges: leave it to parquet-java
-            if (groups > 0 && start[i] == prevEnd) {        // adjacent: extend the current group
-                bufOff[i] = gBuf[groups - 1] + gLen[groups - 1];
-                gLen[groups - 1] += size[i];
-            } else {
-                gStart[groups] = start[i];
-                gLen[groups] = size[i];
-                gBuf[groups] = (int) total;
-                bufOff[i] = (int) total;
-                groups++;
-            }
+            if (size[i] == 0) continue;                 // nothing to read; the pager yields no pages
+            if (start[i] < prevEnd) return declined();  // overlapping ranges: leave it to parquet-java
             total += size[i];
-            if (total > MAX_CHUNK_BUFFER) return declined();
+            nonEmpty++;
             prevEnd = start[i] + size[i];
         }
-
-        // ---- 4. read ---------------------------------------------------------------------------------------
-        ensureChunkBuf((int) total);
-        if (groups > 0 && in == null) in = input.newStream();
-        for (int g = 0; g < groups; g++) {
-            in.seek(gStart[g]);
-            in.readFully(chunkBuf, gBuf[g], gLen[g]);
-        }
+        final boolean windowed = maxBuffered >= 0 && total > maxBuffered;
+        if (!windowed && total > MAX_CHUNK_BUFFER) return declined();
         if (pageBufs.length < n) pageBufs = Arrays.copyOf(pageBufs, n);
 
-        // ---- 5. hand out lazily-parsed page readers --------------------------------------------------------
         final ChunkPages[] readers = new ChunkPages[n];
-        final Map<ColumnPath, ChunkPages> byColumn = new HashMap<>();
-        for (int i = 0; i < n; i++) {
-            ColumnChunkMetaData c = chunks[i];
-            readers[i] = new ChunkPages(i, String.join(".", descs[i].getPath()), rowGroupIndex, c.getCodec(),
-                    bufOff[i], bufOff[i] + size[i], c.getValueCount(), generation);
-            byColumn.put(c.getPath(), readers[i]);
+        if (windowed) {
+            // ---- 4w. no up-front read: every column gets a small window onto its own chunk -------------------
+            if (nonEmpty > 0 && in == null) in = input.newStream();
+            if (winBufs.length < n) winBufs = Arrays.copyOf(winBufs, n);
+            long share = (maxBuffered > 0 ? maxBuffered : DEFAULT_MAX_BUFFERED) / Math.max(1, nonEmpty);
+            int w = (int) Math.max(Math.min(MIN_WINDOW, windowBytes), Math.min((long) windowBytes, share));
+            for (int i = 0; i < n; i++) {
+                ColumnChunkMetaData c = chunks[i];
+                readers[i] = new ChunkPages(i, String.join(".", descs[i].getPath()), rowGroupIndex, c.getCodec(), true,
+                        start[i], start[i] + size[i], 0, (int) Math.min((long) w, Math.max(1, size[i])),
+                        c.getValueCount(), generation);
+            }
+            windowedLoaded++;
+        } else {
+            // ---- 4. coalesce exactly-adjacent chunks into runs, read each run with one readFully ----------------
+            final int[] bufOff = new int[n];
+            final long[] gStart = new long[n];
+            final int[] gLen = new int[n];
+            final int[] gBuf = new int[n];
+            int groups = 0;
+            long running = 0;
+            prevEnd = Long.MIN_VALUE;
+            for (int k = 0; k < n; k++) {
+                int i = order[k];
+                if (size[i] == 0) { bufOff[i] = 0; continue; }
+                if (groups > 0 && start[i] == prevEnd) {        // adjacent: extend the current run
+                    bufOff[i] = gBuf[groups - 1] + gLen[groups - 1];
+                    gLen[groups - 1] += size[i];
+                } else {
+                    gStart[groups] = start[i];
+                    gLen[groups] = size[i];
+                    gBuf[groups] = (int) running;
+                    bufOff[i] = (int) running;
+                    groups++;
+                }
+                running += size[i];
+                prevEnd = start[i] + size[i];
+            }
+            ensureChunkBuf((int) total);
+            if (groups > 0 && in == null) in = input.newStream();
+            for (int g = 0; g < groups; g++) {
+                in.seek(gStart[g]);
+                in.readFully(chunkBuf, gBuf[g], gLen[g]);
+            }
+            for (int i = 0; i < n; i++) {
+                ColumnChunkMetaData c = chunks[i];
+                readers[i] = new ChunkPages(i, String.join(".", descs[i].getPath()), rowGroupIndex, c.getCodec(), false,
+                        start[i], start[i] + size[i], bufOff[i], 0, c.getValueCount(), generation);
+            }
         }
+
+        // ---- 5. hand out lazily-parsed page readers --------------------------------------------------------
+        final Map<ColumnPath, ChunkPages> byColumn = new HashMap<>();
+        for (int i = 0; i < n; i++) byColumn.put(chunks[i].getPath(), readers[i]);
         rowGroupsLoaded++;
         return new Store(byColumn, block.getRowCount(), generation);
     }
@@ -236,9 +322,9 @@ public final class OwnedRowGroupReader implements AutoCloseable {
 
     private void ensureChunkBuf(int needed) {
         if (chunkBuf.length >= needed) return;
-        // Geometric growth, but never past what the next row group could plausibly need by more than 25%.
-        int grown = (int) Math.min(MAX_CHUNK_BUFFER, Math.max((long) needed, (long) chunkBuf.length + (chunkBuf.length >> 2)));
-        chunkBuf = new byte[grown];
+        // Row groups of one file are near-uniform, so ~6% slack is enough to absorb most size jitter without
+        // pinning a quarter more than the largest row group needs.
+        chunkBuf = new byte[(int) Math.min(MAX_CHUNK_BUFFER, (long) needed + (needed >> 4))];
     }
 
     /** A page buffer of at least {@code len} bytes for column {@code slot}; fresh when reuse is off or the size is extreme. */
@@ -249,6 +335,18 @@ public final class OwnedRowGroupReader implements AutoCloseable {
             int grown = (int) Math.min(MAX_RETAINED_BUFFER, Math.max((long) len, b == null ? 0L : (long) b.length + (b.length >> 1)));
             b = new byte[grown];
             pageBufs[slot] = b;
+        }
+        return b;
+    }
+
+    /** A read window of at least {@code need} bytes for column {@code slot} (pooled unless extreme). */
+    private byte[] acquireWindow(int slot, int need) {
+        if (!reuse || need > MAX_RETAINED_BUFFER) return new byte[need];
+        byte[] b = winBufs[slot];
+        if (b == null || b.length < need) {
+            int grown = (int) Math.min(MAX_RETAINED_BUFFER, Math.max((long) need, b == null ? 0L : (long) b.length + (b.length >> 2)));
+            b = new byte[grown];
+            winBufs[slot] = b;
         }
         return b;
     }
@@ -268,6 +366,7 @@ public final class OwnedRowGroupReader implements AutoCloseable {
         decompressors.clear();
         chunkBuf = EMPTY;
         pageBufs = new byte[0][];
+        winBufs = new byte[0][];
     }
 
     // =====================================================================================================
@@ -306,29 +405,41 @@ public final class OwnedRowGroupReader implements AutoCloseable {
         private final String column;
         private final int rowGroup;
         private final CompressionCodecName codec;
-        private final int begin;          // absolute start of this chunk in chunkBuf
-        private final int end;            // absolute end of this chunk in chunkBuf
+        private final boolean windowed;   // true: bytes come through a per-column window; false: from the shared chunkBuf
+        private final long fileStart;     // file offset of this chunk's first byte
+        private final long fileEnd;       // file offset one past its last byte
+        private final int begin;          // whole-buffer mode: index of the chunk's first byte in chunkBuf
+        private final int window;         // windowed mode: preferred read-ahead, in bytes
         private final long totalValues;
         private final int gen;
 
-        private int pos;                  // absolute position in chunkBuf of the next unparsed page header
+        // windowed mode: win[0 .. winValid) holds file bytes [winStart, winStart + winValid)
+        private byte[] win;
+        private long winStart;
+        private int winValid;
+
+        private long pos;                 // file offset of the next unparsed page header
         private long valuesRead;
         private boolean dictChecked;
         private DictionaryPage dictionary;
         private PageHeader pending;       // header parsed by peek() but not yet consumed
-        private int payloadPos;           // absolute position of the pending header's payload
+        private long payloadPos;          // file offset of the pending header's payload
 
-        ChunkPages(int slot, String column, int rowGroup, CompressionCodecName codec,
-                   int begin, int end, long totalValues, int gen) {
+        ChunkPages(int slot, String column, int rowGroup, CompressionCodecName codec, boolean windowed,
+                   long fileStart, long fileEnd, int begin, int window, long totalValues, int gen) {
             this.slot = slot;
             this.column = column;
             this.rowGroup = rowGroup;
             this.codec = codec;
+            this.windowed = windowed;
+            this.fileStart = fileStart;
+            this.fileEnd = fileEnd;
             this.begin = begin;
-            this.pos = begin;
-            this.end = end;
+            this.window = window;
             this.totalValues = totalValues;
             this.gen = gen;
+            this.pos = fileStart;
+            this.win = windowed && reuse && winBufs[slot] != null ? winBufs[slot] : EMPTY;
         }
 
         @Override
@@ -339,7 +450,7 @@ public final class OwnedRowGroupReader implements AutoCloseable {
             checkAlive();
             if (!dictChecked) {
                 dictChecked = true;
-                if (pos < end) {
+                if (pos < fileEnd) {
                     PageHeader h = peek();
                     if (h.getType() == PageType.DICTIONARY_PAGE) {
                         dictionary = buildDictionary(h);
@@ -356,7 +467,7 @@ public final class OwnedRowGroupReader implements AutoCloseable {
             if (!dictChecked) readDictionaryPage(); // a dictionary page, if any, precedes every data page
             while (true) {
                 if (valuesRead >= totalValues) return null;
-                if (pos >= end) {
+                if (pos >= fileEnd) {
                     throw corrupt("column chunk ended after " + valuesRead + " of " + totalValues + " values", null);
                 }
                 PageHeader h = peek();
@@ -380,31 +491,96 @@ public final class OwnedRowGroupReader implements AutoCloseable {
             }
         }
 
+        // ---- byte access ---------------------------------------------------------------------------------
+
+        /** The array that {@link #at} indexes into; fetch it AFTER calling {@code at}, which may replace the window. */
+        private byte[] arr() { return windowed ? win : chunkBuf; }
+
+        /**
+         * Index in {@link #arr()} of file offset {@code off}, with bytes {@code [off, off + len)} guaranteed present.
+         * Windowed mode refills the window first when they are not; anything handed out earlier from this column's
+         * window is invalid afterwards, which is exactly the "previous page is dead once the next one is requested"
+         * contract this class already imposes on the pooled page buffers.
+         */
+        private int at(long off, int len) {
+            if (!windowed) return begin + (int) (off - fileStart);
+            if (off < winStart || off + len > winStart + winValid) refill(off, len);
+            return (int) (off - winStart);
+        }
+
+        private void refill(long off, int len) {
+            // Whatever the window already holds from `off` on is the front of what is needed next: keep it.
+            int keep = 0;
+            if (off >= winStart && off < winStart + winValid) keep = (int) (winStart + winValid - off);
+            final long readFrom = off + keep;
+            final long remaining = fileEnd - readFrom;
+            if ((long) len > keep + remaining) throw corrupt("read of " + len + " bytes at chunk offset " + (off - fileStart) + " runs past the end of the column chunk", null);
+            // Resident bytes wanted from `off`: the request, or a full read-ahead window if that is larger; never past the chunk.
+            final int target = (int) Math.min(Math.max((long) len, (long) window), keep + remaining);
+            byte[] w = win;
+            if (w.length < target) {
+                byte[] grown = acquireWindow(slot, target);
+                if (keep > 0) System.arraycopy(w, (int) (off - winStart), grown, 0, keep);
+                w = grown;
+                win = w;
+            } else if (keep > 0 && off != winStart) {
+                System.arraycopy(w, (int) (off - winStart), w, 0, keep); // overlap-safe compaction to the front
+            }
+            final int toRead = target - keep;
+            if (toRead > 0) {
+                try {
+                    in.seek(readFrom);
+                    in.readFully(w, keep, toRead);
+                } catch (IOException | RuntimeException e) {
+                    winStart = 0;
+                    winValid = 0;
+                    throw corrupt("cannot read " + toRead + " bytes of the column chunk at file offset " + readFrom, e);
+                }
+            }
+            winStart = off;
+            winValid = target;
+        }
+
         // ---- header handling -------------------------------------------------------------------------
 
         private PageHeader peek() {
-            if (pending == null) {
-                headerIn.reset(chunkBuf, pos, end - pos);
-                PageHeader h;
+            if (pending != null) return pending;
+            final long avail = fileEnd - pos;
+            int want = (int) Math.min(avail, windowed ? Math.min(HEADER_PROBE, Math.max(window, 8)) : avail);
+            PageHeader h;
+            int headerLen;
+            while (true) {
+                int i = at(pos, want);
+                byte[] a = arr();
+                int limit = windowed ? winValid - i : (int) avail;
+                headerIn.reset(a, i, limit);
                 try {
                     h = Util.readPageHeader(headerIn);
+                    headerLen = headerIn.position() - i;
+                    break;
                 } catch (IOException | RuntimeException e) {
-                    throw corrupt("cannot parse page header at chunk offset " + (pos - begin), e);
+                    // Windowed: the header may simply extend past what is resident. Retry with a longer prefix until the
+                    // whole rest of the chunk (or the header cap) has been offered.
+                    if (windowed && winStart + winValid < fileEnd && want < MAX_HEADER_BYTES) {
+                        want = (int) Math.min(Math.min(avail, (long) MAX_HEADER_BYTES), Math.max((long) limit * 2, (long) want * 2));
+                        continue;
+                    }
+                    throw corrupt("cannot parse page header at chunk offset " + (pos - fileStart), e);
                 }
-                int compressed = h.getCompressed_page_size();
-                int uncompressed = h.getUncompressed_page_size();
-                if (compressed < 0 || uncompressed < 0) {
-                    throw corrupt("negative page size (compressed=" + compressed + ", uncompressed=" + uncompressed + ")", null);
-                }
-                if (uncompressed > maxPageBytes) {
-                    throw corrupt("page declares " + uncompressed + " uncompressed bytes, above the limit " + maxPageBytes, null);
-                }
-                payloadPos = headerIn.position();
-                if ((long) payloadPos + compressed > end) {
-                    throw corrupt("page payload of " + compressed + " bytes runs past the end of its column chunk", null);
-                }
-                pending = h;
             }
+            int compressed = h.getCompressed_page_size();
+            int uncompressed = h.getUncompressed_page_size();
+            if (compressed < 0 || uncompressed < 0) {
+                throw corrupt("negative page size (compressed=" + compressed + ", uncompressed=" + uncompressed + ")", null);
+            }
+            if (uncompressed > maxPageBytes) {
+                throw corrupt("page declares " + uncompressed + " uncompressed bytes, above the limit " + maxPageBytes, null);
+            }
+            payloadPos = pos + headerLen;
+            if (payloadPos + compressed > fileEnd) {
+                throw corrupt("page payload of " + compressed + " bytes runs past the end of its column chunk", null);
+            }
+            pending = h;
             return pending;
         }
 
@@ -421,7 +597,8 @@ public final class OwnedRowGroupReader implements AutoCloseable {
             if (dh.getNum_values() < 0) throw corrupt("negative value count " + dh.getNum_values(), null);
             int compressed = h.getCompressed_page_size();
             int uncompressed = h.getUncompressed_page_size();
-            BytesInput bytes = inflate(payloadPos, compressed, uncompressed, codec != CompressionCodecName.UNCOMPRESSED, true);
+            int off = at(payloadPos, compressed);
+            BytesInput bytes = inflate(arr(), off, compressed, uncompressed, codec != CompressionCodecName.UNCOMPRESSED, true);
             return new DataPageV1(bytes, dh.getNum_values(), uncompressed, null,
                     encoding(dh.getRepetition_level_encoding()), encoding(dh.getDefinition_level_encoding()),
                     encoding(dh.getEncoding()));
@@ -441,11 +618,13 @@ public final class OwnedRowGroupReader implements AutoCloseable {
                 throw corrupt("V2 level sections (" + rl + " + " + dl + " bytes) do not fit the page (compressed="
                         + compressed + ", uncompressed=" + uncompressed + ")", null);
             }
+            int base = at(payloadPos, compressed);
+            byte[] a = arr();
             // Levels are never compressed in V2; only the values section is, and only when is_compressed (default true).
-            BytesInput rlBytes = BytesInput.from(chunkBuf, payloadPos, rl);
-            BytesInput dlBytes = BytesInput.from(chunkBuf, payloadPos + rl, dl);
+            BytesInput rlBytes = BytesInput.from(a, base, rl);
+            BytesInput dlBytes = BytesInput.from(a, base + rl, dl);
             boolean valuesCompressed = dh.isIs_compressed() && codec != CompressionCodecName.UNCOMPRESSED;
-            BytesInput data = inflate(payloadPos + rl + dl, compressed - rl - dl, uncompressed - rl - dl, valuesCompressed, true);
+            BytesInput data = inflate(a, base + rl + dl, compressed - rl - dl, uncompressed - rl - dl, valuesCompressed, true);
             return DataPageV2.uncompressed(dh.getNum_rows(), dh.getNum_nulls(), dh.getNum_values(),
                     rlBytes, dlBytes, encoding(dh.getEncoding()), data, null);
         }
@@ -454,24 +633,30 @@ public final class OwnedRowGroupReader implements AutoCloseable {
             DictionaryPageHeader dh = h.getDictionary_page_header();
             if (dh == null) throw corrupt("DICTIONARY_PAGE without a dictionary page header", null);
             if (dh.getNum_values() < 0) throw corrupt("negative dictionary size " + dh.getNum_values(), null);
+            int compressed = h.getCompressed_page_size();
             int uncompressed = h.getUncompressed_page_size();
+            int off = at(payloadPos, compressed);
+            byte[] a = arr();
             // Not pooled: a dictionary lives for the whole row group.
-            BytesInput bytes = inflate(payloadPos, h.getCompressed_page_size(), uncompressed,
-                    codec != CompressionCodecName.UNCOMPRESSED, false);
+            BytesInput bytes = inflate(a, off, compressed, uncompressed, codec != CompressionCodecName.UNCOMPRESSED, false);
+            if (windowed && codec == CompressionCodecName.UNCOMPRESSED) {
+                // The zero-copy slice would point into a window that is recycled page by page; the dictionary must outlive that.
+                bytes = BytesInput.from(Arrays.copyOfRange(a, off, off + compressed));
+            }
             return new DictionaryPage(bytes, uncompressed, dh.getNum_values(), encoding(dh.getEncoding()));
         }
 
         /**
-         * The decompressed bytes of {@code [off, off + compressedLen)} of the chunk buffer, as exactly
-         * {@code uncompressedLen} bytes. UNCOMPRESSED data is a zero-copy slice; everything else is written to a
-         * (pooled, when {@code pooled}) array.
+         * The decompressed bytes of {@code src[off .. off + compressedLen)}, as exactly {@code uncompressedLen} bytes.
+         * UNCOMPRESSED data is a zero-copy slice of {@code src}; everything else is written to a (pooled, when
+         * {@code pooled}) array.
          */
-        private BytesInput inflate(int off, int compressedLen, int uncompressedLen, boolean compressed, boolean pooled) {
+        private BytesInput inflate(byte[] src, int off, int compressedLen, int uncompressedLen, boolean compressed, boolean pooled) {
             if (!compressed) {
                 if (compressedLen != uncompressedLen) {
                     throw corrupt("uncompressed page has compressed size " + compressedLen + " != uncompressed size " + uncompressedLen, null);
                 }
-                return BytesInput.from(chunkBuf, off, compressedLen);
+                return BytesInput.from(src, off, compressedLen);
             }
             if (uncompressedLen == 0) return BytesInput.empty(); // nothing to produce, whatever the (possibly empty) payload
             try {
@@ -480,15 +665,15 @@ public final class OwnedRowGroupReader implements AutoCloseable {
                         throw corrupt("page declares " + uncompressedLen + " bytes from only " + compressedLen
                                 + " Snappy bytes (beyond the format's maximum expansion)", null);
                     }
-                    long declared = SnappyDecompressor.uncompressedLength(chunkBuf, off, off + compressedLen);
+                    long declared = SnappyDecompressor.uncompressedLength(src, off, off + compressedLen);
                     if (declared != uncompressedLen) {
                         throw corrupt("Snappy preamble says " + declared + " bytes but the page header says " + uncompressedLen, null);
                     }
                     byte[] dst = pooled ? acquirePageBuf(slot, uncompressedLen) : new byte[uncompressedLen];
-                    SnappyDecompressor.decompress(chunkBuf, off, off + compressedLen, dst, 0, uncompressedLen);
+                    SnappyDecompressor.decompress(src, off, off + compressedLen, dst, 0, uncompressedLen);
                     return BytesInput.from(dst, 0, uncompressedLen);
                 }
-                BytesInput out = decompressorFor(codec).decompress(BytesInput.from(chunkBuf, off, compressedLen), uncompressedLen);
+                BytesInput out = decompressorFor(codec).decompress(BytesInput.from(src, off, compressedLen), uncompressedLen);
                 if (out.size() != uncompressedLen) {
                     throw corrupt(codec + " produced " + out.size() + " bytes but the page header says " + uncompressedLen, null);
                 }
