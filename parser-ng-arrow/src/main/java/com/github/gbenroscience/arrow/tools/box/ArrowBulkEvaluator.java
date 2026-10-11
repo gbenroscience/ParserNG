@@ -14,9 +14,9 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 
 import java.lang.foreign.MemorySegment;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 /**
  * Evaluates a compiled ParserNG expression directly over Apache Arrow columnar
@@ -119,6 +119,23 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
     // ever has one real engine active.
     private final Object parallelLock = new Object();
 
+    private static final Float8Vector[] NO_F64_COLUMNS = new Float8Vector[0];
+    private static final Float4Vector[] NO_F32_COLUMNS = new Float4Vector[0];
+
+    // Per-slot cache of the last MemorySegment wrapped for that slot's Arrow
+    // data buffer (index slotCount is the output buffer). Re-evaluating over
+    // the same buffers -- the usual streaming/benchmark shape -- then costs
+    // zero allocations for the bindings instead of two segment objects per
+    // column per call.
+    //
+    // Thread safety: this cache needs no lock and cannot be torn by
+    // concurrent parallel=false callers. Each entry is a single reference to
+    // an immutable segment whose own address()/byteSize() are re-checked
+    // against the buffer on every call (see
+    // ArrowMemoryBridge.wrapDoublesCached), so the worst a race can do is a
+    // redundant re-wrap, never a wrong binding.
+    private final AtomicReferenceArray<MemorySegment> segmentCache;
+
     private ArrowBulkEvaluator(MathExpression expression,
             SIMDCommandSegmentF64.SIMDVectorCompositeExpression compiled) {
         this.expression = expression;
@@ -127,6 +144,7 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         this.requiredSlots = expression.getSlotItems();
         this.slotCount = expression.getRegistry().size();
         this.constantExpression = requiredSlots.length == 0;
+        this.segmentCache = new AtomicReferenceArray<>(slotCount + 1);
 
         String[] names = new String[requiredSlots.length];
         for (int i = 0; i < requiredSlots.length; i++) {
@@ -143,6 +161,7 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         this.requiredSlots = expression.getSlotItems();
         this.slotCount = expression.getRegistry().size();
         this.constantExpression = requiredSlots.length == 0;
+        this.segmentCache = new AtomicReferenceArray<>(slotCount + 1);
 
         String[] names = new String[requiredSlots.length];
         for (int i = 0; i < requiredSlots.length; i++) {
@@ -330,7 +349,27 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
      */
     public void evaluate(Map<String, Float8Vector> columns, Float8Vector output, NullPolicy nullPolicy, boolean parallel) {
         ensureOpen();
+        // Constant expressions and wrong-precision instances never consult
+        // `columns` (they fill a constant / throw), so don't touch it.
+        Float8Vector[] resolved = (constantExpression || compiled == null)
+                ? NO_F64_COLUMNS : resolveF64Columns(columns);
+        evaluateResolvedF64(resolved, output, nullPolicy, parallel);
+    }
 
+    private Float8Vector[] resolveF64Columns(Map<String, Float8Vector> columns) {
+        Float8Vector[] resolved = new Float8Vector[requiredVariableNames.length];
+        for (int i = 0; i < resolved.length; i++) {
+            resolved[i] = columns.get(requiredVariableNames[i]);
+        }
+        return resolved;
+    }
+
+    /**
+     * Shared float64 implementation behind the {@code Map} and
+     * {@code VectorSchemaRoot} overloads. {@code resolved[i]} is the column
+     * bound to {@code requiredSlots[i]}, or null if the caller supplied none.
+     */
+    private void evaluateResolvedF64(Float8Vector[] resolved, Float8Vector output, NullPolicy nullPolicy, boolean parallel) {
         if (constantExpression) {
             fillConstant(output, output.getValueCount());
             return;
@@ -346,12 +385,12 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
 
         int rowCount = output.getValueCount();
         if (rowCount == 0) {
-            for (MathExpression.Slot slot : requiredSlots) {
-                Float8Vector col = columns.get(slot.getName());
+            for (int i = 0; i < requiredSlots.length; i++) {
+                Float8Vector col = resolved[i];
                 if (col != null && col.getValueCount() > 0) {
                     throw new ArrowBindingException(
                             "Output vector has not been sized (valueCount=0) but bound column '"
-                            + slot.getName() + "' has " + col.getValueCount() + " rows. Call "
+                            + requiredSlots[i].getName() + "' has " + col.getValueCount() + " rows. Call "
                             + "output.allocateNew(rowCount) and output.setValueCount(rowCount) "
                             + "before evaluate(), or use allocateOutput(...).");
                 }
@@ -360,22 +399,23 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         }
 
         MemorySegment[] variables = new MemorySegment[slotCount];
-        for (MathExpression.Slot slot : requiredSlots) {
-            Float8Vector col = columns.get(slot.getName());
+        for (int i = 0; i < requiredSlots.length; i++) {
+            Float8Vector col = resolved[i];
             if (col == null) {
                 throw new ArrowBindingException(
-                        "Missing Arrow column for variable '" + slot.getName() + "'. Required variables: "
+                        "Missing Arrow column for variable '" + requiredSlots[i].getName() + "'. Required variables: "
                         + Arrays.toString(requiredVariableNames));
             }
             if (col.getValueCount() < rowCount) {
                 throw new ArrowBindingException(
-                        "Column '" + slot.getName() + "' has " + col.getValueCount()
+                        "Column '" + requiredSlots[i].getName() + "' has " + col.getValueCount()
                         + " rows, but output expects " + rowCount + " rows.");
             }
-            variables[slot.getSlot()] = ArrowMemoryBridge.wrapDoubles(col.getDataBuffer(), rowCount);
+            int slotIndex = requiredSlots[i].getSlot();
+            variables[slotIndex] = cachedWrapDoubles(col.getDataBuffer(), rowCount, slotIndex);
         }
 
-        MemorySegment outSeg = ArrowMemoryBridge.wrapDoubles(output.getDataBuffer(), rowCount);
+        MemorySegment outSeg = cachedWrapDoubles(output.getDataBuffer(), rowCount, slotCount);
 
         if (parallel) {
             synchronized (parallelLock) {
@@ -386,7 +426,7 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         }
 
         if (nullPolicy == NullPolicy.PROPAGATE) {
-            propagateNulls(columns, output, rowCount);
+            propagateNullsF64(resolved, output, rowCount);
         }
     }
 
@@ -420,22 +460,23 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
     public void evaluate(VectorSchemaRoot root, Float8Vector output, NullPolicy nullPolicy, boolean parallel) {
         ensureOpen();
 
-        Map<String, Float8Vector> columns = new HashMap<>(Math.max(4, requiredSlots.length * 2));
-        for (MathExpression.Slot slot : requiredSlots) {
-            FieldVector fv = root.getVector(slot.getName());
+        Float8Vector[] resolved = new Float8Vector[requiredSlots.length];
+        for (int i = 0; i < requiredSlots.length; i++) {
+            String name = requiredVariableNames[i];
+            FieldVector fv = root.getVector(name);
             if (fv == null) {
-                continue; // reported uniformly by evaluate(Map, ...) below
+                continue; // reported uniformly by evaluateResolvedF64 below
             }
             if (!(fv instanceof Float8Vector)) {
                 throw new ArrowBindingException(
-                        "Column '" + slot.getName() + "' must be a Float8Vector (float64) for zero-copy "
+                        "Column '" + name + "' must be a Float8Vector (float64) for zero-copy "
                         + "evaluation; found " + fv.getClass().getSimpleName()
                         + ". Cast this column to float64 before binding.");
             }
-            columns.put(slot.getName(), (Float8Vector) fv);
+            resolved[i] = (Float8Vector) fv;
         }
 
-        evaluate(columns, output, nullPolicy, parallel);
+        evaluateResolvedF64(resolved, output, nullPolicy, parallel);
     }
 
     // =========================================================================
@@ -488,7 +529,23 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
      */
     public void evaluate(Map<String, Float4Vector> columns, Float4Vector output, NullPolicy nullPolicy, boolean parallel) {
         ensureOpen();
+        Float4Vector[] resolved = (constantExpression || compiledF32 == null)
+                ? NO_F32_COLUMNS : resolveF32Columns(columns);
+        evaluateResolvedF32(resolved, output, nullPolicy, parallel);
+    }
 
+    private Float4Vector[] resolveF32Columns(Map<String, Float4Vector> columns) {
+        Float4Vector[] resolved = new Float4Vector[requiredVariableNames.length];
+        for (int i = 0; i < resolved.length; i++) {
+            resolved[i] = columns.get(requiredVariableNames[i]);
+        }
+        return resolved;
+    }
+
+    /**
+     * Float32 counterpart of {@link #evaluateResolvedF64}.
+     */
+    private void evaluateResolvedF32(Float4Vector[] resolved, Float4Vector output, NullPolicy nullPolicy, boolean parallel) {
         if (constantExpression) {
             fillConstant(output, output.getValueCount());
             return;
@@ -504,12 +561,12 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
 
         int rowCount = output.getValueCount();
         if (rowCount == 0) {
-            for (MathExpression.Slot slot : requiredSlots) {
-                Float4Vector col = columns.get(slot.getName());
+            for (int i = 0; i < requiredSlots.length; i++) {
+                Float4Vector col = resolved[i];
                 if (col != null && col.getValueCount() > 0) {
                     throw new ArrowBindingException(
                             "Output vector has not been sized (valueCount=0) but bound column '"
-                            + slot.getName() + "' has " + col.getValueCount() + " rows. Call "
+                            + requiredSlots[i].getName() + "' has " + col.getValueCount() + " rows. Call "
                             + "output.allocateNew(rowCount) and output.setValueCount(rowCount) "
                             + "before evaluate(), or use allocateOutputF32(...).");
                 }
@@ -518,24 +575,25 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         }
 
         MemorySegment[] variables = new MemorySegment[slotCount];
-        for (MathExpression.Slot slot : requiredSlots) {
-            Float4Vector col = columns.get(slot.getName());
+        for (int i = 0; i < requiredSlots.length; i++) {
+            Float4Vector col = resolved[i];
             if (col == null) {
                 throw new ArrowBindingException(
-                        "Missing Arrow column for variable '" + slot.getName() + "'. Required variables: "
+                        "Missing Arrow column for variable '" + requiredSlots[i].getName() + "'. Required variables: "
                         + Arrays.toString(requiredVariableNames));
             }
             if (col.getValueCount() < rowCount) {
                 throw new ArrowBindingException(
-                        "Column '" + slot.getName() + "' has " + col.getValueCount()
+                        "Column '" + requiredSlots[i].getName() + "' has " + col.getValueCount()
                         + " rows, but output expects " + rowCount + " rows.");
             }
-            // Use wrapFloats for Float4Vector bindings to maintain proper 32-bit offset/stride mappings
-            variables[slot.getSlot()] = ArrowMemoryBridge.wrapFloats(col.getDataBuffer(), rowCount);
+            // wrapFloats keeps the 32-bit offset/stride mapping for Float4Vector bindings
+            int slotIndex = requiredSlots[i].getSlot();
+            variables[slotIndex] = cachedWrapFloats(col.getDataBuffer(), rowCount, slotIndex);
         }
 
-        // Output requires wrapFloats representation to accurately dispatch to F32 SIMD bulk operators
-        MemorySegment outSeg = ArrowMemoryBridge.wrapFloats(output.getDataBuffer(), rowCount);
+        // Output requires the wrapFloats representation to dispatch to the F32 SIMD bulk operators
+        MemorySegment outSeg = cachedWrapFloats(output.getDataBuffer(), rowCount, slotCount);
 
         if (parallel) {
             synchronized (parallelLock) {
@@ -546,7 +604,7 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         }
 
         if (nullPolicy == NullPolicy.PROPAGATE) {
-            propagateNulls(columns, output, rowCount);
+            propagateNullsF32(resolved, output, rowCount);
         }
     }
 
@@ -580,22 +638,23 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
     public void evaluate(VectorSchemaRoot root, Float4Vector output, NullPolicy nullPolicy, boolean parallel) {
         ensureOpen();
 
-        Map<String, Float4Vector> columns = new HashMap<>(Math.max(4, requiredSlots.length * 2));
-        for (MathExpression.Slot slot : requiredSlots) {
-            FieldVector fv = root.getVector(slot.getName());
+        Float4Vector[] resolved = new Float4Vector[requiredSlots.length];
+        for (int i = 0; i < requiredSlots.length; i++) {
+            String name = requiredVariableNames[i];
+            FieldVector fv = root.getVector(name);
             if (fv == null) {
                 continue;
             }
             if (!(fv instanceof Float4Vector)) {
                 throw new ArrowBindingException(
-                        "Column '" + slot.getName() + "' must be a Float4Vector (float32) for zero-copy "
+                        "Column '" + name + "' must be a Float4Vector (float32) for zero-copy "
                         + "evaluation; found " + fv.getClass().getSimpleName()
                         + ". Cast this column to float32 before binding.");
             }
-            columns.put(slot.getName(), (Float4Vector) fv);
+            resolved[i] = (Float4Vector) fv;
         }
 
-        evaluate(columns, output, nullPolicy, parallel);
+        evaluateResolvedF32(resolved, output, nullPolicy, parallel);
     }
 
     // =========================================================================
@@ -615,11 +674,7 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         v.allocateNew(rowCount);
         v.setValueCount(rowCount);
 
-        int validityBytes = (rowCount + 7) / 8;
-        ArrowBuf validity = v.getValidityBuffer();
-        for (int i = 0; i < validityBytes; i++) {
-            validity.setByte(i, (byte) 0xFF);
-        }
+        ArrowMemoryBridge.fillValidityOnes(v.getValidityBuffer(), (rowCount + 7) / 8);
         return v;
     }
 
@@ -637,11 +692,7 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         v.allocateNew(rowCount);
         v.setValueCount(rowCount);
 
-        int validityBytes = (rowCount + 7) / 8;
-        ArrowBuf validity = v.getValidityBuffer();
-        for (int i = 0; i < validityBytes; i++) {
-            validity.setByte(i, (byte) 0xFF);
-        }
+        ArrowMemoryBridge.fillValidityOnes(v.getValidityBuffer(), (rowCount + 7) / 8);
         return v;
     }
 
@@ -655,15 +706,12 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         }
     }
 
-    private void propagateNulls(Map<String, Float8Vector> columns, Float8Vector output, int rowCount) {
+    private void propagateNullsF64(Float8Vector[] resolved, Float8Vector output, int rowCount) {
         int validityBytes = (rowCount + 7) / 8;
         ArrowBuf outValidity = output.getValidityBuffer();
 
-        for (int i = 0; i < validityBytes; i++) {
-            outValidity.setByte(i, (byte) 0xFF);
-        }
-        for (MathExpression.Slot slot : requiredSlots) {
-            Float8Vector col = columns.get(slot.getName());
+        ArrowMemoryBridge.fillValidityOnes(outValidity, validityBytes);
+        for (Float8Vector col : resolved) {
             if (col == null || col.getNullCount() == 0) {
                 continue;
             }
@@ -671,10 +719,7 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
             if (colValidity == null) {
                 continue;
             }
-            for (int i = 0; i < validityBytes; i++) {
-                byte combined = (byte) (outValidity.getByte(i) & colValidity.getByte(i));
-                outValidity.setByte(i, combined);
-            }
+            ArrowMemoryBridge.andValidityInto(outValidity, colValidity, validityBytes);
         }
     }
 
@@ -685,15 +730,12 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
         }
     }
 
-    private void propagateNulls(Map<String, Float4Vector> columns, Float4Vector output, int rowCount) {
+    private void propagateNullsF32(Float4Vector[] resolved, Float4Vector output, int rowCount) {
         int validityBytes = (rowCount + 7) / 8;
         ArrowBuf outValidity = output.getValidityBuffer();
 
-        for (int i = 0; i < validityBytes; i++) {
-            outValidity.setByte(i, (byte) 0xFF);
-        }
-        for (MathExpression.Slot slot : requiredSlots) {
-            Float4Vector col = columns.get(slot.getName());
+        ArrowMemoryBridge.fillValidityOnes(outValidity, validityBytes);
+        for (Float4Vector col : resolved) {
             if (col == null || col.getNullCount() == 0) {
                 continue;
             }
@@ -701,11 +743,32 @@ public final class ArrowBulkEvaluator implements ArrowExpressionEvaluator {
             if (colValidity == null) {
                 continue;
             }
-            for (int i = 0; i < validityBytes; i++) {
-                byte combined = (byte) (outValidity.getByte(i) & colValidity.getByte(i));
-                outValidity.setByte(i, combined);
-            }
+            ArrowMemoryBridge.andValidityInto(outValidity, colValidity, validityBytes);
         }
+    }
+
+    /**
+     * Returns the cached segment for {@code cacheIndex} when it still aliases
+     * {@code buf} at {@code elemCount} doubles, else wraps afresh and
+     * remembers the result. See the {@link #segmentCache} note for why this is
+     * safe under concurrent callers.
+     */
+    private MemorySegment cachedWrapDoubles(ArrowBuf buf, int elemCount, int cacheIndex) {
+        MemorySegment prev = segmentCache.get(cacheIndex);
+        MemorySegment seg = ArrowMemoryBridge.wrapDoublesCached(buf, elemCount, prev);
+        if (seg != prev) {
+            segmentCache.lazySet(cacheIndex, seg);
+        }
+        return seg;
+    }
+
+    private MemorySegment cachedWrapFloats(ArrowBuf buf, int elemCount, int cacheIndex) {
+        MemorySegment prev = segmentCache.get(cacheIndex);
+        MemorySegment seg = ArrowMemoryBridge.wrapFloatsCached(buf, elemCount, prev);
+        if (seg != prev) {
+            segmentCache.lazySet(cacheIndex, seg);
+        }
+        return seg;
     }
 
     private void ensureOpen() {

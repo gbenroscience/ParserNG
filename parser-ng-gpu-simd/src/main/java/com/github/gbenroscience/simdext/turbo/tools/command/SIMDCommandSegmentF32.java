@@ -749,7 +749,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                         case OP_ABS ->
                             VectorMathF::abs;
                         case OP_CEIL ->
-                            VectorMathF::floor;
+                            VectorMathF::ceil;
                         case OP_ROUND ->
                             VectorMathF::round;
                         case OP_FLOOR ->

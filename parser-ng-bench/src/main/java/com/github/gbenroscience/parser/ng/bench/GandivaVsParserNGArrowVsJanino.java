@@ -407,6 +407,7 @@ public class GandivaVsParserNGArrowVsJanino {
     private Float8Vector gandivaOutput;
     private Map<String, Float8Vector> parserColumns;
     private ArrowBulkEvaluator parserSIMDEvaluator;
+    
     private Projector gandivaProjector;
     private List<org.apache.arrow.memory.ArrowBuf> gandivaInputBuffers;
     private List<ValueVector> gandivaOutputVectors;

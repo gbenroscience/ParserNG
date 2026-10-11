@@ -1236,7 +1236,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 VectorMathF::abs;
 
             case OP_CEIL ->
-                VectorMathF::floor;
+                VectorMathF::ceil;
             case OP_ROUND ->
                 VectorMathF::round;
             case OP_FLOOR ->
