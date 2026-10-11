@@ -57,11 +57,13 @@ public final class ParquetScan {
     private final boolean pinWorkerThreads;
     /** null = no per-scan override, defer to the {@code -Dparserng.snappy} system property. See {@link #useJavaSnappyDecoder}. */
     private final Boolean useJavaSnappyDecoder;
+    /** null = no per-scan override, defer to the {@code -Dparserng.zstd} system property. See {@link #useJavaZstdDecoder}. */
+    private final Boolean useJavaZstdDecoder;
 
     private ParquetScan(ParquetSource file, List<String> columns, Predicate predicate, int batchSize,
                         boolean metrics, long maxRowGroupBytes, int parallelism, boolean exactFilter,
                         Map<String, CustomPredicate> customPredicates, boolean pinWorkerThreads,
-                        Boolean useJavaSnappyDecoder) {
+                        Boolean useJavaSnappyDecoder, Boolean useJavaZstdDecoder) {
         this.file = file;
         this.columns = columns;
         this.predicate = predicate;
@@ -73,6 +75,7 @@ public final class ParquetScan {
         this.customPredicates = customPredicates;
         this.pinWorkerThreads = pinWorkerThreads;
         this.useJavaSnappyDecoder = useJavaSnappyDecoder;
+        this.useJavaZstdDecoder = useJavaZstdDecoder;
     }
 
     /** Scans a local file. */
@@ -89,13 +92,13 @@ public final class ParquetScan {
     public static ParquetScan scan(ParquetSource file) {
         if (file == null) throw new NullPointerException("file");
         return new ParquetScan(file, null, null, DEFAULT_BATCH_SIZE, false, DEFAULT_MAX_ROW_GROUP_BYTES,
-                DEFAULT_PARALLELISM, false, Map.of(), false, null);
+                DEFAULT_PARALLELISM, false, Map.of(), false, null, null);
     }
 
     /** Top-level columns to read. Unlisted columns are never decoded. Must be non-empty. */
     public ParquetScan select(String... cols) {
         if (cols == null || cols.length == 0) throw new IllegalArgumentException("select() needs at least one column");
-        return new ParquetScan(file, List.copyOf(Arrays.asList(cols)), predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
+        return new ParquetScan(file, List.copyOf(Arrays.asList(cols)), predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder);
     }
 
     /**
@@ -108,7 +111,7 @@ public final class ParquetScan {
      * exactly instead.
      */
     public ParquetScan pushdown(Predicate p) {
-        return new ParquetScan(file, columns, p, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
+        return new ParquetScan(file, columns, p, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder);
     }
 
     /**
@@ -124,7 +127,7 @@ public final class ParquetScan {
         if (impl == null) throw new NullPointerException("impl");
         Map<String, CustomPredicate> updated = new LinkedHashMap<>(customPredicates);
         updated.put(id, impl);
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, Map.copyOf(updated), pinWorkerThreads, useJavaSnappyDecoder);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, Map.copyOf(updated), pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder);
     }
 
     /**
@@ -161,22 +164,22 @@ public final class ParquetScan {
      */
     public ParquetScan exactFilter() {
         if (predicate == null) throw new IllegalStateException("exactFilter() needs a predicate — call pushdown(...) first");
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, true, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, true, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder);
     }
 
     public ParquetScan batchSize(int rows) {
         if (rows <= 0) throw new IllegalArgumentException("batchSize must be positive");
-        return new ParquetScan(file, columns, predicate, rows, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
+        return new ParquetScan(file, columns, predicate, rows, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder);
     }
 
     public ParquetScan withMetrics(boolean enabled) {
-        return new ParquetScan(file, columns, predicate, batchSize, enabled, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
+        return new ParquetScan(file, columns, predicate, batchSize, enabled, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder);
     }
 
     /** Rejects any surviving row group whose declared uncompressed size exceeds this. */
     public ParquetScan maxRowGroupBytes(long bytes) {
         if (bytes <= 0) throw new IllegalArgumentException("maxRowGroupBytes must be positive");
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, bytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, bytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder);
     }
 
     /**
@@ -189,7 +192,7 @@ public final class ParquetScan {
      */
     public ParquetScan parallelism(int rowGroupsAtOnce) {
         if (rowGroupsAtOnce <= 0) throw new IllegalArgumentException("parallelism must be positive");
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, rowGroupsAtOnce, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, rowGroupsAtOnce, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder);
     }
 
     /**
@@ -212,7 +215,7 @@ public final class ParquetScan {
      * </ul>
      */
     public ParquetScan pinWorkerThreads(boolean pin) {
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pin, useJavaSnappyDecoder);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pin, useJavaSnappyDecoder, useJavaZstdDecoder);
     }
 
     /** Whether {@link #pinWorkerThreads} was requested (default false). */
@@ -232,18 +235,41 @@ public final class ParquetScan {
      * changes.
      */
     public ParquetScan useJavaSnappyDecoder(boolean useJava) {
-        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJava);
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJava, useJavaZstdDecoder);
     }
 
     /** This scan's SNAPPY-decoder override: {@code TRUE}/{@code FALSE} if {@link #useJavaSnappyDecoder} was called, else {@code null} (defers to the system property). */
     public Boolean javaSnappyDecoderOverride() { return useJavaSnappyDecoder; }
 
     /**
+     * Per-scan override of which ZSTD decompressor this scan uses, taking precedence over the
+     * {@code -Dparserng.zstd=java} system property for this scan only. {@code true} forces the pure-Java decoder
+     * (no native/JNI library involved -- see {@code internal.codec.ZstdDecompressor}; {@code zstd-jni} is not even
+     * loaded), {@code false} forces parquet-java's stock ZSTD codec ({@code zstd-jni}, JNI-wrapped native) regardless
+     * of the system property. Unset (the default) defers to the system property, which itself defaults to the
+     * stock codec.
+     *
+     * <p>Composes with {@link #useJavaSnappyDecoder}: enabling both serves SNAPPY and ZSTD in pure Java; all other
+     * codecs always use parquet-java's own.
+     *
+     * <p>Independently correct either way (the decoder is checked against thousands of frames produced by the
+     * reference libzstd, plus corrupted input), but not faster than the native decoder it replaces -- on the
+     * standalone decoder benchmarks it runs at roughly half of libzstd's speed. Reach for this to avoid the native
+     * dependency (no {@code zstd-jni}, no JNI), not for a performance win.
+     */
+    public ParquetScan useJavaZstdDecoder(boolean useJava) {
+        return new ParquetScan(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, useJava);
+    }
+
+    /** This scan's ZSTD-decoder override: {@code TRUE}/{@code FALSE} if {@link #useJavaZstdDecoder} was called, else {@code null} (defers to the system property). */
+    public Boolean javaZstdDecoderOverride() { return useJavaZstdDecoder; }
+
+    /**
      * Opens the scan. The caller owns {@code allocator} (it must outlive the reader and any detached
      * roots); the returned reader owns its file handle(s) and must be closed.
      */
     public ParquetBatchReader open(BufferAllocator allocator) {
-        return new ParquetBatchReader(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, allocator);
+        return new ParquetBatchReader(file, columns, predicate, batchSize, metrics, maxRowGroupBytes, parallelism, exactFilter, customPredicates, pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder, allocator);
     }
 
     /** Convenience loop; each batch is valid only for the duration of the callback. */

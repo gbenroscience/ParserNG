@@ -42,6 +42,8 @@ until `open(allocator)` (or `forEachBatch`).
 | `pinWorkerThreads(boolean)` | Pin parallel decoder threads to CPUs (best-effort, Linux/Windows, needs native access); ignored at `parallelism(1)` | off |
 | `withMetrics(boolean)` | Collect `ScanMetrics` | off |
 | `maxRowGroupBytes(long)` | Reject surviving row groups whose uncompressed size exceeds this (untrusted-input guard) | 2 GiB |
+| `useJavaSnappyDecoder(boolean)` | Decode SNAPPY pages with the pure-Java (FFM) decoder instead of `snappy-java`; per-scan override of `-Dparserng.snappy=panama` | system property |
+| `useJavaZstdDecoder(boolean)` | Decode ZSTD pages with the pure-Java decoder instead of `zstd-jni` (no native/JNI code involved); per-scan override of `-Dparserng.zstd=java` | system property |
 
 ## Usage examples
 
@@ -415,6 +417,33 @@ because whether it helps depends on the machine and the workload, and it can mak
   many workers were actually pinned, and the JMH benchmarks `flatFullScanParallel4Pinned`,
   `flatFullScanParallel8Pinned` and `nestedFullScanParallel4Pinned` are identical to their unpinned
   counterparts except for the flag. No measurement of its effect has been made yet.
+
+### Optional: pure-Java ZSTD (no native library)
+
+By default ZSTD pages are decompressed by parquet-java's own codec, which wraps `zstd-jni` (native code through
+JNI). A pure-Java decoder is available as an opt-in, in the same two forms as the pure-Java SNAPPY decoder:
+
+```java
+// per scan, fluent API (an explicit true/false always beats the system property)
+ParquetScan.scan(file).useJavaZstdDecoder(true);
+
+// JVM-wide default, no code change
+//   java -Dparserng.zstd=java ...
+```
+
+* **No `zstd-jni` needed to read.** The option never constructs parquet-java's ZSTD codec, so a classpath without
+  `zstd-jni` can still scan ZSTD files (writing ZSTD still needs a compressor). Without the option, such a classpath
+  fails with `ClassNotFoundException: com.github.luben.zstd...`.
+* **Complete decoder**, not a subset: concatenated and skippable frames, all block, literal and sequence modes,
+  content checksums (verified), dictionaries. It was checked against several thousand frames written by the reference
+  libzstd (every level and strategy, streamed multi-block frames, dictionaries) and against corrupted input, which is
+  always rejected with an exception rather than decoded to garbage that no checksum would catch.
+* **Not faster than native.** The standalone decoder runs at roughly half of libzstd's speed; in an end-to-end scan
+  of a 600k-row file the difference was about 9% of scan time. Use it to drop the native dependency, not for speed.
+* **Scalar by design.** It does not use the Vector API, so it cannot interact with the `SimdBulkDecode` fast paths
+  (mixing Vector API species within one JVM makes the JIT box vectors, which is slow for both users).
+* **Composes with SNAPPY:** `useJavaSnappyDecoder(true).useJavaZstdDecoder(true)` serves both in pure Java; every other
+  codec always uses parquet-java's own.
 
 ## Decode engine
 Pages are decoded by a native cursor (`internal.decode.FastColumnCursor`) that reads page bytes

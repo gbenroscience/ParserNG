@@ -5,11 +5,13 @@ import com.github.gbenroscience.parser.ng.parquet.v1.internal.PredicateTranslato
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.RepeatedStatsPruner;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.RowFilterEvaluator;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.codec.PanamaSnappyCodecFactory;
+import com.github.gbenroscience.parser.ng.parquet.v1.internal.codec.PureJavaZstdCodecFactory;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.parquet.ParquetReadOptions;
+import org.apache.parquet.compression.CompressionCodecFactory;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.filter2.predicate.FilterPredicate;
@@ -88,7 +90,7 @@ public final class ParquetBatchReader implements AutoCloseable {
     ParquetBatchReader(ParquetSource file, List<String> columns, Predicate predicate, int batchSize,
                        boolean metricsOn, long maxRowGroupBytes, int parallelism, boolean exactFilter,
                        Map<String, CustomPredicate> customPredicates, boolean pinWorkerThreads,
-                       Boolean useJavaSnappyDecoder, BufferAllocator allocator) {
+                       Boolean useJavaSnappyDecoder, Boolean useJavaZstdDecoder, BufferAllocator allocator) {
         if (allocator == null) throw new NullPointerException("allocator");
         this.file = file;
         ParquetFileReader probeOrFiltered = null;
@@ -109,7 +111,7 @@ public final class ParquetBatchReader implements AutoCloseable {
             if (fp != null) filter = FilterCompat.get(fp);
             // The same filter is threaded into ParallelSource for each of its worker readers, so both modes
             // prune identically (see newReadOptions for why page-level pruning is deliberately off).
-            ParquetReadOptions opts = newReadOptions(filter, useJavaSnappyDecoder);
+            ParquetReadOptions opts = newReadOptions(filter, useJavaSnappyDecoder, useJavaZstdDecoder);
 
             ParquetFileReader filtered = file.openReader(scanFooter, opts);
             probeOrFiltered = filtered;
@@ -154,7 +156,7 @@ public final class ParquetBatchReader implements AutoCloseable {
                 filtered.close(); // parallel workers open their own readers; this one is no longer needed
                 probeOrFiltered = null;
                 built = new ParallelSource(file, scanFooter, projected, descriptors, nodePlan, fields,
-                        survivorStartingPos, filter, parallelism, pinWorkerThreads, useJavaSnappyDecoder,
+                        survivorStartingPos, filter, parallelism, pinWorkerThreads, useJavaSnappyDecoder, useJavaZstdDecoder,
                         batchSize, maxRowGroupBytes, allocator, m);
             }
             this.source = (exactEvaluator != null) ? new FilteredSource(built, exactEvaluator, allocator) : built;
@@ -186,24 +188,41 @@ public final class ParquetBatchReader implements AutoCloseable {
      * for list columns where a page may only be skipped at a record boundary.
      */
     static ParquetReadOptions newReadOptions(FilterCompat.Filter filter) {
-        return newReadOptions(filter, null);
+        return newReadOptions(filter, null, null);
+    }
+
+    /** SNAPPY override only; ZSTD defers to the system property. Kept for callers that predate the ZSTD option. */
+    static ParquetReadOptions newReadOptions(FilterCompat.Filter filter, Boolean useJavaSnappyDecoder) {
+        return newReadOptions(filter, useJavaSnappyDecoder, null);
     }
 
     /**
      * {@code useJavaSnappyDecoder}: this scan's {@code ParquetScan#useJavaSnappyDecoder} override, or
      * {@code null} to defer to the {@code -Dparserng.snappy=panama} system property (the pre-existing,
      * JVM-wide default both still fall back to). Explicit {@code TRUE}/{@code FALSE} here always wins.
+     *
+     * <p>{@code useJavaZstdDecoder}: the same for ZSTD -- this scan's {@code ParquetScan#useJavaZstdDecoder}
+     * override, or {@code null} to defer to the {@code -Dparserng.zstd=java} system property.
+     *
+     * <p>The two are independent and compose: the factories are decorators that each intercept only their own
+     * codec and forward everything else, so enabling both stacks them over parquet-java's default factory.
      */
-    static ParquetReadOptions newReadOptions(FilterCompat.Filter filter, Boolean useJavaSnappyDecoder) {
+    static ParquetReadOptions newReadOptions(FilterCompat.Filter filter, Boolean useJavaSnappyDecoder, Boolean useJavaZstdDecoder) {
         ParquetReadOptions.Builder b = ParquetReadOptions.builder()
                 .useStatsFilter(true).useDictionaryFilter(true).useBloomFilter(true)
                 .useColumnIndexFilter(false).withRecordFilter(filter);
-        boolean useJava = (useJavaSnappyDecoder != null)
+        boolean javaSnappy = (useJavaSnappyDecoder != null)
                 ? useJavaSnappyDecoder
                 : "panama".equals(System.getProperty("parserng.snappy"));
+        boolean javaZstd = (useJavaZstdDecoder != null)
+                ? useJavaZstdDecoder
+                : "java".equals(System.getProperty("parserng.zstd"));
         // A fresh factory per call, like the options themselves: decompressors are never shared across threads.
-        if (useJava) {
-            b.withCodecFactory(new PanamaSnappyCodecFactory(HadoopCodecs.newFactory(0)));
+        if (javaSnappy || javaZstd) {
+            CompressionCodecFactory factory = HadoopCodecs.newFactory(0);
+            if (javaSnappy) factory = new PanamaSnappyCodecFactory(factory);
+            if (javaZstd) factory = new PureJavaZstdCodecFactory(factory);
+            b.withCodecFactory(factory);
         }
         return b.build();
     }

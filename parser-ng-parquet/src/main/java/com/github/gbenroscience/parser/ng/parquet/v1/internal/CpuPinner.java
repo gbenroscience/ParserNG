@@ -298,8 +298,4 @@ public final class CpuPinner {
             return cores.isEmpty() ? null : cores.toArray(new int[0][]);
         }
     }
-    public static void main(String[] args) {
-        System.out.println(java.util.Arrays.deepToString(CpuPinner.detectPhysicalCoreGroups()));
-System.out.println(java.util.Arrays.toString(CpuPinner.pinOrder()));
-    }
 }
