@@ -160,6 +160,45 @@ public final class PredicateTranslator {
         return null;
     }
 
+    // ---- TIMESTAMP literal coercion --------------------------------------------------------------
+    //
+    // A TIMESTAMP is physically an INT64: a plain signed count of (the column's declared unit --
+    // MILLIS/MICROS/NANOS) since the Unix epoch. Full ordering is pushed, same reasoning as plain INT64
+    // and DECIMAL's INT32/INT64 case above, not DECIMAL's BINARY one: verified directly against a real
+    // written file (not just read from the parquet-format spec) that parquet-java's writer computes this
+    // column's row-group min/max using ordinary signed-long comparison -- a pre-epoch (negative) value
+    // correctly sorts as the minimum, not, as it would under unsigned comparison, the maximum -- which is
+    // exactly the comparator FilterApi.longColumn()'s own LT/LE/GT/GE evaluation uses, so writer and
+    // reader agree throughout. isAdjustedToUTC does not affect this: it is a display/interpretation flag,
+    // never part of the on-disk encoding or its ordering, so it plays no role in whether pushing a
+    // comparison is sound and is not consulted below.
+    //
+    // The literal is a raw Long/Integer, in the column's own declared unit -- the same convention
+    // RowFilterEvaluator's exactFilter() already uses for TIMESTAMP (see its own doc comment, which
+    // mirrors this one deliberately) and the one this module's README documents for pushdown generally
+    // ("use literals whose Java type matches the column"). This is a deliberate, not accidental, scope
+    // limit: nothing here can detect a unit mismatch -- a caller who passes millis against a
+    // MICROS-declared column gets silent, wrong pruning, not an error -- because a bare Long carries no
+    // unit of its own to check against the column's. Converting a java.time.Instant/LocalDateTime here
+    // instead would not remove that risk, only hide a different version of it (isAdjustedToUTC=false
+    // columns hold a "local", zone-less reading that an Instant cannot represent without the caller
+    // already choosing how to interpret it) while breaking agreement with exactFilter()'s literal, which
+    // pushdown's pruning and the row-level re-check this module's README prescribes both depend on.
+    //
+    // INT96 is not reachable from here at all: it is a different physical type (its own case in cmp()'s
+    // switch, not this one), and has no logical-type annotation to arrive via regardless -- the legacy
+    // "INT96 timestamp" convention is physical-type-only. It is also not just unsupported but
+    // unsupportable at this layer: FilterApi exposes no int96Column() of any kind, so no FilterPredicate
+    // against an INT96 column -- ordering, equality, or even IS NULL -- can be constructed here, which is
+    // exactly why isNull() below has no INT96 case either.
+
+    static Long asTimestamp(PrimitiveType pt, Object v) {
+        if (!(pt.getLogicalTypeAnnotation() instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation)) return null;
+        if (v instanceof Long l) return l;
+        if (v instanceof Integer i) return (long) i;
+        return null;
+    }
+
     static Float asFloat(PrimitiveType pt, Object v) {
         if (pt.getLogicalTypeAnnotation() != null || !(v instanceof Float f) || f.isNaN()) return null;
         return f;
@@ -255,7 +294,8 @@ public final class PredicateTranslator {
                     Long u = asDecimalInt64(dec, v);
                     return u == null ? null : ord(FilterApi.longColumn(n), op, u);
                 }
-                return null;
+                Long ts = asTimestamp(pt, v);
+                return ts == null ? null : ord(FilterApi.longColumn(n), op, ts); // full ordering safe -- see asTimestamp's doc
             }
             case FLOAT: {
                 Float x = asFloat(pt, v);
@@ -332,6 +372,11 @@ public final class PredicateTranslator {
                 if (dec != null) {
                     Set<Long> s = new LinkedHashSet<>();
                     for (Object o : vals) { Long x = asDecimalInt64(dec, o); if (x == null) return null; s.add(x); }
+                    return FilterApi.in(FilterApi.longColumn(n), s);
+                }
+                if (pt.getLogicalTypeAnnotation() instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
+                    Set<Long> s = new LinkedHashSet<>();
+                    for (Object o : vals) { Long x = asTimestamp(pt, o); if (x == null) return null; s.add(x); }
                     return FilterApi.in(FilterApi.longColumn(n), s);
                 }
                 Set<Long> s = new LinkedHashSet<>();

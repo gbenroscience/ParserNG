@@ -269,7 +269,8 @@ final class PredicateConverter {
     static String column(String text, TableSchema s) {
         if (text == null) return null;
         String t = text.trim();
-        return (IDENT.matcher(t).matches() && s.has(t)) ? t : null;
+        // a quoted-identifier reference is pushed down under the file column's real name
+        return (IDENT.matcher(t).matches() && s.hasFileColumn(t)) ? com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(t) : null;
     }
 
     /**

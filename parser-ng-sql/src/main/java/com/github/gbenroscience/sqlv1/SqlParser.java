@@ -37,6 +37,12 @@ import java.util.Locale;
  *         [HAVING boolean_expression]
  *         [ORDER BY order_item (',' order_item)*]
  *         [LIMIT integer_literal]
+ *         [OFFSET integer_literal [ROW | ROWS]]   (also accepted before LIMIT; contextual, so a column may be named offset)
+ * identifier
+ *     ::= name | '"' chars '"' | '`' chars '`'      -- a delimited identifier; the delimiter is doubled to include it
+ * expression extras: a '||' b (string concatenation); string functions are ordinary calls handled by ParquetSql
+ * nested path: name ('.' name | '[' integer ']' | '[' string ']')*   -- ParquetSql only
+ * EXTRACT '(' field FROM expression ')'; CAST(x AS DATE | TIMESTAMP | DECIMAL(p,s) | VARCHAR) keeps its SQL text for ParquetSql
  * table_reference
  *     ::= identifier
  *       | string_literal                          -- a file path (ParquetSql only)
@@ -292,6 +298,7 @@ public final class SqlParser {
 
     private final List<Token> tokens;
     private int pos;
+    private boolean preserveNumericCasts;
 
     private SqlParser(List<Token> tokens) {
         this.tokens = tokens;
@@ -309,8 +316,20 @@ public final class SqlParser {
      * trailing input after a complete, otherwise-valid query)
      */
     public static SelectStatement parse(String sql) {
+        return parse(sql, false);
+    }
+
+    /**
+     * @param preserveNumericCasts if true, a numeric {@code CAST(x AS INTEGER | DOUBLE | ...)} keeps its SQL text
+     *     ({@code CAST(x AS INTEGER)}) instead of being desugared into arithmetic, so a consumer that knows the
+     *     column types can tell a cast of a string (which needs parsing) from a cast of a number.
+     *     {@code ParquetSql} uses this; the default is the desugared form
+     */
+    public static SelectStatement parse(String sql, boolean preserveNumericCasts) {
         List<Token> tokens = SqlLexer.tokenize(sql);
-        return new SqlParser(tokens).parseQuery();
+        SqlParser p = new SqlParser(tokens);
+        p.preserveNumericCasts = preserveNumericCasts;
+        return p.parseQuery();
     }
 
     // =====================================================================
@@ -322,6 +341,14 @@ public final class SqlParser {
 
         boolean selectAll = false;
         List<SelectItem> items = new ArrayList<>();
+
+        // DISTINCT is contextual (an identifier), so a column literally named distinct still works:
+        // it is the keyword only when something that can start a select item follows it.
+        boolean distinct = false;
+        if (isDistinctWord() && !isTerminatorAfterWord()) {
+            advance();
+            distinct = true;
+        }
 
         if (peekType() == TokenType.STAR) {
             advance();
@@ -396,6 +423,12 @@ public final class SqlParser {
         }
 
         Integer limit = null;
+        int offset = 0;
+        boolean offsetSeen = false;
+        if (isOffsetWord()) { // OFFSET m [LIMIT n]
+            offset = parseOffset();
+            offsetSeen = true;
+        }
         if (peekType() == TokenType.LIMIT) {
             advance();
             Token n = expect(TokenType.NUMBER, "Expected a non-negative integer after LIMIT");
@@ -409,11 +442,15 @@ public final class SqlParser {
             }
         }
 
+        if (!offsetSeen && isOffsetWord()) { // LIMIT n OFFSET m
+            offset = parseOffset();
+        }
+
         expect(TokenType.EOF, "Unexpected trailing input after a complete query");
 
         try {
             return new SelectStatement(selectAll, items, table, where, groupBy, having, orderBy, limit,
-                    tableKind, tablePaths);
+                    tableKind, tablePaths, distinct, offset);
         } catch (IllegalArgumentException invalidShape) {
             throw new SqlSyntaxException(invalidShape.getMessage(), 0);
         }
@@ -446,6 +483,8 @@ public final class SqlParser {
             if (peekType() == TokenType.AS) {
                 advance();
                 alias = expectIdentifier("Expected an alias identifier after AS");
+            } else {
+                alias = readableName(agg.defaultOutputName());
             }
             return SelectItem.aggregate(agg, alias);
         }
@@ -458,6 +497,8 @@ public final class SqlParser {
         if (peekType() == TokenType.AS) {
             advance();
             alias = expectIdentifier("Expected an alias identifier after AS");
+        } else {
+            alias = readableName(expr);
         }
         return SelectItem.plain(expr, alias);
     }
@@ -497,9 +538,20 @@ public final class SqlParser {
         if (peekType() == TokenType.STAR) {
             error(func + "(*) is not valid; only COUNT(*) is");
         }
+        boolean distinct = false;
+        if (isDistinctWord() && !isTerminatorAfterWord()) {
+            if (func != AggFunc.COUNT) {
+                error("DISTINCT is supported only as COUNT(DISTINCT expr), not " + func);
+            }
+            advance();
+            distinct = true;
+            if (peekType() == TokenType.STAR) {
+                error("COUNT(DISTINCT *) is not valid; name the column to count distinct values of");
+            }
+        }
         String argExpr = parseValueExpression();
         expect(TokenType.RPAREN, "Expected ')' to close " + func + "(...)");
-        return new AggregateSpec(func, argExpr, false);
+        return new AggregateSpec(func, argExpr, false, distinct);
     }
 
     // =====================================================================
@@ -808,14 +860,24 @@ public final class SqlParser {
         while (true) {
             switch (peekType()) {
                 case IDENTIFIER: {
+                    if (sb.length() > 0 && atTrailingOffset()) {
+                        return sb.toString(); // an operand cannot follow an operand: this is the OFFSET clause
+                    }
                     Token idTok = advance();
                     if (peekType() == TokenType.LPAREN) {
-                        appendToken(sb, buildFunctionCallText(idTok.text()));
+                        if (idTok.text().equalsIgnoreCase("extract")) {
+                            appendToken(sb, buildExtractText());
+                        } else {
+                            appendToken(sb, buildFunctionCallText(idTok.text()));
+                        }
                     } else {
-                        appendToken(sb, idTok.text());
+                        appendToken(sb, columnReference(idTok.text()));
                     }
                     break;
                 }
+                case QUOTED_IDENTIFIER:
+                    appendToken(sb, columnReference(advance().text()));
+                    break;
                 case NUMBER:
                 case TRUE:
                 case FALSE:
@@ -840,6 +902,7 @@ public final class SqlParser {
                 case STAR:
                 case PERCENT:
                 case CARET:
+                case CONCAT_OP:
                     appendToken(sb, advance().text());
                     break;
                 default:
@@ -948,9 +1011,46 @@ public final class SqlParser {
         String inner = parseValueExpression();
         expect(TokenType.AS, "Expected AS inside CAST(... AS type)");
         Token typeTok = expect(TokenType.IDENTIFIER, "Expected a target type name after AS in CAST(... AS type)");
+        int[] castParams = null; // (precision, scale) of DECIMAL(p[,s]), else null
+        if (peekType() == TokenType.LPAREN) {
+            advance();
+            Token pTok = expect(TokenType.NUMBER, "Expected a precision after '(' in the CAST target type");
+            int sc = 0;
+            if (peekType() == TokenType.COMMA) {
+                advance();
+                sc = Integer.parseInt(expect(TokenType.NUMBER, "Expected a scale after ',' in the CAST target type").text());
+            }
+            expect(TokenType.RPAREN, "Expected ')' to close the CAST target type parameters");
+            castParams = new int[] {Integer.parseInt(pTok.text()), sc};
+        }
         expect(TokenType.RPAREN, "Expected ')' to close CAST(...)");
 
         String type = typeTok.text().toUpperCase(Locale.ROOT);
+        // Types the bridge evaluates itself keep their SQL form; numeric targets are desugared below.
+        switch (type) {
+            case "DATE", "TIMESTAMP" -> {
+                return "CAST(" + inner + " AS " + type + ")";
+            }
+            case "VARCHAR", "CHAR", "TEXT", "STRING" -> {
+                return "CAST(" + inner + " AS VARCHAR)";
+            }
+            case "DECIMAL", "NUMERIC" -> {
+                if (castParams != null) {
+                    int p = castParams[0], sc = castParams[1];
+                    return "CAST(" + inner + " AS DECIMAL(" + p + "," + sc + "))";
+                }
+            }
+            default -> { }
+        }
+        if (preserveNumericCasts) {
+            switch (type) {
+                case "INT", "INTEGER" -> { return "CAST(" + inner + " AS INTEGER)"; }
+                case "SMALLINT", "BIGINT" -> { return "CAST(" + inner + " AS " + type + ")"; }
+                case "LONG" -> { return "CAST(" + inner + " AS BIGINT)"; }
+                case "DOUBLE", "FLOAT", "REAL", "NUMERIC", "DECIMAL" -> { return "CAST(" + inner + " AS " + type + ")"; }
+                default -> { }
+            }
+        }
         switch (type) {
             case "INT":
             case "INTEGER":
@@ -1028,6 +1128,14 @@ public final class SqlParser {
      * ParserNG-safe single-quoted text, doubling any embedded {@code '}
      * exactly as {@link SqlLexer} itself accepts on the way in.
      */
+    /**
+     * The default output name of an item whose text holds quoted-identifier references, with the
+     * real names put back; {@code null} (keep the text as the name) when there are none.
+     */
+    private static String readableName(String text) {
+        return QuotedIdentifiers.containsReference(text) ? QuotedIdentifiers.decodeAll(text) : null;
+    }
+
     private static String quoteStringLiteral(String decoded) {
         return "'" + decoded.replace("'", "''") + "'";
     }
@@ -1042,6 +1150,118 @@ public final class SqlParser {
     // =====================================================================
     // token-stream plumbing
     // =====================================================================
+
+    /**
+     * The text standing for a column reference whose first name was just consumed: the plain name, or, if a
+     * nested path follows ({@code s.field}, {@code items[0]}, {@code m['key']}, {@code s.items[2].price}), a
+     * {@link QuotedIdentifiers} reference to the whole path text, which {@code ParquetSql} resolves into the
+     * nested field. Names inside a path are used as written, so a field whose own name contains {@code .},
+     * {@code [} or {@code ]} cannot be addressed.
+     */
+    private String columnReference(String first) {
+        if (peekType() != TokenType.DOT && peekType() != TokenType.LBRACKET) {
+            return QuotedIdentifiers.reference(first);
+        }
+        StringBuilder path = new StringBuilder(first);
+        while (true) {
+            if (peekType() == TokenType.DOT) {
+                advance();
+                if (peekType() != TokenType.IDENTIFIER && peekType() != TokenType.QUOTED_IDENTIFIER) {
+                    error("Expected a field name after '.' in a nested field path");
+                }
+                path.append('.').append(advance().text());
+            } else if (peekType() == TokenType.LBRACKET) {
+                advance();
+                if (peekType() == TokenType.NUMBER) {
+                    Token n = advance();
+                    if (n.text().indexOf('.') >= 0 || n.text().indexOf('e') >= 0 || n.text().indexOf('E') >= 0) {
+                        throw new SqlSyntaxException("A list index must be a non-negative integer, not '" + n.text() + "'", n.start());
+                    }
+                    path.append('[').append(n.text()).append(']');
+                } else if (peekType() == TokenType.STRING) {
+                    path.append("['").append(advance().text().replace("'", "''")).append("']");
+                } else {
+                    error("Expected an integer index or a quoted key inside [...]");
+                }
+                expect(TokenType.RBRACKET, "Expected ']' to close the element access");
+            } else {
+                return QuotedIdentifiers.encode(path.toString());
+            }
+        }
+    }
+
+    /**
+     * {@code EXTRACT(field FROM expression)} (the name and the opening parenthesis are already consumed
+     * up to the name), kept as SQL text for the bridge: {@code EXTRACT(YEAR FROM x)}.
+     */
+    private String buildExtractText() {
+        expect(TokenType.LPAREN, "Expected '(' after EXTRACT");
+        Token field = expectFieldWord();
+        expect(TokenType.FROM, "Expected FROM inside EXTRACT(field FROM expression)");
+        String inner = parseValueExpression();
+        expect(TokenType.RPAREN, "Expected ')' to close EXTRACT(...)");
+        return "EXTRACT(" + field.text().toUpperCase(Locale.ROOT) + " FROM " + inner + ")";
+    }
+
+    private Token expectFieldWord() {
+        if (peekType() == TokenType.IDENTIFIER) return advance();
+        error("Expected a field name such as YEAR, MONTH or DAY inside EXTRACT(field FROM expression)");
+        return null;
+    }
+
+    /** True if the current token is the identifier {@code OFFSET} (any case). */
+    private boolean isOffsetWord() {
+        return peekType() == TokenType.IDENTIFIER && "offset".equalsIgnoreCase(peek().text());
+    }
+
+    /**
+     * True at a trailing {@code OFFSET m} clause: {@code OFFSET}, a number, then end of input or
+     * {@code LIMIT}. Only that exact shape ends an expression, so a column named {@code offset} is
+     * still an ordinary identifier everywhere else.
+     */
+    private boolean atTrailingOffset() {
+        if (!isOffsetWord() || pos + 2 >= tokens.size()) return false;
+        if (tokens.get(pos + 1).type() != TokenType.NUMBER) return false;
+        TokenType after = tokens.get(pos + 2).type();
+        return after == TokenType.EOF || after == TokenType.LIMIT;
+    }
+
+    /** Parses {@code OFFSET m [ROW|ROWS]} at the cursor; {@code m} must be a plain non-negative integer. */
+    private int parseOffset() {
+        advance(); // OFFSET
+        Token n = expect(TokenType.NUMBER, "Expected a non-negative integer after OFFSET");
+        if (n.text().indexOf('.') >= 0) {
+            throw new SqlSyntaxException("OFFSET must be a plain integer, not '" + n.text() + "'", n.start());
+        }
+        int offset;
+        try {
+            offset = Integer.parseInt(n.text());
+        } catch (NumberFormatException overflow) {
+            throw new SqlSyntaxException("OFFSET value '" + n.text() + "' is out of range", n.start());
+        }
+        if (peekType() == TokenType.IDENTIFIER
+                && ("row".equalsIgnoreCase(peek().text()) || "rows".equalsIgnoreCase(peek().text()))) {
+            advance();
+        }
+        return offset;
+    }
+
+    /** True if the current token is the identifier {@code DISTINCT} (any case). */
+    private boolean isDistinctWord() {
+        return peekType() == TokenType.IDENTIFIER && "distinct".equalsIgnoreCase(peek().text());
+    }
+
+    /**
+     * True if the token after the current one cannot start a select item or aggregate argument
+     * ({@code ,}, {@code FROM}, {@code AS}, {@code )}, end of input), which makes a preceding
+     * {@code distinct} an ordinary column name.
+     */
+    private boolean isTerminatorAfterWord() {
+        if (pos + 1 >= tokens.size()) return true;
+        TokenType t = tokens.get(pos + 1).type();
+        return t == TokenType.COMMA || t == TokenType.FROM || t == TokenType.AS
+                || t == TokenType.RPAREN || t == TokenType.EOF;
+    }
 
     private Token peek() {
         return tokens.get(pos);
@@ -1063,6 +1283,9 @@ public final class SqlParser {
     }
 
     private String expectIdentifier(String message) {
+        if (peekType() == TokenType.QUOTED_IDENTIFIER) {
+            return advance().text();
+        }
         return expect(TokenType.IDENTIFIER, message).text();
     }
 

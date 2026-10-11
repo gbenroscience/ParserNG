@@ -51,6 +51,7 @@ public enum TokenType {
 
     // --- literals / names ---
     IDENTIFIER,
+    QUOTED_IDENTIFIER,  // "my col" or `my col`; the token text is the decoded name
     NUMBER,
     STRING,
 
@@ -66,6 +67,10 @@ public enum TokenType {
     SLASH,
     PERCENT,
     CARET,
+    CONCAT_OP,  // '||' string concatenation
+    DOT,        // '.' in a nested field path (s.field)
+    LBRACKET,   // '[' of an element or key access (items[0], m['k'])
+    RBRACKET,
 
     // --- comparison operators ---
     EQ,         // '='

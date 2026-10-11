@@ -15,7 +15,12 @@ package com.github.gbenroscience.sqlv1.ast;
  *
  * @author GBEMIRO
  */
-public record AggregateSpec(AggFunc func, String argExprText, boolean star) {
+public record AggregateSpec(AggFunc func, String argExprText, boolean star, boolean distinct) {
+
+    /** A non-{@code DISTINCT} aggregate. */
+    public AggregateSpec(AggFunc func, String argExprText, boolean star) {
+        this(func, argExprText, star, false);
+    }
 
     public AggregateSpec {
         if (star && func != AggFunc.COUNT) {
@@ -23,6 +28,9 @@ public record AggregateSpec(AggFunc func, String argExprText, boolean star) {
         }
         if (star && argExprText != null) {
             throw new IllegalArgumentException("A star aggregate must not also carry an argument expression");
+        }
+        if (distinct && (star || func != AggFunc.COUNT)) {
+            throw new IllegalArgumentException("DISTINCT is supported only as COUNT(DISTINCT expr)");
         }
         if (!star && argExprText == null) {
             throw new IllegalArgumentException("A non-star aggregate must carry an argument expression");
@@ -37,6 +45,6 @@ public record AggregateSpec(AggFunc func, String argExprText, boolean star) {
      * (named after their own trimmed text)
      */
     public String defaultOutputName() {
-        return star ? func.sqlName() + "(*)" : func.sqlName() + "(" + argExprText + ")";
+        return star ? func.sqlName() + "(*)" : func.sqlName() + "(" + (distinct ? "DISTINCT " : "") + argExprText + ")";
     }
 }

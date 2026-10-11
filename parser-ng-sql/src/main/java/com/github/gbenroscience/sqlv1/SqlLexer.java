@@ -130,8 +130,11 @@ public final class SqlLexer {
         if (Character.isDigit(c)) {
             return number(start);
         }
-        if (c == '\'' || c == '"') {
+        if (c == '\'') {
             return string(start, c);
+        }
+        if (c == '"' || c == '`') {
+            return quotedIdentifier(start, c);
         }
 
         switch (c) {
@@ -174,6 +177,25 @@ public final class SqlLexer {
             case '=' -> {
                 pos++;
                 return new Token(TokenType.EQ, "=", start, pos);
+            }
+            case '.' -> {
+                pos++;
+                return new Token(TokenType.DOT, ".", start, pos);
+            }
+            case '[' -> {
+                pos++;
+                return new Token(TokenType.LBRACKET, "[", start, pos);
+            }
+            case ']' -> {
+                pos++;
+                return new Token(TokenType.RBRACKET, "]", start, pos);
+            }
+            case '|' -> {
+                if (peekAt(pos + 1) == '|') {
+                    pos += 2;
+                    return new Token(TokenType.CONCAT_OP, "||", start, pos);
+                }
+                throw new SqlSyntaxException("Unexpected character '|' (did you mean '||' for string concatenation?)", pos);
             }
             case '!' -> {
                 if (peekAt(pos + 1) == '=') {
@@ -236,12 +258,29 @@ public final class SqlLexer {
         return new Token(TokenType.NUMBER, src.substring(start, pos), start, pos);
     }
 
+    /** True if {@code word} (any case) is a reserved word of this grammar. */
+    static boolean isKeyword(String word) {
+        return KEYWORDS.containsKey(word.toUpperCase(java.util.Locale.ROOT));
+    }
+
+    /**
+     * A delimited identifier, {@code "name"} or {@code `name`}; the delimiter is doubled to include it.
+     * Double quotes used to lex as string literals: string literals are single-quoted only.
+     */
+    private Token quotedIdentifier(int start, char quote) {
+        Token t = string(start, quote);
+        if (t.text().isEmpty()) {
+            throw new SqlSyntaxException("Zero-length delimited identifier", start);
+        }
+        return new Token(TokenType.QUOTED_IDENTIFIER, t.text(), start, pos);
+    }
+
     private Token string(int start, char quote) {
         pos++; // consume opening quote
         StringBuilder sb = new StringBuilder();
         while (true) {
             if (pos >= src.length()) {
-                throw new SqlSyntaxException("Unterminated string literal", start);
+                throw new SqlSyntaxException(quote == '\'' ? "Unterminated string literal" : "Unterminated quoted identifier", start);
             }
             char c = src.charAt(pos);
             if (c == quote) {

@@ -82,12 +82,29 @@ final class NativeLeaves {
         String widenedColumn() {
             return null;
         }
+
+        /**
+         * Every numeric column this kernel reads from the widened root (empty if it reads the native
+         * scan vectors). Defaults to {@link #widenedColumn()}; derived-column kernels read several.
+         */
+        List<String> widenedColumns() {
+            String c = widenedColumn();
+            return c == null ? List.of() : List.of(c);
+        }
     }
 
     // =================================================================== rewriter
 
     static Result rewrite(BoolExpr where, TableSchema schema) {
-        Rewriter r = new Rewriter(schema, containsOr(where));
+        return rewrite(where, schema, 0);
+    }
+
+    /**
+     * @param firstIndex index of the first mask name, so masks named elsewhere (derived columns of
+     *                   {@link ScalarFns}) and these never collide
+     */
+    static Result rewrite(BoolExpr where, TableSchema schema, int firstIndex) {
+        Rewriter r = new Rewriter(schema, containsOr(where), firstIndex);
         BoolExpr out = r.walk(where);
         return new Result(out, r.masks);
     }
@@ -112,9 +129,12 @@ final class NativeLeaves {
          */
         final boolean twoValuedNumeric;
 
-        Rewriter(TableSchema schema, boolean twoValuedNumeric) {
+        final int firstIndex;
+
+        Rewriter(TableSchema schema, boolean twoValuedNumeric, int firstIndex) {
             this.schema = schema;
             this.twoValuedNumeric = twoValuedNumeric;
+            this.firstIndex = firstIndex;
         }
 
         /** Numeric column of {@code o}, or null if {@code o} is not a numeric column. */
@@ -155,7 +175,7 @@ final class NativeLeaves {
         }
 
         String nextName() {
-            return maskName(masks.size());
+            return maskName(firstIndex + masks.size());
         }
 
         BoolExpr constant(boolean v, String why) {
@@ -448,7 +468,11 @@ final class NativeLeaves {
 
     private static FieldVector vec(VectorSchemaRoot src, String col) {
         FieldVector v = src.getVector(col);
-        if (v == null) throw new ParquetSqlException("Column '" + col + "' is missing from the scan");
+        if (v == null) { // a quoted-identifier reference names the file column by its real name
+            String real = com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(col);
+            if (!real.equals(col)) v = src.getVector(real);
+        }
+        if (v == null) throw new ParquetSqlException("Column '" + com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(col) + "' is missing from the scan");
         return v;
     }
 

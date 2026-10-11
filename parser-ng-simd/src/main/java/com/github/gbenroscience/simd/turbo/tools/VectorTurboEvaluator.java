@@ -183,6 +183,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
     public static final int OP_FLOOR = 104;
     public static final int OP_CEIL = 105;
     public static final int OP_ROUND = 106;
+    public static final int OP_FACT = 107;
 
     // Pre-allocated compilation state
     protected MathExpression.Token[] postfix;
@@ -289,6 +290,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                             OP_OR;
                         case '<' ->
                             OP_LT;
+                        case '!' ->
+                            OP_FACT;
                         default ->
                             throw new IllegalArgumentException("Unknown operator: " + t.opChar);
                     };
@@ -526,6 +529,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         }
                         case "erf" ->
                             OP_ERF;
+                        case "fact" ->
+                            OP_FACT;
                         default ->
                             throw new IllegalArgumentException("Unknown function: " + t.name);
                     };
@@ -1301,6 +1306,14 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {
                             scratch[base + k] = Math.abs(scratch[base + k]);
+                        }
+                    }
+                    
+
+                    case OP_FACT -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.fact(scratch[base + k]);
                         }
                     }
                     

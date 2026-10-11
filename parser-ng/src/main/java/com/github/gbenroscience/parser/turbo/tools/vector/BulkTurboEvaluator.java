@@ -177,6 +177,12 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
 
     static final int OP_AND = 102;
     static final int OP_OR = 103;
+    
+    
+    public static final int OP_FLOOR = 104;
+    public static final int OP_CEIL = 105;
+    public static final int OP_ROUND = 106;
+    public static final int OP_FACT = 107;
     // Pre-allocated compilation state
     protected MathExpression.Token[] postfix;
     protected final MethodHandle compiledScalarHandle;
@@ -282,6 +288,9 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         case '<':
                             opcodes[instructionCount] = OP_LT;
                             break;
+                        case '!':
+                            opcodes[instructionCount] = OP_FACT;
+                            break; 
                         default:
                             throw new IllegalArgumentException("Unknown operator: " + t.opChar);
                     }
@@ -296,7 +305,16 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         // Core Math Functions
                         case "abs":
                             opcodes[instructionCount] = OP_ABS;
-                            break;
+                            break; 
+                        case "ceil":
+                            opcodes[instructionCount] = OP_CEIL;
+                            break;       
+                        case "floor":
+                            opcodes[instructionCount] = OP_FLOOR;
+                            break;       
+                        case "round":
+                            opcodes[instructionCount] = OP_ROUND;
+                            break;     
                         case "exp":
                             opcodes[instructionCount] = OP_EXP;
                             break;
@@ -667,6 +685,8 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                             opcodes[instructionCount] = t.arity == 1 ? OP_GEGLU : OP_GEGLU_2;
                         case "erf":
                             opcodes[instructionCount] = OP_ERF;
+                        case "fact":
+                            opcodes[instructionCount] = OP_FACT;
 
                         default:
                             throw new IllegalArgumentException("Unknown function: " + t.name);
@@ -1332,6 +1352,39 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         }
                         break;
                     }
+                    
+                    
+                    case OP_FACT: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.fact(scratch[base + k]);
+                        }
+                        break;
+                    }
+                    
+                    case OP_CEIL: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.ceil(scratch[base + k]);
+                        }
+                        break;
+                    }
+                    
+                    case OP_FLOOR: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.floor(scratch[base + k]);
+                        }
+                        break;
+                    }
+                    
+                    case OP_ROUND: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Math.round(scratch[base + k]);
+                        }
+                        break;
+                    } 
 
                     case OP_EXP: {
                         final int base = (sp - 1) * BLOCK_SIZE;

@@ -24,56 +24,42 @@ public class Maths {                       //3.14159265358979323846;
     private static final double A4 = -1.453152027;
     private static final double A5 = 1.061405429;
 
-    private static final double[] FACT_TABLE = new double[171];
-    private static final double SQRT_2PI = Math.sqrt(2 * Math.PI);
-
     private static final double INV_SQRT_2 = 0.7071067811865475; // 1 / sqrt(2)
-
+    
+    
+    
+     static final double[] FACT_TABLE = new double[171];
+    private static final double SQRT_2PI = Math.sqrt(2 * Math.PI);
     static {
         FACT_TABLE[0] = 1.0;
-        for (int i = 1; i <= 170; i++) {
-            FACT_TABLE[i] = FACT_TABLE[i - 1] * i;
-        }
+        for (int i = 1; i <= 170; i++) FACT_TABLE[i] = FACT_TABLE[i - 1] * i;
     }
-
     public static double fact(double p) {
-        // 1. Instant Path: Integers up to 170 (99% of use cases)
-        if (p >= 0 && p <= 170 && p == (int) p) {
-            return FACT_TABLE[(int) p];
-        }
-
-        // 2. Edge Cases
-        if (p < 0) {
-            return (p == Math.floor(p)) ? Double.NEGATIVE_INFINITY : Double.NaN;
-        }
-        if (p > 170.6) {
-            return Double.POSITIVE_INFINITY; // Beyond 170.6, double overflows
-        }
-        // 3. Floating Point Path (Optimized Stirling/Gamma)
+        if (p >= 0 && p <= 170 && p == (int) p) return FACT_TABLE[(int) p];
+        if (p < 0) return (p == Math.floor(p)) ? Double.NEGATIVE_INFINITY : Double.NaN;
+        if (p > 170.6) return Double.POSITIVE_INFINITY;
         double n = Math.floor(p);
         double k = p - n;
-        double d = 160 + k;
-
-        // Stirling's series with Horner's Method-style evaluation to save cycles
+        // Shift to d = 160 + k and divide out (p+1)...(p+160-n). For n > 160 no shift is
+        // needed (and 160 - n would be negative), so apply Stirling directly at d = p.
+        double d;
+        int limit;
+        if (n > 160) {
+            d = p;
+            limit = 0;
+        } else {
+            d = 160 + k;
+            limit = (int) (160 - n);
+        }
         double invD = 1.0 / d;
         double invD2 = invD * invD;
-
-        // We pre-calculate the large constant series to avoid division in the loop
         double series = 1.0 + invD * (1.0 / 12.0 + invD * (1.0 / 288.0 + invD * (-139.0 / 51840.0
-                + invD * (-59909.0 / 259200000.0 + invD * (1208137.0 / 1492992000.0)))));
-
-        // Use a faster power approximation or Math.pow if p is very large
+                + invD * (-571.0 / 2488320.0 + invD * (163879.0 / 209018880.0)))));
         double fact1 = Math.pow(d / Math.E, d) * SQRT_2PI * Math.sqrt(d) * series;
-
         double prod = 1.0;
-        int limit = (int) (160 - n);
-        for (int j = 1; j <= limit; j++) {
-            prod *= (p + j);
-        }
-
+        for (int j = 1; j <= limit; j++) prod *= (p + j);
         return fact1 / prod;
     }
-
     public static double factOld(double p) {
 
         double i = 1;

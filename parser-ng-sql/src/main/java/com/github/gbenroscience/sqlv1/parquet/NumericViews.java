@@ -76,7 +76,7 @@ final class NumericViews implements AutoCloseable {
             kinds[i] = schema.kind(names[i]);
             arrowTypes[i] = schema.type(names[i]);
             if (kinds[i] == null || !kinds[i].numeric()) {
-                throw new ParquetSqlException("Column '" + names[i] + "' is " + kinds[i]
+                throw new ParquetSqlException("Column '" + com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(names[i]) + "' is " + kinds[i]
                         + " and cannot be used in a numeric expression");
             }
         }
@@ -101,12 +101,15 @@ final class NumericViews implements AutoCloseable {
         List<FieldVector> vecs = new ArrayList<>(names.length + 1);
         List<Field> fields = new ArrayList<>(names.length + 1);
         for (int c = 0; c < names.length; c++) {
-            FieldVector src = source.getVector(names[c]);
+            FieldVector src = source.getVector(com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(names[c]));
             if (src == null) {
-                throw new ParquetSqlException("Column '" + names[c] + "' is missing from the scan (file " + file + ")");
+                throw new ParquetSqlException("Column '" + com.github.gbenroscience.sqlv1.QuotedIdentifiers.real(names[c]) + "' is missing from the scan (file " + file + ")");
             }
             FieldVector v;
-            if (kinds[c] == ColumnKind.FLOAT64) {
+            // A double column is shared by reference, which keeps the file's own name. A column named through a
+            // quoted-identifier reference must carry the reference as its name (that is what the expression
+            // text says), so it is copied under that name instead.
+            if (kinds[c] == ColumnKind.FLOAT64 && src.getField().getName().equals(names[c])) {
                 v = src; // by reference, no copy
             } else {
                 Float8Vector d = ensure(c, n);
@@ -129,7 +132,7 @@ final class NumericViews implements AutoCloseable {
             }
             NativeLeaves.Mask mk = masks.get(m);
             VectorSchemaRoot in = source;
-            if (mk.widenedColumn() != null) {
+            if (!mk.widenedColumns().isEmpty()) {
                 if (widenedRoot == null) {
                     widenedRoot = new VectorSchemaRoot(new Schema(new ArrayList<>(fields)), new ArrayList<>(vecs), n);
                 }
@@ -195,6 +198,10 @@ final class NumericViews implements AutoCloseable {
             case UINT32 -> {
                 UInt4Vector v = (UInt4Vector) src;
                 for (int i = 0; i < n; i++) if (v.isNull(i)) d.setNull(i); else d.set(i, v.get(i) & 0xFFFFFFFFL);
+            }
+            case FLOAT64 -> {
+                Float8Vector v = (Float8Vector) src;
+                for (int i = 0; i < n; i++) if (v.isNull(i)) d.setNull(i); else d.set(i, v.get(i));
             }
             case FLOAT32 -> {
                 Float4Vector v = (Float4Vector) src;

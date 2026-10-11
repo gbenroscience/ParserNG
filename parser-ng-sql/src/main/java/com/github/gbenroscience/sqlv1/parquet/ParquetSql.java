@@ -134,7 +134,7 @@ public final class ParquetSql {
         Matcher m = EXPLAIN.matcher(sql);
         boolean explain = m.find();
         String body = explain ? sql.substring(m.end()) : sql;
-        SelectStatement st = SqlParser.parse(body);
+        SelectStatement st = SqlParser.parse(body, true);
         List<Path> files;
         switch (st.tableKind()) {
             case FILE, READ_PARQUET -> {

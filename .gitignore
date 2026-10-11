@@ -10,6 +10,8 @@ src/main/java/.DS_Store
 *.log
 *.swp
 *.zip
+*.py
+parser-ng-parquet/*.py
 sql-layer-specs.txt
 parser-ng-pro/*.txt
 .specstory

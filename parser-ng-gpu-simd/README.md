@@ -65,7 +65,7 @@ Execution paths utilize pre-allocated internal memory frames and Thread-Local Al
 
 ### 3. Data Scaling & Core Linearity
 * **Single-Worker Purity:** In strict single-threaded environments, ParserNG's contiguous memory alignment outperforms traditional scalar bytecode compilers (like Janino) by over **2× to 14.6×**.
-* **Linear Parallel Scaling:** Unlike scalar compilers that suffer from "negative scaling" due to cache line thrashing across multiple threads, ParserNG's Structure of Arrays (SoA) layout scales with **~80% parallel efficiency** when assigning multiple pinned hardware cores.
+* **Linear Parallel Scaling:** Unlike scalar compilers that suffer from "negative scaling" due to cache line thrashing across multiple threads, ParserNG's Structure of Arrays (SoA) layout scales with **~80% parallel efficiency** when assigning multiple pinned hardware cores. *(Those figures were taken with worker pinning enabled. Pinning is now opt-in — add `-Dparserng.pin=true` to reproduce them, and see [Parallel Execution, CPU Pinning & Tuning](#parallel-execution-cpu-pinning--tuning) for why it is no longer the default.)*
 * **Bandwidth Saturation:** At extreme dataset limits (e.g., 67M+ elements), throughput safely stabilizes to track physical DRAM bandwidth caps, maintaining a consistent `1.3x` advantage over optimized scalar loops.
 
 ---
@@ -102,7 +102,7 @@ The performance gap scales exponentially when moving to a Structure of Arrays (S
 * **ARM64:** Apple Silicon or Enterprise ARM servers supporting NEON or SVE vector extensions.
 
 ### Supported Environments
-* **Target Runtime:** Java 22, 24, or 26. *(JDK 24+ is highly recommended for highly advanced C2 vector unrolling optimization passes.)* CPU pinning (used by the multi-worker paths in the `command` package evaluators) requires JDK 22+.
+* **Target Runtime:** Java 22, 24, or 26. *(JDK 24+ is highly recommended for highly advanced C2 vector unrolling optimization passes.)* Optional CPU pinning (off by default; see [CPU pinning (opt-in)](#cpu-pinning-opt-in)) uses the `java.lang.foreign` API and requires JDK 22+ plus `--enable-native-access=ALL-UNNAMED`.
 
 ### Mandatory JVM Execution Flags
 To grant access to hardware vector extensions, you must specify the incubator flags upon application startup:
@@ -158,7 +158,7 @@ Every evaluator in this package follows the same lifecycle:
 2. Compile it **once** into a `SIMDVectorCompositeExpression` via the class's static `getEvaluator(...)` factory (or `new SIMDCommandXxx(mathExpr).compile()`).
 3. Call one of the `applyBulk*` methods as many times as you need against fresh input/output buffers. Compilation is the expensive step — reuse the compiled evaluator across calls rather than rebuilding it per batch.
 
-Each class below also exposes a `(MathExpression, int numWorkers)` / `(String, int numWorkers)` constructor and matching `getEvaluator` overload for pinned multi-worker parallel execution, plus `applyBulkParallel(...)` and `applyBulkBatched(..., batchSize)` variants alongside the plain `applyBulk(...)` shown here.
+Each class below also exposes a `(MathExpression, int numWorkers)` / `(String, int numWorkers)` constructor and matching `getEvaluator` overload for multi-worker parallel execution (CPU pinning is opt-in — see [Parallel Execution, CPU Pinning & Tuning](#parallel-execution-cpu-pinning--tuning)), plus `applyBulkParallel(...)` and `applyBulkBatched(..., batchSize)` variants alongside the plain `applyBulk(...)` shown here.
 
 #### `SIMDCommandF32` — flat `float[]` and 2D `float[][]` variables
 
@@ -229,7 +229,7 @@ Both classes expose **two** zero-copy entry points, mirroring the flat-array and
 * `applyBulk(MemorySegment variables, MemorySegment output)` — one flat segment holding every variable back-to-back (sample count is derived from `output`'s byte size), for single-variable expressions or pre-interleaved data.
 * `applyBulk(MemorySegment[] variables, MemorySegment output)` — **one segment per variable**, the direct off-heap analog of the `float[][]`/`double[][]` overload; sample count is derived from `variables[0]`'s byte size. This is the one to reach for with multi-variable expressions when you want to hand in independently-sourced off-heap buffers with no copy into a combined layout first.
 
-Both also have `applyBulkParallel(...)` overloads for pinned multi-worker execution, following the same `(MathExpression, int numWorkers)` / `getEvaluator(..., int numWorkers)` setup shown for `SIMDCommandF32`/`SIMDCommandF64` above.
+Both also have `applyBulkParallel(...)` overloads for multi-worker execution (use `Arena.ofShared()` for segments that worker threads will read), following the same `(MathExpression, int numWorkers)` / `getEvaluator(..., int numWorkers)` setup shown for `SIMDCommandF32`/`SIMDCommandF64` above.
 
 ```java
 import com.github.gbenroscience.parser.MathExpression;
@@ -316,6 +316,142 @@ Out of the box, the enterprise kernel includes optimized presets for:
 
 ---
 
+## Parallel Execution, CPU Pinning & Tuning
+
+### How the worker pool behaves
+Every `command` evaluator created with `numWorkers` (or the default worker count, chosen from the machine's CPU count) owns a small pool of daemon worker threads. `applyBulkParallel(...)` splits the batch, the **calling thread processes one share itself**, and the workers process the rest.
+
+* **Handoff:** workers spin briefly (`SPIN_LIMIT`), then block with an **untimed** `LockSupport.park()`. Dispatch calls `unpark(worker)` and a finishing worker calls `unpark(caller)`, so there is no polling loop and no dependence on OS timer granularity. *(Earlier revisions of the `SIMDCommandSegment*` classes polled with `parkNanos(20 µs)`, which on Windows rounds up to the scheduler tick and made parallel runs slower than serial; they now use the same handoff as `SIMDCommandF32`/`SIMDCommandF64`.)*
+* **Lifecycle:** `SIMDVectorCompositeExpression` is `AutoCloseable`. Use try-with-resources (or call `close()`) when you are done so the worker threads stop; otherwise a `Cleaner` stops them when the evaluator is garbage-collected. Benchmark loops that create many evaluators should close each one.
+* **One caller at a time:** to be safe, do not call `applyBulkParallel` concurrently from several threads on the *same* evaluator instance; create one evaluator per calling thread.
+* **Small inputs run serially:** below an internal threshold `applyBulkParallel` falls back to the serial path.
+* **Shared memory:** `MemorySegment`s handed to `applyBulkParallel` must be accessible from the worker threads — allocate them from `Arena.ofShared()` (or `Arena.global()`/`ofAuto()`), not `Arena.ofConfined()`.
+
+### CPU pinning (opt-in)
+**Pinning is off by default.** Hard CPU affinity can help on dedicated, isolated cores, but on shared desktops/laptops it removes the scheduler's ability to move a worker off a busy core. In our measurements it gave no consistent benefit and produced occasional multi-millisecond stalls, so you must ask for it:
+
+```bash
+# enable from the command line
+java --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -Dparserng.pin=true ...
+```
+
+```java
+// or programmatically, BEFORE creating any evaluator (workers decide when they start)
+com.github.gbenroscience.simdext.turbo.tools.utils.CPUPinner.setPinningEnabled(true);
+```
+
+When enabled, each worker calls `CPUPinner.pinWorker(workerId)`:
+
+* **Topology-aware:** `CPUPinner.pinOrder()` lists the first logical CPU of every *physical* core, then each core's SMT siblings (e.g. `[[0,1],[2,3]]` → `[0,2,1,3]`), so workers land on distinct physical cores before sharing one. The first slot is left for the calling thread.
+* **Platforms:** Linux (`sched_setaffinity`) and Windows (`SetThreadAffinityMask`; processor group 0 only, i.e. at most 64 logical CPUs). On macOS pinning is skipped (a no-op). Without `--enable-native-access=ALL-UNNAMED` the JDK prints a restricted-method warning on first use (and a future release will refuse the call), in which case pinning is skipped as well. Every pinning request in this module goes through `CPUPinner.pinCurrentThread`, which honours the flag.
+* **Introspection:** `CPUPinner.isPinningEnabled()`, `CPUPinner.pinOrder()` and `CPUPinner.detectPhysicalCoreGroups()`.
+
+### What we measured (and what to expect)
+Measured on an Intel Core i7-6500U laptop (2 physical cores / 4 logical), Windows 10 and WSL2, 1,000,017 elements per variable. These numbers are specific to that machine — measure on yours.
+
+* Parallel speedup over serial was roughly **1.3–1.9×**, higher for compute-heavy expressions (`exp`, `sin`) where the second hyper-thread helps, lower for cheap expressions that are limited by memory bandwidth (about 10 GB/s on that machine, so F32 runs about twice as fast as F64).
+* The array paths and the `MemorySegment` / `MemorySegment[]` paths performed within about ±15% of each other. The segment paths exist to avoid copies when data already lives off-heap, not to beat heap arrays.
+* Pinning made no consistent difference on WSL2 and was never clearly better on Windows; the worst stalls (a worker taking about twice as long as expected) occurred both pinned and unpinned, so report the **median of several rounds**, not a single average.
+* The default worker count was a good setting on that machine; try `getEvaluator(expr, n)` with your own `n` if you have a different topology.
+
+### Benchmark harness: `SIMDThrptBench`
+`com.github.gbenroscience.simdext.turbo.tools.bench.SIMDThrptBench` benchmarks every bulk path, serial and parallel, and prints a summary table.
+
+```bash
+mvn compile exec:exec -Dexec.executable="java" \
+  -Dexec.args="--add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -classpath %classpath com.github.gbenroscience.simdext.turbo.tools.bench.SIMDThrptBench"
+```
+
+| Option | Path exercised |
+| :--- | :--- |
+| 1 | Auto-vectorized `double[][]` |
+| 2 | Base SIMD `double[][]` |
+| 3 / 4 | `SIMDCommandF32` / `SIMDCommandF64` arrays |
+| 5 / 6 | `SIMDCommandSegmentF32` / `SIMDCommandSegmentF64`, array overloads |
+| 7 / 8 | `SIMDCommandSegmentF64` / `F32`, **flat** `MemorySegment` (all variables in one segment, variable-major: element *(v, i)* at byte offset `(v*N + i) * elemSize`) |
+| 9 / 10 | `SIMDCommandSegmentF64` / `F32`, **`MemorySegment[]`** (one segment per variable) |
+| 0 | All of the above, then a summary table |
+
+| System property | Effect |
+| :--- | :--- |
+| `-Dbench.workers=N` | Worker count for variants 3–10 (default: the evaluator's own default) |
+| `-Dbench.rounds=N` | Measurement rounds per row (default 5); the table reports the **median** round, and each row also prints best and worst |
+| `-Dparserng.pin=true` | Enable CPU pinning (default: off) |
+| `-Dparserng.diag=true` | Print a per-row timing line: dispatch→pickup latency, worker busy time, caller wait time |
+
+The first line of output shows the pin order, whether pinning is on, and the worker count, so every saved log is self-describing. After each prompt the harness prints `Expression :` and `Variant    :` lines confirming what it received — on some Windows launch paths (such as `mvn exec:exec`) the console does not echo typed text even though the input is read correctly. Each row also prints the last output element as a cheap cross-variant correctness check (all F64 rows should match, and all F32 rows should match). Pass `<expression> <variant>` as program arguments to run one variant once and exit — handy for giving each variant its own fresh JVM:
+
+```bash
+java --add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -cp ... \
+  com.github.gbenroscience.simdext.turbo.tools.bench.SIMDThrptBench "x^2+1" 7
+```
+
+### JMH benchmark: `SIMDThrptJmh`
+`SIMDThrptJmh` covers the same ten paths with [JMH](https://github.com/openjdk/jmh). Every parameter combination runs in its own forked JVM, so there is no JIT-profile pollution between variants and no leftover worker threads. The score is **milliseconds per bulk payload** (convert to M elements/s with `elements / 1000 / score_ms`).
+
+Add JMH to the module (benchmarks live in `src/test/java`, so JMH stays out of the shipped jar):
+
+```xml
+<properties><jmh.version>1.37</jmh.version></properties>
+
+<dependency>
+    <groupId>org.openjdk.jmh</groupId>
+    <artifactId>jmh-core</artifactId>
+    <version>${jmh.version}</version>
+    <scope>test</scope>
+</dependency>
+
+<plugin>
+    <artifactId>maven-compiler-plugin</artifactId>
+    <configuration>
+        <annotationProcessorPaths>
+            <path>
+                <groupId>org.openjdk.jmh</groupId>
+                <artifactId>jmh-generator-annprocess</artifactId>
+                <version>${jmh.version}</version>
+            </path>
+        </annotationProcessorPaths>
+    </configuration>
+</plugin>
+```
+
+> If the module already relies on other annotation processors, add them to `annotationProcessorPaths` too — setting that list disables classpath discovery.
+
+Run it through the class's **own `main`** — it prompts for an expression and a variant (0 = all), exactly like `SIMDThrptBench`, and includes *only* this class's benchmark, so other JMH classes in the same directory are never started. Pass `<expression> <variant>` as program arguments to skip the prompts.
+
+```bash
+mvn test-compile exec:exec -Dexec.classpathScope=test -Dexec.executable=java \
+  -Dexec.args="--add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED -classpath %classpath com.github.gbenroscience.simdext.turbo.tools.bench.SIMDThrptJmh"
+```
+
+| JMH parameter | Values |
+| :--- | :--- |
+| `variant` | 1–10 (0 = all in the prompt), same numbering as `SIMDThrptBench` (7/8 flat `MemorySegment`, 9/10 `MemorySegment[]`) |
+| `mode` | `serial` or `parallel` |
+| `expression` | Prompted for by `main` (any expression, commas and spaces are fine). Defaults, used only if you launch through `org.openjdk.jmh.Main`: a cheap one (`x^2+1`) and a three-variable Gaussian |
+| `workers` | `0` = evaluator default, otherwise `getEvaluator(expr, workers)` for variants 3–10 |
+| `elements` | Samples per variable (default 1,000,017) |
+
+Optional system properties on the launching JVM: `-Dbench.workers=N`, `-Dbench.elements=N`, `-Dbench.mode=serial|parallel` (default both), `-Dparserng.pin=true`, `-Dparserng.diag=true`. The module flags and the two `parserng.*` properties are forwarded to the forked JVMs explicitly, and each fork prints a `[config]` line showing what it saw. To use JMH profilers such as `-prof gc`, run `org.openjdk.jmh.Main` with this class's name as the include pattern instead.
+
+### Known limitations
+* `validate(MemorySegment, MemorySegment)` on the segment evaluators requires the input and output segments to have the **same byte size**. That only matches the flat layout for single-variable expressions; multi-variable flat segments (`variables.byteSize() == numVars * output.byteSize()`) are processed by `applyBulk` but would not pass this check. `applyBulk` does not call it.
+* The Windows topology/pinning code handles processor group 0 only.
+
+---
+
+## Change Log
+
+* **Segment evaluators (`SIMDCommandSegmentF32`/`F64`):** replaced `parkNanos(20 µs)` polling in worker idle waits and in the caller's completion wait with the untimed `park()`/`unpark()` handoff used by `SIMDCommandF32`/`F64`. Fixes parallel runs being slower than serial on Windows.
+* **CPU pinning is now opt-in everywhere:** `-Dparserng.pin=true` or `CPUPinner.setPinningEnabled(true)`. `CPUPinner.pinCurrentThread` returns `false` unless enabled.
+* **Topology-aware pinning:** new `CPUPinner.pinOrder()` and `CPUPinner.pinWorker(workerId)` (one logical CPU per physical core first; first slot left for the caller). `SIMDCommandF32`, `SIMDCommandF64`, `SIMDCommandSegmentF32` and `SIMDCommandSegmentF64` now pin through `pinWorker`.
+* **`CPUPinner` fixes:** Windows indices of 64 and above are rejected instead of silently wrapping onto another CPU; the Windows topology buffer is 8-byte aligned.
+* **Opt-in diagnostics** (`-Dparserng.diag=true`) in all four evaluators: per-task dispatch→pickup latency, worker busy time and caller wait time. Compiled out by the JIT when the flag is off.
+* **New JMH harness `SIMDThrptJmh`:** all ten paths, serial and parallel, one forked JVM per combination, evaluators closed after each trial.
+* **`SIMDThrptBench` rewritten:** one shared measurement routine; new variants 7–10 for the flat `MemorySegment` and `MemorySegment[]` paths in F64 and F32; evaluators are closed after each variant; median-of-rounds reporting; `-Dbench.workers`, `-Dbench.rounds`, one-shot `<expr> <variant>` mode; correct handling of repeated expression/variant prompts.
+
+---
+
 ## Local Validation Testing
 
 To run microbenchmarks, check hardware lane allocations, and verify vector compilation paths on your machine architecture, execute the included target test harness:
@@ -325,6 +461,8 @@ mvn clean test -Dtest=SIMDCommandF64SegmentTest
 ```
 
 The validation tool tests across variable scale profiles (20 x 20, 70 x 70, 100 x 100, 200 x 200, 512 x 512, and 1024 x 1024).
+
+For throughput numbers on your own hardware across every bulk path (including the off-heap `MemorySegment` and `MemorySegment[]` paths), use the [`SIMDThrptBench` harness](#benchmark-harness-simdthrptbench).
  
 
 ## Enterprise Support, SLAs, & Custom DSL Services

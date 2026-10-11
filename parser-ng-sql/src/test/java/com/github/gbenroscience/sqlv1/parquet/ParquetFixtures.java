@@ -7,8 +7,11 @@ import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.LocalOutputFile;
 import org.apache.parquet.io.api.Binary;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.MessageTypeParser;
+import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
+import org.apache.parquet.schema.Types;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -69,6 +72,108 @@ final class ParquetFixtures {
                 g.append("dec32", i * 100 + 5);
                 g.append("dec64", i * 10_000L);
                 g.append("decf", Binary.fromConstantByteArray(signed(BigInteger.valueOf(i), 9)));
+                w.write(g);
+            }
+        }
+    }
+
+    /**
+     * Columns whose names are not plain identifiers, for the quoted-identifier tests, over several row groups:
+     * {@code id} int64 = i, {@code "my col"} int32 = 2i, {@code "1st"} string = "v" + i, {@code "select"} int64 = 10i,
+     * {@code "a-b"} int32 = i % 7.
+     */
+    static void writeAwkward(Path file, int rows) throws IOException {
+        MessageType t = Types.buildMessage()
+                .required(PrimitiveTypeName.INT64).named("id")
+                .required(PrimitiveTypeName.INT32).named("my col")
+                .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("1st")
+                .required(PrimitiveTypeName.INT64).named("select")
+                .required(PrimitiveTypeName.INT32).named("a-b")
+                .named("awkward");
+        SimpleGroupFactory f = new SimpleGroupFactory(t);
+        try (ParquetWriter<Group> w = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(t)
+                .withCompressionCodec(CompressionCodecName.UNCOMPRESSED).withRowGroupSize(16 * 1024).build()) {
+            for (int i = 0; i < rows; i++) {
+                Group g = f.newGroup();
+                g.append("id", (long) i);
+                g.append("my col", 2 * i);
+                g.append("1st", "v" + i);
+                g.append("select", 10L * i);
+                g.append("a-b", i % 7);
+                w.write(g);
+            }
+        }
+    }
+
+    private static final MessageType NESTED = MessageTypeParser.parseMessageType(
+            "message nested {\n"
+            + "  required int64 id;\n"
+            + "  optional group s {\n"
+            + "    optional int32 n;\n"
+            + "    optional binary label (UTF8);\n"
+            + "    optional group inner { optional int32 deep; }\n"
+            + "  }\n"
+            + "  optional group nums (LIST) { repeated group list { optional int32 element; } }\n"
+            + "  optional group m (MAP) { repeated group key_value { required binary key (UTF8); optional int32 value; } }\n"
+            + "  optional group items (LIST) { repeated group list { optional group element {\n"
+            + "    optional int32 price; optional binary name (UTF8); } } }\n"
+            + "}\n");
+
+    /**
+     * Nested columns, for the nested-access tests. Row i: {@code s} is null when i%5==0, else
+     * {@code s.n = i} (null when i%9==0), {@code s.label = "L"+i} (null when i%8==0), {@code s.inner.deep = 2i}
+     * (inner null when i%3==0); {@code nums} is null when i%7==0, empty when i%4==0, else (i%3)+1 elements
+     * {@code i*10+k}; {@code m} is null when i%6==0, else {@code {"a": i, "b": 2i}} plus {@code "c": 7} when i is
+     * even; {@code items} is null when i%10==0, else two structs {@code (price=i, name="x"+i)} and
+     * {@code (price=i+1, name="y"+i)}.
+     */
+    static void writeNested(Path file, int rows) throws IOException {
+        SimpleGroupFactory f = new SimpleGroupFactory(NESTED);
+        try (ParquetWriter<Group> w = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(NESTED)
+                .withCompressionCodec(CompressionCodecName.UNCOMPRESSED).withDictionaryEncoding(false).build()) {
+            for (int i = 0; i < rows; i++) {
+                Group g = f.newGroup();
+                g.append("id", (long) i);
+                if (i % 5 != 0) {
+                    Group s = g.addGroup("s");
+                    if (i % 9 != 0) s.append("n", i);
+                    if (i % 8 != 0) s.append("label", "L" + i);
+                    if (i % 3 != 0) s.addGroup("inner").append("deep", 2 * i);
+                }
+                if (i % 7 != 0) {
+                    Group nums = g.addGroup("nums");
+                    if (i % 4 != 0) for (int k = 0; k <= i % 3; k++) nums.addGroup("list").append("element", i * 10 + k);
+                }
+                if (i % 6 != 0) {
+                    Group m = g.addGroup("m");
+                    m.addGroup("key_value").append("key", "a").append("value", i);
+                    m.addGroup("key_value").append("key", "b").append("value", 2 * i);
+                    if (i % 2 == 0) m.addGroup("key_value").append("key", "c").append("value", 7);
+                }
+                if (i % 10 != 0) {
+                    Group items = g.addGroup("items");
+                    Group e1 = items.addGroup("list").addGroup("element");
+                    e1.append("price", i).append("name", "x" + i);
+                    Group e2 = items.addGroup("list").addGroup("element");
+                    e2.append("price", i + 1).append("name", "y" + i);
+                }
+                w.write(g);
+            }
+        }
+    }
+
+    private static final MessageType STRINGS = MessageTypeParser.parseMessageType(
+            "message strings { required int64 id; optional binary v (STRING); }");
+
+    /** {@code id} = position, {@code v} = the given text (a null leaves it null), for the string-to-number cast tests. */
+    static void writeStrings(Path file, String... values) throws IOException {
+        SimpleGroupFactory f = new SimpleGroupFactory(STRINGS);
+        try (ParquetWriter<Group> w = ExampleParquetWriter.builder(new LocalOutputFile(file)).withType(STRINGS)
+                .withCompressionCodec(CompressionCodecName.UNCOMPRESSED).withDictionaryEncoding(false).build()) {
+            for (int i = 0; i < values.length; i++) {
+                Group g = f.newGroup();
+                g.append("id", (long) i);
+                if (values[i] != null) g.append("v", values[i]);
                 w.write(g);
             }
         }

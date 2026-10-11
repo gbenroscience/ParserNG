@@ -170,6 +170,18 @@ public final class ArrowQuery implements AutoCloseable {
     private final String reusableUnsupportedReason;
 
     private ArrowQuery(String sql, SelectStatement stmt) {
+        // Fail loudly: the numeric engine has no DISTINCT, and ignoring the keyword would be a silent wrong answer.
+        if (stmt.offset() != 0) {
+            throw new UnsupportedOperationException("OFFSET is not supported by ArrowQuery; use the Parquet bridge (ParquetSql)");
+        }
+        if (stmt.distinct()) {
+            throw new UnsupportedOperationException("SELECT DISTINCT is not supported by ArrowQuery; use the Parquet bridge (ParquetSql)");
+        }
+        for (SelectItem it : stmt.items()) {
+            if (it.isAggregate() && it.aggregate().distinct()) {
+                throw new UnsupportedOperationException("COUNT(DISTINCT ...) is not supported by ArrowQuery; use the Parquet bridge (ParquetSql)");
+            }
+        }
         this.sql = sql;
         this.stmt = stmt;
         this.reusableUnsupportedReason = computeReusableUnsupportedReason(stmt);
