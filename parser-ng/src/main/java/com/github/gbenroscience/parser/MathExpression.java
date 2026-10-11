@@ -3949,7 +3949,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5)): -->> " + new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
         System.out.println("sin(5,6)-->>" + new MathExpression("sin(5,6)").solve());
         System.out.println("√81 + ³√(27) + 2^10-->>" + new MathExpression("√81 + ³√(27) + 2^10").solve());
-        System.out.println(new MathExpression("5! + 9Р3 + 6Č5").solve());
+        System.out.println("----------------------------------------------------------------------------------"+new MathExpression("5! + 9Р3 + 6Č5").solve());
         System.out.println(new MathExpression("f(x,y)=2*x*y;f(3,4);").solve());
         System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
         System.out.println("sum(sum(5),sum(6)): " + new MathExpression("sum(sum(5),sum(6))").solve());

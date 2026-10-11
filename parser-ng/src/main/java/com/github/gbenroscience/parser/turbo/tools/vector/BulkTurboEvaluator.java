@@ -288,6 +288,9 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         case '<':
                             opcodes[instructionCount] = OP_LT;
                             break;
+                        case '!':
+                            opcodes[instructionCount] = OP_FACT;
+                            break; 
                         default:
                             throw new IllegalArgumentException("Unknown operator: " + t.opChar);
                     }

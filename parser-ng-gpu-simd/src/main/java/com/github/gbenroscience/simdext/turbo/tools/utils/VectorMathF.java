@@ -16,11 +16,15 @@
 package com.github.gbenroscience.simdext.turbo.tools.utils;
 
 import com.github.gbenroscience.math.Maths;
+import com.github.gbenroscience.simd.turbo.tools.utils.VectorMath;
 import com.github.gbenroscience.simd.turbo.tools.utils.VectorizedCodyMath;
+import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.IntVector;
+import jdk.incubator.vector.LongVector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorShape;
 import jdk.incubator.vector.VectorSpecies;
 
 /**
@@ -57,6 +61,46 @@ public final class VectorMathF {
 
     private static final float THRESHOLD_LOW = 0.46875f;
     private static final float THRESHOLD_HIGH = 4.0f;
+
+    // =====================================================================================
+    //                                   float version
+    // =====================================================================================
+    // Float overflows at 35! (1.03e40 > 3.4e38), so the table holds 0!..34! and the only
+    // non-integers that matter are p <= ~34.04. Each float lane is widened to double, run through a
+    // lighter Gamma kernel (target is 24 bits, so shift to y >= 10 instead of 24), and narrowed back.
+    // The double kernel error (~1e-13) is far below half a float ulp (6e-8), so results are
+    // correctly rounded except in vanishingly rare near-tie cases.
+    private static final VectorSpecies<Float> FSPECIES
+            = VectorSpecies.of(float.class, VectorShape.forBitSize(VectorMath.SPECIES.vectorBitSize() / 2));
+
+    private static final VectorSpecies<Double> SPECIES = VectorMath.SPECIES;
+
+    /**
+     * 0!..34! correctly rounded to float (via exact BigInteger arithmetic, not
+     * double).
+     */
+    private static final float[] FACT_F = new float[35];
+
+    static {
+        java.math.BigInteger f = java.math.BigInteger.ONE;
+        FACT_F[0] = 1.0f;
+        for (int i = 1; i < FACT_F.length; i++) {
+            f = f.multiply(java.math.BigInteger.valueOf(i));
+            FACT_F[i] = f.floatValue();        // BigInteger.floatValue() rounds to nearest-even
+        }
+    }
+
+    private static final double MAGIC = 6755399441055744.0;
+    private static final double LN2_HI = 6.93147180369123816490e-01;
+    private static final double LN2_LO = 1.90821492927058770002e-10;
+    private static final double LOG2E = 1.4426950408889634;
+    private static final double SQRT2 = 1.4142135623730951;
+    private static final double HALF_LN_2PI = 0.9189385332046728;           // nearest double to 0.5*ln(2*pi)
+    private static final double HALF_LN_2PI_LO = -3.8782941580672414e-17;  // exact - HALF_LN_2PI
+    private static final double E2 = 1.0 / 2, E3 = 1.0 / 6, E4 = 1.0 / 24, E5 = 1.0 / 120,
+            E6 = 1.0 / 720, E7 = 1.0 / 5040, E8 = 1.0 / 40320, E9 = 1.0 / 362880,
+            E10 = 1.0 / 3628800, E11 = 1.0 / 39916800, E12 = 1.0 / 479001600,
+            E13 = 1.0 / 6227020800.0;
 
     // ========================================================================
     // NO-LAMBDA DIRECT OPERATIONS
@@ -1273,42 +1317,43 @@ public final class VectorMathF {
         }
     }
 
- public static void ceil(int base, int n, float[] s) {
-    int limit = SPECIES_F.loopBound(n);
-    int k = 0;
+    public static void ceil(int base, int n, float[] s) {
+        int limit = SPECIES_F.loopBound(n);
+        int k = 0;
 
-    for (; k < limit; k += SPECIES_F.length()) {
-        FloatVector v = FloatVector.fromArray(SPECIES_F, s, base + k);
+        for (; k < limit; k += SPECIES_F.length()) {
+            FloatVector v = FloatVector.fromArray(SPECIES_F, s, base + k);
 
-        // False for |v| >= 2^23 (already integral), and also false for
-        // +-Infinity and NaN (any compare against NaN is false) -- one guard
-        // covers all three "leave as-is" cases.
-        var inSafeRange = v.abs().compare(VectorOperators.LT, SAFE_INTEGRAL_BOUND_F);
-        // Preserves -0.0f's sign, which the F2I/I2F round trip would otherwise flip to +0.0f.
-        var isZero = v.compare(VectorOperators.EQ, 0.0f);
-        var passthrough = inSafeRange.not().or(isZero);
+            // False for |v| >= 2^23 (already integral), and also false for
+            // +-Infinity and NaN (any compare against NaN is false) -- one guard
+            // covers all three "leave as-is" cases.
+            var inSafeRange = v.abs().compare(VectorOperators.LT, SAFE_INTEGRAL_BOUND_F);
+            // Preserves -0.0f's sign, which the F2I/I2F round trip would otherwise flip to +0.0f.
+            var isZero = v.compare(VectorOperators.EQ, 0.0f);
+            var passthrough = inSafeRange.not().or(isZero);
 
-        FloatVector truncated = (FloatVector) v.convert(VectorOperators.F2I, 0)
-                .convert(VectorOperators.I2F, 0);
+            FloatVector truncated = (FloatVector) v.convert(VectorOperators.F2I, 0)
+                    .convert(VectorOperators.I2F, 0);
 
-        var truncatedLow = truncated.compare(VectorOperators.LT, v);
-        FloatVector ceiled = truncated.blend(truncated.add(1.0f), truncatedLow);
+            var truncatedLow = truncated.compare(VectorOperators.LT, v);
+            FloatVector ceiled = truncated.blend(truncated.add(1.0f), truncatedLow);
 
-        // For -1 < v < 0 the truncation is +0.0f, but Math.ceil gives -0.0.
-        // Restore the sign for negative inputs whose ceiling is zero.
-        var negToZero = v.compare(VectorOperators.LT, 0.0f)
-                .and(ceiled.compare(VectorOperators.EQ, 0.0f));
-        ceiled = ceiled.blend(-0.0f, negToZero);
+            // For -1 < v < 0 the truncation is +0.0f, but Math.ceil gives -0.0.
+            // Restore the sign for negative inputs whose ceiling is zero.
+            var negToZero = v.compare(VectorOperators.LT, 0.0f)
+                    .and(ceiled.compare(VectorOperators.EQ, 0.0f));
+            ceiled = ceiled.blend(-0.0f, negToZero);
 
-        FloatVector result = ceiled.blend(v, passthrough);
-        result.intoArray(s, base + k);
+            FloatVector result = ceiled.blend(v, passthrough);
+            result.intoArray(s, base + k);
+        }
+
+        for (; k < n; k++) {
+            // Math.ceil only has a double overload -- cast back, or this silently widens the array's type intent.
+            s[base + k] = (float) Math.ceil(s[base + k]);
+        }
     }
 
-    for (; k < n; k++) {
-        // Math.ceil only has a double overload -- cast back, or this silently widens the array's type intent.
-        s[base + k] = (float) Math.ceil(s[base + k]);
-    }
-}
     public static void floor(int base, int n, float[] s) {
         int limit = SPECIES_F.loopBound(n);
         int k = 0;
@@ -1411,4 +1456,18 @@ public final class VectorMathF {
         return result.blend(V_NAN, valid.not());
     }
 
+    /**
+     * In place: s[base + i] = s[base + i]! for i in [0, n).
+     *
+     * @param base
+     * @param n
+     * @param s
+     */
+    public static void fact(int base, int n, float[] s) {
+        FactorialVectorF.fact(s, base, s, base, n);          // every lane is read before it is overwritten, so aliasing is safe
+    }
+
+    public static void fact(float[] orig, int base, float[] want, int base0, int n) {
+        FactorialVectorF.fact(orig, base, want, base0, n);
+    }
 }

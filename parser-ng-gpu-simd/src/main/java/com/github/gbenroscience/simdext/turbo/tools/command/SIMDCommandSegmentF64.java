@@ -79,7 +79,7 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
      * {@code java.lang.foreign}/{@code jdk.incubator.vector} code with no
      * dependency on {@link VectorMath}'s {@code double[]}-scratch-shaped
      * {@link UnaryMathOp}/{@link BinaryMathOp} functional interfaces.
-     * {@link PowCommand} (routes through      {@code VectorMath.executePowerBlended(ctx.scratch, ...)}),
+     * {@link PowCommand} (routes through null     {@code VectorMath.executePowerBlended(ctx.scratch, ...)}),
      * {@link UnaryMathCommand}/{@link LoadUnaryMathCommand}, and
      * {@link BinaryMathCommand} deliberately do NOT implement this: their math
      * is delegated to a functional interface whose signature is fixed to
@@ -1645,6 +1645,9 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                 VectorMath::round;
             case OP_FLOOR ->
                 VectorMath::floor;
+            case OP_FACT ->
+                VectorMath::fact;
+
             // Standard Trig
             case OP_SIN ->
                 VectorMath::sin;
@@ -1989,7 +1992,22 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
         // (extremely common) case where the wait is only a handful of nanoseconds,
         // while still falling back to a real park so we don't burn a core forever.
         private static final int SPIN_LIMIT = 4_000;
-        private static final long PARK_NANOS = 20_000L;
+
+        // ---- opt-in timing probes: -Dparserng.diag=true (JIT folds the checks away when false) ----
+        private static final boolean DIAG = Boolean.getBoolean("parserng.diag");
+        private static final java.util.concurrent.atomic.LongAdder D_PICKUP = new java.util.concurrent.atomic.LongAdder();
+        private static final java.util.concurrent.atomic.LongAdder D_BUSY = new java.util.concurrent.atomic.LongAdder();
+        private static final java.util.concurrent.atomic.LongAdder D_WAIT = new java.util.concurrent.atomic.LongAdder();
+        private static final java.util.concurrent.atomic.LongAdder D_TASKS = new java.util.concurrent.atomic.LongAdder();
+
+        /** Average per worker task, in microseconds; resets the counters. */
+        public static String diagReportAndReset() {
+            long t = Math.max(1, D_TASKS.sumThenReset());
+            double pickup = D_PICKUP.sumThenReset() / 1000.0 / t;
+            double busy = D_BUSY.sumThenReset() / 1000.0 / t;
+            double wait = D_WAIT.sumThenReset() / 1000.0 / t;
+            return String.format("  [diag] per worker task: dispatch->pickup %.1f us | worker busy %.1f us | master wait %.1f us (tasks=%d)", pickup, busy, wait, t);
+        }
 
         private final int NUM_WORKERS;
         private final WorkerThread[] workerPool;
@@ -2076,13 +2094,19 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
          * plain, uncontended volatile read per worker.
          */
         private static void awaitDone(WorkerThread worker) {
+            final long w0 = DIAG ? System.nanoTime() : 0L;
+            awaitDone0(worker);
+            if (DIAG) { D_WAIT.add(System.nanoTime() - w0); }
+        }
+
+        private static void awaitDone0(WorkerThread worker) {
             int spins = 0;
             while (!worker.done) {
                 if (spins < SPIN_LIMIT) {
                     Thread.onSpinWait();
                     spins++;
                 } else {
-                    LockSupport.parkNanos(PARK_NANOS);
+                    LockSupport.park();
                 }
             }
         }
@@ -2108,10 +2132,12 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
 
             // taskState: 0 = idle/available, 1 = task dispatched, awaiting pickup.
             private volatile int taskState = 0;
+            private long submitNanos;
             // Per-worker completion flag. The master spins/parks on THIS field
             // (via awaitDone) instead of a single shared AtomicInteger latch, so
             // fan-in no longer forces every worker to contend on one cache line.
             private volatile boolean done = true;
+            private volatile Thread masterThread;
 
             private double[][] vars2D;
             private double[] vars1D;
@@ -2146,7 +2172,10 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                 this.startIdx = startIdx;
                 this.length = length;
                 this.done = false;
+                this.masterThread = Thread.currentThread();
+                if (DIAG) { this.submitNanos = System.nanoTime(); }
                 this.taskState = 1;
+                LockSupport.unpark(this);
             }
 
             public void submitTask1D(double[] vars, double[] output, int dataSize, int startIdx, int length) {
@@ -2160,7 +2189,10 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                 this.startIdx = startIdx;
                 this.length = length;
                 this.done = false;
+                this.masterThread = Thread.currentThread();
+                if (DIAG) { this.submitNanos = System.nanoTime(); }
                 this.taskState = 1;
+                LockSupport.unpark(this);
             }
 
             public void submitTaskSeg2D(MemorySegment[] vars, MemorySegment output, int dataSize, int startIdx, int length) {
@@ -2174,7 +2206,10 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                 this.startIdx = startIdx;
                 this.length = length;
                 this.done = false;
+                this.masterThread = Thread.currentThread();
+                if (DIAG) { this.submitNanos = System.nanoTime(); }
                 this.taskState = 1;
+                LockSupport.unpark(this);
             }
 
             public void submitTaskSeg1D(MemorySegment vars, MemorySegment output, int dataSize, int startIdx, int length) {
@@ -2188,7 +2223,10 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                 this.startIdx = startIdx;
                 this.length = length;
                 this.done = false;
+                this.masterThread = Thread.currentThread();
+                if (DIAG) { this.submitNanos = System.nanoTime(); }
                 this.taskState = 1;
+                LockSupport.unpark(this);
             }
 
             public void terminate() {
@@ -2198,7 +2236,7 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
 
             @Override
             public void run() {
-                CPUPinner.pinCurrentThread(this.workerId);
+                CPUPinner.pinWorker(this.workerId);
                 while (isRunning) {
                     int spins = 0;
                     while (taskState == 0 && isRunning) {
@@ -2206,7 +2244,7 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                             Thread.onSpinWait();
                             spins++;
                         } else {
-                            LockSupport.parkNanos(PARK_NANOS);
+                            LockSupport.park();
                             if (Thread.interrupted() && !isRunning) {
                                 return;
                             }
@@ -2221,6 +2259,8 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                     // malformed input throws mid-block. Without this, a single
                     // faulting task would leave the master's awaitDone() loop
                     // spinning/parking forever on a flag that never flips.
+                    final long diagT0 = DIAG ? System.nanoTime() : 0L;
+                    if (DIAG) { D_PICKUP.add(diagT0 - this.submitNanos); }
                     try {
                         if (vars2D != null) {
                             applyBulkInternal(vars2D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
@@ -2232,6 +2272,7 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                             applyBulkInternalSeg(vars1DSeg, evalContext, executionPlan, blockSize, dataSize, outputSeg, startIdx, length);
                         }
                     } finally {
+                        if (DIAG) { D_BUSY.add(System.nanoTime() - diagT0); D_TASKS.increment(); }
                         this.taskState = 0;
                         this.vars2D = null;
                         this.vars1D = null;
@@ -2244,6 +2285,10 @@ public class SIMDCommandSegmentF64 extends VectorTurboEvaluator {
                         // master fans-in via awaitDone()'s spin-then-park hybrid, which
                         // simply polls this flag.
                         this.done = true;
+                        Thread master = this.masterThread;
+                        if (master != null) {
+                            LockSupport.unpark(master);
+                        }
                     }
                 }
             }

@@ -15,7 +15,7 @@
  */
 package com.github.gbenroscience.simd.turbo.tools.utils;
 
-import com.github.gbenroscience.math.Maths;
+import com.github.gbenroscience.math.Maths; 
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.LongVector;
 import jdk.incubator.vector.VectorMask;
@@ -31,7 +31,12 @@ public final class VectorMath {
     private VectorMath() {
     }
 
-    private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
+    public static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
+    static{
+             System.out.println("Vector species: " + SPECIES +
+                     " lanes=" + SPECIES.length());
+        // ---- accuracy vs mpmath reference
+    }
     public static int VECTOR_THRESHOLD = 256;
 
     // Angle conversions
@@ -56,6 +61,26 @@ public final class VectorMath {
 
     private static final double THRESHOLD_LOW = 0.46875;
     private static final double THRESHOLD_HIGH = 4.0;
+    
+    
+    
+    /////////////////////////////factorial bfields begin//////////////////////////////
+    ///
+    ///
+     
+ 
+    private static final double MAGIC = 6755399441055744.0;
+    private static final double LN2_HI = 6.93147180369123816490e-01;
+    private static final double LN2_LO = 1.90821492927058770002e-10;
+    private static final double LOG2E = 1.4426950408889634;
+    private static final double SQRT2 = 1.4142135623730951;
+    private static final double HALF_LN_2PI = 0.9189385332046728;           // nearest double to 0.5*ln(2*pi)
+    private static final double HALF_LN_2PI_LO = -3.8782941580672414e-17;  // exact - HALF_LN_2PI
+    private static final double E2 = 1.0 / 2, E3 = 1.0 / 6, E4 = 1.0 / 24, E5 = 1.0 / 120,
+            E6 = 1.0 / 720, E7 = 1.0 / 5040, E8 = 1.0 / 40320, E9 = 1.0 / 362880,
+            E10 = 1.0 / 3628800, E11 = 1.0 / 39916800, E12 = 1.0 / 479001600,
+            E13 = 1.0 / 6227020800.0;
+ ////////////////////// factorial fields ends//////////////////////////////
 
     // ========================================================================
     // NO-LAMBDA DIRECT OPERATIONS
@@ -2038,17 +2063,19 @@ public final class VectorMath {
             dest[destBase + i] = Maths.fastGelu(src[srcBase + i]);
         }
     }
-
-        public static void fact(double[] src, int srcBase, double[] dest, int destBase, int n) {
-        int i = 0, limit = SPECIES.loopBound(n);
-        final DoubleVector ONE = DoubleVector.broadcast(SPECIES, 1.0);
-        for (; i < limit; i += SPECIES.length()) {
-            DoubleVector x = DoubleVector.fromArray(SPECIES, src, srcBase + i);
-            DoubleVector expNegX = fastVectorExp(x.neg());
-            x.div(expNegX.add(ONE)).intoArray(dest, destBase + i);
-        }
-        for (; i < n; i++) {
-            dest[destBase + i] = Maths.swiglu(src[srcBase + i]);
-        }
+ 
+      
+    /**
+     * In place: s[base + i] = s[base + i]! for i in [0, n). 
+     * @param base
+     * @param n
+     * @param s 
+     */
+    public static void fact(int base, int n, double[] s) {
+        FactorialVector.fact(s, base, s, base, n);          // every lane is read before it is overwritten, so aliasing is safe
+    }
+    
+      public static void fact(double[] orig, int base, double[] want, int base0, int n) {
+        FactorialVector.fact(orig, base, want, base0, n);
     }
 }

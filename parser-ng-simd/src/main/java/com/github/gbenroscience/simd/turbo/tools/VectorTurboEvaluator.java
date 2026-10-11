@@ -290,6 +290,8 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                             OP_OR;
                         case '<' ->
                             OP_LT;
+                        case '!' ->
+                            OP_FACT;
                         default ->
                             throw new IllegalArgumentException("Unknown operator: " + t.opChar);
                     };
