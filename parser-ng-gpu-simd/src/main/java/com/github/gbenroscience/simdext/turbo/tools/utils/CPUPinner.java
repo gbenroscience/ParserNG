@@ -43,6 +43,26 @@ import java.util.Map;
  */
 public final class CPUPinner {
 
+    /**
+     * Hard CPU affinity is OPT-IN. Measurements on a 2-core/4-thread laptop (Windows and
+     * WSL2) showed no consistent benefit from pinning and occasional multi-millisecond
+     * stalls when a pinned worker shared its CPU with another busy thread. Enable with
+     * {@code -Dparserng.pin=true} or, before any evaluator is created,
+     * {@link #setPinningEnabled(boolean)}. Worker threads decide whether to pin when they
+     * start, so changing the flag later does not affect evaluators that already exist.
+     */
+    private static volatile boolean pinningEnabled = Boolean.getBoolean("parserng.pin");
+
+    /** @return true if worker/thread pinning has been enabled (default: false). */
+    public static boolean isPinningEnabled() {
+        return pinningEnabled;
+    }
+
+    /** Programmatic equivalent of {@code -Dparserng.pin=true|false}; call before creating evaluators. */
+    public static void setPinningEnabled(boolean enabled) {
+        pinningEnabled = enabled;
+    }
+
     private static final MethodHandle SetThreadAffinityMaskHandle;
     private static final MethodHandle GetCurrentThreadHandle;
     private static final MethodHandle SchedSetAffinityHandle;
@@ -113,11 +133,18 @@ public final class CPUPinner {
         if (coreIndex < 0) {
             return false;
         }
+        // Opt-in: every pinning request in the library funnels through here.
+        if (!pinningEnabled) {
+            return false;
+        }
 
         // --- Windows Execution Path ---
         if (SetThreadAffinityMaskHandle != null && GetCurrentThreadHandle != null) {
             try {
                 MemorySegment threadHandle = (MemorySegment) GetCurrentThreadHandle.invokeExact();
+                if (coreIndex >= 64) {
+                    return false; // 1L << n wraps modulo 64 and would pin to the wrong core
+                }
                 long mask = 1L << coreIndex; // Supports up to 64 logical cores in the current group
                 long previousMask = (long) SetThreadAffinityMaskHandle.invokeExact(threadHandle, mask);
                 return previousMask != 0;
@@ -192,6 +219,53 @@ public final class CPUPinner {
         return naiveFallbackGroups();
     }
 
+    /** Lazily computed once per JVM; holder class keeps CPUPinner's own init cheap. */
+    private static final class Order {
+        static final int[] ORDER = interleave(detectPhysicalCoreGroups());
+    }
+
+    /**
+     * Logical CPUs in hand-out order: the first sibling of every physical core, then
+     * every core's second sibling, and so on. E.g. [[0,1],[2,3]] -> [0,2,1,3].
+     */
+    public static int[] pinOrder() {
+        return Order.ORDER.clone();
+    }
+
+    static int[] interleave(int[][] groups) {
+        int total = 0, deepest = 0;
+        for (int[] g : groups) {
+            total += g.length;
+            deepest = Math.max(deepest, g.length);
+        }
+        int[] order = new int[total];
+        int n = 0;
+        for (int depth = 0; depth < deepest; depth++) {
+            for (int[] g : groups) {
+                if (depth < g.length) {
+                    order[n++] = g[depth];
+                }
+            }
+        }
+        return order;
+    }
+
+    /**
+     * Topology-aware replacement for pinCurrentThread(workerId). Workers take
+     * pinOrder()[1..] so the first physical core is left for the calling (master)
+     * thread, and spread over distinct physical cores before sharing SMT siblings.
+     * A no-op (returns false) unless pinning is enabled via -Dparserng.pin=true or
+     * {@link #setPinningEnabled(boolean)}.
+     */
+    public static boolean pinWorker(int workerId) {
+        int[] order = Order.ORDER;
+        if (order.length == 0 || workerId < 0) {
+            return false;
+        }
+        int idx = (order.length == 1) ? 0 : 1 + (workerId % (order.length - 1));
+        return pinCurrentThread(order[idx]);
+    }
+
     private static int[][] naiveFallbackGroups() {
         int n = Runtime.getRuntime().availableProcessors();
         int[][] fallback = new int[n][];
@@ -227,7 +301,7 @@ public final class CPUPinner {
         final long BUFFER_SIZE = 65536; // generous; RelationProcessorCore records are small
 
         try (Arena arena = Arena.ofConfined()) {
-            MemorySegment buffer = arena.allocate(BUFFER_SIZE);
+            MemorySegment buffer = arena.allocate(BUFFER_SIZE, 8);
             MemorySegment lengthSeg = arena.allocate(ValueLayout.JAVA_INT);
             lengthSeg.set(ValueLayout.JAVA_INT, 0, (int) BUFFER_SIZE);
 

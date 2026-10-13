@@ -1236,11 +1236,14 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 VectorMathF::abs;
 
             case OP_CEIL ->
-                VectorMathF::floor;
+                VectorMathF::ceil;
             case OP_ROUND ->
                 VectorMathF::round;
             case OP_FLOOR ->
                 VectorMathF::floor;
+                
+            case OP_FACT ->
+                 VectorMathF::fact; 
 
             // Standard Trig
             case OP_SIN ->
@@ -1583,6 +1586,22 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
         // waiter never burns a core forever if something stalls.
         private static final int SPIN_LIMIT = 2000;
 
+        // ---- opt-in timing probes: -Dparserng.diag=true (JIT folds the checks away when false) ----
+        private static final boolean DIAG = Boolean.getBoolean("parserng.diag");
+        private static final java.util.concurrent.atomic.LongAdder D_PICKUP = new java.util.concurrent.atomic.LongAdder();
+        private static final java.util.concurrent.atomic.LongAdder D_BUSY = new java.util.concurrent.atomic.LongAdder();
+        private static final java.util.concurrent.atomic.LongAdder D_WAIT = new java.util.concurrent.atomic.LongAdder();
+        private static final java.util.concurrent.atomic.LongAdder D_TASKS = new java.util.concurrent.atomic.LongAdder();
+
+        /** Average per worker task, in microseconds; resets the counters. */
+        public static String diagReportAndReset() {
+            long t = Math.max(1, D_TASKS.sumThenReset());
+            double pickup = D_PICKUP.sumThenReset() / 1000.0 / t;
+            double busy = D_BUSY.sumThenReset() / 1000.0 / t;
+            double wait = D_WAIT.sumThenReset() / 1000.0 / t;
+            return String.format("  [diag] per worker task: dispatch->pickup %.1f us | worker busy %.1f us | master wait %.1f us (tasks=%d)", pickup, busy, wait, t);
+        }
+
         private final int NUM_WORKERS;
         private final WorkerThread[] workerPool;
         private final VectorCommand[] executionPlan;
@@ -1709,6 +1728,12 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
          * common case where the wait is short.
          */
         private void awaitWorkers(int used) {
+            final long w0 = DIAG ? System.nanoTime() : 0L;
+            awaitWorkers0(used);
+            if (DIAG) { D_WAIT.add(System.nanoTime() - w0); }
+        }
+
+        private void awaitWorkers0(int used) {
             for (int i = 0; i < used; i++) {
                 WorkerThread w = workerPool[i];
                 int spins = 0;
@@ -1741,6 +1766,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
 
             private volatile boolean isRunning = true;
             private volatile int taskState = 0;
+            private long submitNanos;
             // Written only by this worker; polled by the master in
             // awaitWorkers(). Deliberately not shared/aggregated so workers
             // never contend with each other while reporting completion.
@@ -1774,6 +1800,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 this.length = length;
                 this.masterThread = master;
                 this.done = false;
+                if (DIAG) { this.submitNanos = System.nanoTime(); }
                 this.taskState = 1;
                 LockSupport.unpark(this);
             }
@@ -1787,6 +1814,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 this.length = length;
                 this.masterThread = master;
                 this.done = false;
+                if (DIAG) { this.submitNanos = System.nanoTime(); }
                 this.taskState = 1;
                 LockSupport.unpark(this);
             }
@@ -1798,7 +1826,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
 
             @Override
             public void run() {
-                CPUPinner.pinCurrentThread(this.workerId);
+                CPUPinner.pinWorker(this.workerId);
                 while (isRunning) {
                     int spins = 0;
                     while (taskState == 0 && isRunning) {
@@ -1820,6 +1848,8 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                     // master always unparked, even if a bad expression or
                     // malformed input throws mid-block. Without this a single
                     // faulting task would leave the master parked forever.
+                    final long diagT0 = DIAG ? System.nanoTime() : 0L;
+                    if (DIAG) { D_PICKUP.add(diagT0 - this.submitNanos); }
                     try {
                         if (vars2D != null) {
                             applyBulkInternal(vars2D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
@@ -1827,6 +1857,7 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                             applyBulkInternal(vars1D, evalContext, executionPlan, blockSize, dataSize, output, startIdx, length);
                         }
                     } finally {
+                        if (DIAG) { D_BUSY.add(System.nanoTime() - diagT0); D_TASKS.increment(); }
                         this.taskState = 0;
                         this.vars2D = null;
                         this.vars1D = null;

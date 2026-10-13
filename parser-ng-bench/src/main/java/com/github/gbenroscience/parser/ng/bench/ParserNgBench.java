@@ -135,7 +135,8 @@ public class ParserNgBench {
         "0.39894228 / x1 * exp(-((x2 - x3) * (x2 - x3)) / (2 * x1 * x1))",
         "(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)-2)/(2*x1-2))",
         "(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)",
-        "3*sin(x)*cos(y)+sqrt(abs(x*y))"
+        "3*sin(x)*cos(y)+sqrt(abs(x*y))",
+        "(x1+x2)*(x1-x2) + x3*x3*x3"
     };
 
     static int index = 23;
@@ -474,6 +475,7 @@ public class ParserNgBench {
             43====(1/(x1*sqrt(2*pi)))*exp((-(x2-x3)-2)/(2*x1-2))
             44====(x1^2.5+(x1+2*x2)^3.14+4*x3^2.25+x4^1.98)
             45====(3*sin(x1)*cos(x2)+sqrt(abs(x1*x2)))
+            46====(x1+x2)*(x1-x2) + x3*x3*x3
             """;
 
     public static final StringBuilder EXPR_MAP = new StringBuilder();

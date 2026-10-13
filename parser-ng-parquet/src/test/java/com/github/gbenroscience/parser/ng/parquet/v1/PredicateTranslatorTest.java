@@ -84,8 +84,27 @@ class PredicateTranslatorTest {
     }
 
     @Test
-    void timestampColumnsAreNeverPushed() {
-        assertNull(tr(Predicate.gt("ts", 1L)));
+    void everyOperatorTranslatesOnATimestampColumn() {
+        // Full ordering, not just EQ/NE: unlike DECIMAL's BINARY case, a TIMESTAMP's physical INT64 is
+        // plain signed-long both in parquet-java's own writer-computed stats and in FilterApi.longColumn()'s
+        // evaluator -- see PredicateTranslator.asTimestamp's doc for how that was actually verified.
+        for (Predicate.Op op : Predicate.Op.values()) {
+            assertNotNull(tr(new Predicate.Cmp("ts", op, 10L)), op.name());
+        }
+    }
+
+    @Test
+    void timestampColumnWideningAndCrossTypeRules() {
+        assertNotNull(tr(Predicate.gt("ts", 5)), "Integer widens to the column's INT64 the same as plain INT64 does");
+        assertNull(tr(Predicate.eq("ts", LocalDate.of(2020, 1, 1))), "a LocalDate is DATE's literal type, not TIMESTAMP's");
+        assertNull(tr(Predicate.eq("ts", "2020-01-01")), "no string literal is ever coerced onto a numeric/temporal column");
+        assertNull(tr(Predicate.eq("day", 18262L)), "and not the reverse: a Long is not coerced onto a DATE column either");
+    }
+
+    @Test
+    void timestampInListTranslatesAndStillRejectsOnAnyBadElement() {
+        assertNotNull(tr(Predicate.in("ts", 1L, 2L, 3L)));
+        assertNull(tr(Predicate.in("ts", 1L, LocalDate.of(2020, 1, 1))), "one wrong-typed element voids the whole IN list");
     }
 
     @Test

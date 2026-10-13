@@ -12,6 +12,7 @@ src/main/java/.DS_Store
 *.zip
 *.py
 */.py
+parser-ng-parquet/*.py
 sql-layer-specs.txt
 parser-ng-pro/*.txt
 .specstory

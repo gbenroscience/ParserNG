@@ -15,6 +15,7 @@
     <artifactId>parser-ng-simd</artifactId>
     <packaging>jar</packaging>
     <name>parser-ng-simd</name>
+    <version>3.0.9</version>
     <description>
         Hardware-accelerated SIMD vector calculation pipelines for ParserNG
         Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.(e.g. JNI) 
