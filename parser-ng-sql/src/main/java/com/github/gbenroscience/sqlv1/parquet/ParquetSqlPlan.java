@@ -70,7 +70,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
 
     private final String sql;
     private final SelectStatement stmt;
-    private final List<Path> files;
+    private final List<FileRef> files;
     private final ParquetSqlOptions options;
     private final boolean explainOnly;
 
@@ -115,7 +115,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
         return ArrowQuery.compile(sql, engineStmt).withBackend(options.backend());
     }
 
-    ParquetSqlPlan(String sql, SelectStatement stmt, List<Path> files, ParquetSqlOptions options, boolean explainOnly) {
+    ParquetSqlPlan(String sql, SelectStatement stmt, List<FileRef> files, ParquetSqlOptions options, boolean explainOnly) {
         this.sql = sql;
         this.stmt = stmt;
         this.files = List.copyOf(files);
@@ -126,8 +126,8 @@ public final class ParquetSqlPlan implements AutoCloseable {
         long rows = 0;
         ParquetFileInfo first = null;
         List<ParquetFileInfo> infos = new ArrayList<>();
-        for (Path f : files) {
-            ParquetFileInfo info = ParquetFileInfo.read(f);
+        for (FileRef f : files) {
+            ParquetFileInfo info = f.info();
             infos.add(info);
             if (first == null) first = info;
             else if (!first.topLevelColumns().equals(info.topLevelColumns())) {
@@ -433,18 +433,18 @@ public final class ParquetSqlPlan implements AutoCloseable {
         }
     }
 
-    private static Schema discoverSchema(Path file, List<String> cols) {
+    private static Schema discoverSchema(FileRef file, List<String> cols) {
         try (BufferAllocator a = new RootAllocator(); ParquetBatchReader r = scanOf(file, cols).open(a)) {
             return r.schema();
         }
     }
 
-    private static ParquetScan scanOf(Path file, List<String> cols) {
-        ParquetScan s = ParquetScan.scan(file);
+    private static ParquetScan scanOf(FileRef file, List<String> cols) {
+        ParquetScan s = file.scan();
         return cols == null || cols.isEmpty() ? s : s.select(cols.toArray(new String[0]));
     }
 
-    private ParquetScan scanFor(Path file) {
+    private ParquetScan scanFor(FileRef file) {
         ParquetScan s = scanOf(file, plan.columns()).withMetrics(options.metrics());
         if (options.parallelism() != null) s = s.parallelism(options.parallelism());
         if (options.batchSize() != null) s = s.batchSize(options.batchSize());
@@ -592,7 +592,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
         long remaining = plan.limit() == null ? Long.MAX_VALUE : plan.limit();
         long skip = stmt.offset();
         if (remaining == 0) return;
-        for (Path f : files) {
+        for (FileRef f : files) {
             if (remaining <= 0) break;
             try (ParquetBatchReader r = scanFor(f).open(allocator);
                  NumericViews views = views(allocator, f)) {
@@ -677,7 +677,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
         List<VectorSchemaRoot> parts = new ArrayList<>();
         try {
             long rows = 0;
-            for (Path f : files) {
+            for (FileRef f : files) {
                 try (ParquetBatchReader r = scanFor(f).open(allocator)) {
                     while (r.next()) {
                         rows += r.root().getRowCount();
@@ -729,7 +729,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
         int limit = effLimit();
         TopSelect sel = new TopSelect(limit, sortDesc);
         try (TopN top = new TopN(allocator, limit, outs.size(), sortDesc)) {
-            for (Path f : files) {
+            for (FileRef f : files) {
                 try (ParquetBatchReader r = scanFor(f).open(allocator);
                      NumericViews views = views(allocator, f)) {
                     while (r.next()) {
@@ -840,7 +840,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
     private VectorSchemaRoot executePartial(BufferAllocator allocator) {
         PartialAgg.Merger m = partial.newMerger(maxMaterializedRows);
         try {
-            for (Path f : files) {
+            for (FileRef f : files) {
                 try (ParquetBatchReader r = scanFor(f).open(allocator);
                      NumericViews views = views(allocator, f)) {
                     while (r.next()) {
@@ -923,7 +923,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
 
     // ------------------------------------------------------------------ internals
 
-    private NumericViews views(BufferAllocator alloc, Path file) {
+    private NumericViews views(BufferAllocator alloc, FileRef file) {
         if (arrowSchema == null) return null;
         if (numericColumns.isEmpty() && masks.isEmpty() && (grouped || engineless)) return null;
         return new NumericViews(alloc, numericColumns, schema, options.int64Policy(), !grouped, file.toString(), masks);

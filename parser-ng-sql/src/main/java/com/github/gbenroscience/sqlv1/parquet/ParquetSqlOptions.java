@@ -20,13 +20,16 @@ import java.nio.file.Path;
  * @param maxMaterializedRows cap on rows held by materializing queries (ORDER BY, aggregates)
  * @param int64Policy what to do with an int64/uint64/decimal value that a double cannot hold exactly
  * @param allowedRoot if non-null, every resolved file must live under this directory
+ * @param sourceResolver resolves remote paths (any {@code scheme://}) in SQL text; {@code null} (default) means remote
+ *     paths are rejected with a clear error, and only local files can be read
  * @param backend the parser-ng-arrow backend that runs the numeric expression engine (default
  *     {@link ArrowExecutionBackend#CPU_SIMD}); work the bridge does itself (string, date and boolean
  *     functions, {@code COUNT(DISTINCT)}, the Java folds) always runs on the CPU
  */
 public record ParquetSqlOptions(Integer parallelism, Integer batchSize, Long maxRowGroupBytes,
         boolean metrics, boolean exactFilter, long maxMaterializedRows,
-        Int64Policy int64Policy, Path allowedRoot, ArrowExecutionBackend backend) {
+        Int64Policy int64Policy, Path allowedRoot, ArrowExecutionBackend backend,
+        ParquetSourceResolver sourceResolver) {
 
     /**
      * Source- and binary-compatible form from before {@code backend} existed; uses
@@ -36,7 +39,15 @@ public record ParquetSqlOptions(Integer parallelism, Integer batchSize, Long max
             boolean metrics, boolean exactFilter, long maxMaterializedRows,
             Int64Policy int64Policy, Path allowedRoot) {
         this(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows,
-                int64Policy, allowedRoot, ArrowExecutionBackend.CPU_SIMD);
+                int64Policy, allowedRoot, ArrowExecutionBackend.CPU_SIMD, null);
+    }
+
+    /** Compatible form from before {@code sourceResolver} existed; remote paths stay rejected. */
+    public ParquetSqlOptions(Integer parallelism, Integer batchSize, Long maxRowGroupBytes,
+            boolean metrics, boolean exactFilter, long maxMaterializedRows,
+            Int64Policy int64Policy, Path allowedRoot, ArrowExecutionBackend backend) {
+        this(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows,
+                int64Policy, allowedRoot, backend, null);
     }
 
     /** Default cap on materialized rows. */
@@ -67,40 +78,40 @@ public record ParquetSqlOptions(Integer parallelism, Integer batchSize, Long max
     /** @return the defaults */
     public static ParquetSqlOptions defaults() {
         return new ParquetSqlOptions(null, null, null, true, false, DEFAULT_MAX_MATERIALIZED_ROWS,
-                Int64Policy.ERROR, null, ArrowExecutionBackend.CPU_SIMD);
+                Int64Policy.ERROR, null, ArrowExecutionBackend.CPU_SIMD, null);
     }
 
     public ParquetSqlOptions withParallelism(int n) {
-        return new ParquetSqlOptions(n, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend);
+        return new ParquetSqlOptions(n, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend, sourceResolver);
     }
 
     public ParquetSqlOptions withBatchSize(int rows) {
-        return new ParquetSqlOptions(parallelism, rows, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend);
+        return new ParquetSqlOptions(parallelism, rows, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend, sourceResolver);
     }
 
     public ParquetSqlOptions withMaxRowGroupBytes(long bytes) {
-        return new ParquetSqlOptions(parallelism, batchSize, bytes, metrics, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend);
+        return new ParquetSqlOptions(parallelism, batchSize, bytes, metrics, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend, sourceResolver);
     }
 
     public ParquetSqlOptions withMetrics(boolean on) {
-        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, on, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend);
+        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, on, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend, sourceResolver);
     }
 
     public ParquetSqlOptions withExactFilter(boolean on) {
-        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, on, maxMaterializedRows, int64Policy, allowedRoot, backend);
+        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, on, maxMaterializedRows, int64Policy, allowedRoot, backend, sourceResolver);
     }
 
     public ParquetSqlOptions withMaxMaterializedRows(long rows) {
-        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, rows, int64Policy, allowedRoot, backend);
+        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, rows, int64Policy, allowedRoot, backend, sourceResolver);
     }
 
     public ParquetSqlOptions withInt64Policy(Int64Policy p) {
-        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, p, allowedRoot, backend);
+        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, p, allowedRoot, backend, sourceResolver);
     }
 
     /** Restricts every file the SQL text can name to {@code root} and below. */
     public ParquetSqlOptions withAllowedRoot(Path root) {
-        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, int64Policy, root, backend);
+        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, int64Policy, root, backend, sourceResolver);
     }
 
     /**
@@ -112,6 +123,18 @@ public record ParquetSqlOptions(Integer parallelism, Integer batchSize, Long max
      * @return a copy with {@code backend} set
      */
     public ParquetSqlOptions withBackend(ArrowExecutionBackend backend) {
-        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend);
+        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend, sourceResolver);
+    }
+
+    /**
+     * Sets the resolver for remote paths ({@code s3a://}, {@code gs://}, {@code hdfs://}, ...). See
+     * {@link ParquetSourceResolver} for an example and for the security note: {@link #withAllowedRoot} does not
+     * restrict what the resolver can read.
+     *
+     * @param resolver the resolver, or {@code null} to reject remote paths (the default)
+     * @return a copy with the resolver set
+     */
+    public ParquetSqlOptions withSourceResolver(ParquetSourceResolver resolver) {
+        return new ParquetSqlOptions(parallelism, batchSize, maxRowGroupBytes, metrics, exactFilter, maxMaterializedRows, int64Policy, allowedRoot, backend, resolver);
     }
 }
