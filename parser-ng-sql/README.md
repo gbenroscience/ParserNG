@@ -225,7 +225,8 @@ not a different capability.
 ### CAST
 
 > `ParquetSql` also evaluates `CAST(x AS DATE | TIMESTAMP | DECIMAL(p,s) | VARCHAR)`; see the date and time section of
-> the Parquet chapter. The numeric targets below are the same in both.
+> the Parquet chapter. The numeric targets below are the same in both. Plain `ArrowQuery` / `ArrowSql` rejects the
+> other targets at compile time with a `SqlSyntaxException` ("only supported by ParquetSql").
 
 `CAST(expression AS type)` supports numeric target types; since every
 ParserNG value is already a floating-point number under the hood, `CAST`
@@ -424,7 +425,9 @@ ArrowQuery query = ArrowQuery.compile(sql)
 
 Available backends: `CPU_SIMD`, `GPU_AUTO`, `GPU_CUDA`, `GPU_OPENCL`,
 `GPU_METAL`. Changing the backend after a plan has already been compiled
-invalidates and recompiles it on the next `execute`.
+invalidates and recompiles it on the next `execute`. For queries over Parquet
+files, set it on the options instead: `ParquetSqlOptions.withBackend(...)`
+(see Scan options).
 
 ### Null handling
 
@@ -614,7 +617,7 @@ try (VectorSchemaRoot r = sql.execute("SELECT COUNT(*) FROM 'data/events.parquet
 
 | Form | Resolution |
 | --- | --- |
-| `FROM 'dir/file.parquet'` | The quoted text is the file. Always resolved. |
+| `FROM 'dir/file.parquet'` | The quoted text is the file. Always resolved. A `scheme://` path (`s3a://`, `gs://`, ...) is remote and needs a `ParquetSourceResolver`; see Remote storage below. |
 | `FROM read_parquet('dir/*.parquet', 'other.parquet')` | One or more paths or globs, expanded and sorted. All files must have identical column names and types for the columns the query reads, else a named error. |
 | `FROM events` | Looked up among tables passed to `register(name, pathOrGlob)`. An unregistered name is an error. |
 | `ParquetSql.plan(file, sql)` with `FROM anything` | The name is ignored and `file` is the source (the original behaviour). Combining an explicit file with a quoted path in the SQL is rejected as ambiguous. |
@@ -950,6 +953,8 @@ buffers and row-index buffer are reused.
 | Numeric expressions, `WHERE`, `GROUP BY`, `HAVING`, `ORDER BY`, `LIMIT` | yes |
 | Row-group pruning for int, long, float, double, date, string equality and short decimals, with correct literal typing | yes |
 | `FROM 'path'`, `read_parquet('glob')`, `register(name, path)` | yes |
+| Remote paths (`s3a://`, `gs://`, `hdfs://`, `abfss://`) | yes, through your `ParquetSourceResolver` (no connector bundled; not verified against real cloud storage) |
+| Execution backend for the numeric engine (`ParquetSqlOptions.withBackend`) | yes (`CPU_SIMD` default; GPU backends not exercised by the tests) |
 | Allow-listed root for paths | yes |
 | `EXPLAIN` | yes |
 | `COUNT(*)` from the footer, no decode | yes |
@@ -1063,7 +1068,8 @@ parser-ng-sql deliberately does not implement:
   exactly one `VectorSchemaRoot` you already have in hand.
 - `INSERT`, `UPDATE`, `DELETE`, transactions, or a catalog of any kind;
   there is no notion of a persistent table to mutate.
-- `DISTINCT`.
+- `DISTINCT` in `ArrowSql` / `ArrowQuery`, which reject it. `ParquetSql` supports `SELECT DISTINCT` and
+  `COUNT(DISTINCT x)`.
 - General string/text processing in `ArrowSql`; every value in a ParserNG expression is a
   floating-point number. Over Parquet, string, boolean, date and timestamp predicates, the string
   functions, `CAST` to date, timestamp and decimal, `EXTRACT` and `INTERVAL` are supported by the bridge
