@@ -37,10 +37,31 @@ public class Scanner {
     private final boolean dynamicMatchFirst;
     private final boolean stripDelimiterMarkers;
     private final UnterminatedDelimiterPolicy unterminatedDelimiterPolicy;
-    private final Map<Character, List<String>> tokensByFirstChar;
+    private final TokenTable tokenTable;
     private final Predicate<String> dynamicTokenMatcher;
-    private final HashSet<Character> extraIdentifierParts;
-    private final Map<Character, List<Delimiter>> delimitersByFirstChar;
+    private final boolean hasDynamicMatcher;
+    private final char[] extraIdentifierParts;
+    // Delimiters, stable-sorted longest start marker first (same relative order the
+    // old per-first-char buckets had), plus a first-char pre-filter.
+    private final Delimiter[] delimiters;
+    private final boolean[] delimiterStartsAscii;
+    private final boolean delimiterStartsNonAscii;
+
+    /**
+     * Exact (built from the JDK's own predicates) lookup tables for ASCII, so the
+     * hot loop does not call Character.isJavaIdentifier* once per character.
+     */
+    private static final boolean[] IDENT_START = new boolean[128];
+    private static final boolean[] IDENT_PART = new boolean[128];
+
+    static {
+        for (char c = 0; c < 128; c++) {
+            IDENT_START[c] = Character.isJavaIdentifierStart(c);
+            IDENT_PART[c] = Character.isJavaIdentifierPart(c);
+        }
+    }
+
+    private static final Predicate<String> NEVER = s -> false;
 
     // Lazily computed, cached since the scanner is fully immutable post-construction.
     private List<String> cachedResult;
@@ -88,37 +109,80 @@ public class Scanner {
         this.includeTokensInOutput = builder.includeTokensInOutput;
         this.ignoreWhitespace = builder.ignoreWhitespace;
         this.dynamicTokenMatcher = builder.dynamicTokenMatcher;
+        this.hasDynamicMatcher = builder.dynamicTokenMatcher != NEVER;
         this.dynamicMatchFirst = builder.dynamicMatchFirst;
         this.stripDelimiterMarkers = builder.stripDelimiterMarkers;
         this.unterminatedDelimiterPolicy = builder.unterminatedDelimiterPolicy;
-        this.extraIdentifierParts = builder.extraIdentifierParts.isEmpty()
-                ? new HashSet<>()
-                : new HashSet<>(builder.extraIdentifierParts);
 
-        Map<Character, List<String>> map = new HashMap<>();
-        for (String token : builder.allTokens) {
-            if (token != null && !token.isEmpty()) {
-                map.computeIfAbsent(token.charAt(0), k -> new ArrayList<>()).add(token);
-            }
+        char[] extras = new char[builder.extraIdentifierParts.size()];
+        int e = 0;
+        for (char c : builder.extraIdentifierParts) {
+            extras[e++] = c;
+        }
+        this.extraIdentifierParts = extras;
+
+        // A prebuilt table is shared as-is (no per-scan hashing or sorting). Extra
+        // tokens added on top of it force a merged table to be built.
+        if (builder.tokenTable != null && builder.allTokens.isEmpty()) {
+            this.tokenTable = builder.tokenTable;
+        } else if (builder.tokenTable != null) {
+            List<String> merged = new ArrayList<>(builder.tokenTable.all());
+            merged.addAll(builder.allTokens);
+            this.tokenTable = TokenTable.of(merged);
+        } else {
+            this.tokenTable = TokenTable.of(builder.allTokens);
         }
 
-        // Longest match first
-        for (List<String> list : map.values()) {
-            list.sort((a, b) -> Integer.compare(b.length(), a.length()));
-        }
-
-        this.tokensByFirstChar = Collections.unmodifiableMap(map);
-
-        Map<Character, List<Delimiter>> delimMap = new HashMap<>();
-        for (Delimiter d : builder.delimiters) {
-            delimMap.computeIfAbsent(d.start.charAt(0), k -> new ArrayList<>()).add(d);
-        }
+        Delimiter[] ds = builder.delimiters.toArray(new Delimiter[0]);
         // Longest start-marker first, so e.g. "\"\"\"" (triple-quote) is preferred
         // over "\"" when both are registered and both match at the same cursor.
-        for (List<Delimiter> list : delimMap.values()) {
-            list.sort((a, b) -> Integer.compare(b.start.length(), a.start.length()));
+        // Arrays.sort on objects is stable, matching the old List.sort behaviour.
+        Arrays.sort(ds, (a, b) -> Integer.compare(b.start.length(), a.start.length()));
+        this.delimiters = ds;
+        boolean[] ascii = new boolean[128];
+        boolean nonAscii = false;
+        for (Delimiter d : ds) {
+            char c = d.start.charAt(0);
+            if (c < 128) {
+                ascii[c] = true;
+            } else {
+                nonAscii = true;
+            }
         }
-        this.delimitersByFirstChar = Collections.unmodifiableMap(delimMap);
+        this.delimiterStartsAscii = ascii;
+        this.delimiterStartsNonAscii = nonAscii;
+    }
+
+    /**
+     * Copy constructor behind {@link #withInput(String)}: shares every piece of
+     * (immutable) configuration, so no table, array or delimiter list is rebuilt.
+     */
+    private Scanner(Scanner o, String input) {
+        this.input = input;
+        this.includeTokensInOutput = o.includeTokensInOutput;
+        this.ignoreWhitespace = o.ignoreWhitespace;
+        this.dynamicMatchFirst = o.dynamicMatchFirst;
+        this.stripDelimiterMarkers = o.stripDelimiterMarkers;
+        this.unterminatedDelimiterPolicy = o.unterminatedDelimiterPolicy;
+        this.tokenTable = o.tokenTable;
+        this.dynamicTokenMatcher = o.dynamicTokenMatcher;
+        this.hasDynamicMatcher = o.hasDynamicMatcher;
+        this.extraIdentifierParts = o.extraIdentifierParts;
+        this.delimiters = o.delimiters;
+        this.delimiterStartsAscii = o.delimiterStartsAscii;
+        this.delimiterStartsNonAscii = o.delimiterStartsNonAscii;
+    }
+
+    /**
+     * Returns a scanner with exactly this scanner's configuration but a different
+     * input. Cheap (a single small object), so a fully configured scanner can be
+     * kept as a template and applied to many inputs.
+     *
+     * @param newInput the text to scan
+     * @return a new scanner for {@code newInput}
+     */
+    public Scanner withInput(String newInput) {
+        return new Scanner(this, Objects.requireNonNull(newInput, "Input string cannot be null"));
     }
 
     // =========================================================================
@@ -136,10 +200,10 @@ public class Scanner {
             return cachedResult;
         }
 
-        List<String> output = new ArrayList<>();
+        int length = input.length();
+        List<String> output = new ArrayList<>(Math.max(10, (length >> 1) + 2));
         int cursor = 0;
         int literalStart = 0;
-        int length = input.length();
 
         while (cursor < length) {
             char currentChar = input.charAt(cursor);
@@ -160,7 +224,7 @@ public class Scanner {
             // Deliberately checked before static/dynamic matching: a delimited region
             // means "don't tokenize inside here", so nothing downstream should ever
             // get a look at its interior.
-            if (!delimitersByFirstChar.isEmpty()) {
+            if (delimiters.length != 0 && (currentChar < 128 ? delimiterStartsAscii[currentChar] : delimiterStartsNonAscii)) {
                 int consumed = tryDelimitedMatch(output, literalStart, cursor, length, currentChar);
                 if (consumed > 0) {
                     cursor += consumed;
@@ -177,7 +241,7 @@ public class Scanner {
             // as one candidate run and handed to the dynamic predicate whole, instead
             // of being truncated at "y" before the predicate ever sees the brackets).
             int identEnd = -1;
-            if (Character.isJavaIdentifierStart(currentChar)) {
+            if (currentChar < 128 ? IDENT_START[currentChar] : Character.isJavaIdentifierStart(currentChar)) {
                 identEnd = cursor + 1;
                 while (identEnd < length && isIdentifierPart(input.charAt(identEnd))) {
                     identEnd++;
@@ -247,12 +311,10 @@ public class Scanner {
      * @return number of characters consumed (> 0) if a delimiter started here, otherwise 0.
      */
     private int tryDelimitedMatch(List<String> output, int literalStart, int cursor, int length, char currentChar) {
-        List<Delimiter> candidates = delimitersByFirstChar.getOrDefault(currentChar, Collections.emptyList());
-        if (candidates.isEmpty()) {
-            return 0;
-        }
-
-        for (Delimiter d : candidates) {
+        for (Delimiter d : delimiters) {
+            if (d.start.charAt(0) != currentChar) {
+                continue;
+            }
             int startLen = d.start.length();
             if (startLen <= length - cursor && input.regionMatches(cursor, d.start, 0, startLen)) {
                 int contentStart = cursor + startLen;
@@ -401,7 +463,7 @@ public class Scanner {
      */
     private int tryStaticMatch(List<String> output, int literalStart, int cursor, int length,
                                 char currentChar, int identEnd) {
-        List<String> candidates = tokensByFirstChar.getOrDefault(currentChar, Collections.emptyList());
+        final String[] candidates = tokenTable.candidates(currentChar);
 
         for (String token : candidates) {
             int tokenLen = token.length();
@@ -429,7 +491,7 @@ public class Scanner {
      * @return true if the predicate accepted the run and it was emitted.
      */
     private boolean tryDynamicMatch(List<String> output, int literalStart, int cursor, int identEnd) {
-        if (identEnd == -1) {
+        if (identEnd == -1 || !hasDynamicMatcher) {
             return false;
         }
         String potentialWord = input.substring(cursor, identEnd);
@@ -452,7 +514,15 @@ public class Scanner {
      * can't kick one off on their own.
      */
     private boolean isIdentifierPart(char c) {
-        return Character.isJavaIdentifierPart(c) || extraIdentifierParts.contains(c);
+        if (c < 128 ? IDENT_PART[c] : Character.isJavaIdentifierPart(c)) {
+            return true;
+        }
+        for (char x : extraIdentifierParts) {
+            if (x == c) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void flushLiteral(List<String> output, int start, int end) {
@@ -461,6 +531,80 @@ public class Scanner {
             if (!ignoreWhitespace || !literal.trim().isEmpty()) {
                 output.add(literal);
             }
+        }
+    }
+
+    // =========================================================================
+    // TOKEN TABLE
+    // =========================================================================
+
+    /**
+     * Immutable, shareable index of static tokens by first character, each bucket
+     * ordered longest-first (stable) exactly as the scanner's longest-match rule
+     * requires. ASCII first characters use a direct array lookup (no boxing).
+     */
+    public static final class TokenTable {
+
+        private static final String[] NONE = new String[0];
+        private final String[][] ascii = new String[128][];
+        private final Map<Character, String[]> other;
+        private final List<String> all;
+
+        private TokenTable(List<String> distinct) {
+            this.all = Collections.unmodifiableList(distinct);
+            Map<Character, List<String>> buckets = new HashMap<>();
+            for (String t : distinct) {
+                buckets.computeIfAbsent(t.charAt(0), k -> new ArrayList<>()).add(t);
+            }
+            Map<Character, String[]> rest = new HashMap<>();
+            for (Map.Entry<Character, List<String>> en : buckets.entrySet()) {
+                List<String> list = en.getValue();
+                list.sort((a, b) -> Integer.compare(b.length(), a.length()));
+                String[] arr = list.toArray(new String[0]);
+                char c = en.getKey();
+                if (c < 128) {
+                    ascii[c] = arr;
+                } else {
+                    rest.put(c, arr);
+                }
+            }
+            this.other = rest;
+        }
+
+        /**
+         * Builds a table. Null/empty tokens are ignored and exact duplicates are
+         * collapsed (a duplicate can never change which token matches).
+         */
+        public static TokenTable of(Collection<String> tokens) {
+            LinkedHashSet<String> distinct = new LinkedHashSet<>();
+            for (String t : tokens) {
+                if (t != null && !t.isEmpty()) {
+                    distinct.add(t);
+                }
+            }
+            return new TokenTable(new ArrayList<>(distinct));
+        }
+
+        public static TokenTable of(String[]... arrays) {
+            List<String> l = new ArrayList<>();
+            for (String[] a : arrays) {
+                if (a != null) {
+                    l.addAll(Arrays.asList(a));
+                }
+            }
+            return of(l);
+        }
+
+        String[] candidates(char c) {
+            String[] r = c < 128 ? ascii[c] : other.get(c);
+            return r == null ? NONE : r;
+        }
+
+        /**
+         * @return the distinct tokens in this table, in first-seen order.
+         */
+        public List<String> all() {
+            return all;
         }
     }
 
@@ -503,7 +647,8 @@ public class Scanner {
         private boolean dynamicMatchFirst = false;
         private boolean stripDelimiterMarkers = false;
         private UnterminatedDelimiterPolicy unterminatedDelimiterPolicy = UnterminatedDelimiterPolicy.CONSUME_TO_END;
-        private Predicate<String> dynamicTokenMatcher = s -> false;
+        private Predicate<String> dynamicTokenMatcher = NEVER;
+        private TokenTable tokenTable;
         private final List<String> allTokens = new ArrayList<>();
         private final HashSet<Character> extraIdentifierParts =  new HashSet<>();
         private final List<Delimiter> delimiters = new ArrayList<>();
@@ -523,7 +668,7 @@ public class Scanner {
         }
 
         public Builder withDynamicMatcher(Predicate<String> matcher) {
-            this.dynamicTokenMatcher = matcher != null ? matcher : s -> false;
+            this.dynamicTokenMatcher = matcher != null ? matcher : NEVER;
             return this;
         }
 
@@ -571,6 +716,17 @@ public class Scanner {
                     this.extraIdentifierParts.add(c);
                 }
             }
+            return this;
+        }
+
+        /**
+         * Supplies a prebuilt, immutable {@link TokenTable}. Building the table is
+         * the expensive part of constructing a Scanner (hash + sort of every
+         * token), so callers that scan many inputs with the same vocabulary should
+         * build it once and reuse it here.
+         */
+        public Builder tokenTable(TokenTable table) {
+            this.tokenTable = table;
             return this;
         }
 
@@ -800,4 +956,4 @@ public class Scanner {
             System.out.println("Unterminated, THROW: caught -> " + e.getMessage());
         }
     }
-}
+}

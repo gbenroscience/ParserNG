@@ -4,7 +4,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.parser.MathExpression;
@@ -213,9 +215,80 @@ public class Declarations {
         return Collections.unmodifiableList(BASIC_NUMERICAL_METHODS);
     }
 
+    // Declared early so it is initialised before any static block can reach it.
+    private static final String[] STATS_METHODS = {LIST_SUM, PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR,
+        RANDOM, SORT, NANOS, NOW, IF};
+
+    /**
+     * Immutable snapshot of everything derived from the registered methods. It
+     * used to be rebuilt (and re-sorted) on <em>every</em> call to
+     * {@link #getInbuiltMethods()}, which the scanner reaches several times per
+     * token via {@code Method.isDefinedMethod}. It is now built lazily once and
+     * discarded only when a basic numerical method is (un)registered.
+     */
+    private static final class Snapshot {
+
+        final String[] sortedNames;
+        final Set<String> inbuilt;
+        final Set<String> basicNames;
+
+        Snapshot(String[] sortedNames, Set<String> basicNames) {
+            this.sortedNames = sortedNames;
+            this.inbuilt = new HashSet<>(Arrays.asList(sortedNames));
+            this.basicNames = basicNames;
+        }
+    }
+
+    // Deliberately no initializer: the static block below registers methods and
+    // must not be undone by field-initialization order.
+    private static volatile Snapshot snapshot;
+
+    private static Snapshot snapshot() {
+        Snapshot s = snapshot;
+        if (s == null) {
+            Set<String> basic = new HashSet<>();
+            for (BasicNumericalMethod m : BASIC_NUMERICAL_METHODS) {
+                basic.add(m.getName());
+            }
+            s = new Snapshot(createInBuiltMethods(), basic);
+            snapshot = s;
+        }
+        return s;
+    }
+
+    /**
+     * Zero-allocation membership test for the names of the core inbuilt
+     * methods (same answer as scanning {@link #getInbuiltMethods()}).
+     *
+     * @param name the candidate method name
+     * @return true if it is an inbuilt method name
+     */
+    public static boolean isInbuiltMethodName(String name) {
+        return snapshot().inbuilt.contains(name);
+    }
+
+    /**
+     * Opaque identity of the current inbuilt-method snapshot. It changes exactly
+     * when a basic numerical method is (un)registered, so callers that cache
+     * something derived from the inbuilt method names can compare it by identity
+     * to know whether their cache is still valid.
+     */
+    public static Object inbuiltMethodsVersion() {
+        return snapshot();
+    }
+
+    /**
+     * Shared, read-only view of the sorted inbuilt method names. Callers must
+     * not modify the array; use {@link #getInbuiltMethods()} for a private copy.
+     */
+    static String[] inbuiltMethodsShared() {
+        return snapshot().sortedNames;
+    }
+
     public static void registerBasicNumericalMethod(BasicNumericalMethod basicNumericalMethod) {
         unregisterBasicNumericalMethod(basicNumericalMethod.getClass());
         BASIC_NUMERICAL_METHODS.add(basicNumericalMethod);
+        snapshot = null;
         /**
          * Add to the new method registry also
          */
@@ -240,6 +313,7 @@ public class Declarations {
                 BASIC_NUMERICAL_METHODS.remove(i);
             }
         }
+        snapshot = null;
     }
 
     public static void registerBasicNumericalMethodInMethodRegistry(BasicNumericalMethod basicNumericalMethod) {
@@ -292,7 +366,7 @@ public class Declarations {
      * @return Array of strings
      */
     public static String[] getInbuiltMethods() {
-        return createInBuiltMethods();
+        return snapshot().sortedNames.clone();
     }
 
     /**
@@ -603,22 +677,27 @@ public class Declarations {
     /**
      * @return all the statistical methods used by the parser.
      */
+    /**
+     * Shared array (package-private, read-only by contract) instead of a fresh
+     * copy on every call.
+     */
     static String[] getStatsMethods() {
-        return new String[]{LIST_SUM, PROD, MEDIAN, MODE, RANGE, MID_RANGE, ROOT_MEAN_SQUARED, COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE, STD_ERR,
-            RANDOM, SORT, NANOS, NOW, IF};
+        return STATS_METHODS;
     }
 
     public static boolean isBasicNumericalFunction(String op) {
-        for (BasicNumericalMethod basicNumericalMethod : Declarations.getBasicNumericalMethods()) {
-            if (op.equals(basicNumericalMethod.getName())) {
-                return true;
-            }
-        }
-        return false;
+        return snapshot().basicNames.contains(op);
+    }
+
+    private static final class DrgEnv {
+
+        static final String VALUE = System.getenv(DRG_MODE.DEG_MODE_VARIABLE);
     }
 
     public static DRG_MODE degGradRadFromVariable() {
-        String userDrgMode = System.getenv(DRG_MODE.DEG_MODE_VARIABLE);
+        // The process environment cannot change after start-up, so read it once;
+        // the system property can, so it is still consulted on every call.
+        String userDrgMode = DrgEnv.VALUE;
         if (userDrgMode == null) {
             userDrgMode = System.getProperty(DRG_MODE.DEG_MODE_VARIABLE);
         }

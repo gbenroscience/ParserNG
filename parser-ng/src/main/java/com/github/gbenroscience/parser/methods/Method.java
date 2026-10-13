@@ -90,13 +90,27 @@ public class Method {
      * @return An array containing the names of all functions defined by the
      * user and inbuilt into the software.
      */
+    /**
+     * @return the shared, read-only array of inbuilt method names. Do not modify
+     * it. This is the allocation-free counterpart of {@link #getAllFunctions()}
+     * for callers that handle the user-defined functions separately.
+     */
+    public static String[] getInbuiltNames() {
+        return inbuiltMethodsShared();
+    }
+
     public static String[] getAllFunctions() {
-        int sz = FunctionManager.FUNCTIONS.size();
-        String[] userDefined = new String[sz + getInbuiltMethods().length];
-        String[] keyset = FunctionManager.FUNCTIONS.keySet().toArray(new String[]{});
-        System.arraycopy(keyset, 0, userDefined, 0, keyset.length);
-        System.arraycopy(getInbuiltMethods(), 0, userDefined, keyset.length, getInbuiltMethods().length);
-        return userDefined;
+        final String[] inbuilt = inbuiltMethodsShared();
+        // Snapshot the key set under the map's own lock; the old code read size()
+        // and toArray() separately and could mis-size the result under mutation.
+        final String[] keyset;
+        synchronized (FunctionManager.FUNCTIONS) {
+            keyset = FunctionManager.FUNCTIONS.keySet().toArray(new String[0]);
+        }
+        String[] all = new String[keyset.length + inbuilt.length];
+        System.arraycopy(keyset, 0, all, 0, keyset.length);
+        System.arraycopy(inbuilt, 0, all, keyset.length, inbuilt.length);
+        return all;
     }//end method.
 
     /**
@@ -155,12 +169,16 @@ public class Method {
      * in a list e.g sort or mode
      */
     public static boolean isListReturningStatsMethod(String op) {
-        return (op.equals(SORT) || op.equals(MODE) || op.equals(RANDOM) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS)
-                || op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX))
-                || op.equals(MATRIX_MULTIPLY) || op.equals(MATRIX_DIVIDE) || op.equals(MATRIX_ADD) || op.equals(MATRIX_SUBTRACT) || op.equals(MATRIX_POWER)
-                || op.equals(MATRIX_TRANSPOSE) || op.equals(MATRIX_EDIT) || op.equals(MATRIX_EIGENVEC) || op.equals(MATRIX_EIGENVALUES)
-                || op.equals(SUB_MATRIX) || op.equals(RANDOM_MATRIX) || op.equals(MATRIX_MINOR);
+        return LIST_RETURNING_STATS_METHODS.contains(op);
     }
+
+    /** Same names the old chain of 20 equals() calls tested, now one hash lookup. */
+    private static final java.util.Set<String> LIST_RETURNING_STATS_METHODS = new java.util.HashSet<>(Arrays.asList(
+            SORT, MODE, RANDOM, QUADRATIC, TARTAGLIA_ROOTS,
+            INVERSE_MATRIX, LINEAR_SYSTEM, TRIANGULAR_MATRIX, ECHELON_MATRIX,
+            MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD, MATRIX_SUBTRACT, MATRIX_POWER,
+            MATRIX_TRANSPOSE, MATRIX_EDIT, MATRIX_EIGENVEC, MATRIX_EIGENVALUES,
+            SUB_MATRIX, RANDOM_MATRIX, MATRIX_MINOR));
 
     public static boolean isMatrixReturningMethod(String op) {
         return (op.equals(INVERSE_MATRIX) || op.equals(LINEAR_SYSTEM) || op.equals(TRIANGULAR_MATRIX) || op.equals(ECHELON_MATRIX))
@@ -1126,7 +1144,7 @@ public class Method {
      * the parser.
      */
     public static boolean isDefinedMethod(String methodName) {
-        return arrayContains(getInbuiltMethods(), methodName) || FunctionManager.containsAlgebraicFunction(methodName);
+        return isInbuiltMethodName(methodName) || FunctionManager.containsAlgebraicFunction(methodName);
     }//end method
 
     /**
@@ -1136,7 +1154,7 @@ public class Method {
      * function.
      */
     public static boolean isInBuiltMethod(String methodName) {
-        return arrayContains(getInbuiltMethods(), methodName);
+        return isInbuiltMethodName(methodName);
     }//end method
 
     /**
@@ -1167,30 +1185,27 @@ public class Method {
      * @return true if the string represents a valid method name.
      */
     public static boolean isMethodName(String name) {
-        try {
-            String end = "";
-            if (name.equals("-¹")) {
-                return false;
-            }//end if
-            else if (name.endsWith("-¹") && !name.equals("-¹")) {
-                end = "-¹";
-                name = name.substring(0, name.length() - 2);
-            }
-            if (isMethodNameBeginner(name.substring(0, 1))) {
-                int len = name.length();
-                for (int i = 0; i < len; i++) {
-                    if (!isMethodNameBuilder(name.substring(i, i + 1))) {
-                        return false;
-                    }//end if
-                }//end for loop
-
-                return true;
-            }//end if
-            return false;
-        }//end try
-        catch (IndexOutOfBoundsException | NullPointerException boundsException) {
+        if (name == null) {
             return false;
         }
+        int len = name.length();
+        // "-¹" alone is the inverse operator, not a method; a "-¹" suffix is
+        // tolerated (log-¹, sin-¹ ...) and ignored for the character checks.
+        if (len >= 2 && name.charAt(len - 2) == '-' && name.charAt(len - 1) == '¹') {
+            if (len == 2) {
+                return false;
+            }
+            len -= 2;
+        }
+        if (len == 0 || !isMethodNameBeginnerChar(name.charAt(0))) {
+            return false;
+        }
+        for (int i = 1; i < len; i++) {
+            if (!isMethodNameBuilderChar(name.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
     }//end method
 
     //////////////////////////////////////////////////////////////////////
@@ -1224,7 +1239,7 @@ public static boolean isMethodNameBuilderChar(char c) {
         }
         // Character.isLetter is a bit heavier but necessary for Unicode letters;
         // if you only need ASCII letters, use (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-        return Character.isLetter(c) && !com.github.gbenroscience.parser.Operator.isPermOrComb(Character.toString(c));
+        return Character.isLetter(c) && !com.github.gbenroscience.parser.Operator.isPermOrComb(c);
     }
 
 // Backwards-compatible wrapper

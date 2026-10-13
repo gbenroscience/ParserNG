@@ -94,12 +94,110 @@ MathExpression
      * @return true if the string is a valid number
      */
     public static boolean validNumber(String num) {
+        // Same answer as "Double.parseDouble(num) does not throw", without paying
+        // for a NumberFormatException (stack trace and all) on every token that is
+        // not a number -- which, in a scanner, is most of them.
+        final int len = num.length(); // NPE on null, like parseDouble
+        if (len == 0) {
+            return false; // parseDouble("") throws
+        }
+        final char c = num.charAt(0);
+        // parseDouble trims whitespace/control chars (<= ' ') and then needs one of
+        // + - . 0-9 or the words NaN / Infinity. Anything else cannot parse.
+        if (c > ' ' && c != '+' && c != '-' && c != '.' && c != 'N' && c != 'I' && (c < '0' || c > '9')) {
+            return false;
+        }
+        if (isPlainDecimal(num, len)) {
+            return true;
+        }
+        if (c > ' ') {
+            // Not padded with whitespace. Skip the optional sign, then the next char
+            // decides whether parseDouble could possibly accept this at all. The
+            // overwhelmingly common non-numbers here are the operators "+", "-" and
+            // "." (and "-1", "+-" style fragments), which would otherwise pay for a
+            // NumberFormatException with a full stack trace.
+            final int i = (c == '+' || c == '-') ? 1 : 0;
+            if (i >= len) {
+                return false; // a bare sign
+            }
+            final char d = num.charAt(i);
+            final boolean maybe;
+            if (d >= '0' && d <= '9') {
+                maybe = true; // 1d, 2f, 0x1p3, trailing blanks ...
+            } else if (d == '.') {
+                maybe = len - i > 1; // "." alone is never a number
+            } else if (d == 'N') {
+                maybe = len - i >= 3; // NaN
+            } else if (d == 'I') {
+                maybe = len - i >= 8; // Infinity
+            } else {
+                maybe = false;
+            }
+            if (!maybe) {
+                return false;
+            }
+            // parseDouble only ever accepts ASCII letters/digits, '.', '+', '-' and
+            // padding whitespace/control chars; an expression such as "3+4*2" (which
+            // the scanner asks about as a whole) can be rejected without throwing.
+            for (int k = 0; k < len; k++) {
+                final char ch = num.charAt(k);
+                if (ch > ' ' && ch != '.' && ch != '+' && ch != '-'
+                        && (ch < '0' || ch > '9') && (ch < 'A' || ch > 'Z') && (ch < 'a' || ch > 'z')) {
+                    return false;
+                }
+            }
+        }
+        // Rare shapes (whitespace padding, NaN, Infinity, hex floats, 1d / 2f
+        // suffixes, malformed input): defer to the JDK so the answer is identical.
         try {
             Double.parseDouble(num);
             return true;
         } catch (NumberFormatException numErr) {
             return false;
         }
+    }
+
+    /**
+     * Recognises [+-]? (digits [. digits*] | . digits) ([eE] [+-]? digits)? -- a
+     * strict subset of what Double.parseDouble accepts.
+     */
+    private static boolean isPlainDecimal(String s, int len) {
+        int i = 0;
+        char c = s.charAt(0);
+        if (c == '+' || c == '-') {
+            i = 1;
+        }
+        int intDigits = 0;
+        while (i < len && (c = s.charAt(i)) >= '0' && c <= '9') {
+            i++;
+            intDigits++;
+        }
+        int fracDigits = 0;
+        if (i < len && s.charAt(i) == '.') {
+            i++;
+            while (i < len && (c = s.charAt(i)) >= '0' && c <= '9') {
+                i++;
+                fracDigits++;
+            }
+        }
+        if (intDigits == 0 && fracDigits == 0) {
+            return false;
+        }
+        if (i < len && ((c = s.charAt(i)) == 'e' || c == 'E')) {
+            i++;
+            if (i < len && ((c = s.charAt(i)) == '+' || c == '-')) {
+                i++;
+            }
+            int expDigits = 0;
+            while (i < len && (c = s.charAt(i)) >= '0' && c <= '9') {
+                i++;
+                expDigits++;
+            }
+            if (expDigits == 0) {
+                return false;
+            }
+        }
+        return i == len;
     }
 
     /**
@@ -112,22 +210,19 @@ MathExpression
      */
     public static boolean isNumber(String num) {
         //sign_num_._num_E_sign_num
-        boolean verily = false;
-        if(num == null){
+        if (num == null) {
             return false;
         }
-        if (STRING.isDigit(STRING.firstElement(num))) {
-            verily = true;
-        } else if (STRING.firstChar(num) == Operator.PLUS.charAt(0) || STRING.firstChar(num) == Operator.MINUS.charAt(0)) {
-            if (num.length() > 1) {
-                if (STRING.isDigitChar(num.charAt(1)) || num.charAt(1) == '.') {
-                    verily = true;
-                }
-            }
-        } else if (STRING.firstElement(num).charAt(0) == '.') {
-            verily = true;
+        // charAt(0) on "" throws StringIndexOutOfBoundsException, exactly as the
+        // old STRING.firstChar(num) did for the empty string.
+        final char c = num.charAt(0);
+        if (c >= '0' && c <= '9') {
+            return true;
         }
-        return verily;
+        if (c == '+' || c == '-') {
+            return num.length() > 1 && (STRING.isDigitChar(num.charAt(1)) || num.charAt(1) == '.');
+        }
+        return c == '.';
     }
     public static boolean isOnlyDigits(String num){
         return STRING.isOnlyDigits(num);
