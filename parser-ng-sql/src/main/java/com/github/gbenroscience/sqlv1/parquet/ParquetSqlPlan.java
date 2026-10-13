@@ -8,6 +8,8 @@ import com.github.gbenroscience.sqlv1.ast.SelectItem;
 import com.github.gbenroscience.sqlv1.ast.SelectStatement;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.BaseFixedWidthVector;
+import org.apache.arrow.vector.BaseVariableWidthVector;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.Float8Vector;
 import org.apache.arrow.vector.VarCharVector;
@@ -81,6 +83,12 @@ public final class ParquetSqlPlan implements AutoCloseable {
     private final List<String> numericColumns = new ArrayList<>();
     /** Hidden Float8 sort-key items added to the engine query for bounded top-N, else empty. */
     private final List<String> sortKeys = new ArrayList<>();
+    /** True when the top-N keys are plain numeric columns and nothing needs the engine: see {@link #topNDirect}. */
+    private boolean topDirect;
+    /** The numeric column behind each sort key when {@link #topDirect}. */
+    private final List<String> topKeyCols = new ArrayList<>();
+    /** Non-null when aggregates are computed per batch and merged: see {@link PartialAgg}. */
+    private PartialAgg partial;
     private boolean[] sortDesc = new boolean[0];
     private final boolean grouped;
     private final boolean engineless;
@@ -229,12 +237,33 @@ public final class ParquetSqlPlan implements AutoCloseable {
         boolean bare = false;
         try {
             if (grouped) {
-                SelectStatement eng = new SelectStatement(rstmt.selectAll(), rstmt.items(), rstmt.table(), engineWhere,
-                        rstmt.groupBy(), rstmt.having(), rstmt.orderBy(), effLimit());
-                Set<String> grefs = new LinkedHashSet<>(ColumnRefs.referencedBy(eng));
-                grefs.addAll(maskColumns());
-                addNumeric(grefs);
-                q = ArrowQuery.compile(sql, eng);
+                PartialAgg pa = PartialAgg.tryCreate(rstmt);
+                if (pa != null) {
+                    // Aggregate each batch in the engine and merge the partials, instead of copying the whole scan into
+                    // one root. Anything unexpected falls back to the materializing path below.
+                    List<String> savedNumeric = new ArrayList<>(numericColumns);
+                    try {
+                        SelectStatement pe = pa.engineStatement(engineWhere);
+                        Set<String> prefs = new LinkedHashSet<>(ColumnRefs.referencedBy(pe));
+                        prefs.addAll(maskColumns());
+                        addNumeric(prefs);
+                        q = ArrowQuery.compile(sql, pe);
+                        partial = pa;
+                    } catch (RuntimeException notPartial) {
+                        if (q != null) q.close();
+                        q = null;
+                        numericColumns.clear();
+                        numericColumns.addAll(savedNumeric);
+                    }
+                }
+                if (partial == null) {
+                    SelectStatement eng = new SelectStatement(rstmt.selectAll(), rstmt.items(), rstmt.table(), engineWhere,
+                            rstmt.groupBy(), rstmt.having(), rstmt.orderBy(), effLimit());
+                    Set<String> grefs = new LinkedHashSet<>(ColumnRefs.referencedBy(eng));
+                    grefs.addAll(maskColumns());
+                    addNumeric(grefs);
+                    q = ArrowQuery.compile(sql, eng);
+                }
                 bare = false;
             } else {
                 List<SelectItem> computed = new ArrayList<>();
@@ -262,7 +291,8 @@ public final class ParquetSqlPlan implements AutoCloseable {
                 bare = computed.isEmpty() && engineWhere == null && rstmt.orderBy().isEmpty() && sameNames;
                 if (!bare) {
                     List<SelectItem> items = new ArrayList<>(computed);
-                    if (topNEligible()) {
+                    boolean topN = topNEligible();
+                    if (topN) {
                         // ORDER BY text resolves against computed aliases exactly as the engine resolves it,
                         // unless a widened column of the same name wins the name.
                         java.util.Map<String, String> bind = new java.util.LinkedHashMap<>();
@@ -283,11 +313,26 @@ public final class ParquetSqlPlan implements AutoCloseable {
                             sortKeys.add(name);
                             sortDesc[k] = ob.get(k).descending();
                         }
+                        // With no WHERE, no computed output and plain numeric columns as keys, the engine is not needed at
+                        // all: the keys are read from the widened columns and the best rows picked with a heap.
+                        boolean direct = engineWhere == null && computed.isEmpty();
+                        for (int k = 0; k < ob.size() && direct; k++) {
+                            String t = ob.get(k).exprText().trim();
+                            ColumnKind kd = schema.kind(t);
+                            direct = kd != null && kd.numeric() && schema.has(t) && numericColumns.contains(t);
+                            if (direct) topKeyCols.add(t);
+                        }
+                        topDirect = direct;
+                        if (!direct) topKeyCols.clear();
                     }
-                    items.add(SelectItem.plain(NumericViews.ROW_ID, NumericViews.ROW_ID));
-                    SelectStatement es = new SelectStatement(false, items, rstmt.table(), engineWhere,
-                            List.of(), null, rstmt.orderBy(), effLimit());
-                    q = ArrowQuery.compile(sql, es);
+                    if (!topDirect) {
+                        items.add(SelectItem.plain(NumericViews.ROW_ID, NumericViews.ROW_ID));
+                        // top-N: the engine evaluates the keys and filters, and does NOT sort or limit; the heap picks the rows
+                        SelectStatement es = topN
+                                ? new SelectStatement(false, items, rstmt.table(), engineWhere, List.of(), null, List.of(), null)
+                                : new SelectStatement(false, items, rstmt.table(), engineWhere, List.of(), null, rstmt.orderBy(), effLimit());
+                        q = ArrowQuery.compile(sql, es);
+                    }
                 }
             }
         } catch (RuntimeException e) {
@@ -296,6 +341,37 @@ public final class ParquetSqlPlan implements AutoCloseable {
         }
         this.engineless = bare;
         this.engine = q;
+    }
+
+    /**
+     * Allocates {@code combined} for exactly the rows about to be appended (the count and the string bytes are known
+     * from the parts), so appending copies each value once instead of growing the vectors by doubling and copying them
+     * again each time.
+     */
+    private static void presize(VectorSchemaRoot combined, List<VectorSchemaRoot> parts, long rows) {
+        if (rows > 0 && rows < Integer.MAX_VALUE / 2) {
+            for (FieldVector v : combined.getFieldVectors()) {
+                if (v instanceof BaseFixedWidthVector f) {
+                    f.setInitialCapacity((int) rows);
+                } else if (v instanceof BaseVariableWidthVector b) {
+                    long bytes = 0;
+                    for (VectorSchemaRoot p : parts) {
+                        FieldVector pv = p.getVector(v.getName());
+                        if (pv instanceof BaseVariableWidthVector pb) bytes += pb.sizeOfValueBuffer();
+                    }
+                    b.setInitialCapacity((int) rows, Math.max(1.0, (double) bytes / rows));
+                }
+            }
+        }
+        combined.allocateNew();
+    }
+
+    /**
+     * True if {@link #stream} delivers this query batch by batch (a projection or filter), which never holds the
+     * result in memory; false if it needs {@link #execute}.
+     */
+    public boolean isStreamable() {
+        return fold == null && footer == null && plan.streamable();
     }
 
     /** {@code LIMIT + OFFSET}: rows to produce before the offset is dropped, or {@code null} for no limit. */
@@ -429,7 +505,9 @@ public final class ParquetSqlPlan implements AutoCloseable {
             return b.toString();
         }
         b.append("mode: ").append(plan.streamable() ? "stream"
-                : !sortKeys.isEmpty() ? "bounded top-" + effLimit() + " (keeps at most " + 2L * effLimit() + " candidate rows)"
+                : !sortKeys.isEmpty() ? "bounded top-" + effLimit() + " (heap selection per batch, keeps at most " + 2L * effLimit() + " candidate rows"
+                        + (topDirect ? "; keys read directly from the widened columns, no engine" : "; the engine evaluates keys and filter, it does not sort") + ")"
+                : partial != null ? "streaming partial aggregation (the engine aggregates each batch, the partials are merged)"
                 : "materialize (" + plan.materializeReason() + ")").append('\n');
         b.append("columns decoded: ").append(plan.columns() == null ? "*" : plan.columns()).append('\n');
         if (stmt.where() == null) {
@@ -588,6 +666,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
         }
         if (plan.metadataOnly()) return footerAnswer(allocator);
         if (!sortKeys.isEmpty()) return executeTopN(allocator);
+        if (partial != null) return executePartial(allocator);
 
         List<VectorSchemaRoot> parts = new ArrayList<>();
         try {
@@ -611,7 +690,7 @@ public final class ParquetSqlPlan implements AutoCloseable {
                 // VectorAppender reads the target's offset buffer for variable-width vectors, which is a
                 // zero-length buffer until allocated: appending into a fresh root fails with an
                 // IndexOutOfBoundsException on the first VARCHAR/BINARY column.
-                combined.allocateNew();
+                presize(combined, parts, rows);
                 if (!parts.isEmpty()) VectorSchemaRootAppender.append(combined, parts.toArray(new VectorSchemaRoot[0]));
                 combined.setRowCount((int) rows);
                 try (NumericViews views = views(allocator, files.get(0))) {
@@ -634,16 +713,134 @@ public final class ParquetSqlPlan implements AutoCloseable {
         }
     }
 
-    /** Bounded {@code ORDER BY ... LIMIT n}: each batch's engine answer is merged into a {@link TopN}. */
+    /**
+     * Bounded {@code ORDER BY ... LIMIT n}. Per batch the best rows are picked with a bounded heap
+     * ({@link TopSelect}), not by sorting the batch, and copied straight from their source vectors into the running
+     * {@link TopN}. With plain numeric key columns and no {@code WHERE} the engine is not involved at all; otherwise
+     * it evaluates the keys and the filter for the batch (without sorting) and the heap picks among the survivors.
+     */
     private VectorSchemaRoot executeTopN(BufferAllocator allocator) {
-        try (TopN top = new TopN(allocator, effLimit(), outs.size(), sortDesc)) {
+        int limit = effLimit();
+        TopSelect sel = new TopSelect(limit, sortDesc);
+        try (TopN top = new TopN(allocator, limit, outs.size(), sortDesc)) {
+            for (Path f : files) {
+                try (ParquetBatchReader r = scanFor(f).open(allocator);
+                     NumericViews views = views(allocator, f)) {
+                    while (r.next()) {
+                        VectorSchemaRoot src = derived == null ? r.root() : derived.extend(r.root(), allocator);
+                        if (topDirect) topDirectBatch(src, views, sel, top);
+                        else topEngineBatch(src, views, sel, top);
+                    }
+                    lastMetrics = r.metrics();
+                    roundedValues += views == null ? 0 : views.roundedValues();
+                }
+            }
+            VectorSchemaRoot res = top.finish();
+            return res != null ? res : emptyResult(allocator);
+        }
+    }
+
+    private static TopSelect.Key keyOf(Float8Vector v) {
+        return new TopSelect.Key() {
+            @Override public boolean isNull(int row) { return v.isNull(row); }
+
+            @Override public double get(int row) { return v.get(row); }
+        };
+    }
+
+    private void topDirectBatch(VectorSchemaRoot src, NumericViews views, TopSelect sel, TopN top) {
+        int n = src.getRowCount();
+        if (n == 0) return;
+        VectorSchemaRoot w = views.bind(src);
+        TopSelect.Key[] keys = new TopSelect.Key[topKeyCols.size()];
+        Float8Vector[] kvec = new Float8Vector[keys.length];
+        for (int k = 0; k < keys.length; k++) {
+            kvec[k] = (Float8Vector) w.getVector(topKeyCols.get(k));
+            keys[k] = keyOf(kvec[k]);
+        }
+        int[] picks = sel.select(n, keys, top.threshold());
+        if (picks.length == 0) return;
+        FieldVector[] vecs = new FieldVector[outs.size()];
+        int[][] rows = new int[outs.size()][];
+        for (int c = 0; c < vecs.length; c++) {
+            vecs[c] = src.getVector(outs.get(c).column());
+            rows[c] = picks;
+        }
+        offer(top, vecs, rows, picks, kvec, picks);
+    }
+
+    private void topEngineBatch(VectorSchemaRoot src, NumericViews views, TopSelect sel, TopN top) {
+        int n = src.getRowCount();
+        VectorSchemaRoot res = engine.execute(views == null ? emptyRoot(n) : views.bind(src));
+        try {
+            int count = res.getRowCount();
+            if (count == 0) return;
+            Float8Vector rid = (Float8Vector) res.getVector(NumericViews.ROW_ID);
+            TopSelect.Key[] keys = new TopSelect.Key[sortKeys.size()];
+            Float8Vector[] kvec = new Float8Vector[keys.length];
+            for (int k = 0; k < keys.length; k++) {
+                kvec[k] = (Float8Vector) res.getVector(sortKeys.get(k));
+                keys[k] = keyOf(kvec[k]);
+            }
+            int[] picks = sel.select(count, keys, top.threshold());
+            if (picks.length == 0) return;
+            int[] srcRows = new int[picks.length];
+            for (int i = 0; i < picks.length; i++) srcRows[i] = (int) rid.get(picks[i]);
+            FieldVector[] vecs = new FieldVector[outs.size()];
+            int[][] rows = new int[outs.size()][];
+            for (int c = 0; c < vecs.length; c++) {
+                Out o = outs.get(c);
+                if (o.column() == null) { // computed by the engine: indexed by the engine's row
+                    vecs[c] = res.getVector(o.name());
+                    rows[c] = picks;
+                } else {                   // a column of the scan: indexed by the row the engine reports
+                    vecs[c] = src.getVector(o.column());
+                    rows[c] = srcRows;
+                }
+            }
+            offer(top, vecs, rows, picks, kvec, picks);
+        } finally {
+            res.close();
+        }
+    }
+
+    /** Hands the picked rows to the running top-N. {@code keyRows[i]} is the row of {@code kvec} behind pick {@code i}. */
+    private void offer(TopN top, FieldVector[] vecs, int[][] rows, int[] picks, Float8Vector[] kvec, int[] keyRows) {
+        int nk = kvec.length;
+        double[][] kv = new double[nk][picks.length];
+        boolean[][] kn = new boolean[nk][picks.length];
+        for (int k = 0; k < nk; k++) {
+            for (int i = 0; i < picks.length; i++) {
+                boolean isNull = kvec[k].isNull(keyRows[i]);
+                kn[k][i] = isNull;
+                kv[k][i] = isNull ? 0.0 : kvec[k].get(keyRows[i]);
+            }
+        }
+        Field[] fields = null;
+        if (!top.initialized()) {
+            fields = new Field[vecs.length];
+            for (int c = 0; c < vecs.length; c++) {
+                Field f = vecs[c].getField();
+                fields[c] = new Field(outs.get(c).name(), f.getFieldType(), f.getChildren());
+            }
+        }
+        top.addPicked(fields, vecs, rows, picks.length, kv, kn);
+    }
+
+    /**
+     * Aggregation with the engine run per batch: each batch yields partial aggregates, merged by
+     * {@link PartialAgg}. Memory is one batch plus one row per group; nothing is copied into a combined root.
+     */
+    private VectorSchemaRoot executePartial(BufferAllocator allocator) {
+        PartialAgg.Merger m = partial.newMerger(maxMaterializedRows);
+        try {
             for (Path f : files) {
                 try (ParquetBatchReader r = scanFor(f).open(allocator);
                      NumericViews views = views(allocator, f)) {
                     while (r.next()) {
                         Batch b = process(r.root(), views, allocator);
                         try {
-                            top.add(b.root());
+                            m.accept(b.root(), allocator);
                         } finally {
                             if (b.owned()) b.root().close();
                         }
@@ -652,8 +849,11 @@ public final class ParquetSqlPlan implements AutoCloseable {
                     roundedValues += views == null ? 0 : views.roundedValues();
                 }
             }
-            VectorSchemaRoot res = top.finish();
-            return res != null ? res : emptyResult(allocator);
+            Integer lim = effLimit();
+            return m.finish(allocator, lim == null ? Integer.MAX_VALUE : lim);
+        } catch (RuntimeException e) {
+            m.close();
+            throw e;
         }
     }
 

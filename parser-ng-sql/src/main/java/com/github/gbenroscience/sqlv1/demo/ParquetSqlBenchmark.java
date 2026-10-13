@@ -381,6 +381,24 @@ public final class ParquetSqlBenchmark {
                     return groups * SPLIT + total;
                 }, null));
 
+        w.add(new Workload("group-having", "GROUP BY with HAVING, ORDER BY and LIMIT: merged partials",
+                "SELECT qty, COUNT(*) AS c FROM t WHERE qty >= 0 GROUP BY qty HAVING COUNT(*) > 20000 ORDER BY c DESC LIMIT 5",
+                r -> sumDouble(r, 1),
+                (cfg, a) -> {
+                    long[] cnt = new long[100];
+                    try (ParquetBatchReader rd = scan(cfg, "qty").open(a)) {
+                        while (rd.next()) {
+                            IntVector q = (IntVector) rd.root().getVector("qty");
+                            for (int i = 0, m = rd.root().getRowCount(); i < m; i++) if (!q.isNull(i)) cnt[q.get(i)]++;
+                        }
+                    }
+                    long[] sorted = cnt.clone();
+                    Arrays.sort(sorted);
+                    double s = 0;
+                    for (int i = 0; i < 5; i++) if (sorted[sorted.length - 1 - i] > 20000) s += sorted[sorted.length - 1 - i];
+                    return s;
+                }, null));
+
         w.add(new Workload("group-string", "GROUP BY a string column: folded in Java",
                 "SELECT name, COUNT(*) AS c FROM t GROUP BY name",
                 r -> r.getRowCount() * SPLIT + sumDouble(r, 1),
@@ -426,6 +444,27 @@ public final class ParquetSqlBenchmark {
                             Float8Vector v = (Float8Vector) rd.root().getVector("value");
                             for (int i = 0, n = rd.root().getRowCount(); i < n; i++) {
                                 if (v.isNull(i)) continue;
+                                double x = v.get(i);
+                                if (heap.size() < 100) heap.add(x);
+                                else if (x > heap.peek()) { heap.poll(); heap.add(x); }
+                            }
+                        }
+                    }
+                    double s = 0;
+                    for (double x : heap) s += x;
+                    return s;
+                }, null));
+        w.add(new Workload("top-100-where", "ORDER BY value DESC LIMIT 100 with a WHERE: the engine filters, the heap picks",
+                "SELECT id, value FROM t WHERE qty < 50 ORDER BY value DESC LIMIT 100",
+                r -> sumDouble(r, 1),
+                (cfg, a) -> {
+                    PriorityQueue<Double> heap = new PriorityQueue<>(Comparator.naturalOrder());
+                    try (ParquetBatchReader rd = scan(cfg, "value", "qty").open(a)) {
+                        while (rd.next()) {
+                            Float8Vector v = (Float8Vector) rd.root().getVector("value");
+                            IntVector q = (IntVector) rd.root().getVector("qty");
+                            for (int i = 0, n = rd.root().getRowCount(); i < n; i++) {
+                                if (v.isNull(i) || q.isNull(i) || q.get(i) >= 50) continue;
                                 double x = v.get(i);
                                 if (heap.size() < 100) heap.add(x);
                                 else if (x > heap.peek()) { heap.poll(); heap.add(x); }
@@ -517,11 +556,20 @@ public final class ParquetSqlBenchmark {
             String ex = plan.explain();
             mode = ex.lines().filter(l -> l.startsWith("mode:")).findFirst().orElse("mode: ?").replace("mode: ", "");
             if (c.explain) System.out.println("--- " + w.name() + "\n" + ex);
-            sql = BenchStats.measure(() -> {
-                try (VectorSchemaRoot r = plan.execute(alloc)) {
-                    return w.answer().applyAsDouble(r);
-                }
-            }, c.warmup, c.reps, c.minRepMs);
+            if (plan.isStreamable()) {
+                // a projection or filter is consumed batch by batch, as an application would: the answers are additive over batches
+                sql = BenchStats.measure(() -> {
+                    double[] acc = {0};
+                    plan.stream(alloc, root -> acc[0] += w.answer().applyAsDouble(root));
+                    return acc[0];
+                }, c.warmup, c.reps, c.minRepMs);
+            } else {
+                sql = BenchStats.measure(() -> {
+                    try (VectorSchemaRoot r = plan.execute(alloc)) {
+                        return w.answer().applyAsDouble(r);
+                    }
+                }, c.warmup, c.reps, c.minRepMs);
+            }
             answer = sql.answer;
             ScanMetrics m = plan.lastMetrics();
             if (m != null) pruning = m.rowGroupsSkipped() + "/" + m.rowGroupsInFile() + " groups skipped";

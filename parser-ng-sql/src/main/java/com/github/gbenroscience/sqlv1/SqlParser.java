@@ -161,8 +161,10 @@ import java.util.Locale;
  * methodology this project uses for every ParserNG built-in before relying
  * on it).
  * <p>
- * {@code CAST(expr AS type)} supports numeric target types only, since
- * every ParserNG value is already a floating-point number under the hood:
+ * {@code CAST(expr AS type)} desugars numeric target types, since
+ * every ParserNG value is already a floating-point number under the hood
+ * ({@code DATE}, {@code TIMESTAMP}, {@code DECIMAL(p,s)} and {@code VARCHAR}/{@code CHAR}/{@code TEXT}/{@code STRING}
+ * keep their SQL text for the Parquet bridge to evaluate):
  * {@code INT}/{@code INTEGER}/{@code SMALLINT}/{@code BIGINT}/{@code LONG}
  * truncate toward zero, and {@code DOUBLE}/{@code FLOAT}/{@code REAL}/
  * {@code NUMERIC}/{@code DECIMAL} are a no-op identity (already the

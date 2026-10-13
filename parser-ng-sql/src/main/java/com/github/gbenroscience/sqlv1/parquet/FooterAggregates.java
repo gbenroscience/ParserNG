@@ -31,8 +31,10 @@ import java.util.List;
  * <p><b>When it is exact.</b>
  * <ul>
  * <li>{@code COUNT(col)} needs a null count for every row group of every file; the answer is values minus nulls.</li>
- * <li>{@code MIN}/{@code MAX} are taken from the footer only for signed integers, {@code FLOAT}, {@code DOUBLE},
- * {@code DATE} and {@code BOOLEAN}, whose statistics are exact by definition. Strings and binary
+ * <li>{@code MIN}/{@code MAX} are taken from the footer only for signed integers, {@code DATE} and
+ * {@code BOOLEAN}, whose statistics are exact by definition. {@code FLOAT} and {@code DOUBLE} are always
+ * scanned: a writer may record {@code -0.0} as the minimum of a column whose smallest value is {@code 0.0}
+ * and leaves {@code NaN} out of its statistics, so the footer can disagree with a scan. Strings and binary
  * (statistics may be truncated or written with a wrong order by old writers), decimals, unsigned integers
  * and timestamps (statistics are rendered in a writer-dependent text form) are always scanned.</li>
  * <li>Every row group must either carry usable min and max, or be all nulls (null count equal to the row
@@ -165,7 +167,7 @@ final class FooterAggregates {
 
     private static boolean supportedExtreme(ColumnKind k) {
         return switch (k) {
-            case INT8, INT16, INT32, INT64, FLOAT32, FLOAT64, DATE, BOOL -> true;
+            case INT8, INT16, INT32, INT64, DATE, BOOL -> true;
             default -> false;
         };
     }
@@ -218,12 +220,6 @@ final class FooterAggregates {
                         if (!text.equalsIgnoreCase("true") && !text.equalsIgnoreCase("false")) return null;
                         l = text.equalsIgnoreCase("true") ? 1 : 0;
                         d = l;
-                    } else if (k == ColumnKind.FLOAT32) {
-                        d = Float.parseFloat(text);
-                        l = 0;
-                    } else if (k == ColumnKind.FLOAT64) {
-                        d = Double.parseDouble(text);
-                        l = 0;
                     } else {
                         l = Long.parseLong(text);
                         d = l;
