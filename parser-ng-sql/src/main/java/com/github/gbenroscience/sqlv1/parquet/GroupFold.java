@@ -80,6 +80,7 @@ final class GroupFold implements Folder {
 
     GroupFold(SelectStatement stmt, TableSchema schema) {
         this.stmt = stmt;
+        // SqlParser already rejects SELECT * with GROUP BY (SqlSyntaxException); kept for statements built without the parser.
         if (stmt.selectAll()) throw new ParquetSqlException("SELECT * cannot be used with GROUP BY");
         for (String g : stmt.groupBy()) {
             String t = norm(resolveAlias(g));

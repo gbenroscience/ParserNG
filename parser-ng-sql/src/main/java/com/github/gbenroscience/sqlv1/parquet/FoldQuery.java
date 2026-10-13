@@ -57,9 +57,10 @@ import java.util.Set;
  * rows are held in memory, capped by {@code maxMaterializedRows}.</li>
  * </ul>
  *
- * <p>{@code GROUP BY} and {@code HAVING} combined with either are rejected with a named error. Distinct
- * keys are boxed (one object per value), so this path is correct and bounded but not zero-allocation.
- * Not thread safe.
+ * <p>Only ungrouped queries come here: anything with a {@code GROUP BY} is folded by {@link GroupFold}
+ * (see {@link ParquetSqlPlan}). {@code HAVING} without {@code GROUP BY} is rejected with a named error.
+ * Distinct keys are boxed (one object per value), so this path is correct and bounded but not
+ * zero-allocation. Not thread safe.
  */
 final class FoldQuery implements Folder {
 
@@ -119,9 +120,13 @@ final class FoldQuery implements Folder {
         this.schema = schema;
         this.arrow = arrow;
         this.aggregates = stmt.items().stream().anyMatch(SelectItem::isAggregate);
-        if (!stmt.groupBy().isEmpty() || stmt.having() != null) {
-            throw new ParquetSqlException("GROUP BY / HAVING combined with SELECT DISTINCT, COUNT(DISTINCT ...) or an aggregate over a"
-                    + " string, date, timestamp or boolean column is not supported yet; run the aggregate without GROUP BY");
+        if (!stmt.groupBy().isEmpty()) {
+            // Invariant: ParquetSqlPlan sends every grouped query to GroupFold. Fail loudly rather than fold it wrongly.
+            throw new IllegalStateException("FoldQuery does not handle GROUP BY; grouped queries are folded by GroupFold");
+        }
+        if (stmt.having() != null) {
+            throw new ParquetSqlException("HAVING without GROUP BY is not supported together with SELECT DISTINCT, COUNT(DISTINCT ...)"
+                    + " or an aggregate over a string, date, timestamp or boolean column; add a GROUP BY or filter in WHERE");
         }
         if (aggregates) validateAggregates();
         else validateDistinctRows();

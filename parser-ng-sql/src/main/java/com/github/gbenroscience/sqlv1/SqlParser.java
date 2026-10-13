@@ -334,6 +334,55 @@ public final class SqlParser {
         return p.parseQuery();
     }
 
+    /**
+     * Rejects the {@code CAST} targets only {@code ParquetSql} evaluates ({@code DATE}, {@code TIMESTAMP},
+     * {@code DECIMAL(p,s)}, {@code VARCHAR}/{@code CHAR}/{@code TEXT}/{@code STRING}). {@link #parse(String)} lets
+     * their SQL text through, because the Parquet bridge needs it; a plain {@code ArrowQuery} cannot run it, and
+     * would otherwise hand the text to ParserNG and fail later with a confusing error. Works on tokens, so a string
+     * literal that merely looks like a cast is never rejected.
+     *
+     * @param sql the query text
+     * @throws SqlSyntaxException if a cast to such a target appears anywhere in {@code sql}
+     */
+    static void requireNumericCastTargets(String sql) {
+        List<Token> t = SqlLexer.tokenize(sql);
+        for (int i = 0; i + 1 < t.size(); i++) {
+            if (t.get(i).type() != TokenType.CAST || t.get(i + 1).type() != TokenType.LPAREN) {
+                continue;
+            }
+            int depth = 0;
+            int as = -1;
+            for (int j = i + 1; j < t.size(); j++) {
+                TokenType ty = t.get(j).type();
+                if (ty == TokenType.LPAREN) {
+                    depth++;
+                } else if (ty == TokenType.RPAREN) {
+                    if (--depth == 0) {
+                        break;
+                    }
+                } else if (ty == TokenType.AS && depth == 1) {
+                    as = j;
+                }
+            }
+            if (as < 0 || as + 1 >= t.size()) {
+                continue; // malformed: parse() has already reported it
+            }
+            Token target = t.get(as + 1);
+            String name = target.text().toUpperCase(Locale.ROOT);
+            boolean parameterised = as + 2 < t.size() && t.get(as + 2).type() == TokenType.LPAREN;
+            boolean bridgeOnly = switch (name) {
+                case "DATE", "TIMESTAMP", "VARCHAR", "CHAR", "TEXT", "STRING" -> true;
+                case "DECIMAL", "NUMERIC" -> parameterised;
+                default -> false;
+            };
+            if (bridgeOnly) {
+                throw new SqlSyntaxException("CAST(... AS " + target.text() + ") is only supported by ParquetSql; ArrowQuery "
+                        + "supports numeric CAST targets (INT/INTEGER/BIGINT/SMALLINT/LONG or DOUBLE/FLOAT/REAL/NUMERIC/DECIMAL)",
+                        target.start());
+            }
+        }
+    }
+
     // =====================================================================
     // query / select_list / select_item
     // =====================================================================
@@ -1072,10 +1121,10 @@ public final class SqlParser {
                 return "(" + inner + ")";
             default:
                 throw new SqlSyntaxException(
-                        "Unsupported CAST target type '" + typeTok.text() + "' -- parser-ng-sql only supports "
-                                + "numeric CAST targets (INT/INTEGER/BIGINT/SMALLINT/LONG or "
-                                + "DOUBLE/FLOAT/REAL/NUMERIC/DECIMAL), since every ParserNG value is already "
-                                + "a floating-point number under the hood.",
+                        "Unsupported CAST target type '" + typeTok.text() + "' -- supported targets are the numeric "
+                                + "types (INT/INTEGER/BIGINT/SMALLINT/LONG or DOUBLE/FLOAT/REAL/NUMERIC/DECIMAL), since "
+                                + "every ParserNG value is already a floating-point number under the hood, plus "
+                                + "DATE, TIMESTAMP, DECIMAL(p,s) and VARCHAR/CHAR/TEXT/STRING, which only ParquetSql evaluates.",
                         typeTok.start());
         }
     }
