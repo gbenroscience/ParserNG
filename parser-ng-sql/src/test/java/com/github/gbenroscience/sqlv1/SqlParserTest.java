@@ -539,6 +539,6 @@ class SqlParserTest {
 
     @Test
     void castToANonNumericTargetTypeIsRejected() {
-        assertThrows(SqlSyntaxException.class, () -> SqlParser.parse("SELECT CAST(x AS VARCHAR) AS xs FROM t"));
+        assertThrows(SqlSyntaxException.class, () -> SqlParser.parse("SELECT CAST(x AS BLOB) AS xs FROM t"));
     }
 }

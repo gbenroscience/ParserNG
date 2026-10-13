@@ -59,8 +59,9 @@ import java.util.regex.Pattern;
  * numbers. {@code ORDER BY} names output columns, aliases or aggregates as written in the select list (nulls
  * last, ties in first-seen order). {@code SELECT DISTINCT} removes duplicate output rows after grouping.
  * Without {@code ORDER BY} the groups come out in first-seen order. Every select item must be a group key or an
- * aggregate. Group count is capped by {@code maxMaterializedRows}; keys are boxed, so this path is correct and
- * bounded but not zero-allocation. Not thread safe.
+ * aggregate. Group count is capped by {@code maxMaterializedRows}. A single string or long-hashable key, and several keys that are
+ * all strings or long-hashable (composite table), are looked up without allocating per row; other key types
+ * (decimal, nested, binary) are boxed. Not thread safe.
  */
 final class GroupFold implements Folder {
 
@@ -79,6 +80,7 @@ final class GroupFold implements Folder {
 
     GroupFold(SelectStatement stmt, TableSchema schema) {
         this.stmt = stmt;
+        // SqlParser already rejects SELECT * with GROUP BY (SqlSyntaxException); kept for statements built without the parser.
         if (stmt.selectAll()) throw new ParquetSqlException("SELECT * cannot be used with GROUP BY");
         for (String g : stmt.groupBy()) {
             String t = norm(resolveAlias(g));
@@ -162,20 +164,76 @@ final class GroupFold implements Folder {
             }
             Map<List<Object>, Integer> ids = new HashMap<>();
             int[] groups = {0};
+            // One key of a hashable type needs no boxing: strings are hashed from a reused buffer, fixed-width values as longs.
+            ByteKeyTable byteKeys = nk == 1 && fields.get(0).getType() instanceof org.apache.arrow.vector.types.pojo.ArrowType.Utf8 ? new ByteKeyTable() : null;
+            boolean longKeyType = nk == 1 && byteKeys == null && canHashAsLong(fields.get(0));
+            LongKeyTable longKeys = longKeyType ? new LongKeyTable() : null;
+            // Several keys that are all strings or long-hashable need no boxing either: one composite table, bytes in an arena.
+            CompositeKeyTable comp = null;
+            boolean[] compStr = new boolean[nk];
+            if (nk > 1 && byteKeys == null && longKeys == null) {
+                byte[] kinds = new byte[nk];
+                boolean all = true;
+                for (int k = 0; k < nk && all; k++) {
+                    Field kf = fields.get(k);
+                    if (kf.getType() instanceof org.apache.arrow.vector.types.pojo.ArrowType.Utf8) {
+                        kinds[k] = CompositeKeyTable.STRING;
+                        compStr[k] = true;
+                    } else if (canHashAsLong(kf)) {
+                        kinds[k] = CompositeKeyTable.LONG;
+                    } else {
+                        all = false;
+                    }
+                }
+                if (all) comp = new CompositeKeyTable(kinds);
+            }
+            final CompositeKeyTable compKeys = comp;
+            ByteScratch scratch = new ByteScratch();
             inner.stream(alloc, root -> {
                 List<FieldVector> vs = root.getFieldVectors();
                 int n = root.getRowCount();
                 for (int r = 0; r < n; r++) {
-                    Object[] key = new Object[nk];
-                    for (int k = 0; k < nk; k++) key[k] = FoldQuery.norm(vs.get(k).getObject(r));
-                    List<Object> kl = Arrays.asList(key);
-                    Integer g = ids.get(kl);
-                    if (g == null) {
+                    int g;
+                    if (byteKeys != null) {
+                        FieldVector kv = vs.get(0);
+                        if (kv.isNull(r)) {
+                            g = byteKeys.nullId();
+                        } else {
+                            int len = scratch.load((VarCharVector) kv, r); // load first: it may replace the buffer
+                            g = byteKeys.idOf(scratch.buf, len);
+                        }
+                    } else if (longKeys != null) {
+                        FieldVector kv = vs.get(0);
+                        g = kv.isNull(r) ? longKeys.nullId() : longKeys.idOf(VecKeys.longOf(kv, r));
+                    } else if (compKeys != null) {
+                        for (int k = 0; k < nk; k++) {
+                            FieldVector kv = vs.get(k);
+                            if (kv.isNull(r)) {
+                                compKeys.setNull(k);
+                            } else if (compStr[k]) {
+                                int len = scratch.load((VarCharVector) kv, r);
+                                compKeys.setString(k, scratch.buf, len);
+                            } else {
+                                compKeys.setLong(k, VecKeys.longOf(kv, r));
+                            }
+                        }
+                        g = compKeys.find();
+                    } else {
+                        Object[] key = new Object[nk];
+                        for (int k = 0; k < nk; k++) key[k] = FoldQuery.norm(vs.get(k).getObject(r));
+                        List<Object> kl = Arrays.asList(key);
+                        Integer found = ids.get(kl);
+                        if (found == null) {
+                            found = groups[0];
+                            ids.put(kl, found);
+                        }
+                        g = found;
+                    }
+                    if (g == groups[0]) { // ids are handed out in order, so a new group is the next one
                         if (groups[0] >= maxRows) {
                             throw new ParquetSqlException("GROUP BY produced more than maxMaterializedRows (" + maxRows + ") groups; add a WHERE or raise the cap");
                         }
-                        g = groups[0]++;
-                        ids.put(kl, g);
+                        groups[0]++;
                         for (int k = 0; k < nk; k++) keyVecs[k].copyFromSafe(r, g, vs.get(k));
                     }
                     for (int i = 0; i < acc.length; i++) acc[i].accept(g, argPos[i] < 0 ? null : vs.get(argPos[i]), r);
@@ -213,6 +271,17 @@ final class GroupFold implements Folder {
             return gather(alloc, full, idx);
         } finally {
             for (FieldVector v : toClose) v.close();
+        }
+    }
+
+    /** True if values of this field can be keyed as longs: integers, dates, timestamps, booleans, floating point. */
+    private static boolean canHashAsLong(Field f) {
+        ColumnKind k = TableSchema.kindOf(f.getType());
+        switch (k) {
+            case INT8, INT16, INT32, INT64, FLOAT32, FLOAT64, DATE, TIMESTAMP, BOOL:
+                return true;
+            default:
+                return false;
         }
     }
 
@@ -479,13 +548,29 @@ final class GroupFold implements Folder {
 
     private static final class CountDistinct extends GAcc {
         private final List<Set<Object>> sets = new ArrayList<>();
+        private final List<ByteKeyTable> byteSets = new ArrayList<>();
+        private final List<LongKeyTable> longSets = new ArrayList<>();
+        private final ByteScratch scratch = new ByteScratch();
 
         @Override void accept(int g, FieldVector v, int row) {
-            while (sets.size() <= g) sets.add(new HashSet<>());
-            if (!v.isNull(row)) sets.get(g).add(FoldQuery.norm(v.getObject(row)));
+            if (v instanceof VarCharVector s) { // hashed from a reused buffer: no object per value
+                while (byteSets.size() <= g) byteSets.add(new ByteKeyTable());
+                if (!v.isNull(row)) {
+                    int len = scratch.load(s, row); // load first: it may replace the buffer
+                    byteSets.get(g).idOf(scratch.buf, len);
+                }
+            } else if (VecKeys.hasLongKey(v)) {
+                while (longSets.size() <= g) longSets.add(new LongKeyTable());
+                if (!v.isNull(row)) longSets.get(g).idOf(VecKeys.longOf(v, row));
+            } else {
+                while (sets.size() <= g) sets.add(new HashSet<>());
+                if (!v.isNull(row)) sets.get(g).add(FoldQuery.norm(v.getObject(row)));
+            }
         }
 
         private int size(int g) {
+            if (g < byteSets.size()) return byteSets.get(g).size();
+            if (g < longSets.size()) return longSets.get(g).size();
             return g < sets.size() ? sets.get(g).size() : 0;
         }
 
@@ -578,9 +663,9 @@ final class GroupFold implements Folder {
             ensure(g);
             if (v.isNull(row)) return;
             if (v instanceof VarCharVector s) {
-                byte[] b = s.get(row);
-                if (!has[g] || (wantMax ? Arrays.compareUnsigned(b, bestBytes[g]) > 0 : Arrays.compareUnsigned(b, bestBytes[g]) < 0)) {
-                    bestBytes[g] = b;
+                // compared in place; the value is copied only when it becomes the group's new best
+                if (!has[g] || (wantMax ? VecKeys.compareRow(s, row, bestBytes[g]) > 0 : VecKeys.compareRow(s, row, bestBytes[g]) < 0)) {
+                    bestBytes[g] = s.get(row);
                     has[g] = true;
                 }
                 return;

@@ -43,6 +43,7 @@ query.close();
 - [Performance notes](#performance-notes)
 - [Error handling](#error-handling)
 - [Querying Parquet files](#querying-parquet-files)
+- [Benchmarking and profiling ParquetSql](#benchmarking-and-profiling-parquetsql)
 - [What's intentionally out of scope](#whats-intentionally-out-of-scope)
 - [Resource ownership and thread-safety](#resource-ownership-and-thread-safety)
 
@@ -57,14 +58,14 @@ repository and is published to Maven Central alongside it.
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-sql</artifactId>
-    <version>3.0.8</version>
+    <version>3.0.9</version>
 </dependency>
 ```
 
 **Gradle**
 
 ```groovy
-implementation("com.github.gbenroscience:parser-ng-sql:3.0.8")
+implementation("com.github.gbenroscience:parser-ng-sql:3.0.9")
 ```
 
 parser-ng-sql depends on `parser-ng-arrow`, `parser-ng`, `parser-ng-simd`, and
@@ -561,7 +562,9 @@ hard to keep problems on the compile-time side of that line rather than
 letting them surface as a confusing runtime failure:
 
 - **`SqlSyntaxException`**; the SQL text itself doesn't parse: a missing
-  keyword, an unsupported `CAST` target type, a `CASE` with no `ELSE`. This
+  keyword, an unsupported `CAST` target type, a `CASE` with no `ELSE`, `SELECT *`
+  combined with `GROUP BY` (this applies to `ParquetSql` too, which lets the
+  parser's `SqlSyntaxException` through unwrapped). This
   is thrown as early as possible, from `ArrowQuery.compile`, before any
   ParserNG expression is even compiled.
 - **`ArrowSqlException`**; the SQL parsed fine, but compiling its
@@ -634,11 +637,34 @@ that directory or the query fails.
 * **Row-group pruning** uses a superset predicate derived from the `WHERE`. The full `WHERE` is
   always re-evaluated, unless you opt into `withExactFilter(true)` and the whole `WHERE` converts
   with exactly the SQL semantics (see below).
-* **`ORDER BY ... LIMIT n`** (no `GROUP BY`) is a bounded top-N: each batch is sorted and cut to `n`, and the
-  bridge keeps at most about `2n` candidate rows however many rows match. Ordering is the engine's: keys
-  compare as doubles, nulls last in both directions, ties keep file order. `n` must be at most
-  `maxMaterializedRows` and 1,000,000; otherwise, and for `ORDER BY` with no `LIMIT`, every matching row is
-  materialized. `explain()` reports `bounded top-n`.
+* **`ORDER BY ... LIMIT n`** (no `GROUP BY`) is a bounded top-N. Per batch the best `n` rows are picked with a
+  bounded heap (`TopSelect`), not by sorting the batch: O(rows) when most rows cannot enter, and a row that cannot
+  beat the current n-th best over all batches is dropped before it touches the heap. The picked rows are copied
+  straight from their source vectors into a running result that holds at most about `2n` candidates however many
+  rows match. When there is no `WHERE`, no computed output and the keys are plain numeric columns, the numeric
+  engine is not involved at all (the keys are read from the widened columns); otherwise the engine evaluates the
+  keys and the filter for the batch, without sorting, and the heap picks among the survivors. Ordering is the
+  engine's: keys compare as doubles, nulls last in both directions, ties keep file order. `n` (plus any `OFFSET`)
+  must be at most `maxMaterializedRows` and 1,000,000; otherwise, and for `ORDER BY` with no `LIMIT`, every matching
+  row is materialized. `explain()` reports `bounded top-n` and whether the engine is involved.
+* **Streaming aggregation.** `COUNT`, `SUM`, `AVG`, `MIN` and `MAX`, with or without `GROUP BY`, `HAVING`,
+  `ORDER BY` and `LIMIT`, no longer copy the whole scan into one root. The engine aggregates each batch into
+  partial values (a count; a sum, minimum or maximum together with the count of values behind it) and the bridge
+  merges them (`PartialAgg`, `MergeCore`), so memory is one batch plus one row per group. `AVG` is merged as a sum
+  over a count. `HAVING`, `ORDER BY`, `LIMIT` and `OFFSET` are applied to the merged groups. A partial sum, minimum
+  or maximum is used only when its count is positive, so whatever the engine returns for an empty batch never
+  leaks into the result. Differences from the materializing path, all as SQL defines them: `SUM`, `AVG`, `MIN` and
+  `MAX` over no values are null, a `HAVING` that evaluates to null does not keep the group, and groups come out in
+  first-seen order unless `ORDER BY` says otherwise. A statement the merge cannot handle exactly (a `DISTINCT`, an
+  `ORDER BY` or `HAVING` operand that is not an output or an aggregate) still takes the materializing path.
+  `explain()` reports `streaming partial aggregation`.
+* **Allocation in the Java folds.** A single string key, `COUNT(DISTINCT string)` and string `MIN`/`MAX` no longer
+  create an object per row: strings are hashed from a reused buffer (`ByteKeyTable`), integer, date, timestamp,
+  boolean and floating-point keys as `long`s (`LongKeyTable`), and string extremes are compared in place and copied
+  only when they become the new best. Several keys that are all strings or long-hashable (integers, dates, timestamps,
+  booleans, floating point) use one composite table with a shared byte arena (`CompositeKeyTable`), also without
+  per-row allocation; only other key types (decimal, nested, binary) are boxed. Materializing paths pre-size the combined
+  vectors from the known row and byte counts, so appending copies each value once.
 * **`SELECT DISTINCT`, `COUNT(DISTINCT col)`, `COUNT(col)` on any column, and `MIN`/`MAX` over strings, dates,
   timestamps and booleans** are folded in Java over the native batches of an inner scan that keeps your `FROM`
   and `WHERE` (so row-group pruning and native predicates apply). Rules:
@@ -654,8 +680,8 @@ that directory or the query fails.
     nulls equal each other.
   * `DISTINCT` is a keyword only where a select item can follow it, so a column named `distinct` still works.
     `SUM(DISTINCT x)` and `AVG(DISTINCT x)` are syntax errors; `ArrowQuery` itself rejects both forms.
-  * These queries cannot be streamed (`stream()` throws); keys are boxed, so this path is correct and bounded
-    but not zero-allocation.
+  * These queries cannot be streamed (`stream()` throws); string, long-hashable and composite keys of those are looked up
+    without allocation; other key types are boxed, so those are correct and bounded but not zero-allocation.
 * **`GROUP BY` the numeric engine cannot do** is folded too (`explain()` says `GROUP BY the numeric engine
   cannot do`): a string, boolean, date or timestamp group key or key expression (`GROUP BY name`,
   `GROUP BY LOWER(name)`, `GROUP BY day`, `GROUP BY CAST(ts AS DATE)`), `COUNT(DISTINCT x)`, `MIN`/`MAX` over
@@ -690,7 +716,7 @@ that directory or the query fails.
   which is not a stable order across files, as in any SQL engine. `OFFSET` is a keyword only as a trailing
   clause (`OFFSET`, an integer, then the end or `LIMIT`), so a column named `offset` still works.
   `ArrowQuery` itself rejects `OFFSET` rather than ignore it.
-* **String functions.** `LOWER(s)`, `UPPER(s)`, `TRIM(s)`, `SUBSTRING(s, start [, count])` (alias `SUBSTR`),
+* **String functions.** `LOWER(s)`, `UPPER(s)`, `TRIM(s)`, `LTRIM(s)`, `RTRIM(s)`, `SUBSTRING(s, start [, count])` (alias `SUBSTR`),
   `CONCAT(a, b, ...)`, `a || b`, and `LENGTH(s)` (aliases `CHAR_LENGTH`, `CHARACTER_LENGTH`) and
   `OCTET_LENGTH(s)`. ParserNG evaluates doubles and cannot hold a string, so the bridge evaluates these
   itself, directly over the UTF-8 bytes of the Arrow vectors, and only the results meet the engine.
@@ -708,12 +734,12 @@ that directory or the query fails.
     string), while `||` gives null if any operand is null. `LENGTH` counts characters (UTF-8 code points),
     `OCTET_LENGTH` bytes. `SUBSTRING` is 1-based by character; positions before 1 count as in PostgreSQL
     (`SUBSTRING('abc', 0, 2)` is `'a'`), a start past the end gives the empty string, a negative count is an
-    error. `TRIM` removes spaces (U+0020) at both ends. `LOWER`/`UPPER` fold ASCII by byte and use
+    error. `TRIM` removes spaces (U+0020) at both ends, `LTRIM` at the start, `RTRIM` at the end. `LOWER`/`UPPER` fold ASCII by byte and use
     `String.toLowerCase(Locale.ROOT)`/`toUpperCase` only for a value with a non-ASCII byte, so `UPPER('Straße')`
     is `'STRASSE'`.
   * Not supported, with a named error: a string-valued expression as an `ORDER BY` or `GROUP BY` key, as an
     aggregate argument (`COUNT(DISTINCT LOWER(name))`), or mixed with arithmetic (`LOWER(a) + 1`); the
-    `SUBSTRING(s FROM n FOR m)` and `TRIM(BOTH ... FROM ...)` forms; `LTRIM`/`RTRIM`; numeric columns inside
+    `SUBSTRING(s FROM n FOR m)` and `TRIM(BOTH ... FROM ...)` forms; numeric columns inside
     `CONCAT`. A string predicate over a function is never pushed to row-group pruning.
   * Cost: each derived column is evaluated for every row of a batch, including rows the `WHERE` later drops,
     into a reusable vector. Buffers are reused, so steady state allocates nothing per row except for a value
@@ -748,7 +774,8 @@ that directory or the query fails.
   The answer is taken only when it is provably what a scan would give, and anything else is scanned as usual:
   * `COUNT(*)` is the footer row count. `COUNT(col)` is values minus nulls and needs a null count for every
     row group of every file, on any column type.
-  * `MIN`/`MAX` use the footer only for signed integers, `FLOAT`, `DOUBLE`, `DATE` and `BOOLEAN`. Strings and
+  * `MIN`/`MAX` use the footer only for signed integers, `DATE` and `BOOLEAN`. `FLOAT` and `DOUBLE` are scanned (a footer
+    minimum may be `-0.0` for `0.0`, and `NaN` is left out of statistics). Strings and
     binary (statistics may be truncated, or written in a wrong order by old writers), decimals, unsigned
     integers and timestamps (statistics are stored as writer-dependent text) are always scanned.
   * Every row group must carry usable min and max, or be all nulls. A row group with neither, a 64-bit
@@ -856,7 +883,20 @@ allocated per row except `REGEXP` (one `String` per non-null row).
 
 `ParquetSqlOptions`: `parallelism`, `batchSize`, `maxRowGroupBytes` (unset means parser-ng-parquet's
 own defaults, so the modules cannot drift), `metrics` (default on), `exactFilter` (default off),
-`maxMaterializedRows` (default 20,000,000), `int64Policy`, `allowedRoot`.
+`maxMaterializedRows` (default 20,000,000), `int64Policy`, `allowedRoot`, `backend`.
+
+`backend` picks the parser-ng-arrow backend, as `ArrowQuery.withBackend` does (default `CPU_SIMD`;
+also `GPU_AUTO`, `GPU_CUDA`, `GPU_OPENCL`, `GPU_METAL`):
+
+```java
+ParquetSql sql = ParquetSql.create(ParquetSqlOptions.defaults().withBackend(ArrowExecutionBackend.GPU_AUTO))
+        .register("t", "data/*.parquet");
+```
+
+It applies to the numeric expression engine only (filters, projections, numeric aggregates). Work the
+bridge does itself (string, date and boolean functions, `COUNT(DISTINCT)`, the Java folds, row-group
+pruning) always runs on the CPU. A backend the host cannot run fails when the query executes, as in
+`ArrowQuery`. `explain()` prints `backend: ...` whenever the engine is involved.
 
 `exactFilter` lets the scan do the row filtering and drops the `WHERE` from the engine. It applies
 only when every leaf converts exactly: numeric columns only, float32 literals exactly representable,
@@ -893,7 +933,7 @@ buffers and row-index buffer are reused.
 | Exact decimal predicates | not yet (compared as double) |
 | Arithmetic on strings, dates, timestamps | clear error |
 | `LIKE`, `ILIKE` (ASCII folding), `REGEXP`, `ESCAPE` | yes |
-| String functions `LOWER`, `UPPER`, `TRIM`, `SUBSTRING`/`SUBSTR`, `CONCAT`, `||`, `LENGTH`/`CHAR_LENGTH`/`OCTET_LENGTH` | yes (bridge only; see the string functions section) |
+| String functions `LOWER`, `UPPER`, `TRIM`, `LTRIM`, `RTRIM`, `SUBSTRING`/`SUBSTR`, `CONCAT`, `||`, `LENGTH`/`CHAR_LENGTH`/`OCTET_LENGTH` | yes (bridge only; see the string functions section) |
 | String-valued expressions as `ORDER BY`/`GROUP BY` keys or aggregate arguments, or in arithmetic | not yet (named error) |
 | `DATE '...'`, `TIMESTAMP '...'` literals | yes |
 | `EXTRACT(field FROM x)`, `CAST(x AS DATE / TIMESTAMP / DECIMAL(p,s) / VARCHAR)`, `INTERVAL` | yes (bridge only; see the date and time section) |
@@ -901,11 +941,88 @@ buffers and row-index buffer are reused.
 | Timestamp row-group pruning | not yet (needs a parser-ng-parquet change) |
 | Quoted identifiers (`"my col"`, `` `my col` ``) | yes (bridge only; double quotes are no longer string literals, see below) |
 | Nested field access (`s.field`, `items[0]`, `m['k']`) and `CARDINALITY` | yes (bridge only; never pushed to row-group pruning) |
-| `MIN`/`MAX`/`COUNT(col)` answered from footer statistics | yes, when provably exact (signed integers, floats, dates, booleans; see below) |
+| `MIN`/`MAX`/`COUNT(col)` answered from footer statistics | yes, when provably exact (signed integers, dates, booleans; floats are scanned; see below) |
 | `HAVING` over a string, date or timestamp `MIN`/`MAX`; `GROUP BY` position (`GROUP BY 1`) | not yet (named error) |
 | `LIMIT n OFFSET m`, `OFFSET m [LIMIT n]` | yes (bridge only; `ArrowQuery` rejects `OFFSET`) |
 | `COALESCE`, `NULLIF` over numeric columns and literals | yes (bridge only; result is `Float8`) |
 | `COALESCE`/`NULLIF` over strings, dates, timestamps, or with expression arguments | not yet (named error) |
+
+## Benchmarking and profiling ParquetSql
+
+`com.github.gbenroscience.sqlv1.demo.ParquetSqlBenchmark` measures `ParquetSql` against what it is built on and
+says where the time goes. It lives with the other demos and reuses their methods: fixed-seed data written before
+any timing and a warm page cache (the parser-ng-parquet fair comparison), warm-up then calibrated reps with the
+median, min and max, and every answer consumed so the JIT cannot drop the work (`Benchmark`, `ExecBench`).
+
+**What each workload is.** One SQL query run three ways over the same file:
+
+| column | meaning |
+|---|---|
+| `sql ms` | `ParquetSql`, planned once and executed repeatedly (median per call) |
+| `direct ms` | the same answer from hand-written Java straight on parser-ng-parquet's Arrow batches, with the equivalent `select` and `pushdown` |
+| `sql/dir` | the cost of the SQL layer over a hand-written loop on the same scan: 1.0 is no overhead |
+| `raw ms`, `raw/sql` | the parquet-java `Group` reader (a few workloads), the baseline of the "3x to 5x" claim, and how many times slower it is than `ParquetSql` |
+| `plan ms` | building the plan (footer reads, rewriting, engine setup), timed on its own |
+| `alloc/call` | bytes allocated per call by the calling thread (a parallel scan's worker threads are not counted) |
+| `ok` | the three answers agree (checksum, relative tolerance 1e-9) and the allocator was empty afterwards (`MISMATCH` or `LEAK` otherwise, and the exit code is 1) |
+| `path` | which execution path the plan took (`footer statistics`, `stream`, `materialize`, `streaming partial aggregation`, `bounded top-N`, `fold in Java`) |
+
+The workloads cover each path: footer-only answers (`count-star`, `footer-stats`), a zero-copy projection, row-group
+pruning (`filter-pruned`), numeric filters and aggregates through the engine (`filter-numeric`, `agg-sum-avg`,
+`group-numeric`), derived columns (`coalesce-sum`, `extract-year`, `upper-eq`), the native string kernel
+(`like-native`), the Java folds (`group-string`, `count-distinct`) and bounded top-N (`top-100`). The data is
+`id` (increasing int64), `value` (double, 10% null), `qty` (int32, 5% null), `name` (1000 distinct strings, 5% null),
+`day` (date) and `flag` (boolean, 20% null).
+
+**Running it.** Use the same JVM flags as the tests. On JDK 24 and later add `-Darrow.allocation.manager.type=Unsafe`.
+
+```
+mvn -q -pl parser-ng-sql -am package -DskipTests
+mvn -q -pl parser-ng-sql exec:exec -Dexec.executable=java \
+  -Dexec.args="--add-modules=jdk.incubator.vector --enable-native-access=ALL-UNNAMED \
+  --add-opens=java.base/java.nio=ALL-UNNAMED -classpath %classpath \
+  com.github.gbenroscience.sqlv1.demo.ParquetSqlBenchmark --rows 3000000"
+```
+
+Options: `--rows N`, `--codec UNCOMPRESSED|SNAPPY`, `--rowgroup-mb N`, `--batch N`, `--parallelism N`, `--only TEXT`,
+`--no-raw` (the Group baselines are slow), `--warmup N --reps N --min-rep-ms X`, `--explain` (print every plan),
+`--csv FILE`, `--keep`. Compare runs by changing one option at a time (`--parallelism 1` against the default shows
+what the parallel scan buys; `--codec SNAPPY` shows decompression).
+
+**Profiling.** `--profile TEXT --seconds S` runs the first matching workload under an in-process sampler
+(`StackSampler`) and prints self and inclusive time per layer (bridge, SQL engine, scan, expression engine, Arrow,
+parquet-java, JDK), the hottest methods and the threads that were running, and the allocation per call. Read it for
+"which layer owns the time" and for spotting a hot allocation site. It samples at safepoints, so for line-level
+truth attach JFR (`-XX:StartFlightRecording=duration=60s,filename=bench.jfr`) or async-profiler to the same run.
+
+**Streamed or materialized.** A plan that streams (a projection or filter, `isStreamable()`) is measured through
+`stream()`, batch by batch, as an application would consume a large result, not through `execute()`, which returns the
+whole result as one root and so measures a copy of the table as well.
+
+**A first run, as a baseline.** On a 4-core Windows machine, Java 24.0.1, 3,000,000 rows, 16 MiB row groups
+(4 row groups), the numbers before the streaming aggregation, heap top-N and allocation-free folds were:
+
+| workload | sql ms | direct ms | sql/dir | alloc/call | path then |
+|---|---:|---:|---:|---:|---|
+| scan-project | 351 | 188 | 1.87 | 140 MiB | materialized through `execute()` |
+| filter-pruned | 118 | 29 | 4.14 | 21 MiB | materialized through `execute()` |
+| filter-numeric | 421 | 197 | 2.14 | 178 MiB | whole scan copied into one root |
+| agg-sum-avg | 411 | 177 | 2.32 | 224 MiB | whole scan copied into one root |
+| coalesce-sum | 257 | 79 | 3.26 | 131 MiB | whole scan copied into one root |
+| group-numeric | 597 | 74 | 8.02 | 267 MiB | whole scan copied into one root |
+| group-string | 478 | 485 | 0.98 | 458 MiB | boxed fold |
+| count-distinct | 407 | 459 | 0.89 | 320 MiB | boxed fold |
+| top-100 | 1243 | 107 | 11.60 | 246 MiB | engine sorted every batch |
+
+The `raw/sql` ratios were 4.33x, 3.74x and 3.67x for the three workloads with a parquet-java baseline, in line with the
+3x to 5x claim. Every answer agreed and no allocator leaked. Rerun on your machine after a change and compare against
+this table; none of the changes described above has been measured yet.
+
+**Reading the result.** A `sql/dir` close to 1.0 on a scan-bound workload means the layer adds almost nothing there;
+a large ratio on a small workload points at per-call fixed cost (`plan ms`, derived-column setup); a large
+`alloc/call` on a workload that should be zero-allocation points at the batch loop (the folds box their keys by
+design, and `plan.execute` allocates one result root per call). The numbers depend on the machine, the JVM and the
+data: run it where you will deploy before drawing conclusions.
 
 ## What's intentionally out of scope
 

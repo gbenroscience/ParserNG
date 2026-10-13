@@ -104,6 +104,19 @@ class StringFnsTest {
     }
 
     @Test
+    void ltrimAndRtrimRemoveSpacesFromOneEndOnly() {
+        List<String> l = eval("SELECT LTRIM(name) FROM t");
+        List<String> r = eval("SELECT RTRIM(name) FROM t");
+        for (int i = 0; i < NAMES.size(); i++) {
+            String s = NAMES.get(i);
+            assertEquals(s == null ? null : s.replaceFirst("^ +", ""), l.get(i));
+            assertEquals(s == null ? null : s.replaceFirst(" +$", ""), r.get(i));
+        }
+        assertEquals("bob  ", l.get(1));
+        assertEquals("  bob", r.get(1));
+    }
+
+    @Test
     void substringIsOneBasedByCharacterWithPostgresEdgeRules() {
         long[][] cases = {{1, 2}, {2, 3}, {0, 2}, {-1, 3}, {3, 0}, {5, 9}, {20, 2}, {2, 100}};
         for (long[] c : cases) {

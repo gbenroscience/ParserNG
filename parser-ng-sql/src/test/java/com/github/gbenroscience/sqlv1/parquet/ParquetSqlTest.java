@@ -1,6 +1,7 @@
 package com.github.gbenroscience.sqlv1.parquet;
 
 import com.github.gbenroscience.parser.ng.parquet.v1.ScanMetrics;
+import com.github.gbenroscience.sqlv1.SqlSyntaxException;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.*;
@@ -283,6 +284,19 @@ class ParquetSqlTest {
             p.stream(a, b -> rows[0] += b.getRowCount());
             assertEquals(ROWS / 2, rows[0]);
             assertEquals(2, p.lastMetrics().parallelism());
+        }
+    }
+
+    @Test
+    void theBackendOptionReachesTheEngineAndDoesNotChangeResults() throws Exception {
+        ParquetSqlOptions o = ParquetSqlOptions.defaults()
+                .withBackend(com.github.gbenroscience.arrow.tools.box.ArrowExecutionBackend.CPU_SIMD);
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT id FROM t WHERE id % 2 = 0", o)) {
+            assertTrue(p.explain().contains("backend: CPU_SIMD"), p.explain());
+            long[] rows = {0};
+            p.stream(a, b -> rows[0] += b.getRowCount());
+            assertEquals(ROWS / 2, rows[0]);
         }
     }
 
@@ -753,11 +767,8 @@ class ParquetSqlTest {
 
     @Test
     void foldedQueriesRejectWhatTheyCannotDoWithNamedErrors() throws Exception {
+        // (grouped COUNT(DISTINCT name) is supported now: see the grouped-fold test)
         ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
-            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT flag, COUNT(DISTINCT name) FROM t GROUP BY flag")) { }
-        });
-        assertTrue(e.getMessage().contains("GROUP BY"), e.getMessage());
-        e = assertThrows(ParquetSqlException.class, () -> {
             try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT COUNT(DISTINCT name), SUM(id + 1) FROM t")) { }
         });
         assertTrue(e.getMessage().contains("plain column"), e.getMessage());
@@ -998,7 +1009,7 @@ class ParquetSqlTest {
         try (ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT id FROM t WHERE LENGTH(name) > 3 AND UPPER(name) = 'N5'")) {
             String ex = p.explain();
             assertTrue(ex.contains("derived column"), ex);
-            assertTrue(ex.contains("derived string columns"), ex);
+            assertTrue(ex.contains("(STRING): UPPER(name)"), ex);
         }
     }
 
@@ -1326,7 +1337,7 @@ class ParquetSqlTest {
         for (int i = 0; i < ROWS; i++) { if (i % 11 != 0) names++; if (i % 10 != 0) i32s++; }
         try (BufferAllocator a = new RootAllocator();
              ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT COUNT(*) AS n, COUNT(name) AS cn, COUNT(i32) AS ci, MIN(id) AS lo, MAX(id) AS hi,"
-                     + " MIN(i32) AS ilo, MAX(i32) AS ihi, MIN(f64) AS flo, MAX(f64) AS fhi, MIN(day) AS d0, MAX(day) AS d1 FROM t");
+                     + " MIN(i32) AS ilo, MAX(i32) AS ihi, MIN(day) AS d0, MAX(day) AS d1 FROM t");
              VectorSchemaRoot r = p.execute(a)) {
             assertTrue(p.explain().contains("footer statistics"), p.explain());
             assertNull(p.lastMetrics(), "no data page was read");
@@ -1337,8 +1348,6 @@ class ParquetSqlTest {
             assertEquals(ROWS - 1.0, dblAt(r, "hi", 0), 0.0);
             assertEquals(1.0, dblAt(r, "ilo", 0), 0.0);
             assertEquals(99.0, dblAt(r, "ihi", 0), 0.0);
-            assertEquals(0.0, dblAt(r, "flo", 0), 0.0);
-            assertEquals((ROWS - 1) * 1.5, dblAt(r, "fhi", 0), 0.0);
             assertEquals(19000, ((DateDayVector) r.getVector("d0")).get(0));
             assertEquals(19364, ((DateDayVector) r.getVector("d1")).get(0));
         }
@@ -1348,8 +1357,8 @@ class ParquetSqlTest {
     void footerAnswersAgreeWithAScanOfTheSameQuery() throws Exception {
         // a WHERE that keeps every row forces the scan path; both must give the same numbers
         try (BufferAllocator a = new RootAllocator();
-             VectorSchemaRoot foot = runSql(a, "SELECT MIN(id) AS lo, MAX(id) AS hi, COUNT(i32) AS ci, MIN(f32) AS f0, MAX(f32) AS f1 FROM t");
-             VectorSchemaRoot scan = runSql(a, "SELECT MIN(id) AS lo, MAX(id) AS hi, COUNT(i32) AS ci, MIN(f32) AS f0, MAX(f32) AS f1 FROM t WHERE id >= 0")) {
+             VectorSchemaRoot foot = runSql(a, "SELECT MIN(id) AS lo, MAX(id) AS hi, COUNT(i32) AS ci, MIN(i32) AS f0, MAX(i32) AS f1 FROM t");
+             VectorSchemaRoot scan = runSql(a, "SELECT MIN(id) AS lo, MAX(id) AS hi, COUNT(i32) AS ci, MIN(i32) AS f0, MAX(i32) AS f1 FROM t WHERE id >= 0")) {
             for (String c : new String[] {"lo", "hi", "ci", "f0", "f1"}) {
                 assertEquals(dblAt(scan, c, 0), dblAt(foot, c, 0), 0.0, c);
             }
@@ -1362,12 +1371,25 @@ class ParquetSqlTest {
                 "SELECT MIN(name) FROM t",
                 "SELECT MAX(ts) FROM t",
                 "SELECT MIN(dec32) FROM t",
+                "SELECT MIN(f64) FROM t",   // float statistics can hold -0.0 for 0.0 and leave NaN out: scanned on purpose
+                "SELECT MAX(f32) FROM t",
                 "SELECT SUM(id) FROM t",
                 "SELECT MIN(id) FROM t WHERE id > 5",
                 "SELECT COUNT(DISTINCT id) FROM t"}) {
             try (ParquetSqlPlan p = ParquetSql.plan(main(), sql)) {
                 assertFalse(p.explain().contains("footer statistics"), sql + "\n" + p.explain());
             }
+        }
+    }
+
+    @Test
+    void floatingPointMinMaxIsScannedAndCorrect() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT MIN(f64) AS lo, MAX(f64) AS hi FROM t");
+             VectorSchemaRoot r = p.execute(a)) {
+            assertFalse(p.explain().contains("footer statistics"), p.explain());
+            assertEquals(0.0, dblAt(r, "lo", 0), 0.0);
+            assertEquals((ROWS - 1) * 1.5, dblAt(r, "hi", 0), 0.0);
         }
     }
 
@@ -1599,14 +1621,18 @@ class ParquetSqlTest {
                 {"SELECT name, COUNT(*) FROM t GROUP BY flag", "GROUP BY"},
                 {"SELECT flag, SUM(name) FROM t GROUP BY flag", "not supported on a STRING"},
                 {"SELECT flag, COUNT(*) FROM t GROUP BY flag HAVING nonsense > 1", "HAVING operand"},
-                {"SELECT flag, COUNT(*) AS c FROM t GROUP BY flag ORDER BY name", "must name a select-list"},
-                {"SELECT * FROM t GROUP BY flag", "SELECT *"}};
+                {"SELECT flag, COUNT(*) AS c FROM t GROUP BY flag ORDER BY name", "must name a select-list"}};
         for (String[] c : cases) {
             ParquetSqlException e = assertThrows(ParquetSqlException.class, () -> {
                 try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, c[0])) { }
             }, c[0]);
             assertTrue(e.getMessage().contains(c[1]), c[0] + " -> " + e.getMessage());
         }
+        // SELECT * with GROUP BY is a grammar-level shape error: the parser rejects it before the bridge plans anything.
+        SqlSyntaxException syn = assertThrows(SqlSyntaxException.class, () -> {
+            try (BufferAllocator a = new RootAllocator(); VectorSchemaRoot r = runSql(a, "SELECT * FROM t GROUP BY flag")) { }
+        });
+        assertTrue(syn.getMessage().contains("SELECT *"), syn.getMessage());
     }
 
     @Test
@@ -1616,6 +1642,119 @@ class ParquetSqlTest {
         }
         try (ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT flag, COUNT(*) FROM t GROUP BY flag")) {
             assertTrue(p.explain().contains("GROUP BY the numeric engine cannot do"), p.explain());
+        }
+    }
+
+    // ---------------------------------------------------------------- streaming aggregation, heap top-N, allocation-free folds
+
+    @Test
+    void globalAggregatesAreMergedFromPerBatchPartials() throws Exception {
+        double sumF = 0, sumI = 0, minId = Double.MAX_VALUE, maxId = -1;
+        long cntI = 0, rows = 0;
+        for (int i = 100; i < ROWS; i++) {
+            rows++;
+            sumF += i * 1.5;
+            if (i % 10 != 0) { sumI += i % 100; cntI++; }
+            minId = Math.min(minId, i);
+            maxId = Math.max(maxId, i);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT COUNT(*) AS n, COUNT(i32) AS ci, SUM(f64) AS sf, AVG(i32) AS ai, MIN(id) AS lo, MAX(id) AS hi FROM t WHERE id >= 100",
+                     ParquetSqlOptions.defaults().withBatchSize(1500));
+             VectorSchemaRoot r = p.execute(a)) {
+            assertTrue(p.explain().contains("streaming partial aggregation"), p.explain());
+            assertEquals(1, r.getRowCount());
+            assertEquals(rows, dblAt(r, "n", 0), 0.0);
+            assertEquals(cntI, dblAt(r, "ci", 0), 0.0);
+            assertEquals(sumF, dblAt(r, "sf", 0), 1e-6);
+            assertEquals(sumI / cntI, dblAt(r, "ai", 0), 1e-9);
+            assertEquals(minId, dblAt(r, "lo", 0), 0.0);
+            assertEquals(maxId, dblAt(r, "hi", 0), 0.0);
+        }
+    }
+
+    @Test
+    void aggregatesOverNoValuesAreCountZeroAndNull() throws Exception {
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS n, COUNT(i32) AS ci, SUM(i32) AS s, AVG(i32) AS av, MIN(i32) AS lo, MAX(i32) AS hi FROM t WHERE id = 0")) {
+            assertEquals(1, r.getRowCount());
+            assertEquals(1.0, dblAt(r, "n", 0), 0.0);
+            assertEquals(0.0, dblAt(r, "ci", 0), 0.0, "i32 is null in row 0");
+            for (String c : new String[] {"s", "av", "lo", "hi"}) assertNull(dblAt(r, c, 0), c);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT COUNT(*) AS n, SUM(f64) AS s FROM t WHERE id < 0")) {
+            assertEquals(1, r.getRowCount(), "a global aggregate always has its row");
+            assertEquals(0.0, dblAt(r, "n", 0), 0.0);
+            assertNull(dblAt(r, "s", 0));
+        }
+    }
+
+    @Test
+    void groupedPartialsHonourHavingOrderByLimitAndOffset() throws Exception {
+        // i32 = i % 100 is null every tenth row, so each non-multiple of ten has 200 rows
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT i32, COUNT(*) AS c, SUM(f64) AS s FROM t WHERE i32 >= 0 GROUP BY i32 HAVING COUNT(*) > 100 ORDER BY c DESC LIMIT 3")) {
+            assertEquals(3, r.getRowCount());
+            for (int i = 0; i < 3; i++) assertEquals(200.0, dblAt(r, "c", i), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT i32, COUNT(*) AS c FROM t WHERE i32 >= 0 GROUP BY i32 HAVING COUNT(*) > 250")) {
+            assertEquals(0, r.getRowCount());
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = runSql(a, "SELECT i32, SUM(f64) AS s FROM t WHERE i32 >= 0 GROUP BY i32 ORDER BY s DESC LIMIT 2 OFFSET 1")) {
+            double[] sums = new double[100];
+            for (int i = 0; i < ROWS; i++) if (i % 10 != 0) sums[i % 100] += i * 1.5;
+            Integer[] ord = new Integer[100];
+            for (int i = 0; i < 100; i++) ord[i] = i;
+            java.util.Arrays.sort(ord, (x, y) -> Double.compare(sums[y], sums[x]));
+            assertEquals(2, r.getRowCount());
+            assertEquals(sums[ord[1]], dblAt(r, "s", 0), 1e-6);
+            assertEquals(sums[ord[2]], dblAt(r, "s", 1), 1e-6);
+        }
+    }
+
+    @Test
+    void topNPicksWithAHeapAndSaysWhetherTheEngineIsInvolved() throws Exception {
+        try (ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT id, i32 FROM t ORDER BY i32 DESC LIMIT 25")) {
+            assertTrue(p.explain().contains("heap selection") && p.explain().contains("no engine"), p.explain());
+        }
+        try (ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT id, i32 FROM t WHERE id > 5 ORDER BY i32 DESC LIMIT 25")) {
+            assertTrue(p.explain().contains("heap selection") && p.explain().contains("does not sort"), p.explain());
+        }
+        assertEquals(topByI32(true, false, 25), runIds("SELECT id, i32 FROM t ORDER BY i32 DESC LIMIT 25", ParquetSqlOptions.defaults().withBatchSize(777)));
+        assertEquals(topByI32(false, false, 40), runIds("SELECT id, i32 FROM t ORDER BY i32 LIMIT 40", ParquetSqlOptions.defaults().withBatchSize(777)));
+        List<Long> filtered = new ArrayList<>();
+        for (long i : topByI32(true, false, ROWS)) if (i > 5) filtered.add(i);
+        assertEquals(filtered.subList(0, 30), runIds("SELECT id, i32 FROM t WHERE id > 5 ORDER BY i32 DESC LIMIT 30", ParquetSqlOptions.defaults().withBatchSize(777)));
+    }
+
+    @Test
+    void foldsHandleStringsLongerThanTheScratchBufferAndEmptyStrings() throws Exception {
+        String a100 = "a".repeat(100), a300 = "a".repeat(300);
+        Path f = strings(a100 + "x", a100 + "y", a100 + "x", null, "", "b", a300 + "z", a300 + "z", a300 + "y");
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = ParquetSql.execute(f, "SELECT v, COUNT(*) AS c FROM t GROUP BY v", a)) {
+            assertEquals(7, r.getRowCount(), "five distinct long or short values, the empty string and null");
+            java.util.Map<String, Double> got = new java.util.HashMap<>();
+            for (int i = 0; i < 7; i++) got.put(r.getVector("v").isNull(i) ? null : str(r, "v", i), dblAt(r, "c", i));
+            assertEquals(2.0, got.get(a100 + "x"));
+            assertEquals(1.0, got.get(a100 + "y"));
+            assertEquals(1.0, got.get(null));
+            assertEquals(1.0, got.get(""));
+            assertEquals(2.0, got.get(a300 + "z"));
+            assertEquals(1.0, got.get(a300 + "y"));
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = ParquetSql.execute(f, "SELECT COUNT(DISTINCT v) AS d, MIN(v) AS lo, MAX(v) AS hi FROM t", a)) {
+            assertEquals(6.0, dblAt(r, "d", 0), 0.0);
+            assertEquals("", str(r, "lo", 0), "the empty string sorts first");
+            assertEquals("b", str(r, "hi", 0));
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = ParquetSql.execute(f, "SELECT COUNT(DISTINCT v) AS d, MAX(v) AS hi FROM t GROUP BY id % 2", a)) {
+            assertEquals(2, r.getRowCount());
         }
     }
 }

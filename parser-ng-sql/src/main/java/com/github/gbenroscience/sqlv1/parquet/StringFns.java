@@ -34,7 +34,7 @@ import java.util.Set;
 import java.util.function.UnaryOperator;
 
 /**
- * SQL string functions: {@code LOWER}, {@code UPPER}, {@code TRIM}, {@code SUBSTRING}/{@code SUBSTR},
+ * SQL string functions: {@code LOWER}, {@code UPPER}, {@code TRIM}, {@code LTRIM}, {@code RTRIM}, {@code SUBSTRING}/{@code SUBSTR},
  * {@code CONCAT}, the {@code ||} operator, and {@code LENGTH}/{@code CHAR_LENGTH}/{@code OCTET_LENGTH}.
  *
  * <p><b>Why a separate path.</b> ParserNG evaluates doubles; a string has no representation in it.
@@ -168,7 +168,7 @@ final class StringFns {
 
     // ------------------------------------------------------------------ text scanning
 
-    private static final Set<String> STRING_FUNCS = Set.of("LOWER", "UPPER", "TRIM", "SUBSTRING", "SUBSTR", "CONCAT");
+    private static final Set<String> STRING_FUNCS = Set.of("LOWER", "UPPER", "TRIM", "LTRIM", "RTRIM", "SUBSTRING", "SUBSTR", "CONCAT");
     private static final Set<String> LENGTH_FUNCS = Set.of("LENGTH", "CHAR_LENGTH", "CHARACTER_LENGTH", "OCTET_LENGTH");
     static final Set<String> LENGTH_NAMES = LENGTH_FUNCS;
 
@@ -468,10 +468,10 @@ final class StringFns {
                     expect(')');
                     return new Case(a, f.equals("UPPER"));
                 }
-                case "TRIM" -> {
+                case "TRIM", "LTRIM", "RTRIM" -> {
                     SNode a = concat();
                     expect(')');
-                    return new Trim(a);
+                    return new Trim(a, !f.equals("RTRIM"), !f.equals("LTRIM"));
                 }
                 case "SUBSTRING", "SUBSTR" -> {
                     SNode a = concat();
@@ -538,7 +538,7 @@ final class StringFns {
                 }
                 case "LENGTH", "CHAR_LENGTH", "CHARACTER_LENGTH", "OCTET_LENGTH" ->
                         throw fail(f + " returns a number; it cannot be an argument of a string function");
-                default -> throw fail("'" + f + "' is not a string function this engine supports (LOWER, UPPER, TRIM, SUBSTRING, CONCAT, ||)");
+                default -> throw fail("'" + f + "' is not a string function this engine supports (LOWER, UPPER, TRIM, LTRIM, RTRIM, SUBSTRING, CONCAT, ||)");
             }
         }
 
@@ -710,8 +710,13 @@ final class StringFns {
     }
 
     private static final class Trim extends Unary {
-        Trim(SNode child) {
+        private final boolean left, right;
+
+        /** {@code TRIM} strips both ends, {@code LTRIM} the start and {@code RTRIM} the end; spaces (U+0020) only. */
+        Trim(SNode child, boolean left, boolean right) {
             super(child);
+            this.left = left;
+            this.right = right;
         }
 
         @Override int eval(int row) {
@@ -719,8 +724,8 @@ final class StringFns {
             if (len < 0) return -1;
             byte[] in = child.buf;
             int a = 0, b = len;
-            while (a < b && in[a] == ' ') a++;
-            while (b > a && in[b - 1] == ' ') b--;
+            if (left) while (a < b && in[a] == ' ') a++;
+            if (right) while (b > a && in[b - 1] == ' ') b--;
             int n = b - a;
             System.arraycopy(in, a, room(n), 0, n);
             return n;

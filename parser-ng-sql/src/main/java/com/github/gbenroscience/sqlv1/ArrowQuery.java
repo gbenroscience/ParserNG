@@ -208,10 +208,12 @@ public final class ArrowQuery implements AutoCloseable {
      *
      * @param sql the query text
      * @return the query
-     * @throws SqlSyntaxException if {@code sql} does not conform to the grammar
+     * @throws SqlSyntaxException if {@code sql} does not conform to the grammar, or casts to a target only
+     *     {@code ParquetSql} evaluates ({@code DATE}, {@code TIMESTAMP}, {@code DECIMAL(p,s)}, {@code VARCHAR})
      */
     public static ArrowQuery compile(String sql) {
         SelectStatement stmt = SqlParser.parse(sql);
+        SqlParser.requireNumericCastTargets(sql);
         return new ArrowQuery(sql, stmt);
     }
 

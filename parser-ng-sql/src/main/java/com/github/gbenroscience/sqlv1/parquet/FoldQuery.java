@@ -57,9 +57,10 @@ import java.util.Set;
  * rows are held in memory, capped by {@code maxMaterializedRows}.</li>
  * </ul>
  *
- * <p>{@code GROUP BY} and {@code HAVING} combined with either are rejected with a named error. Distinct
- * keys are boxed (one object per value), so this path is correct and bounded but not zero-allocation.
- * Not thread safe.
+ * <p>Only ungrouped queries come here: anything with a {@code GROUP BY} is folded by {@link GroupFold}
+ * (see {@link ParquetSqlPlan}). {@code HAVING} without {@code GROUP BY} is rejected with a named error.
+ * Distinct keys are boxed (one object per value), so this path is correct and bounded but not
+ * zero-allocation. Not thread safe.
  */
 final class FoldQuery implements Folder {
 
@@ -119,9 +120,13 @@ final class FoldQuery implements Folder {
         this.schema = schema;
         this.arrow = arrow;
         this.aggregates = stmt.items().stream().anyMatch(SelectItem::isAggregate);
-        if (!stmt.groupBy().isEmpty() || stmt.having() != null) {
-            throw new ParquetSqlException("GROUP BY / HAVING combined with SELECT DISTINCT, COUNT(DISTINCT ...) or an aggregate over a"
-                    + " string, date, timestamp or boolean column is not supported yet; run the aggregate without GROUP BY");
+        if (!stmt.groupBy().isEmpty()) {
+            // Invariant: ParquetSqlPlan sends every grouped query to GroupFold. Fail loudly rather than fold it wrongly.
+            throw new IllegalStateException("FoldQuery does not handle GROUP BY; grouped queries are folded by GroupFold");
+        }
+        if (stmt.having() != null) {
+            throw new ParquetSqlException("HAVING without GROUP BY is not supported together with SELECT DISTINCT, COUNT(DISTINCT ...)"
+                    + " or an aggregate over a string, date, timestamp or boolean column; add a GROUP BY or filter in WHERE");
         }
         if (aggregates) validateAggregates();
         else validateDistinctRows();
@@ -408,6 +413,9 @@ final class FoldQuery implements Folder {
 
     private static final class CountDistinct extends Acc {
         private final Set<Object> seen = new HashSet<>();
+        private ByteKeyTable bytes;
+        private LongKeyTable longs;
+        private ByteScratch scratch;
         private final long maxRows;
 
         CountDistinct(String name, String col, long maxRows) {
@@ -416,16 +424,36 @@ final class FoldQuery implements Folder {
         }
 
         @Override void accept(FieldVector v, int rows) {
-            for (int i = 0; i < rows; i++) {
-                if (v.isNull(i)) continue;
-                seen.add(norm(v.getObject(i)));
+            if (v instanceof VarCharVector s) { // strings are hashed from a reused buffer: no object per row
+                if (bytes == null) {
+                    bytes = new ByteKeyTable();
+                    scratch = new ByteScratch();
+                }
+                for (int i = 0; i < rows; i++) {
+                    if (s.isNull(i)) continue;
+                    { int len = scratch.load(s, i); bytes.idOf(scratch.buf, len); }
+                }
+            } else if (VecKeys.hasLongKey(v)) {
+                if (longs == null) longs = new LongKeyTable();
+                for (int i = 0; i < rows; i++) {
+                    if (!v.isNull(i)) longs.idOf(VecKeys.longOf(v, i));
+                }
+            } else {
+                for (int i = 0; i < rows; i++) {
+                    if (v.isNull(i)) continue;
+                    seen.add(norm(v.getObject(i)));
+                }
             }
-            if (seen.size() > maxRows) {
+            if (size() > maxRows) {
                 throw new ParquetSqlException(outName + " has more than maxMaterializedRows (" + maxRows + ") distinct values; raise the cap");
             }
         }
 
-        @Override void emit(FieldVector out) { ((Float8Vector) out).set(0, seen.size()); }
+        private int size() {
+            return bytes != null ? bytes.size() : longs != null ? longs.size() : seen.size();
+        }
+
+        @Override void emit(FieldVector out) { ((Float8Vector) out).set(0, size()); }
     }
 
     private static final class NumAgg extends Acc {
@@ -486,9 +514,9 @@ final class FoldQuery implements Folder {
             if (v instanceof VarCharVector s) {
                 for (int i = 0; i < rows; i++) {
                     if (s.isNull(i)) continue;
-                    byte[] b = s.get(i);
-                    if (!has || (wantMax ? Arrays.compareUnsigned(b, bestBytes) > 0 : Arrays.compareUnsigned(b, bestBytes) < 0)) {
-                        bestBytes = b;
+                    // compared in place; the value is copied only when it becomes the new best
+                    if (!has || (wantMax ? VecKeys.compareRow(s, i, bestBytes) > 0 : VecKeys.compareRow(s, i, bestBytes) < 0)) {
+                        bestBytes = s.get(i);
                         has = true;
                     }
                 }

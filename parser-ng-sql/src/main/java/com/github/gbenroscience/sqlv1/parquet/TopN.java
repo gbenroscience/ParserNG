@@ -77,6 +77,90 @@ final class TopN implements AutoCloseable {
         }
     }
 
+    /** True once the output vectors exist (the first rows were added). */
+    boolean initialized() {
+        return acc != null;
+    }
+
+    /** The n-th best key tuple over everything added so far, or {@code null} while fewer than n rows are known. */
+    TopSelect.Threshold threshold() {
+        return haveThreshold ? this::beats : null;
+    }
+
+    /** Whether {@code row} sorts strictly before the current n-th best row. */
+    private boolean beats(TopSelect.Key[] keys, int row) {
+        for (int k = 0; k < keyCount; k++) {
+            boolean n1 = keys[k].isNull(row), n2 = thrNull[k];
+            int cmp;
+            if (n1 || n2) {
+                cmp = (n1 == n2) ? 0 : (n1 ? 1 : -1);
+            } else {
+                cmp = Double.compare(keys[k].get(row), thrVal[k]);
+                if (desc[k]) cmp = -cmp;
+            }
+            if (cmp != 0) return cmp < 0;
+        }
+        return false; // equal keys: the earlier arrival wins
+    }
+
+    /**
+     * Offers rows chosen by {@link TopSelect} straight from their source vectors, with no intermediate batch: pick
+     * {@code i} is copied from row {@code rows[c][i]} of {@code vecs[c]} into output column {@code c}. The picks are
+     * sorted best first, so the first one that cannot beat the threshold ends the call.
+     *
+     * @param outFields the output fields (named as the result columns), used when the first rows arrive
+     * @param kv        sort-key values of each pick, {@code kv[key][pick]}
+     * @param kn        whether each of them is null
+     */
+    void addPicked(Field[] outFields, FieldVector[] vecs, int[][] rows, int count, double[][] kv, boolean[][] kn) {
+        if (count == 0) return;
+        if (acc == null) initFields(outFields);
+        int cap = 2 * limit;
+        for (int i = 0; i < count; i++) {
+            if (haveThreshold && !pickBeats(kv, kn, i)) break;
+            ensureCapacity(size + 1);
+            for (int c = 0; c < outCount; c++) acc[c].copyFromSafe(rows[c][i], size, vecs[c]);
+            for (int k = 0; k < keyCount; k++) {
+                nulls[k][size] = kn[k][i];
+                keys[k][size] = kn[k][i] ? 0.0 : kv[k][i];
+            }
+            size++;
+            if (size >= cap) compact();
+        }
+    }
+
+    private boolean pickBeats(double[][] kv, boolean[][] kn, int i) {
+        for (int k = 0; k < keyCount; k++) {
+            boolean n1 = kn[k][i], n2 = thrNull[k];
+            int cmp;
+            if (n1 || n2) {
+                cmp = (n1 == n2) ? 0 : (n1 ? 1 : -1);
+            } else {
+                cmp = Double.compare(kv[k][i], thrVal[k]);
+                if (desc[k]) cmp = -cmp;
+            }
+            if (cmp != 0) return cmp < 0;
+        }
+        return false;
+    }
+
+    private void initFields(Field[] outFields) {
+        fields = outFields.clone();
+        acc = new FieldVector[outCount];
+        int cap = Math.min(Math.max(16, 2 * limit), 4096);
+        try {
+            for (int c = 0; c < outCount; c++) {
+                acc[c] = fields[c].createVector(alloc);
+                acc[c].allocateNew();
+            }
+        } catch (RuntimeException e) {
+            close();
+            throw e;
+        }
+        keys = new double[keyCount][cap];
+        nulls = new boolean[keyCount][cap];
+    }
+
     /**
      * Returns the sorted top rows as a root the caller closes; this object then holds nothing.
      * With no input at all, returns {@code null} (the caller builds its own empty result).
