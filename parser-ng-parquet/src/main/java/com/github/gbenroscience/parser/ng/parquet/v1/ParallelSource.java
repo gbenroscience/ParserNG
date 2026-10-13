@@ -87,7 +87,7 @@ final class ParallelSource implements BatchSource {
 
     ParallelSource(ParquetSource file, ParquetMetadata footer, MessageType projected, ColumnDescriptor[] descs, NodePlan nodePlan,
                    List<Field> fields, long[] expectedStartingPos, FilterCompat.Filter filter,
-                   int parallelism, boolean pinWorkers, int batchSize, long maxRowGroupBytes,
+                   int parallelism, boolean pinWorkers, Boolean useJavaSnappyDecoder, int batchSize, long maxRowGroupBytes,
                    BufferAllocator allocator, ScanMetrics metrics) {
         this.file = file;
         this.fields = fields;
@@ -115,7 +115,7 @@ final class ParallelSource implements BatchSource {
                 // was upheld for the ParquetFileReader/RowGroupDecoder objects themselves (one each per
                 // worker, pooled, never checked out by two threads at once) but was being silently
                 // violated one layer up, by handing every worker's reader the same options instance.
-                ParquetReadOptions workerOpts = ParquetBatchReader.newReadOptions(filter);
+                ParquetReadOptions workerOpts = ParquetBatchReader.newReadOptions(filter, useJavaSnappyDecoder);
                 ParquetFileReader r = file.openReader(footer, workerOpts);
                 RowGroupDecoder d;
                 try {

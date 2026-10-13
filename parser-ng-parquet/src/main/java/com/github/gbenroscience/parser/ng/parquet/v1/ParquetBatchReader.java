@@ -4,6 +4,7 @@ import com.github.gbenroscience.parser.ng.parquet.v1.internal.NodePlan;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.PredicateTranslator;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.RepeatedStatsPruner;
 import com.github.gbenroscience.parser.ng.parquet.v1.internal.RowFilterEvaluator;
+import com.github.gbenroscience.parser.ng.parquet.v1.internal.codec.PanamaSnappyCodecFactory;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -15,6 +16,7 @@ import org.apache.parquet.filter2.predicate.FilterPredicate;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.hadoop.util.HadoopCodecs;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 
@@ -85,7 +87,8 @@ public final class ParquetBatchReader implements AutoCloseable {
 
     ParquetBatchReader(ParquetSource file, List<String> columns, Predicate predicate, int batchSize,
                        boolean metricsOn, long maxRowGroupBytes, int parallelism, boolean exactFilter,
-                       Map<String, CustomPredicate> customPredicates, boolean pinWorkerThreads, BufferAllocator allocator) {
+                       Map<String, CustomPredicate> customPredicates, boolean pinWorkerThreads,
+                       Boolean useJavaSnappyDecoder, BufferAllocator allocator) {
         if (allocator == null) throw new NullPointerException("allocator");
         this.file = file;
         ParquetFileReader probeOrFiltered = null;
@@ -106,7 +109,7 @@ public final class ParquetBatchReader implements AutoCloseable {
             if (fp != null) filter = FilterCompat.get(fp);
             // The same filter is threaded into ParallelSource for each of its worker readers, so both modes
             // prune identically (see newReadOptions for why page-level pruning is deliberately off).
-            ParquetReadOptions opts = newReadOptions(filter);
+            ParquetReadOptions opts = newReadOptions(filter, useJavaSnappyDecoder);
 
             ParquetFileReader filtered = file.openReader(scanFooter, opts);
             probeOrFiltered = filtered;
@@ -151,7 +154,8 @@ public final class ParquetBatchReader implements AutoCloseable {
                 filtered.close(); // parallel workers open their own readers; this one is no longer needed
                 probeOrFiltered = null;
                 built = new ParallelSource(file, scanFooter, projected, descriptors, nodePlan, fields,
-                        survivorStartingPos, filter, parallelism, pinWorkerThreads, batchSize, maxRowGroupBytes, allocator, m);
+                        survivorStartingPos, filter, parallelism, pinWorkerThreads, useJavaSnappyDecoder,
+                        batchSize, maxRowGroupBytes, allocator, m);
             }
             this.source = (exactEvaluator != null) ? new FilteredSource(built, exactEvaluator, allocator) : built;
         } catch (IOException e) {
@@ -182,9 +186,26 @@ public final class ParquetBatchReader implements AutoCloseable {
      * for list columns where a page may only be skipped at a record boundary.
      */
     static ParquetReadOptions newReadOptions(FilterCompat.Filter filter) {
-        return ParquetReadOptions.builder()
+        return newReadOptions(filter, null);
+    }
+
+    /**
+     * {@code useJavaSnappyDecoder}: this scan's {@code ParquetScan#useJavaSnappyDecoder} override, or
+     * {@code null} to defer to the {@code -Dparserng.snappy=panama} system property (the pre-existing,
+     * JVM-wide default both still fall back to). Explicit {@code TRUE}/{@code FALSE} here always wins.
+     */
+    static ParquetReadOptions newReadOptions(FilterCompat.Filter filter, Boolean useJavaSnappyDecoder) {
+        ParquetReadOptions.Builder b = ParquetReadOptions.builder()
                 .useStatsFilter(true).useDictionaryFilter(true).useBloomFilter(true)
-                .useColumnIndexFilter(false).withRecordFilter(filter).build();
+                .useColumnIndexFilter(false).withRecordFilter(filter);
+        boolean useJava = (useJavaSnappyDecoder != null)
+                ? useJavaSnappyDecoder
+                : "panama".equals(System.getProperty("parserng.snappy"));
+        // A fresh factory per call, like the options themselves: decompressors are never shared across threads.
+        if (useJava) {
+            b.withCodecFactory(new PanamaSnappyCodecFactory(HadoopCodecs.newFactory(0)));
+        }
+        return b.build();
     }
 
     private static MessageType project(MessageType schema, List<String> columns) {
