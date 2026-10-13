@@ -1517,7 +1517,7 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         final int resOffset = base;
                         sp++;
                         for (int k = 0; k < n; k++) {
-                            scratch[resOffset + k] = scratch[aOffset + k] * scratch[bOffset + k] + scratch[cOffset + k];
+                            scratch[resOffset + k] = Math.fma(scratch[aOffset + k] , scratch[bOffset + k] , scratch[cOffset + k]);
                         }
                     }
 
