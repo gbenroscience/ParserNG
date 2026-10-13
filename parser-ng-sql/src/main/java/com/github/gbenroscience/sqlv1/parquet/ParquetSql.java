@@ -39,7 +39,8 @@ import java.util.regex.Pattern;
  * </ol>
  * The in-memory {@code ArrowSql} path never resolves the name.
  * <b>Quoted paths are file reads:</b> see {@link ParquetTables} and
- * {@link ParquetSqlOptions#withAllowedRoot(Path)}.
+ * {@link ParquetSqlOptions#withAllowedRoot(Path)}. A path with a {@code scheme://} prefix is remote and needs a
+ * {@link ParquetSourceResolver} ({@link ParquetSqlOptions#withSourceResolver}); without one it is rejected.
  *
  * <p>{@code EXPLAIN SELECT ...} returns the plan as a one-column ({@code plan}) result.
  */
@@ -72,7 +73,7 @@ public final class ParquetSql {
     /** As {@link #register(String, Path)} with a glob string. */
     public ParquetSql register(String name, String fileOrGlob) {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("table name must not be blank");
-        ParquetTables.resolve(fileOrGlob, options.allowedRoot()); // fail at registration, not at first query
+        ParquetTables.resolveAll(fileOrGlob, options); // fail at registration, not at first query
         tables.put(name, fileOrGlob);
         return this;
     }
@@ -135,25 +136,25 @@ public final class ParquetSql {
         boolean explain = m.find();
         String body = explain ? sql.substring(m.end()) : sql;
         SelectStatement st = SqlParser.parse(body, true);
-        List<Path> files;
+        List<FileRef> files;
         switch (st.tableKind()) {
             case FILE, READ_PARQUET -> {
                 if (explicit != null) {
                     throw new ParquetSqlException("FROM names a path but a file was also passed explicitly; use one or the other");
                 }
                 files = new java.util.ArrayList<>();
-                for (String spec : st.tablePaths()) files.addAll(ParquetTables.resolve(spec, o.allowedRoot()));
+                for (String spec : st.tablePaths()) files.addAll(ParquetTables.resolveAll(spec, o));
             }
             case NAME -> {
                 if (explicit != null) {
-                    files = ParquetTables.resolve(explicit.toString(), o.allowedRoot());
+                    files = ParquetTables.resolveAll(explicit.toString(), o);
                 } else {
                     String spec = registry == null ? null : registry.tables.get(st.table());
                     if (spec == null) {
                         throw new ParquetSqlException("Unknown table '" + st.table() + "'. Register it with register(name, path), "
                                 + "or write FROM 'path/to/file.parquet' or FROM read_parquet('glob').");
                     }
-                    files = ParquetTables.resolve(spec, o.allowedRoot());
+                    files = ParquetTables.resolveAll(spec, o);
                 }
             }
             default -> throw new IllegalStateException();

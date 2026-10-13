@@ -40,6 +40,41 @@ final class ParquetTables {
         return checked;
     }
 
+    private static final java.util.regex.Pattern REMOTE = java.util.regex.Pattern.compile("^[A-Za-z][A-Za-z0-9+.\\-]+://");
+
+    /** True for {@code scheme://...} with a scheme of two or more characters (so {@code C:\\x} is local). */
+    static boolean isRemote(String spec) {
+        return spec != null && REMOTE.matcher(spec).find();
+    }
+
+    /** Resolves {@code spec}: a local file or glob as before, or a remote path through the configured resolver. */
+    static List<FileRef> resolveAll(String spec, ParquetSqlOptions options) {
+        if (!isRemote(spec)) {
+            List<FileRef> out = new ArrayList<>();
+            for (Path p : resolve(spec, options.allowedRoot())) out.add(FileRef.local(p));
+            return out;
+        }
+        ParquetSourceResolver resolver = options.sourceResolver();
+        if (resolver == null) {
+            throw new ParquetSqlException("'" + spec + "' is a remote path but no ParquetSourceResolver is configured; "
+                    + "see ParquetSqlOptions.withSourceResolver(...)");
+        }
+        List<ParquetSourceResolver.ResolvedSource> resolved;
+        try {
+            resolved = resolver.resolve(spec);
+        } catch (ParquetSqlException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new ParquetSqlException("Could not resolve '" + spec + "': " + e.getMessage(), e);
+        }
+        if (resolved == null || resolved.isEmpty()) throw new ParquetSqlException("'" + spec + "' matched no files");
+        List<ParquetSourceResolver.ResolvedSource> sorted = new ArrayList<>(resolved);
+        sorted.sort(java.util.Comparator.comparing(ParquetSourceResolver.ResolvedSource::name));
+        List<FileRef> out = new ArrayList<>(sorted.size());
+        for (ParquetSourceResolver.ResolvedSource r : sorted) out.add(FileRef.remote(r.name(), r.source()));
+        return out;
+    }
+
     static boolean isGlob(String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

@@ -288,6 +288,47 @@ class ParquetSqlTest {
     }
 
     @Test
+    void theBackendOptionReachesTheEngineAndDoesNotChangeResults() throws Exception {
+        ParquetSqlOptions o = ParquetSqlOptions.defaults()
+                .withBackend(com.github.gbenroscience.arrow.tools.box.ArrowExecutionBackend.CPU_SIMD);
+        try (BufferAllocator a = new RootAllocator();
+             ParquetSqlPlan p = ParquetSql.plan(main(), "SELECT id FROM t WHERE id % 2 = 0", o)) {
+            assertTrue(p.explain().contains("backend: CPU_SIMD"), p.explain());
+            long[] rows = {0};
+            p.stream(a, b -> rows[0] += b.getRowCount());
+            assertEquals(ROWS / 2, rows[0]);
+        }
+    }
+
+    @Test
+    void aRemoteStyleSourceRunsQueriesThroughTheResolver() throws Exception {
+        // Any parquet-java InputFile behaves like remote storage here: the bytes come through ParquetSource, not a Path.
+        java.util.List<String> asked = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Path backing = main().toAbsolutePath(); // resolved here: main() throws IOException, the resolver cannot
+        ParquetSqlOptions o = ParquetSqlOptions.defaults().withSourceResolver(spec -> {
+            asked.add(spec);
+            return java.util.List.of(new ParquetSourceResolver.ResolvedSource(spec,
+                    com.github.gbenroscience.parser.ng.parquet.v1.ParquetSource.of(
+                            new org.apache.parquet.io.LocalInputFile(backing), spec)));
+        });
+        ParquetSql sql = ParquetSql.create(o);
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = sql.execute("SELECT COUNT(*) AS c FROM 'mem://bucket/t.parquet'", a)) {
+            assertEquals((double) ROWS, ((Float8Vector) r.getVector("c")).get(0), 0.0);
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = sql.execute("SELECT id FROM read_parquet('mem://bucket/*.parquet') WHERE id < 5 ORDER BY id", a)) {
+            assertEquals(5, r.getRowCount());
+            assertEquals(4L, ((BigIntVector) r.getVector("id")).get(4));
+        }
+        try (BufferAllocator a = new RootAllocator();
+             VectorSchemaRoot r = sql.execute("SELECT SUM(f64) AS s FROM 'mem://bucket/t.parquet' WHERE id < 100", a)) {
+            assertEquals(1.5 * (99 * 100 / 2), ((Float8Vector) r.getVector("s")).get(0), 1e-9);
+        }
+        assertEquals(java.util.List.of("mem://bucket/t.parquet", "mem://bucket/*.parquet", "mem://bucket/t.parquet"), asked);
+    }
+
+    @Test
     void exactFilterFiltersInTheScanWithSameResult() throws Exception {
         ParquetSqlOptions o = ParquetSqlOptions.defaults().withExactFilter(true);
         try (BufferAllocator a = new RootAllocator();

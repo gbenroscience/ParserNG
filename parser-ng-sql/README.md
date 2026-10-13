@@ -620,7 +620,37 @@ try (VectorSchemaRoot r = sql.execute("SELECT COUNT(*) FROM 'data/events.parquet
 | `ParquetSql.plan(file, sql)` with `FROM anything` | The name is ignored and `file` is the source (the original behaviour). Combining an explicit file with a quoted path in the SQL is rejected as ambiguous. |
 | `ArrowSql` / `ArrowQuery` (in memory) | The name is never resolved; it is documentation only. |
 
-**Security.** A path in SQL text is an unauthenticated file read on the machine running the
+**Remote storage.** A path written as `scheme://...` (`s3a://`, `gs://`, `hdfs://`, `abfss://`) is remote.
+parser-ng-parquet reads remote data through `ParquetSource`, but this module bundles no connector, so you supply
+a `ParquetSourceResolver` that turns the path (glob included) into sources:
+
+```java
+Configuration conf = ...;                                   // credentials, endpoint (hadoop-aws etc. on your classpath)
+ParquetSqlOptions o = ParquetSqlOptions.defaults().withSourceResolver(spec -> {
+    org.apache.hadoop.fs.Path p = new org.apache.hadoop.fs.Path(spec);
+    List<ParquetSourceResolver.ResolvedSource> out = new ArrayList<>();
+    for (FileStatus st : p.getFileSystem(conf).globStatus(p)) {
+        out.add(new ParquetSourceResolver.ResolvedSource(ParquetSource.hadoop(st.getPath().toString(), conf)));
+    }
+    return out;
+});
+ParquetSql sql = ParquetSql.create(o);
+sql.execute("SELECT region, SUM(revenue) AS total FROM read_parquet('s3a://analytics/sales/*.parquet') "
+          + "WHERE year = 2026 GROUP BY region ORDER BY total DESC LIMIT 20", allocator);
+```
+
+Without a resolver, a remote path is rejected with a clear error, so remote reads are opt-in. Resolved
+sources are read in name order and must have identical columns, as with local globs. Everything else
+(pruning, ranged reads, `OFFSET`, grouped folds) works the same; only the projected column chunks of surviving
+row groups are fetched, and parser-ng-parquet reads each footer once per scan. Local paths are unchanged.
+Not verified against real S3, GCS, ABFS or HDFS (the parser-ng-parquet README says the same): tests use a
+local `InputFile` standing in for remote storage. Retry and timeout behaviour is the connector's.
+
+**Security.** `withAllowedRoot` restricts local files only. A remote path in SQL text is an unauthenticated read
+with whatever credentials your resolver holds, so if user-influenced SQL can reach `ParquetSql`, the resolver
+must enforce its own bucket and prefix allowlist and throw otherwise.
+
+**Security (local files).** A path in SQL text is an unauthenticated file read on the machine running the
 query. If any user-influenced SQL can reach `ParquetSql`, set
 `ParquetSqlOptions.withAllowedRoot(dir)`: every file, after symlink resolution, must live under
 that directory or the query fails.
@@ -883,7 +913,21 @@ allocated per row except `REGEXP` (one `String` per non-null row).
 
 `ParquetSqlOptions`: `parallelism`, `batchSize`, `maxRowGroupBytes` (unset means parser-ng-parquet's
 own defaults, so the modules cannot drift), `metrics` (default on), `exactFilter` (default off),
-`maxMaterializedRows` (default 20,000,000), `int64Policy`, `allowedRoot`.
+`maxMaterializedRows` (default 20,000,000), `int64Policy`, `allowedRoot`, `backend`, `sourceResolver`
+(remote paths, see above).
+
+`backend` picks the parser-ng-arrow backend, as `ArrowQuery.withBackend` does (default `CPU_SIMD`;
+also `GPU_AUTO`, `GPU_CUDA`, `GPU_OPENCL`, `GPU_METAL`):
+
+```java
+ParquetSql sql = ParquetSql.create(ParquetSqlOptions.defaults().withBackend(ArrowExecutionBackend.GPU_AUTO))
+        .register("t", "data/*.parquet");
+```
+
+It applies to the numeric expression engine only (filters, projections, numeric aggregates). Work the
+bridge does itself (string, date and boolean functions, `COUNT(DISTINCT)`, the Java folds, row-group
+pruning) always runs on the CPU. A backend the host cannot run fails when the query executes, as in
+`ArrowQuery`. `explain()` prints `backend: ...` whenever the engine is involved.
 
 `exactFilter` lets the scan do the row filtering and drops the `WHERE` from the engine. It applies
 only when every leaf converts exactly: numeric columns only, float32 literals exactly representable,
