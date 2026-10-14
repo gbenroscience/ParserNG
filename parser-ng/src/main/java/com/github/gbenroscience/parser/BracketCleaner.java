@@ -44,7 +44,9 @@ public class BracketCleaner {
 
 
     // Fast lookup for known functions (covers Method.isMethodName)
-    private static final List<String> FUNCTIONS = Arrays.asList(Method.getAllFunctions());
+    // Hash lookup instead of List.contains (a linear scan over ~150 names, run once
+    // per candidate bracket). Still a snapshot taken at class-load time, as before.
+    private static final java.util.Set<String> FUNCTIONS = new HashSet<>(Arrays.asList(Method.getAllFunctions()));
 
   
     /**
@@ -57,10 +59,15 @@ public class BracketCleaner {
             return;
         }
 
+        // Scratch arrays are sized once; every rebuild only shrinks the list.
+        final int cap = scanner.size();
+        final int[] pairMap = new int[cap];
+        final int[] stack = new int[cap];
+
         boolean changed;
         do {
             changed = false;
-            int[] pairMap = buildPairMap(scanner);
+            buildPairMap(scanner, pairMap, stack);
 
             for (int i = 0; i < scanner.size(); i++) {
                 if (!"(".equals(scanner.get(i)) || pairMap[i] == -1) {
@@ -121,22 +128,20 @@ public class BracketCleaner {
         } while (changed);   // handles deep nesting like (((x)))
     }
 
-    private static int[] buildPairMap(List<String> tokens) {
+    private static void buildPairMap(List<String> tokens, int[] pairMap, int[] stack) {
         int n = tokens.size();
-        int[] pairMap = new int[n];
-        Arrays.fill(pairMap, -1);
-        Deque<Integer> stack = new ArrayDeque<>();
+        Arrays.fill(pairMap, 0, n, -1);
+        int sp = 0; // primitive stack: no Deque, no Integer boxing
         for (int i = 0; i < n; i++) {
             String t = tokens.get(i);
             if ("(".equals(t)) {
-                stack.push(i);
-            } else if (")".equals(t) && !stack.isEmpty()) {
-                int open = stack.pop();
+                stack[sp++] = i;
+            } else if (")".equals(t) && sp > 0) {
+                int open = stack[--sp];
                 pairMap[open] = i;
                 pairMap[i] = open;
             }
         }
-        return pairMap;
     }
   
     public static void main(String[] args) {
@@ -154,4 +159,4 @@ public class BracketCleaner {
         System.out.println("Cleaned scanner:" + scanner );
         System.out.println("eval:" + mexie.solve() );
     }
-}
+}

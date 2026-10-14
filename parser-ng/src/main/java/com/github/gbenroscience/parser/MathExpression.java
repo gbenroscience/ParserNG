@@ -134,7 +134,7 @@ public class MathExpression implements Savable, Solvable {
      */
     private boolean hasFunctionOrVariableInitStatement;
 
-    private static final int INIT_POOL_SIZE = 64;
+    private static final int INIT_POOL_SIZE = 16;
     // A simple pre-allocated array of results to act as a stack
     private EvalResult[] pool = new EvalResult[INIT_POOL_SIZE];
     private int poolPointer = 0;
@@ -628,9 +628,6 @@ public class MathExpression implements Savable, Solvable {
         this.expression = LISTS.createStringFrom(scan, 0, scan.size());
 
         this.help = this.expression.equals(Declarations.HELP);
-        for (int i = 0; i < INIT_POOL_SIZE; i++) {
-            pool[i] = new EvalResult();
-        }
 
         invalidateTurbo();  // Clear turbo cache
         this.cachedPostfix = null;  // Force recompile
@@ -723,11 +720,8 @@ public class MathExpression implements Savable, Solvable {
     public MathExpression(String input, boolean foldConstants) throws InputMismatchException{
         this.willFoldConstants = foldConstants;
         this.help = input.equals(Declarations.HELP);
-        for (int i = 0; i < INIT_POOL_SIZE; i++) {
-            pool[i] = new EvalResult();
-        }
 
-        Scanner cs = new Scanner(STRING.purifier(input), false, VariableManager.endOfLine);
+        Scanner cs = TokenTables.statementScanner(STRING.purifier(input));
 
         List<String> scanned = cs.scan();
         String mathExpr = null;
@@ -1285,9 +1279,9 @@ public class MathExpression implements Savable, Solvable {
      *
      * @param scanner The ArrayList object that holds the string values in the
      * scanned function.
-     * @return a Bracket array that holds related brackets pairs.
+     * @throws InputMismatchException if the brackets of this kind do not pair up.
      */
-    private Bracket[] mapBrackets(List<String> scanner, Bracket.BracketMode mode) {
+    private void mapBrackets(List<String> scanner, Bracket.BracketMode mode) {
         for (Iterator<String> it = scanner.iterator(); it.hasNext();) {
             if (" ".equals(it.next())) {
                 it.remove();
@@ -1296,41 +1290,30 @@ public class MathExpression implements Savable, Solvable {
         char op = mode.getBracket();
         char cl = Bracket.BracketMode.getComplement(mode).getBracket();
 
-        ArrayList<Bracket> bracs = new ArrayList<>();
-        Deque<Integer> stack = new ArrayDeque<>();
+        // The matched Bracket pairs this method used to build were never used by
+        // the caller; only the matching check mattered. A depth counter gives the
+        // same verdict (and the same errors) without allocating anything.
+        int depth = 0;
+        for (int i = 0, n = scanner.size(); i < n; i++) {
+            char c = scanner.get(i).charAt(0);
 
-        for (int i = 0; i < scanner.size(); i++) {
-            String token = scanner.get(i);
-
-            if (op == token.charAt(0)) {
-                stack.push(i);
-            } else if (cl == token.charAt(0)) {
-                if (stack.isEmpty()) {
+            if (op == c) {
+                depth++;
+            } else if (cl == c) {
+                if (depth == 0) {
                     String err = "Unmatched closing bracket at index " + i;
                     errorLog.info(err);
                     throw new InputMismatchException(err);
                 }
-                int openIndex = stack.pop();
-
-                Bracket openBrac = new Bracket(op);
-                Bracket closeBrac = new Bracket(cl);
-                openBrac.setIndex(openIndex);
-                closeBrac.setIndex(i);
-                openBrac.setComplement(closeBrac);
-                closeBrac.setComplement(openBrac);
-
-                bracs.add(openBrac);
-                bracs.add(closeBrac);
+                depth--;
             }
         }
 
-        if (!stack.isEmpty()) {
+        if (depth != 0) {
             String err = "Unmatched opening bracket(s) remain";
             errorLog.info(err);
             throw new InputMismatchException(err);
         }
-
-        return bracs.toArray(new Bracket[0]);
     }
 
     /**
@@ -1368,7 +1351,10 @@ public class MathExpression implements Savable, Solvable {
 //check for the various valid arrangements for all members of the function.
                 String token = scanner.get(i);
                 //Variables
-                if (isVariableString(token) && !Method.isUserDefinedFunction(token) && !Method.isDefinedMethod(token)) {
+                // isDefinedMethod = inbuilt name OR a defined algebraic function; the first
+                // check already proved no function by this name exists, so only the inbuilt
+                // check is left (saves two locked FUNCTIONS look-ups per variable token).
+                if (isVariableString(token) && !Method.isUserDefinedFunction(token) && !Declarations.isInbuiltMethodName(token)) {
 
                     try {
                         //specify valid tokens that can come before a variable
@@ -1693,15 +1679,15 @@ public class MathExpression implements Savable, Solvable {
             return new Token(Token.METHOD, transformedMethodName, -1, methodId, errorLog); // Arity set during compile
         }
 
-        //3 - If it is a Matrix
-        if (FunctionManager.containsMatrix(s)) {
-            Function f = FunctionManager.lookUp(s);
-            Token t = new Token(f.getMatrix());
+        //3 - If it is a Matrix (one registry look-up serves steps 3 and 4)
+        Function fn = FunctionManager.lookUp(s);
+        if (fn != null && fn.getType() == TYPE.MATRIX) {
+            Token t = new Token(fn.getMatrix());
             return t;
         }
 
         //4 - Identify Functions/Anonymous Functions (ONLY if followed by "(")
-        if (FunctionManager.containsAny(s)) {
+        if (fn != null) {
             // CRITICAL: Only treat as FUNCTION if it's being CALLED (has "(" after it)
             if (next != null && next.equals("(")) {
                 return new Token(Token.FUNCTION, s, -1, -1, errorLog); // Arity set during compile
@@ -1799,13 +1785,17 @@ public class MathExpression implements Savable, Solvable {
         int currentParenDepth = 0;
 
         // --- 2. STANDARD SHUNTING YARD STACKS ---
-        Stack<Token> opStack = new Stack<>();
-        Stack<Boolean> isFuncParenStack = new Stack<>(); // Tracks if a '(' belongs to a function
+        // Plain arrays instead of java.util.Stack (a synchronized Vector, boxing
+        // Booleans): each token pushes at most one entry on each stack.
+        final int len = scanner.size();
+        Token[] opStack = new Token[len + 1];
+        int opTop = 0;
+        boolean[] isFuncParenStack = new boolean[len + 1]; // Tracks if a '(' belongs to a function
+        int fpTop = 0;
 
-        Token[] postfix = new Token[scanner.size() * 2];
+        Token[] postfix = new Token[len * 2];
         int p = 0;
 
-        int len = scanner.size();
         for (int idx = 0; idx < len; idx++) {
             String s = scanner.get(idx);
             String next = idx + 1 < len ? scanner.get(idx + 1) : null;
@@ -1822,10 +1812,10 @@ public class MathExpression implements Savable, Solvable {
 
             if (t.kind == Token.LPAREN) {
                 currentParenDepth++;
-                if (!opStack.isEmpty() && (opStack.peek().kind == Token.FUNCTION || opStack.peek().kind == Token.METHOD)) {
+                if (opTop > 0 && (opStack[opTop - 1].kind == Token.FUNCTION || opStack[opTop - 1].kind == Token.METHOD)) {
                     isFuncParen = true;
                     // Turn on a new microphone for this function at the current depth
-                    trackers.add(new FuncArgTracker(opStack.peek(), currentParenDepth));
+                    trackers.add(new FuncArgTracker(opStack[opTop - 1], currentParenDepth));
                 }
             }
 
@@ -1893,26 +1883,26 @@ public class MathExpression implements Savable, Solvable {
                     break;
                 case Token.FUNCTION:
                 case Token.METHOD:
-                    opStack.push(t);
+                    opStack[opTop++] = t;
                     break;
 
                 case Token.LPAREN:
-                    opStack.push(t);
-                    isFuncParenStack.push(isFuncParen);
+                    opStack[opTop++] = t;
+                    isFuncParenStack[fpTop++] = isFuncParen;
                     break;
 
                 case Token.RPAREN:
-                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                        postfix[p++] = opStack.pop();
+                    while (opTop > 0 && opStack[opTop - 1].kind != Token.LPAREN) {
+                        postfix[p++] = opStack[--opTop];
                     }
 
-                    if (!opStack.isEmpty()) {
-                        opStack.pop(); // Discard the '('
+                    if (opTop > 0) {
+                        opTop--; // Discard the '('
                     }
 
-                    boolean wasFunc = !isFuncParenStack.isEmpty() && isFuncParenStack.pop();
-                    if (wasFunc && !opStack.isEmpty()) {
-                        postfix[p++] = opStack.pop(); // Move function to output
+                    boolean wasFunc = fpTop > 0 && isFuncParenStack[--fpTop];
+                    if (wasFunc && opTop > 0) {
+                        postfix[p++] = opStack[--opTop]; // Move function to output
                     }
 
                     // Turn off the tracker if a function just closed
@@ -1924,8 +1914,8 @@ public class MathExpression implements Savable, Solvable {
                     break;
 
                 case Token.COMMA:
-                    while (!opStack.isEmpty() && opStack.peek().kind != Token.LPAREN) {
-                        postfix[p++] = opStack.pop();
+                    while (opTop > 0 && opStack[opTop - 1].kind != Token.LPAREN) {
+                        postfix[p++] = opStack[--opTop];
                     }
                     break;
 
@@ -1933,24 +1923,24 @@ public class MathExpression implements Savable, Solvable {
                     if (t.isPostfix) {
                         postfix[p++] = t;
                     } else {
-                        while (!opStack.isEmpty() && opStack.peek().kind == Token.OPERATOR) {
-                            Token top = opStack.peek();
+                        while (opTop > 0 && opStack[opTop - 1].kind == Token.OPERATOR) {
+                            Token top = opStack[opTop - 1];
                             if ((!t.isRightAssoc && t.precedence <= top.precedence)
                                     || (t.isRightAssoc && t.precedence < top.precedence)) {
-                                postfix[p++] = opStack.pop();
+                                postfix[p++] = opStack[--opTop];
                             } else {
                                 break;
                             }
                         }
-                        opStack.push(t);
+                        opStack[opTop++] = t;
                     }
                     break;
             }
         }
 
         // Clean up remaining operators
-        while (!opStack.isEmpty()) {
-            Token top = opStack.pop();
+        while (opTop > 0) {
+            Token top = opStack[--opTop];
             if (top.kind != Token.LPAREN) {
                 postfix[p++] = top;
             }
@@ -2001,38 +1991,48 @@ public class MathExpression implements Savable, Solvable {
         public ExpressionSolver clone() {
             ExpressionSolver e = new ExpressionSolver();
             for (int i = 0; i < stack.length; i++) {
-                e.stack[i] = stack[i].clone();
+                e.stack[i] = stack[i] == null ? null : stack[i].clone();
             }
 
             for (int i = 0; i <= MAX_ARITY; i++) {
+                if (argCache[i] == null) {
+                    continue; // never used, so the clone creates it on demand too
+                }
                 e.argCache[i] = new EvalResult[i];
                 for (int j = 0; j < i; j++) {
-                    e.argCache[i][j] = argCache[i][j].clone();  // Initialize
+                    e.argCache[i][j] = argCache[i][j] == null ? null : argCache[i][j].clone();
                 }
             }
             return e;
+        }
+
+        /**
+         * The argument array for {@code arity} values, created on first use.
+         * Entries are always assigned from the evaluation stack before they are
+         * read, so they need no pre-built EvalResult objects.
+         */
+        private EvalResult[] argsFor(int arity) {
+            EvalResult[] a = argCache[arity];
+            if (a == null) {
+                argCache[arity] = a = new EvalResult[arity];
+            }
+            return a;
         }
 
         public ExpressionSolver() {
 
             // Allocate stack ONCE, with sufficient capacity
             // Max stack depth is usually cachedPostfix.length, but we pad for safety
-            int maxStackDepth = Math.max(cachedPostfix.length * 2, 256);
+            // Every postfix token pushes at most one value, so the stack can never be
+            // deeper than the postfix is long.
+            int maxStackDepth = cachedPostfix.length + 1;
+            // Slots are only ever read after the evaluator has stored the result of
+            // getNextResult() in them (stack[++ptr] = ...), so the array can start
+            // out empty. It used to be filled with 256+ throw-away EvalResults.
             this.stack = new EvalResult[maxStackDepth];
 
-            // CRITICAL: Initialize all stack slots with EvalResult objects
-            for (int i = 0; i < stack.length; i++) {
-                stack[i] = new EvalResult();
-            }
-
-            // Pre-allocate argument arrays
+            // Argument arrays are created per arity on first use (argsFor).
             this.argCache = new EvalResult[MAX_ARITY + 1][];
-            for (int i = 0; i <= MAX_ARITY; i++) {
-                argCache[i] = new EvalResult[i];
-                for (int j = 0; j < i; j++) {
-                    argCache[i][j] = new EvalResult();  // Initialize
-                }
-            }
 
             int len = cachedPostfix.length;
             if (len > 0) {
@@ -2130,7 +2130,7 @@ public class MathExpression implements Savable, Solvable {
                         int valuesOnStack = ptr + 1;
 
                         if (arity == 0) {
-                            EvalResult result = t.action.calc(getNextResult(), arity, argCache[arity]);
+                            EvalResult result = t.action.calc(getNextResult(), arity, argsFor(0));
                             stack[++ptr] = result;
                             break;
                         }
@@ -2144,7 +2144,7 @@ public class MathExpression implements Savable, Solvable {
                         }
 
                         // ULTRA FAST: Reuse cached array for this arity
-                        EvalResult[] args = (arity <= MAX_ARITY) ? argCache[arity] : new EvalResult[arity];
+                        EvalResult[] args = (arity <= MAX_ARITY) ? argsFor(arity) : new EvalResult[arity];
 
                         // This eliminates loop overhead for the most common cases
                         switch (arity) {
@@ -2639,8 +2639,21 @@ public class MathExpression implements Savable, Solvable {
 
         String name = t.name.toLowerCase();
 
+        if (FoldSets.NON_FOLDABLE.contains(name)) {
+            return false;
+        }
+        return FoldSets.DEFINITELY_FOLDABLE.contains(name);
+    }
+
+    /**
+     * The fold black/white lists. They used to be rebuilt (three HashSets, ~150
+     * strings) on every call, i.e. once per function token of every expression
+     * constructed. They never change, so build them once, on first use.
+     */
+    private static final class FoldSets {
+
         // ===== BLACKLIST: NON-FOLDABLE (Side effects, randomness, I/O, user-defined) =====
-        java.util.Set<String> nonFoldable = new java.util.HashSet<>(
+        static final java.util.Set<String> NON_FOLDABLE = new java.util.HashSet<>(
                 Arrays.asList(
                         // Stochastic - different result each time
                         "rand", "random", "randbetween", "randi", "randint", "randnormal", "rnd",
@@ -2671,20 +2684,10 @@ public class MathExpression implements Savable, Solvable {
                         "quadratic", "tartaglia_roots", "t_root", "general_root", "root")
         );
 
-        if (nonFoldable.contains(name)) {
-            return false;
-        }
-
-        // ===== SPECIAL HANDLING: Trigonometric functions =====
-        // These ARE foldable, but ONLY if NOT being used with setDRG() changes
-        // For safety, we fold them ONLY when the expression containsAlgebraicFunction constants
-        // Since we're in compile-time, we CAN fold them with current DRG mode
-        java.util.Set<String> trigonometric = new java.util.HashSet<>(
-                Arrays.asList(MethodRegistry.expandedTrigAndHypMethodNames)
-        );
-
-        // ===== WHITELIST: DEFINITELY FOLDABLE =====
-        java.util.Set<String> definitelyFoldable = new java.util.HashSet<>(
+        // ===== WHITELIST: DEFINITELY FOLDABLE (trigonometric names added below) =====
+        // Trigonometric functions ARE foldable with the current DRG mode: the DRG
+        // variant is baked into the method name, so the expanded names cover it.
+        static final java.util.Set<String> DEFINITELY_FOLDABLE = new java.util.HashSet<>(
                 Arrays.asList(
                         // ===== EXPONENTIAL & LOGARITHMIC =====
                         "exp", "ln", "lg", "log", "log10", "log2",
@@ -2709,9 +2712,10 @@ public class MathExpression implements Savable, Solvable {
                         "variance", "st_err",
                         "cov"
                 ));
-        definitelyFoldable.addAll(trigonometric);
 
-        return definitelyFoldable.contains(name);
+        static {
+            DEFINITELY_FOLDABLE.addAll(Arrays.asList(MethodRegistry.expandedTrigAndHypMethodNames));
+        }
     }
 
     /**
@@ -3168,17 +3172,22 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
                     int newSize = pool.length * 2;
                     EvalResult[] newPool = new EvalResult[newSize];
                     System.arraycopy(pool, 0, newPool, 0, pool.length);
-                    for (int i = pool.length; i < newSize; i++) {
-                        newPool[i] = new EvalResult();
-                    }
                     this.pool = newPool; // Now the pointer won't OOM
                 }
             }
         }
 
         // 2. Fetch and Reset
-        EvalResult result = pool[poolPointer++];
-        result.reset(); // Clear old state (crucial for complex objects!)
+        EvalResult result = pool[poolPointer];
+        if (result == null) {
+            // Slots are filled on first use, not up front: constructing a
+            // MathExpression no longer allocates (and zeroes) 64+ EvalResults
+            // that a short expression never touches.
+            pool[poolPointer] = result = new EvalResult();
+        } else {
+            result.reset(); // Clear old state (crucial for complex objects!)
+        }
+        poolPointer++;
         return result;
     }
 
@@ -3655,7 +3664,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         clone.parser_Result = ParserResult.valueOf(parser_Result.name());
         clone.pool = new EvalResult[pool.length];
         for (i = 0; i < clone.pool.length; i++) {
-            clone.pool[i] = pool[i].clone();
+            clone.pool[i] = pool[i] == null ? null : pool[i].clone();
         }
         clone.poolPointer = poolPointer;
         if (registry != null) {
@@ -3949,7 +3958,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         System.out.println("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5)): -->> " + new MathExpression("det(@(4,4)(2,3,-5,12,3,-4,8,20,7,-6,2,18,4,2,18,5))").solve());
         System.out.println("sin(5,6)-->>" + new MathExpression("sin(5,6)").solve());
         System.out.println("√81 + ³√(27) + 2^10-->>" + new MathExpression("√81 + ³√(27) + 2^10").solve());
-        System.out.println("----------------------------------------------------------------------------------"+new MathExpression("5! + 9Р3 + 6Č5").solve());
+        System.out.println(new MathExpression("5! + 9Р3 + 6Č5").solve());
         System.out.println(new MathExpression("f(x,y)=2*x*y;f(3,4);").solve());
         System.out.println("FUNCTIONS: " + FunctionManager.FUNCTIONS);
         System.out.println("sum(sum(5),sum(6)): " + new MathExpression("sum(sum(5),sum(6))").solve());

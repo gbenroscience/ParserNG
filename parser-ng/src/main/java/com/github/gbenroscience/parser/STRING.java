@@ -484,9 +484,9 @@ public class STRING {
      * @throws StringIndexOutOfBoundsException
      */
     public static int getFirstIndexOfDigitOrPoint(String val) throws StringIndexOutOfBoundsException {
-        int i;
-        for (i = 0; i < val.length(); i++) {
-            if (isDigit(val.substring(i, i + 1)) || val.substring(i, i + 1).equals(".")) {
+        for (int i = 0, n = val.length(); i < n; i++) {
+            char c = val.charAt(i);
+            if ((c >= '0' && c <= '9') || c == '.') {
                 return i;
             }
         }
@@ -659,8 +659,17 @@ public class STRING {
         if (h == null || h.isEmpty()) {
             return h == null ? null : "";
         }
-        StringBuilder b = new StringBuilder(h.length());
-        for (int i = 0, n = h.length(); i < n; i++) {
+        final int n = h.length();
+        int i = 0;
+        while (i < n && !Character.isWhitespace(h.charAt(i))) {
+            i++;
+        }
+        if (i == n) {
+            return h; // nothing to strip: no copy (the common case)
+        }
+        StringBuilder b = new StringBuilder(n);
+        b.append(h, 0, i);
+        for (i++; i < n; i++) {
             char c = h.charAt(i);
             if (!Character.isWhitespace(c)) {
                 b.append(c);

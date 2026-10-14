@@ -33,9 +33,7 @@ import java.util.regex.Pattern;
  * double-quoted, e.g. 'hello' or "hello" (see {@link #consumeStringLiteral})
  * - Binary operators: + - * / % ^
  * (^ is power, right-associative; % is modulo/remainder, same precedence
- * tier as * and /) - Unary + - ! √ (square root), where prefix '!' is logical
- * NOT - Postfix factorial '!', e.g. "4!", "x!", "(x+y!)!", "3!!" (binds
- * tighter than '^' and prefix signs; "x!=y" remains inequality) - Prefix "nth
+ * tier as * and /) - Unary + - ! √ (square root) - Prefix "nth
  * root" notation: a run of superscript digits immediately before '√', e.g.
  * "³√9" (cube root of 9) - Postfix Unicode superscript exponents, e.g.
  * "x²", "3³", "y²³" (== y^23) - Binary combinatoric operators nPr and nCr,
@@ -481,13 +479,7 @@ public class MathExpressionTreeDepth implements Savable {
             char c = peek();
 
             // 1. Handle >, <, >=, <=, ==, !=
-            //    A '!' is only the start of a relational operator when it is
-            //    immediately followed by '=' ("!="). Any other '!' that follows
-            //    an operand is the postfix factorial operator, which has already
-            //    been consumed by parsePostfixOperators() before control gets
-            //    back to this level (see parsePower()).
-            boolean isNotEquals = c == '!' && pos + 1 < expr.length() && expr.charAt(pos + 1) == '=';
-            if (c == '>' || c == '<' || c == '=' || isNotEquals) {
+            if (c == '>' || c == '<' || c == '=' || c == '!') {
                 nextChar(); // Consume the primary symbol
                 if (peek() == '=') {
                     nextChar(); // Consume the '=' to form >=, <=, ==, !=
@@ -713,7 +705,16 @@ public class MathExpressionTreeDepth implements Savable {
      */
     private int parsePower() {
         int leftDepth = parsePrimary();
-        leftDepth = parsePostfixOperators(leftDepth);
+        skipWhitespace();
+
+        if (isSuperscriptDigit(peek())) {
+            while (isSuperscriptDigit(peek())) {
+                nextChar();
+            }
+            unaryOpCount++;
+            leftDepth = 1 + leftDepth;
+            skipWhitespace();
+        }
 
         if (peek() == '^') {
             nextChar();
@@ -723,61 +724,6 @@ public class MathExpressionTreeDepth implements Savable {
             return Math.max(leftDepth, 1 + rightDepth);
         }
         return leftDepth;
-    }
-
-    /**
-     * Consumes any run of postfix unary operators that may follow a primary
-     * (or a parenthesized group / function call, which are primaries too):
-     * <ul>
-     *   <li>a run of Unicode superscript digits, e.g. {@code x²³} — the whole
-     *       run is one literal exponent;</li>
-     *   <li>the factorial operator {@code !}, e.g. {@code 4!}, {@code x!},
-     *       {@code (x+y!)!}, {@code f(x)!}, and chains such as {@code 3!!}
-     *       (read as {@code (3!)!}).</li>
-     * </ul>
-     * Each operator wraps everything to its left, so they apply
-     * left-to-right and may be mixed ({@code x²!} == {@code (x²)!}). Every
-     * one contributes {@code 1 + operandDepth} and counts as a unary operator,
-     * exactly like the superscript exponent always did. A loop (not
-     * recursion) is used, so a long run of {@code !} cannot threaten the
-     * call stack.
-     *
-     * <p>Postfix binds tighter than {@code ^}, so {@code 2^3!} is
-     * {@code 2^(3!)} and {@code 2!^3} is {@code (2!)^3}; and tighter than
-     * prefix signs, so {@code -3!} is {@code -(3!)}.</p>
-     *
-     * <p><b>Disambiguation from {@code !=}:</b> a {@code '!'} immediately
-     * followed by {@code '='} is NOT consumed here — it is the inequality
-     * operator and is left for {@link #parseRelationalLogical()}. So
-     * {@code x!=3} is still "x not equal to 3". To take the factorial of
-     * something and then test equality, put a space or parentheses between:
-     * {@code x! == 6} or {@code (x!)==6}.</p>
-     * Prefix {@code !} (logical NOT, e.g. {@code !flag}) is unaffected: it
-     * is only ever recognized at the start of an operand, in
-     * {@link #parseUnary()}, never here.
-     *
-     * @param operandDepth depth of the operand these operators apply to
-     * @return the depth after applying every postfix operator found
-     */
-    private int parsePostfixOperators(int operandDepth) {
-        int depth = operandDepth;
-        while (true) {
-            skipWhitespace();
-            char c = peek();
-            if (isSuperscriptDigit(c)) {
-                while (isSuperscriptDigit(peek())) {
-                    nextChar();
-                }
-                unaryOpCount++;
-                depth = 1 + depth;
-            } else if (c == '!' && !(pos + 1 < expr.length() && expr.charAt(pos + 1) == '=')) {
-                nextChar(); // consume '!'
-                unaryOpCount++;
-                depth = 1 + depth;
-            } else {
-                return depth;
-            }
-        }
     }
 
     private int parsePrimary() {
@@ -1071,10 +1017,51 @@ public class MathExpressionTreeDepth implements Savable {
         }
     }
 
+    /**
+     * Hand-written equivalent of {@link #NUMBER_PATTERN}
+     * ({@code (\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?}, ASCII digits) over
+     * {@code s[start, end)}; avoids a substring and a Matcher per number.
+     */
+    private static boolean isNumericLiteral(String s, int start, int end) {
+        int i = start;
+        int digits = 0;
+        while (i < end && s.charAt(i) >= '0' && s.charAt(i) <= '9') {
+            i++;
+            digits++;
+        }
+        if (i < end && s.charAt(i) == '.') {
+            i++;
+            int frac = 0;
+            while (i < end && s.charAt(i) >= '0' && s.charAt(i) <= '9') {
+                i++;
+                frac++;
+            }
+            if (frac == 0) {
+                return false; // "5." or "."
+            }
+        } else if (digits == 0) {
+            return false;
+        }
+        if (i < end && (s.charAt(i) == 'e' || s.charAt(i) == 'E')) {
+            i++;
+            if (i < end && (s.charAt(i) == '+' || s.charAt(i) == '-')) {
+                i++;
+            }
+            int exp = 0;
+            while (i < end && s.charAt(i) >= '0' && s.charAt(i) <= '9') {
+                i++;
+                exp++;
+            }
+            if (exp == 0) {
+                return false;
+            }
+        }
+        return i == end;
+    }
+
     private void validateNumberToken(int start, int end) {
-        String token = expr.substring(start, end);
-        if (!NUMBER_PATTERN.matcher(token).matches()) {
-            throw new ParseException("Invalid numeric literal '" + token + "'", start);
+        if (!isNumericLiteral(expr, start, end)) {
+            throw new ParseException("Invalid numeric literal '" + expr.substring(start, end) + "'", start);
         }
     }
 
@@ -1382,25 +1369,6 @@ public class MathExpressionTreeDepth implements Savable {
             "9\u04203",                          // "9Р3" -- nPr permutation
             "6\u010C5",                          // "6Č5" -- nCr combination
             "5! + 9\u04203 + 6\u010C5",           // the reported crashing expression
-            "4!",                                 // postfix factorial on a literal
-            "x!",                                 // postfix factorial on a variable
-            "(x+2!)",                             // factorial inside grouping parens (original crash)
-            "(x+y!)!",                            // factorial inside AND after a group
-            "3!!",                                // chained factorial == (3!)!
-            "x!+y!",                              // factorial on both sides of a binary operator
-            "-3!",                                // -(3!)
-            "2^3!",                               // 2^(3!)
-            "2!^3",                               // (2!)^3
-            "x\u00B2!",                           // superscript then factorial == (x^2)!
-            "sin(x)!",                            // factorial of a function result
-            "max(3!, x!, 2)",                     // factorial inside function arguments
-            "4!x",                                // factorial then implicit multiplication == (4!)*x
-            "4!(2+1)",                            // factorial then implicit multiplication with a group
-            "5 ! + 1",                            // whitespace before '!'
-            "x! == 6",                            // factorial then equality
-            "!a && b!",                           // prefix NOT and postfix factorial together
-            "x!=3",                               // still the inequality operator
-            "x != y",                             // still the inequality operator
             "(a+b)\u0420(c-d) * 2\u010C1",       // combinatoric operators combined with grouping/multiplication
             "3t",                                 // implicit multiplication: "3t" == "3*t"
             "5sin(4)",                             // implicit multiplication: "5sin(4)" == "5*sin(4)"
@@ -1460,11 +1428,6 @@ public class MathExpressionTreeDepth implements Savable {
             "diffeqn(y[-1], a)", // negative index is not a non-negative integer
             "diffeqn(y[3, a)",   // missing closing ']' on the derivative index
             "\u04203 + 1",        // permutation operator with no left operand
-            "!",             // bare '!' with no operand
-            "!!",            // prefix NOT with no operand
-            "(x+)!",         // factorial cannot rescue a missing operand
-            "x!=",           // '!=' with no right operand
-            "4! 3",          // factorial does not enable bare-number juxtaposition ("1 2" is still rejected)
             "2+diffeqn(y[0]+y[1], a)",          // diffeqn NOT the root: something precedes it
             "diffeqn(y[0]+y[1], a)-2",          // diffeqn NOT the root: something follows it
             "sin(diffeqn(y[0], a))",            // diffeqn nested inside another function call

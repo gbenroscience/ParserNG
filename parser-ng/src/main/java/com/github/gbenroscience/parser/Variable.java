@@ -265,6 +265,13 @@ public class Variable implements Savable {
      * @return true if the variable is a valid Variable starting character
      */
     public static boolean isVariableBeginner(char var) {
+        if (var < 128) {
+            // ASCII: a letter other than 'E' (the exponent marker), '_' or '$'.
+            // (e is a letter, and the permutation/combination, pi and theta
+            // characters are all non-ASCII.)
+            return (var >= 'a' && var <= 'z') || (var >= 'A' && var <= 'Z' && var != 'E')
+                    || var == '_' || var == '$';
+        }
         return (!Operator.isPermOrComb(var) && var != 'E' && var != 'π'
                 && (Character.isLetter(var) || isTheta(var) || isPI(var) || isExpNumber(var) || var == '_' || var == '$'));
     }//end method
@@ -284,13 +291,21 @@ public class Variable implements Savable {
         if (len == 0) return false;
         
         if (len == 1) {
-            return isVariableBeginner(var);
+            return isVariableBeginner(var.charAt(0));
+        }
+
+        // A name longer than one character can only be valid if its first character
+        // is a valid beginner (this is also checked at the end of the method and is
+        // true for "ans"), so reject the common non-names -- numbers, operators,
+        // punctuation -- before doing any string comparisons or map lookups.
+        if (!isVariableBeginner(var.charAt(0))) {
+            return false;
         }
 
         // Exact-match keyword checks
         if (var.equals("ans")) {
             return true;
-        } else if (var.equals("var") || var.equals("const") || STRING.purifier(var).equals("")) {
+        } else if (var.equals("var") || var.equals("const") || isAllWhitespace(var)) {
             return false;
         } else if (Operator.isOperatorString(var)) {
             return false;
@@ -325,7 +340,7 @@ public class Variable implements Savable {
 
         // 2. Validate the prefix/name logic
         // String.valueOf(char) caches standard characters (zero-allocation for Latin-1)
-        if (!isVariableBeginner(String.valueOf(var.charAt(0)))) {
+        if (!isVariableBeginner(var.charAt(0))) {
             return false;
         }
 
@@ -337,16 +352,28 @@ public class Variable implements Savable {
             boolean isStandardChar = Character.isLetterOrDigit(c) || c == '_' || c == '$' || c == 'θ' || c == 'π';
             
             if (!isStandardChar) {
-                // Fallback to your defined method for unusual characters.
-                // String.valueOf(c) is much faster and lighter than var.substring(i, i+1).
-                if (!isVariableBuilder(String.valueOf(c))) {
-                    return false;
-                }
+                // isVariableBuilder(String.valueOf(c)) accepts exactly letters/digits,
+                // '_', '$', 'θ', 'π' and 'e' -- all already covered by isStandardChar,
+                // so any other character is invalid. No String needs to be created.
+                return false;
             }
         }
 
         return true;
     }
+    /**
+     * Allocation-free equivalent of {@code STRING.purifier(s).equals("")}: true
+     * when every character is whitespace (or the string is empty).
+     */
+    private static boolean isAllWhitespace(String s) {
+        for (int i = 0, n = s.length(); i < n; i++) {
+            if (!Character.isWhitespace(s.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static boolean isVariableBuilder(String unit) {
         return Character.isLetterOrDigit(unit.charAt(0)) || isTheta(unit)
                 || isPI(unit) || isExpNumber(unit) || unit.equals("_") || unit.equals("$");

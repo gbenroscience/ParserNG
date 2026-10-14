@@ -35,7 +35,12 @@ import static com.github.gbenroscience.parser.Bracket.*;
 
 public class DataSetFormatter {
 
-    private final List<String> dataset;
+    /** The trimmed input; kept so the token list can be produced lazily. */
+    private final String text;
+    /** Tokenised and bracketed form. Null until needed when the fast path applied. */
+    private List<String> dataset;
+    /** Cached result of {@link #getFormattedDataSet()}. */
+    private String formatted;
 
     public static final String COMMA_MASK = "?";
     public static final String OPEN_CIRC_BRAC_MASK = "<<<<";
@@ -44,24 +49,54 @@ public class DataSetFormatter {
 
     public DataSetFormatter(String text) {
         Objects.requireNonNull(text, "Expression text cannot be null");
-        this.dataset = processExpression(text.trim());
+        this.text = text.trim();
+        if (needsProcessing(this.text)) {
+            this.dataset = processExpression(this.text);
+        } else {
+            // No closing bracket and no mask look-alike: the token stream
+            // concatenates back to exactly the input and nothing is rewritten, so
+            // skip tokenising altogether.
+            this.formatted = this.text;
+        }
+    }
+
+    /**
+     * The formatter only ever rewrites text around a ')' token, and
+     * {@link #restoreMasks} only touches tokens that equal one of the three mask
+     * strings. If the text contains none of those characters, the output is the
+     * input verbatim.
+     */
+    private static boolean needsProcessing(String t) {
+        return t.indexOf(')') >= 0
+                || t.indexOf('?') >= 0
+                || t.contains(OPEN_CIRC_BRAC_MASK)
+                || t.contains(CLOSE_CIRC_BRAC_MASK);
     }
 
     public List<String> getDataset() {
+        if (dataset == null) {
+            dataset = processExpression(text);
+        }
         return new ArrayList<>(dataset); // defensive copy
     }
 
     public String getFormattedDataSet() {
-        StringBuilder sb = new StringBuilder(dataset.size() * 8);
-        for (String token : dataset) {
-            sb.append(token);
+        String f = formatted;
+        if (f == null) {
+            StringBuilder sb = new StringBuilder(text.length() + 16);
+            for (String token : dataset) {
+                sb.append(token);
+            }
+            f = sb.toString();
+            formatted = f;
         }
-        return sb.toString();
+        return f;
     }
 
     private List<String> processExpression(String expression) {
-        Scanner csc = new Scanner(expression, true, Method.getAllFunctions(),
-                COMMA, OPEN_CIRC_BRAC, CLOSE_CIRC_BRAC, OPEN_SQUARE_BRAC, CLOSE_SQUARE_BRAC);
+        // Same vocabulary as before (all function names, comma, round and square
+        // brackets) but the table is cached instead of rebuilt for every input.
+        Scanner csc = TokenTables.dataSetScanner(expression);
 
         List<String> tokens = csc.scan();
 
@@ -85,6 +120,23 @@ public class DataSetFormatter {
      * v3 core: index-based groups + manual copy + single buffer per bracket
      */
     private void wrapArgumentsInPlace(List<String> tokens, int start, int end) {
+        // Single argument (no comma): the rewrite is either a no-op or just a pair
+        // of masked brackets around it, so skip the buffer and the sublist clear.
+        boolean hasComma = false;
+        for (int i = start; i < end; i++) {
+            if (",".equals(tokens.get(i))) {
+                hasComma = true;
+                break;
+            }
+        }
+        if (!hasComma) {
+            if (start < end && shouldWrap(tokens, start, end)) {
+                tokens.add(end, CLOSE_CIRC_BRAC_MASK);
+                tokens.add(start, OPEN_CIRC_BRAC_MASK);
+            }
+            return;
+        }
+
         List<String> buffer = new ArrayList<>((end - start) * 3 / 2 + 8);
         int argStart = start;
 
@@ -199,4 +251,4 @@ public class DataSetFormatter {
        System.out.println("output is same: "+(t1.equals(t2)));
     }
 
-}
+}
