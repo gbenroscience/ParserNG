@@ -19,9 +19,11 @@ import com.github.gbenroscience.sqlv1.ast.WhereAliasResolver;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.BaseIntVector;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.Float4Vector;
 import org.apache.arrow.vector.Float8Vector;
+import org.apache.arrow.vector.FloatingPointVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.pojo.ArrowType;
@@ -32,10 +34,13 @@ import org.apache.arrow.vector.util.TransferPair;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -169,13 +174,15 @@ public final class ArrowQuery implements AutoCloseable {
     /** Computed once from {@code stmt}; see {@link #requireReusableOutputSupportedShape()}. */
     private final String reusableUnsupportedReason;
 
-    private ArrowQuery(String sql, SelectStatement stmt) {
-        // Fail loudly: the numeric engine has no DISTINCT, and ignoring the keyword would be a silent wrong answer.
+    private ArrowQuery(String sql, SelectStatement stmt, boolean allowDistinct) {
+        // Fail loudly rather than ignore a keyword: ignoring it would be a silent wrong answer.
         if (stmt.offset() != 0) {
             throw new UnsupportedOperationException("OFFSET is not supported by ArrowQuery; use the Parquet bridge (ParquetSql)");
         }
-        if (stmt.distinct()) {
-            throw new UnsupportedOperationException("SELECT DISTINCT is not supported by ArrowQuery; use the Parquet bridge (ParquetSql)");
+        if (stmt.distinct() && !allowDistinct) {
+            // The Parquet bridge compiles rewritten statements through compile(label, stmt) and merges batches itself;
+            // a per-batch DISTINCT inside the engine would be silently wrong there.
+            throw new UnsupportedOperationException("SELECT DISTINCT is not supported by ArrowQuery.compile(label, stmt); use the Parquet bridge (ParquetSql)");
         }
         for (SelectItem it : stmt.items()) {
             if (it.isAggregate() && it.aggregate().distinct()) {
@@ -188,6 +195,9 @@ public final class ArrowQuery implements AutoCloseable {
     }
 
     private static String computeReusableUnsupportedReason(SelectStatement stmt) {
+        if (stmt.distinct()) {
+            return "DISTINCT";
+        }
         if (stmt.isGrouped()) {
             return "GROUP BY";
         }
@@ -210,11 +220,18 @@ public final class ArrowQuery implements AutoCloseable {
      * @return the query
      * @throws SqlSyntaxException if {@code sql} does not conform to the grammar, or casts to a target only
      *     {@code ParquetSql} evaluates ({@code DATE}, {@code TIMESTAMP}, {@code DECIMAL(p,s)}, {@code VARCHAR})
+     * @throws UnsupportedOperationException for {@code OFFSET} and {@code COUNT(DISTINCT ...)}
+     *
+     * <p>{@code SELECT DISTINCT} is supported over numeric output columns, <b>per batch</b>: duplicates are removed
+     * within the one root passed to {@code execute}, never across several calls. Rows keep their first-seen order;
+     * {@code ORDER BY} (select-list columns or aliases only) and {@code LIMIT} apply after de-duplication. {@code NULL}s
+     * are equal to each other and distinct from {@code NaN}; {@code -0.0} equals {@code 0.0}. Integer columns are compared
+     * exactly. It runs with boxed keys in memory, and is rejected by {@link #execute(VectorSchemaRoot, VectorSchemaRoot)}.
      */
     public static ArrowQuery compile(String sql) {
         SelectStatement stmt = SqlParser.parse(sql);
         SqlParser.requireNumericCastTargets(sql);
-        return new ArrowQuery(sql, stmt);
+        return new ArrowQuery(sql, stmt, true);
     }
 
     /**
@@ -224,9 +241,11 @@ public final class ArrowQuery implements AutoCloseable {
      * @param label text shown in error messages in place of the SQL
      * @param stmt the statement
      * @return the query
+     * @throws UnsupportedOperationException for {@code OFFSET}, {@code SELECT DISTINCT} and {@code COUNT(DISTINCT ...)}:
+     *     the bridge merges batches itself, so a per-batch DISTINCT here would be wrong
      */
     public static ArrowQuery compile(String label, SelectStatement stmt) {
-        return new ArrowQuery(label, stmt);
+        return new ArrowQuery(label, stmt, false);
     }
 
     /** @return the parsed statement backing this query */
@@ -750,7 +769,31 @@ public final class ArrowQuery implements AutoCloseable {
             }
 
             List<OrderByPlan> orderByPlans = new ArrayList<>(stmt.orderBy().size());
-            if (stmt.isGrouped()) {
+            if (stmt.distinct()) {
+                // DISTINCT sorts the de-duplicated OUTPUT rows, so ORDER BY must be expressed in output columns.
+                Set<String> outputNames = new HashSet<>();
+                if (stmt.selectAll()) {
+                    for (FieldVector v : root.getFieldVectors()) {
+                        outputNames.add(v.getName());
+                    }
+                } else {
+                    for (SelectItem it : stmt.items()) {
+                        outputNames.add(it.outputName());
+                    }
+                }
+                for (OrderItem item : stmt.orderBy()) {
+                    String text = item.exprText();
+                    if (outputNames.contains(text)) {
+                        orderByPlans.add(new OrderByPlan(true, text, null));
+                    } else if (SIMPLE_IDENTIFIER.matcher(text).matches()) {
+                        throw new ArrowSqlException("Failed to compile query \"" + sql + "\": SELECT DISTINCT requires ORDER BY to "
+                                + "name a select-list column or alias, but '" + text + "' is not one");
+                    } else {
+                        orderByPlans.add(new OrderByPlan(false, null,
+                                compileCached(text, backend, float64, compiledCache)));
+                    }
+                }
+            } else if (stmt.isGrouped()) {
                 for (OrderItem item : stmt.orderBy()) {
                     orderByPlans.add(new OrderByPlan(false, null,
                             compileCached(item.exprText(), backend, float64, compiledCache)));
@@ -1032,6 +1075,9 @@ public final class ArrowQuery implements AutoCloseable {
      * untouched input root; projection is the only step that touches column data.
      */
     private VectorSchemaRoot runNonGrouped(CompiledPlan p, VectorSchemaRoot root, NullPolicy nullPolicy) {
+        if (stmt.distinct()) {
+            return runDistinct(p, root, nullPolicy);
+        }
         int rowCount = root.getRowCount();
         int[] selected = selectRows(p, root, nullPolicy); // null = every row, in order
         if (!p.orderByPlans.isEmpty()) {
@@ -1043,6 +1089,106 @@ public final class ArrowQuery implements AutoCloseable {
             n = limit; // only the first n entries of `selected` are ever read
         }
         return project(p, root, selected, n, nullPolicy);
+    }
+
+    /**
+     * SELECT DISTINCT without aggregates: WHERE -> project every surviving row -> drop duplicate rows (first
+     * occurrence wins) -> ORDER BY over the output columns -> LIMIT. Unlike {@link #runNonGrouped} the projection cannot
+     * be cut to {@code LIMIT} rows early, because duplicates are only known after projection.
+     */
+    private VectorSchemaRoot runDistinct(CompiledPlan p, VectorSchemaRoot root, NullPolicy nullPolicy) {
+        int[] selected = selectRows(p, root, nullPolicy);
+        int n = selected == null ? root.getRowCount() : selected.length;
+        VectorSchemaRoot result = project(p, root, selected, n, nullPolicy);
+        try {
+            result = dropDuplicateRows(result);
+            if (!p.orderByPlans.isEmpty()) {
+                VectorSchemaRoot next = materializeRows(result, sortedSelection(p, result, null, nullPolicy));
+                closeAll(result);
+                result = next;
+            }
+            Integer limit = stmt.limit();
+            if (limit != null && limit < result.getRowCount()) {
+                VectorSchemaRoot next = materializePrefix(result, limit);
+                closeAll(result);
+                result = next;
+            }
+        } catch (RuntimeException | Error e) {
+            closeAll(result);
+            throw e;
+        }
+        return result;
+    }
+
+    /**
+     * @return {@code r} itself when it has no duplicate rows, otherwise a new root holding the first occurrence of each
+     *     distinct row (and {@code r} is closed). On failure {@code r} is left open for the caller to close.
+     */
+    private static VectorSchemaRoot dropDuplicateRows(VectorSchemaRoot r) {
+        int[] keep = firstOccurrences(r);
+        if (keep.length == r.getRowCount()) {
+            return r;
+        }
+        VectorSchemaRoot next = materializeRows(r, keep);
+        closeAll(r);
+        return next;
+    }
+
+    /**
+     * Indices (ascending) of the first row of each distinct value tuple. Floating-point columns compare by value with
+     * {@code -0.0 == 0.0} and all NaNs equal; integer columns compare as exact longs; a null equals only another null.
+     */
+    private static int[] firstOccurrences(VectorSchemaRoot r) {
+        List<FieldVector> cols = r.getFieldVectors();
+        for (FieldVector v : cols) {
+            if (!(v instanceof BaseIntVector) && !(v instanceof FloatingPointVector)) {
+                throw new ArrowSqlException("SELECT DISTINCT in ArrowQuery supports numeric columns only, but column '"
+                        + v.getName() + "' is " + v.getField().getType() + "; use the Parquet bridge (ParquetSql) for other types");
+            }
+        }
+        int rows = r.getRowCount();
+        int nc = cols.size();
+        Set<RowKey> seen = new HashSet<>(Math.max(16, (int) Math.min(rows, 1_000_000L) * 4 / 3 + 1));
+        int[] keep = new int[rows];
+        int kept = 0;
+        for (int i = 0; i < rows; i++) {
+            long[] key = new long[2 * nc]; // per column: [isNull, value bits]
+            for (int c = 0; c < nc; c++) {
+                FieldVector v = cols.get(c);
+                if (v.isNull(i)) {
+                    key[2 * c] = 1L;
+                } else if (v instanceof BaseIntVector iv) {
+                    key[2 * c + 1] = iv.getValueAsLong(i);
+                } else {
+                    double d = ((FloatingPointVector) v).getValueAsDouble(i) + 0.0; // -0.0 + 0.0 == +0.0
+                    key[2 * c + 1] = Double.doubleToLongBits(d); // canonical NaN
+                }
+            }
+            if (seen.add(new RowKey(key))) {
+                keep[kept++] = i;
+            }
+        }
+        return kept == rows ? keep : Arrays.copyOf(keep, kept);
+    }
+
+    /** Hashable value tuple of one row for DISTINCT. */
+    private static final class RowKey {
+
+        private final long[] values;
+
+        RowKey(long[] values) {
+            this.values = values;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof RowKey other && Arrays.equals(values, other.values);
+        }
+
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(values);
+        }
     }
 
     /**
@@ -1213,6 +1359,9 @@ public final class ArrowQuery implements AutoCloseable {
                 closeAll(result);
                 result = next;
             }
+            if (stmt.distinct()) {
+                result = dropDuplicateRows(result);
+            }
             if (!p.orderByPlans.isEmpty()) {
                 VectorSchemaRoot next = materializeRows(result, sortedSelection(p, result, null, nullPolicy));
                 closeAll(result);
@@ -1268,7 +1417,9 @@ public final class ArrowQuery implements AutoCloseable {
         for (int row = 0; row < rowCount; row++) {
             double[] key = new double[numKeys];
             for (int k = 0; k < numKeys; k++) {
-                key[k] = keyIsNull[k][row] ? Double.NaN : keyValues[k][row];
+                // "+ 0.0" turns -0.0 into 0.0 (IEEE round-to-nearest) so both fall into one group, as SQL
+                // equality requires; GroupKey compares raw bits. Every other value, NaN included, is unchanged.
+                key[k] = keyIsNull[k][row] ? Double.NaN : keyValues[k][row] + 0.0;
             }
             GroupKey gk = new GroupKey(key);
             Integer idx = groupIndex.get(gk);
@@ -1290,6 +1441,18 @@ public final class ArrowQuery implements AutoCloseable {
                     aggs[a].accumulate(aggValues[a][row], aggIsNull[a][row]);
                 }
             }
+        }
+
+        // A global aggregate (no GROUP BY keys) is one group even over zero rows: COUNT is 0 and SUM, AVG, MIN
+        // and MAX are null. Groups are otherwise created only when a row arrives, so seed it here. This runs only
+        // when the input is empty, so the per-row path above is untouched.
+        if (numKeys == 0 && groupAggregators.isEmpty()) {
+            groupKeyValuesOut.add(new double[0]);
+            Aggregator[] aggs = new Aggregator[numAggs];
+            for (int a = 0; a < numAggs; a++) {
+                aggs[a] = newAggregator(gp.aggregates.get(a).func);
+            }
+            groupAggregators.add(aggs);
         }
 
         int numGroups = groupAggregators.size();
@@ -1828,6 +1991,8 @@ public final class ArrowQuery implements AutoCloseable {
             this.evaluator = evaluator;
         }
     }
+
+    private static final Pattern SIMPLE_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
     private static final class OrderByPlan {
 

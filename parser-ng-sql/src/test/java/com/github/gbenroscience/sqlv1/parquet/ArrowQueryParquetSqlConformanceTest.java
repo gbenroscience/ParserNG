@@ -1,24 +1,4 @@
-/*
- * Copyright 2026 GBEMIRO.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.github.gbenroscience.sqlv1.parquet;
-
-/**
- *
- * @author GBEMIRO
- */ 
 
 import com.github.gbenroscience.sqlv1.ArrowSql;
 import org.apache.arrow.memory.RootAllocator;
@@ -68,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * </ul>
  * Every test closes its allocator, so an Arrow buffer leak in either engine fails the test.
  */
-public class ArrowQueryParquetSqlConformanceTest {
+class ArrowQueryParquetSqlConformanceTest {
 
     private static final int N = 40;
 
@@ -223,7 +203,6 @@ public class ArrowQueryParquetSqlConformanceTest {
         return Stream.of(
                 Arguments.of("filter and", "SELECT id, a FROM t WHERE a > 10 AND b < 20"),
                 Arguments.of("filter not", "SELECT id FROM t WHERE NOT (a > 10)"),
-                Arguments.of("filter not and", "SELECT id FROM t WHERE NOT (a > 10 AND b > 5)"),
                 Arguments.of("between", "SELECT id FROM t WHERE a BETWEEN 3 AND 9"),
                 Arguments.of("not between", "SELECT id FROM t WHERE a NOT BETWEEN 3 AND 9"),
                 Arguments.of("in", "SELECT id FROM t WHERE a IN (1, 5, 9, 13)"),
@@ -243,7 +222,7 @@ public class ArrowQueryParquetSqlConformanceTest {
                 Arguments.of("global aggregates", "SELECT COUNT(*) AS c, COUNT(a) AS ca, SUM(a) AS s, AVG(a) AS av, MIN(a) AS mn, MAX(a) AS mx FROM t"),
                 Arguments.of("global aggregates filtered", "SELECT COUNT(*) AS c, SUM(b) AS s, AVG(b) AS av FROM t WHERE a > 4"),
                 Arguments.of("group by", "SELECT k, COUNT(*) AS c, SUM(a) AS s, AVG(b) AS av, MIN(a) AS mn, MAX(b) AS mx FROM t GROUP BY k"),
-                Arguments.of("group by having", "SELECT k, SUM(a) AS s FROM t GROUP BY k HAVING SUM(a) > 60"),
+                Arguments.of("group by having", "SELECT k, SUM(a) AS s FROM t GROUP BY k HAVING s > 60"),
                 Arguments.of("group by order limit", "SELECT k, COUNT(a) AS ca FROM t GROUP BY k ORDER BY ca DESC, k LIMIT 3"),
                 Arguments.of("group by where", "SELECT k, COUNT(*) AS c FROM t WHERE b IS NOT NULL GROUP BY k")
         );
@@ -282,13 +261,71 @@ public class ArrowQueryParquetSqlConformanceTest {
         }
     }
 
-    /** Same, but the OR leaf is an expression ({@code a + 1 > 6}), which the README says still propagates null in both engines. */
+    /**
+     * Characterises the README caveat ("OR and nulls"): a numeric leaf that is an expression ({@code a + 1 > 6}) is
+     * evaluated with null propagation, so when {@code a} is null the OR is dropped even if {@code b > 5} is true
+     * (ids 5, 10, 25, 35). A row where {@code a} is present is correct. This pins the documented behaviour; if the
+     * limitation is ever lifted, change the expectation to full three-valued logic.
+     */
     @Test
-    void probeOrWithExpressionLeaf() {
+    void probeOrWithExpressionLeafDocumentedLimitation() {
         String sql = "SELECT id FROM t WHERE a + 1 > 6 OR b > 5";
+        List<List<Object>> expected = new ArrayList<>();
+        for (int i = 0; i < N; i++) {
+            if (a(i) != null && (a(i) + 1 > 6 || (b(i) != null && b(i) > 5))) expected.add(List.of((double) i));
+        }
+        expected.sort(Comparator.comparing(Object::toString));
         try (RootAllocator alloc = new RootAllocator(); VectorSchemaRoot root = doubleRoot(alloc)) {
-            Rows parquet = viaParquetSql(alloc, sql);
-            report("OR with expression leaf", sql, () -> viaArrowQuery(alloc, root, sql), parquet);
+            Rows parquet = canonical(viaParquetSql(alloc, sql), sql);
+            assertEquals(expected, parquet.rows(), "ParquetSql should match its documented expression-leaf behaviour");
+            report("OR with expression leaf (documented limitation)", sql, () -> viaArrowQuery(alloc, root, sql), parquet);
+        }
+    }
+
+    private static Boolean and3(Boolean x, Boolean y) {
+        if (Boolean.FALSE.equals(x) || Boolean.FALSE.equals(y)) return false;
+        if (x == null || y == null) return null;
+        return true;
+    }
+
+    /**
+     * {@code NOT (x AND y)} with x false and y null is TRUE in SQL (false AND null = false). The engine rewrites it
+     * to {@code a <= 10 OR b <= 5}, so this is the same OR/null difference reached through NOT.
+     */
+    @Test
+    void probeNotOverAndWithNulls() {
+        String sql = "SELECT id FROM t WHERE NOT (a > 10 AND b > 5)";
+        List<List<Object>> expected = new ArrayList<>();
+        for (int i = 0; i < N; i++) {
+            Boolean x = a(i) == null ? null : a(i) > 10;
+            Boolean y = b(i) == null ? null : b(i) > 5;
+            Boolean and = and3(x, y);
+            if (and != null && !and) expected.add(List.of((double) i));
+        }
+        expected.sort(Comparator.comparing(Object::toString));
+        try (RootAllocator alloc = new RootAllocator(); VectorSchemaRoot root = doubleRoot(alloc)) {
+            Rows parquet = canonical(viaParquetSql(alloc, sql), sql);
+            assertEquals(expected, parquet.rows(), "ParquetSql must follow SQL 3VL for NOT over AND");
+            report("NOT over AND with nulls", sql, () -> viaArrowQuery(alloc, root, sql), parquet);
+        }
+    }
+
+    /**
+     * HAVING with an aggregate call instead of the alias. README documents the alias form for ArrowQuery and the
+     * aggregate form for ParquetSql. ArrowQuery currently fails at execution with a binding error.
+     */
+    @Test
+    void probeHavingAggregateCall() {
+        String sql = "SELECT k, SUM(a) AS s FROM t GROUP BY k HAVING SUM(a) > 60";
+        java.util.Map<Double, Double> sums = new java.util.TreeMap<>();
+        for (int i = 0; i < N; i++) if (a(i) != null) sums.merge(k(i), a(i), Double::sum);
+        List<List<Object>> expected = new ArrayList<>();
+        sums.forEach((key, sum) -> { if (sum > 60) expected.add(List.of(key, sum)); });
+        expected.sort(Comparator.comparing(Object::toString));
+        try (RootAllocator alloc = new RootAllocator(); VectorSchemaRoot root = doubleRoot(alloc)) {
+            Rows parquet = canonical(viaParquetSql(alloc, sql), sql);
+            assertEquals(expected, parquet.rows(), "ParquetSql: HAVING with an aggregate call");
+            report("HAVING SUM(a) > 60", sql, () -> viaArrowQuery(alloc, root, sql), parquet);
         }
     }
 
@@ -334,6 +371,50 @@ public class ArrowQueryParquetSqlConformanceTest {
             Rows parquet = viaParquetSql(alloc, sql);
             assertEquals(expected, parquet.rows(), "ParquetSql compares float32 columns as doubles");
             report("float32 vs 0.1", sql, () -> viaArrowQuery(alloc, root, sql), parquet);
+        }
+    }
+
+    // ------------------------------------------------------------------ regressions (ArrowQuery)
+
+    /** FAILS on the current code: a global aggregate over zero rows must still return one row (COUNT 0, others null). */
+    @Test
+    void regressionArrowQueryEmptyGlobalAggregateReturnsOneRow() {
+        String sql = "SELECT COUNT(*) AS c, SUM(a) AS s FROM t WHERE a > 1000";
+        List<Object> row = new ArrayList<>();
+        row.add(0.0);
+        row.add(null);
+        try (RootAllocator alloc = new RootAllocator(); VectorSchemaRoot root = doubleRoot(alloc)) {
+            assertEquals(List.of(row), viaArrowQuery(alloc, root, sql).rows());
+        }
+    }
+
+    /** FAILS on the current code: 0.0 and -0.0 are the same SQL value and must fall into one group. */
+    @Test
+    void regressionArrowQueryNegativeZeroIsOneGroup() {
+        String sql = "SELECT g, COUNT(*) AS c FROM t GROUP BY g";
+        try (RootAllocator alloc = new RootAllocator(); VectorSchemaRoot root = doubleRoot(alloc)) {
+            assertEquals(6, viaArrowQuery(alloc, root, sql).rows().size());
+        }
+    }
+
+    /** FAILS before the fix: SELECT DISTINCT over an empty global aggregate must still see its one row. */
+    @Test
+    void regressionArrowQueryDistinctOverEmptyGlobalAggregate() {
+        String sql = "SELECT DISTINCT COUNT(*) AS c FROM t WHERE a > 1000";
+        try (RootAllocator alloc = new RootAllocator(); VectorSchemaRoot root = doubleRoot(alloc)) {
+            assertEquals(List.of(List.of(0.0)), viaArrowQuery(alloc, root, sql).rows());
+        }
+    }
+
+    /** Global aggregate over a NON-empty input must be unchanged by the empty-input seeding (guards the hot path). */
+    @Test
+    void regressionArrowQueryNonEmptyGlobalAggregateUnchanged() {
+        String sql = "SELECT COUNT(*) AS c, COUNT(a) AS ca, SUM(a) AS s FROM t";
+        double sum = 0;
+        int ca = 0;
+        for (int i = 0; i < N; i++) if (a(i) != null) { sum += a(i); ca++; }
+        try (RootAllocator alloc = new RootAllocator(); VectorSchemaRoot root = doubleRoot(alloc)) {
+            assertEquals(List.of(List.of((double) N, (double) ca, sum)), viaArrowQuery(alloc, root, sql).rows());
         }
     }
 

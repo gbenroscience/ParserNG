@@ -37,12 +37,14 @@ query.close();
 - [Execution model](#execution-model)
   - [Compile once, execute many](#compile-once-execute-many)
   - [Choosing an execution backend](#choosing-an-execution-backend)
+  - [`SELECT DISTINCT` in `ArrowQuery`](#select-distinct-in-arrowquery)
   - [Null handling](#null-handling)
   - [Reusable output buffers (zero-allocation execution)](#reusable-output-buffers-zero-allocation-execution)
   - [Warming up](#warming-up)
 - [Performance notes](#performance-notes)
 - [Error handling](#error-handling)
 - [Querying Parquet files](#querying-parquet-files)
+  - [Differences between ArrowQuery and ParquetSql](#differences-between-arrowquery-and-parquetsql)
 - [Benchmarking and profiling ParquetSql](#benchmarking-and-profiling-parquetsql)
 - [What's intentionally out of scope](#whats-intentionally-out-of-scope)
 - [Resource ownership and thread-safety](#resource-ownership-and-thread-safety)
@@ -122,7 +124,7 @@ want.
 A query has this shape:
 
 ```
-SELECT select_list
+SELECT [DISTINCT] select_list
 FROM table_reference
 [WHERE boolean_expression]
 [GROUP BY expression_list]
@@ -130,6 +132,8 @@ FROM table_reference
 [ORDER BY order_item [, order_item ...]]
 [LIMIT integer_literal]
 ```
+
+`SELECT DISTINCT` is described in [its own section](#select-distinct-in-arrowquery) (numeric columns, per batch).
 
 Every arithmetic expression anywhere in a query; a `SELECT` item, a `WHERE`
 operand, an aggregate's argument, an `ORDER BY` key; is ordinary ParserNG
@@ -274,6 +278,10 @@ FROM data
 WHERE reading > 0
 ```
 
+That implicit group exists even when no row survives the `WHERE` (or the batch is empty): the query
+returns exactly one row, with `COUNT` equal to `0` and `SUM`, `AVG`, `MIN` and `MAX` `null`. A query with
+an explicit `GROUP BY` returns one row per group, so an empty input gives no rows.
+
 A grouped query's non-aggregate `SELECT` items must match a `GROUP BY` key
 expression exactly; the usual SQL rule that a plain column in the select
 list of a grouped query has to be functionally determined by the grouping
@@ -294,6 +302,8 @@ GROUP BY category, subcategory
 ORDER BY category, subcategory
 ```
 
+Keys compare by value: `0.0` and `-0.0` fall into one group, and all `null` keys form one group.
+
 ### HAVING
 
 `HAVING` filters groups by an aggregate result, after grouping; the same
@@ -306,6 +316,10 @@ FROM data
 GROUP BY category
 HAVING total > 50
 ```
+
+In `ArrowQuery`, `HAVING` names a `GROUP BY` key or an aggregate's alias. Spelling the aggregate out
+(`HAVING SUM(reading) > 50`) parses but is not supported there: it fails when the query executes, with an
+`ArrowBindingException`. `ParquetSql` accepts the spelled-out form.
 
 `HAVING` only applies to a grouped query (an explicit `GROUP BY`, or at
 least one aggregate `SELECT` item); using it otherwise is rejected at
@@ -390,7 +404,8 @@ transitively.
 of any particular Arrow schema. The actual ParserNG expression evaluators
 are compiled lazily on the first call to `execute`, because whether
 ParserNG compiles `float64` or `float32` kernels depends on the column
-types of the batch you pass in. Once built, that compiled plan is cached
+types of the batch you pass in: `float64` only when every column is a
+`Float8Vector`, otherwise every expression in the query runs as `float32`. Once built, that compiled plan is cached
 and reused on every subsequent `execute` call against a batch with the
 same schema; the SQL parsing and expression compilation genuinely happen
 once, no matter how many batches you run through it:
@@ -429,6 +444,28 @@ invalidates and recompiles it on the next `execute`. For queries over Parquet
 files, set it on the options instead: `ParquetSqlOptions.withBackend(...)`
 (see Scan options).
 
+### `SELECT DISTINCT` in `ArrowQuery`
+
+`ArrowQuery.compile(sql)` (and so `ArrowSql`) supports `SELECT DISTINCT` over numeric columns:
+
+```java
+try (ArrowQuery q = ArrowQuery.compile("SELECT DISTINCT x FROM t WHERE y > 0 ORDER BY x DESC LIMIT 10");
+     VectorSchemaRoot out = q.execute(batch)) { ... }
+```
+
+* **Per batch.** Duplicates are removed within the one root passed to `execute`, never across calls. To
+  de-duplicate a stream of batches use `ParquetSql`, which merges batches itself.
+* **Order and clauses.** Rows keep their first-seen order. `ORDER BY` (select-list columns or aliases only, otherwise
+  an `ArrowSqlException`) and `LIMIT` run after de-duplication, so `LIMIT` cannot shortcut the projection. It also
+  applies to a grouped result (`SELECT DISTINCT SUM(y) ... GROUP BY x`).
+* **Equality.** Two rows are equal when every column is equal: a `NULL` equals only another `NULL` (not `NaN`),
+  `-0.0` equals `0.0`, all `NaN`s are equal, and integer columns compare exactly.
+* **Numeric output columns only.** A string, boolean, date or other non-numeric output column fails with a clear
+  `ArrowSqlException`; use `ParquetSql` for those.
+* **Cost.** Boxed row keys held in memory, and every surviving row is projected before de-duplication.
+* **Not supported:** `COUNT(DISTINCT x)`, `OFFSET`, `execute(root, reusableOutput)` / `allocateReusableOutput`
+  (`UnsupportedOperationException`), and `SELECT DISTINCT` via `ArrowQuery.compile(label, stmt)`.
+
 ### Null handling
 
 `withNullPolicy` controls how a `null` input is treated:
@@ -442,6 +479,16 @@ ArrowQuery query = ArrowQuery.compile(sql)
 the inputs allow one, and `null` only where an input actually was;
 standard, predictable null propagation through arithmetic. Unlike
 `withBackend`, changing the null policy never requires recompilation.
+
+In a `WHERE` clause a null predicate result excludes the row. Without `IS [NOT] NULL` the clause runs as one
+fused expression in which a comparison against a null input is itself null, and that null propagates through
+`AND`, `OR` and `NOT`. Under `OR` this means a row is dropped when one branch is null even if the other branch
+is true: with `a` null and `b = 10`, `a > 5 OR b > 5` does not keep the row, and neither does
+`NOT (a > 10 AND b > 5)` (it is evaluated as `a <= 10 OR b <= 5`). SQL's three-valued logic would keep both. A
+`WHERE` that contains `IS [NOT] NULL` anywhere is evaluated leaf by leaf instead, with a null leaf counted as
+false, so a null branch no longer hides a true one under `OR`. `ParquetSql` evaluates simple numeric leaves
+under `OR` as two-valued masks (see "`OR` and nulls"), so the same query can return different rows from the two
+entry points; see [Differences between ArrowQuery and ParquetSql](#differences-between-arrowquery-and-parquetsql).
 
 ### Reusable output buffers (zero-allocation execution)
 
@@ -479,8 +526,8 @@ a `WHERE`-narrowed selection.
 
 This comes with real constraints, by design:
 
-- **Only supported for queries without `GROUP BY`, `HAVING`, `ORDER BY`, or
-  `LIMIT`.** Those clauses can change the output row count in ways a
+- **Only supported for queries without `SELECT DISTINCT`, `GROUP BY`, `HAVING`,
+  `ORDER BY`, or `LIMIT`.** Those can change the output row count in ways a
   fixed-capacity buffer can't safely bound; using this overload with one
   of them throws `UnsupportedOperationException` immediately, rather than
   failing confusingly mid-run. Use `execute(root)` for those queries.
@@ -573,16 +620,18 @@ letting them surface as a confusing runtime failure:
 - **`ArrowSqlException`**; the SQL parsed fine, but compiling its
   expressions against a particular batch's schema failed: a grouped
   query's `SELECT` item doesn't match a `GROUP BY` key, a cyclic
-  `SELECT`-list alias reference, and similar shape mismatches that can
+  `SELECT`-list alias reference, a `SELECT DISTINCT` whose `ORDER BY` names a column outside the select
+  list, a non-numeric `SELECT DISTINCT` column (raised while executing), and similar shape mismatches that can
   only be detected once a real schema is in hand. Thrown from the first
   `execute` call against a given schema.
 - **`ArrowBindingException`**; thrown directly by parser-ng-arrow itself
   when a compiled expression can't actually run against the data in front
   of it (a column genuinely missing from the batch, for instance).
 - **`UnsupportedOperationException`**; thrown by `execute(root, output)`
-  or `allocateReusableOutput` if the query uses `GROUP BY`, `HAVING`,
-  `ORDER BY`, or `LIMIT`; see
+  or `allocateReusableOutput` if the query uses `SELECT DISTINCT`, `GROUP BY`,
+  `HAVING`, `ORDER BY`, or `LIMIT`; see
   [Reusable output buffers](#reusable-output-buffers-zero-allocation-execution).
+  `ArrowQuery.compile` also throws it for `OFFSET` and `COUNT(DISTINCT ...)`.
 - **`IllegalArgumentException`**; thrown by `execute(root, output)` if
   `output` doesn't match the query's column shape, or doesn't have enough
   per-column capacity for `root`'s row count.
@@ -713,6 +762,8 @@ that directory or the query fails.
     nulls equal each other.
   * `DISTINCT` is a keyword only where a select item can follow it, so a column named `distinct` still works.
     `SUM(DISTINCT x)` and `AVG(DISTINCT x)` are syntax errors; `ArrowQuery` itself rejects both forms.
+    `ArrowQuery` also rejects `COUNT(DISTINCT x)`, and rejects `SELECT DISTINCT` when it is compiled from a statement
+    (`compile(label, stmt)`, which is what this bridge uses), because the bridge merges batches itself.
   * These queries cannot be streamed (`stream()` throws); string, long-hashable and composite keys of those are looked up
     without allocation; other key types are boxed, so those are correct and bounded but not zero-allocation.
 * **`GROUP BY` the numeric engine cannot do** is folded too (`explain()` says `GROUP BY the numeric engine
@@ -960,6 +1011,7 @@ buffers and row-index buffer are reused.
 | `COUNT(*)` from the footer, no decode | yes |
 | Bounded top-N for `ORDER BY ... LIMIT n` | yes |
 | `SELECT DISTINCT`, `COUNT(DISTINCT col)` | yes, with or without `GROUP BY` |
+| `SELECT DISTINCT` in plain `ArrowQuery` / `ArrowSql` | numeric columns only, per batch (see "`SELECT DISTINCT` in `ArrowQuery`") |
 | `COUNT(col)` any type; `MIN`/`MAX` over string, date, timestamp, boolean | yes, with or without `GROUP BY` |
 | `GROUP BY` a string, boolean, date or timestamp key or expression, with `HAVING` and `ORDER BY` | yes (folded in Java) |
 | `CAST` of a string to a number | yes (strict parse, named errors) |
@@ -982,6 +1034,20 @@ buffers and row-index buffer are reused.
 | `LIMIT n OFFSET m`, `OFFSET m [LIMIT n]` | yes (bridge only; `ArrowQuery` rejects `OFFSET`) |
 | `COALESCE`, `NULLIF` over numeric columns and literals | yes (bridge only; result is `Float8`) |
 | `COALESCE`/`NULLIF` over strings, dates, timestamps, or with expression arguments | not yet (named error) |
+
+### Differences between ArrowQuery and ParquetSql
+
+The same SQL text can behave differently through the two entry points. The first three rows are by design; the
+last three are limitations of `ArrowQuery` that `ParquetSql` does not share.
+
+| | `ArrowQuery` / `ArrowSql` | `ParquetSql` |
+| --- | --- | --- |
+| `OFFSET` | rejected (`UnsupportedOperationException`) | supported |
+| `SELECT DISTINCT` | numeric columns, per batch | any column type, across batches |
+| `COUNT(DISTINCT x)` | rejected | supported |
+| Numeric type of the computation | `float32` kernels unless every column is a `Float8Vector`: a `Float4` column compared with `0.1` is compared as `float32`, so `0.1f > 0.1` is false | every numeric column is widened to double, so the same comparison is evaluated in double and `0.1f > 0.1` is true |
+| Null under `OR`, and `NOT (... AND ...)` | a null operand drops the row even when the other branch is true (see Null handling) | simple numeric leaves are two-valued masks, so the row is kept; numeric expression leaves still propagate null |
+| `HAVING` | a `GROUP BY` key or an aggregate alias; a spelled-out aggregate fails at execution | aggregates by alias or spelled out |
 
 ## Benchmarking and profiling ParquetSql
 
@@ -1068,8 +1134,9 @@ parser-ng-sql deliberately does not implement:
   exactly one `VectorSchemaRoot` you already have in hand.
 - `INSERT`, `UPDATE`, `DELETE`, transactions, or a catalog of any kind;
   there is no notion of a persistent table to mutate.
-- `DISTINCT` in `ArrowSql` / `ArrowQuery`, which reject it. `ParquetSql` supports `SELECT DISTINCT` and
-  `COUNT(DISTINCT x)`.
+- `COUNT(DISTINCT x)` in `ArrowSql` / `ArrowQuery`, which reject it (`ParquetSql` supports it). `SELECT DISTINCT`
+  works in `ArrowQuery` for numeric columns, per batch only (see
+  [`SELECT DISTINCT` in `ArrowQuery`](#select-distinct-in-arrowquery)).
 - General string/text processing in `ArrowSql`; every value in a ParserNG expression is a
   floating-point number. Over Parquet, string, boolean, date and timestamp predicates, the string
   functions, `CAST` to date, timestamp and decimal, `EXTRACT` and `INTERVAL` are supported by the bridge

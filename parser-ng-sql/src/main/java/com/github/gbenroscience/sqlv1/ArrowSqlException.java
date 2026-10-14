@@ -28,6 +28,10 @@ public class ArrowSqlException extends RuntimeException {
 
     private static final long serialVersionUID = 1L;
 
+    public ArrowSqlException(String message) {
+        super(message);
+    }
+
     public ArrowSqlException(String message, Throwable cause) {
         super(message, cause);
     }
