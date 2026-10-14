@@ -66,7 +66,7 @@ public class AutoDiffNEvaluator implements Cloneable {
     private static final int OP_ATAN = 13;
     private static final int OP_SEC = 14;
     private static final int OP_COSEC = 15;
-    private static final int OP_COT = 16;
+    private static final int OP_COT = 16;//Missing OP_ASEC, OP_ACOSEC, OP_ACOT
     private static final int OP_SINH = 17;
     private static final int OP_COSH = 18;
     private static final int OP_TANH = 19;

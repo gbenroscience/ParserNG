@@ -44,9 +44,17 @@ public class MeCopyVsConstructor {
 
     public MeCopyVsConstructor() {
     }
+    
+    private static void coldConstructorTime(){
+        long t = System.nanoTime();
+        MathExpression me = new MathExpression(expr);
+        double end = System.nanoTime() - t;
+        System.out.println("cold compile run for MathExpression: "+(end/1000000.0)+"ms");
+    }
 
     
     public static void main(String[] args) {
+        coldConstructorTime();
         if(runSequentially){
             mainSeq(args);
         }else{
