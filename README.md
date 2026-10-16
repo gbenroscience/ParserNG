@@ -8,8 +8,14 @@
 > **The fastest pure-Java math runtime, now with GPU (CUDA, Metal and OpenCL) bulk evaluators and a fully open-sourced Vector API (SIMD) kernel. Zero JNI. Zero native binaries. Zero bytecode-safety risk.**
 
 [**ParserNG 3.0.9 is live**](LATEST.md)
-- In this version, `parser-ng-parquet` becomes the latest addition to the ParserNG ecosystem. It affords JVM users the ability to read parquet files at perhaps, the highest possible rates on the JVM; about 3x-4x the rate that `parquet-java` itself affords
-.- In version 3.0.8, `parser-ng-sql`, the new extension introduced in v3.0.7 to help Apache Arrow users of ParserNG(parser-ng-arrow) maximize its use, has received major speed and bug updates. 
+- In this version, `parser-ng-parquet` becomes the latest addition to the ParserNG ecosystem. It affords JVM users the ability to read parquet files, both local and remote(e.g s3) at perhaps, the highest possible rates on the JVM; about 3x-4x the rate that `parquet-java` itself affords.
+It introduces powerful speedups to the base `MathExpression` constructor itself and perfects the `BaseNFunction` which is the `MathExpression` class extended to all number bases between 2 and 36(included).
+A secret allocation source that was randomly appearing on the SIMD bulk evaluators was also squashed.
+`parser-ng-sql` now supports select over parquet files, both local and remote(e.g. s3).
+The float32 SIMD bulk evaluators(`SIMDCommandF32, SIMDCommandSegmentF32) broke 1.4 billion evals/second on my Dell Inspiron 4150's Intel mobile skylake processor(manufacturere, 2015 or 2016) using just 2 workers on the quadratic expression `x^2+2*x+1`. 
+Please check the READMEs for `parser-ng-sql` and `parser-ng-parquet` properly as there are many new updates.
+
+- In version 3.0.8, `parser-ng-sql`, the new extension introduced in v3.0.7 to help Apache Arrow users of ParserNG(parser-ng-arrow) maximize its use, has received major speed and bug updates. 
 - It introduced (in v3.0.5) float32 (Java's float type) and float64 (Java's primitive double type) bulk evaluators, alongside MemorySegment-based bulk evaluators for both precisions.
 - It puts all of that to work in **parser-ng-arrow**: a true zero-copy bridge between ParserNG and Apache Arrow, letting you evaluate any runtime string expression, filter rows, and project computed columns directly over Arrow's columnar memory, no serialization, no staging buffers, no leaving the Arrow buffer at all. In its SIMD mode (`ArrowBulkEvaluator`), it beats Apache Gandiva by 10 to 30 times on every transcendental function: `sin`, `cos`, `log`, `exp`, and the rest of the set. Gandiva still edges it out on hardware-intrinsic `sqrt` and plain arithmetic, by 1.5x to 2x, but flip on `ArrowBulkEvaluator`'s built-in parallelism and that gap is gone at just 2 workers.
 - For workloads that want more than the CPU can give, `ArrowGpuBulkEvaluator` dispatches the same expressions straight to CUDA, OpenCL, or Metal, with zero JNI and zero native binaries anywhere in your build.

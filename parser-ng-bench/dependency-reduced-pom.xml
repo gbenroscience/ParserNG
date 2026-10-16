@@ -55,6 +55,17 @@
               <version>1.37</version>
             </path>
           </annotationProcessorPaths>
+          <compilerArgs>
+            <arg>--add-modules</arg>
+            <arg>jdk.incubator.vector</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+        <configuration>
+          <argLine>--add-modules jdk.incubator.vector</argLine>
         </configuration>
       </plugin>
     </plugins>

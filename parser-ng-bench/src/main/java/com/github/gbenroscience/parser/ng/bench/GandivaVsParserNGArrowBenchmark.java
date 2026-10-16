@@ -303,7 +303,20 @@ public class GandivaVsParserNGArrowBenchmark {
             sum = add(sum, cbrtFn(x2, t), t);
             sum = add(sum, sqrtFn(add(absFn(x3, t), lit(1.0), t), t), t);
             return sum;
-        })
+        }),
+
+        // ---- plain single-function baseline -----------------------------
+        // Appended at the END of the array so existing indices are unchanged.
+        // NOTE: x1 = sin(t)*10 is negative for roughly half the rows once
+        // size >= 262144 (all non-negative at size=1024), so those rows are
+        // NaN on both sides and verifyCorrectness() skips them.
+        new ExpressionDef("SQRT_PLAIN", "sqrt(x1)",
+        (x1, x2, x3, t) -> sqrtFn(x1, t)),
+
+        // NaN-free variant of SQRT_PLAIN: abs() keeps every row valid at all
+        // sizes, so the correctness check covers 100% of rows.
+        new ExpressionDef("SQRT_ABS", "sqrt(abs(x1))",
+        (x1, x2, x3, t) -> sqrtFn(absFn(x1, t), t))
     };
 
     private static final Map<String, ExpressionDef> EXPRESSIONS_BY_NAME;

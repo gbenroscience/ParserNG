@@ -1,11 +1,13 @@
 # ParserNG
 
-### ParserNG 3.0.9 lands with parser-ng-parquet.
-Allows parquet files to be read at low alloc and very high rates, multiple times faster than the standard paruet-java reader.
+### ParserNG 3.0.9 lands with 
+- `parser-ng-parquet` 
+- upgrades to `parser-ng-sql. Allows parquet files to be read at low alloc and very high rates, multiple times faster than the standard parquet-java reader. `parser-ng-sql` now selects over both local and remote parquet files.
+
 ### ParserNG 3.0.8 is out on maven-central
  A huge speed update over the first edition of `parser-ng-sql`. Race fixes and alloc. updates, further cementing the zero copy promises of the module.
 Now brings the full power of `parser-ng-arrow` to the user, by introducing consierably lesser overhead while allowing `parser-ng-arrow` do its work on the substrate data. Now comes with an execute(args) overload that allows you to use reusable output buffers for even greater speed.
-Approaches Gandiva speed on simple arithmetic/sqrt/logic and beats it by 10x to 30x on every other thing. No LLVM, No JNI. Pure Java.
+Approaches Gandiva speed on simple `arithmetic/sqrt/logic` and beats it by 10x to 30x on every other thing. No LLVM, No JNI. Pure Java.
 
 
 ### ParserNG 3.0.7 is out on maven-central
