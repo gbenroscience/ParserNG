@@ -920,7 +920,7 @@ that directory or the query fails.
 | STRING / ENUM / JSON | VarChar | native | `WHERE` and the select list: `= <> < <= > >=`, `IN`, `BETWEEN`, `LIKE`, `ILIKE`, `REGEXP`, `IS NULL`, and the string functions below | yes (`=`, `<>`, `IN` only; no string range pruning) |
 | BINARY, UUID | VarBinary / FixedSizeBinary | native | clear error | no |
 | DATE | DateDay | native | `WHERE` only: comparisons, `IN`, `BETWEEN`, `IS NULL`, with `DATE '...'` or an ISO string | yes |
-| TIMESTAMP (all units, UTC or local), INT96 | TimeStamp | native | `WHERE` only: comparisons, `IN`, `BETWEEN`, `IS NULL`, with `TIMESTAMP '...'` | no (needs a parser-ng-parquet translator change) |
+| TIMESTAMP (all units, UTC or local), INT96 | TimeStamp | native | `WHERE` only: comparisons, `IN`, `BETWEEN`, `IS NULL`, with `TIMESTAMP '...'` | no (the bridge does not push timestamp predicates; see Timestamps below) |
 | struct / list / map | nested | native (whole struct decoded); fields by path, see nested field access | a leaf by path (`s.field`, `items[0]`, `m['k']`), `CARDINALITY(list_or_map)`; the whole column is an error | no |
 
 A clear error names the column, its type and the clause, for example
@@ -958,7 +958,10 @@ allocated per row except `REGEXP` (one `String` per non-null row).
   nanoseconds) and INT96 work, and a literal finer than the column unit compares exactly (`=` cannot match).
 * **Clear errors** name the column and type: `name = 5`, `id = 'x'`, `flag < TRUE`, two non-numeric columns
   compared with each other, `LIKE` on a non-string column, binary and nested columns in `WHERE`.
-* **Not pushed to Parquet:** `LIKE`, `REGEXP`, boolean tests and timestamps. String and date comparisons are
+* **Not pushed to Parquet:** `LIKE`, `REGEXP`, boolean tests and timestamps. For timestamps this is a limit of the bridge, not of
+  parser-ng-parquet: its translator already prunes `INT64` timestamp columns when given a raw `long` in the column's unit,
+  but the bridge does not yet turn a `TIMESTAMP '...'` literal into that value. `INT96` columns can never be pruned.
+  Timestamp predicates are still evaluated exactly in the engine. String and date comparisons are
   pushed as a pruning hint only; the predicate is always re-evaluated.
 * `WHERE x` on a numeric column now parses (as `x = TRUE`) and then fails with a type error; it used to be a
   syntax error.
@@ -1026,7 +1029,7 @@ buffers and row-index buffer are reused.
 | `DATE '...'`, `TIMESTAMP '...'` literals | yes |
 | `EXTRACT(field FROM x)`, `CAST(x AS DATE / TIMESTAMP / DECIMAL(p,s) / VARCHAR)`, `INTERVAL` | yes (bridge only; see the date and time section) |
 | `CAST ... AS VARCHAR` of a non-integer, `TIMESTAMP WITH TIME ZONE` casts, `date_part`, `AGE`, `DATE_TRUNC` | not yet (named error) |
-| Timestamp row-group pruning | not yet (needs a parser-ng-parquet change) |
+| Timestamp row-group pruning in SQL | not yet (the bridge must convert the literal to the column's unit; `INT96` cannot be pruned) |
 | Quoted identifiers (`"my col"`, `` `my col` ``) | yes (bridge only; double quotes are no longer string literals, see below) |
 | Nested field access (`s.field`, `items[0]`, `m['k']`) and `CARDINALITY` | yes (bridge only; never pushed to row-group pruning) |
 | `MIN`/`MAX`/`COUNT(col)` answered from footer statistics | yes, when provably exact (signed integers, dates, booleans; floats are scanned; see below) |
