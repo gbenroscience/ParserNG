@@ -35,11 +35,12 @@ public class ExpressionChecks {
         return me;
     }
     public static void main(String[] args) {
+        MathExpression.setStrict(true);
         runExpr("2+");
         runExpr("4/0");
         runExpr("2+≠pi");
-        MathExpression me = runExpr("hello world");
-        System.out.println("scanner: "+me.getScanner());
+        runExpr("(((), 2+≠pi, 2+*3");
+        MathExpression me = runExpr("hello world"); 
         runExpr("(((), 2+≠pi, 2+*3");
         runExpr("0/0");
         me=runExpr("sqrt(-1)");

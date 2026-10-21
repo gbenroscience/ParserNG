@@ -112,7 +112,7 @@ public class MathExpression implements Savable, Solvable {
     protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scan input function
     private boolean optimizable;
     
-    private static boolean strict = true;
+    private static boolean strict = false;
 
     protected boolean hasListReturningOperators;
     /**
@@ -832,6 +832,7 @@ public class MathExpression implements Savable, Solvable {
 
         this.commaAlias = opScanner.commaAlias;
         scanner = opScanner.getScanner();
+        System.out.println("1. "+scanner);
         correctFunction = opScanner.isRunnable();
         parser_Result = opScanner.parser_Result;
         if (parser_Result == ParserResult.VALID) {

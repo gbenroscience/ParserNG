@@ -236,6 +236,41 @@ public class MathExpressionTreeDepth implements Savable {
     // string literals and never touch this field.
     private int lastBareIdentEnd = -1;
 
+    // Names introduced by this expression itself: assignment targets
+    // (x=5), function names and parameters (f(x)=..., @(x,y)...). Strict
+    // mode accepts these as declared.
+    private final java.util.Set<String> declaredNames = new java.util.HashSet<>();
+
+    // > 0 while parsing a parameter list of a definition: identifiers there
+    // are declarations, not uses.
+    private int declHeaderDepth = 0;
+
+    /**
+     * Index of the ')' matching the '(' at {@code open}, skipping quoted
+     * strings, or -1 if unbalanced.
+     */
+    private int matchingParenEnd(int open) {
+        int depth = 0;
+        for (int i = open; i < expr.length(); i++) {
+            char ch = expr.charAt(i);
+            if (ch == SINGLE_QUOTE || ch == DOUBLE_QUOTE) {
+                int j = i + 1;
+                while (j < expr.length() && expr.charAt(j) != ch) {
+                    if (expr.charAt(j) == '\\') {
+                        j++;
+                    }
+                    j++;
+                }
+                i = j;
+            } else if (ch == '(') {
+                depth++;
+            } else if (ch == ')' && --depth == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /**
      * Whether unknown identifiers used as calls, e.g. {@code foo(3)}, must be
      * rejected. Isolated in one place so the dependency on
@@ -867,8 +902,14 @@ public class MathExpressionTreeDepth implements Savable {
             final int identEnd = pos;
             skipWhitespace();
             if (peek() == '(') {
+                final int openParen = pos;
                 nextChar(); // (
                 functionCount++;
+                int closeParen = matchingParenEnd(openParen);
+                final boolean isDefinition = closeParen > 0 && isFollowedByAssignment(closeParen + 1);
+                if (isDefinition) {
+                    declaredNames.add(name);
+                }
                 boolean isDiffEq = DIFF_EQ_FUNCTIONS.contains(name);
 
                 // ROOT-ONLY RULE for diffeqn / diffeqnPath / diffeqnHO /
@@ -899,8 +940,18 @@ public class MathExpressionTreeDepth implements Savable {
                 }
                 enterNesting();
                 try {
-                    int result = parseCommaListAndClose(
-                            "Missing closing ')' for function '" + name + "'");
+                    if (isDefinition) {
+                        declHeaderDepth++;
+                    }
+                    int result;
+                    try {
+                        result = parseCommaListAndClose(
+                                "Missing closing ')' for function '" + name + "'");
+                    } finally {
+                        if (isDefinition) {
+                            declHeaderDepth--;
+                        }
+                    }
 
                     // STRICT MODE: foo(3) is only legal if foo is a known
                     // function/method/variable -- unless this is a definition
@@ -962,7 +1013,23 @@ public class MathExpressionTreeDepth implements Savable {
                 // pushes exactly one stack slot, same as a plain variable.
                 return 1;
             }
-            // plain variable pushes 1 item to stack
+            // STRICT MODE: a bare identifier is a variable use and must be
+            // declared. Exempt: declarations (parameter lists, assignment
+            // targets like x=5), names declared earlier in this expression,
+            // system constants (pi, e...), and the free symbols (t, y, ...)
+            // inside diffeqn-family calls.
+            if (declHeaderDepth > 0) {
+                declaredNames.add(name);
+            } else if (isStrictMode() && diffEqDepth == 0 && !isFollowedByAssignment(identEnd)
+                    && !declaredNames.contains(name)
+                    && !com.github.gbenroscience.parser.Variable.isSystemConstant(name)
+                    && !isKnownName(name)) {
+                throw new ParseException(
+                        "Undeclared variable '" + name + "' in strict mode. Declare it first "
+                        + "(e.g. " + name + "=5) or disable strict mode.", nameStart);
+            } else if (isFollowedByAssignment(identEnd)) {
+                declaredNames.add(name);
+            }
             lastBareIdentEnd = identEnd;
             return 1;
         }
@@ -1001,8 +1068,14 @@ public class MathExpressionTreeDepth implements Savable {
                         "Expected '(' after '@' to start an anonymous function/matrix definition", pos);
             }
             nextChar();
-            int headerDepth = parseCommaListAndClose(
-                    "Missing closing ')' for anonymous function/matrix header");
+            int headerDepth;
+            declHeaderDepth++;
+            try {
+                headerDepth = parseCommaListAndClose(
+                        "Missing closing ')' for anonymous function/matrix header");
+            } finally {
+                declHeaderDepth--;
+            }
 
             skipWhitespace();
             // Optional single '=' between the header and the body/data. Do NOT
