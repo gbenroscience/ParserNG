@@ -16,6 +16,9 @@
 package com.github.gbenroscience.parser;
 
 import com.github.gbenroscience.interfaces.Savable;
+import com.github.gbenroscience.parser.methods.Declarations;
+import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.VariableManager;
 import java.util.InputMismatchException;
 import java.util.NoSuchElementException;
 
@@ -222,6 +225,52 @@ public class MathExpressionTreeDepth implements Savable {
 
     // Guards against reusing a single instance across multiple parses.
     private boolean consumed = false;
+    
+    private MathExpression.VariableRegistry registry;
+
+    // End index (exclusive) of the most recently consumed BARE identifier
+    // (a variable-like word that was not a function call and not a name[n]
+    // derivative index), or -1. Used to reject two words separated only by
+    // whitespace, e.g. "hello world" or "a b", which would otherwise be
+    // silently read as implicit multiplication. Words inside quotes are
+    // string literals and never touch this field.
+    private int lastBareIdentEnd = -1;
+
+    /**
+     * Whether unknown identifiers used as calls, e.g. {@code foo(3)}, must be
+     * rejected. Isolated in one place so the dependency on
+     * {@code MathExpression.isStrict()} is easy to adapt.
+     */
+    private static boolean isStrictMode() {
+        return MathExpression.isStrict();
+    }
+
+    /**
+     * True if {@code name} is a user-defined function of any kind, an inbuilt
+     * method, a global variable, or a local variable of the registry.
+     */
+    private boolean isKnownName(String name) {
+        return FunctionManager.containsAny(name)
+                || Declarations.isInbuiltMethodName(name)
+                || DIFF_EQ_FUNCTIONS.contains(name)
+                || VariableManager.lookUp(name) != null
+                || (registry != null && registry.lookUp(name) != null);
+    }
+
+    /**
+     * True if, after optional whitespace at index {@code from}, a single '='
+     * (not '==') follows, i.e. the call is really a definition such as
+     * {@code f(x)=sin(x)} or {@code A(2,2)=(3,1,4,7)} and its name need not
+     * exist yet.
+     */
+    private boolean isFollowedByAssignment(int from) {
+        int i = from;
+        while (i < expr.length() && Character.isWhitespace(expr.charAt(i))) {
+            i++;
+        }
+        return i < expr.length() && expr.charAt(i) == '='
+                && !(i + 1 < expr.length() && expr.charAt(i + 1) == '=');
+    }
 
     /**
      * NOTE: whitespace is intentionally NOT stripped up front (the original
@@ -238,10 +287,32 @@ public class MathExpressionTreeDepth implements Savable {
      * whitespace still correctly terminates a number or identifier, and is
      * preserved verbatim as content inside a string literal.
      * @param expression
+     * @param registry 
      */
-    public MathExpressionTreeDepth(String expression) {
+    public MathExpressionTreeDepth(String expression, MathExpression.VariableRegistry registry) {
         this.expr = expression == null ? "" : expression.replace("-¹", String.valueOf(MathExpression.Token.INVERSE_DEF));
         this.pos = 0;
+        this.registry = registry;
+    }
+    
+        /**
+     * NOTE: whitespace is intentionally NOT stripped up front (the original
+     * implementation did {@code replaceAll("\\s+", "")} in the constructor).
+     * Doing so destroys token boundaries: "a AND b" and "aANDb" become the
+     * same string, so a textual keyword operator can never be reliably told
+     * apart from an identifier that merely starts with the same letters
+     * (e.g. "orange", "android"). Whitespace is instead skipped lazily, at
+     * each point where the parser is deciding what token comes next (see
+     * {@link #skipWhitespace()}), while the low-level token consumers
+     * ({@link #consumeNumber()}, {@link #consumeIdentifier()}, {@link
+     * #consumeStringLiteral(char)}) deliberately
+     * use the raw, non-skipping {@link #peek()}/{@link #nextChar()} so that
+     * whitespace still correctly terminates a number or identifier, and is
+     * preserved verbatim as content inside a string literal.
+     * @param expression 
+     */
+    public MathExpressionTreeDepth(String expression) {
+        this(expression, null);
     }
 
     /**
@@ -613,6 +684,18 @@ public class MathExpressionTreeDepth implements Savable {
                 // 1 slot for the left side, plus the right side's requirement
                 maxDepth = Math.max(maxDepth, 1 + rightDepth);
             } else if (isImplicitMultiplicationTrigger(c)) {
+                if (Character.isLetter(c) && pos > lastBareIdentEnd && lastBareIdentEnd >= 0
+                        && isOnlyWhitespaceAndChar(lastBareIdentEnd, pos, ' ')) {
+                    // Two bare words separated only by whitespace, e.g.
+                    // "hello world" or "a b". Without quotes this is almost
+                    // certainly meant as text (or a missing operator).
+                    throw new ParseException(
+                            "Unexpected word '" + peekWord() + "' after '"
+                            + expr.substring(identStartBefore(lastBareIdentEnd), lastBareIdentEnd)
+                            + "'. Text containing spaces must be enclosed in single or "
+                            + "double quotes, e.g. \"hello world\"; otherwise put an "
+                            + "operator between the terms.", pos);
+                }
                 // No operator token to consume here -- e.g. "3t", "5sin(4)",
                 // or "3'x'" -- treated exactly like an explicit '*' at this
                 // same precedence tier. See isImplicitMultiplicationTrigger's
@@ -781,6 +864,7 @@ public class MathExpressionTreeDepth implements Savable {
         if (Character.isLetter(c) && !isReservedOperatorChar(c)) {
             int nameStart = pos;
             String name = consumeIdentifier();
+            final int identEnd = pos;
             skipWhitespace();
             if (peek() == '(') {
                 nextChar(); // (
@@ -817,6 +901,16 @@ public class MathExpressionTreeDepth implements Savable {
                 try {
                     int result = parseCommaListAndClose(
                             "Missing closing ')' for function '" + name + "'");
+
+                    // STRICT MODE: foo(3) is only legal if foo is a known
+                    // function/method/variable -- unless this is a definition
+                    // such as f(x)=sin(x), which creates the name.
+                    if (isStrictMode() && !isKnownName(name) && !isFollowedByAssignment(pos)) {
+                        throw new ParseException(
+                                "Unknown function or variable '" + name + "' in strict mode: it is not "
+                                + "a user-defined function, an inbuilt function, or a global/local variable",
+                                nameStart);
+                    }
 
                     if (isDiffEq) {
                         // Only whitespace and closing grouping parens may
@@ -869,6 +963,7 @@ public class MathExpressionTreeDepth implements Savable {
                 return 1;
             }
             // plain variable pushes 1 item to stack
+            lastBareIdentEnd = identEnd;
             return 1;
         }
 
@@ -1126,6 +1221,26 @@ public class MathExpressionTreeDepth implements Savable {
             }
             nextChar(); // ordinary content character, including the OTHER quote kind
         }
+    }
+
+    /** The identifier-like word starting at the current position (for messages). */
+    private String peekWord() {
+        int i = pos;
+        while (i < expr.length() && (Character.isLetterOrDigit(expr.charAt(i)) || expr.charAt(i) == '_')
+                && !isReservedOperatorChar(expr.charAt(i))) {
+            i++;
+        }
+        return expr.substring(pos, i);
+    }
+
+    /** Start index of the identifier that ends (exclusive) at {@code end}. */
+    private int identStartBefore(int end) {
+        int i = end;
+        while (i > 0 && (Character.isLetterOrDigit(expr.charAt(i - 1)) || expr.charAt(i - 1) == '_')
+                && !isReservedOperatorChar(expr.charAt(i - 1))) {
+            i--;
+        }
+        return i;
     }
 
     private String consumeIdentifier() {

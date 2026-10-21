@@ -90,6 +90,7 @@ import com.github.gbenroscience.util.StringManager;
  */
 public class MathExpression implements Savable, Solvable {
 
+
     private final ErrorLog errorLog = new ErrorLog();
     private static final long serialVersionUID = 1L;
     /**
@@ -110,6 +111,8 @@ public class MathExpression implements Savable, Solvable {
     protected int noOfListReturningOperators;
     protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scan input function
     private boolean optimizable;
+    
+    private static boolean strict = true;
 
     protected boolean hasListReturningOperators;
     /**
@@ -721,7 +724,8 @@ public class MathExpression implements Savable, Solvable {
         this.willFoldConstants = foldConstants;
         this.help = input.equals(Declarations.HELP);
 
-        Scanner cs = TokenTables.statementScanner(STRING.purifier(input));
+        Scanner cs = TokenTables.statementScanner(input);
+        //Scanner cs = TokenTables.statementScanner(STRING.purifier(input));
 
         List<String> scanned = cs.scan();
         String mathExpr = null;
@@ -816,7 +820,8 @@ public class MathExpression implements Savable, Solvable {
     }
 
     private void initializing(String expression) throws InputMismatchException{
-        this.expression = STRING.purifier(expression);
+        this.expression = expression;
+        //this.expression = STRING.purifier(expression);
         computeTreeDepth();
         setCorrectFunction(true);
         setHasListReturningOperators(false);
@@ -1083,8 +1088,17 @@ public class MathExpression implements Savable, Solvable {
         return optimizable;
     }
 
+    public static void setStrict(boolean strict) {
+        MathExpression.strict = strict;
+    }
+
+    
+    public static boolean isStrict() {
+       return MathExpression.strict;
+    }
+    
     private void computeTreeDepth() {
-        treeStats = new MathExpressionTreeDepth(expression).calculate();
+        treeStats = new MathExpressionTreeDepth(expression, registry).calculate();
     }
 
     public MathExpressionTreeDepth.Result getTreeStats() {

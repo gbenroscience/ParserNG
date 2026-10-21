@@ -49,48 +49,7 @@ public class ExpressionChecks {
         
  
 
-        //me.solve();
-        // 1. Setup tokens (Operators, Keywords, etc.)
-        String[] tokens = {"if", "else", "while", "return", "class", "public", "private",
-            "==", "!=", ">=", "<=", "&&", "||", "++", "--", "+", "-", "*", "/",
-            "=", "{", "}", "(", ")", "[", "]", ";", ",", ".", "String", "int"};
-
-        // 2. Generate a Large Input (approx 1MB of text)
-        StringBuilder sb = new StringBuilder();
-        String sampleBody = "public class Test { int a = 10; if(a == 10 && true) { return a + 5; } } ";
-        for (int i = 0; i < 15000; i++) {
-            sb.append(sampleBody);
-        }
-        String largeInput = sb.toString();
-
-        System.out.println("Input Size: " + (largeInput.length() / 1024) + " KB");
-        System.out.println("--- Starting Benchmark ---\n");
-
-        // Warm up the JVM (important for JIT compiler optimization)
-        runScanner(largeInput, tokens);
-        runOptimizedScanner(largeInput, tokens);
-
-        // 3. Test Scanner (Original)
-        long start1 = System.currentTimeMillis();
-        runScanner(largeInput, tokens);
-        long end1 = System.currentTimeMillis();
-        System.out.println("Scanner (Original) Time: " + (end1 - start1) + " ms");
-
-        // 4. Test Scanner (Optimized)
-        long start2 = System.currentTimeMillis();
-        runOptimizedScanner(largeInput, tokens);
-        long end2 = System.currentTimeMillis();
-        System.out.println("Scanner (Optimized) Time: " + (end2 - start2) + " ms");
-
-        double speedup = (double) (end1 - start1) / (end2 - start2);
-        System.out.println("\nSpeedup Factor: " + String.format("%.2f", speedup) + "x faster");
+    
     }
-
-    private static void runScanner(String input, String[] tokens) {
-        new CustomScanner(input, true, tokens).scan();
-    }
-
-    private static void runOptimizedScanner(String input, String[] tokens) {
-        new Scanner(input, true, tokens).scan();
-    }
+ 
 }
