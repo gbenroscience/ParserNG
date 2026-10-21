@@ -222,6 +222,8 @@ public class MathExpressionTreeDepth implements Savable {
 
     // Guards against reusing a single instance across multiple parses.
     private boolean consumed = false;
+    
+    private MathExpression.VariableRegistry registry;
 
     /**
      * NOTE: whitespace is intentionally NOT stripped up front (the original
@@ -238,10 +240,32 @@ public class MathExpressionTreeDepth implements Savable {
      * whitespace still correctly terminates a number or identifier, and is
      * preserved verbatim as content inside a string literal.
      * @param expression
+     * @param registry 
      */
-    public MathExpressionTreeDepth(String expression) {
+    public MathExpressionTreeDepth(String expression, MathExpression.VariableRegistry registry) {
         this.expr = expression == null ? "" : expression.replace("-¹", String.valueOf(MathExpression.Token.INVERSE_DEF));
         this.pos = 0;
+        this.registry = registry;
+    }
+    
+        /**
+     * NOTE: whitespace is intentionally NOT stripped up front (the original
+     * implementation did {@code replaceAll("\\s+", "")} in the constructor).
+     * Doing so destroys token boundaries: "a AND b" and "aANDb" become the
+     * same string, so a textual keyword operator can never be reliably told
+     * apart from an identifier that merely starts with the same letters
+     * (e.g. "orange", "android"). Whitespace is instead skipped lazily, at
+     * each point where the parser is deciding what token comes next (see
+     * {@link #skipWhitespace()}), while the low-level token consumers
+     * ({@link #consumeNumber()}, {@link #consumeIdentifier()}, {@link
+     * #consumeStringLiteral(char)}) deliberately
+     * use the raw, non-skipping {@link #peek()}/{@link #nextChar()} so that
+     * whitespace still correctly terminates a number or identifier, and is
+     * preserved verbatim as content inside a string literal.
+     * @param expression 
+     */
+    public MathExpressionTreeDepth(String expression) {
+        this(expression, null);
     }
 
     /**

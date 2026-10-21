@@ -110,6 +110,8 @@ public class MathExpression implements Savable, Solvable {
     protected int noOfListReturningOperators;
     protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scan input function
     private boolean optimizable;
+    
+    private static boolean strict = true;
 
     protected boolean hasListReturningOperators;
     /**
@@ -721,7 +723,8 @@ public class MathExpression implements Savable, Solvable {
         this.willFoldConstants = foldConstants;
         this.help = input.equals(Declarations.HELP);
 
-        Scanner cs = TokenTables.statementScanner(STRING.purifier(input));
+        Scanner cs = TokenTables.statementScanner(input);
+        //Scanner cs = TokenTables.statementScanner(STRING.purifier(input));
 
         List<String> scanned = cs.scan();
         String mathExpr = null;
@@ -816,7 +819,8 @@ public class MathExpression implements Savable, Solvable {
     }
 
     private void initializing(String expression) throws InputMismatchException{
-        this.expression = STRING.purifier(expression);
+        this.expression = expression;
+        //this.expression = STRING.purifier(expression);
         computeTreeDepth();
         setCorrectFunction(true);
         setHasListReturningOperators(false);
@@ -1016,6 +1020,15 @@ public class MathExpression implements Savable, Solvable {
         }
     }
 
+    public static void setStrict(boolean strict) {
+        MathExpression.strict = strict;
+    }
+
+    public static boolean isStrict() {
+        return strict;
+    }
+
+    
     /**
      *
      * @return true if the input can be evaluated.

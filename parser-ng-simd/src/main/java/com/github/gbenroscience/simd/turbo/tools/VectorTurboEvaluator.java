@@ -1885,6 +1885,12 @@ public class VectorTurboEvaluator extends ScalarTurboEvaluator1 {
                         }
                     }
 
+                    case OP_FACT -> {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.fact(scratch[base + k]);
+                        }
+                    }
                     case OP_CBRT -> {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {

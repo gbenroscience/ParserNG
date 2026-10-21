@@ -102,6 +102,102 @@ public final class VectorMathF {
             E10 = 1.0 / 3628800, E11 = 1.0 / 39916800, E12 = 1.0 / 479001600,
             E13 = 1.0 / 6227020800.0;
 
+    // =====================================================================================
+    //   Large-argument guard for the float SIN / COS / TAN intrinsics
+    // =====================================================================================
+    // FloatVector.lanewise(SIN / COS / TAN) is fast only while the arguments are small.
+    // Measured on the JDK's SVML-backed intrinsics (AVX2 and AVX-512 alike): cost jumps about
+    // 6x (~0.75 ns -> ~4.5 ns per element on AVX2) as soon as ANY lane of a vector exceeds
+    // roughly 8e3..1e4 in magnitude -- tan degrades first, at 2^13. Expressions such as
+    // sin(x*x+1) feed it exactly such arguments, while sin(sqrt(x*x+y*y)) does not.
+    //
+    // Once a vector with a lane above TRIG_FAST_LIMIT is met, the REST of the call is evaluated
+    // through the double-precision VectorMath kernels instead (float lanes widened to double,
+    // VectorMath.sin/cos/tan, narrowed back). Those kernels are range-robust, and the result is
+    // at least as accurate as the float intrinsic. Calls whose arguments all stay under the
+    // limit run the unchanged float intrinsic, so their results are bit-identical to before.
+    //
+    // NaN lanes are not > limit and stay on the fast path; +/-Inf are > limit and go through the
+    // double kernels, which return NaN exactly as the float intrinsic does.
+    // Disable with -Dparserng.simd.trigWiden=false (A/B comparisons, or if an issue is suspected).
+    private static final boolean TRIG_WIDEN = !"false".equalsIgnoreCase(System.getProperty("parserng.simd.trigWiden"));
+    private static final float TRIG_FAST_LIMIT = 8192.0f;
+    private static final FloatVector V_TRIG_FAST_LIMIT = FloatVector.broadcast(F_SPECIES, TRIG_FAST_LIMIT);
+    // Same total width as F_SPECIES, so one float vector expands into exactly two double vectors.
+    private static final VectorSpecies<Double> TRIG_D_SPECIES = VectorSpecies.of(double.class, F_SPECIES.vectorShape());
+    private static final VectorMask<Float> TRIG_UPPER_HALF = VectorMask.fromLong(F_SPECIES,
+            ((1L << F_SPECIES.length()) - 1L) & ~((1L << (F_SPECIES.length() >> 1)) - 1L));
+
+    private static final int TRIG_SIN = 0, TRIG_COS = 1, TRIG_TAN = 2, TRIG_SEC = 3, TRIG_CSC = 4, TRIG_COT = 5;
+
+    // One scratch per thread (workers run concurrently); grown on demand, never shrunk.
+    private static final ThreadLocal<double[]> TRIG_TMP = ThreadLocal.withInitial(() -> new double[4096]);
+
+    private static boolean trigNeedsWidening(FloatVector x) {
+        return TRIG_WIDEN && x.abs().compare(VectorOperators.GT, V_TRIG_FAST_LIMIT).anyTrue();
+    }
+
+    /**
+     * Evaluates {@code kind}(s[base+from .. base+n) * scale) in double precision and stores the
+     * narrowed result back in place. {@code scale} is applied as a FLOAT multiply, exactly as the
+     * fast path applies it, so only the trig itself changes precision.
+     */
+    private static void trigWide(float[] s, int base, int from, int n, float scale, int kind) {
+        final int m = n - from;
+        if (m <= 0) {
+            return;
+        }
+        double[] t = TRIG_TMP.get();
+        if (t.length < m) {
+            t = new double[Math.max(m, t.length << 1)];
+            TRIG_TMP.set(t);
+        }
+        final int src = base + from;
+        final int dl = TRIG_D_SPECIES.length();
+        final int lim = F_SPECIES.loopBound(m);
+        int j = 0;
+        for (; j < lim; j += F_SPECIES.length()) {
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, src + j);
+            if (scale != 1.0f) {
+                x = x.mul(scale);
+            }
+            ((DoubleVector) x.convertShape(VectorOperators.F2D, TRIG_D_SPECIES, 0)).intoArray(t, j);
+            ((DoubleVector) x.convertShape(VectorOperators.F2D, TRIG_D_SPECIES, 1)).intoArray(t, j + dl);
+        }
+        for (; j < m; j++) {
+            t[j] = (double) (s[src + j] * scale);
+        }
+
+        switch (kind) {
+            case TRIG_SIN, TRIG_CSC -> VectorMath.sin(0, m, t);
+            case TRIG_COS, TRIG_SEC -> VectorMath.cos(0, m, t);
+            default -> VectorMath.tan(0, m, t);                    // TRIG_TAN, TRIG_COT
+        }
+
+        if (kind >= TRIG_SEC) {                                    // sec = 1/cos, csc = 1/sin, cot = 1/tan
+            final DoubleVector one = DoubleVector.broadcast(TRIG_D_SPECIES, 1.0);
+            final int dlim = TRIG_D_SPECIES.loopBound(m);
+            int k = 0;
+            for (; k < dlim; k += dl) {
+                one.div(DoubleVector.fromArray(TRIG_D_SPECIES, t, k)).intoArray(t, k);
+            }
+            for (; k < m; k++) {
+                t[k] = 1.0 / t[k];
+            }
+        }
+
+        j = 0;
+        for (; j < lim; j += F_SPECIES.length()) {
+            FloatVector lo = (FloatVector) DoubleVector.fromArray(TRIG_D_SPECIES, t, j).convertShape(VectorOperators.D2F, F_SPECIES, 0);
+            FloatVector hi = (FloatVector) DoubleVector.fromArray(TRIG_D_SPECIES, t, j + dl).convertShape(VectorOperators.D2F, F_SPECIES, -1);
+            lo.blend(hi, TRIG_UPPER_HALF).intoArray(s, src + j);
+        }
+        for (; j < m; j++) {
+            s[src + j] = (float) t[j];
+        }
+    }
+
+
     // ========================================================================
     // NO-LAMBDA DIRECT OPERATIONS
     // ========================================================================
@@ -110,8 +206,12 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .lanewise(VectorOperators.SIN)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, 1.0f, TRIG_SIN);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.SIN)
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -123,8 +223,12 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .lanewise(VectorOperators.COS)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, 1.0f, TRIG_COS);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.COS)
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -136,8 +240,12 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .lanewise(VectorOperators.TAN)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, 1.0f, TRIG_TAN);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.TAN)
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -150,9 +258,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_DEG_TO_RAD)
-                    .lanewise(VectorOperators.SIN)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_DEG_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, DEG_TO_RAD, TRIG_SIN);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.SIN)
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -164,9 +276,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_DEG_TO_RAD)
-                    .lanewise(VectorOperators.COS)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_DEG_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, DEG_TO_RAD, TRIG_COS);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.COS)
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -178,9 +294,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_DEG_TO_RAD)
-                    .lanewise(VectorOperators.TAN)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_DEG_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, DEG_TO_RAD, TRIG_TAN);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.TAN)
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -193,9 +313,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_GRAD_TO_RAD)
-                    .lanewise(VectorOperators.SIN)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_GRAD_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, GRAD_TO_RAD, TRIG_SIN);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.SIN)
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -207,9 +331,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_GRAD_TO_RAD)
-                    .lanewise(VectorOperators.COS)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_GRAD_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, GRAD_TO_RAD, TRIG_COS);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.COS)
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -221,9 +349,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_GRAD_TO_RAD)
-                    .lanewise(VectorOperators.TAN)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_GRAD_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, GRAD_TO_RAD, TRIG_TAN);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.TAN)
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -237,8 +369,12 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            V_ONE.div(FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .lanewise(VectorOperators.COS))
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, 1.0f, TRIG_SEC);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            V_ONE.div(x.lanewise(VectorOperators.COS))
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -250,8 +386,12 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            V_ONE.div(FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .lanewise(VectorOperators.SIN))
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, 1.0f, TRIG_CSC);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            V_ONE.div(x.lanewise(VectorOperators.SIN))
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -263,9 +403,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector v = FloatVector.fromArray(F_SPECIES, s, base + i);
-            v.lanewise(VectorOperators.COS)
-                    .div(v.lanewise(VectorOperators.SIN))
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, 1.0f, TRIG_COT);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.COS)
+                    .div(x.lanewise(VectorOperators.SIN))
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -278,9 +422,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            V_ONE.div(FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_DEG_TO_RAD)
-                    .lanewise(VectorOperators.COS))
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_DEG_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, DEG_TO_RAD, TRIG_SEC);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            V_ONE.div(x.lanewise(VectorOperators.COS))
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -292,9 +440,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            V_ONE.div(FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_DEG_TO_RAD)
-                    .lanewise(VectorOperators.SIN))
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_DEG_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, DEG_TO_RAD, TRIG_CSC);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            V_ONE.div(x.lanewise(VectorOperators.SIN))
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -306,10 +458,14 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector v = FloatVector.fromArray(F_SPECIES, s, base + i)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
                     .mul(V_DEG_TO_RAD);
-            v.lanewise(VectorOperators.COS)
-                    .div(v.lanewise(VectorOperators.SIN))
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, DEG_TO_RAD, TRIG_COT);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.COS)
+                    .div(x.lanewise(VectorOperators.SIN))
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -322,9 +478,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            V_ONE.div(FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_GRAD_TO_RAD)
-                    .lanewise(VectorOperators.COS))
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_GRAD_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, GRAD_TO_RAD, TRIG_SEC);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            V_ONE.div(x.lanewise(VectorOperators.COS))
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -336,9 +496,13 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            V_ONE.div(FloatVector.fromArray(F_SPECIES, s, base + i)
-                    .mul(V_GRAD_TO_RAD)
-                    .lanewise(VectorOperators.SIN))
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
+                    .mul(V_GRAD_TO_RAD);
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, GRAD_TO_RAD, TRIG_CSC);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            V_ONE.div(x.lanewise(VectorOperators.SIN))
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
@@ -350,10 +514,14 @@ public final class VectorMathF {
         int i = 0;
         int limit = F_SPECIES.loopBound(n);
         for (; i < limit; i += F_SPECIES.length()) {
-            FloatVector v = FloatVector.fromArray(F_SPECIES, s, base + i)
+            FloatVector x = FloatVector.fromArray(F_SPECIES, s, base + i)
                     .mul(V_GRAD_TO_RAD);
-            v.lanewise(VectorOperators.COS)
-                    .div(v.lanewise(VectorOperators.SIN))
+            if (trigNeedsWidening(x)) {
+                trigWide(s, base, i, n, GRAD_TO_RAD, TRIG_COT);   // rest of the call, incl. the scalar tail
+                return;
+            }
+            x.lanewise(VectorOperators.COS)
+                    .div(x.lanewise(VectorOperators.SIN))
                     .intoArray(s, base + i);
         }
         for (; i < n; i++) {
