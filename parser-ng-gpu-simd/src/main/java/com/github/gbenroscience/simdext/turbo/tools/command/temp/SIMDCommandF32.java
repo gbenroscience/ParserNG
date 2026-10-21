@@ -910,11 +910,21 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
         void apply(int base, int n, float[] scratch);
     }
 
-    record UnaryMathCommand(UnaryMathOp op, int baseOff) implements VectorCommand {
+    record UnaryMathCommand(UnaryMathOp op, int baseOff) implements VectorCommand, OutputInPlaceCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
             op.apply(baseOff, n, ctx.scratch);
+        }
+
+        @Override
+        public int inPlaceBase() {
+            return baseOff;
+        }
+
+        @Override
+        public void applyInPlaceOnOutput(float[] output, int outputOffset, int n) {
+            op.apply(outputOffset, n, output);
         }
     }
 
@@ -1032,6 +1042,258 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                 }
             }
         }
+    }
+
+    // --- Lane-wise op chains (abs / sqrt) ---
+    // abs and sqrt each map to ONE hardware instruction per vector
+    // (VectorOperators.ABS / VectorOperators.SQRT). Compiled one-op-per-command
+    // they are dominated by memory traffic, not math: sqrt(abs(x)) used to cost
+    //   copy x->scratch, abs in place, sqrt in place, scratch->output
+    // = four full passes over every block, versus ONE pass for a bare sqrt(x)
+    // (LoadSqrtCommand). The two commands below keep the value in a vector
+    // register across a chain of up to two lane ops and touch memory once:
+    //
+    //   LoadLaneChainCommand  variable -> [lane ops] -> scratch / output
+    //   LaneChainCommand      scratch  -> [lane ops] -> scratch / output
+    //
+    // Both implement DirectOutputCommand, so when one is the last command of a
+    // plan its result goes straight to `output` and the separate
+    // scratch-to-output writeback pass disappears too. The lane ops are the same
+    // VectorOperators primitives VectorMath uses for abs()/sqrt(), so results
+    // are bit-identical to the unfused path.
+    //
+    // A chain is represented by a small SHAPE id, and each shape has its own
+    // straight-line loop in runLanes(). Deliberately NOT a loop over an op
+    // array: a vector value carried through a variable-length loop is not
+    // reliably scalarized by C2 (it boxes a FloatVector per op, ~24 B/element),
+    // and which way it goes depends on what else the JVM has compiled. Chains
+    // longer than two ops are simply split across consecutive commands.
+    static final int LANE_ABS = 0;
+    static final int LANE_SQRT = 1;
+
+    static final int SHAPE_ABS = 0;         // abs(x)
+    static final int SHAPE_SQRT = 1;        // sqrt(x)
+    static final int SHAPE_ABS_SQRT = 2;    // sqrt(abs(x))
+    static final int SHAPE_SQRT_ABS = 3;    // abs(sqrt(x))
+    static final int SHAPE_SQRT_SQRT = 4;   // sqrt(sqrt(x))
+
+    private static boolean isLaneOp(int opcode) {
+        return opcode == OP_ABS || opcode == OP_SQRT;
+    }
+
+    private static int toLaneOp(int opcode) {
+        return opcode == OP_ABS ? LANE_ABS : LANE_SQRT;
+    }
+
+    /**
+     * The shape that results from applying {@code lane} after {@code shape}, or
+     * -1 if that would need more than two ops (caller then starts a new command).
+     * abs(abs(x)) == abs(x) exactly, so a repeated abs never grows the chain.
+     */
+    private static int extendShape(int shape, int lane) {
+        return switch (shape) {
+            case SHAPE_ABS ->
+                lane == LANE_ABS ? SHAPE_ABS : SHAPE_ABS_SQRT;
+            case SHAPE_SQRT ->
+                lane == LANE_ABS ? SHAPE_SQRT_ABS : SHAPE_SQRT_SQRT;
+            default ->
+                -1;
+        };
+    }
+
+    private static int shapeOf(int lane) {
+        return lane == LANE_ABS ? SHAPE_ABS : SHAPE_SQRT;
+    }
+
+    /**
+     * dst[dstOff+k] = chain(src[srcOff+k]) for k in [0, n). src and dst may be
+     * the same array at the same offset (in-place): each vector is fully read
+     * before it is written.
+     */
+    private static void runLanes(float[] src, int srcOff, float[] dst, int dstOff, int n, int shape) {
+        int k = 0;
+        final int limit = SPECIES.loopBound(n);
+        switch (shape) {
+            case SHAPE_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.ABS)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = Math.abs(src[srcOff + k]);
+                }
+            }
+            case SHAPE_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = (float) Math.sqrt(src[srcOff + k]);
+                }
+            }
+            case SHAPE_ABS_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.ABS)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = (float) Math.sqrt(Math.abs(src[srcOff + k]));
+                }
+            }
+            case SHAPE_SQRT_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.ABS)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = Math.abs((float) Math.sqrt(src[srcOff + k]));
+                }
+            }
+            case SHAPE_SQRT_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = (float) Math.sqrt((float) Math.sqrt(src[srcOff + k]));
+                }
+            }
+            default ->
+                throw new IllegalStateException("bad lane shape " + shape);
+        }
+    }
+
+    record LoadLaneChainCommand(int varSlot, int shape, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            if (ctx.flatVariables != null) {
+                runLanes(ctx.flatVariables, (varSlot * ctx.dataSize) + ctx.blockStart, ctx.scratch, destOff, n, shape);
+            } else {
+                runLanes(ctx._2DVariables[varSlot], ctx.blockStart, ctx.scratch, destOff, n, shape);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            if (ctx.flatVariables != null) {
+                runLanes(ctx.flatVariables, (varSlot * ctx.dataSize) + ctx.blockStart, output, outputOffset, n, shape);
+            } else {
+                runLanes(ctx._2DVariables[varSlot], ctx.blockStart, output, outputOffset, n, shape);
+            }
+        }
+    }
+
+    record LaneChainCommand(int shape, int baseOff) implements VectorCommand, DirectOutputCommand, OutputInPlaceCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            runLanes(ctx.scratch, baseOff, ctx.scratch, baseOff, n, shape);
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            runLanes(ctx.scratch, baseOff, output, outputOffset, n, shape);
+        }
+
+        @Override
+        public int inPlaceBase() {
+            return baseOff;
+        }
+
+        @Override
+        public void applyInPlaceOnOutput(float[] output, int outputOffset, int n) {
+            runLanes(output, outputOffset, output, outputOffset, n, shape);
+        }
+    }
+
+    // --- Unary tail on the output array ---
+    // A plan that ENDS in in-place unary ops -- e.g. floor(x1 + x2), or
+    // abs(floor(x1 * x2)) -- used to cost, per block: producer -> scratch,
+    // each unary op in place on scratch, then a scratch-to-output writeback.
+    // When the command feeding that tail can write straight to `output` (a
+    // DirectOutputCommand), the tail ops can just as well run in place on the
+    // OUTPUT block it wrote: producer -> output, unary ops in place on output.
+    // Same results, one full read+write pass fewer per block (the writeback).
+    //
+    // OPT-IN: off by default. Measured gain is real only when the block stays
+    // cache-resident (small inputs, roughly 1.1x-2x for cheap unary ops such as
+    // floor/ceil); at large sizes the run is memory-bound and the result is
+    // neutral to slightly negative (about 0.9x-1.05x), so enabling it blindly is
+    // not worthwhile. Turn it on with -Dparserng.simd.outputTail=true and
+    // benchmark YOUR workload first. Plans it does not apply to are untouched.
+    //
+    // CONTRACT this relies on: a UnaryMathOp only reads and writes
+    // array[base .. base+n). Every op in resolveUnaryMathOp is elementwise, and
+    // UnaryMathOp.apply already takes (base, n, array) rather than a scratch
+    // slot, but it is the one assumption the compiler does not enforce -- run
+    // UnaryOpContractTest before enabling.
+    private static final boolean OUTPUT_TAIL_ENABLED = Boolean.getBoolean("parserng.simd.outputTail");
+
+    interface OutputInPlaceCommand {
+
+        /** Scratch offset this command operates at; only base-0 commands can be the tail (the final result lives at 0). */
+        int inPlaceBase();
+
+        /** Apply this command in place to output[outputOffset .. outputOffset+n). */
+        void applyInPlaceOnOutput(float[] output, int outputOffset, int n);
+    }
+
+    private static final class OutputTail {
+
+        final int runLen;                      // commands [0, runLen) run through execute() as usual
+        final DirectOutputCommand producer;    // plan[runLen]: writes its result straight to output
+        final OutputInPlaceCommand[] tail;     // plan(runLen, end): run in place on output, in order
+
+        OutputTail(int runLen, DirectOutputCommand producer, OutputInPlaceCommand[] tail) {
+            this.runLen = runLen;
+            this.producer = producer;
+            this.tail = tail;
+        }
+
+        void apply(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            producer.executeToOutput(ctx, n, output, outputOffset);
+            for (int i = 0; i < tail.length; i++) {
+                tail[i].applyInPlaceOnOutput(output, outputOffset, n);
+            }
+        }
+    }
+
+    /**
+     * Splits {@code plan} into [normal commands][producer][in-place unary tail]
+     * when that shape applies, else returns null (caller keeps the ordinary
+     * execute()+writeback path). Only used when the LAST command is not itself a
+     * DirectOutputCommand -- that case is already handled by the terminal path.
+     *
+     * <p>The command immediately before the tail produced the value the first tail
+     * op consumes (strict stack machine), and every tail op sits at base 0, so the
+     * producer's result is at scratch 0 -- exactly what executeToOutput writes.
+     */
+    private static OutputTail analyzeOutputTail(VectorCommand[] plan) {
+        if (!OUTPUT_TAIL_ENABLED) {
+            return null;
+        }
+        int i = plan.length;
+        while (i > 0 && plan[i - 1] instanceof OutputInPlaceCommand c && c.inPlaceBase() == 0) {
+            i--;
+        }
+        if (i == plan.length || i == 0 || !(plan[i - 1] instanceof DirectOutputCommand producer)) {
+            return null;
+        }
+        OutputInPlaceCommand[] tail = new OutputInPlaceCommand[plan.length - i];
+        for (int j = 0; j < tail.length; j++) {
+            tail[j] = (OutputInPlaceCommand) plan[i + j];
+        }
+        return new OutputTail(i - 1, producer, tail);
     }
 
     @FunctionalInterface
@@ -1194,7 +1456,12 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
                     // LoadCommand into the unary op itself. See
                     // tryFuseLoadUnary()'s javadoc for the generic-vs-dedicated
                     // (LoadSqrtCommand) distinction.
-                    VectorCommand loadFused = tryFuseLoadUnary(plan, opcode, baseOff);
+                    //
+                    // Cheap lane-wise ops (abs, sqrt) are tried FIRST so that
+                    // chains such as sqrt(abs(x)) collapse into one command --
+                    // see tryFuseLaneChain(). Everything else is untouched.
+                    VectorCommand laneFused = tryFuseLaneChain(plan, opcode, baseOff);
+                    VectorCommand loadFused = laneFused != null ? laneFused : tryFuseLoadUnary(plan, opcode, baseOff);
                     if (loadFused != null) {
                         plan.add(loadFused);
                     } else {
@@ -1573,6 +1840,63 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             return new LoadSqrtCommand(load.slotIdx(), baseOff);
         }
         return new LoadUnaryMathCommand(resolveUnaryMathOp(opcode), load.slotIdx(), baseOff);
+    }
+
+    /**
+     * Peephole for the cheap lane-wise unary ops ({@code abs}, {@code sqrt}):
+     * folds them into one command so a chain costs one pass over memory
+     * instead of one pass per op. See the "Lane-wise op chains" comment above
+     * {@link LoadLaneChainCommand}.
+     *
+     * <p>The top of the virtual stack is always produced by the LAST plan
+     * entry (strict stack machine), so only the tail of {@code plan} is ever
+     * inspected. Cases, in order:
+     * <ul>
+     * <li>tail is a {@link LoadLaneChainCommand} / {@link LaneChainCommand} at
+     * {@code baseOff} with room for another op: extend its chain;</li>
+     * <li>tail is a {@link LoadSqrtCommand} at {@code baseOff}: promote it to a
+     * {@link LoadLaneChainCommand} {@code [sqrt, op]};</li>
+     * <li>tail is a bare {@link LoadCommand} and the op is {@code abs}: start a
+     * {@link LoadLaneChainCommand} (a bare {@code sqrt(x)} is deliberately left
+     * to {@link #tryFuseLoadUnary}, i.e. {@link LoadSqrtCommand}, unchanged);</li>
+     * <li>otherwise (e.g. {@code sqrt(x+1)}, or a chain that is already two ops
+     * long) the op becomes an in-place {@link LaneChainCommand}.</li>
+     * </ul>
+     * Returns {@code null} (leaving {@code plan} untouched) when {@code opcode}
+     * is not a lane op, or in the bare-{@code sqrt(x)} case above.
+     */
+    private static VectorCommand tryFuseLaneChain(List<VectorCommand> plan, int opcode, int baseOff) {
+        if (!isLaneOp(opcode)) {
+            return null;
+        }
+        final int lane = toLaneOp(opcode);
+        final int size = plan.size();
+        if (size >= 1) {
+            VectorCommand last = plan.get(size - 1);
+            if (last instanceof LoadLaneChainCommand c && c.destOff() == baseOff) {
+                int ext = extendShape(c.shape(), lane);
+                if (ext >= 0) {
+                    plan.remove(size - 1);
+                    return new LoadLaneChainCommand(c.varSlot(), ext, baseOff);
+                }
+            } else if (last instanceof LaneChainCommand c && c.baseOff() == baseOff) {
+                int ext = extendShape(c.shape(), lane);
+                if (ext >= 0) {
+                    plan.remove(size - 1);
+                    return new LaneChainCommand(ext, baseOff);
+                }
+            } else if (last instanceof LoadSqrtCommand c && c.destOff() == baseOff) {
+                plan.remove(size - 1);
+                return new LoadLaneChainCommand(c.varSlot(), extendShape(SHAPE_SQRT, lane), baseOff);
+            } else if (last instanceof LoadCommand c && c.destOff() == baseOff) {
+                if (lane == LANE_SQRT) {
+                    return null; // bare sqrt(x): keep the dedicated LoadSqrtCommand
+                }
+                plan.remove(size - 1);
+                return new LoadLaneChainCommand(c.slotIdx(), SHAPE_ABS, baseOff);
+            }
+        }
+        return new LaneChainCommand(shapeOf(lane), baseOff);
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression implements AutoCloseable {
@@ -2053,7 +2377,11 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             // Resolved once outside the block loop since it's the same for
             // every block.
             final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
-            final int runLen = terminal != null ? planLen - 1 : planLen;
+            // Plan ends in in-place unary ops fed by a direct-output producer: the
+            // producer writes `output` and the unary tail runs in place on it
+            // (see analyzeOutputTail). Only considered when `terminal` is null.
+            final OutputTail otail = terminal == null ? analyzeOutputTail(executionPlan) : null;
+            final int runLen = terminal != null ? planLen - 1 : (otail != null ? otail.runLen : planLen);
 
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
@@ -2065,6 +2393,8 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
 
                 if (terminal != null) {
                     terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
+                } else if (otail != null) {
+                    otail.apply(ctx, currentBlockSize, output, blockStart);
                 } else {
                     // Vectorized output write back (assumes result is at scratch offset 0)
                     int k = 0, limit = SPECIES.loopBound(currentBlockSize);
@@ -2086,7 +2416,11 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
             // See the flatVariables overload above for the full explanation of
             // this DirectOutputCommand check -- identical logic here.
             final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
-            final int runLen = terminal != null ? planLen - 1 : planLen;
+            // Plan ends in in-place unary ops fed by a direct-output producer: the
+            // producer writes `output` and the unary tail runs in place on it
+            // (see analyzeOutputTail). Only considered when `terminal` is null.
+            final OutputTail otail = terminal == null ? analyzeOutputTail(executionPlan) : null;
+            final int runLen = terminal != null ? planLen - 1 : (otail != null ? otail.runLen : planLen);
 
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
@@ -2098,6 +2432,8 @@ public class SIMDCommandF32 extends VectorTurboEvaluator {
 
                 if (terminal != null) {
                     terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
+                } else if (otail != null) {
+                    otail.apply(ctx, currentBlockSize, output, blockStart);
                 } else {
                     // Vectorized output write back
                     int k = 0, limit = SPECIES.loopBound(currentBlockSize);

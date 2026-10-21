@@ -15,10 +15,11 @@
  */
 package com.github.gbenroscience.parser.benchmarks;
 
- 
-import com.github.gbenroscience.parser.CustomScanner; 
+import com.github.gbenroscience.parser.CustomScanner;
+import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.Scanner;
 import java.util.*;
+
 /*
 Sampel output gains:
 Input Size: 1054 KB
@@ -30,13 +31,16 @@ Scanner (Optimized) Time: 55 ms
 Speedup Factor: 347.00x faster
 
 So Scanner will replace Scanner in all parser code
-*/
+ */
 public class ScannerBenchmark {
+ 
     public static void main(String[] args) {
+   
+        //me.solve();
         // 1. Setup tokens (Operators, Keywords, etc.)
-        String[] tokens = {"if", "else", "while", "return", "class", "public", "private", 
-                           "==", "!=", ">=", "<=", "&&", "||", "++", "--", "+", "-", "*", "/", 
-                           "=", "{", "}", "(", ")", "[", "]", ";", ",", ".", "String", "int"};
+        String[] tokens = {"if", "else", "while", "return", "class", "public", "private",
+            "==", "!=", ">=", "<=", "&&", "||", "++", "--", "+", "-", "*", "/",
+            "=", "{", "}", "(", ")", "[", "]", ";", ",", ".", "String", "int"};
 
         // 2. Generate a Large Input (approx 1MB of text)
         StringBuilder sb = new StringBuilder();

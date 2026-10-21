@@ -75,6 +75,32 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         void execute(EvaluationContext ctx, int n);
     }
 
+    /**
+     * A command that can write its final result for the current block straight
+     * into the caller's output buffer, instead of into {@code ctx.scratch}.
+     *
+     * <p>
+     * When the LAST command in a compiled plan implements this interface, the
+     * {@code applyBulkInternal*} loops call {@link #executeToOutput} for it
+     * instead of {@code execute(...)} followed by the separate scratch-to-output
+     * writeback pass -- one fewer full read+write pass over every block. Every
+     * command before the last one is unaffected; this only changes how the FINAL
+     * result reaches the output. A last command that does not implement this
+     * interface (PowCommand, UnaryMathCommand, BinaryMathCommand -- anything
+     * that delegates to VectorMathF's scratch-shaped ops) takes the original
+     * execute()+writeback path, byte-for-byte unchanged.
+     *
+     * <p>
+     * There are two flavours because the plan can be driven with either a
+     * {@link MemorySegment} output or a {@code float[]} output.
+     */
+    interface DirectOutputCommand {
+
+        void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset);
+
+        void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset);
+    }
+
 // 2. Ultra-lean Context (Zero dynamic stack allocation)
     private static final class EvaluationContext {
 
@@ -114,7 +140,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
     }
 // --- Memory Operations ---
 
-    record ConstCommand(float value, int destOff) implements VectorCommand {
+    record ConstCommand(float value, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -128,9 +154,34 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 s[destOff + k] = value;
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            FloatVector v = FloatVector.broadcast(SPECIES, value);
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                v.intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+            }
+            for (; k < n; k++) {
+                output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, value);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            FloatVector v = FloatVector.broadcast(SPECIES, value);
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                v.intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = value;
+            }
+        }
     }
 
-    record LoadCommand(int slotIdx, int destOff) implements VectorCommand {
+    record LoadCommand(int slotIdx, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -148,10 +199,42 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                         (long) ctx.blockStart * ValueLayout.JAVA_FLOAT.byteSize(), ctx.scratch, destOff, n);
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            if (ctx.flatVariables != null) {
+                int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
+                MemorySegment.copy(ctx.flatVariables, srcOff, output, ValueLayout.JAVA_FLOAT, outputElemOffset * elemBytes, n);
+            } else if (ctx._2DVariables != null) {
+                MemorySegment.copy(ctx._2DVariables[slotIdx], ctx.blockStart, output, ValueLayout.JAVA_FLOAT, outputElemOffset * elemBytes, n);
+            } else if (ctx.flatVariablesSeg != null) {
+                long srcOff = ((long) slotIdx * ctx.dataSize) + ctx.blockStart;
+                MemorySegment.copy(ctx.flatVariablesSeg, srcOff * elemBytes, output, outputElemOffset * elemBytes, (long) n * elemBytes);
+            } else {
+                MemorySegment.copy(ctx._2DVariablesSeg[slotIdx], (long) ctx.blockStart * elemBytes, output, outputElemOffset * elemBytes, (long) n * elemBytes);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            if (ctx.flatVariables != null) {
+                int srcOff = (slotIdx * ctx.dataSize) + ctx.blockStart;
+                System.arraycopy(ctx.flatVariables, srcOff, output, outputOffset, n);
+            } else if (ctx._2DVariables != null) {
+                System.arraycopy(ctx._2DVariables[slotIdx], ctx.blockStart, output, outputOffset, n);
+            } else if (ctx.flatVariablesSeg != null) {
+                long srcOff = ((long) slotIdx * ctx.dataSize) + ctx.blockStart;
+                MemorySegment.copy(ctx.flatVariablesSeg, ValueLayout.JAVA_FLOAT, srcOff * elemBytes, output, outputOffset, n);
+            } else {
+                MemorySegment.copy(ctx._2DVariablesSeg[slotIdx], ValueLayout.JAVA_FLOAT, (long) ctx.blockStart * elemBytes, output, outputOffset, n);
+            }
+        }
     }
 
 // --- Core Binary Operations ---
-    record AddCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record AddCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -166,9 +249,38 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 s[destOff + k] = s[lOff + k] + s[rOff + k];
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            float[] s = ctx.scratch;
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .add(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+            }
+            for (; k < n; k++) {
+                output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, s[lOff + k] + s[rOff + k]);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .add(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] + s[rOff + k];
+            }
+        }
     }
 
-    record SubCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record SubCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -183,9 +295,38 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 s[destOff + k] = s[lOff + k] - s[rOff + k];
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            float[] s = ctx.scratch;
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .sub(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+            }
+            for (; k < n; k++) {
+                output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, s[lOff + k] - s[rOff + k]);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .sub(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] - s[rOff + k];
+            }
+        }
     }
 
-    record MulCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record MulCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -200,9 +341,38 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 s[destOff + k] = s[lOff + k] * s[rOff + k];
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            float[] s = ctx.scratch;
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .mul(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+            }
+            for (; k < n; k++) {
+                output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, s[lOff + k] * s[rOff + k]);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .mul(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] * s[rOff + k];
+            }
+        }
     }
 
-    record DivCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record DivCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -215,6 +385,35 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             }
             for (; k < n; k++) {
                 s[destOff + k] = s[lOff + k] / s[rOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            float[] s = ctx.scratch;
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .div(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+            }
+            for (; k < n; k++) {
+                output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, s[lOff + k] / s[rOff + k]);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, limit = SPECIES.loopBound(n);
+            for (; k < limit; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, lOff + k)
+                        .div(FloatVector.fromArray(SPECIES, s, rOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            for (; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] / s[rOff + k];
             }
         }
     }
@@ -231,7 +430,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
     // peephole-fusion over the emitted plan - see tryFuseLoadLoad().
     // Numerically identical to LoadCommand+LoadCommand+BinaryOp: same IEEE
     // op, same operand order, just a different source.
-    record LoadLoadAddCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+    record LoadLoadAddCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -289,9 +488,121 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .add(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, flat[lBase + k] + flat[rBase + k]);
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .add(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, l[base + k] + r[base + k]);
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .add(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k,
+                            flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) + flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k));
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .add(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k,
+                            lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) + rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k));
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .add(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] + flat[rBase + k];
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .add(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] + r[base + k];
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .add(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) + flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k);
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .add(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) + rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k);
+                }
+            }
+        }
     }
 
-    record LoadLoadSubCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+    record LoadLoadSubCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -349,9 +660,121 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .sub(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, flat[lBase + k] - flat[rBase + k]);
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .sub(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, l[base + k] - r[base + k]);
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .sub(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k,
+                            flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) - flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k));
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .sub(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k,
+                            lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) - rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k));
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .sub(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] - flat[rBase + k];
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .sub(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] - r[base + k];
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .sub(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) - flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k);
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .sub(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) - rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k);
+                }
+            }
+        }
     }
 
-    record LoadLoadMulCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+    record LoadLoadMulCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -409,9 +832,121 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .mul(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, flat[lBase + k] * flat[rBase + k]);
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .mul(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, l[base + k] * r[base + k]);
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .mul(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k,
+                            flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) * flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k));
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .mul(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k,
+                            lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) * rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k));
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .mul(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] * flat[rBase + k];
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .mul(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] * r[base + k];
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .mul(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) * flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k);
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .mul(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) * rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k);
+                }
+            }
+        }
     }
 
-    record LoadLoadDivCommand(int lSlot, int rSlot, int destOff) implements VectorCommand {
+    record LoadLoadDivCommand(int lSlot, int rSlot, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -469,6 +1004,118 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 }
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .div(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, flat[lBase + k] / flat[rBase + k]);
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .div(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, l[base + k] / r[base + k]);
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .div(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k,
+                            flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) / flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k));
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .div(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k,
+                            lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) / rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k));
+                }
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, limit = SPECIES.loopBound(n);
+            if (ctx.flatVariables != null) {
+                float[] flat = ctx.flatVariables;
+                int lBase = (lSlot * ctx.dataSize) + ctx.blockStart;
+                int rBase = (rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, flat, lBase + k)
+                            .div(FloatVector.fromArray(SPECIES, flat, rBase + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flat[lBase + k] / flat[rBase + k];
+                }
+            } else if (ctx._2DVariables != null) {
+                float[] l = ctx._2DVariables[lSlot];
+                float[] r = ctx._2DVariables[rSlot];
+                int base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, l, base + k)
+                            .div(FloatVector.fromArray(SPECIES, r, base + k))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = l[base + k] / r[base + k];
+                }
+            } else if (ctx.flatVariablesSeg != null) {
+                MemorySegment flatSeg = ctx.flatVariablesSeg;
+                long lBase = ((long) lSlot * ctx.dataSize) + ctx.blockStart;
+                long rBase = ((long) rSlot * ctx.dataSize) + ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, flatSeg, (lBase + k) * elemBytes, ByteOrder.nativeOrder())
+                            .div(FloatVector.fromMemorySegment(SPECIES, flatSeg, (rBase + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, lBase + k) / flatSeg.getAtIndex(ValueLayout.JAVA_FLOAT, rBase + k);
+                }
+            } else {
+                MemorySegment lSeg = ctx._2DVariablesSeg[lSlot];
+                MemorySegment rSeg = ctx._2DVariablesSeg[rSlot];
+                long base = ctx.blockStart;
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, lSeg, (base + k) * elemBytes, ByteOrder.nativeOrder())
+                            .div(FloatVector.fromMemorySegment(SPECIES, rSeg, (base + k) * elemBytes, ByteOrder.nativeOrder()))
+                            .intoArray(output, outputOffset + k);
+                }
+                for (; k < n; k++) {
+                    output[outputOffset + k] = lSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k) / rSeg.getAtIndex(ValueLayout.JAVA_FLOAT, base + k);
+                }
+            }
+        }
     }
 
     record PowCommand(int lOff, int rOff, int destOff) implements VectorCommand {
@@ -481,7 +1128,7 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         }
     }
 
-    record RemCommand(int lOff, int rOff, int destOff) implements VectorCommand {
+    record RemCommand(int lOff, int rOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -490,10 +1137,26 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 s[destOff + k] = s[lOff + k] % s[rOff + k];
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            float[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, s[lOff + k] % s[rOff + k]);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                output[outputOffset + k] = s[lOff + k] % s[rOff + k];
+            }
+        }
     }
 
 // --- Comparisons ---
-    record CompareCommand(int lOff, int rOff, int destOff, int opcode) implements VectorCommand {
+    record CompareCommand(int lOff, int rOff, int destOff, int opcode) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -548,10 +1211,118 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                     throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            float[] s = ctx.scratch;
+            int l = lOff;
+            int r = rOff;
+            int d = destOff;
+
+            switch (opcode) {
+                case OP_GT -> {
+                    for (int k = 0; k < n; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, (s[l + k] > s[r + k]) ? 1.0f : 0.0f);
+                    }
+                }
+                case OP_LT -> {
+                    for (int k = 0; k < n; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, (s[l + k] < s[r + k]) ? 1.0f : 0.0f);
+                    }
+                }
+                case OP_EQ -> {
+                    for (int k = 0; k < n; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, (s[l + k] == s[r + k]) ? 1.0f : 0.0f);
+                    }
+                }
+                case OP_NE -> {
+                    for (int k = 0; k < n; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, (s[l + k] != s[r + k]) ? 1.0f : 0.0f);
+                    }
+                }
+                case OP_GE -> {
+                    for (int k = 0; k < n; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, (s[l + k] >= s[r + k]) ? 1.0f : 0.0f);
+                    }
+                }
+                case OP_LE -> {
+                    for (int k = 0; k < n; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, (s[l + k] <= s[r + k]) ? 1.0f : 0.0f);
+                    }
+                }
+                // Standard C-style floating-point truthiness: non-zero is true
+                case OP_AND -> {
+                    for (int k = 0; k < n; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, (s[l + k] != 0.0 && s[r + k] != 0.0) ? 1.0f : 0.0f);
+                    }
+                }
+                case OP_OR -> {
+                    for (int k = 0; k < n; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k, (s[l + k] != 0.0 || s[r + k] != 0.0) ? 1.0f : 0.0f);
+                    }
+                }
+                default ->
+                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int l = lOff;
+            int r = rOff;
+            int d = destOff;
+
+            switch (opcode) {
+                case OP_GT -> {
+                    for (int k = 0; k < n; k++) {
+                        output[outputOffset + k] = (s[l + k] > s[r + k]) ? 1.0f : 0.0f;
+                    }
+                }
+                case OP_LT -> {
+                    for (int k = 0; k < n; k++) {
+                        output[outputOffset + k] = (s[l + k] < s[r + k]) ? 1.0f : 0.0f;
+                    }
+                }
+                case OP_EQ -> {
+                    for (int k = 0; k < n; k++) {
+                        output[outputOffset + k] = (s[l + k] == s[r + k]) ? 1.0f : 0.0f;
+                    }
+                }
+                case OP_NE -> {
+                    for (int k = 0; k < n; k++) {
+                        output[outputOffset + k] = (s[l + k] != s[r + k]) ? 1.0f : 0.0f;
+                    }
+                }
+                case OP_GE -> {
+                    for (int k = 0; k < n; k++) {
+                        output[outputOffset + k] = (s[l + k] >= s[r + k]) ? 1.0f : 0.0f;
+                    }
+                }
+                case OP_LE -> {
+                    for (int k = 0; k < n; k++) {
+                        output[outputOffset + k] = (s[l + k] <= s[r + k]) ? 1.0f : 0.0f;
+                    }
+                }
+                // Standard C-style floating-point truthiness: non-zero is true
+                case OP_AND -> {
+                    for (int k = 0; k < n; k++) {
+                        output[outputOffset + k] = (s[l + k] != 0.0 && s[r + k] != 0.0) ? 1.0f : 0.0f;
+                    }
+                }
+                case OP_OR -> {
+                    for (int k = 0; k < n; k++) {
+                        output[outputOffset + k] = (s[l + k] != 0.0 || s[r + k] != 0.0) ? 1.0f : 0.0f;
+                    }
+                }
+                default ->
+                    throw new IllegalArgumentException("Unknown comparison opcode: " + opcode);
+            }
+        }
     }
 
 // --- Ternary / Branching ---
-    record VmaCommand(int aOff, int bOff, int cOff, int destOff) implements VectorCommand {
+    record VmaCommand(int aOff, int bOff, int cOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
@@ -571,15 +1342,71 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                         .intoArray(s, destOff + k, mask);
             }
         }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            float[] s = ctx.scratch;
+            long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+            int k = 0, bound = SPECIES.loopBound(n);
+            for (; k < bound; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, aOff + k)
+                        .fma(FloatVector.fromArray(SPECIES, s, bOff + k),
+                                FloatVector.fromArray(SPECIES, s, cOff + k))
+                        .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder());
+            }
+            if (k < n) {
+                var mask = SPECIES.indexInRange(k, n);
+                FloatVector.fromArray(SPECIES, s, aOff + k, mask)
+                        .fma(FloatVector.fromArray(SPECIES, s, bOff + k, mask),
+                                FloatVector.fromArray(SPECIES, s, cOff + k, mask))
+                        .intoMemorySegment(output, (outputElemOffset + k) * elemBytes, ByteOrder.nativeOrder(), mask);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            int k = 0, bound = SPECIES.loopBound(n);
+            for (; k < bound; k += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, s, aOff + k)
+                        .fma(FloatVector.fromArray(SPECIES, s, bOff + k),
+                                FloatVector.fromArray(SPECIES, s, cOff + k))
+                        .intoArray(output, outputOffset + k);
+            }
+            if (k < n) {
+                var mask = SPECIES.indexInRange(k, n);
+                FloatVector.fromArray(SPECIES, s, aOff + k, mask)
+                        .fma(FloatVector.fromArray(SPECIES, s, bOff + k, mask),
+                                FloatVector.fromArray(SPECIES, s, cOff + k, mask))
+                        .intoArray(output, outputOffset + k, mask);
+            }
+        }
     }
 
-    record IfCommand(int condOff, int trueOff, int falseOff, int destOff) implements VectorCommand {
+    record IfCommand(int condOff, int trueOff, int falseOff, int destOff) implements VectorCommand, DirectOutputCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
             float[] s = ctx.scratch;
             for (int k = 0; k < n; k++) {
                 s[destOff + k] = (s[condOff + k] != 0.0) ? s[trueOff + k] : s[falseOff + k];
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            float[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                output.setAtIndex(ValueLayout.JAVA_FLOAT, outputElemOffset + k,
+                        (s[condOff + k] != 0.0) ? s[trueOff + k] : s[falseOff + k]);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            float[] s = ctx.scratch;
+            for (int k = 0; k < n; k++) {
+                output[outputOffset + k] = (s[condOff + k] != 0.0) ? s[trueOff + k] : s[falseOff + k];
             }
         }
     }
@@ -591,12 +1418,489 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         void apply(int base, int n, float[] scratch);
     }
 
-    record UnaryMathCommand(UnaryMathOp op, int baseOff) implements VectorCommand {
+    record UnaryMathCommand(UnaryMathOp op, int baseOff) implements VectorCommand, OutputInPlaceCommand {
 
         @Override
         public void execute(EvaluationContext ctx, int n) {
             op.apply(baseOff, n, ctx.scratch);
         }
+
+        @Override
+        public int inPlaceBase() {
+            return baseOff;
+        }
+
+        @Override
+        public void applyInPlaceOnOutput(float[] output, int outputOffset, int n) {
+            op.apply(outputOffset, n, output);
+        }
+    }
+
+    // --- Lane-wise op chains (abs / sqrt) ---
+    // abs and sqrt each map to ONE hardware instruction per vector
+    // (VectorOperators.ABS / VectorOperators.SQRT). Compiled one-op-per-command
+    // they are dominated by memory traffic, not math: sqrt(abs(x)) used to cost
+    //   copy x->scratch, abs in place, sqrt in place, scratch->output
+    // = four full passes over every block, versus ONE pass for a bare sqrt(x)
+    // (LoadSqrtCommand). The two commands below keep the value in a vector
+    // register across a chain of up to two lane ops and touch memory once:
+    //
+    //   LoadLaneChainCommand  variable -> [lane ops] -> scratch / output
+    //   LaneChainCommand      scratch  -> [lane ops] -> scratch / output
+    //
+    // Both implement DirectOutputCommand, so when one is the last command of a
+    // plan its result goes straight to the output buffer (array or
+    // MemorySegment) and the separate scratch-to-output writeback pass disappears
+    // too. The lane ops are the same VectorOperators primitives the unfused
+    // abs()/sqrt() ops use, so results are bit-identical to the unfused path.
+    //
+    // A chain is represented by a small SHAPE id, and each shape has its own
+    // straight-line loop in runLanes(). Deliberately NOT a loop over an op
+    // array: a vector value carried through a variable-length loop is not
+    // reliably scalarized by C2 (it boxes a DoubleVector per op, ~24 B/element),
+    // and which way it goes depends on what else the JVM has compiled. Chains
+    // longer than two ops are simply split across consecutive commands.
+    static final int LANE_ABS = 0;
+    static final int LANE_SQRT = 1;
+
+    static final int SHAPE_ABS = 0;         // abs(x)
+    static final int SHAPE_SQRT = 1;        // sqrt(x)
+    static final int SHAPE_ABS_SQRT = 2;    // sqrt(abs(x))
+    static final int SHAPE_SQRT_ABS = 3;    // abs(sqrt(x))
+    static final int SHAPE_SQRT_SQRT = 4;   // sqrt(sqrt(x))
+
+    private static boolean isLaneOp(int opcode) {
+        return opcode == OP_ABS || opcode == OP_SQRT;
+    }
+
+    private static int toLaneOp(int opcode) {
+        return opcode == OP_ABS ? LANE_ABS : LANE_SQRT;
+    }
+
+    /**
+     * The shape that results from applying {@code lane} after {@code shape}, or
+     * -1 if that would need more than two ops (caller then starts a new command).
+     * abs(abs(x)) == abs(x) exactly, so a repeated abs never grows the chain.
+     */
+    private static int extendShape(int shape, int lane) {
+        return switch (shape) {
+            case SHAPE_ABS ->
+                lane == LANE_ABS ? SHAPE_ABS : SHAPE_ABS_SQRT;
+            case SHAPE_SQRT ->
+                lane == LANE_ABS ? SHAPE_SQRT_ABS : SHAPE_SQRT_SQRT;
+            default ->
+                -1;
+        };
+    }
+
+    private static int shapeOf(int lane) {
+        return lane == LANE_ABS ? SHAPE_ABS : SHAPE_SQRT;
+    }
+
+    /**
+     * dst = chain(src) for n elements. Four flavours (array/segment source x
+     * array/segment destination); src and dst may be the same array at the same
+     * offset (in-place): each vector is fully read before it is written.
+     */
+    private static void runLanesAA(float[] src, int srcOff, float[] dst, int dstOff, int n, int shape) {
+        int k = 0;
+        final int limit = SPECIES.loopBound(n);
+        switch (shape) {
+            case SHAPE_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.ABS)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = Math.abs(src[srcOff + k]);
+                }
+            }
+            case SHAPE_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = (float) Math.sqrt(src[srcOff + k]);
+                }
+            }
+            case SHAPE_ABS_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.ABS)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = (float) Math.sqrt(Math.abs(src[srcOff + k]));
+                }
+            }
+            case SHAPE_SQRT_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.ABS)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = Math.abs((float) Math.sqrt(src[srcOff + k]));
+                }
+            }
+            case SHAPE_SQRT_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = (float) Math.sqrt((float) Math.sqrt(src[srcOff + k]));
+                }
+            }
+            default ->
+                throw new IllegalStateException("bad lane shape " + shape);
+        }
+    }
+
+    private static void runLanesAS(float[] src, int srcOff, MemorySegment dst, long dstElem, int n, int shape) {
+        final long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+        int k = 0;
+        final int limit = SPECIES.loopBound(n);
+        switch (shape) {
+            case SHAPE_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.ABS)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, Math.abs(src[srcOff + k]));
+                }
+            }
+            case SHAPE_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, (float) Math.sqrt(src[srcOff + k]));
+                }
+            }
+            case SHAPE_ABS_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.ABS)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, (float) Math.sqrt(Math.abs(src[srcOff + k])));
+                }
+            }
+            case SHAPE_SQRT_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.ABS)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, Math.abs((float) Math.sqrt(src[srcOff + k])));
+                }
+            }
+            case SHAPE_SQRT_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, src, srcOff + k)
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, (float) Math.sqrt((float) Math.sqrt(src[srcOff + k])));
+                }
+            }
+            default ->
+                throw new IllegalStateException("bad lane shape " + shape);
+        }
+    }
+
+    private static void runLanesSA(MemorySegment src, long srcElem, float[] dst, int dstOff, int n, int shape) {
+        final long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+        int k = 0;
+        final int limit = SPECIES.loopBound(n);
+        switch (shape) {
+            case SHAPE_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.ABS)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = Math.abs(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k));
+                }
+            }
+            case SHAPE_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = (float) Math.sqrt(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k));
+                }
+            }
+            case SHAPE_ABS_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.ABS)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = (float) Math.sqrt(Math.abs(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k)));
+                }
+            }
+            case SHAPE_SQRT_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.ABS)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = Math.abs((float) Math.sqrt(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k)));
+                }
+            }
+            case SHAPE_SQRT_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoArray(dst, dstOff + k);
+                }
+                for (; k < n; k++) {
+                    dst[dstOff + k] = (float) Math.sqrt((float) Math.sqrt(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k)));
+                }
+            }
+            default ->
+                throw new IllegalStateException("bad lane shape " + shape);
+        }
+    }
+
+    private static void runLanesSS(MemorySegment src, long srcElem, MemorySegment dst, long dstElem, int n, int shape) {
+        final long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
+        int k = 0;
+        final int limit = SPECIES.loopBound(n);
+        switch (shape) {
+            case SHAPE_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.ABS)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, Math.abs(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k)));
+                }
+            }
+            case SHAPE_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.SQRT)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, (float) Math.sqrt(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k)));
+                }
+            }
+            case SHAPE_ABS_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.ABS)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, (float) Math.sqrt(Math.abs(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k))));
+                }
+            }
+            case SHAPE_SQRT_ABS -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.ABS)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, Math.abs((float) Math.sqrt(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k))));
+                }
+            }
+            case SHAPE_SQRT_SQRT -> {
+                for (; k < limit; k += SPECIES.length()) {
+                    FloatVector.fromMemorySegment(SPECIES, src, (srcElem + k) * elemBytes, ByteOrder.nativeOrder())
+                            .lanewise(VectorOperators.SQRT)
+                            .lanewise(VectorOperators.SQRT)
+                            .intoMemorySegment(dst, (dstElem + k) * elemBytes, ByteOrder.nativeOrder());
+                }
+                for (; k < n; k++) {
+                    dst.setAtIndex(ValueLayout.JAVA_FLOAT, dstElem + k, (float) Math.sqrt((float) Math.sqrt(src.getAtIndex(ValueLayout.JAVA_FLOAT, srcElem + k))));
+                }
+            }
+            default ->
+                throw new IllegalStateException("bad lane shape " + shape);
+        }
+    }
+
+    record LoadLaneChainCommand(int varSlot, int shape, int destOff) implements VectorCommand, DirectOutputCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            if (ctx.flatVariables != null) {
+                runLanesAA(ctx.flatVariables, (varSlot * ctx.dataSize) + ctx.blockStart, ctx.scratch, destOff, n, shape);
+            } else if (ctx._2DVariables != null) {
+                runLanesAA(ctx._2DVariables[varSlot], ctx.blockStart, ctx.scratch, destOff, n, shape);
+            } else if (ctx.flatVariablesSeg != null) {
+                runLanesSA(ctx.flatVariablesSeg, ((long) varSlot * ctx.dataSize) + ctx.blockStart, ctx.scratch, destOff, n, shape);
+            } else {
+                runLanesSA(ctx._2DVariablesSeg[varSlot], ctx.blockStart, ctx.scratch, destOff, n, shape);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            if (ctx.flatVariables != null) {
+                runLanesAS(ctx.flatVariables, (varSlot * ctx.dataSize) + ctx.blockStart, output, outputElemOffset, n, shape);
+            } else if (ctx._2DVariables != null) {
+                runLanesAS(ctx._2DVariables[varSlot], ctx.blockStart, output, outputElemOffset, n, shape);
+            } else if (ctx.flatVariablesSeg != null) {
+                runLanesSS(ctx.flatVariablesSeg, ((long) varSlot * ctx.dataSize) + ctx.blockStart, output, outputElemOffset, n, shape);
+            } else {
+                runLanesSS(ctx._2DVariablesSeg[varSlot], ctx.blockStart, output, outputElemOffset, n, shape);
+            }
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            if (ctx.flatVariables != null) {
+                runLanesAA(ctx.flatVariables, (varSlot * ctx.dataSize) + ctx.blockStart, output, outputOffset, n, shape);
+            } else if (ctx._2DVariables != null) {
+                runLanesAA(ctx._2DVariables[varSlot], ctx.blockStart, output, outputOffset, n, shape);
+            } else if (ctx.flatVariablesSeg != null) {
+                runLanesSA(ctx.flatVariablesSeg, ((long) varSlot * ctx.dataSize) + ctx.blockStart, output, outputOffset, n, shape);
+            } else {
+                runLanesSA(ctx._2DVariablesSeg[varSlot], ctx.blockStart, output, outputOffset, n, shape);
+            }
+        }
+    }
+
+    record LaneChainCommand(int shape, int baseOff) implements VectorCommand, DirectOutputCommand, OutputInPlaceCommand {
+
+        @Override
+        public void execute(EvaluationContext ctx, int n) {
+            runLanesAA(ctx.scratch, baseOff, ctx.scratch, baseOff, n, shape);
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, MemorySegment output, long outputElemOffset) {
+            runLanesAS(ctx.scratch, baseOff, output, outputElemOffset, n, shape);
+        }
+
+        @Override
+        public void executeToOutput(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            runLanesAA(ctx.scratch, baseOff, output, outputOffset, n, shape);
+        }
+
+        @Override
+        public int inPlaceBase() {
+            return baseOff;
+        }
+
+        @Override
+        public void applyInPlaceOnOutput(float[] output, int outputOffset, int n) {
+            runLanesAA(output, outputOffset, output, outputOffset, n, shape);
+        }
+    }
+
+    // --- Unary tail on the output array ---
+    // A plan that ENDS in in-place unary ops -- e.g. floor(x1 + x2), or
+    // abs(floor(x1 * x2)) -- used to cost, per block: producer -> scratch,
+    // each unary op in place on scratch, then a scratch-to-output writeback.
+    // When the command feeding that tail can write straight to `output` (a
+    // DirectOutputCommand), the tail ops can just as well run in place on the
+    // OUTPUT block it wrote: producer -> output, unary ops in place on output.
+    // Same results, one full read+write pass fewer per block (the writeback).
+    //
+    // OPT-IN: off by default. Measured gain is real only when the block stays
+    // cache-resident (small inputs, roughly 1.1x-2x for cheap unary ops such as
+    // floor/ceil); at large sizes the run is memory-bound and the result is
+    // neutral to slightly negative (about 0.9x-1.05x), so enabling it blindly is
+    // not worthwhile. Turn it on with -Dparserng.simd.outputTail=true and
+    // benchmark YOUR workload first. Plans it does not apply to are untouched.
+    //
+    // CONTRACT this relies on: a UnaryMathOp only reads and writes
+    // array[base .. base+n). Every op in resolveUnaryMathOp is elementwise, and
+    // UnaryMathOp.apply already takes (base, n, array) rather than a scratch
+    // slot, but it is the one assumption the compiler does not enforce -- run
+    // UnaryOpContractTest before enabling.
+    private static final boolean OUTPUT_TAIL_ENABLED = Boolean.getBoolean("parserng.simd.outputTail");
+
+    interface OutputInPlaceCommand {
+
+        /** Scratch offset this command operates at; only base-0 commands can be the tail (the final result lives at 0). */
+        int inPlaceBase();
+
+        /** Apply this command in place to output[outputOffset .. outputOffset+n). */
+        void applyInPlaceOnOutput(float[] output, int outputOffset, int n);
+    }
+
+    private static final class OutputTail {
+
+        final int runLen;                      // commands [0, runLen) run through execute() as usual
+        final DirectOutputCommand producer;    // plan[runLen]: writes its result straight to output
+        final OutputInPlaceCommand[] tail;     // plan(runLen, end): run in place on output, in order
+
+        OutputTail(int runLen, DirectOutputCommand producer, OutputInPlaceCommand[] tail) {
+            this.runLen = runLen;
+            this.producer = producer;
+            this.tail = tail;
+        }
+
+        void apply(EvaluationContext ctx, int n, float[] output, int outputOffset) {
+            producer.executeToOutput(ctx, n, output, outputOffset);
+            for (int i = 0; i < tail.length; i++) {
+                tail[i].applyInPlaceOnOutput(output, outputOffset, n);
+            }
+        }
+    }
+
+    /**
+     * Splits {@code plan} into [normal commands][producer][in-place unary tail]
+     * when that shape applies, else returns null (caller keeps the ordinary
+     * execute()+writeback path). Only used when the LAST command is not itself a
+     * DirectOutputCommand -- that case is already handled by the terminal path.
+     *
+     * <p>The command immediately before the tail produced the value the first tail
+     * op consumes (strict stack machine), and every tail op sits at base 0, so the
+     * producer's result is at scratch 0 -- exactly what executeToOutput writes.
+     */
+    private static OutputTail analyzeOutputTail(VectorCommand[] plan) {
+        if (!OUTPUT_TAIL_ENABLED) {
+            return null;
+        }
+        int i = plan.length;
+        while (i > 0 && plan[i - 1] instanceof OutputInPlaceCommand c && c.inPlaceBase() == 0) {
+            i--;
+        }
+        if (i == plan.length || i == 0 || !(plan[i - 1] instanceof DirectOutputCommand producer)) {
+            return null;
+        }
+        OutputInPlaceCommand[] tail = new OutputInPlaceCommand[plan.length - i];
+        for (int j = 0; j < tail.length; j++) {
+            tail[j] = (OutputInPlaceCommand) plan[i + j];
+        }
+        return new OutputTail(i - 1, producer, tail);
     }
 
     @FunctionalInterface
@@ -727,6 +2031,15 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
                 default -> {
                     // All remaining valid opcodes are Unary/In-place operations.
                     int baseOff = virtualStack[sp - 1]; // Peak at top of stack (in-place)
+
+                    // Cheap lane-wise ops (abs, sqrt) collapse into one command --
+                    // see tryFuseLaneChain(). Everything else falls through to the
+                    // original table below, untouched.
+                    VectorCommand laneFused = tryFuseLaneChain(plan, opcode, baseOff);
+                    if (laneFused != null) {
+                        plan.add(laneFused);
+                        continue;
+                    }
 
                     UnaryMathOp mathOp = switch (opcode) {
 
@@ -909,6 +2222,54 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             default ->
                 null;
         };
+    }
+
+    /**
+     * Peephole for the cheap lane-wise unary ops ({@code abs}, {@code sqrt}):
+     * folds them into one command so a chain costs one pass over memory
+     * instead of one pass per op. See the "Lane-wise op chains" comment above
+     * {@link LoadLaneChainCommand}.
+     *
+     * <p>The top of the virtual stack is always produced by the LAST plan
+     * entry (strict stack machine), so only the tail of {@code plan} is ever
+     * inspected. Cases, in order:
+     * <ul>
+     * <li>tail is a {@link LoadLaneChainCommand} / {@link LaneChainCommand} at
+     * {@code baseOff} with room for another op: extend its chain;</li>
+     * <li>tail is a bare {@link LoadCommand}: start a
+     * {@link LoadLaneChainCommand};</li>
+     * <li>otherwise (e.g. {@code sqrt(x+1)}, or a chain that is already two ops
+     * long) the op becomes an in-place {@link LaneChainCommand}.</li>
+     * </ul>
+     * Returns {@code null} (leaving {@code plan} untouched) when {@code opcode}
+     * is not a lane op,.
+     */
+    private static VectorCommand tryFuseLaneChain(List<VectorCommand> plan, int opcode, int baseOff) {
+        if (!isLaneOp(opcode)) {
+            return null;
+        }
+        final int lane = toLaneOp(opcode);
+        final int size = plan.size();
+        if (size >= 1) {
+            VectorCommand last = plan.get(size - 1);
+            if (last instanceof LoadLaneChainCommand c && c.destOff() == baseOff) {
+                int ext = extendShape(c.shape(), lane);
+                if (ext >= 0) {
+                    plan.remove(size - 1);
+                    return new LoadLaneChainCommand(c.varSlot(), ext, baseOff);
+                }
+            } else if (last instanceof LaneChainCommand c && c.baseOff() == baseOff) {
+                int ext = extendShape(c.shape(), lane);
+                if (ext >= 0) {
+                    plan.remove(size - 1);
+                    return new LaneChainCommand(ext, baseOff);
+                }
+            } else if (last instanceof LoadCommand c && c.destOff() == baseOff) {
+                plan.remove(size - 1);
+                return new LoadLaneChainCommand(c.slotIdx(), shapeOf(lane), baseOff);
+            }
+        }
+        return new LaneChainCommand(shapeOf(lane), baseOff);
     }
 
     public final class SIMDVectorCompositeExpression extends BatchedVectorCompositeExpression implements AutoCloseable {
@@ -1629,22 +2990,39 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         private static void applyBulkInternal(float[] flatVariables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, float[] output, int startIdx, int length) {
             final int endIdx = startIdx + length;
             float[] s = ctx.scratch;
+            final int planLen = executionPlan.length;
+            // If the last command can write its result straight to `output` (see
+            // DirectOutputCommand), run every command before it as usual and skip
+            // BOTH its execute() and the scratch-to-output writeback below.
+            // Otherwise `terminal` is null and the original path runs unchanged.
+            final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
+            // Plan ends in in-place unary ops fed by a direct-output producer: the
+            // producer writes `output` and the unary tail runs in place on it
+            // (see analyzeOutputTail). Only considered when `terminal` is null.
+            final OutputTail otail = terminal == null ? analyzeOutputTail(executionPlan) : null;
+            final int runLen = terminal != null ? planLen - 1 : (otail != null ? otail.runLen : planLen);
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
                 ctx.initForBlock(flatVariables, null, dataSize, blockStart);
 
-                for (int i = 0; i < executionPlan.length; i++) {
+                for (int i = 0; i < runLen; i++) {
                     executionPlan[i].execute(ctx, currentBlockSize);
                 }
 
-                // Vectorized output write back (assumes result is at scratch offset 0)
-                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
-                for (; k < limit; k += SPECIES.length()) {
-                    FloatVector.fromArray(SPECIES, s, k)
-                            .intoArray(output, blockStart + k);
-                }
-                for (; k < currentBlockSize; k++) {
-                    output[blockStart + k] = s[k];
+                if (terminal != null) {
+                    terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
+                } else if (otail != null) {
+                    otail.apply(ctx, currentBlockSize, output, blockStart);
+                } else {
+                    // Vectorized output write back (assumes result is at scratch offset 0)
+                    int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                    for (; k < limit; k += SPECIES.length()) {
+                        FloatVector.fromArray(SPECIES, s, k)
+                                .intoArray(output, blockStart + k);
+                    }
+                    for (; k < currentBlockSize; k++) {
+                        output[blockStart + k] = s[k];
+                    }
                 }
             }
         }
@@ -1652,22 +3030,39 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
         private static void applyBulkInternal(float[][] variables, EvaluationContext ctx, VectorCommand[] executionPlan, int blockSize, int dataSize, float[] output, int startIdx, int length) {
             final int endIdx = startIdx + length;
             float[] s = ctx.scratch;
+            final int planLen = executionPlan.length;
+            // If the last command can write its result straight to `output` (see
+            // DirectOutputCommand), run every command before it as usual and skip
+            // BOTH its execute() and the scratch-to-output writeback below.
+            // Otherwise `terminal` is null and the original path runs unchanged.
+            final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
+            // Plan ends in in-place unary ops fed by a direct-output producer: the
+            // producer writes `output` and the unary tail runs in place on it
+            // (see analyzeOutputTail). Only considered when `terminal` is null.
+            final OutputTail otail = terminal == null ? analyzeOutputTail(executionPlan) : null;
+            final int runLen = terminal != null ? planLen - 1 : (otail != null ? otail.runLen : planLen);
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
                 ctx.initForBlock(null, variables, dataSize, blockStart);
 
-                for (int i = 0; i < executionPlan.length; i++) {
+                for (int i = 0; i < runLen; i++) {
                     executionPlan[i].execute(ctx, currentBlockSize);
                 }
 
-                // Vectorized output write back
-                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
-                for (; k < limit; k += SPECIES.length()) {
-                    FloatVector.fromArray(SPECIES, s, k)
-                            .intoArray(output, blockStart + k);
-                }
-                for (; k < currentBlockSize; k++) {
-                    output[blockStart + k] = s[k];
+                if (terminal != null) {
+                    terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
+                } else if (otail != null) {
+                    otail.apply(ctx, currentBlockSize, output, blockStart);
+                } else {
+                    // Vectorized output write back
+                    int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                    for (; k < limit; k += SPECIES.length()) {
+                        FloatVector.fromArray(SPECIES, s, k)
+                                .intoArray(output, blockStart + k);
+                    }
+                    for (; k < currentBlockSize; k++) {
+                        output[blockStart + k] = s[k];
+                    }
                 }
             }
         }
@@ -1677,22 +3072,33 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             final int endIdx = startIdx + length;
             final long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
             float[] s = ctx.scratch;
+            final int planLen = executionPlan.length;
+            // If the last command can write its result straight to `output` (see
+            // DirectOutputCommand), run every command before it as usual and skip
+            // BOTH its execute() and the scratch-to-output writeback below.
+            // Otherwise `terminal` is null and the original path runs unchanged.
+            final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
+            final int runLen = terminal != null ? planLen - 1 : planLen;
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
                 ctx.initForBlockSeg(flatVariablesSeg, null, dataSize, blockStart);
 
-                for (int i = 0; i < executionPlan.length; i++) {
+                for (int i = 0; i < runLen; i++) {
                     executionPlan[i].execute(ctx, currentBlockSize);
                 }
 
-                // Vectorized output write back (assumes result is at scratch offset 0)
-                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
-                for (; k < limit; k += SPECIES.length()) {
-                    FloatVector.fromArray(SPECIES, s, k)
-                            .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
-                }
-                for (; k < currentBlockSize; k++) {
-                    output.setAtIndex(ValueLayout.JAVA_FLOAT, blockStart + k, s[k]);
+                if (terminal != null) {
+                    terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
+                } else {
+                    // Vectorized output write back (assumes result is at scratch offset 0)
+                    int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                    for (; k < limit; k += SPECIES.length()) {
+                        FloatVector.fromArray(SPECIES, s, k)
+                                .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
+                    }
+                    for (; k < currentBlockSize; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, blockStart + k, s[k]);
+                    }
                 }
             }
         }
@@ -1701,22 +3107,33 @@ public class SIMDCommandSegmentF32 extends VectorTurboEvaluator {
             final int endIdx = startIdx + length;
             final long elemBytes = ValueLayout.JAVA_FLOAT.byteSize();
             float[] s = ctx.scratch;
+            final int planLen = executionPlan.length;
+            // If the last command can write its result straight to `output` (see
+            // DirectOutputCommand), run every command before it as usual and skip
+            // BOTH its execute() and the scratch-to-output writeback below.
+            // Otherwise `terminal` is null and the original path runs unchanged.
+            final DirectOutputCommand terminal = (planLen > 0 && executionPlan[planLen - 1] instanceof DirectOutputCommand doc) ? doc : null;
+            final int runLen = terminal != null ? planLen - 1 : planLen;
             for (int blockStart = startIdx; blockStart < endIdx; blockStart += blockSize) {
                 final int currentBlockSize = Math.min(blockSize, endIdx - blockStart);
                 ctx.initForBlockSeg(null, variablesSeg, dataSize, blockStart);
 
-                for (int i = 0; i < executionPlan.length; i++) {
+                for (int i = 0; i < runLen; i++) {
                     executionPlan[i].execute(ctx, currentBlockSize);
                 }
 
-                // Vectorized output write back
-                int k = 0, limit = SPECIES.loopBound(currentBlockSize);
-                for (; k < limit; k += SPECIES.length()) {
-                    FloatVector.fromArray(SPECIES, s, k)
-                            .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
-                }
-                for (; k < currentBlockSize; k++) {
-                    output.setAtIndex(ValueLayout.JAVA_FLOAT, blockStart + k, s[k]);
+                if (terminal != null) {
+                    terminal.executeToOutput(ctx, currentBlockSize, output, blockStart);
+                } else {
+                    // Vectorized output write back
+                    int k = 0, limit = SPECIES.loopBound(currentBlockSize);
+                    for (; k < limit; k += SPECIES.length()) {
+                        FloatVector.fromArray(SPECIES, s, k)
+                                .intoMemorySegment(output, (blockStart + k) * elemBytes, ByteOrder.nativeOrder());
+                    }
+                    for (; k < currentBlockSize; k++) {
+                        output.setAtIndex(ValueLayout.JAVA_FLOAT, blockStart + k, s[k]);
+                    }
                 }
             }
         }

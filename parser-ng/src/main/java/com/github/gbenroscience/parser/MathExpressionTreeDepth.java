@@ -16,6 +16,8 @@
 package com.github.gbenroscience.parser;
 
 import com.github.gbenroscience.interfaces.Savable;
+import java.util.InputMismatchException;
+import java.util.NoSuchElementException;
 
 import java.util.regex.Pattern;
 
@@ -250,7 +252,7 @@ public class MathExpressionTreeDepth implements Savable {
      * nesting. Unchecked, so a bulk evaluator can catch it per-expression
      * without forcing a checked-exception signature everywhere.
      */
-    public static class ParseException extends RuntimeException {
+    public static class ParseException extends InputMismatchException {
 
         private static final long serialVersionUID = 1L;
         private final int position;
@@ -261,7 +263,7 @@ public class MathExpressionTreeDepth implements Savable {
         }
 
         public ParseException(String message, int position, Throwable cause) {
-            super(message + " [position " + position + "]", cause);
+            super(message + " [position " + position + "]\n"+ cause.toString());
             this.position = position;
         }
 
