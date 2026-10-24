@@ -1,4 +1,4 @@
-# ParserNG 3.0.9.1 🧮⚡
+# ParserNG 3.0.9.2 🧮⚡
 
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?style=flat-square&color=blue)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![Downloads](https://img.shields.io/badge/Downloads-11k%2B-brightgreen?style=flat-square)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
@@ -7,7 +7,7 @@
 
 > **The fastest pure-Java math runtime, now with GPU (CUDA, Metal and OpenCL) bulk evaluators and a fully open-sourced Vector API (SIMD) kernel. Zero JNI. Zero native binaries. Zero bytecode-safety risk.**
 
-[**ParserNG 3.0.9.1 is live**](LATEST.md)
+[**ParserNG 3.0.9.2 is live**](LATEST.md)
 ParserNG's core class, `MathExpression`, has been armed with a `strict` flag(instance field)
 This allows it to determine whether to allow undeclared variable/method names fly as valid variables initialized to zero or not. When the flag is set to true, undeclared variables/methods throw a error at constructor initialization time. To preserve behaviour, the flag is set to false by default, but once set to true, undeclared variable names and method names will throw a parser exception.
 

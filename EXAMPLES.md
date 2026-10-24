@@ -1,4 +1,4 @@
-# ParserNG 3.0.9 🧮⚡ 
+# ParserNG 3.0.9.2 🧮⚡ 
 ### The Fastest, Interpreted(non-compiling) Math Runtime for Java.
 
 ## GPU bulk evaluation comes to ParserNG in v3.0.x

@@ -1,7 +1,7 @@
 # ParserNG
 
 
-### ParserNG 3.0.9.1 Minor updates. 
+### ParserNG 3.0.9.2 Minor updates. 
 ParserNG's core class, `MathExpression`, has been armed with a `strict` flag(instance field)
 This allows it to determine whether to allow undeclared variable/method names fly as valid variables initialized to zero or not. When the flag is set to true, undeclared variables/methods throw a error at constructor initialization time.
 
