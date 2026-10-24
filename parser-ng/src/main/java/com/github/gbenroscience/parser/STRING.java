@@ -679,6 +679,41 @@ public class STRING {
     }
 
     /**
+     * Like {@link #purifier(String)} but leaves everything inside single- or
+     * double-quoted string literals untouched, so that "hello world" keeps
+     * its space. A backslash escapes the next character inside a literal.
+     * Call this AFTER the raw input has been validated (the validator needs
+     * the original spacing to reject unquoted text such as hello world).
+     */
+    public static String purifierPreservingQuotes(String h) {
+        if (h == null || h.isEmpty()) {
+            return h == null ? null : "";
+        }
+        if (h.indexOf('"') < 0 && h.indexOf('\'') < 0) {
+            return purifier(h);
+        }
+        StringBuilder b = new StringBuilder(h.length());
+        char quote = 0;
+        for (int i = 0; i < h.length(); i++) {
+            char c = h.charAt(i);
+            if (quote != 0) {
+                b.append(c);
+                if (c == '\\' && i + 1 < h.length()) {
+                    b.append(h.charAt(++i));
+                } else if (c == quote) {
+                    quote = 0;
+                }
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+                b.append(c);
+            } else if (!Character.isWhitespace(c)) {
+                b.append(c);
+            }
+        }
+        return b.toString();
+    }
+
+    /**
      * Returns a string where characters from index `fromIndex` onward are
      * purified (spaces and newlines removed), while the prefix [0, fromIndex)
      * is preserved exactly.

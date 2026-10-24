@@ -8,12 +8,12 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>3.0.9</version>
+        <version>3.0.9.1</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>parser-ng-sql</artifactId>
-    <version>3.0.9</version>
+    <version>3.0.9.1</version>
     <packaging>jar</packaging>
     <name>parser-ng-sql</name>
     <description>
@@ -33,7 +33,7 @@
         <!-- Same requirement as parser-ng-arrow: Vector API / jdk.incubator.vector -->
         <maven.compiler.release>22</maven.compiler.release>
         <arrow.version>19.0.0</arrow.version>
-        <upstream.version>3.0.9</upstream.version>
+        <upstream.version>3.0.9.1</upstream.version>
     </properties>
 
     <dependencies>

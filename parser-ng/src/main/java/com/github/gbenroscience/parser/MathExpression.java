@@ -90,7 +90,6 @@ import com.github.gbenroscience.util.StringManager;
  */
 public class MathExpression implements Savable, Solvable {
 
-
     private final ErrorLog errorLog = new ErrorLog();
     private static final long serialVersionUID = 1L;
     /**
@@ -111,8 +110,8 @@ public class MathExpression implements Savable, Solvable {
     protected int noOfListReturningOperators;
     protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scan input function
     private boolean optimizable;
-    
-    private static boolean strict = false;
+
+    private boolean strict = false;
 
     protected boolean hasListReturningOperators;
     /**
@@ -593,8 +592,8 @@ public class MathExpression implements Savable, Solvable {
      * function which has the value 0;
      *
      */
-    public MathExpression() throws InputMismatchException{
-        this("(0.0)");
+    public MathExpression() throws InputMismatchException {
+        this("(0.0)", true, false);
     }
 
     /**
@@ -609,8 +608,8 @@ public class MathExpression implements Savable, Solvable {
      * end with a semicolon.
      *
      */
-    public MathExpression(String input) throws InputMismatchException{
-        this(input, true);
+    public MathExpression(String input) throws InputMismatchException {
+        this(input, true, false);
     }//end constructor MathExpression
 
     /**
@@ -621,9 +620,10 @@ public class MathExpression implements Savable, Solvable {
      * @param scan
      * @param foldConstants
      */
-    MathExpression(List<String> scan, String commaAlias) {
+    MathExpression(List<String> scan, String commaAlias, boolean strict) {
         this.commaAlias = commaAlias;
         this.scanner = scan;
+        this.strict = strict;
         this.willFoldConstants = true;
         //try a light validation stage before calling this 
         this.correctFunction = true;
@@ -649,6 +649,68 @@ public class MathExpression implements Savable, Solvable {
 
         this.slots = registry.getSlots();
     }//end constructor MathExpression
+    
+    MathExpression(List<String> scan, String commaAlias) {
+        this(scan, commaAlias, false); 
+    }
+
+    public MathExpression(String input, boolean foldConstants) throws InputMismatchException {
+        this(input, foldConstants, false);
+    }//end constructor MathExpression
+
+    public MathExpression(String input, boolean foldConstants, boolean strict) throws InputMismatchException {
+        this.willFoldConstants = foldConstants;
+        this.help = input.equals(Declarations.HELP);
+        this.strict = strict;
+
+        Scanner cs = TokenTables.statementScanner(input);
+        //Scanner cs = TokenTables.statementScanner(STRING.purifier(input));
+
+        List<String> scanned = cs.scan();
+        String mathExpr = null;
+        int exprCount = 0;
+
+        for (String code : scanned) {
+            int indexOfRot = code.indexOf("rot(");
+            if (indexOfRot != -1) {//rot(f(x)=sin(x),ang,P1,P2) or rot(f=@(x)sin(x),ang,P1,P2)
+                //process rot function if it contains =
+
+                int openBracIdx = indexOfRot + "rot".length();
+                int idxOfCloseBracForRot = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, openBracIdx, code);
+                int eqIdx = code.indexOf("=", indexOfRot);
+                if (eqIdx != -1 && eqIdx < idxOfCloseBracForRot) {//rot(f,=,jjj,....) e.g equals index lies inside rot's bracket contents
+                    MathScanner sc = new MathScanner(code.substring(indexOfRot, idxOfCloseBracForRot + 1), this);
+                    errorLog.copyFrom(sc.errorLog);
+                    sc.unmaskCommas();
+                    code = processRotScenarios(sc.getScanner());
+                }
+            }
+            int indexOfEquals = code.indexOf("=");
+            boolean equalsPresentAndCanLookForwardAndBackward = indexOfEquals != -1 && indexOfEquals != 0 && indexOfEquals + 1 < code.length();
+
+            if (equalsPresentAndCanLookForwardAndBackward && !isLogicOperator(code.substring(indexOfEquals - 1, indexOfEquals + 1))
+                    && !isLogicOperator(code.substring(indexOfEquals, indexOfEquals + 2))) {
+                boolean success = Function.assignObject(STRING.purifierPreservingQuotes(code) + ";", this);
+                if (!success) {
+                    correctFunction = success;
+                    parser_Result = ParserResult.SYNTAX_ERROR;
+                    input = null;
+                    return;
+                }
+            } else {
+                mathExpr = "(" + code + ")";
+                ++exprCount;
+            }
+        }
+        if (mathExpr != null && !mathExpr.isEmpty() && exprCount == 1) {
+            setExpression(mathExpr);
+        }//end if
+        else {
+            setExpression("(0.0)");
+        }
+
+        this.slots = registry.getSlots();
+    }
 
     /**
      * MathExpression clone = new
@@ -720,59 +782,6 @@ public class MathExpression implements Savable, Solvable {
         return s.toString();
     }
 
-    public MathExpression(String input, boolean foldConstants) throws InputMismatchException{
-        this.willFoldConstants = foldConstants;
-        this.help = input.equals(Declarations.HELP);
-
-        Scanner cs = TokenTables.statementScanner(input);
-        //Scanner cs = TokenTables.statementScanner(STRING.purifier(input));
-
-        List<String> scanned = cs.scan();
-        String mathExpr = null;
-        int exprCount = 0;
-
-        for (String code : scanned) {
-            int indexOfRot = code.indexOf("rot(");
-            if (indexOfRot != -1) {//rot(f(x)=sin(x),ang,P1,P2) or rot(f=@(x)sin(x),ang,P1,P2)
-                //process rot function if it contains =
-
-                int openBracIdx = indexOfRot + "rot".length();
-                int idxOfCloseBracForRot = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, openBracIdx, code);
-                int eqIdx = code.indexOf("=", indexOfRot);
-                if (eqIdx != -1 && eqIdx < idxOfCloseBracForRot) {//rot(f,=,jjj,....) e.g equals index lies inside rot's bracket contents
-                    MathScanner sc = new MathScanner(code.substring(indexOfRot, idxOfCloseBracForRot + 1), this);
-                    errorLog.copyFrom(sc.errorLog);
-                    sc.unmaskCommas();
-                    code = processRotScenarios(sc.getScanner());
-                }
-            }
-            int indexOfEquals = code.indexOf("=");
-            boolean equalsPresentAndCanLookForwardAndBackward = indexOfEquals != -1 && indexOfEquals != 0 && indexOfEquals + 1 < code.length();
-
-            if (equalsPresentAndCanLookForwardAndBackward && !isLogicOperator(code.substring(indexOfEquals - 1, indexOfEquals + 1))
-                    && !isLogicOperator(code.substring(indexOfEquals, indexOfEquals + 2))) {
-                boolean success = Function.assignObject(code + ";", this);
-                if (!success) {
-                    correctFunction = success;
-                    parser_Result = ParserResult.SYNTAX_ERROR;
-                    input = null;
-                    return;
-                }
-            } else {
-                mathExpr = "(" + code + ")";
-                ++exprCount;
-            }
-        }
-        if (mathExpr != null && !mathExpr.isEmpty() && exprCount == 1) {
-            setExpression(mathExpr);
-        }//end if
-        else {
-            setExpression("(0.0)");
-        }
-
-        this.slots = registry.getSlots();
-    }
-
     public double[] getExecutionFrame() {
         return executionFrame;
     }
@@ -788,7 +797,7 @@ public class MathExpression implements Savable, Solvable {
     /**
      * @param expression The expression
      */
-    public final void setExpression(String expression) throws InputMismatchException{
+    public final void setExpression(String expression) throws InputMismatchException {
         if (!expression.equals(this.expression)) {
             invalidateTurbo();  // Clear turbo cache
             scanner.clear();
@@ -819,10 +828,11 @@ public class MathExpression implements Savable, Solvable {
         log.copyFrom(errorLog);
     }
 
-    private void initializing(String expression) throws InputMismatchException{
-        this.expression = expression;
-        //this.expression = STRING.purifier(expression);
+    private void initializing(String expression) throws InputMismatchException {
+        this.expression = expression; // raw: the validator must see the real spacing
         computeTreeDepth();
+        this.expression = STRING.purifierPreservingQuotes(expression);
+        expression = this.expression;
         setCorrectFunction(true);
         setHasListReturningOperators(false);
         setNoOfListReturningOperators(0);
@@ -832,15 +842,13 @@ public class MathExpression implements Savable, Solvable {
 
         this.commaAlias = opScanner.commaAlias;
         scanner = opScanner.getScanner();
-        System.out.println("1. "+scanner);
         correctFunction = opScanner.isRunnable();
         parser_Result = opScanner.parser_Result;
         if (parser_Result == ParserResult.VALID) {
-            //refixCommas(); 
             statsVerifier();
             refixCommas();
-            mapBrackets();//System.out.println("scanner-1: "+opScanner.getScanner());
-            functionComponentsAssociation();//System.out.println("scanner-2: "+opScanner.getScanner());
+            mapBrackets();
+            functionComponentsAssociation();
             compileToPostfix();  // Compile once if not already done 
         }//end if
 
@@ -1089,17 +1097,16 @@ public class MathExpression implements Savable, Solvable {
         return optimizable;
     }
 
-    public static void setStrict(boolean strict) {
-        MathExpression.strict = strict;
+    public void setStrict(boolean strict) {
+        this.strict = strict;
     }
 
-    
-    public static boolean isStrict() {
-       return MathExpression.strict;
+    public boolean isStrict() {
+        return strict;
     }
-    
+
     private void computeTreeDepth() {
-        treeStats = new MathExpressionTreeDepth(expression, registry).calculate();
+        treeStats = new MathExpressionTreeDepth(expression, registry, strict).calculate();
     }
 
     public MathExpressionTreeDepth.Result getTreeStats() {
@@ -1294,7 +1301,8 @@ public class MathExpression implements Savable, Solvable {
      *
      * @param scanner The ArrayList object that holds the string values in the
      * scanned function.
-     * @throws InputMismatchException if the brackets of this kind do not pair up.
+     * @throws InputMismatchException if the brackets of this kind do not pair
+     * up.
      */
     private void mapBrackets(List<String> scanner, Bracket.BracketMode mode) {
         for (Iterator<String> it = scanner.iterator(); it.hasNext();) {
@@ -1588,7 +1596,7 @@ public class MathExpression implements Savable, Solvable {
             return res;
         }
         if (cachedPostfix != null) {
-            resetPool(); 
+            resetPool();
             try {
                 EvalResult r = Variable.lastResult = expressionSolver.evaluate();
                 returnType = r.getType();
@@ -3619,16 +3627,15 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         }
 
         /**
-         * Returns every declared variable's name paired with its assigned
-         * frame slot, in ascending slot order — the same left-to-right,
+         * Returns every declared variable's name paired with its assigned frame
+         * slot, in ascending slot order — the same left-to-right,
          * first-appearance order {@link #getSlot(String)} assigned it in.
          * {@link #getVariables()}, {@link #getSlots()}, and {@link
          * #getVarsAndSlots()} track the same thing but are private internal
          * helpers; this is the public surface for callers that need to
-         * reconstruct variable order without re-parsing the expression
-         * string themselves — e.g. ArrowBulkEvaluator, which binds Arrow
-         * columns directly to slots and needs to know which column goes in
-         * which slot.
+         * reconstruct variable order without re-parsing the expression string
+         * themselves — e.g. ArrowBulkEvaluator, which binds Arrow columns
+         * directly to slots and needs to know which column goes in which slot.
          */
         public Map<String, Integer> getSlotAssignments() {
             List<Map.Entry<String, Integer>> entries = new ArrayList<>(nameToSlot.entrySet());
@@ -3919,7 +3926,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
 
         System.out.println("x=3;y=2;x<3&&y>-2 -->> " + new MathExpression("x=3;y=2;x<3&&y>-2").solve());
         MathExpression buggy = new MathExpression("(sin(8+cos(3)) + 2 + ((27-5)/(8^3)*(3.14159*4^(14-10)) + sin(-3.141) + (0%4)) * 4/3 * 3/sqrt(4))+12");
-        System.out.println("buggy.solve() - "+buggy.solve());
+        System.out.println("buggy.solve() - " + buggy.solve());
         MathExpression m111 = new MathExpression("x=-5;if(3*x+7<5,sin(x), -3)");
         System.out.println(m111.scanner);
 

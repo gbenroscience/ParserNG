@@ -919,9 +919,8 @@ class MathExpressionTest {
 
     @Test
     void ifExprTestTurbo1() throws Throwable {
-        MathExpression.setStrict(false);
-        MathExpression m111 = new MathExpression("if(3*x+7>5,sin(x), -3)");
-        System.out.println("strict mode? "+MathExpression.isStrict());
+        MathExpression m111 = new MathExpression("if(3*x+7>5,sin(x), -3)", true, false);
+        System.out.println("strict mode? "+m111.isStrict());
         System.out.println(m111.correctFunction);
         ScalarTurboEvaluator1 sct = new ScalarTurboEvaluator1(m111);
         FastCompositeExpression fce = sct.compile(); 

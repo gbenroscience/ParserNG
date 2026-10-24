@@ -15,37 +15,38 @@
  */
 package com.github.gbenroscience.parser.benchmarks;
 
-import com.github.gbenroscience.parser.CustomScanner;
+
 import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.parser.Scanner;
 import java.util.*;
 
 
 public class ExpressionChecks {
 
-    private static MathExpression runExpr(String expr){
+    private static MathExpression runExpr(String expr, boolean strictMode){
         
             System.out.println("Input - "+expr); 
          MathExpression me = null;
         try {
-            me = new MathExpression(expr);
+            me = new MathExpression(expr, true, strictMode);
         } catch (InputMismatchException e) {
             e.printStackTrace();
         }
         return me;
     }
-    public static void main(String[] args) {
-        MathExpression.setStrict(true);
-        runExpr("2+");
-        runExpr("4/0");
-        runExpr("2+≠pi");
-        runExpr("(((), 2+≠pi, 2+*3");
-        MathExpression me = runExpr("hello world"); 
-        runExpr("(((), 2+≠pi, 2+*3");
-        runExpr("0/0");
-        me=runExpr("sqrt(-1)");
+    public static void main(String[] args) { 
+        MathExpression m = new MathExpression("4!");
+        System.out.println("fact-solve: "+m.solve());
+        runExpr("2+", true);
+        runExpr("4/0", true);
+        runExpr("2+≠pi", true);
+        runExpr("(((), 2+≠pi, 2+*3", true);
+        MathExpression me = runExpr("hello world", true); 
+          runExpr("x", true); 
+        runExpr("(((), 2+≠pi, 2+*3", true);
+        runExpr("0/0", true);
+        me=runExpr("sqrt(-1)", false);
          System.out.println("scanner: "+me.getScanner());
-        me = runExpr("foo(3)");
+        me = runExpr("foo(3)", true);
         System.out.println("scanner: "+me.getScanner());
         
  
