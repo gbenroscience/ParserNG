@@ -1973,7 +1973,15 @@ public class BulkTurboEvaluator extends ScalarTurboEvaluator1 {
                         }
                         break;
                     }
-
+                            
+                    case OP_FACT: {
+                        final int base = (sp - 1) * BLOCK_SIZE;
+                        for (int k = 0; k < n; k++) {
+                            scratch[base + k] = Maths.fact(scratch[base + k]);
+                        }
+                        break;
+                    }
+                    
                     case OP_EXP: {
                         final int base = (sp - 1) * BLOCK_SIZE;
                         for (int k = 0; k < n; k++) {

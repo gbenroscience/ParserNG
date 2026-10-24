@@ -3,12 +3,12 @@
   <parent>
     <artifactId>parser-ng-parent</artifactId>
     <groupId>com.github.gbenroscience</groupId>
-    <version>3.0.9</version>
+    <version>3.0.9.1</version>
   </parent>
   <modelVersion>4.0.0</modelVersion>
   <artifactId>parser-ng-simd</artifactId>
   <name>parser-ng-simd</name>
-  <version>3.0.9</version>
+  <version>3.0.9.1</version>
   <description>Hardware-accelerated SIMD vector calculation pipelines for ParserNG
         Rich and Performant, Cross Platform Java Library(100% Java).No native dependencies.(e.g. JNI) 
         For library support, customizations or donations, reach me at gbenroscience@gmail.com|+2348165779034</description>

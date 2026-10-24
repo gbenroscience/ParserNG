@@ -5,7 +5,7 @@ Read-only storage layer for ParserNG: Parquet file -> projected, row-group-prune
 parallel across row groups and optionally filtered exactly, row by row. It does not parse SQL
 (parser-ng-sql) and does not evaluate expressions (parser-ng-arrow). There is no writer.
 
-* **Coordinates:** `com.github.gbenroscience:parser-ng-parquet:3.0.9`
+* **Coordinates:** `com.github.gbenroscience:parser-ng-parquet:3.0.9.1`
 * **Requires:** JDK 22+ with the incubator Vector API (`--add-modules jdk.incubator.vector`), Arrow 19.0.0,
   parquet-java 1.18.0, Hadoop client 3.4.1
 * **Verified on:** JDK 24 (Windows 10) and JDK 26 (CentOS Stream 9 under WSL2). On **JDK 25 and newer** you
@@ -648,7 +648,7 @@ See the separate `parquet` package of the `parser-ng-sql` module for the bridge 
 depends on the SQL or Arrow-query modules at compile time.
 
 ## Build
-Add `<module>parser-ng-parquet</module>` to the parent POM (`parser-ng-parent`, version 3.0.9), then:
+Add `<module>parser-ng-parquet</module>` to the parent POM (`parser-ng-parent`, version 3.0.9.1), then:
 
 ```bash
 mvn -pl parser-ng-parquet -am package
