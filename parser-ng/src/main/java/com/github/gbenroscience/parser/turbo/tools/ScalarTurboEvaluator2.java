@@ -1749,7 +1749,7 @@ public class ScalarTurboEvaluator2 implements TurboExpressionEvaluator, Savable 
 
     public static double divide(double a, double b) {
         if (b == 0) {
-            return a >= 0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+               return a == 0 ? Double.NaN : (a > 0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY);
         }
         return a / b;
     }

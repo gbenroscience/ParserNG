@@ -2309,7 +2309,7 @@ public class MathExpression implements Savable, Solvable {
                     case '/':
                         if (right.scalar == 0.0) {
                             errorLog.info("Division by zero---op=" + op + ", b=" + right.scalar + ", aRes=" + left.scalar);
-                            left.scalar = Double.POSITIVE_INFINITY;
+                            left.scalar = left.scalar == 0.0 ? Double.NaN : (left.scalar < 0 ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY);
                         } else {
                             left.scalar /= right.scalar;
                         }

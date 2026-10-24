@@ -623,7 +623,13 @@ private static MethodHandle createConstantHandle(EvalResult res) {
                     cache.result.wrap(left.scalar * right.scalar);
                     break;
                 case '/':
-                    cache.result.wrap(left.scalar / right.scalar);
+                    double val;
+                       if (right.scalar == 0.0) {
+                            val = left.scalar == 0.0 ? Double.NaN : (left.scalar < 0 ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY);
+                        } else {
+                            val = left.scalar / right.scalar;
+                        }
+                    cache.result.wrap(val);
                     break;
                 case '^':
                     cache.result.wrap(Math.pow(left.scalar, right.scalar));

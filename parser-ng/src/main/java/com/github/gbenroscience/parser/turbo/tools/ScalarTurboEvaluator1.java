@@ -224,7 +224,7 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
     /**
      * Hardened production bridge. Zero allocation for arity &lt;= 8. Safely
-     * scales for any arity without crashing.   
+     * scales for any arity without crashing.
      *
      * @param methodId
      * @param argsValues
@@ -2469,10 +2469,14 @@ public class ScalarTurboEvaluator1 implements TurboExpressionEvaluator, Savable 
 
     /**
      * Inlined division: a / b with zero-check
+     *
+     * @param a
+     * @param b
+     * @return
      */
     public static double divide(double a, double b) {
         if (b == 0) {
-            return a >= 0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+            return a == 0 ? Double.NaN : (a > 0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY);
         }
         return a / b;
     }
