@@ -21,6 +21,7 @@ import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.TYPE;
 import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.FunctionScope;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 
@@ -47,7 +48,7 @@ public class TurboEvaluatorFactory {
                 break;
             }
         }
-        return involvesMatrices ? new MatrixTurboEvaluator(me) : new ScalarTurboEvaluator(me);//defaults to an array based approach
+        return scoped(me, involvesMatrices ? new MatrixTurboEvaluator(me) : new ScalarTurboEvaluator(me));//defaults to an array based approach
     }
     /**
      * 
@@ -70,7 +71,32 @@ public class TurboEvaluatorFactory {
                 break;
             }
         }
-        return involvesMatrices ? new MatrixTurboEvaluator(me) : new ScalarTurboEvaluator(me, useWideningVarsPassing);//defaults to an array based approach
+        return scoped(me, involvesMatrices ? new MatrixTurboEvaluator(me) : new ScalarTurboEvaluator(me, useWideningVarsPassing));//defaults to an array based approach
+    }
+
+    /**
+     * Expressions of the global scope get the evaluator untouched. An
+     * expression that belongs to a local scope compiles inside that scope and
+     * its compiled form runs in it (see {@link MathExpression#bindToScope}).
+     */
+    private static TurboExpressionEvaluator scoped(final MathExpression me, final TurboExpressionEvaluator inner) {
+        final FunctionScope scope = me.getFunctionScope();
+        if (scope.isGlobal()) {
+            return inner;
+        }
+        return new TurboExpressionEvaluator() {
+            @Override
+            public FastCompositeExpression compile() throws Throwable {
+                final FunctionScope prev = FunctionManager.enter(scope);
+                try {
+                    return me.bindToScope(inner.compile());
+                } finally {
+                    if (prev != scope) {
+                        FunctionManager.exit(prev);
+                    }
+                }
+            }
+        };
     }
 
     private static boolean isMatrixToken(MathExpression.Token t) {

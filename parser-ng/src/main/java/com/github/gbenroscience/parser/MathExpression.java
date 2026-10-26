@@ -40,6 +40,7 @@ import com.github.gbenroscience.parser.turbo.tools.ScalarTurboEvaluator1;
 import com.github.gbenroscience.parser.turbo.tools.TurboExpressionEvaluator;
 import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.FunctionScope;
 import com.github.gbenroscience.util.Serializer;
 import com.github.gbenroscience.util.VariableManager;
 import java.util.HashSet;
@@ -154,6 +155,15 @@ public class MathExpression implements Savable, Solvable {
     private int[] slots;
     private double[] executionFrame;
     VariableRegistry registry = new VariableRegistry();
+
+    /**
+     * The function scope this expression belongs to, or null for the global
+     * scope. An expression created while a local scope is active (for example
+     * the body of a function defined in that scope) joins it automatically,
+     * which is what makes function scoping lexical. Not serialized: a
+     * deserialized expression is global.
+     */
+    private transient FunctionScope scope = FunctionManager.activeLocalScope();
 
     /**
      * Sometimes, after evaluation the evaluation list which is a local
@@ -641,11 +651,18 @@ public class MathExpression implements Savable, Solvable {
         whitespaceremover.add("");
 
         if (parser_Result == ParserResult.VALID) {
-            statsVerifier();
-            refixCommas();
-            mapBrackets();
-            functionComponentsAssociation();
-            compileToPostfix();  // Compile once if not already done 
+            final FunctionScope prevScope = FunctionManager.enter(scope);
+            try {
+                statsVerifier();
+                refixCommas();
+                mapBrackets();
+                functionComponentsAssociation();
+                compileToPostfix();  // Compile once if not already done 
+            } finally {
+                if (prevScope != scope) {
+                    FunctionManager.exit(prevScope);
+                }
+            }
         }//end if
 
         this.slots = registry.getSlots();
@@ -660,6 +677,39 @@ public class MathExpression implements Savable, Solvable {
     }//end constructor MathExpression
 
     public MathExpression(String input, boolean foldConstants, boolean strict) throws InputMismatchException {
+        this(input, foldConstants, strict, FunctionManager.activeLocalScope());
+    }
+
+    /**
+     * Creates an expression that belongs to a {@link FunctionScope}. Functions
+     * it defines (e.g. {@code "f(x)=x^2;f(3)"}) are stored in that scope, and
+     * names it uses resolve in that scope first, then in the scope's parents.
+     *
+     * @param input the expression
+     * @param scope the scope to use; null or the global scope mean the global
+     * scope
+     */
+    public MathExpression(String input, FunctionScope scope) throws InputMismatchException {
+        this(input, true, false, scope);
+    }
+
+    public MathExpression(String input, boolean foldConstants, FunctionScope scope) throws InputMismatchException {
+        this(input, foldConstants, false, scope);
+    }
+
+    public MathExpression(String input, boolean foldConstants, boolean strict, FunctionScope scope) throws InputMismatchException {
+        this.scope = (scope == null || scope.isGlobal()) ? null : scope;
+        final FunctionScope prevScope = FunctionManager.enter(this.scope);
+        try {
+            construct(input, foldConstants, strict);
+        } finally {
+            if (prevScope != this.scope) {
+                FunctionManager.exit(prevScope);
+            }
+        }
+    }
+
+    private void construct(String input, boolean foldConstants, boolean strict) throws InputMismatchException {
         this.willFoldConstants = foldConstants;
         this.help = input.equals(Declarations.HELP);
         this.strict = strict;
@@ -806,7 +856,14 @@ public class MathExpression implements Savable, Solvable {
             this.poolPointer = 0;
             setCorrectFunction(true);
             this.expression = expression;
-            initializing(expression);
+            final FunctionScope prevScope = FunctionManager.enter(scope);
+            try {
+                initializing(expression);
+            } finally {
+                if (prevScope != scope) {
+                    FunctionManager.exit(prevScope);
+                }
+            }
         } else {
             this.expression = expression;
         }
@@ -860,7 +917,14 @@ public class MathExpression implements Savable, Solvable {
         boolean changed = willFoldConstants != this.willFoldConstants;
         this.willFoldConstants = willFoldConstants;
         if (changed) {
-            compileToPostfix();
+            final FunctionScope prevScope = FunctionManager.enter(scope);
+            try {
+                compileToPostfix();
+            } finally {
+                if (prevScope != scope) {
+                    FunctionManager.exit(prevScope);
+                }
+            }
         }
     }
 
@@ -917,6 +981,7 @@ public class MathExpression implements Savable, Solvable {
             throw new IllegalStateException(err);
         }
 
+        final FunctionScope prevScope = FunctionManager.enter(scope);
         try {
             // Analyze expression to determine best compiler
             boolean hasMatrixOps = hasMatrixOperations(cachedPostfix);
@@ -932,7 +997,7 @@ public class MathExpression implements Savable, Solvable {
                 compiler = new MatrixTurboEvaluator(this);
             }
 
-            compiledTurbo = compiler.compile();
+            compiledTurbo = bindToScope(compiler.compile());
             turboCompiled = true;
             return compiledTurbo;
 
@@ -942,7 +1007,47 @@ public class MathExpression implements Savable, Solvable {
             errorLog.info(err);
             throw new RuntimeException(
                     err, e);
+        } finally {
+            if (prevScope != scope) {
+                FunctionManager.exit(prevScope);
+            }
         }
+    }
+
+    /**
+     * @return the {@link FunctionScope} this expression belongs to. Never null:
+     * an expression with no scope of its own reports the global scope.
+     */
+    public FunctionScope getFunctionScope() {
+        return scope == null ? FunctionManager.globalScope() : scope;
+    }
+
+    /**
+     * @return the local scope this expression belongs to, or null if it is
+     * global. Allocation-free; for the scanner and {@link Function}.
+     */
+    FunctionScope scopeOrNull() {
+        return scope;
+    }
+
+    /**
+     * Makes a compiled expression run in this expression's scope. A compiled
+     * expression that calls user functions (or takes function handles) looks
+     * them up when it runs, so it must run in the scope it was compiled for,
+     * whichever thread calls it. Expressions with no such tokens, and every
+     * expression of the global scope, are returned untouched, so they pay
+     * nothing.
+     */
+    public FastCompositeExpression bindToScope(FastCompositeExpression compiled) {
+        if (scope == null || compiled == null || cachedPostfix == null) {
+            return compiled;
+        }
+        for (Token t : cachedPostfix) {
+            if (t.kind == Token.FUNCTION || t.kind == Token.FUNCTION_HANDLE || t.kind == Token.FUNCTION_HANDLE_UNDEFINED) {
+                return new ScopedFastExpression(compiled, scope);
+            }
+        }
+        return compiled;
     }
 
     // Inside MathExpression.java (in parser-ng-core)
@@ -951,16 +1056,23 @@ public class MathExpression implements Savable, Solvable {
      * to Hardware SIMD if parser-ng-pro is installed!
      */
     public FastCompositeExpression compileBulkTurbo() throws Throwable {
-        TurboEvaluatorProvider proEngine = TurboEngineLocator.getProvider();
+        final FunctionScope prevScope = FunctionManager.enter(scope);
+        try {
+            TurboEvaluatorProvider proEngine = TurboEngineLocator.getProvider();
 
-        if (proEngine != null && proEngine.isVectorHardwareSupported()) {
-            // PRO TIER: Routes to the VectorTurboEvaluator in the closed-source JAR
-            return proEngine.getVectorEvaluator(this).compile();
+            if (proEngine != null && proEngine.isVectorHardwareSupported()) {
+                // PRO TIER: Routes to the VectorTurboEvaluator in the closed-source JAR
+                return bindToScope(proEngine.getVectorEvaluator(this).compile());
+            }
+
+            // FREE TIER: Graceful fallback to the standard array-based scalar engine
+            System.out.println("SIMD hardware not detected. Using standard Turbo Scalar.");
+            return bindToScope(new ScalarTurboEvaluator1(this).compile());
+        } finally {
+            if (prevScope != scope) {
+                FunctionManager.exit(prevScope);
+            }
         }
-
-        // FREE TIER: Graceful fallback to the standard array-based scalar engine
-        System.out.println("SIMD hardware not detected. Using standard Turbo Scalar.");
-        return new ScalarTurboEvaluator1(this).compile();
     }
 
     /**
@@ -1582,6 +1694,9 @@ public class MathExpression implements Savable, Solvable {
         }
         if (cachedPostfix != null) {
             resetPool();
+            if (scope != null || FunctionManager.isScopingActive()) {
+                return evaluateInScopeWithThrows();
+            }
             EvalResult r = Variable.lastResult = expressionSolver.evaluate();
             returnType = r.getType();
             return r;
@@ -1600,18 +1715,63 @@ public class MathExpression implements Savable, Solvable {
         }
         if (cachedPostfix != null) {
             resetPool();
-            try {
-                EvalResult r = Variable.lastResult = expressionSolver.evaluate();
-                returnType = r.getType();
-                return r;
-            } catch (Throwable ex) {
-                Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+            if (scope != null || FunctionManager.isScopingActive()) {
+                EvalResult r = evaluateInScope();
+                if (r != null) {
+                    return r;
+                }
+            } else {
+                try {
+                    EvalResult r = Variable.lastResult = expressionSolver.evaluate();
+                    returnType = r.getType();
+                    return r;
+                } catch (Throwable ex) {
+                    Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+                }
             }
         }
         if (scanner == null || scanner.isEmpty() || !correctFunction || parser_Result != ParserResult.VALID) {
             return EvalResult.ERROR;
         }
         return EvalResult.ERROR;
+    }
+
+    /**
+     * Evaluates with this expression's function scope active. Kept out of
+     * {@link #solveGeneric()} so that the unscoped path stays as small as it
+     * ever was. One thread-local lookup, no allocation.
+     *
+     * @return the result, or null if evaluation threw (already logged)
+     */
+    private EvalResult evaluateInScope() {
+        final FunctionManager.Slot slot = FunctionManager.slot();
+        final FunctionScope prev = slot == null ? null : slot.swap(scope);
+        try {
+            EvalResult r = Variable.lastResult = expressionSolver.evaluate();
+            returnType = r.getType();
+            return r;
+        } catch (Throwable ex) {
+            Logger.getLogger(MathExpression.class.getName()).log(Level.SEVERE, null, ex);
+            return null;
+        } finally {
+            if (slot != null && prev != scope) {
+                slot.restore(prev);
+            }
+        }
+    }
+
+    private EvalResult evaluateInScopeWithThrows() throws Throwable {
+        final FunctionManager.Slot slot = FunctionManager.slot();
+        final FunctionScope prev = slot == null ? null : slot.swap(scope);
+        try {
+            EvalResult r = Variable.lastResult = expressionSolver.evaluate();
+            returnType = r.getType();
+            return r;
+        } finally {
+            if (slot != null && prev != scope) {
+                slot.restore(prev);
+            }
+        }
     }
 
     public EvalResult solveGeneric(double... args) {
@@ -1709,6 +1869,12 @@ public class MathExpression implements Savable, Solvable {
         Function fn = FunctionManager.lookUp(s);
         if (fn != null && fn.getType() == TYPE.MATRIX) {
             Token t = new Token(fn.getMatrix());
+            // A matrix travels through evaluation as a name that is looked up again later.
+            // If it was reached through an alias (see FunctionScope#aliasFor), keep the alias
+            // so that later lookups find this very matrix and not a same-named one elsewhere.
+            if (FunctionManager.isScopingActive() && !s.equals(t.name)) {
+                t.name = s;
+            }
             return t;
         }
 
@@ -3242,6 +3408,64 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
         }
     }
 
+    /**
+     * Runs a compiled expression with its {@link FunctionScope} active. Holds
+     * no per-call state: entering and leaving a scope is a save and restore of
+     * one thread-local reference, with no allocation.
+     */
+    static final class ScopedFastExpression implements FastCompositeExpression {
+
+        private static final long serialVersionUID = 1L;
+        private final FastCompositeExpression delegate;
+        private final transient FunctionScope scope;
+
+        ScopedFastExpression(FastCompositeExpression delegate, FunctionScope scope) {
+            this.delegate = delegate;
+            this.scope = scope;
+        }
+
+        @Override
+        public MathExpression getRoot() {
+            return delegate.getRoot();
+        }
+
+        @Override
+        public EvalResult apply(double[] variables) {
+            final FunctionManager.Slot slot = FunctionManager.slot();
+            final FunctionScope prev = slot == null ? null : slot.swap(scope);
+            try {
+                return delegate.apply(variables);
+            } finally {
+                if (slot != null && prev != scope) {
+                    slot.restore(prev);
+                }
+            }
+        }
+
+        @Override
+        public double applyScalar(double[] variables) {
+            final FunctionManager.Slot slot = FunctionManager.slot();
+            final FunctionScope prev = slot == null ? null : slot.swap(scope);
+            try {
+                return delegate.applyScalar(variables);
+            } finally {
+                if (slot != null && prev != scope) {
+                    slot.restore(prev);
+                }
+            }
+        }
+
+        @Override
+        public String checkErrorLogs() {
+            return delegate.checkErrorLogs();
+        }
+
+        @Override
+        public TurboExpressionEvaluator getCompiler() {
+            return delegate.getCompiler();
+        }
+    }
+
     public static class RpnCseOptimizer {
 
         // A lightweight AST node representation of your RPN stream
@@ -3662,6 +3886,7 @@ private double evaluateBinaryOpWithStrengthReduction(char op, double a, double b
      */
     public MathExpression copy() {
         MathExpression clone = new MathExpression(true);
+        clone.scope = scope;
         clone.DRG = DRG;
         Token tokens[] = new Token[cachedPostfix.length];
         int i = 0;

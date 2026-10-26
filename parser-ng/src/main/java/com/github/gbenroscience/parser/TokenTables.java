@@ -7,11 +7,14 @@ package com.github.gbenroscience.parser;
 
 import com.github.gbenroscience.parser.methods.Declarations;
 import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.FunctionScope;
 import com.github.gbenroscience.util.VariableManager;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * Caches the {@link Scanner.TokenTable}s used by {@link MathScanner} and
@@ -29,6 +32,11 @@ import java.util.Map;
  * equality) and against the identity of the inbuilt-method snapshot. A stale
  * table is rebuilt on the spot, so direct writes to those public maps are still
  * honoured. Validation is allocation-free.
+ * <p>
+ * When a local {@link FunctionScope} is active, the vocabulary also contains the
+ * function names that scope can see, so each local scope keeps its own cached
+ * table (held weakly: a dropped scope frees its table), validated the same
+ * allocation-free way. A local scope that adds no names shares the global table.
  *
  * @author GBEMIRO
  */
@@ -69,11 +77,70 @@ final class TokenTables {
     private static volatile Entry mathEntry;
 
     /**
+     * A cached table for one local scope. {@code names} remembers, per scope of
+     * the chain, which function names the table was built from.
+     */
+    private static final class ScopedEntry {
+
+        final Object inbuiltVersion;
+        final FunctionScope.NameSnapshot names;
+        final String[] variableKeys; // empty for the data-set table
+        final Scanner.TokenTable table;
+        final Scanner template;
+
+        ScopedEntry(Object inbuiltVersion, FunctionScope.NameSnapshot names, String[] variableKeys, Scanner.TokenTable table, Scanner template) {
+            this.inbuiltVersion = inbuiltVersion;
+            this.names = names;
+            this.variableKeys = variableKeys;
+            this.table = table;
+            this.template = template;
+        }
+    }
+
+    private static final Map<FunctionScope, ScopedEntry> SCOPED_DATASET = Collections.synchronizedMap(new WeakHashMap<FunctionScope, ScopedEntry>());
+    private static final Map<FunctionScope, ScopedEntry> SCOPED_MATH = Collections.synchronizedMap(new WeakHashMap<FunctionScope, ScopedEntry>());
+
+    /**
+     * @return the local scope whose names must be in the vocabulary, or null
+     * when the global table applies (no local scope, or one that adds nothing).
+     */
+    private static FunctionScope vocabularyScope() {
+        FunctionScope s = FunctionManager.activeLocalScope();
+        return (s == null || s.addsNoNames()) ? null : s;
+    }
+
+    /**
      * Vocabulary for {@link DataSetFormatter}: all function names plus the comma
      * and bracket characters.
      */
     static Scanner dataSetScanner(String input) {
+        FunctionScope local = vocabularyScope();
+        if (local != null) {
+            return scopedDataSetEntry(local).template.withInput(input);
+        }
         return dataSetEntry().template.withInput(input);
+    }
+
+    private static ScopedEntry scopedDataSetEntry(FunctionScope scope) {
+        ScopedEntry e = SCOPED_DATASET.get(scope);
+        Object inbuilt = Declarations.inbuiltMethodsVersion();
+        if (e != null && e.inbuiltVersion == inbuilt && scope.unchangedSince(e.names)) {
+            return e;
+        }
+        FunctionScope.NameSnapshot names = scope.snapshotNames();
+        List<String> tokens = new ArrayList<>(names.names().length + 160);
+        addAll(tokens, names.names());
+        addAll(tokens, com.github.gbenroscience.parser.methods.Method.getInbuiltNames());
+        tokens.add(Operator.COMMA);
+        tokens.add(Operator.OPEN_CIRC_BRAC);
+        tokens.add(Operator.CLOSE_CIRC_BRAC);
+        tokens.add(Operator.OPEN_SQUARE_BRAC);
+        tokens.add(Operator.CLOSE_SQUARE_BRAC);
+        Scanner.TokenTable table = Scanner.TokenTable.of(tokens);
+        Scanner template = new Scanner.Builder("").includeTokens(true).tokenTable(table).build();
+        e = new ScopedEntry(inbuilt, names, new String[0], table, template);
+        SCOPED_DATASET.put(scope, e);
+        return e;
     }
 
     private static Entry dataSetEntry() {
@@ -103,7 +170,42 @@ final class TokenTables {
      * every operator.
      */
     static Scanner mathScanner(String input) {
+        FunctionScope local = vocabularyScope();
+        if (local != null) {
+            return scopedMathEntry(local).template.withInput(input);
+        }
         return mathEntry().template.withInput(input);
+    }
+
+    private static ScopedEntry scopedMathEntry(FunctionScope scope) {
+        ScopedEntry e = SCOPED_MATH.get(scope);
+        Object inbuilt = Declarations.inbuiltMethodsVersion();
+        if (e != null && e.inbuiltVersion == inbuilt
+                && scope.unchangedSince(e.names)
+                && sameKeys(VariableManager.VARIABLES, e.variableKeys)) {
+            return e;
+        }
+        FunctionScope.NameSnapshot names = scope.snapshotNames();
+        String[] varKeys = keysOf(VariableManager.VARIABLES);
+        List<String> tokens = new ArrayList<>(names.names().length + varKeys.length + 200);
+        addAll(tokens, varKeys);
+        addAll(tokens, names.names());
+        addAll(tokens, com.github.gbenroscience.parser.methods.Method.getInbuiltNames());
+        addAll(tokens, Operator.operators);
+        Scanner.TokenTable table = Scanner.TokenTable.of(tokens);
+        Scanner template = new Scanner.Builder("")
+                .includeTokens(true)
+                .ignoreWhitespace(false)
+                .addDelimitedRegion("\"", "\"")
+                .addDelimitedRegion("'", "'")
+                .withDynamicMatcher(MathScanner.DYNAMIC_RULES)
+                .tokenTable(table)
+                .matchDynamicFirst(true)
+                .identifierPartExtra('[', ']')
+                .build();
+        e = new ScopedEntry(inbuilt, names, varKeys, table, template);
+        SCOPED_MATH.put(scope, e);
+        return e;
     }
 
     private static Entry mathEntry() {

@@ -103,10 +103,7 @@ public class Method {
         final String[] inbuilt = inbuiltMethodsShared();
         // Snapshot the key set under the map's own lock; the old code read size()
         // and toArray() separately and could mis-size the result under mutation.
-        final String[] keyset;
-        synchronized (FunctionManager.FUNCTIONS) {
-            keyset = FunctionManager.FUNCTIONS.keySet().toArray(new String[0]);
-        }
+        final String[] keyset = FunctionManager.visibleFunctionNames();
         String[] all = new String[keyset.length + inbuilt.length];
         System.arraycopy(keyset, 0, all, 0, keyset.length);
         System.arraycopy(inbuilt, 0, all, keyset.length, inbuilt.length);

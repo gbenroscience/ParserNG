@@ -940,7 +940,7 @@ public class MathScanner {
                         //g(x,y,z)=3*x+f(x,y,2) --- the f(x,y,2) portion will be treated as a function call with default values being assigned to x and y.
                         //g(x,y,z)=3*x+f(1,y,2) --- the f(1,y,2) portion will be treated as a function call with default values being assigned to x and y.
                         //g(x,y,z)=3*x+f(3,5,2) --- the f(3,5,2) portion will be treated as a function call with default values being assigned to x and y.
-                        List<String> scan = Function.transformScan(f, argVectors);
+                        List<String> scan = Function.transformScan(f, Function.bodyTokensForActiveScope(f), argVectors);
                         scanner.subList(i, closeBracOfFunctionCall + 1).clear();
                         scanner.addAll(i, scan);
                     }

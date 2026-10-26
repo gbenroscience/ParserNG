@@ -159,27 +159,32 @@ public class CustomScanner {
 
     
 
-        long start = System.nanoTime();
- 
-        long duration = System.nanoTime() - start;
-
-        System.out.println("Old Scanner parse in>>> "+(duration)+" ns");
-
-
 
         CustomScanner scanner1 = new CustomScanner(in,
                 true, "sinh", "+", "-", ")", "(", "sin", "cos", "/","zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm-zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm");
+        long start = System.nanoTime();
+ 
+         List<String> scan1 = scanner1.scan();
+        double d1 = System.nanoTime() - start;
+
+        System.out.println("Old Scanner parse in>>> "+(d1)+" ns");
+
+
+        Scanner sc = new Scanner(in, true, "sinh", "+", "-", ")", "(", "sin", "cos", "/","zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm-zopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekmzopmkdmekdekekdmekdmekdmekdmekdmekdmekdmekdmekdmekdmekm");
 
         start = System.nanoTime();
 
-        List<String> scan1 = scanner1.scan();
+        List<String> scan2 = sc.scan();
 
-        duration = System.nanoTime() - start;
+        double d2 = System.nanoTime() - start;
 
-        System.out.println("New Scanner parse in>>> "+(duration)+" ns");
+        System.out.println("New Scanner parse in>>> "+(d2)+" ns");
+        
+        System.out.println("Speed ratio - new is: "+Math.round(d1/d2)+"x faster than old");
 
 
-        System.out.println("Output>>>\n "+scan1);
+        System.out.println("Output1>>>\n "+scan1);
+        System.out.println("Output2>>>\n "+scan2);
 
 
     }
