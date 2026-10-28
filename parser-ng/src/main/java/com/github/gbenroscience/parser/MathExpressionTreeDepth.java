@@ -236,6 +236,10 @@ public class MathExpressionTreeDepth implements Savable {
     // mode accepts these as declared.
     private final java.util.Set<String> declaredNames = new java.util.HashSet<>();
 
+    // Number of top-level items in the argument list parseCommaListAndClose()
+    // most recently closed ("sin()" -> 0, "pow(2,3)" -> 2).
+    private int lastArgCount = 0;
+
     // > 0 while parsing a parameter list of a definition: identifiers there
     // are declarations, not uses.
     private int declHeaderDepth = 0;
@@ -282,10 +286,52 @@ public class MathExpressionTreeDepth implements Savable {
      */
     private boolean isKnownName(String name) {
         return FunctionManager.containsAny(name)
-                || Declarations.isInbuiltMethodName(name)
+                || isBuiltinMethodName(name)
                 || DIFF_EQ_FUNCTIONS.contains(name)
                 || VariableManager.lookUp(name) != null
                 || (registry != null && registry.lookUp(name) != null);
+    }
+
+    /**
+     * True if {@code name} is an inbuilt method. {@code fma} and {@code vma}
+     * are built-ins (arity 3) even though they are not in the inbuilt-names
+     * list.
+     */
+    private static boolean isBuiltinMethodName(String name) {
+        return Declarations.isInbuiltMethodName(name)
+                || Declarations.FMA.equals(name)
+                || Declarations.VMA.equals(name);
+    }
+
+    /**
+     * True if a user-defined function called {@code name} takes exactly
+     * {@code argCount} arguments. Matrix-typed entries are index-based rather
+     * than arity-bound, so they are not held against the call.
+     */
+    private static boolean matchesUserFunctionArity(String name, int argCount) {
+        Function f = FunctionManager.lookUp(name);
+        if (f == null) {
+            return false;
+        }
+        if (f.getType() == TYPE.MATRIX) {
+            return true;
+        }
+        java.util.List<Variable> params = f.getIndependentVariables();
+        return params != null && params.size() == argCount;
+    }
+
+    /** The argument counts a built-in accepts, e.g. "1" or "1 or 2". */
+    private static String describeAcceptedArgCounts(String name) {
+        StringBuilder b = new StringBuilder();
+        for (int n = 0; n <= 8; n++) {
+            if (Declarations.acceptsInbuiltMethodArgCount(name, n)) {
+                if (b.length() > 0) {
+                    b.append(" or ");
+                }
+                b.append(n);
+            }
+        }
+        return b.length() == 0 ? "a different number of" : b.toString();
     }
 
     /**
@@ -997,6 +1043,22 @@ public class MathExpressionTreeDepth implements Savable {
                         }
                     }
 
+                    // ARITY (strict and non-strict): a call to a built-in must
+                    // supply an argument count the built-in accepts, or one
+                    // that matches a user-defined function of the same name.
+                    // Definitions such as f(x)=... are not calls.
+                    final int argCount = lastArgCount;
+                    if (!isDefinition && isBuiltinMethodName(name)
+                            && !Declarations.acceptsInbuiltMethodArgCount(name, argCount)
+                            && !matchesUserFunctionArity(name, argCount)) {
+                        throw new ParseException(
+                                "Wrong number of arguments for built-in '" + name + "': got "
+                                + argCount + ", expected " + describeAcceptedArgCounts(name)
+                                + ". (No user-defined function '" + name + "' takes "
+                                + argCount + " argument" + (argCount == 1 ? "" : "s") + " either.)",
+                                nameStart);
+                    }
+
                     // STRICT MODE: foo(3) is only legal if foo is a known
                     // function/method/variable -- unless this is a definition
                     // such as f(x)=sin(x), which creates the name.
@@ -1070,7 +1132,7 @@ public class MathExpressionTreeDepth implements Savable {
                 // ALWAYS an error, in strict and non-strict mode: a bare
                 // built-in method name such as "sin", "sqrt" or "tan" is not
                 // a variable and could only fail later, at run time.
-                if (Declarations.isInbuiltMethodName(name) && !FunctionManager.containsAny(name)) {
+                if (isBuiltinMethodName(name) && !FunctionManager.containsAny(name)) {
                     throw new ParseException(
                             "'" + name + "' is a built-in function, not a variable. "
                             + "Call it with arguments, e.g. " + name + "(...), or choose a "
@@ -1184,6 +1246,7 @@ public class MathExpressionTreeDepth implements Savable {
      * function).
      */
     private int parseCommaListAndClose(String missingCloseMessage) {
+        lastArgCount = 0;
         int maxStackDepth = 0;
         int itemsCurrentlyOnStack = 0;
 
@@ -1213,6 +1276,10 @@ public class MathExpressionTreeDepth implements Savable {
             throw new ParseException(missingCloseMessage, pos);
         }
         nextChar();
+
+        // Written last, after any nested lists have finished, so it always
+        // describes the list that has just been closed.
+        lastArgCount = itemsCurrentlyOnStack;
 
         // An empty list, or a single item, still takes at least 1 slot.
         return maxStackDepth > 0 ? maxStackDepth : 1;
@@ -1633,7 +1700,12 @@ public class MathExpressionTreeDepth implements Savable {
             "2^3!", // ...including inside an exponent
             "-5!", // unary minus applies to the whole factorial
             "x!=3", // '!=' is still not-equal, not factorial-then-'='
-            "5!>=100 && 3!<7", // factorials mixed with comparisons and logic
+            "5!>=100 && 3!<7",
+            "pow(2,3)", // exact arity
+            "fma(1,2,3)", // fma is a built-in even though it is not in the inbuilt list
+            "log(8)", "log(8,2)", // overloaded: 1 or 2 arguments
+            "if(1>0,2,3)", "now()", "rnd()", "rnd(5)", "max(1,2,3,4)", // fixed 0/3 and variable arity
+            "atan2(1,2)+floorN(2,1.5)", // several fixed-arity calls in one expression // factorials mixed with comparisons and logic
             "x\u00B2!", // superscript then factorial
             "(a+b)\u0420(c-d) * 2\u010C1", // combinatoric operators combined with grouping/multiplication
             "3t", // implicit multiplication: "3t" == "3*t"
@@ -1714,6 +1786,17 @@ public class MathExpressionTreeDepth implements Savable {
             "!", // a lone '!' has no operand
             "5!=", // '!=' with no right operand (NOT a factorial followed by '=')
             "sin", // bare built-in name used as a variable
+            "sin()", // built-in called with too few arguments
+            "cos(4,5)", // ...with too many
+            "pow(2)", // two-argument built-in with one
+            "pow(1,2,3)", // ...and with three
+            "fma(1,2)", // three-argument built-in with two
+            "if(1>0,2)", // if needs three
+            "log(1,2,3)", // log is overloaded 1-2, not 3
+            "atan2(1)", // atan2 needs two
+            "floorN(1)", // "N, value" rounding needs two
+            "now(1)", // now takes none
+            "fact()", // fact needs one
             "sqrt+1", // ...in an arithmetic expression
             "2*tan", // ...as an operand
             "sin+cos(1)", // bare built-in next to a real call
