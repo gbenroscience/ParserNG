@@ -40,6 +40,10 @@ public class ExpressionChecks {
         m = new MathExpression("\"hi\"", true, true);
         System.out.println("\"hi\": " + m.solve());
 
+        m = runExpr("4+tan(3)", true);
+        System.out.println("tan : " + m.solve());
+        m = runExpr("cos()", true);
+        System.out.println("cos() : " + m.solve());
         runExpr("sec(x,y,z)=0", true);
         System.out.println("sec(x,y,z)=0 : " + FunctionManager.FUNCTIONS);
         runExpr("sin(x)=5+x/3", true);

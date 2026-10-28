@@ -289,6 +289,20 @@ public class MathExpressionTreeDepth implements Savable {
     }
 
     /**
+     * True if {@code name} has been declared as a variable: introduced by this
+     * expression (assignment target, parameter), a system constant (pi, e...),
+     * a global variable, or a local variable of the registry. Deliberately
+     * excludes inbuilt method names, so that a bare {@code sin} is never
+     * mistaken for a variable.
+     */
+    private boolean isDeclaredVariable(String name) {
+        return declaredNames.contains(name)
+                || com.github.gbenroscience.parser.Variable.isSystemConstant(name)
+                || VariableManager.lookUp(name) != null
+                || (registry != null && registry.lookUp(name) != null);
+    }
+
+    /**
      * True if, after optional whitespace at index {@code from}, a single '='
      * (not '==') follows, i.e. the call is really a definition such as
      * {@code f(x)=sin(x)} or {@code A(2,2)=(3,1,4,7)} and its name need not
@@ -1043,21 +1057,32 @@ public class MathExpressionTreeDepth implements Savable {
                 // pushes exactly one stack slot, same as a plain variable.
                 return 1;
             }
-            // STRICT MODE: a bare identifier is a variable use and must be
-            // declared. Exempt: declarations (parameter lists, assignment
-            // targets like x=5), names declared earlier in this expression,
-            // system constants (pi, e...), and the free symbols (t, y, ...)
-            // inside diffeqn-family calls.
+            // A bare identifier (no call parentheses, no [n] index) is a
+            // variable use. Exempt: declarations (parameter lists, assignment
+            // targets like x=5), declared variables, system constants (pi, e)
+            // and, for the strict "undeclared" rule only, the free symbols
+            // (t, y, ...) and method names (rk4, ...) inside diffeqn-family
+            // calls.
+            final boolean assignmentTarget = isFollowedByAssignment(identEnd);
             if (declHeaderDepth > 0) {
                 declaredNames.add(name);
-            } else if (isStrictMode() && diffEqDepth == 0 && !isFollowedByAssignment(identEnd)
-                    && !declaredNames.contains(name)
-                    && !com.github.gbenroscience.parser.Variable.isSystemConstant(name)
-                    && !isKnownName(name)) {
-                throw new ParseException(
-                        "Undeclared variable '" + name + "' in strict mode. Declare it first "
-                        + "(e.g. " + name + "=5) or disable strict mode.", nameStart);
-            } else if (isFollowedByAssignment(identEnd)) {
+            } else if (!assignmentTarget && !isDeclaredVariable(name)) {
+                // ALWAYS an error, in strict and non-strict mode: a bare
+                // built-in method name such as "sin", "sqrt" or "tan" is not
+                // a variable and could only fail later, at run time.
+                if (Declarations.isInbuiltMethodName(name) && !FunctionManager.containsAny(name)) {
+                    throw new ParseException(
+                            "'" + name + "' is a built-in function, not a variable. "
+                            + "Call it with arguments, e.g. " + name + "(...), or choose a "
+                            + "different variable name.", nameStart);
+                }
+                // Strict mode only: any other unknown name.
+                if (isStrictMode() && diffEqDepth == 0 && !isKnownName(name)) {
+                    throw new ParseException(
+                            "Undeclared variable '" + name + "' in strict mode. Declare it first "
+                            + "(e.g. " + name + "=5) or disable strict mode.", nameStart);
+                }
+            } else if (assignmentTarget) {
                 declaredNames.add(name);
             }
             lastBareIdentEnd = identEnd;
@@ -1688,6 +1713,10 @@ public class MathExpressionTreeDepth implements Savable {
             "5!!!=", // factorials followed by a dangling '!=' with no right operand
             "!", // a lone '!' has no operand
             "5!=", // '!=' with no right operand (NOT a factorial followed by '=')
+            "sin", // bare built-in name used as a variable
+            "sqrt+1", // ...in an arithmetic expression
+            "2*tan", // ...as an operand
+            "sin+cos(1)", // bare built-in next to a real call
         };
 
         System.out.println("\n-- malformed input (expected to fail cleanly) --");

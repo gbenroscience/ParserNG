@@ -2312,8 +2312,7 @@ public class MathExpression implements Savable, Solvable {
 
                     case Token.METHOD:
                     case Token.FUNCTION:
-                        int arity = t.arity;
-                        System.out.println("token-kind: "+t.kind+", "+expression);
+                        int arity = t.arity; 
 
                         if (arity > ABSOLUTE_MAX_ARITY) {
                             String err
