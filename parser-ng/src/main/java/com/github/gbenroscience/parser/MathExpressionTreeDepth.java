@@ -236,6 +236,15 @@ public class MathExpressionTreeDepth implements Savable {
     // mode accepts these as declared.
     private final java.util.Set<String> declaredNames = new java.util.HashSet<>();
 
+    // Index of the first non-whitespace character of the expression.
+    private int exprStart = 0;
+
+    // Start index of the list item parseCommaListAndClose() is currently
+    // parsing (or -1). A multi-item "(a,b,...)" group is only meaningful as a
+    // WHOLE item of a function-argument / matrix-data list, which this lets
+    // the group branch of parsePrimary() verify in O(1).
+    private int itemStart = -1;
+
     // Number of top-level items in the argument list parseCommaListAndClose()
     // most recently closed ("sin()" -> 0, "pow(2,3)" -> 2).
     private int lastArgCount = 0;
@@ -398,8 +407,7 @@ public class MathExpressionTreeDepth implements Savable {
      * terminates a number or identifier, and is preserved verbatim as content
      * inside a string literal.
      *
-     * @param expression
-     * @param registry 
+     * @param expression 
      */
     public MathExpressionTreeDepth(String expression) {
         this(expression, null, false);
@@ -489,6 +497,8 @@ public class MathExpressionTreeDepth implements Savable {
         }
 
         try {
+            skipWhitespace();
+            exprStart = pos;
             int depth = parseExpression();
             skipWhitespace();
             if (pos != expr.length()) {
@@ -967,10 +977,17 @@ public class MathExpressionTreeDepth implements Savable {
         // original "parens add no depth" grouping, while multiple items fall
         // back to the same stack-accumulation formula used for function args.
         if (c == '(') {
+            final int groupStart = pos;
+            // Captured now: parsing the group's own items overwrites itemStart.
+            final boolean startsAnItem = groupStart == itemStart;
             nextChar();
             enterNesting();
             try {
-                return parseCommaListAndClose("Missing closing ')'");
+                int groupDepth = parseCommaListAndClose("Missing closing ')'", false);
+                if (lastArgCount > 1) {
+                    checkListGroupPlacement(groupStart, startsAnItem);
+                }
+                return groupDepth;
             } finally {
                 exitNesting();
             }
@@ -1245,7 +1262,103 @@ public class MathExpressionTreeDepth implements Savable {
      * missing, so callers can give context-specific wording (e.g. naming the
      * function).
      */
+    /**
+     * Called right after a plain parenthesised group with TWO OR MORE
+     * comma-separated items has been closed (pos is just past its ')').
+     * Such a group is a list literal such as the matrix data {@code (3,1,4,7)}
+     * and is valid only as one whole item of an enclosing list, i.e. a
+     * function argument or matrix data item: {@code sort((1,2,3))},
+     * {@code max(1,(2,3))}, {@code @(2,2)((1,2,3,4))}. It is rejected:
+     * <ul>
+     * <li>when it IS the whole expression, e.g. {@code 1,2} after the engine
+     * has wrapped the statement in parentheses, or {@code 5,8*9},
+     * {@code a,1,3+b,5^2}; and</li>
+     * <li>when it is an operand of an operator or postfix, e.g.
+     * {@code 3+(1,2)}, {@code (1,2)*(3,4)}, {@code (1,2)!}.</li>
+     * </ul>
+     * O(1) apart from skipping whitespace.
+     */
+    private void checkListGroupPlacement(int groupStart, boolean startsAnItem) {
+        int end = pos;
+        while (end < expr.length() && Character.isWhitespace(expr.charAt(end))) {
+            end++;
+        }
+        boolean spansExpression = groupStart == exprStart && end == expr.length();
+        boolean followedByListEnd = end == expr.length()
+                || expr.charAt(end) == ',' || expr.charAt(end) == ')';
+        if (spansExpression
+                || !(startsAnItem || isPrecededByDimensionedAssignment(groupStart))
+                || !followedByListEnd) {
+            throw new ParseException(
+                    "A comma-separated list is not a valid expression here. Use a function call "
+                    + "such as sort(1,2,3), or put an operator between the terms.", groupStart);
+        }
+    }
+
+    /**
+     * True if the group at {@code index} is the right-hand side of a matrix /
+     * vector definition with explicit dimensions: the nearest non-whitespace
+     * character before it is a lone '=' (not "==", "!=", "<=", ">=") whose
+     * left side is {@code name(rows,cols)} or {@code name(length)} with
+     * integer literals, e.g. {@code A(2,2)=(3,1,4,7)} or {@code V(3)=(1,2,3)}.
+     * Plain {@code B=(3,1,4,7)} or {@code x=(1,2)} is not a definition.
+     * Only runs for a multi-item group, so it is off the hot path.
+     */
+    private boolean isPrecededByDimensionedAssignment(int index) {
+        int i = index - 1;
+        while (i >= 0 && Character.isWhitespace(expr.charAt(i))) {
+            i--;
+        }
+        if (i <= 0 || expr.charAt(i) != '=') {
+            return false;
+        }
+        char before = expr.charAt(i - 1);
+        if (before == '=' || before == '!' || before == '<' || before == '>') {
+            return false;
+        }
+        int close = i - 1;
+        while (close >= 0 && Character.isWhitespace(expr.charAt(close))) {
+            close--;
+        }
+        if (close < 0 || expr.charAt(close) != ')') {
+            return false;
+        }
+        int open = close - 1;
+        int numbers = 0;
+        boolean inNumber = false;
+        while (open >= 0 && expr.charAt(open) != '(') {
+            char ch = expr.charAt(open);
+            if (Character.isDigit(ch)) {
+                if (!inNumber) {
+                    numbers++;
+                    inNumber = true;
+                }
+            } else if (ch == ',' || Character.isWhitespace(ch)) {
+                inNumber = false;
+            } else {
+                return false; // not a plain list of integer literals
+            }
+            open--;
+        }
+        if (open <= 0 || numbers < 1 || numbers > 2) {
+            return false;
+        }
+        char nameEnd = expr.charAt(open - 1);
+        return Character.isLetterOrDigit(nameEnd) || nameEnd == '_';
+    }
+
     private int parseCommaListAndClose(String missingCloseMessage) {
+        return parseCommaListAndClose(missingCloseMessage, true);
+    }
+
+    /**
+     * @param itemsOwnListGroups true for function arguments and anonymous
+     * function / matrix lists, whose items may be whole "(a,b,..)" list
+     * literals; false for a plain grouping parenthesis, whose single item must
+     * not be (otherwise the engine's own wrapper parentheses would legitimise
+     * "((1,2))" and "B=(3,1,4,7)").
+     */
+    private int parseCommaListAndClose(String missingCloseMessage, boolean itemsOwnListGroups) {
         lastArgCount = 0;
         int maxStackDepth = 0;
         int itemsCurrentlyOnStack = 0;
@@ -1255,6 +1368,7 @@ public class MathExpressionTreeDepth implements Savable {
 
         if (hasItems) {
             while (true) {
+                itemStart = itemsOwnListGroups ? pos : -1;
                 int itemDepth = parseExpression();
                 // The peak depth is the depth required to evaluate THIS item,
                 // PLUS the items we've already evaluated and left on the stack.
@@ -1701,6 +1815,11 @@ public class MathExpressionTreeDepth implements Savable {
             "-5!", // unary minus applies to the whole factorial
             "x!=3", // '!=' is still not-equal, not factorial-then-'='
             "5!>=100 && 3!<7",
+            "sort(1,2,3+5,-9,12)", // comma lists are fine as function arguments
+            "sort((1,2,3))", "max(1,(2,3))", // ...including a list literal as a whole argument
+            "@(2,2)((1,2,3,4))", // matrix data
+            "V(3)=(1,2,3)", // dimensioned vector definition (A(2,2)=(3,1,4,7) is already above)
+            "@(2)(\"hi there\", \"hullo bro\")", // one-dimensional anonymous form holding strings
             "pow(2,3)", // exact arity
             "fma(1,2,3)", // fma is a built-in even though it is not in the inbuilt list
             "log(8)", "log(8,2)", // overloaded: 1 or 2 arguments
@@ -1800,6 +1919,19 @@ public class MathExpressionTreeDepth implements Savable {
             "sqrt+1", // ...in an arithmetic expression
             "2*tan", // ...as an operand
             "sin+cos(1)", // bare built-in next to a real call
+            "1,2", // a bare comma list is not an expression
+            "1,2+3,4,5", // ...whatever the items are
+            "5,8*9",
+            "a,1,3+b,5^2",
+            "3+(1,2)", // a list literal cannot be an operand
+            "(1,2)*(3,4)",
+            "(1,2)!",
+            "B=(3,1,4,7)", // a list on the right of '=' needs a dimensioned left side
+            "x=(1,2)",
+            "a=(1,2,3)",
+            "A(2,x)=(1,2)", // dimensions must be integer literals
+            "A(1,2,3)=(1,2,3,4,5,6)", // at most two dimensions
+            "((1,2))", // plain grouping parentheses do not legitimise a list
         };
 
         System.out.println("\n-- malformed input (expected to fail cleanly) --");

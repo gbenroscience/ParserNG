@@ -40,8 +40,16 @@ public class ExpressionChecks {
         m = new MathExpression("\"hi\"", true, true);
         System.out.println("\"hi\": " + m.solve());
         
+        
+        m = new MathExpression("1,2", true, true);
+        System.out.println("1,2: " + m.solve()+", scanner: "+m.getScanner());
+        
+        m = new MathExpression("1,2+3,9", true, true);
+        System.out.println("1,2: " + m.solve()+", scanner: "+m.getScanner());
+        
         m = new MathExpression("a;b;", true, true);
         System.out.println("a;b: " + m.solve());
+        
 
         m = runExpr("4+tan(3)", true);
         System.out.println("tan : " + m.solve());
