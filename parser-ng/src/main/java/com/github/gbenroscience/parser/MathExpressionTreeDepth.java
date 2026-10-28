@@ -245,6 +245,19 @@ public class MathExpressionTreeDepth implements Savable {
     // the group branch of parsePrimary() verify in O(1).
     private int itemStart = -1;
 
+    // Start index at which a multi-item "(a,b,...)" group still counts as the
+    // WHOLE item even though it is not literally at itemStart, because it sits
+    // inside redundant grouping parentheses that themselves begin the item:
+    // geom(((2,8,4))) is geom((2,8,4)), exactly as the bracket cleaner treats it
+    // (or -1). Set by the group branch of parsePrimary() for the first token
+    // inside such a wrapper.
+    private int wrappedItemStart = -1;
+
+    // True while the group being parsed encloses a list group that was accepted
+    // only because redundant parentheses around it begin an item. Each such
+    // wrapper then has to pass the same follow-up test as the list itself.
+    private boolean wrappedListAccepted = false;
+
     // Number of top-level items in the argument list parseCommaListAndClose()
     // most recently closed ("sin()" -> 0, "pow(2,3)" -> 2).
     private int lastArgCount = 0;
@@ -980,16 +993,37 @@ public class MathExpressionTreeDepth implements Savable {
             final int groupStart = pos;
             // Captured now: parsing the group's own items overwrites itemStart.
             final boolean startsAnItem = groupStart == itemStart;
+            // Redundant wrapper: this group begins an item (or is itself a wrapper
+            // that does) and its content starts with another "(". If that inner
+            // group turns out to be a list and the sole content of this one, it
+            // is the whole item. The inner group verifies that when it closes.
+            final boolean inheritedItem = groupStart == wrappedItemStart;
+            final int savedWrappedItemStart = wrappedItemStart;
+            final boolean savedWrappedListAccepted = wrappedListAccepted;
+            wrappedListAccepted = false;
             nextChar();
+            if (startsAnItem || inheritedItem
+                    || isFollowedByOpenGroupAfterDimensionedAssignment(groupStart)) {
+                skipWhitespace();
+                wrappedItemStart = peek() == '(' ? pos : -1;
+            }
             enterNesting();
             try {
                 int groupDepth = parseCommaListAndClose("Missing closing ')'", false);
                 if (lastArgCount > 1) {
-                    checkListGroupPlacement(groupStart, startsAnItem);
+                    checkListGroupPlacement(groupStart, startsAnItem, inheritedItem);
+                    wrappedListAccepted = inheritedItem;
+                } else if (wrappedListAccepted) {
+                    // This group is a redundant wrapper around the accepted list:
+                    // it must itself end the item ("geom(((1,2))!)" is not valid).
+                    checkWrapperFollower(groupStart, inheritedItem);
+                    wrappedListAccepted = inheritedItem;
                 }
                 return groupDepth;
             } finally {
                 exitNesting();
+                wrappedItemStart = savedWrappedItemStart;
+                wrappedListAccepted = savedWrappedListAccepted || wrappedListAccepted;
             }
         }
 
@@ -1278,7 +1312,7 @@ public class MathExpressionTreeDepth implements Savable {
      * </ul>
      * O(1) apart from skipping whitespace.
      */
-    private void checkListGroupPlacement(int groupStart, boolean startsAnItem) {
+    private void checkListGroupPlacement(int groupStart, boolean startsAnItem, boolean insideItemWrapper) {
         int end = pos;
         while (end < expr.length() && Character.isWhitespace(expr.charAt(end))) {
             end++;
@@ -1286,6 +1320,12 @@ public class MathExpressionTreeDepth implements Savable {
         boolean spansExpression = groupStart == exprStart && end == expr.length();
         boolean followedByListEnd = end == expr.length()
                 || expr.charAt(end) == ',' || expr.charAt(end) == ')';
+        if (insideItemWrapper) {
+            // Inside redundant parentheses the list must be everything in them:
+            // geom(((2,8,4))) is fine, ((1,2),3) and ((1,2)+3) are not.
+            startsAnItem = true;
+            followedByListEnd = end < expr.length() && expr.charAt(end) == ')';
+        }
         if (spansExpression
                 || !(startsAnItem || isPrecededByDimensionedAssignment(groupStart))
                 || !followedByListEnd) {
@@ -1293,6 +1333,41 @@ public class MathExpressionTreeDepth implements Savable {
                     "A comma-separated list is not a valid expression here. Use a function call "
                     + "such as sort(1,2,3), or put an operator between the terms.", groupStart);
         }
+    }
+
+    /**
+     * A redundant wrapper around an accepted list group must itself be the whole
+     * item: followed by the end of the list or expression, a ',' or a ')'; an
+     * inner wrapper by the ')' of the wrapper around it.
+     */
+    private void checkWrapperFollower(int groupStart, boolean innerWrapper) {
+        int end = pos;
+        while (end < expr.length() && Character.isWhitespace(expr.charAt(end))) {
+            end++;
+        }
+        boolean ok = innerWrapper
+                ? end < expr.length() && expr.charAt(end) == ')'
+                : end == expr.length() || expr.charAt(end) == ',' || expr.charAt(end) == ')';
+        if (!ok) {
+            throw new ParseException(
+                    "A comma-separated list is not a valid expression here. Use a function call "
+                    + "such as sort(1,2,3), or put an operator between the terms.", groupStart);
+        }
+    }
+
+    /**
+     * True if the group at {@code index} is a plain wrapper whose content starts
+     * with another group and which is itself the right-hand side of a dimensioned
+     * matrix / vector definition, e.g. the outer bracket of
+     * {@code A(2,2)=((3,1,4,7))}. Cheap guard first: it only does the backward
+     * scan when the next non-blank character after the wrapper's "(" is "(".
+     */
+    private boolean isFollowedByOpenGroupAfterDimensionedAssignment(int index) {
+        int i = index + 1;
+        while (i < expr.length() && Character.isWhitespace(expr.charAt(i))) {
+            i++;
+        }
+        return i < expr.length() && expr.charAt(i) == '(' && isPrecededByDimensionedAssignment(index);
     }
 
     /**

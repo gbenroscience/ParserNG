@@ -640,7 +640,7 @@ public class MathExpression implements Savable, Solvable {
 
         this.expression = LISTS.createStringFrom(scan, 0, scan.size());
 
-        this.help = this.expression.equals(Declarations.HELP);
+        this.help = this.expression.equals(Declarations.HELP+"()");
 
         invalidateTurbo();  // Clear turbo cache
         this.cachedPostfix = null;  // Force recompile
@@ -710,7 +710,7 @@ public class MathExpression implements Savable, Solvable {
 
     private void construct(String input, boolean foldConstants, boolean strict) throws InputMismatchException {
         this.willFoldConstants = foldConstants;
-        this.help = input.equals(Declarations.HELP);
+        this.help = input.equals(Declarations.HELP+"()");
         this.strict = strict;
 
         Scanner cs = TokenTables.statementScanner(input);

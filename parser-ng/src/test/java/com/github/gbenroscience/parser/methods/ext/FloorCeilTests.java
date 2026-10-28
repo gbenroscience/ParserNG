@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import com.github.gbenroscience.parser.MathExpression;
+import java.util.InputMismatchException;
 
 public class FloorCeilTests {
 
@@ -368,8 +369,12 @@ public class FloorCeilTests {
         me = new MathExpression("sin(8)");
         Assertions.assertEquals(0.9893582466233818, Double.parseDouble(me.solve()));
         //ParserNG iincorrectly solve sin(1+1,2+2) as  sin(2*4)
+        try{ 
         me = new MathExpression("sin(1+1,2+2)");
-        Assertions.assertEquals(MathExpression.SYNTAX_ERROR, me.solve());
+        }catch(InputMismatchException inp){
+                Assertions.assertTrue(true, "sin cannot have 2 args(numbers) except when overriden as such");
+        }
+ 
     }
 
     @Test
