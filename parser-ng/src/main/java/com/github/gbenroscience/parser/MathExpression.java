@@ -745,8 +745,11 @@ public class MathExpression implements Savable, Solvable {
                 if (!success) {
                     correctFunction = success;
                     parser_Result = ParserResult.SYNTAX_ERROR;
-                    input = null;
+                    /*
+                   -input = null;
                     return;
+                    */
+                    throw new InputMismatchException("Invalid Function syntax - "+code);
                 }
             } else {
                 mathExpr = "(" + code + ")";
@@ -2310,6 +2313,7 @@ public class MathExpression implements Savable, Solvable {
                     case Token.METHOD:
                     case Token.FUNCTION:
                         int arity = t.arity;
+                        System.out.println("token-kind: "+t.kind+", "+expression);
 
                         if (arity > ABSOLUTE_MAX_ARITY) {
                             String err

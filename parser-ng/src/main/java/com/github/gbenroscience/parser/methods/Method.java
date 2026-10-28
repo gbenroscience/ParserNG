@@ -157,7 +157,7 @@ public class Method {
     }
 
        public static boolean isPureListReturningStatsMethod(String op) {
-        return (op.equals(SORT) || op.equals(MODE) || op.equals(RANDOM) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS));
+        return (op.equals(SORT) || op.equals(MODE) || op.equals(QUADRATIC) || op.equals(TARTAGLIA_ROOTS));
     }
     
     /**
@@ -171,7 +171,7 @@ public class Method {
 
     /** Same names the old chain of 20 equals() calls tested, now one hash lookup. */
     private static final java.util.Set<String> LIST_RETURNING_STATS_METHODS = new java.util.HashSet<>(Arrays.asList(
-            SORT, MODE, RANDOM, QUADRATIC, TARTAGLIA_ROOTS,
+            SORT, MODE, QUADRATIC, TARTAGLIA_ROOTS,
             INVERSE_MATRIX, LINEAR_SYSTEM, TRIANGULAR_MATRIX, ECHELON_MATRIX,
             MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD, MATRIX_SUBTRACT, MATRIX_POWER,
             MATRIX_TRANSPOSE, MATRIX_EDIT, MATRIX_EIGENVEC, MATRIX_EIGENVALUES,

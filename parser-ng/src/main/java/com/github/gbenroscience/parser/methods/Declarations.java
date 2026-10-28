@@ -590,7 +590,7 @@ public class Declarations {
             case STD_ERR:
                 return TYPE.NUMBER.toString();
             case RANDOM:
-                return TYPE.VECTOR.toString();
+                return TYPE.NUMBER.toString();//rnd() and rnd(n) return one number, not a list
             case SORT:
                 return TYPE.VECTOR.toString();
             case SUM:

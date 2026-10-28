@@ -15,18 +15,17 @@
  */
 package com.github.gbenroscience.parser.benchmarks;
 
-
 import com.github.gbenroscience.parser.MathExpression;
- 
-import java.util.*;
+import com.github.gbenroscience.util.FunctionManager;
 
+import java.util.*;
 
 public class ExpressionChecks {
 
-    private static MathExpression runExpr(String expr, boolean strictMode){
-        
-            System.out.println("Input - "+expr); 
-         MathExpression me = null;
+    private static MathExpression runExpr(String expr, boolean strictMode) {
+
+        System.out.println("Input - " + expr);
+        MathExpression me = null;
         try {
             me = new MathExpression(expr, true, strictMode);
         } catch (InputMismatchException e) {
@@ -34,24 +33,41 @@ public class ExpressionChecks {
         }
         return me;
     }
- 
-    public static void main(String[] args) { 
+
+    public static void main(String[] args) {
         MathExpression m = new MathExpression("4!");
-        System.out.println("fact-solve: "+m.solve());
+        System.out.println("fact-solve: " + m.solve());
+        m = new MathExpression("\"hi\"", true, true);
+        System.out.println("\"hi\": " + m.solve());
+
+        runExpr("sec(x,y,z)=0", true);
+        System.out.println("sec(x,y,z)=0 : " + FunctionManager.FUNCTIONS);
+        runExpr("sin(x)=5+x/3", true);
+        System.out.println("sin(x) : " + FunctionManager.FUNCTIONS);
+        System.out.println("sin(x) : " + new MathExpression("sin(2)").solve());
+        runExpr("cosh=@(x)0", true);
+        System.out.println("cosh=@(x)0 : " + FunctionManager.FUNCTIONS);
+        runExpr("cos()=(4+cos(2))", true);
+      
+        System.out.println("cos()=(4+cos(2)) : " + FunctionManager.FUNCTIONS);
+        System.out.println("cos() : " + new MathExpression("cos()").solve());
         runExpr("2+", true);
         runExpr("4/0", true);
         runExpr("2+≠pi", true);
         runExpr("(((), 2+≠pi, 2+*3", true);
-        MathExpression me = runExpr("hello world", true); 
-          runExpr("x", true); 
+        MathExpression me = runExpr("hello world", true);
+        runExpr("x", true);
         runExpr("(((), 2+≠pi, 2+*3", true);
         runExpr("0/0", true);
-        me=runExpr("sqrt(-1)", false);
-         System.out.println("scanner: "+me.getScanner());
+        me = runExpr("sqrt(-1)", false);
+        System.out.println("scanner: " + me.getScanner());
         me = runExpr("foo(3)", true);
-        System.out.println("scanner: "+me.getScanner()); 
+        System.out.println("scanner: " + me.getScanner());
         
-  
+        
+        m = new MathExpression("j", true, true);
+        System.out.println("j: " + m.solve());
+
     }
-  
+
 }

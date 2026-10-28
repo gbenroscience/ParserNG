@@ -310,7 +310,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
      * @param root The root {@link MathExpression} that generated the input
      * @return
      */
-    public static boolean assignObject(String input, MathExpression root) {
+    public static boolean assignObject(String input, MathExpression root) throws InputMismatchException{
         ErrorLog log = root != null ? root.getErrorLog() : new ErrorLog();
         /**
          * Check if it is a function assignment operation...e.g:
@@ -734,7 +734,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
 
             if (!isArray) {
                 Matrix m = new Matrix(flatArray, 1, sz);
-                anonFn = FunctionManager.lockDownAnon(varList.toArray(new String[0]));
+                anonFn = FunctionManager.lockDownAnon(varList.toArray(new String[0]));     
                 m.setName(anonFn.getName());
                 String dependentVar = anonFn.getName();
                 anonFn.setDependentVariable(new Variable(dependentVar));
@@ -1591,11 +1591,12 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                     return null;
                 }
                 String str = dependentVariable.getName() + "(";
+                int len = str.length();
                 int sz = independentVariables.size();
                 for (int i = 0; i < sz; i++) {
                     str += (independentVariables.get(i).getName() + ",");
                 }//end for
-                str = str.substring(0, str.length() - 1);
+                str = len == str.length() ? str : str.substring(0, str.length() - 1);
                 return str + ")";
             case MATRIX:
                 return getName() + "(" + matrix.getRows() + "," + matrix.getCols() + ")";
