@@ -111,7 +111,6 @@ public class MathExpression implements Savable, Solvable {
     protected int noOfListReturningOperators;
     protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scan input function
     private boolean optimizable;
-     
 
     private boolean strict = false;
 
@@ -667,9 +666,9 @@ public class MathExpression implements Savable, Solvable {
 
         this.slots = registry.getSlots();
     }//end constructor MathExpression
-    
+
     MathExpression(List<String> scan, String commaAlias) {
-        this(scan, commaAlias, false); 
+        this(scan, commaAlias, false);
     }
 
     public MathExpression(String input, boolean foldConstants) throws InputMismatchException {
@@ -748,11 +747,18 @@ public class MathExpression implements Savable, Solvable {
                     /*
                    -input = null;
                     return;
-                    */
-                    throw new InputMismatchException("Invalid Function syntax - "+code);
+                     */
+                    throw new InputMismatchException("Invalid Function syntax - " + code);
                 }
             } else {
                 mathExpr = "(" + code + ")";
+                // With several statements (a;b) only one expression survives and
+                // setExpression() validates just that one, so validate EVERY
+                // expression statement here, in order, after the assignments
+                // that precede it have declared their variables.
+                if (scanned.size() > 1) {
+                    validateStatement(mathExpr);
+                }
                 ++exprCount;
             }
         }
@@ -835,7 +841,7 @@ public class MathExpression implements Savable, Solvable {
 
         return s.toString();
     }
- 
+
     public double[] getExecutionFrame() {
         return executionFrame;
     }
@@ -889,7 +895,6 @@ public class MathExpression implements Savable, Solvable {
         log.copyFrom(errorLog);
     }
 
- 
     private void initializing(String expression) throws InputMismatchException {
         this.expression = expression; // raw: the validator must see the real spacing
         computeTreeDepth();
@@ -1147,7 +1152,6 @@ public class MathExpression implements Savable, Solvable {
         }
     }
 
-    
     /**
      *
      * @return true if the input can be evaluated.
@@ -1225,6 +1229,14 @@ public class MathExpression implements Savable, Solvable {
 
     private void computeTreeDepth() {
         treeStats = new MathExpressionTreeDepth(expression, registry, strict).calculate();
+    }
+
+    /**
+     * Runs the structural/strict-mode validator over one statement, throwing
+     * exactly what {@link #computeTreeDepth()} would throw for it.
+     */
+    private void validateStatement(String statement) {
+        new MathExpressionTreeDepth(statement, registry, isStrict()).calculate();
     }
 
     public MathExpressionTreeDepth.Result getTreeStats() {
@@ -2312,7 +2324,7 @@ public class MathExpression implements Savable, Solvable {
 
                     case Token.METHOD:
                     case Token.FUNCTION:
-                        int arity = t.arity; 
+                        int arity = t.arity;
 
                         if (arity > ABSOLUTE_MAX_ARITY) {
                             String err

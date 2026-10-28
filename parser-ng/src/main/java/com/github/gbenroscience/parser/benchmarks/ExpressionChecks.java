@@ -39,6 +39,9 @@ public class ExpressionChecks {
         System.out.println("fact-solve: " + m.solve());
         m = new MathExpression("\"hi\"", true, true);
         System.out.println("\"hi\": " + m.solve());
+        
+        m = new MathExpression("a;b;", true, true);
+        System.out.println("a;b: " + m.solve());
 
         m = runExpr("4+tan(3)", true);
         System.out.println("tan : " + m.solve());
