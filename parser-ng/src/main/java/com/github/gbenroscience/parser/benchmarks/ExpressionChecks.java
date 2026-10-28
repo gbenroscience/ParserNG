@@ -41,10 +41,11 @@ public class ExpressionChecks {
         System.out.println("\"hi\": " + m.solve());
         
         
-        m = new MathExpression("1,2", true, true);
-        System.out.println("1,2: " + m.solve()+", scanner: "+m.getScanner());
         
         m = new MathExpression("1,2+3,9", true, true);
+        System.out.println("1,2: " + m.solve()+", scanner: "+m.getScanner());
+        
+        m = new MathExpression("1,2", true, true);
         System.out.println("1,2: " + m.solve()+", scanner: "+m.getScanner());
         
         m = new MathExpression("a;b;", true, true);
