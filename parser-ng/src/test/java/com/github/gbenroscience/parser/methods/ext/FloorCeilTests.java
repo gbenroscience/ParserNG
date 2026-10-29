@@ -354,7 +354,7 @@ public class FloorCeilTests {
     void fracPreReqNonStat1() {
         MathExpression me;
         me = new MathExpression("sin(3/2)");
-        Assertions.assertEquals(0.9974949866040544, Double.parseDouble(me.solve()));
+        Assertions.assertEquals(Math.sin(1.5), Double.parseDouble(me.solve()), 1e-15);
     }
 
     @Test

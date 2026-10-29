@@ -55,7 +55,7 @@ class MathExpressionTest {
     @Test
     void help() {
         MathExpression me = new MathExpression("help()");
-        String help = me.solve();System.out.println("help:"+help);
+        String help = me.solve();
         Assertions.assertTrue(help.length() > 100);
         Assertions.assertTrue(help.contains(Declarations.SIN));
     }

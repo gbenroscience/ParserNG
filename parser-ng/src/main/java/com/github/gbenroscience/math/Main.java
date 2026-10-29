@@ -158,8 +158,9 @@ public class Main {
     }
 
     static void help() {
+        Help.projectSupportNotice();
         System.out.println("  ParserNG " + getVersion() + " " + Main.class.getName());
-        System.out.println(helpSwitch + "         this text; do not change for help (witout dashes), which lists functions");
+        System.out.println(helpSwitch + "         this text; do not change for help (without dashes), which lists functions");
         System.out.println(verboseSwitch + "      output is reprinted to stderr with some inter-steps");
         System.out.println(logcalSwitch + "        will add logical expression wrapper around the expression");
         System.out.println("                     Logical expression parser is much less evolved and slow. Do not use it if you don't must");
