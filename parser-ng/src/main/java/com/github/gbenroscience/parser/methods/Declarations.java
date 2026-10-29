@@ -161,6 +161,189 @@ public class Declarations {
     public static final String SWIGLU = "swiglu";
     public static final String GEGLU = "geglu";
     public static final String HELP = "help";
+    
+    public static final int ARITY_ZERO = 0;
+    public static final int ARITY_ONE = 1;
+    public static final int ARITY_TWO = 2;
+    public static final int ARITY_THREE = 3;
+    public static final int ARITY_N = -10;
+    
+    /**
+     * Returns the number of arguments an inbuilt method expects, expressed with
+     * the {@code ARITY_*} constants of this class.
+     *
+     * <ul>
+     * <li>{@link #ARITY_ZERO} - takes no arguments ({@code now()},
+     * {@code nanos()}).</li>
+     * <li>{@link #ARITY_ONE} - exactly one argument: the scalar functions
+     * (trigonometric, hyperbolic, exponential, logarithmic, roots, rounding
+     * without a precision, ...), {@code fact}, {@code erf}, {@code gelu}, and
+     * the solvers that take a single function ({@code quadratic},
+     * {@code t_root}).</li>
+     * <li>{@link #ARITY_TWO} - exactly two: {@code pow}, {@code atan2},
+     * {@code comb}, {@code perm}, and the "N, value" rounding family
+     * ({@code roundN}, {@code floorN}, {@code ceilDigitsN}, ...).</li>
+     * <li>{@link #ARITY_THREE} - exactly three: {@code fma}, {@code vma},
+     * {@code if}.</li>
+     * <li>{@link #ARITY_N} - anything else: methods that accept a variable
+     * number of arguments. This covers the statistics methods, the matrix and
+     * linear-algebra methods, the calculus / differential-equation / root
+     * finding commands, the {@code echo*} family, and every method that is
+     * <em>overloaded</em> on argument count, e.g. {@code log(x)} /
+     * {@code log(x, base)}, {@code geglu(x)} / {@code geglu(a, b)},
+     * {@code swiglu(x)} / {@code swiglu(a, b)}, {@code rnd()} /
+     * {@code rnd(n)}. A single int cannot describe "one or two", so such
+     * methods report {@code ARITY_N}; use
+     * {@link #acceptsInbuiltMethodArgCount(String, int)} for a precise check.
+     * Basic numerical methods registered by users carry no arity information
+     * and also report {@code ARITY_N}.</li>
+     * </ul>
+     *
+     * The DRG-mode variants produced by
+     * {@link #getTrigFuncDRGVariant(String, DRG_MODE)} (e.g. {@code sin_deg})
+     * have the arity of the method they were derived from.
+     *
+     * @param inbuiltMethodName the name of the inbuilt method
+     * @return one of {@link #ARITY_ZERO}, {@link #ARITY_ONE},
+     * {@link #ARITY_TWO}, {@link #ARITY_THREE} or {@link #ARITY_N}
+     * @throws IllegalArgumentException if the name is null or is not the name
+     * of an inbuilt method
+     */
+    public static final int getInbuiltMethodArity(String inbuiltMethodName) {
+        if (inbuiltMethodName == null) {
+            throw new IllegalArgumentException("Method name must not be null");
+        }
+        switch (inbuiltMethodName) {
+            // ---- no arguments -------------------------------------------------
+            case NOW:
+            case NANOS:
+                return ARITY_ZERO;
+
+            // ---- exactly one argument -----------------------------------------
+            case SIN: case COS: case TAN:
+            case ARC_SIN: case ARC_COS: case ARC_TAN:
+            case ARC_SIN_ALT: case ARC_COS_ALT: case ARC_TAN_ALT:
+            case SEC: case COSEC: case COT:
+            case ARC_SEC: case ARC_COSEC: case ARC_COT:
+            case ARC_SEC_ALT: case ARC_COSEC_ALT: case ARC_COT_ALT:
+            case SINH: case COSH: case TANH:
+            case ARC_SINH: case ARC_COSH: case ARC_TANH:
+            case ARC_SINH_ALT: case ARC_COSH_ALT: case ARC_TANH_ALT:
+            case SECH: case COSECH: case COTH:
+            case ARC_SECH: case ARC_COSECH: case ARC_COTH:
+            case ARC_SECH_ALT: case ARC_COSECH_ALT: case ARC_COTH_ALT:
+            case EXP:
+            case LN: case LG:
+            case LN_INV: case LG_INV:
+            case LN_INV_ALT: case LG_INV_ALT:
+            case SQRT: case CBRT: case INVERSE: case SQUARE: case CUBE:
+            case FACT:
+            case ABS: case FLOOR: case CEIL:
+            case ERF: case ERFC: case GELU: case FAST_GELU:
+            case QUADRATIC: case TARTAGLIA_ROOTS:
+            // basic numerical methods (ext package) taking a single number
+            case "round":
+            case "length": case "lengthDecimal": case "lengthFractional":
+                return ARITY_ONE;
+
+            // ---- exactly two arguments ----------------------------------------
+            case POW: case ATAN2:
+            case COMBINATION: case PERMUTATION:
+            // "N, value" rounding family (ext package)
+            case "roundN": case "roundX": case "roundDigitsN":
+            case "ceilN": case "ceilDigitsN":
+            case "floorN": case "floorDigitsN":
+                return ARITY_TWO;
+
+            // ---- exactly three arguments --------------------------------------
+            case FMA: case VMA:
+            case IF:
+                return ARITY_THREE;
+
+            // ---- variable / overloaded ----------------------------------------
+            // log, log-1, alog, geglu, swiglu, rnd and help are overloaded on
+            // the argument count; the rest are genuinely n-ary.
+            case LOG: case LOG_INV: case LOG_INV_ALT:
+            case GEGLU: case SWIGLU:
+            case RANDOM: case HELP:
+            case SUM: case LIST_SUM: case PROD: case MEAN: case AVG:
+            case MEDIAN: case MODE: case RANGE: case MID_RANGE:
+            case ROOT_MEAN_SQUARED: case COEFFICIENT_OF_VARIATION:
+            case MIN: case MAX: case STD_DEV: case VARIANCE: case STD_ERR:
+            case SORT: case PLOT: case PRINT:
+            case DIFFERENTIATION: case AUTO_DIFF: case AUTO_DIFF_N:
+            case INTEGRATION: case GENERAL_ROOT: case ROTOR:
+            case DIFF_EQN: case DIFF_EQN_PATH:
+            case DIFF_EQN_HO: case DIFF_EQN_PATH_HO:
+            case LINEAR_SYSTEM: case DETERMINANT: case INVERSE_MATRIX:
+            case TRIANGULAR_MATRIX: case ECHELON_MATRIX:
+            case MATRIX_MULTIPLY: case MATRIX_DIVIDE: case MATRIX_ADD:
+            case MATRIX_SUBTRACT: case MATRIX_POWER: case MATRIX_TRANSPOSE:
+            case MATRIX_EDIT: case MATRIX_COFACTORS: case MATRIX_ADJOINT:
+            case MATRIX_EIGENVEC: case MATRIX_EIGENVALUES:
+            case MATRIX_EIGENPOLY: case SUB_MATRIX: case RANDOM_MATRIX:
+            case MATRIX_MINOR:
+            // basic numerical methods (ext package) taking a list
+            case "echo": case "echon": case "echoi": case "echoni":
+            case "avg": case "avgN": case "geom": case "geomN":
+            case "count": case "gsum":
+                return ARITY_N;
+
+            default:
+                break;
+        }
+
+        // DRG variants such as "sin_deg", "cos_rad", "atan_grad".
+        for (String suffix : DRG_SUFFIXES) {
+            if (inbuiltMethodName.endsWith(suffix)) {
+                String base = inbuiltMethodName.substring(0, inbuiltMethodName.length() - suffix.length());
+                if (!base.isEmpty() && isInbuiltMethodName(base)) {
+                    return getInbuiltMethodArity(base);
+                }
+            }
+        }
+
+        // Registered basic numerical methods (including user supplied ones)
+        // carry no arity metadata: treat them as variable-arity.
+        if (isInbuiltMethodName(inbuiltMethodName)) {
+            return ARITY_N;
+        }
+        throw new IllegalArgumentException("Not an inbuilt method: " + inbuiltMethodName);
+    }
+
+    private static final String[] DRG_SUFFIXES = {"_deg", "_rad", "_grad"};
+
+    /**
+     * Whether an inbuilt method accepts exactly {@code argCount} arguments.
+     * Unlike {@link #getInbuiltMethodArity(String)}, this understands methods
+     * overloaded on argument count: {@code log} and {@code log-1} accept 1 or
+     * 2, {@code geglu} and {@code swiglu} accept 1 or 2, {@code rnd} accepts 0
+     * or 1, {@code help} accepts 0 or 1. Fixed-arity methods accept exactly
+     * their arity; every other variable-arity method accepts any non-negative
+     * count (their own implementations validate the specifics).
+     *
+     * @param inbuiltMethodName the name of the inbuilt method
+     * @param argCount the number of arguments supplied
+     * @return true if the call shape is acceptable
+     * @throws IllegalArgumentException if the name is null or not inbuilt
+     */
+    public static boolean acceptsInbuiltMethodArgCount(String inbuiltMethodName, int argCount) {
+        int arity = getInbuiltMethodArity(inbuiltMethodName);
+        if (arity != ARITY_N) {
+            return argCount == arity;
+        }
+        switch (inbuiltMethodName) {
+            case LOG: case LOG_INV:
+            case GEGLU: case SWIGLU:
+                return argCount == 1 || argCount == 2;
+            case LOG_INV_ALT:
+                return argCount == 2; // the implementation reads both arguments
+            case RANDOM: case HELP:
+                return argCount == 0 || argCount == 1;
+            default:
+                return argCount >= 0;
+        }
+    }
 
     public static final String getTrigFuncDRGVariant(String methodName, DRG_MODE drg) {
         String mode = drg == DRG_MODE.DEG ? "_deg" : (drg == DRG_MODE.RAD ? "_rad" : "_grad");
@@ -255,6 +438,7 @@ public class Declarations {
         }
         return s;
     }
+
 
     /**
      * Zero-allocation membership test for the names of the core inbuilt
@@ -590,7 +774,7 @@ public class Declarations {
             case STD_ERR:
                 return TYPE.NUMBER.toString();
             case RANDOM:
-                return TYPE.VECTOR.toString();
+                return TYPE.NUMBER.toString();//rnd() and rnd(n) return one number, not a list
             case SORT:
                 return TYPE.VECTOR.toString();
             case SUM:

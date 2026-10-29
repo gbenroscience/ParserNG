@@ -78,7 +78,13 @@ public class BracketCleaner {
                 int close = pairMap[i];
 
                 // 1. Redundant nested brackets ((...)) → (...)   (always safe)
-                if (open + 1 < scanner.size() && pairMap[open + 1] == close - 1) {
+                //    The inner token must really be an opening bracket. pairMap is
+                //    symmetric, so for an EMPTY pair "()" the token at open+1 is the
+                //    closing bracket itself, whose partner (open) equals close-1, and
+                //    the test below would wrongly pass and strip the "()" before the
+                //    safety checks of rule 3 ever ran. That made zero-argument calls
+                //    such as check() or adapt() reach the inliner as a bare name.
+                if (open + 1 < scanner.size() && "(".equals(scanner.get(open + 1)) && pairMap[open + 1] == close - 1) {
                     scanner.remove(close);
                     scanner.remove(open);
                     changed = true;
@@ -159,4 +165,4 @@ public class BracketCleaner {
         System.out.println("Cleaned scanner:" + scanner );
         System.out.println("eval:" + mexie.solve() );
     }
-}
+}

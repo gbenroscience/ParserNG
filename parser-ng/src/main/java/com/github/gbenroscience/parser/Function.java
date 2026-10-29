@@ -17,6 +17,7 @@ import com.github.gbenroscience.parser.methods.MethodRegistry;
 import com.github.gbenroscience.parser.turbo.tools.*;
 import com.github.gbenroscience.util.ErrorLog;
 import com.github.gbenroscience.util.FunctionManager;
+import com.github.gbenroscience.util.FunctionScope;
 import static com.github.gbenroscience.util.FunctionManager.*;
 import com.github.gbenroscience.util.Serializer;
 import com.github.gbenroscience.util.Utils;
@@ -81,16 +82,14 @@ public class Function implements Savable, MethodRegistry.MethodAction {
 
         String fName = this.matrix.getName();
 
-        Function oldFunc = FUNCTIONS.get(fName);
-        Variable v = VariableManager.lookUp(fName);//check if a Variable has this name in the Variables registry
-        if (v != null) {
-            VariableManager.delete(fName);//if so delete it.
-        }//end if 
+        if (FunctionManager.activeLocalScope() == null) {
+            Variable v = VariableManager.lookUp(fName);//check if a Variable has this name in the Variables registry
+            if (v != null) {
+                VariableManager.delete(fName);//if so delete it.
+            }//end if 
+        }//a local scope never deletes global variables
 
-        if (oldFunc != null) {//function exists in registry
-            FunctionManager.delete(fName);
-        }
-        FunctionManager.add(this);
+        FunctionManager.add(this);//replaces any function of this name in the active scope
         FunctionManager.update();
     }
 
@@ -311,7 +310,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
      * @param root The root {@link MathExpression} that generated the input
      * @return
      */
-    public static boolean assignObject(String input, MathExpression root) {
+    public static boolean assignObject(String input, MathExpression root) throws InputMismatchException{
         ErrorLog log = root != null ? root.getErrorLog() : new ErrorLog();
         /**
          * Check if it is a function assignment operation...e.g:
@@ -503,7 +502,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                                 throw new InputMismatchException(err);
                             }
                             f = FunctionManager.lookUp(referenceName);
-                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
+                            FunctionManager.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
                             success = true;
                             break;
                         case VECTOR:
@@ -513,7 +512,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                                 throw new InputMismatchException(err);
                             }
                             f = FunctionManager.lookUp(referenceName);
-                            FunctionManager.FUNCTIONS.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
+                            FunctionManager.put(newFuncName, new Function(newFuncName + "=" + f.expressionForm()));
                             success = true;
                             break;
                         case STRING:
@@ -735,7 +734,7 @@ public class Function implements Savable, MethodRegistry.MethodAction {
 
             if (!isArray) {
                 Matrix m = new Matrix(flatArray, 1, sz);
-                anonFn = FunctionManager.lockDownAnon(varList.toArray(new String[0]));
+                anonFn = FunctionManager.lockDownAnon(varList.toArray(new String[0]));     
                 m.setName(anonFn.getName());
                 String dependentVar = anonFn.getName();
                 anonFn.setDependentVariable(new Variable(dependentVar));
@@ -1229,7 +1228,74 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                     }
                 }
             }
-            return new MathExpression(scanner, commaAlias);
+            // The function runs in the scope it was defined in, not the caller's.
+            // The arguments here are constants, so nothing in them is scoped.
+            final FunctionScope home = f.getMathExpression().scopeOrNull();
+            final FunctionScope prev = FunctionManager.enter(home);
+            try {
+                return new MathExpression(scanner, commaAlias);
+            } finally {
+                if (prev != home) {
+                    FunctionManager.exit(prev);
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The tokens of this function's body, ready to be spliced into an
+     * expression of the <i>active</i> scope. When the function was defined in
+     * that same scope (always the case without local scopes) this is a plain
+     * copy. When it was defined elsewhere, any name in the body that names a
+     * function (a matrix, a vector, a function handle, ...) and that the active
+     * scope would resolve differently is replaced by a hidden alias to the
+     * function the body meant, so the spliced tokens keep their original
+     * meaning. Parameters and built-in names are never touched.
+     */
+    final static List<String> bodyTokensForActiveScope(Function f) {
+        List<String> body = new ArrayList<>(f.getMathExpression().scanner);
+        final FunctionScope home = f.getMathExpression().scopeOrNull();
+        final FunctionScope here = FunctionManager.activeLocalScope();
+        if (home == here) {
+            return body;
+        }
+        final FunctionScope homeScope = FunctionManager.scopeOrGlobal(home);
+        final FunctionScope hereScope = FunctionManager.scopeOrGlobal(here);
+        for (int i = 0, n = body.size(); i < n; i++) {
+            String tk = body.get(i);
+            if (!Variable.isVariableString(tk) || f.isParam(tk)) {
+                continue;
+            }
+            Function meant = homeScope.lookUp(tk);
+            if (meant != null && hereScope.lookUp(tk) != meant) {
+                body.set(i, hereScope.aliasFor(meant));
+            }
+        }
+        return body;
+    }
+
+    /**
+     * Same as {@link #transformScan(Function, List)} but starting from the
+     * given body tokens instead of the function's own.
+     */
+    final static List<String> transformScan(Function f, List<String> body, List<List<String>> argVectors) {
+        if (!f.isMatrix()) {
+            List<String> scanner = body;
+
+            for (int i = 0; i < argVectors.size(); i++) {
+                List<String> arg = argVectors.get(i);
+                Variable v = f.independentVariables.get(i);
+                for (int j = 0; j < scanner.size(); j++) {
+                    String tkn = scanner.get(j);
+                    if (tkn.equals(v.getName())) {
+                        scanner.remove(j);
+                        scanner.addAll(j, arg);
+                        j += arg.size();
+                    }
+                }
+            }
+            return scanner;
         }
         return null;
     }
@@ -1525,11 +1591,12 @@ public class Function implements Savable, MethodRegistry.MethodAction {
                     return null;
                 }
                 String str = dependentVariable.getName() + "(";
+                int len = str.length();
                 int sz = independentVariables.size();
                 for (int i = 0; i < sz; i++) {
                     str += (independentVariables.get(i).getName() + ",");
                 }//end for
-                str = str.substring(0, str.length() - 1);
+                str = len == str.length() ? str : str.substring(0, str.length() - 1);
                 return str + ")";
             case MATRIX:
                 return getName() + "(" + matrix.getRows() + "," + matrix.getCols() + ")";

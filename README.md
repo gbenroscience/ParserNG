@@ -320,6 +320,7 @@ Full measured breakdowns, including GPU throughput at scale, live in [BENCHMARK_
 * **Calculus & Advanced Algebra:** Symbolic differentiation (`diff`), automatic differentiation (`autodiff`) to arbitrary order, numerical integration (`intg`), and full matrix algebra: determinants, `eigvalues`, `adjoint`, `cofactor`, `echelon`, `linear_sys`, matrix division.
 * **Vectorized Orchestration:** Hardware vector registers via `jdk.incubator.vector`, with a smooth Android-compliant scalar fallback.
 * **Versatile Execution Architecture:** Logical/conditional expressions (`if(cond, a, b)`), user-defined functions (`f(x,y)=...` and `@(x,y)...` anonymous forms), equation root solvers (`quadratic`, `t_root` for cubics via Tartaglia, general `root`), point/line/function rotation (`rot`), and real-time geometric plotting buffers.
+* **Global and Local Function Scopes:** Give each `MathExpression` (or group of them) its own private function registry with `FunctionScope`, shadowing or isolating from the global one, with zero allocation on the hot paths. See [global and local function scopes](#-new-global-and-local-function-scopes).
 * **Zero Dependencies:** Portable and self-contained across Java SE, Android, and legacy JavaME profiles.
 
 ---
@@ -345,6 +346,102 @@ An array literal accepts both single- and double-quoted strings (`'3.14'` and `"
 
 
 
+
+## 🔒 New: global and local function scopes
+
+Until now every `MathExpression` in the process shared one function registry, `FunctionManager.FUNCTIONS`. That is still the default, and nothing changes for code that ignores this section. But when many expressions, tenants, plugins or tests must each define *their own* `f(x)`, a single shared registry means they overwrite one another. A **`FunctionScope`** is a private registry that sits in front of the global one.
+
+```java
+FunctionManager.add("f(x)=x+1");                        // global, exactly as before
+
+FunctionScope mine = FunctionScope.create();            // a new, empty local scope
+new MathExpression("f(x)=x*10;f(2)", mine).solve();     // "20.0"  defined in `mine`, shadowing the global f
+new MathExpression("f(2)", mine).solve();               // "20.0"  `mine` remembers its own f
+new MathExpression("f(2)").solve();                     // "3.0"   the global f was never touched
+```
+
+### The rules
+
+| | |
+|---|---|
+| **Lookup** | The expression's scope first, then its parent, and so on up to the global scope. The first match wins, so a local function *shadows* a global one of the same name. |
+| **Definition** | `f(x)=...`, `f=@(x)...`, matrices (`M=@(2,2)(...)`), vectors, arrays and anonymous functions all go into the expression's own scope, never into a parent. |
+| **Deletion** | Only removes from the scope you are in. A local scope can never delete a global function, or a global variable. |
+| **Lexical** | A function runs in the scope it was *defined* in, whoever calls it. A global `g(x)=f(x)+1` keeps using the global `f`, even when called from a scope that defines its own `f`. A local `g` that calls `f` uses the local `f`. This also holds when the scanner inlines `g`'s body into the caller: matrices and function handles named in the body are pinned to the function the body meant (via hidden per-scope aliases), so they cannot leak to a same-named definition in the caller's scope. |
+| **No scope given** | The global scope, which is the old behaviour. `FunctionManager.FUNCTIONS` remains the global map. |
+
+### Creating and using scopes
+
+```java
+// An expression that belongs to a scope
+MathExpression me = new MathExpression("f(3)", mine);
+me.solve();
+me.getFunctionScope();                                  // `mine`
+
+// A scope you can define things in directly
+mine.add("g(x)=x^2");                                   // local
+mine.solve("h(x)=g(x)+1; h(3)");                        // "10.0", and h is local too
+
+// Where do names come from?
+mine.lookUp("f");                                       // local f if there is one, else the global f
+mine.lookUpLocal("f");                                  // only what `mine` itself defines
+mine.localNames();                                      // names defined in `mine`
+mine.remove("f");                                       // the global f is visible again
+```
+
+A few shapes, depending on how much you want to share:
+
+```java
+FunctionScope.create();                  // child of the global scope: sees global functions, adds its own
+FunctionScope.create(parent);            // child of another scope: scopes nest
+FunctionScope.isolated();                // no fallback at all: global user functions are invisible
+```
+
+Give each expression its own scope for full separation (100 expressions, 100 different `f`), or share one scope between many expressions that should agree on their definitions.
+
+Code that predates scopes, or that calls the static `FunctionManager` API, can be pointed at a scope for a block:
+
+```java
+try (FunctionScope.Binding b = mine.activate()) {
+    FunctionManager.add("k(x)=x+7");                    // lands in `mine`
+    new MathExpression("k(1)").solve();                 // an expression created here joins `mine`
+}                                                       // the previous scope is restored
+```
+
+### How it works
+
+ParserNG resolves function names through the static `FunctionManager` in a couple of hundred places, so rather than thread a scope argument through all of them, **each thread has an active scope** and every `FunctionManager` method reads and writes it. A `MathExpression` that belongs to a scope makes it active while it parses, compiles and evaluates, then puts the previous one back. An expression created while a scope is active (a function body, a nested sub-expression) joins that scope automatically; that is what makes scoping lexical. Compiled (`compileTurbo()`) expressions carry their scope with them and keep working on any thread. The scanner's cached vocabulary is kept per scope, so a scope's function names are recognised without ever appearing in the global one.
+
+### Performance
+
+Scoping is built to cost nothing when unused and next to nothing when used.
+
+* **No allocation, ever, on the hot paths.** Scope lookup, scope switching, and evaluation of scoped expressions all allocate zero bytes per call (checked by a test that measures per-thread allocation).
+* **Unscoped code pays one volatile read.** Until the first local scope is created in the process, the only added cost is a single flag check per evaluation. Global compiled expressions run at the same ~5 ns as before.
+* **Local lookups are lock-free.** A local scope is a `ConcurrentHashMap`, so reading it takes no monitor; a lookup is about 10 ns against about 24 ns for the global (synchronized) map.
+* **Compiled expressions that call no user functions are returned unwrapped**, with no scope handling at all.
+
+Measured on one machine (JDK 21, best of seven runs of two million calls); your numbers will differ, the proportions should not:
+
+| Operation | Before | After |
+|---|---|---|
+| `solveGeneric`, global expression, no scopes in use | 12.3 ns | 12.9 ns |
+| compiled global expression, `applyScalar` | 5.4 ns | 5.4 ns |
+| compiled scoped expression, `applyScalar` | n/a | 5.5 ns |
+| global function lookup | 23.7 ns | 23.5 ns |
+| local function lookup | n/a | 10.2 ns |
+
+Once a local scope exists anywhere in the process, evaluating an expression costs one extra thread-local read (about 3 ns), because a global expression has to be able to tell it is not running inside a local scope.
+
+### Limits
+
+* Only **functions** are scoped. Variables keep their existing model: a per-expression registry backed by the global `VariableManager`.
+* As in the global registry, a function keeps what its body referred to **when it was defined**. If `pp(x)=f(x)+5` is defined and `f` is redefined afterwards, `pp` still uses the old `f`. This is unchanged from before; it applies inside a scope exactly as it does globally.
+* Serialization does not carry the scope: a deserialized `MathExpression` is global.
+* A `MathExpression` is still not thread-safe; give each thread its own, as before. Scopes themselves are safe to share.
+* Code that reads `FunctionManager.FUNCTIONS` directly sees the **global** functions only.
+
+---
 
 ## 📐 Examples Across Every Backend
 

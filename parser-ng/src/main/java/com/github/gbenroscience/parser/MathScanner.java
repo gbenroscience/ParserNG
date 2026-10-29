@@ -840,6 +840,16 @@ public class MathScanner {
         return true;
     }
 
+    /**
+     * @param name A name that the user has also defined as a function.
+     * @return true if a built-in method of that name exists, so a call whose
+     * argument count does not match the user's function is a call to the
+     * built-in instead.
+     */
+    private static boolean isBuiltInOverload(String name) {
+        return Declarations.isInbuiltMethodName(name);
+    }
+
     private void processNestedExpressions() {
         for (int i = 0; i + 1 < scanner.size(); i++) {
             // Cheapest test first: a function call needs "(" right after the name.
@@ -859,6 +869,26 @@ public class MathScanner {
                      * MathExpression("3+sin(x)+f(x,5*y,2*z-5)")
                      */
                     int closeBracOfFunctionCall = Bracket.getComplementIndex(true, Bracket.BracketMode.CIRCULAR_OPEN, i + 1, scanner);
+
+                    /**
+                     * A call with no arguments: check(), adapt(). The generic
+                     * argument loop below would count the empty brackets as one
+                     * (empty) argument and reject the call, so handle it here.
+                     * The body is spliced in, not evaluated, so any variables it
+                     * reads stay live, exactly as in the variable-argument case.
+                     */
+                    if (closeBracOfFunctionCall == i + 2) {
+                        if (arity != 0) {
+                            if (isBuiltInOverload(token)) {
+                                continue;//e.g. the user defined cos(x) and this is the built-in cos()
+                            }
+                            throw new RuntimeException("Function(" + f.getName() + " requires `" + arity + "` parameters, but 0 parameters were supplied!");
+                        }
+                        List<String> body = Function.transformScan(f, Function.bodyTokensForActiveScope(f), new ArrayList<List<String>>(0));
+                        scanner.subList(i, closeBracOfFunctionCall + 1).clear();
+                        scanner.addAll(i, body);
+                        continue;
+                    }
                     /**
                      * The function is being used in another expression if all
                      * the args passed to it are expressions themselves or
@@ -909,6 +939,16 @@ public class MathScanner {
                     }
 
                     if (argCount != arity) {
+                        /**
+                         * A user function and a built-in method may share a name
+                         * when their argument counts differ, e.g. the user defines
+                         * cos()=4+cos(2): cos() is theirs, cos(2) is the built-in.
+                         * Only when no built-in of that name exists is a wrong
+                         * argument count an error.
+                         */
+                        if (isBuiltInOverload(token)) {
+                            continue;
+                        }
                         throw new RuntimeException("Function(" + f.getName() + " requires `" + arity + "` parameters, but " + argCount + " parameters were supplied!");
                     }
                     //f(x,y,z)=sin(x)+cos(y-3*z)+5*z
@@ -940,7 +980,7 @@ public class MathScanner {
                         //g(x,y,z)=3*x+f(x,y,2) --- the f(x,y,2) portion will be treated as a function call with default values being assigned to x and y.
                         //g(x,y,z)=3*x+f(1,y,2) --- the f(1,y,2) portion will be treated as a function call with default values being assigned to x and y.
                         //g(x,y,z)=3*x+f(3,5,2) --- the f(3,5,2) portion will be treated as a function call with default values being assigned to x and y.
-                        List<String> scan = Function.transformScan(f, argVectors);
+                        List<String> scan = Function.transformScan(f, Function.bodyTokensForActiveScope(f), argVectors);
                         scanner.subList(i, closeBracOfFunctionCall + 1).clear();
                         scanner.addAll(i, scan);
                     }
