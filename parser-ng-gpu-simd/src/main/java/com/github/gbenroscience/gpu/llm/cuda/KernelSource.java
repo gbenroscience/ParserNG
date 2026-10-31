@@ -63,7 +63,7 @@ public final class KernelSource {
     public static final String KERNEL_QUANTIZE_ACTIVATION_Q8_0 = "quantize_activation_q8_0_blocks";
     public static final String KERNEL_Q8_0_GEMV_SPLIT = "q8_0_gemv_split";
     public static final String KERNEL_Q8_0_GEMV_PLAIN = "q8_0_gemv_plain";
-    public static final String KERNEL_ROPE_APPLY_SPLIT = "rope_apply_split";
+    public static final String KERNEL_ROPE_APPLY_PAIRS = "rope_apply_pairs";
     public static final String KERNEL_RMSNORM_PARTIAL_SUMSQ = "rmsnorm_partial_sumsq";
     public static final String KERNEL_RMSNORM_APPLY = "rmsnorm_apply";
     public static final String KERNEL_ATTN_SCORES = "attn_scores";
@@ -270,7 +270,7 @@ public final class KernelSource {
             out_f32[n] = acc;
         }
 
-        extern "C" __global__ void rope_apply_split(
+        extern "C" __global__ void rope_apply_pairs(
             float* buf,
             const float* cos_table,
             const float* sin_table,
@@ -285,16 +285,16 @@ public final class KernelSource {
             if (h >= heads) return;
 
             const int headOff = h * head_dim;
-            const int evenOff = headOff;
-            const int oddOff = headOff + halfDim;
+            const int evenOff = headOff + (i << 1);
+            const int oddOff = evenOff + 1;
 
             float c = cos_table[cosSinOffset + i];
             float s = sin_table[cosSinOffset + i];
-            float x0 = buf[evenOff + i];
-            float x1 = buf[oddOff + i];
+            float x0 = buf[evenOff];
+            float x1 = buf[oddOff];
 
-            buf[evenOff + i] = x0 * c - x1 * s;
-            buf[oddOff + i] = x0 * s + x1 * c;
+            buf[evenOff] = x0 * c - x1 * s;
+            buf[oddOff] = x0 * s + x1 * c;
         }
 
         extern __shared__ float sh_rms[];
@@ -612,19 +612,16 @@ public final class KernelSource {
         }
 
         /*
-         * rope_apply_pairwise_rows: batched RoPE for the ADJACENT-PAIR
-         * layout q8_0_gemm_tiled naturally produces (plain contiguous
-         * output: dims [2i, 2i+1] sit next to each other within each
-         * head's head_dim span), NOT the even/odd-SPLIT layout the
-         * decode-path's q8_0_gemv_split emits. This is a deliberate
-         * layout difference from rope_apply_split, not an inconsistency:
-         * the split layout was specifically an artifact of
-         * q8_0_gemv_split's own output pairing (a RoPE-adjacent
-         * optimization tied to that ONE kernel); q8_0_gemm_tiled has no
-         * such pairing, so its RoPE pass rotates the natural adjacent
-         * pairs directly instead. Each row t has its OWN absolute
-         * sequence position (positions[t] = startPos + t during
-         * prefill), unlike the decode path's single shared position.
+         * rope_apply_pairwise_rows: batched RoPE for the prefill path. Like
+         * rope_apply_pairs (decode), it rotates the NATURAL adjacent pairs
+         * (dims 2i, 2i+1 of each head) -- the GGUF-native layout. Decode and
+         * prefill MUST use the same layout because they write into and read
+         * from the same KV cache (an earlier revision split the decode-path Q/K
+         * into an even/odd layout while prefill kept the natural one, which made
+         * every decode step after a prefill attend to mis-paired keys).
+         * Each row t has its OWN absolute sequence position (positions[t] =
+         * startPos + t during prefill), unlike the decode path's single
+         * shared position.
          */
         extern "C" __global__ void rope_apply_pairwise_rows(
             float* buf,             // [T, heads*head_dim], PLAIN contiguous layout

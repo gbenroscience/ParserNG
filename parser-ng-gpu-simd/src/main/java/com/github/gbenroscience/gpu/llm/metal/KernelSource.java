@@ -63,7 +63,7 @@ public final class KernelSource {
     public static final String KERNEL_QUANTIZE_ACTIVATION_Q8_0 = "quantize_activation_q8_0_blocks";
     public static final String KERNEL_Q8_0_GEMV_SPLIT = "q8_0_gemv_split";
     public static final String KERNEL_Q8_0_GEMV_PLAIN = "q8_0_gemv_plain";
-    public static final String KERNEL_ROPE_APPLY_SPLIT = "rope_apply_split";
+    public static final String KERNEL_ROPE_APPLY_PAIRS = "rope_apply_pairs";
     public static final String KERNEL_RMSNORM_PARTIAL_SUMSQ = "rmsnorm_partial_sumsq";
     public static final String KERNEL_RMSNORM_APPLY = "rmsnorm_apply";
     public static final String KERNEL_ATTN_SCORES = "attn_scores";
@@ -269,7 +269,7 @@ public final class KernelSource {
             out_f32[n] = acc;
         }
 
-        kernel void rope_apply_split(
+        kernel void rope_apply_pairs(
             device float* buf                [[buffer(0)]],
             device const float* cos_table    [[buffer(1)]],
             device const float* sin_table    [[buffer(2)]],
@@ -284,16 +284,16 @@ public final class KernelSource {
             if (h >= heads) return;
 
             const int headOff = h * head_dim;
-            const int evenOff = headOff;
-            const int oddOff = headOff + halfDim;
+            const int evenOff = headOff + (i << 1);
+            const int oddOff = evenOff + 1;
 
             float c = cos_table[cosSinOffset + i];
             float s = sin_table[cosSinOffset + i];
-            float x0 = buf[evenOff + i];
-            float x1 = buf[oddOff + i];
+            float x0 = buf[evenOff];
+            float x1 = buf[oddOff];
 
-            buf[evenOff + i] = x0 * c - x1 * s;
-            buf[oddOff + i] = x0 * s + x1 * c;
+            buf[evenOff] = x0 * c - x1 * s;
+            buf[oddOff] = x0 * s + x1 * c;
         }
 
         kernel void rmsnorm_partial_sumsq(
@@ -610,9 +610,9 @@ public final class KernelSource {
             out[row * features + i] = x[row * features + i] * rms[row] * gamma[i];
         }
 
-        // Batched RoPE for the ADJACENT-PAIR layout q8_0_gemm_tiled naturally
-        // produces -- see the CUDA KernelSource's javadoc for why this differs
-        // deliberately from rope_apply_split's even/odd-SPLIT layout.
+        // Batched (prefill) RoPE on the natural adjacent-pair layout -- the same
+        // layout rope_apply_pairs uses for decode. Both paths share one KV cache,
+        // so they must agree on it.
         kernel void rope_apply_pairwise_rows(
             device float* buf                [[buffer(0)]], // [T, heads*head_dim]
             device const float* cos_table    [[buffer(1)]], // [max_seq, halfDim]

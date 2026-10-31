@@ -1,5 +1,7 @@
 package com.github.gbenroscience.gpu.llm.cuda;
 
+import com.github.gbenroscience.gpu.llm.core.ModelSpec;
+import com.github.gbenroscience.gpu.llm.core.RopeTables;
 import com.github.gbenroscience.simd.turbo.tools.llm.loader.GGUFLoader;
 
 import java.lang.foreign.Arena;
@@ -84,6 +86,24 @@ public final class LlamaLayer {
         public double rope_scaling_high_freq_factor = 4.0;
         public double rope_scaling_orig_context_length = 8192.0;
 
+        /** RoPE scaling rule. null = legacy inference (rope_scaling_factor != 1.0 means Llama-3 NTK-by-parts). */
+        public RopeTables.Scaling rope_scaling_type = null;
+        /** Optional per-pair frequency divisors (GGUF rope_freqs.weight, ggml semantics), length head_dim/2; null = none. */
+        public float[] rope_freq_factors = null;
+
+        /** The RoPE definition shared by all three backends (see {@link RopeTables}). */
+        public RopeTables.Params ropeParams() {
+            RopeTables.Params p = new RopeTables.Params();
+            p.scaling = (rope_scaling_type != null) ? rope_scaling_type
+                    : (rope_scaling_factor != 1.0 ? RopeTables.Scaling.LLAMA3 : RopeTables.Scaling.NONE);
+            p.factor = rope_scaling_factor;
+            p.lowFreqFactor = rope_scaling_low_freq_factor;
+            p.highFreqFactor = rope_scaling_high_freq_factor;
+            p.origContextLength = rope_scaling_orig_context_length;
+            p.freqFactors = rope_freq_factors;
+            return p;
+        }
+
         public ActivationType activationType = ActivationType.SWIGLU;
 
         /**
@@ -159,43 +179,28 @@ public final class LlamaLayer {
          * later inside GpuState construction.
          */
         public static Config fromGguf(GGUFLoader.GGUFFile gguf) {
+            // Validates architecture, metadata, tensor shapes/types and RoPE configuration up front and
+            // throws UnsupportedModelException naming the exact problem -- no silent defaults, no device
+            // allocation has happened yet.
+            ModelSpec spec = ModelSpec.fromGguf(gguf);
             Config cfg = new Config();
-
-            String arch = stringMetadata(gguf, "general.architecture", "llama");
-
-            cfg.n_layers = intMetadata(gguf, arch + ".block_count", cfg.n_layers);
-            cfg.dim = intMetadata(gguf, arch + ".embedding_length", cfg.dim);
-            cfg.hidden_dim = intMetadata(gguf, arch + ".feed_forward_length", cfg.hidden_dim);
-            cfg.num_heads = intMetadata(gguf, arch + ".attention.head_count", cfg.num_heads);
-            cfg.kv_heads = intMetadata(gguf, arch + ".attention.head_count_kv", cfg.num_heads);
-            cfg.max_seq = intMetadata(gguf, arch + ".context_length", cfg.max_seq);
-            cfg.norm_eps = doubleMetadata(gguf, arch + ".attention.layer_norm_rms_epsilon", cfg.norm_eps);
-            cfg.rope_theta = doubleMetadata(gguf, arch + ".rope.freq_base", cfg.rope_theta);
-            cfg.rope_scaling_factor = doubleMetadata(gguf, arch + ".rope.scaling.factor", cfg.rope_scaling_factor);
-            cfg.rope_scaling_low_freq_factor = doubleMetadata(gguf, arch + ".rope.scaling.low_freq_factor", cfg.rope_scaling_low_freq_factor);
-            cfg.rope_scaling_high_freq_factor = doubleMetadata(gguf, arch + ".rope.scaling.high_freq_factor", cfg.rope_scaling_high_freq_factor);
-            cfg.rope_scaling_orig_context_length = doubleMetadata(gguf, arch + ".rope.scaling.original_context_length", cfg.rope_scaling_orig_context_length);
-
-            int keyLength = intMetadata(gguf, arch + ".attention.key_length", -1);
-            cfg.head_dim = (keyLength > 0) ? keyLength : (cfg.dim / Math.max(cfg.num_heads, 1));
-
+            cfg.n_layers = spec.layers;
+            cfg.dim = spec.dim;
+            cfg.hidden_dim = spec.hiddenDim;
+            cfg.num_heads = spec.heads;
+            cfg.kv_heads = spec.kvHeads;
+            cfg.head_dim = spec.headDim;
+            cfg.max_seq = spec.contextLength;
+            cfg.norm_eps = spec.normEps;
+            cfg.rope_theta = spec.ropeTheta;
+            cfg.rope_scaling_type = spec.rope.scaling;
+            cfg.rope_scaling_factor = spec.rope.factor;
+            cfg.rope_scaling_low_freq_factor = spec.rope.lowFreqFactor;
+            cfg.rope_scaling_high_freq_factor = spec.rope.highFreqFactor;
+            cfg.rope_scaling_orig_context_length = spec.rope.origContextLength;
+            cfg.rope_freq_factors = spec.rope.freqFactors;
             cfg.validate();
             return cfg;
-        }
-
-        private static String stringMetadata(GGUFLoader.GGUFFile gguf, String key, String defaultValue) {
-            Object v = gguf.metadata.get(key);
-            return (v != null) ? String.valueOf(v) : defaultValue;
-        }
-
-        private static int intMetadata(GGUFLoader.GGUFFile gguf, String key, int defaultValue) {
-            Object v = gguf.metadata.get(key);
-            return (v instanceof Number) ? ((Number) v).intValue() : defaultValue;
-        }
-
-        private static double doubleMetadata(GGUFLoader.GGUFFile gguf, String key, double defaultValue) {
-            Object v = gguf.metadata.get(key);
-            return (v instanceof Number) ? ((Number) v).doubleValue() : defaultValue;
         }
     }
 
@@ -377,37 +382,9 @@ public final class LlamaLayer {
             return (len / 32) * 34;
         }
 
+        /** Delegates to {@link RopeTables}: one RoPE definition for CUDA, OpenCL and Metal. */
         private static void precomputeRope(float[] cosOut, float[] sinOut, int maxSeq, int headDim, double base, Config cfg) {
-            int halfDim = headDim / 2;
-            for (int p = 0; p < maxSeq; p++) {
-                for (int i = 0; i < halfDim; i++) {
-                    double freq = 1.0 / Math.pow(base, (2.0 * i) / headDim);
-                    freq = applyRopeScaling(freq, cfg);
-                    double angle = p * freq;
-                    cosOut[p * halfDim + i] = (float) Math.cos(angle);
-                    sinOut[p * halfDim + i] = (float) Math.sin(angle);
-                }
-            }
-        }
-
-        /** Llama-3 NTK-by-parts RoPE frequency correction -- see com.github.gbenroscience.gpu.llm.opencl.LlamaLayer's identical method for the full derivation/javadoc. Identity when rope_scaling_factor==1.0. */
-        private static double applyRopeScaling(double freq, Config cfg) {
-            if (cfg.rope_scaling_factor == 1.0) {
-                return freq;
-            }
-            double lowFreqWavelen = cfg.rope_scaling_orig_context_length / cfg.rope_scaling_low_freq_factor;
-            double highFreqWavelen = cfg.rope_scaling_orig_context_length / cfg.rope_scaling_high_freq_factor;
-            double wavelen = 2.0 * Math.PI / freq;
-
-            if (wavelen < highFreqWavelen) {
-                return freq;
-            }
-            if (wavelen > lowFreqWavelen) {
-                return freq / cfg.rope_scaling_factor;
-            }
-            double smooth = (cfg.rope_scaling_orig_context_length / wavelen - cfg.rope_scaling_low_freq_factor)
-                    / (cfg.rope_scaling_high_freq_factor - cfg.rope_scaling_low_freq_factor);
-            return (1.0 - smooth) * (freq / cfg.rope_scaling_factor) + smooth * freq;
+            RopeTables.fill(cosOut, sinOut, maxSeq, headDim, base, cfg.ropeParams());
         }
 
         @Override
@@ -465,7 +442,9 @@ public final class LlamaLayer {
         try (Arena tmp = Arena.ofConfined()) {
             MemorySegment ptrBuf = tmp.allocate(ValueLayout.JAVA_LONG);
             GpuContext.check((int) ctx.cu.cuMemAlloc.invoke(ptrBuf, byteCount), "cuMemAlloc");
-            return ptrBuf.get(ValueLayout.JAVA_LONG, 0);
+            long ptr = ptrBuf.get(ValueLayout.JAVA_LONG, 0);
+            ctx.allocations.add(ptr);
+            return ptr;
         }
     }
 
@@ -476,7 +455,13 @@ public final class LlamaLayer {
             MemorySegment ptrBuf = tmp.allocate(ValueLayout.JAVA_LONG);
             GpuContext.check((int) ctx.cu.cuMemAlloc.invoke(ptrBuf, host.byteSize()), "cuMemAlloc(weight bytes)");
             long device = ptrBuf.get(ValueLayout.JAVA_LONG, 0);
-            GpuContext.check((int) ctx.cu.cuMemcpyHtoD.invoke(device, host, host.byteSize()), "cuMemcpyHtoD(weight bytes)");
+            ctx.allocations.add(device);
+            try {
+                GpuContext.check((int) ctx.cu.cuMemcpyHtoD.invoke(device, host, host.byteSize()), "cuMemcpyHtoD(weight bytes)");
+            } catch (Throwable t) {
+                freeQuietly(ctx, device); // never leak the fresh allocation when the copy fails
+                throw t;
+            }
             return device;
         }
     }
@@ -488,7 +473,13 @@ public final class LlamaLayer {
             MemorySegment ptrBuf = tmp.allocate(ValueLayout.JAVA_LONG);
             GpuContext.check((int) ctx.cu.cuMemAlloc.invoke(ptrBuf, host.byteSize()), "cuMemAlloc(weight floats)");
             long device = ptrBuf.get(ValueLayout.JAVA_LONG, 0);
-            GpuContext.check((int) ctx.cu.cuMemcpyHtoD.invoke(device, host, host.byteSize()), "cuMemcpyHtoD(weight floats)");
+            ctx.allocations.add(device);
+            try {
+                GpuContext.check((int) ctx.cu.cuMemcpyHtoD.invoke(device, host, host.byteSize()), "cuMemcpyHtoD(weight floats)");
+            } catch (Throwable t) {
+                freeQuietly(ctx, device); // never leak the fresh allocation when the copy fails
+                throw t;
+            }
             return device;
         }
     }
@@ -518,7 +509,13 @@ public final class LlamaLayer {
             MemorySegment ptrBuf = tmp.allocate(ValueLayout.JAVA_LONG);
             GpuContext.check((int) ctx.cu.cuMemAlloc.invoke(ptrBuf, host.byteSize()), "cuMemAlloc(ints)");
             long device = ptrBuf.get(ValueLayout.JAVA_LONG, 0);
-            GpuContext.check((int) ctx.cu.cuMemcpyHtoD.invoke(device, host, host.byteSize()), "cuMemcpyHtoD(ints)");
+            ctx.allocations.add(device);
+            try {
+                GpuContext.check((int) ctx.cu.cuMemcpyHtoD.invoke(device, host, host.byteSize()), "cuMemcpyHtoD(ints)");
+            } catch (Throwable t) {
+                freeQuietly(ctx, device); // never leak the fresh allocation when the copy fails
+                throw t;
+            }
             return device;
         }
     }
@@ -542,11 +539,11 @@ public final class LlamaLayer {
 
     public static void freeQuietly(GpuContext ctx, long devicePtr) {
         try {
-            if (devicePtr != 0L) {
+            if (devicePtr != 0L && ctx.allocations.remove(devicePtr)) {
                 ctx.cu.cuMemFree.invoke(devicePtr);
             }
         } catch (Throwable t) {
-            // best-effort cleanup
+            System.getLogger(LlamaLayer.class.getName()).log(System.Logger.Level.ERROR, "cuMemFree failed", t);
         }
     }
 
@@ -575,12 +572,15 @@ public final class LlamaLayer {
             rmsNorm(ctx, x, w.attn_norm_gamma, s.xNorm, dim, cfg.norm_eps, s.rmsPartials);
             quantizeActivationQ8_0(ctx, s.xNorm, s.xNormQ8, dim);
 
-            q8_0GemvSplit(ctx, s.xNormQ8, w.wq_q8_0, s.qSplit, numHeads, headDim, dim);
-            q8_0GemvSplit(ctx, s.xNormQ8, w.wk_q8_0, s.kNew, kvHeads, headDim, dim);
-            q8_0GemvSplit(ctx, s.xNormQ8, w.wv_q8_0, s.vNew, kvHeads, headDim, dim);
+            q8_0GemvPlain(ctx, s.xNormQ8, w.wq_q8_0, s.qSplit, numHeads * headDim, dim);
+            q8_0GemvPlain(ctx, s.xNormQ8, w.wk_q8_0, s.kNew, kvDim, dim);
+            // V is NOT de-interleaved: only Q and K go through the split layout (it pairs RoPE's rotated
+            // dimensions). V feeds the weighted sum and wo in natural order, exactly like the batched
+            // prefill path (q8_0GemmTiled) that fills the same KV cache.
+            q8_0GemvPlain(ctx, s.xNormQ8, w.wv_q8_0, s.vNew, kvDim, dim);
 
-            ropeApplySplit(ctx, s.qSplit, s.cos_table, s.sin_table, numHeads, headDim, s.pos * halfDim);
-            ropeApplySplit(ctx, s.kNew, s.cos_table, s.sin_table, kvHeads, headDim, s.pos * halfDim);
+            ropeApplyPairs(ctx, s.qSplit, s.cos_table, s.sin_table, numHeads, headDim, s.pos * halfDim);
+            ropeApplyPairs(ctx, s.kNew, s.cos_table, s.sin_table, kvHeads, headDim, s.pos * halfDim);
 
             writeIntoCache(ctx, s.kNew, s.k_cache_f32, (long) s.pos * kvDim, kvDim);
             writeIntoCache(ctx, s.vNew, s.v_cache_f32, (long) s.pos * kvDim, kvDim);
@@ -972,13 +972,13 @@ public final class LlamaLayer {
         }
     }
 
-    static void ropeApplySplit(GpuContext ctx, long buf, long cosTable, long sinTable,
+    static void ropeApplyPairs(GpuContext ctx, long buf, long cosTable, long sinTable,
             int heads, int headDim, int cosSinOffset) throws Throwable {
         try (Arena tmp = Arena.ofConfined()) {
             MemorySegment params = kernelParams(tmp,
                     argL(tmp, buf), argL(tmp, cosTable), argL(tmp, sinTable),
                     argI(tmp, heads), argI(tmp, headDim), argI(tmp, cosSinOffset));
-            launch1D(ctx, ctx.kRopeApplySplit, (long) heads * (headDim / 2), KernelSource.DEFAULT_BLOCK_SIZE, 0, params);
+            launch1D(ctx, ctx.kRopeApplyPairs, (long) heads * (headDim / 2), KernelSource.DEFAULT_BLOCK_SIZE, 0, params);
         }
     }
 

@@ -1,5 +1,7 @@
 package com.github.gbenroscience.gpu.llm.metal;
 
+import com.github.gbenroscience.gpu.llm.core.AllocationTracker;
+
 /**
  * Metal counterpart of {@code com.github.gbenroscience.gpu.llm.cuda.GpuContext}
  * / {@code com.github.gbenroscience.gpu.llm.opencl.GpuContext}. Bootstrap
@@ -37,6 +39,13 @@ package com.github.gbenroscience.gpu.llm.metal;
  */
 public final class GpuContext implements AutoCloseable {
 
+    private static final System.Logger LOG = System.getLogger(GpuContext.class.getName());
+    /** Every live device allocation made through this context (see {@link AllocationTracker}). */
+    public final AllocationTracker allocations = new AllocationTracker();
+    private boolean closed;
+    /** Number of device buffers still live when close() ran (0 = every owner released its buffers explicitly). */
+    public volatile int sweptAtClose = -1;
+
     public final MetalBindings mtl;
 
     public final long device;          // id<MTLDevice>
@@ -49,7 +58,7 @@ public final class GpuContext implements AutoCloseable {
     public final long kQuantizeActivationQ8_0;
     public final long kQ8_0GemvSplit;
     public final long kQ8_0GemvPlain;
-    public final long kRopeApplySplit;
+    public final long kRopeApplyPairs;
     public final long kRmsnormPartialSumsq;
     public final long kRmsnormApply;
     public final long kAttnScores;
@@ -95,7 +104,7 @@ public final class GpuContext implements AutoCloseable {
             this.kQuantizeActivationQ8_0 = pipeline(KernelSource.KERNEL_QUANTIZE_ACTIVATION_Q8_0);
             this.kQ8_0GemvSplit = pipeline(KernelSource.KERNEL_Q8_0_GEMV_SPLIT);
             this.kQ8_0GemvPlain = pipeline(KernelSource.KERNEL_Q8_0_GEMV_PLAIN);
-            this.kRopeApplySplit = pipeline(KernelSource.KERNEL_ROPE_APPLY_SPLIT);
+            this.kRopeApplyPairs = pipeline(KernelSource.KERNEL_ROPE_APPLY_PAIRS);
             this.kRmsnormPartialSumsq = pipeline(KernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ);
             this.kRmsnormApply = pipeline(KernelSource.KERNEL_RMSNORM_APPLY);
             this.kAttnScores = pipeline(KernelSource.KERNEL_ATTN_SCORES);
@@ -135,7 +144,7 @@ public final class GpuContext implements AutoCloseable {
     private final long[] allPipelines() {
         return new long[]{
                 kQuantizeI8, kQuantizeActivationQ8_0, kQ8_0GemvSplit, kQ8_0GemvPlain,
-                kRopeApplySplit, kRmsnormPartialSumsq, kRmsnormApply, kAttnScores,
+                kRopeApplyPairs, kRmsnormPartialSumsq, kRmsnormApply, kAttnScores,
                 kSoftmaxInplace, kAttnWeightedSum, kSwigluActivate, kResidualAdd, kF32Gemv,
                 kGeluActivate, kGegluActivate,
                 kQ8_0GemmTiled, kF32GemmTiled, kRmsnormPartialSumsqRows, kRmsnormApplyRows,
@@ -146,7 +155,23 @@ public final class GpuContext implements AutoCloseable {
 
     /** Releases every pipeline state, the compiled library, and the command queue -- the Metal analogue of cuModuleUnload/cuDevicePrimaryCtxRelease. The system device itself is intentionally NOT released: MTLCreateSystemDefaultDevice/MTLCopyAllDevices hand back the OS-owned singleton device object(s), which Apple's own docs describe as safe to hold indefinitely and not meant to be released by the caller. */
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        long[] leaked = allocations.drain();
+        sweptAtClose = leaked.length;
+        if (leaked.length > 0) {
+            LOG.log(System.Logger.Level.WARNING, "closing Metal context with {0} buffers still allocated; releasing them", leaked.length);
+        }
+        for (long id : leaked) {
+            try {
+                mtl.release(id);
+            } catch (Throwable t) {
+                LOG.log(System.Logger.Level.ERROR, "release failed for MTLBuffer 0x" + Long.toHexString(id), t);
+            }
+        }
         try {
             for (long pso : allPipelines()) {
                 mtl.release(pso);
@@ -154,7 +179,7 @@ public final class GpuContext implements AutoCloseable {
             mtl.release(library);
             mtl.release(commandQueue);
         } catch (Throwable t) {
-            // best-effort cleanup, mirrors the CUDA/OpenCL ports' close()
+            LOG.log(System.Logger.Level.ERROR, "failed releasing Metal pipelines/library/queue", t);
         }
     }
 }

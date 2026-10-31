@@ -83,7 +83,7 @@ generated text
 | `LlamaLayer.java` | The actual model math: `Config`, `GpuWeights`, `GpuState`, `forward_layer` (single-token decode), `prefill_layer` (batched prompt processing), and every kernel-dispatch helper. This is the biggest file in each package and the one to read first to understand the model itself. |
 | `EmbeddingTable.java` | Host-resident `float[vocabSize*dim]` table; gathers one row (or T rows for prefill) per call rather than keeping the whole table GPU-resident. |
 | `BpeTokenizer.java` | Byte-level BPE tokenizer (GPT-2/Llama-3/Mistral/Falcon style). **Byte-identical across all three backends**; this file has no GPU-specific code at all. |
-| `Sampler.java` | Host-side temperature / top-k / top-p / repetition-penalty sampling over logits already read back from the GPU. **Byte-identical across all three backends**; pure CPU logic. |
+| `Sampler.java` | Host-side temperature / top-k / top-p / repetition-penalty sampling over logits already read back from the GPU. Each backend's `Sampler` is a thin wrapper over the single implementation in `core.Sampler` (order: temperature → top-k → renormalise → top-p → sample; NaN/+Inf logits rejected; config validated), so the backends cannot sample differently. |
 | `Llama<Backend>Engine.java` | Top-level orchestrator: tokenize → prefill → decode loop → detokenize. (`LlamaCudaEngine` / `LlamaOpenCLEngine` / `LlamaMetalEngine`.) |
 | `<Backend>LlamaEngine.java` | Implements the backend-agnostic `LlamaGpuEngine` interface; owns GGUF loading and full lifecycle. (`CudaLlamaEngine` / `OpenCLLlamaEngine` / `MetalLlamaEngine`.) |
 | `<Backend>Demo.java` | End-to-end wiring example / minimal CLI (`CudaDemo` / `OpenCLDemo` / `MetalDemo`). |
@@ -248,6 +248,30 @@ dimensions.
 
 ## 7. Standing caveat
 
+### Verification status (updated by the engineering audit; see `LLM-AUDIT.md`)
+
+| Backend | Java compiles | Kernels executed | Checked against CPU reference | Physical GPU |
+|---|---|---|---|---|
+| OpenCL | yes | **yes, on a PoCL CPU device** | **yes** (53-test suite, end-to-end logits within 1e-4 abs) | not reproduced by the audit (the author's earlier hardware run predates the fixes below and must be repeated) |
+| CUDA | yes (javac only) | **no** | no | **no** |
+| Metal | yes (javac only) | **no** | no | **no** |
+
+An OpenCL run on a CPU device proves the OpenCL kernels and the host logic;
+it does not prove behaviour on any GPU. Run the suite on real hardware
+(`-Dopencl.device.type=GPU`) before calling OpenCL production-verified.
+CUDA and Metal received the same source changes as OpenCL (V projection,
+Q/K layout, RoPE kernel, fp16 rounding is already RNE there) **without ever
+being compiled by NVRTC / Metal or executed**.
+
+The audit found and fixed a decode/prefill KV-layout inconsistency that
+affected all three backends: decode projected Q/K/V through the even/odd
+"split" GEMV (V should never be permuted) while batched prefill wrote the
+natural adjacent-pair layout into the same KV cache. Decode and prefill now
+both use the natural GGUF layout. The old `q8_0_gemv_split` kernel is no
+longer used by the engines.
+
+### Original caveat (kept for history)
+
 Of the three packhges, only OpenCL has been verified on hardware.
 **Every file in the CUDA and METAL packages are yet UNVERIFIED**. 
 The CUDA and Metal hardware/toolchains were unavailable while writing this
@@ -266,8 +290,8 @@ abstraction (§1), a change to the *model* (a new activation type, a
 config field, a fix to an algorithm) needs to be ported to **all
 three** `LlamaLayer.java` files, plus the corresponding kernel source
 file, plus both benchmark files, to stay consistent. `BpeTokenizer.java`
-and `Sampler.java` are the exception; they're byte-identical across
-all three packages (pure host-side logic, no GPU dependency), so a fix
-there can be copied verbatim rather than re-derived. When changing
+is the exception (still three identical copies; pure host-side logic), and sampling,
+RoPE tables and model validation now live once in `llm/core`
+(`Sampler`, `RopeTables`, `ModelSpec`) -- change them there, not per backend. When changing
 shared model behavior, grep for the same method/field name across all
 three `<backend>` packages before considering the change complete.

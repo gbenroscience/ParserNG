@@ -118,6 +118,25 @@ public final class LlamaCudaEngine implements AutoCloseable {
         if (promptIds.length == 0) {
             throw new IllegalArgumentException("Prompt tokenized to zero tokens");
         }
+        if (genCfg.maxNewTokens < 0) {
+            throw new IllegalArgumentException("maxNewTokens must be >= 0, got " + genCfg.maxNewTokens);
+        }
+        // Positions written to the KV cache / RoPE tables: the prompt plus every generated token that is
+        // fed back (the last sampled token is never forwarded). Exceeding max_seq would index past the
+        // device KV cache, RoPE tables and score buffer, so refuse BEFORE touching the device.
+        long positionsNeeded = (long) promptIds.length + Math.max(0, genCfg.maxNewTokens - 1);
+        if (positionsNeeded > cfg.max_seq) {
+            throw new IllegalArgumentException("Prompt (" + promptIds.length + " tokens) + maxNewTokens (" + genCfg.maxNewTokens
+                    + ") needs " + positionsNeeded + " KV positions but the model context is " + cfg.max_seq);
+        }
+        // Every generate() starts a fresh sequence: reset the KV position of every layer explicitly rather
+        // than relying on prefill_layer to overwrite it (it is skipped when max_prefill_batch == 0).
+        for (LlamaLayer.GpuState layerState : states) {
+            layerState.pos = 0;
+        }
+        if (genCfg.maxNewTokens == 0) {
+            return "";
+        }
 
         List<Integer> history = new ArrayList<>(promptIds.length + genCfg.maxNewTokens);
         for (int id : promptIds) {
@@ -139,6 +158,9 @@ public final class LlamaCudaEngine implements AutoCloseable {
             }
             generated.add(nextId);
             history.add(nextId);
+            if (step == genCfg.maxNewTokens - 1) {
+                break; // the final token needs no forward pass: its successor would never be used
+            }
 
             embeddings.embedRow(nextId, xSingle, ctx);
             for (int l = 0; l < layers.length; l++) {
@@ -196,21 +218,15 @@ public final class LlamaCudaEngine implements AutoCloseable {
             MemorySegment ptrBuf = tmp.allocate(ValueLayout.JAVA_LONG);
             GpuContext.check((int) ctx.cu.cuMemAlloc.invoke(ptrBuf, count * ValueLayout.JAVA_FLOAT.byteSize()),
                     "cuMemAlloc(engine scratch)");
-            return ptrBuf.get(ValueLayout.JAVA_LONG, 0);
+            long ptr = ptrBuf.get(ValueLayout.JAVA_LONG, 0);
+            ctx.allocations.add(ptr);
+            return ptr;
         }
     }
 
     @Override
     public void close() {
-        try {
-            if (xSingle != 0L) {
-                ctx.cu.cuMemFree.invoke(xSingle);
-            }
-            if (xBatch != 0L) {
-                ctx.cu.cuMemFree.invoke(xBatch);
-            }
-        } catch (Throwable t) {
-            // best-effort cleanup
-        }
+        LlamaLayer.freeQuietly(ctx, xSingle);
+        LlamaLayer.freeQuietly(ctx, xBatch);
     }
 }

@@ -1,6 +1,7 @@
 package com.github.gbenroscience.gpu.llm.opencl;
 
 
+import com.github.gbenroscience.gpu.llm.core.AllocationTracker;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
@@ -48,6 +49,13 @@ import java.nio.charset.StandardCharsets;
  */
 public final class GpuContext implements AutoCloseable {
 
+    private static final System.Logger LOG = System.getLogger(GpuContext.class.getName());
+    /** Every live device allocation made through this context (see {@link AllocationTracker}). */
+    public final AllocationTracker allocations = new AllocationTracker();
+    private boolean closed;
+    /** Number of device buffers still live when close() ran (0 = every owner released its buffers explicitly). */
+    public volatile int sweptAtClose = -1;
+
     public final OpenCLBindings cl;
 
     public final MemorySegment platform;
@@ -62,7 +70,7 @@ public final class GpuContext implements AutoCloseable {
     public final MemorySegment kQuantizeActivationQ8_0;
     public final MemorySegment kQ8_0GemvSplit;
     public final MemorySegment kQ8_0GemvPlain;
-    public final MemorySegment kRopeApplySplit;
+    public final MemorySegment kRopeApplyPairs;
     public final MemorySegment kRmsnormPartialSumsq;
     public final MemorySegment kRmsnormApply;
     public final MemorySegment kAttnScores;
@@ -120,7 +128,7 @@ public final class GpuContext implements AutoCloseable {
             this.kQuantizeActivationQ8_0 = createKernel(bootstrap, KernelSource.KERNEL_QUANTIZE_ACTIVATION_Q8_0);
             this.kQ8_0GemvSplit = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_SPLIT);
             this.kQ8_0GemvPlain = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_PLAIN);
-            this.kRopeApplySplit = createKernel(bootstrap, KernelSource.KERNEL_ROPE_APPLY_SPLIT);
+            this.kRopeApplyPairs = createKernel(bootstrap, KernelSource.KERNEL_ROPE_APPLY_PAIRS);
             this.kRmsnormPartialSumsq = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ);
             this.kRmsnormApply = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_APPLY);
             this.kAttnScores = createKernel(bootstrap, KernelSource.KERNEL_ATTN_SCORES);
@@ -202,13 +210,29 @@ public final class GpuContext implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        long[] leaked = allocations.drain();
+        sweptAtClose = leaked.length;
+        if (leaked.length > 0) {
+            LOG.log(System.Logger.Level.WARNING, "closing OpenCL context with {0} device buffers still allocated; releasing them", leaked.length);
+        }
+        for (long addr : leaked) {
+            try {
+                cl.clReleaseMemObject.invoke(java.lang.foreign.MemorySegment.ofAddress(addr));
+            } catch (Throwable t) {
+                LOG.log(System.Logger.Level.ERROR, "clReleaseMemObject failed for 0x" + Long.toHexString(addr), t);
+            }
+        }
         try {
             releaseKernelQuietly(kQuantizeI8);
             releaseKernelQuietly(kQuantizeActivationQ8_0);
             releaseKernelQuietly(kQ8_0GemvSplit);
             releaseKernelQuietly(kQ8_0GemvPlain);
-            releaseKernelQuietly(kRopeApplySplit);
+            releaseKernelQuietly(kRopeApplyPairs);
             releaseKernelQuietly(kRmsnormPartialSumsq);
             releaseKernelQuietly(kRmsnormApply);
             releaseKernelQuietly(kAttnScores);
@@ -231,7 +255,7 @@ public final class GpuContext implements AutoCloseable {
             cl.clReleaseCommandQueue.invoke(queue);
             cl.clReleaseContext.invoke(context);
         } catch (Throwable t) {
-            // best-effort cleanup
+            LOG.log(System.Logger.Level.ERROR, "failed releasing OpenCL program/queue/context", t);
         }
     }
 

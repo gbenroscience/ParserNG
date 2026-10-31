@@ -33,35 +33,114 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
     private final MemorySegment lmHeadDevice;
     private final LlamaOpenCLEngine engine;
     private final String deviceDescription;
+    private boolean closed;
 
-    public OpenCLLlamaEngine(File ggufPath) throws Throwable {
-        GGUFLoader.GGUFFile gguf = GGUFLoader.load(ggufPath);
-        LlamaLayer.Config cfg = LlamaLayer.Config.fromGguf(gguf);
+    /** Everything that needs no device: parsing, full model validation, tokenizer, embeddings. */
+    private static final class Prepared {
+        final GGUFLoader.GGUFFile gguf;
+        final LlamaLayer.Config cfg;
+        final BpeTokenizer tokenizer;
+        final EmbeddingTable embeddings;
 
-        this.ctx = new GpuContext();
-        this.deviceDescription = ctx.selectedDeviceDescription;
-
-        BpeTokenizer tokenizer = BpeTokenizer.fromGguf(gguf);
-        EmbeddingTable embeddings = EmbeddingTable.fromGguf(gguf, tokenizer.vocabSize(), cfg.dim);
-
-        this.layers = new LlamaLayer.GpuWeights[cfg.n_layers];
-        this.states = new LlamaLayer.GpuState[cfg.n_layers];
-        for (int i = 0; i < cfg.n_layers; i++) {
-            String prefix = "blk." + i + ".";
-            layers[i] = LlamaLayer.GpuWeights.fromGguf(ctx, gguf, prefix);
-            states[i] = new LlamaLayer.GpuState(ctx, cfg);
+        Prepared(File ggufPath) throws Throwable {
+            this.gguf = GGUFLoader.load(ggufPath);
+            this.cfg = LlamaLayer.Config.fromGguf(gguf); // throws UnsupportedModelException before any device work
+            this.tokenizer = BpeTokenizer.fromGguf(gguf);
+            this.embeddings = EmbeddingTable.fromGguf(gguf, tokenizer.vocabSize(), cfg.dim);
         }
+    }
 
-        this.finalNormGammaDevice = loadAndUploadFloat(ctx, gguf, "output_norm.weight");
-        this.lmHeadDevice = loadAndUploadFloat(ctx, gguf, findLmHeadTensorName(gguf));
+    /** Validates the model first (no device touched, so a bad file fails fast), then acquires the device. */
+    public OpenCLLlamaEngine(File ggufPath) throws Throwable {
+        this(new Prepared(ggufPath), new GpuContext());
+    }
 
-        this.engine = new LlamaOpenCLEngine(
-                ctx, cfg, layers, states, embeddings, tokenizer,
-                finalNormGammaDevice, lmHeadDevice, tokenizer.vocabSize());
+    /**
+     * Same, on a caller-supplied context (used by tests). Ownership of {@code context} transfers to
+     * this engine once the model has been validated: it is closed if loading fails and by {@link #close()}.
+     * If validation itself fails the caller keeps the context.
+     */
+    OpenCLLlamaEngine(File ggufPath, GpuContext context) throws Throwable {
+        this(new Prepared(ggufPath), context);
+    }
+
+    /**
+     * Transactional: device acquisition happens inside one try block; if ANY step throws, every
+     * resource acquired so far is released in reverse order (cleanup failures are attached to the
+     * original exception as suppressed) and the original exception is rethrown.
+     */
+    private OpenCLLlamaEngine(Prepared prep, GpuContext c) throws Throwable {
+        LlamaLayer.Config cfg = prep.cfg;
+        LlamaLayer.GpuWeights[] w = new LlamaLayer.GpuWeights[cfg.n_layers];
+        LlamaLayer.GpuState[] st = new LlamaLayer.GpuState[cfg.n_layers];
+        MemorySegment norm = null;
+        MemorySegment head = null;
+        LlamaOpenCLEngine eng = null;
+        try {
+            for (int i = 0; i < cfg.n_layers; i++) {
+                String prefix = "blk." + i + ".";
+                w[i] = LlamaLayer.GpuWeights.fromGguf(c, prep.gguf, prefix);
+                st[i] = new LlamaLayer.GpuState(c, cfg);
+            }
+            norm = loadAndUploadFloat(c, prep.gguf, "output_norm.weight");
+            head = loadAndUploadFloat(c, prep.gguf, findLmHeadTensorName(prep.gguf));
+            eng = new LlamaOpenCLEngine(c, cfg, w, st, prep.embeddings, prep.tokenizer, norm, head, prep.tokenizer.vocabSize());
+        } catch (Throwable failure) {
+            Throwable cleanup = teardown(c, eng, st, w, norm, head);
+            if (cleanup != null) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
+        }
+        this.ctx = c;
+        this.deviceDescription = c.selectedDeviceDescription;
+        this.layers = w;
+        this.states = st;
+        this.finalNormGammaDevice = norm;
+        this.lmHeadDevice = head;
+        this.engine = eng;
+    }
+
+    /** Releases in reverse order of acquisition. Never throws; returns the first failure (others suppressed) or null. */
+    private static Throwable teardown(GpuContext ctx, LlamaOpenCLEngine engine, LlamaLayer.GpuState[] states,
+            LlamaLayer.GpuWeights[] layers, MemorySegment norm, MemorySegment head) {
+        Throwable[] first = new Throwable[1];
+        if (engine != null) {
+            step(first, engine::close);
+        }
+        for (LlamaLayer.GpuState s : states) {
+            if (s != null) {
+                step(first, s::close);
+            }
+        }
+        for (LlamaLayer.GpuWeights w : layers) {
+            if (w != null) {
+                step(first, w::close);
+            }
+        }
+        LlamaLayer.freeQuietly(ctx, norm);
+        LlamaLayer.freeQuietly(ctx, head);
+        step(first, ctx::close);
+        return first[0];
+    }
+
+    private static void step(Throwable[] first, Runnable r) {
+        try {
+            r.run();
+        } catch (Throwable t) {
+            if (first[0] == null) {
+                first[0] = t;
+            } else {
+                first[0].addSuppressed(t);
+            }
+        }
     }
 
     @Override
-    public String generate(String prompt, LlamaGenerationConfig cfg) throws Throwable {
+    public synchronized String generate(String prompt, LlamaGenerationConfig cfg) throws Throwable {
+        if (closed) {
+            throw new IllegalStateException("OpenCLLlamaEngine is closed");
+        }
         LlamaOpenCLEngine.GenerationConfig genCfg = new LlamaOpenCLEngine.GenerationConfig();
         genCfg.maxNewTokens = cfg.maxNewTokens;
         genCfg.eosTokenId = cfg.eosTokenId;
@@ -79,22 +158,17 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         return deviceDescription;
     }
 
+    /** Idempotent. Throws IllegalStateException (first failure as cause, others suppressed) if any resource failed to release. */
     @Override
-    public void close() {
-        // Reverse order of construction -- same rationale as OpenCLDemo's
-        // finally block: per-layer state/weights, then the shared
-        // final-norm/LM-head buffers, then the engine's own scratch, then
-        // the context last (everything else's device memory lives inside it).
-        engine.close();
-        for (LlamaLayer.GpuState s : states) {
-            s.close();
+    public synchronized void close() {
+        if (closed) {
+            return;
         }
-        for (LlamaLayer.GpuWeights w : layers) {
-            w.close();
+        closed = true;
+        Throwable failure = teardown(ctx, engine, states, layers, finalNormGammaDevice, lmHeadDevice);
+        if (failure != null) {
+            throw new IllegalStateException("failure while releasing GPU resources of OpenCLLlamaEngine", failure);
         }
-        LlamaLayer.freeQuietly(ctx, finalNormGammaDevice);
-        LlamaLayer.freeQuietly(ctx, lmHeadDevice);
-        ctx.close();
     }
 
     private static MemorySegment loadAndUploadFloat(GpuContext ctx, GGUFLoader.GGUFFile gguf, String tensorName) throws Throwable {

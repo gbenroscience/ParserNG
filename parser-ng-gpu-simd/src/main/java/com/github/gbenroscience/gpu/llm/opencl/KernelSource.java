@@ -76,7 +76,7 @@ public final class KernelSource {
     public static final String KERNEL_QUANTIZE_ACTIVATION_Q8_0 = "quantize_activation_q8_0_blocks";
     public static final String KERNEL_Q8_0_GEMV_SPLIT = "q8_0_gemv_split";
     public static final String KERNEL_Q8_0_GEMV_PLAIN = "q8_0_gemv_plain";
-    public static final String KERNEL_ROPE_APPLY_SPLIT = "rope_apply_split";
+    public static final String KERNEL_ROPE_APPLY_PAIRS = "rope_apply_pairs";
     public static final String KERNEL_RMSNORM_PARTIAL_SUMSQ = "rmsnorm_partial_sumsq";
     public static final String KERNEL_RMSNORM_APPLY = "rmsnorm_apply";
     public static final String KERNEL_ATTN_SCORES = "attn_scores";
@@ -149,37 +149,40 @@ public final class KernelSource {
 
         /** Round-half-up float->half bit pattern -- see class javadoc for why exact ties-to-even isn't needed here. */
         inline ushort encode_fp16_bits(float value) {
+            // IEEE binary16, round-to-nearest-EVEN. Bit-exact with Float.floatToFloat16 /
+            // CUDA __float2half / Metal half() for all 2^32 float patterns (checked exhaustively
+            // on the Java twin, core/Fp16.java). NB: 'half' is a reserved type name in OpenCL C.
             uint x = as_uint(value);
             uint sign = (x >> 16) & 0x8000u;
-            uint mantissa = x & 0x007FFFFFu;
-            int exponent = (int) ((x >> 23) & 0xFFu) - 127;
-
-            if (((x >> 23) & 0xFFu) == 0xFFu) {
-                return (ushort) (sign | 0x7C00u | (mantissa != 0u ? 0x200u : 0u));
+            uint expField = (x >> 23) & 0xFFu;
+            uint mant = x & 0x007FFFFFu;
+            if (expField == 0xFFu) {
+                return (ushort) (sign | 0x7C00u | (mant != 0u ? 0x200u : 0u));
             }
-            if (exponent > 15) {
+            int e = (int) expField - 127 + 15;
+            if (e >= 31) {
                 return (ushort) (sign | 0x7C00u);
             }
-            if (exponent < -14) {
-                if (exponent < -24) {
+            if (e <= 0) {
+                if (e < -10) {
                     return (ushort) sign;
                 }
-                mantissa |= 0x00800000u;
-                int shift = -14 - exponent; // 1..10
-                uint halfMant = mantissa >> (13 + shift);
-                uint roundBit = (mantissa >> (12 + shift)) & 1u;
-                halfMant += roundBit;
-                return (ushort) (sign | halfMant);
+                mant |= 0x00800000u;
+                uint shift = (uint) (14 - e);
+                uint hs = mant >> shift;
+                uint rem = mant & ((1u << shift) - 1u);
+                uint halfway = 1u << (shift - 1u);
+                if (rem > halfway || (rem == halfway && (hs & 1u) != 0u)) {
+                    hs += 1u;
+                }
+                return (ushort) (sign | hs);
             }
-            uint halfExp = (uint) (exponent + 15);
-            uint halfMant = mantissa >> 13;
-            uint roundBit = (mantissa >> 12) & 1u;
-            uint rounded = halfMant + roundBit;
-            if (rounded == 0x400u) {
-                rounded = 0u;
-                halfExp += 1u;
+            uint hn = ((uint) e << 10) | (mant >> 13);
+            uint rem2 = mant & 0x1FFFu;
+            if (rem2 > 0x1000u || (rem2 == 0x1000u && (hn & 1u) != 0u)) {
+                hn += 1u;
             }
-            return (ushort) (sign | (halfExp << 10) | rounded);
+            return (ushort) (sign | hn);
         }
 
         inline float gpu_sigmoid_f(float x) {
@@ -336,7 +339,7 @@ public final class KernelSource {
             out_f32[n] = acc;
         }
 
-        __kernel void rope_apply_split(
+        __kernel void rope_apply_pairs(
             __global float* buf,
             __global const float* cos_table,
             __global const float* sin_table,
@@ -351,16 +354,16 @@ public final class KernelSource {
             if (h >= heads) return;
 
             const int headOff = h * head_dim;
-            const int evenOff = headOff;
-            const int oddOff = headOff + halfDim;
+            const int evenOff = headOff + (i << 1);
+            const int oddOff = evenOff + 1;
 
             float c = cos_table[cosSinOffset + i];
             float s = sin_table[cosSinOffset + i];
-            float x0 = buf[evenOff + i];
-            float x1 = buf[oddOff + i];
+            float x0 = buf[evenOff];
+            float x1 = buf[oddOff];
 
-            buf[evenOff + i] = x0 * c - x1 * s;
-            buf[oddOff + i] = x0 * s + x1 * c;
+            buf[evenOff] = x0 * c - x1 * s;
+            buf[oddOff] = x0 * s + x1 * c;
         }
 
         __kernel void rmsnorm_partial_sumsq(

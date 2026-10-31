@@ -295,7 +295,7 @@ public final class CoreKernelBenchmark {
         MemorySegment sinDev = LlamaLayer.uploadFloats(ctx, sinVals);
         float[] gpuOut;
         try {
-            LlamaLayer.ropeApplySplit(ctx, bufDev, cosDev, sinDev, heads, headDim, 0);
+            LlamaLayer.ropeApplyPairs(ctx, bufDev, cosDev, sinDev, heads, headDim, 0);
             LlamaLayer.finish(ctx);
             gpuOut = LlamaLayer.downloadFloats(ctx, bufDev, heads * headDim);
         } finally {
@@ -304,10 +304,10 @@ public final class CoreKernelBenchmark {
             LlamaLayer.freeQuietly(ctx, sinDev);
         }
 
-        float[] cpuOut = cpuRopeSplit(buf, cosVals, sinVals, heads, headDim);
+        float[] cpuOut = cpuRopePairs(buf, cosVals, sinVals, heads, headDim);
         float maxDiff = maxAbsDiff(cpuOut, gpuOut);
         boolean pass = maxDiff <= TOLERANCE_ABS;
-        report("rope_apply_split", "heads=" + heads + " headDim=" + headDim + " pos=" + pos, maxDiff, pass);
+        report("rope_apply_pairs", "heads=" + heads + " headDim=" + headDim + " pos=" + pos, maxDiff, pass);
         return pass;
     }
 
@@ -666,22 +666,22 @@ public final class CoreKernelBenchmark {
         return out;
     }
 
-    private static float[] cpuRopeSplit(float[] buf, float[] cosVals, float[] sinVals, int heads, int headDim) {
+    private static float[] cpuRopePairs(float[] buf, float[] cosVals, float[] sinVals, int heads, int headDim) {
         int halfDim = headDim / 2;
         float[] out = buf.clone();
         for (int h = 0; h < heads; h++) {
             int headOff = h * headDim;
             for (int i = 0; i < halfDim; i++) {
                 float c = cosVals[i], s = sinVals[i];
-                float x0 = buf[headOff + i], x1 = buf[headOff + halfDim + i];
-                out[headOff + i] = x0 * c - x1 * s;
-                out[headOff + halfDim + i] = x0 * s + x1 * c;
+                float x0 = buf[headOff + 2 * i], x1 = buf[headOff + 2 * i + 1]; // natural adjacent pairs
+                out[headOff + 2 * i] = x0 * c - x1 * s;
+                out[headOff + 2 * i + 1] = x0 * s + x1 * c;
             }
         }
         return out;
     }
 
-    /** Different convention from cpuRopeSplit -- ADJACENT pairs (2i,2i+1), not split halves. Mirrors rope_apply_pairwise_rows exactly, see that kernel's javadoc note about the two conventions coexisting in this codebase. */
+    /** Different convention from cpuRopePairs -- ADJACENT pairs (2i,2i+1), not split halves. Mirrors rope_apply_pairwise_rows exactly, see that kernel's javadoc note about the two conventions coexisting in this codebase. */
     private static float[] cpuRopePairwiseRows(float[] buf, float[] cosTable, float[] sinTable, int[] positions, int T, int heads, int headDim) {
         int halfDim = headDim / 2;
         float[] out = buf.clone();

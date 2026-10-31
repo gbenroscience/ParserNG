@@ -1,5 +1,6 @@
 package com.github.gbenroscience.gpu.llm.cuda;
 
+import com.github.gbenroscience.gpu.llm.core.AllocationTracker;
 import com.github.gbenroscience.gpu.evaluator.cuda.CudaBindings;
 import com.github.gbenroscience.gpu.evaluator.cuda.NvrtcBindings;
 import java.lang.foreign.Arena;
@@ -22,6 +23,13 @@ import java.nio.charset.StandardCharsets;
  */
 public final class GpuContext implements AutoCloseable {
 
+    private static final System.Logger LOG = System.getLogger(GpuContext.class.getName());
+    /** Every live device allocation made through this context (see {@link AllocationTracker}). */
+    public final AllocationTracker allocations = new AllocationTracker();
+    private boolean closed;
+    /** Number of device buffers still live when close() ran (0 = every owner released its buffers explicitly). */
+    public volatile int sweptAtClose = -1;
+
     public final CudaBindings cu;
     public final NvrtcBindings nvrtc;
 
@@ -35,7 +43,7 @@ public final class GpuContext implements AutoCloseable {
     public final MemorySegment kQuantizeActivationQ8_0;
     public final MemorySegment kQ8_0GemvSplit;
     public final MemorySegment kQ8_0GemvPlain;
-    public final MemorySegment kRopeApplySplit;
+    public final MemorySegment kRopeApplyPairs;
     public final MemorySegment kRmsnormPartialSumsq;
     public final MemorySegment kRmsnormApply;
     public final MemorySegment kAttnScores;
@@ -89,7 +97,7 @@ public final class GpuContext implements AutoCloseable {
             this.kQuantizeActivationQ8_0 = getFunction(bootstrap, KernelSource.KERNEL_QUANTIZE_ACTIVATION_Q8_0);
             this.kQ8_0GemvSplit = getFunction(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_SPLIT);
             this.kQ8_0GemvPlain = getFunction(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_PLAIN);
-            this.kRopeApplySplit = getFunction(bootstrap, KernelSource.KERNEL_ROPE_APPLY_SPLIT);
+            this.kRopeApplyPairs = getFunction(bootstrap, KernelSource.KERNEL_ROPE_APPLY_PAIRS);
             this.kRmsnormPartialSumsq = getFunction(bootstrap, KernelSource.KERNEL_RMSNORM_PARTIAL_SUMSQ);
             this.kRmsnormApply = getFunction(bootstrap, KernelSource.KERNEL_RMSNORM_APPLY);
             this.kAttnScores = getFunction(bootstrap, KernelSource.KERNEL_ATTN_SCORES);
@@ -183,12 +191,28 @@ public final class GpuContext implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        long[] leaked = allocations.drain();
+        sweptAtClose = leaked.length;
+        if (leaked.length > 0) {
+            LOG.log(System.Logger.Level.WARNING, "closing CUDA context with {0} device allocations still live; freeing them", leaked.length);
+        }
+        for (long ptr : leaked) {
+            try {
+                cu.cuMemFree.invoke(ptr);
+            } catch (Throwable t) {
+                LOG.log(System.Logger.Level.ERROR, "cuMemFree failed for 0x" + Long.toHexString(ptr), t);
+            }
+        }
         try {
             cu.cuModuleUnload.invoke(module);
             cu.cuDevicePrimaryCtxRelease.invoke(device);
         } catch (Throwable t) {
-            // best-effort cleanup
+            LOG.log(System.Logger.Level.ERROR, "failed unloading CUDA module / releasing primary context", t);
         }
     }
 }
