@@ -568,9 +568,11 @@ public final class LlamaLayer {
         final int posInclusive = s.pos + 1;
 
         synchronized (ctx.dispatchLock) {
+            Prof.start(ctx);
             // === 1. Attention block: x = x + attn(rms_norm(x)) ===
             rmsNorm(ctx, x, w.attn_norm_gamma, s.xNorm, dim, cfg.norm_eps, s.rmsPartials);
             quantizeActivationQ8_0(ctx, s.xNorm, s.xNormQ8, dim);
+            Prof.mark(ctx, Prof.NORM);
 
             q8_0GemvPlain(ctx, s.xNormQ8, w.wq_q8_0, s.qSplit, numHeads * headDim, dim);
             q8_0GemvPlain(ctx, s.xNormQ8, w.wk_q8_0, s.kNew, kvDim, dim);
@@ -578,41 +580,50 @@ public final class LlamaLayer {
             // dimensions). V feeds the weighted sum and wo in natural order, exactly like the batched
             // prefill path (q8_0GemmTiled) that fills the same KV cache.
             q8_0GemvPlain(ctx, s.xNormQ8, w.wv_q8_0, s.vNew, kvDim, dim);
+            Prof.mark(ctx, Prof.QKV);
 
             ropeApplyPairs(ctx, s.qSplit, s.cos_table, s.sin_table, numHeads, headDim, s.pos * halfDim);
             ropeApplyPairs(ctx, s.kNew, s.cos_table, s.sin_table, kvHeads, headDim, s.pos * halfDim);
 
             writeIntoCache(ctx, s.kNew, s.k_cache_f32, (long) s.pos * kvDim, kvDim);
             writeIntoCache(ctx, s.vNew, s.v_cache_f32, (long) s.pos * kvDim, kvDim);
+            Prof.mark(ctx, Prof.ROPE_CACHE);
 
-            for (int h = 0; h < numHeads; h++) {
-                int kvHead = h / groupSize;
-                int qHeadOff = h * headDim;
-                int kvHeadOff = kvHead * headDim;
+            if (fusedAttentionSupported(headDim)) {
+                attnDecodeFused(ctx, s.qSplit, s.k_cache_f32, s.v_cache_f32, s.attnOut, numHeads, kvHeads, headDim, posInclusive, rsqrtD);
+            } else {
+                for (int h = 0; h < numHeads; h++) {
+                    int kvHead = h / groupSize;
+                    int qHeadOff = h * headDim;
+                    int kvHeadOff = kvHead * headDim;
 
-                attnScores(ctx, s.qSplit, s.k_cache_f32, s.scores,
-                        qHeadOff, headDim, kvDim, kvHeadOff, posInclusive, rsqrtD);
-                softmaxInplace(ctx, s.scores, posInclusive);
-                attnWeightedSum(ctx, s.scores, s.v_cache_f32, s.attnOut,
-                        qHeadOff, headDim, kvDim, kvHeadOff, posInclusive);
+                    attnScores(ctx, s.qSplit, s.k_cache_f32, s.scores,
+                            qHeadOff, headDim, kvDim, kvHeadOff, posInclusive, rsqrtD);
+                    softmaxInplace(ctx, s.scores, posInclusive);
+                    attnWeightedSum(ctx, s.scores, s.v_cache_f32, s.attnOut,
+                            qHeadOff, headDim, kvDim, kvHeadOff, posInclusive);
+                }
             }
 
+            Prof.mark(ctx, Prof.ATTENTION);
             f32Gemv(ctx, s.attnOut, w.wo_f32, s.attnProj, dim, dim);
             residualAdd(ctx, x, s.attnProj, dim);
+            Prof.mark(ctx, Prof.WO);
 
             // === 2. FFN block: x = x + ffn(rms_norm(x)) ===
             rmsNorm(ctx, x, w.ffn_norm_gamma, s.ffnNorm, dim, cfg.norm_eps, s.rmsPartials);
             quantizeActivationQ8_0(ctx, s.ffnNorm, s.ffnNormQ8, dim);
+            Prof.mark(ctx, Prof.NORM);
 
             ffnActivateDecode(ctx, s, w, cfg, dim, hidden);
 
             quantizeActivationQ8_0(ctx, s.swigluOut, s.swigluOutQ8, hidden);
+            Prof.mark(ctx, Prof.FFN_UP);
             q8_0GemvPlain(ctx, s.swigluOutQ8, w.w_down_q8_0, s.ffnDownOut, dim, hidden);
             residualAdd(ctx, x, s.ffnDownOut, dim);
+            Prof.mark(ctx, Prof.FFN_DOWN);
 
-            // Not required for correctness (see class javadoc) -- kept for
-            // predictable per-token timing if the caller profiles this call.
-            GpuContext.check((int) ctx.cl.clFinish.invoke(ctx.queue), "clFinish(end of forward_layer)");
+            // No per-layer clFinish: the queue is in-order, so layers pipeline; the per-token logits readback is the sync point.
         }
 
         s.pos++;
@@ -704,8 +715,10 @@ public final class LlamaLayer {
 
         try {
             synchronized (ctx.dispatchLock) {
+                Prof.start(ctx);
                 rmsNorm(ctx, xRow, finalNormGammaDevice, normed, cfg.dim, cfg.norm_eps, partials);
                 f32Gemv(ctx, normed, lmHeadDevice, logitsDevice, cfg.dim, vocabSize);
+                Prof.mark(ctx, Prof.LOGITS);
             }
 
             float[] logits = new float[vocabSize];
@@ -908,7 +921,8 @@ public final class LlamaLayer {
             setArg(tmp, ctx, ctx.kQ8_0GemvPlain, 2, out);
             setArgI(tmp, ctx, ctx.kQ8_0GemvPlain, 3, N);
             setArgI(tmp, ctx, ctx.kQ8_0GemvPlain, 4, K);
-            launch1D(ctx, ctx.kQ8_0GemvPlain, N, KernelSource.DEFAULT_BLOCK_SIZE);
+            // one work-group per output row
+            launch1D(ctx, ctx.kQ8_0GemvPlain, (long) N * KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP);
         }
     }
 
@@ -956,6 +970,35 @@ public final class LlamaLayer {
             p <<= 1;
         }
         return Math.min(p, 256);
+    }
+
+    /** True when attn_decode_fused can handle this head geometry (otherwise the per-head path is used). */
+    static boolean fusedAttentionSupported(int headDim) {
+        return headDim % 4 == 0 && headDim <= KernelSource.ATTN_FUSED_MAX_HEAD_DIM;
+    }
+
+    /** One launch for all heads: q [numHeads*headDim] (roped), caches [*, kvHeads*headDim], out [numHeads*headDim]. */
+    static void attnDecodeFused(GpuContext ctx, MemorySegment q, MemorySegment kCache, MemorySegment vCache, MemorySegment out,
+            int numHeads, int kvHeads, int headDim, int nCtx, float scale) throws Throwable {
+        if (!fusedAttentionSupported(headDim)) {
+            throw new IllegalArgumentException("attn_decode_fused needs headDim % 4 == 0 and headDim <= "
+                    + KernelSource.ATTN_FUSED_MAX_HEAD_DIM + ", got " + headDim);
+        }
+        if (nCtx < 1 || numHeads % kvHeads != 0) {
+            throw new IllegalArgumentException("invalid attention geometry: nCtx=" + nCtx + " numHeads=" + numHeads + " kvHeads=" + kvHeads);
+        }
+        try (Arena tmp = Arena.ofConfined()) {
+            setArg(tmp, ctx, ctx.kAttnDecodeFused, 0, q);
+            setArg(tmp, ctx, ctx.kAttnDecodeFused, 1, kCache);
+            setArg(tmp, ctx, ctx.kAttnDecodeFused, 2, vCache);
+            setArg(tmp, ctx, ctx.kAttnDecodeFused, 3, out);
+            setArgI(tmp, ctx, ctx.kAttnDecodeFused, 4, numHeads);
+            setArgI(tmp, ctx, ctx.kAttnDecodeFused, 5, kvHeads);
+            setArgI(tmp, ctx, ctx.kAttnDecodeFused, 6, headDim);
+            setArgI(tmp, ctx, ctx.kAttnDecodeFused, 7, nCtx);
+            setArgF(tmp, ctx, ctx.kAttnDecodeFused, 8, scale);
+            launch1D(ctx, ctx.kAttnDecodeFused, (long) numHeads * KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP);
+        }
     }
 
     static void attnWeightedSum(GpuContext ctx, MemorySegment scores, MemorySegment vCache, MemorySegment attnOutAllHeads,
@@ -1021,7 +1064,7 @@ public final class LlamaLayer {
             setArg(tmp, ctx, ctx.kF32Gemv, 2, out);
             setArgI(tmp, ctx, ctx.kF32Gemv, 3, K);
             setArgI(tmp, ctx, ctx.kF32Gemv, 4, N);
-            launch1D(ctx, ctx.kF32Gemv, N, KernelSource.DEFAULT_BLOCK_SIZE);
+            launch1D(ctx, ctx.kF32Gemv, (long) N * KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP);
         }
     }
 

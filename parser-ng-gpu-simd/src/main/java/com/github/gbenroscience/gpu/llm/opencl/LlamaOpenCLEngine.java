@@ -127,6 +127,9 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
             history.add(id);
         }
 
+        final boolean timing = Boolean.getBoolean("llm.timing") || Prof.ON;
+        Prof.reset();
+        final long tStart = System.nanoTime();
         MemorySegment lastRowResult = processPrompt(promptIds);
 
         int eosId = genCfg.eosTokenId >= 0 ? genCfg.eosTokenId : tokenizer.getEosId();
@@ -135,6 +138,8 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
 
         float[] logits = LlamaLayer.finalLogits(lastRowResult, finalNormGammaDevice, lmHeadDevice, cfg, ctx, vocabSize);
         int nextId = sampler.sample(logits, history);
+        final long tFirstToken = System.nanoTime();
+        int decodeForwards = 0;
 
         for (int step = 0; step < genCfg.maxNewTokens; step++) {
             if (nextId == eosId) {
@@ -152,6 +157,18 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
             }
             logits = LlamaLayer.finalLogits(xSingle, finalNormGammaDevice, lmHeadDevice, cfg, ctx, vocabSize);
             nextId = sampler.sample(logits, history);
+            decodeForwards++;
+        }
+        final long tEnd = System.nanoTime();
+        if (timing) {
+            double prefillMs = (tFirstToken - tStart) / 1e6;
+            double decodeMs = (tEnd - tFirstToken) / 1e6;
+            System.out.printf("[llm.timing] prompt=%d tokens, time-to-first-token=%.1f ms (%.1f tok/s prefill); decode=%d tokens in %.1f ms = %.2f tok/s (%.1f ms/token)%n",
+                    promptIds.length, prefillMs, promptIds.length * 1000.0 / Math.max(prefillMs, 1e-9),
+                    decodeForwards, decodeMs, decodeForwards * 1000.0 / Math.max(decodeMs, 1e-9), decodeMs / Math.max(decodeForwards, 1));
+            if (Prof.ON) {
+                System.out.print(Prof.report());
+            }
         }
 
         int[] generatedIds = new int[generated.size()];

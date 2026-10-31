@@ -30,7 +30,7 @@ public final class CpuReference {
         return (len / Q8_GROUP) * Q8_BLOCK_BYTES;
     }
 
-    /** Same arithmetic as the device kernel quantize_activation_q8_0_blocks (fp16 scale RNE, rint, clamp ±127). */
+    /** Same arithmetic as the device kernel quantize_activation_q8_0_blocks (fp16 scale RNE, rint, clamp +/-127). */
     public static byte[] quantizeQ8_0(float[] x) {
         byte[] out = new byte[q8Bytes(x.length)];
         for (int b = 0; b < x.length / Q8_GROUP; b++) {

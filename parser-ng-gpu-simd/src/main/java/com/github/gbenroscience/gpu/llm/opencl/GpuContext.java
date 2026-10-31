@@ -76,6 +76,7 @@ public final class GpuContext implements AutoCloseable {
     public final MemorySegment kAttnScores;
     public final MemorySegment kSoftmaxInplace;
     public final MemorySegment kAttnWeightedSum;
+    public final MemorySegment kAttnDecodeFused;
     public final MemorySegment kSwigluActivate;
     public final MemorySegment kResidualAdd;
     public final MemorySegment kF32Gemv;
@@ -134,6 +135,7 @@ public final class GpuContext implements AutoCloseable {
             this.kAttnScores = createKernel(bootstrap, KernelSource.KERNEL_ATTN_SCORES);
             this.kSoftmaxInplace = createKernel(bootstrap, KernelSource.KERNEL_SOFTMAX_INPLACE);
             this.kAttnWeightedSum = createKernel(bootstrap, KernelSource.KERNEL_ATTN_WEIGHTED_SUM);
+            this.kAttnDecodeFused = createKernel(bootstrap, KernelSource.KERNEL_ATTN_DECODE_FUSED);
             this.kSwigluActivate = createKernel(bootstrap, KernelSource.KERNEL_SWIGLU_ACTIVATE);
             this.kResidualAdd = createKernel(bootstrap, KernelSource.KERNEL_RESIDUAL_ADD);
             this.kF32Gemv = createKernel(bootstrap, KernelSource.KERNEL_F32_GEMV);
@@ -238,6 +240,7 @@ public final class GpuContext implements AutoCloseable {
             releaseKernelQuietly(kAttnScores);
             releaseKernelQuietly(kSoftmaxInplace);
             releaseKernelQuietly(kAttnWeightedSum);
+            releaseKernelQuietly(kAttnDecodeFused);
             releaseKernelQuietly(kSwigluActivate);
             releaseKernelQuietly(kResidualAdd);
             releaseKernelQuietly(kF32Gemv);

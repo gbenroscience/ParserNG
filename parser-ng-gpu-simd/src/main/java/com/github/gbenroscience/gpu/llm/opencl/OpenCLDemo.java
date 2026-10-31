@@ -1,27 +1,33 @@
 package com.github.gbenroscience.gpu.llm.opencl;
 
+import com.github.gbenroscience.gpu.llm.LlamaGenerationConfig;
 import com.github.gbenroscience.simd.turbo.tools.llm.loader.GGUFLoader;
 
 import java.io.File;
-import java.lang.foreign.MemorySegment;
-import java.util.NoSuchElementException;
 
 /**
  * End-to-end OpenCL GGUF inference demo.
  *
  * Usage:
- *   OpenCLDemo <model.gguf> <prompt...>
+ *   OpenCLDemo [model.gguf] [prompt...]
  *
- * The prompt is passed as plain text. This demo does not synthesize a Llama-3
- * chat template: the current BpeTokenizer does not yet implement Llama-3
- * special-token parsing / pre-tokenization, so this class must not pretend
- * that adding the visible template strings would make them valid token IDs.
+ * System properties:
+ *   -Dopencl.vendor=INTEL|NVIDIA|AMD|...   device to use (default INTEL; use -Dopencl.device.type=CPU for a CPU device)
+ *   -Dllm.timing=true                      (on by default here) time-to-first-token and decode tokens/s
+ *   -Dllm.profile=true                     per-stage time breakdown; serialises the pipeline, so use it to
+ *                                          find hotspots, not to measure speed
+ *   -Dllm.printTokens=true                 print the prompt token ids, for diffing against `llama-tokenize`
+ *
+ * The prompt is passed as plain text. This demo does not apply a chat template, and the current
+ * BpeTokenizer uses the GPT-2 pre-tokenizer regex rather than the one Llama-3 models declare in
+ * tokenizer.ggml.pre, so prompts containing unusual whitespace, contractions or long digit runs may
+ * tokenize differently from llama.cpp. Treat output quality accordingly.
  */
 public final class OpenCLDemo {
 
     private static final String DEFAULT_MODEL =
             "C:\\Users\\GBEMIRO\\Documents\\NetBeansProjects\\ai-models\\llama-3.2-1b-instruct-q8_0.gguf";
-    private static final String DEFAULT_PROMPT = "Define turbulent flow in flid mechanics";
+    private static final String DEFAULT_PROMPT = "What is 23*34? Answer briefly.";
 
     private OpenCLDemo() {
     }
@@ -35,6 +41,7 @@ public final class OpenCLDemo {
             System.exit(1);
             return;
         }
+        System.setProperty("llm.timing", System.getProperty("llm.timing", "true"));
 
         File ggufPath = new File(args[0]);
         if (!ggufPath.isFile()) {
@@ -43,108 +50,40 @@ public final class OpenCLDemo {
         String prompt = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
         System.out.println("Model: " + ggufPath.getAbsolutePath());
         System.out.println("Prompt: " + prompt);
-        System.out.println("Loading GGUF model...");
 
-        GGUFLoader.GGUFFile gguf = GGUFLoader.load(ggufPath);
-        LlamaLayer.Config cfg = LlamaLayer.Config.fromGguf(gguf);
-        System.out.printf("Model config: dim=%d, layers=%d, heads=%d, maxSeq=%d%n",
-                cfg.dim, cfg.n_layers, cfg.num_heads, cfg.max_seq);
-
-        // Select the requested device before constructing GpuContext.
-        OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.GpuVendor.INTEL);
-        GpuContext ctx = new GpuContext();
-
-        LlamaLayer.GpuWeights[] layers = null;
-        LlamaLayer.GpuState[] states = null;
-        MemorySegment finalNormGammaDevice = MemorySegment.NULL;
-        MemorySegment lmHeadDevice = MemorySegment.NULL;
-
-        try {
-            BpeTokenizer tokenizer = BpeTokenizer.fromGguf(gguf);
-            int[] promptIds = tokenizer.encode(prompt, true);
-            System.out.printf("Tokenizer: vocab=%d, BOS=%d, EOS=%d, promptTokens=%d%n",
-                    tokenizer.vocabSize(), tokenizer.getBosId(), tokenizer.getEosId(), promptIds.length);
-            if (promptIds.length == 0) {
-                throw new IllegalStateException("Prompt tokenized to zero tokens");
-            }
-
-            EmbeddingTable embeddings = EmbeddingTable.fromGguf(gguf, tokenizer.vocabSize(), cfg.dim);
-            layers = new LlamaLayer.GpuWeights[cfg.n_layers];
-            states = new LlamaLayer.GpuState[cfg.n_layers];
-            for (int i = 0; i < cfg.n_layers; i++) {
-                String prefix = "blk." + i + ".";
-                layers[i] = LlamaLayer.GpuWeights.fromGguf(ctx, gguf, prefix);
-                states[i] = new LlamaLayer.GpuState(ctx, cfg);
-                System.out.printf("Uploaded layer %d/%d%n", i + 1, cfg.n_layers);
-            }
-
-            finalNormGammaDevice = loadAndUploadFloat(ctx, gguf, "output_norm.weight");
-            lmHeadDevice = loadAndUploadFloat(ctx, gguf, findLmHeadTensorName(gguf));
-
-            try (LlamaOpenCLEngine engine = new LlamaOpenCLEngine(
-                    ctx, cfg, layers, states, embeddings, tokenizer,
-                    finalNormGammaDevice, lmHeadDevice, tokenizer.vocabSize())) {
-
-                LlamaOpenCLEngine.GenerationConfig genCfg = new LlamaOpenCLEngine.GenerationConfig();
-                // One token is only a smoke test and commonly produces an
-                // apparently empty answer when the first sampled token is EOS.
-                genCfg.maxNewTokens = 64;
-                genCfg.sampler.temperature = 0.0f; // deterministic greedy decoding
-                genCfg.sampler.topK = 1;
-                genCfg.sampler.topP = 1.0f;
-                genCfg.sampler.repetitionPenalty = 1.0f;
-
-                System.out.println("Running inference...");
-                String completion = engine.generate(prompt, genCfg);
-                if (completion == null || completion.isBlank()) {
-                    System.out.println("Generated text: <empty>");
-                    System.out.println("The engine returned no visible text. Check the tokenizer/model compatibility warning below.");
-                } else {
-                    System.out.println("Generated text:");
-                    System.out.println(completion);
-                }
-            }
-        } finally {
-            if (states != null) {
-                for (LlamaLayer.GpuState state : states) {
-                    if (state != null) state.close();
-                }
-            }
-            if (layers != null) {
-                for (LlamaLayer.GpuWeights weights : layers) {
-                    if (weights != null) weights.close();
-                }
-            }
-            LlamaLayer.freeQuietly(ctx, finalNormGammaDevice);
-            LlamaLayer.freeQuietly(ctx, lmHeadDevice);
-            ctx.close();
+        // Device selection: honoured by GpuContext, which the engine creates after the model is validated.
+        if (System.getProperty("opencl.device.type") == null) {
+            OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.GpuVendor.valueOf(
+                    System.getProperty("opencl.vendor", "INTEL").toUpperCase()));
         }
 
-        System.out.println();
-        System.out.println("Compatibility note: this demo's current BPE implementation is not yet a verified Llama-3.2 tokenizer.");
-        System.out.println("Increasing maxNewTokens prevents the one-token smoke-test issue, but it does not fix tokenizer/pre-tokenizer or chat-template incompatibility.");
-    }
-
-    private static MemorySegment loadAndUploadFloat(
-            GpuContext ctx, GGUFLoader.GGUFFile gguf, String tensorName) throws Throwable {
-        GGUFLoader.Tensor tensor = gguf.tensors.get(tensorName);
-        if (tensor == null) {
-            throw new NoSuchElementException("Required GGUF tensor missing: " + tensorName);
+        if (Boolean.getBoolean("llm.printTokens")) {
+            BpeTokenizer tok = BpeTokenizer.fromGguf(GGUFLoader.load(ggufPath));
+            System.out.println("Prompt token ids: " + java.util.Arrays.toString(tok.encode(prompt, true)));
         }
-        float[] data = switch (tensor.type) {
-            case 0 -> tensor.loadFloat();
-            case 8 -> tensor.loadQ8_0AsFloat();
-            default -> throw new IllegalArgumentException(
-                    "Tensor '" + tensorName + "' has GGML type " + tensor.type
-                    + " -- only F32 (0) and Q8_0 (8) are handled here.");
-        };
-        return LlamaLayer.uploadFloats(ctx, data);
-    }
 
-    private static String findLmHeadTensorName(GGUFLoader.GGUFFile gguf) {
-        if (gguf.tensors.containsKey("output.weight")) return "output.weight";
-        if (gguf.tensors.containsKey("token_embd.weight")) return "token_embd.weight";
-        throw new NoSuchElementException(
-                "Neither output.weight nor token_embd.weight was found in the GGUF tensors");
+        System.out.println("Loading and validating model, then uploading to the device...");
+        long t0 = System.nanoTime();
+        // Validates architecture / tensor shapes / types before touching the device; if loading fails
+        // partway, everything already uploaded is released and the original exception is rethrown.
+        try (OpenCLLlamaEngine engine = new OpenCLLlamaEngine(ggufPath)) {
+            System.out.printf("Load + upload: %.1f s on %s%n", (System.nanoTime() - t0) / 1e9, engine.getDeviceDescription());
+
+            LlamaGenerationConfig cfg = new LlamaGenerationConfig();
+            cfg.maxNewTokens = 64;
+            cfg.temperature = 0.0f; // deterministic greedy decoding
+            cfg.topK = 1;
+            cfg.topP = 1.0f;
+            cfg.repetitionPenalty = 1.0f;
+
+            System.out.println("Running inference...");
+            String completion = engine.generate(prompt, cfg);
+            if (completion == null || completion.isBlank()) {
+                System.out.println("Generated text: <empty>");
+            } else {
+                System.out.println("Generated text:");
+                System.out.println(completion);
+            }
+        }
     }
 }

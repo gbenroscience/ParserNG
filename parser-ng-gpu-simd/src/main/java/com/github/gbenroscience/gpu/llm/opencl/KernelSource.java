@@ -82,6 +82,7 @@ public final class KernelSource {
     public static final String KERNEL_ATTN_SCORES = "attn_scores";
     public static final String KERNEL_SOFTMAX_INPLACE = "softmax_inplace";
     public static final String KERNEL_ATTN_WEIGHTED_SUM = "attn_weighted_sum";
+    public static final String KERNEL_ATTN_DECODE_FUSED = "attn_decode_fused";
     public static final String KERNEL_SWIGLU_ACTIVATE = "swiglu_activate";
     public static final String KERNEL_RESIDUAL_ADD = "residual_add";
     public static final String KERNEL_F32_GEMV = "f32_gemv";
@@ -109,12 +110,42 @@ public final class KernelSource {
     /** Default work-group size for the simple bound-checked 1D kernels (GEMVs, RoPE, elementwise ops); also the upper cap nextPow2() uses for softmax's local reduction size, and therefore the __local array size softmax_inplace/softmax_inplace_rows declare. */
     public static final int DEFAULT_BLOCK_SIZE = 256;
 
+    /** Work-group size of the GEMV kernels (one work-group per output row). Must equal GEMV_WG in the kernel source. */
+    public static final int GEMV_WORKGROUP = 64;
+
+    /** Largest head_dim handled by attn_decode_fused (must equal ATTN_MAX_HEAD_DIM in the kernel source). */
+    public static final int ATTN_FUSED_MAX_HEAD_DIM = 256;
+
     /** Default column-tile work-group size for the batched GEMM kernels (local_work_size[0]; get_group_id(1) iterates rows). */
     public static final int GEMM_TILE_N = 128;
 
     public static final String CL_SOURCE = """
         #define Q8_0_GROUP_SIZE 32
         #define Q8_0_BLOCK_SIZE 34
+        #define GEMV_WG 64
+
+        // exact int8 x int8 dot of 16 lanes
+        inline int dot_i8x16(char16 a, char16 b) {
+            int16 p = convert_int16(a) * convert_int16(b);
+            int8 q = p.lo + p.hi;
+            int4 r = q.lo + q.hi;
+            int2 t = r.lo + r.hi;
+            return t.x + t.y;
+        }
+
+        // tree reduction of one float per work-item across the GEMV_WG work-group
+        inline float wg_sum(__local float* partial, float v) {
+            const int lid = get_local_id(0);
+            partial[lid] = v;
+            barrier(CLK_LOCAL_MEM_FENCE);
+            for (int stride = GEMV_WG / 2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    partial[lid] += partial[lid + stride];
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+            return partial[0];
+        }
         #define DEVICE_FLT_MAX 3.402823466e+38f
 
         // ---- manual IEEE-754 binary16 <-> binary32 conversion (see class javadoc) ----
@@ -305,38 +336,37 @@ public final class KernelSource {
             out_f32_split[oddOutOff + i] = acc1;
         }
 
-        __kernel void q8_0_gemv_plain(
+        // One work-group per output row. The GEMV_WG work-items stride over the row's 34-byte
+        // blocks, so neighbouring work-items read neighbouring bytes (coalesced) instead of
+        // rows K/32*34 bytes apart; partial sums are combined by a local-memory tree reduction.
+        __kernel __attribute__((reqd_work_group_size(GEMV_WG, 1, 1)))
+        void q8_0_gemv_plain(
             __global const uchar* x_q8_0,
             __global const uchar* W_q8_0,
             __global float* out_f32,
             const int N,
             const int K)
         {
-            const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
-            if (n >= N) return;
+            __local float partial[GEMV_WG];
+            const int n = get_group_id(0);
+            if (n >= N) return; // uniform across the work-group, so the barriers below stay legal
 
             const int numBlocks = K / Q8_0_GROUP_SIZE;
-            const int B_stride = numBlocks * Q8_0_BLOCK_SIZE;
-            const int wRowOff = n * B_stride;
+            __global const uchar* wRow = W_q8_0 + (size_t) n * (size_t) numBlocks * Q8_0_BLOCK_SIZE;
 
             float acc = 0.0f;
-            for (int b = 0; b < numBlocks; b++) {
-                const int xBlockOff = b * Q8_0_BLOCK_SIZE;
-                const int wBlockOff = wRowOff + b * Q8_0_BLOCK_SIZE;
-
-                float xScale = decode_fp16(x_q8_0[xBlockOff], x_q8_0[xBlockOff + 1]);
-                float wScale = decode_fp16(W_q8_0[wBlockOff], W_q8_0[wBlockOff + 1]);
-                float scale = xScale * wScale;
-
-                int iacc = 0;
-                for (int j = 0; j < Q8_0_GROUP_SIZE; j++) {
-                    char xv = (char) x_q8_0[xBlockOff + 2 + j];
-                    char wv = (char) W_q8_0[wBlockOff + 2 + j];
-                    iacc += (int) xv * (int) wv;
-                }
+            for (int b = get_local_id(0); b < numBlocks; b += GEMV_WG) {
+                __global const uchar* xb = x_q8_0 + (size_t) b * Q8_0_BLOCK_SIZE;
+                __global const uchar* wb = wRow + (size_t) b * Q8_0_BLOCK_SIZE;
+                const float scale = decode_fp16(xb[0], xb[1]) * decode_fp16(wb[0], wb[1]);
+                __global const char* xq = (__global const char*) (xb + 2);
+                __global const char* wq = (__global const char*) (wb + 2);
+                const int iacc = dot_i8x16(vload16(0, xq), vload16(0, wq))
+                               + dot_i8x16(vload16(1, xq), vload16(1, wq));
                 acc += iacc * scale;
             }
-            out_f32[n] = acc;
+            const float total = wg_sum(partial, acc);
+            if (get_local_id(0) == 0) out_f32[n] = total;
         }
 
         __kernel void rope_apply_pairs(
@@ -526,22 +556,147 @@ public final class KernelSource {
         // head (K=dim, N=vocab, still in-bounds, still wrong). See
         // LlamaLayer's/this kernel's git history -- or ask the person who
         // introduced this fix -- for the full derivation.
-        __kernel void f32_gemv(
+        // One work-group per output row; float4 loads when the row is 16-byte aligned (K % 4 == 0).
+        __kernel __attribute__((reqd_work_group_size(GEMV_WG, 1, 1)))
+        void f32_gemv(
             __global const float* a,
             __global const float* B,
             __global float* out,
             const int K,
             const int N)
         {
-            const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
-            if (n >= N) return;
+            __local float partial[GEMV_WG];
+            const int n = get_group_id(0);
+            if (n >= N) return; // uniform across the work-group
 
-            const int rowOff = n * K;
+            __global const float* row = B + (size_t) n * (size_t) K;
             float acc = 0.0f;
-            for (int k = 0; k < K; k++) {
-                acc += a[k] * B[rowOff + k];
+            if ((K & 3) == 0) {
+                __global const float4* a4 = (__global const float4*) a;
+                __global const float4* r4 = (__global const float4*) row;
+                float4 acc4 = (float4)(0.0f);
+                for (int k = get_local_id(0); k < (K >> 2); k += GEMV_WG) {
+                    acc4 += a4[k] * r4[k];
+                }
+                acc = (acc4.x + acc4.y) + (acc4.z + acc4.w);
+            } else {
+                for (int k = get_local_id(0); k < K; k += GEMV_WG) {
+                    acc += a[k] * row[k];
+                }
             }
-            out[n] = acc;
+            const float total = wg_sum(partial, acc);
+            if (get_local_id(0) == 0) out[n] = total;
+        }
+
+        #define ATTN_WG GEMV_WG
+        #define ATTN_TILE 256
+        #define ATTN_MAX_HEAD_DIM 256
+
+        // work-group max / sum that are safe to call repeatedly on the same scratch array
+        inline float wg_max_sync(__local float* red, float v) {
+            const int lid = get_local_id(0);
+            red[lid] = v;
+            barrier(CLK_LOCAL_MEM_FENCE);
+            for (int stride = ATTN_WG / 2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    red[lid] = fmax(red[lid], red[lid + stride]);
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+            const float r = red[0];
+            barrier(CLK_LOCAL_MEM_FENCE);
+            return r;
+        }
+
+        inline float wg_sum_sync(__local float* red, float v) {
+            const float r = wg_sum(red, v);
+            barrier(CLK_LOCAL_MEM_FENCE);
+            return r;
+        }
+
+        // Decode-step attention for ALL query heads in one launch: one work-group per head.
+        // The cached context is consumed in tiles of ATTN_TILE positions with an online softmax
+        // (running max m, normaliser l, per-dimension accumulators), so no score buffer is needed and
+        // any context length works. Grouped-query: head h reads KV head h / (numHeads / kvHeads).
+        // Requires headDim % 4 == 0 and headDim <= ATTN_MAX_HEAD_DIM (the host falls back otherwise).
+        __kernel __attribute__((reqd_work_group_size(ATTN_WG, 1, 1)))
+        void attn_decode_fused(
+            __global const float* q,
+            __global const float* k_cache,
+            __global const float* v_cache,
+            __global float* out,
+            const int numHeads,
+            const int kvHeads,
+            const int headDim,
+            const int nCtx,
+            const float scale)
+        {
+            __local float qs[ATTN_MAX_HEAD_DIM];
+            __local float tile[ATTN_TILE];
+            __local float red[ATTN_WG];
+
+            const int h = get_group_id(0);
+            const int lid = get_local_id(0);
+            const int kvDim = kvHeads * headDim;
+            const int kvOff = (h / (numHeads / kvHeads)) * headDim;
+
+            for (int d = lid; d < headDim; d += ATTN_WG) {
+                qs[d] = q[h * headDim + d];
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            float m = -FLT_MAX;
+            float l = 0.0f;
+            float acc[ATTN_MAX_HEAD_DIM / ATTN_WG];
+            for (int i = 0; i < ATTN_MAX_HEAD_DIM / ATTN_WG; i++) {
+                acc[i] = 0.0f;
+            }
+
+            for (int t0 = 0; t0 < nCtx; t0 += ATTN_TILE) {
+                const int tn = min(ATTN_TILE, nCtx - t0);
+
+                float tmax = -FLT_MAX;
+                for (int j = lid; j < tn; j += ATTN_WG) {
+                    __global const float4* kj = (__global const float4*) (k_cache + (size_t) (t0 + j) * kvDim + kvOff);
+                    float4 a4 = (float4)(0.0f);
+                    for (int d4 = 0; d4 < (headDim >> 2); d4++) {
+                        a4 += vload4(d4, qs) * kj[d4];
+                    }
+                    const float sc = ((a4.x + a4.y) + (a4.z + a4.w)) * scale;
+                    tile[j] = sc;
+                    tmax = fmax(tmax, sc);
+                }
+                const float mNew = fmax(m, wg_max_sync(red, tmax));
+                const float corr = exp(m - mNew);
+
+                float psum = 0.0f;
+                for (int j = lid; j < tn; j += ATTN_WG) {
+                    const float p = exp(tile[j] - mNew);
+                    tile[j] = p;
+                    psum += p;
+                }
+                l = l * corr + wg_sum_sync(red, psum); // the barrier inside also publishes tile[]
+
+                for (int i = 0; i < ATTN_MAX_HEAD_DIM / ATTN_WG; i++) {
+                    const int d = lid + i * ATTN_WG;
+                    if (d < headDim) {
+                        float a = acc[i] * corr;
+                        for (int j = 0; j < tn; j++) {
+                            a += tile[j] * v_cache[(size_t) (t0 + j) * kvDim + kvOff + d];
+                        }
+                        acc[i] = a;
+                    }
+                }
+                m = mNew;
+                barrier(CLK_LOCAL_MEM_FENCE); // tile[] is rewritten by the next tile
+            }
+
+            for (int i = 0; i < ATTN_MAX_HEAD_DIM / ATTN_WG; i++) {
+                const int d = lid + i * ATTN_WG;
+                if (d < headDim) {
+                    out[h * headDim + d] = acc[i] / l;
+                }
+            }
         }
 
         // =====================================================================

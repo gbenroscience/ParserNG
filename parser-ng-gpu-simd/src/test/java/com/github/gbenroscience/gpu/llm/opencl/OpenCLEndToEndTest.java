@@ -263,9 +263,9 @@ class OpenCLEndToEndTest {
     void tokenizerRoundTripAndByteLevelEncoding() throws Throwable {
         TinyModel m = tiny(9);
         BpeTokenizer tok = BpeTokenizer.fromGguf(GGUFLoader.load(write(m)));
-        int[] ids = tok.encode("hé!", true);
-        // BOS, 'h', then 'é' as its two UTF-8 bytes C3 A9, then '!'
+        int[] ids = tok.encode("h\u00e9!", true);
+        // BOS, 'h', then U+00E9 as its two UTF-8 bytes C3 A9, then '!'
         assertArrayEquals(new int[]{256, 'h', 0xC3, 0xA9, '!'}, ids);
-        assertEquals("hé!", tok.decode(ids));
+        assertEquals("h\u00e9!", tok.decode(ids));
     }
 }

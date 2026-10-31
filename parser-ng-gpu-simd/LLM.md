@@ -83,7 +83,7 @@ generated text
 | `LlamaLayer.java` | The actual model math: `Config`, `GpuWeights`, `GpuState`, `forward_layer` (single-token decode), `prefill_layer` (batched prompt processing), and every kernel-dispatch helper. This is the biggest file in each package and the one to read first to understand the model itself. |
 | `EmbeddingTable.java` | Host-resident `float[vocabSize*dim]` table; gathers one row (or T rows for prefill) per call rather than keeping the whole table GPU-resident. |
 | `BpeTokenizer.java` | Byte-level BPE tokenizer (GPT-2/Llama-3/Mistral/Falcon style). **Byte-identical across all three backends**; this file has no GPU-specific code at all. |
-| `Sampler.java` | Host-side temperature / top-k / top-p / repetition-penalty sampling over logits already read back from the GPU. Each backend's `Sampler` is a thin wrapper over the single implementation in `core.Sampler` (order: temperature → top-k → renormalise → top-p → sample; NaN/+Inf logits rejected; config validated), so the backends cannot sample differently. |
+| `Sampler.java` | Host-side temperature / top-k / top-p / repetition-penalty sampling over logits already read back from the GPU. Each backend's `Sampler` is a thin wrapper over the single implementation in `core.Sampler` (order: temperature -> top-k -> renormalise -> top-p -> sample; NaN/+Inf logits rejected; config validated), so the backends cannot sample differently. |
 | `Llama<Backend>Engine.java` | Top-level orchestrator: tokenize → prefill → decode loop → detokenize. (`LlamaCudaEngine` / `LlamaOpenCLEngine` / `LlamaMetalEngine`.) |
 | `<Backend>LlamaEngine.java` | Implements the backend-agnostic `LlamaGpuEngine` interface; owns GGUF loading and full lifecycle. (`CudaLlamaEngine` / `OpenCLLlamaEngine` / `MetalLlamaEngine`.) |
 | `<Backend>Demo.java` | End-to-end wiring example / minimal CLI (`CudaDemo` / `OpenCLDemo` / `MetalDemo`). |
@@ -269,6 +269,12 @@ affected all three backends: decode projected Q/K/V through the even/odd
 natural adjacent-pair layout into the same KV cache. Decode and prefill now
 both use the natural GGUF layout. The old `q8_0_gemv_split` kernel is no
 longer used by the engines.
+
+### Performance flags (OpenCL)
+
+* `-Dllm.timing=true` prints time-to-first-token and decode tokens/s.
+* `-Dllm.profile=true` prints a per-stage time breakdown (serialises the pipeline; for finding hotspots only).
+* `-Dopencl.device.type=CPU|GPU` and `OpenCLDeviceSelector` choose the device.
 
 ### Original caveat (kept for history)
 
