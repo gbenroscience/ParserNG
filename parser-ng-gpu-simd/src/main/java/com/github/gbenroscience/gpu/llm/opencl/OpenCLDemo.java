@@ -14,8 +14,10 @@ import java.io.File;
  * System properties:
  *   -Dopencl.vendor=INTEL|NVIDIA|AMD|...   device to use (default INTEL; use -Dopencl.device.type=CPU for a CPU device)
  *   -Dllm.timing=true                      (on by default here) time-to-first-token and decode tokens/s
- *   -Dllm.profile=true                     per-stage time breakdown; serialises the pipeline, so use it to
- *                                          find hotspots, not to measure speed
+ *   -Dllm.profile=true                     OpenCL event profiler: device time per operation / layer, launches, syncs,
+ *                                          transfers (adds a little overhead; no extra synchronisation)
+ *   -Dllm.maxContext=N                     cap on context positions (default 8192; sizes the KV cache)
+ *   (for a full measurement run use OpenCLDiagnostics, which needs no arguments)
  *   -Dllm.printTokens=true                 print the prompt token ids, for diffing against `llama-tokenize`
  *
  * The prompt is passed as plain text. This demo does not apply a chat template, and the current

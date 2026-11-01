@@ -48,7 +48,7 @@ public final class OpenCLBenchmark {
      * 2-byte offset, so vector loads on them are misaligned).
      */
     static void bandwidthProbe(GpuContext ctx) throws Throwable {
-        long bytes = 256L << 20;
+        long bytes = Long.getLong("llm.bandwidth.mb", 256L) << 20;
         MemorySegment buf = null;
         for (; bytes >= (16L << 20); bytes >>= 1) {
             try {
