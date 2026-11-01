@@ -27,7 +27,8 @@ public final class OpenCLDemo {
 
     private static final String DEFAULT_MODEL =
             "C:\\Users\\GBEMIRO\\Documents\\NetBeansProjects\\ai-models\\llama-3.2-1b-instruct-q8_0.gguf";
-    private static final String DEFAULT_PROMPT = "What is 23*34? Answer briefly.";
+    //private static final String DEFAULT_PROMPT = "What is 23*34? Answer briefly.";
+    private static final String DEFAULT_PROMPT = "Explain photosynthesis";
 
     private OpenCLDemo() {
     }
