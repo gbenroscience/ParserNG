@@ -260,4 +260,68 @@ class OpenCLConformanceTest {
         assertTrue(LlamaLayer.fusedAttentionSupported(64));
         assertTrue(LlamaLayer.fusedAttentionSupported(256));
     }
+
+    /** Fused single-launch RMSNorm vs the double-precision reference, incl. sizes that are not multiples of the work-group. */
+    @Test
+    void fusedRmsNormMatchesReference() throws Throwable {
+        needDevice();
+        for (int n : new int[]{1, 3, 31, 63, 64, 65, 255, 256, 257, 2048, 4097}) {
+            for (float scale : new float[]{1e-6f, 1f, 3e3f}) {
+                Random r = new Random(n * 13L + (long) scale);
+                float[] x = randn(r, n, scale);
+                float[] g = new float[n];
+                for (int i = 0; i < n; i++) {
+                    g[i] = 1f + 0.1f * (float) r.nextGaussian();
+                }
+                MemorySegment dx = LlamaLayer.uploadFloats(ctx, x);
+                MemorySegment dg = LlamaLayer.uploadFloats(ctx, g);
+                MemorySegment dout = LlamaLayer.allocFloats(ctx, n);
+                MemorySegment dpart = LlamaLayer.allocFloats(ctx, (n + 255) / 256);
+                try {
+                    LlamaLayer.rmsNorm(ctx, dx, dg, dout, n, 1e-5, dpart);
+                    LlamaLayer.finish(ctx);
+                    float[] got = LlamaLayer.downloadFloats(ctx, dout, n);
+                    com.github.gbenroscience.gpu.llm.core.ErrorStats st = com.github.gbenroscience.gpu.llm.core.ErrorStats
+                            .compare(got, CpuReference.rmsNorm(x, g, 1e-5), 1e-6 * Math.max(scale, 1f), 1e-5);
+                    assertTrue(st.passed(), "n=" + n + " scale=" + scale + " " + st);
+                } finally {
+                    LlamaLayer.freeQuietly(ctx, dx);
+                    LlamaLayer.freeQuietly(ctx, dg);
+                    LlamaLayer.freeQuietly(ctx, dout);
+                    LlamaLayer.freeQuietly(ctx, dpart);
+                }
+            }
+        }
+    }
+
+    /** The legacy RMSNorm path stays available and numerically equivalent. */
+    @Test
+    void legacyRmsNormStillMatchesReference() throws Throwable {
+        needDevice();
+        System.setProperty("llm.rmsnorm", "legacy");
+        try {
+            Random r = new Random(3);
+            int n = 2048;
+            float[] x = randn(r, n, 2f);
+            float[] g = new float[n];
+            java.util.Arrays.fill(g, 1f);
+            MemorySegment dx = LlamaLayer.uploadFloats(ctx, x);
+            MemorySegment dg = LlamaLayer.uploadFloats(ctx, g);
+            MemorySegment dout = LlamaLayer.allocFloats(ctx, n);
+            MemorySegment dpart = LlamaLayer.allocFloats(ctx, (n + 255) / 256);
+            try {
+                LlamaLayer.rmsNorm(ctx, dx, dg, dout, n, 1e-5, dpart);
+                LlamaLayer.finish(ctx);
+                assertTrue(com.github.gbenroscience.gpu.llm.core.ErrorStats.compare(LlamaLayer.downloadFloats(ctx, dout, n),
+                        CpuReference.rmsNorm(x, g, 1e-5), 1e-6, 1e-5).passed());
+            } finally {
+                LlamaLayer.freeQuietly(ctx, dx);
+                LlamaLayer.freeQuietly(ctx, dg);
+                LlamaLayer.freeQuietly(ctx, dout);
+                LlamaLayer.freeQuietly(ctx, dpart);
+            }
+        } finally {
+            System.clearProperty("llm.rmsnorm");
+        }
+    }
 }

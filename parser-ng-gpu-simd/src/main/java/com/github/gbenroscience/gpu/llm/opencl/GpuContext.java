@@ -77,6 +77,13 @@ public final class GpuContext implements AutoCloseable {
     public final MemorySegment kSoftmaxInplace;
     public final MemorySegment kAttnWeightedSum;
     public final MemorySegment kAttnDecodeFused;
+    public final MemorySegment kQ8_0GemvPlainLegacy;
+    public final MemorySegment kF32GemvLegacy;
+    public final MemorySegment kRmsnormFused;
+    final MemorySegment kBwU8;
+    final MemorySegment kBwU32;
+    final MemorySegment kBwU128;
+    final MemorySegment kBwV16Off2;
     public final MemorySegment kSwigluActivate;
     public final MemorySegment kResidualAdd;
     public final MemorySegment kF32Gemv;
@@ -98,12 +105,25 @@ public final class GpuContext implements AutoCloseable {
     /** Serializes kernelArgs-set + enqueue against the shared in-order queue -- same role as the CUDA port's dispatchLock. */
     public final Object dispatchLock = new Object();
 
+    /** Profiling follows -Dllm.profile=true. */
     public GpuContext() {
-        this.cl = new OpenCLBindings();
+        this(DeviceProfiler.ON);
+    }
+
+    /** Event profiler of this context, or null when profiling is off. */
+    final DeviceProfiler prof;
+
+    /** @param profile capture OpenCL events for every command (see {@link DeviceProfiler}); adds a little overhead. */
+    GpuContext(boolean profile) {
+        this.prof = profile ? new DeviceProfiler() : null;
+        this.cl = new OpenCLBindings(prof);
+        final long tCtx0 = LoadTimer.start();
 
         try (Arena bootstrap = Arena.ofConfined()) {
            // OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.DeviceType.GPU); 
+            long tSel = LoadTimer.start();
             OpenCLDeviceSelector.SelectedDevice chosen = OpenCLDeviceSelector.resolve();
+            LoadTimer.stop("opencl: platform/device selection", tSel);
             this.platform = chosen.platform();
             this.device = chosen.device();
             this.selectedDeviceDescription = chosen.describe();
@@ -119,11 +139,14 @@ public final class GpuContext implements AutoCloseable {
 
             errBuf.set(ValueLayout.JAVA_INT, 0, 0);
             MemorySegment queueResult = (MemorySegment) cl.clCreateCommandQueue.invoke(
-                    context, device, 0L, errBuf); // properties=0 -> in-order queue, see class javadoc
+                    context, device, prof != null ? 2L : 0L, errBuf); // 0 = plain in-order queue (see class javadoc); 2 = CL_QUEUE_PROFILING_ENABLE
             check(errBuf.get(ValueLayout.JAVA_INT, 0), "clCreateCommandQueue");
             this.queue = queueResult;
 
+            long tBuild = LoadTimer.start();
             this.program = buildProgram(bootstrap);
+            LoadTimer.stop("opencl: clBuildProgram (kernel JIT)", tBuild);
+            long tKern = LoadTimer.start();
 
             this.kQuantizeI8 = createKernel(bootstrap, KernelSource.KERNEL_QUANTIZE_I8);
             this.kQuantizeActivationQ8_0 = createKernel(bootstrap, KernelSource.KERNEL_QUANTIZE_ACTIVATION_Q8_0);
@@ -136,6 +159,13 @@ public final class GpuContext implements AutoCloseable {
             this.kSoftmaxInplace = createKernel(bootstrap, KernelSource.KERNEL_SOFTMAX_INPLACE);
             this.kAttnWeightedSum = createKernel(bootstrap, KernelSource.KERNEL_ATTN_WEIGHTED_SUM);
             this.kAttnDecodeFused = createKernel(bootstrap, KernelSource.KERNEL_ATTN_DECODE_FUSED);
+            this.kQ8_0GemvPlainLegacy = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_PLAIN_LEGACY);
+            this.kF32GemvLegacy = createKernel(bootstrap, KernelSource.KERNEL_F32_GEMV_LEGACY);
+            this.kRmsnormFused = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_FUSED);
+            this.kBwU8 = createKernel(bootstrap, KernelSource.KERNEL_BW_U8);
+            this.kBwU32 = createKernel(bootstrap, KernelSource.KERNEL_BW_U32);
+            this.kBwU128 = createKernel(bootstrap, KernelSource.KERNEL_BW_U128);
+            this.kBwV16Off2 = createKernel(bootstrap, KernelSource.KERNEL_BW_V16_OFF2);
             this.kSwigluActivate = createKernel(bootstrap, KernelSource.KERNEL_SWIGLU_ACTIVATE);
             this.kResidualAdd = createKernel(bootstrap, KernelSource.KERNEL_RESIDUAL_ADD);
             this.kF32Gemv = createKernel(bootstrap, KernelSource.KERNEL_F32_GEMV);
@@ -151,6 +181,7 @@ public final class GpuContext implements AutoCloseable {
             this.kAttnScoresCausalBatched = createKernel(bootstrap, KernelSource.KERNEL_ATTN_SCORES_CAUSAL_BATCHED);
             this.kSoftmaxInplaceRows = createKernel(bootstrap, KernelSource.KERNEL_SOFTMAX_INPLACE_ROWS);
             this.kAttnWeightedSumCausalBatched = createKernel(bootstrap, KernelSource.KERNEL_ATTN_WEIGHTED_SUM_CAUSAL_BATCHED);
+            LoadTimer.stop("opencl: clCreateKernel x all", tKern);
 
             System.err.println("[ParserNG LLM-OpenCL] " + selectedDeviceDescription);
 
@@ -202,6 +233,9 @@ public final class GpuContext implements AutoCloseable {
         MemorySegment errBuf = arena.allocate(ValueLayout.JAVA_INT);
         MemorySegment kernel = (MemorySegment) cl.clCreateKernel.invoke(program, nameSeg, errBuf);
         check(errBuf.get(ValueLayout.JAVA_INT, 0), "clCreateKernel(" + name + ")");
+        if (prof != null) {
+            prof.nameKernel(kernel, name);
+        }
         return kernel;
     }
 
@@ -241,6 +275,13 @@ public final class GpuContext implements AutoCloseable {
             releaseKernelQuietly(kSoftmaxInplace);
             releaseKernelQuietly(kAttnWeightedSum);
             releaseKernelQuietly(kAttnDecodeFused);
+            releaseKernelQuietly(kQ8_0GemvPlainLegacy);
+            releaseKernelQuietly(kF32GemvLegacy);
+            releaseKernelQuietly(kRmsnormFused);
+            releaseKernelQuietly(kBwU8);
+            releaseKernelQuietly(kBwU32);
+            releaseKernelQuietly(kBwU128);
+            releaseKernelQuietly(kBwV16Off2);
             releaseKernelQuietly(kSwigluActivate);
             releaseKernelQuietly(kResidualAdd);
             releaseKernelQuietly(kF32Gemv);
@@ -269,6 +310,55 @@ public final class GpuContext implements AutoCloseable {
             }
         } catch (Throwable t) {
             // best-effort cleanup
+        }
+    }
+
+    // ---------------------------------------------------------------- device report
+
+    private String infoString(int param) throws Throwable {
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment size = a.allocate(ValueLayout.JAVA_LONG);
+            check((int) cl.clGetDeviceInfo.invoke(device, param, 0L, MemorySegment.NULL, size), "clGetDeviceInfo(size)");
+            long n = size.get(ValueLayout.JAVA_LONG, 0);
+            MemorySegment buf = a.allocate(Math.max(n, 1));
+            check((int) cl.clGetDeviceInfo.invoke(device, param, n, buf, MemorySegment.NULL), "clGetDeviceInfo");
+            return n <= 1 ? "" : buf.getString(0);
+        }
+    }
+
+    private long infoNumber(int param, int bytes) throws Throwable {
+        try (Arena a = Arena.ofConfined()) {
+            MemorySegment buf = a.allocate(8);
+            check((int) cl.clGetDeviceInfo.invoke(device, param, (long) bytes, buf, MemorySegment.NULL), "clGetDeviceInfo");
+            return bytes == 4 ? Integer.toUnsignedLong(buf.get(ValueLayout.JAVA_INT, 0)) : buf.get(ValueLayout.JAVA_LONG, 0);
+        }
+    }
+
+    /** Human-readable hardware / driver description (name, driver, OpenCL version, memory, compute units, ...). */
+    public String deviceInfo() {
+        try {
+            String ext = infoString(0x1030);
+            StringBuilder sb = new StringBuilder();
+            sb.append("selected: ").append(selectedDeviceDescription).append('\n');
+            sb.append("CL_DEVICE_NAME:            ").append(infoString(0x102B)).append('\n');
+            sb.append("CL_DEVICE_VENDOR:          ").append(infoString(0x102C)).append('\n');
+            sb.append("CL_DRIVER_VERSION:         ").append(infoString(0x102D)).append('\n');
+            sb.append("CL_DEVICE_VERSION:         ").append(infoString(0x102F)).append('\n');
+            sb.append("CL_DEVICE_OPENCL_C_VERSION:").append(' ').append(infoString(0x103D)).append('\n');
+            sb.append("compute units / max clock: ").append(infoNumber(0x1002, 4)).append(" / ").append(infoNumber(0x100C, 4)).append(" MHz\n");
+            sb.append(String.format("global memory:             %.2f GB (max single allocation %.2f GB, local memory %d KB, host-unified=%d)%n",
+                    infoNumber(0x101F, 8) / 1e9, infoNumber(0x1010, 8) / 1e9, infoNumber(0x1023, 8) / 1024, infoNumber(0x1035, 4)));
+            sb.append("max work-group size:       ").append(infoNumber(0x1004, 8)).append('\n');
+            sb.append("extensions of interest:    ");
+            for (String e : new String[]{"cl_khr_fp16", "cl_khr_subgroups", "cl_intel_subgroups", "cl_intel_required_subgroup_size",
+                "cl_khr_integer_dot_product", "cl_intel_subgroups_char", "cl_khr_int64_base_atomics"}) {
+                if (ext.contains(e)) {
+                    sb.append(e).append(' ');
+                }
+            }
+            return sb.append('\n').toString();
+        } catch (Throwable t) {
+            return "device info unavailable: " + t;
         }
     }
 }

@@ -272,8 +272,12 @@ longer used by the engines.
 
 ### Performance flags (OpenCL)
 
-* `-Dllm.timing=true` prints time-to-first-token and decode tokens/s.
-* `-Dllm.profile=true` prints a per-stage time breakdown (serialises the pipeline; for finding hotspots only).
+* `-Dllm.timing=true` prints time-to-first-token, decode tokens/s and the host wall split per token.
+* `-Dllm.profile=true` enables the OpenCL event profiler: device time per kernel / phase / layer, launches, synchronisations, allocations, transfers.
+* `-Dllm.maxContext=N` caps the context (default 8192) so KV-cache memory is not sized for the model's full context.
+* `-Dllm.gemv=legacy`, `-Dllm.attention=legacy`, `-Dllm.rmsnorm=legacy` select the original generic kernels for A/B comparison.
+* `-Dllm.lmhead=f32` keeps the LM head dequantised to F32 (the default keeps a Q8_0 head as Q8_0).
+* `OpenCLBenchmark <model.gguf>` runs a reproducible cold/warm timing run plus a profiled run; `--bandwidth` (or `--bandwidth-only`, no model) adds a streaming-read bandwidth probe.
 * `-Dopencl.device.type=CPU|GPU` and `OpenCLDeviceSelector` choose the device.
 
 ### Original caveat (kept for history)

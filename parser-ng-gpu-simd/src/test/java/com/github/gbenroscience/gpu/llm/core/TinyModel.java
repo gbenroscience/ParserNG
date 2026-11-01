@@ -28,6 +28,10 @@ public final class TinyModel {
     public double eps = 1e-5;
     public double theta = 10000.0;
     public boolean tiedOutput = false;
+    /** Store output.weight as Q8_0 (like a Q8_0 GGUF does). */
+    public boolean q8Head = false;
+    /** Store token_embd.weight as Q8_0 (the tied LM head then is Q8_0 too). */
+    public boolean q8Embeddings = false;
     public float weightScale = 0.08f;
 
     public final GgufTestWriter writer = new GgufTestWriter();
@@ -57,10 +61,18 @@ public final class TinyModel {
         w.metadata.put("tokenizer.ggml.bos_token_id", 256);
         w.metadata.put("tokenizer.ggml.eos_token_id", 257);
 
-        f32("token_embd.weight", new int[]{dim, vocab}, rnd, 0.5f);
+        if (q8Embeddings) {
+            q8("token_embd.weight", new int[]{dim, vocab}, rnd, 0.5f);
+        } else {
+            f32("token_embd.weight", new int[]{dim, vocab}, rnd, 0.5f);
+        }
         f32("output_norm.weight", new int[]{dim}, rnd, 1f, true);
         if (!tiedOutput) {
-            f32("output.weight", new int[]{dim, vocab}, rnd, 0.5f);
+            if (q8Head) {
+                q8("output.weight", new int[]{dim, vocab}, rnd, 0.5f);
+            } else {
+                f32("output.weight", new int[]{dim, vocab}, rnd, 0.5f);
+            }
         }
         int qd = heads * headDim();
         int kd = kvHeads * headDim();
@@ -105,9 +117,13 @@ public final class TinyModel {
     }
 
     private void q8(String name, int[] dims, Random rnd) {
+        q8(name, dims, rnd, weightScale);
+    }
+
+    private void q8(String name, int[] dims, Random rnd, float scale) {
         float[] v = new float[count(dims)];
         for (int i = 0; i < v.length; i++) {
-            v[i] = weightScale * (float) rnd.nextGaussian();
+            v[i] = scale * (float) rnd.nextGaussian();
         }
         truth.put(name, v);
         writer.tensors.put(name, new GgufTestWriter.Tensor(name, dims, ModelSpec.GGML_Q8_0, CpuReference.quantizeQ8_0(v)));

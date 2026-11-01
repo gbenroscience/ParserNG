@@ -20,9 +20,11 @@ public final class ErrorStats {
     public final int worstIndex;
     public final float worstActual;
     public final float worstExpected;
+    /** cos(angle) between actual and expected over the finite elements (1.0 = same direction). */
+    public final double cosineSimilarity;
 
     private ErrorStats(int count, double maxAbs, double meanAbs, double maxRel, double rms,
-            int nan, int inf, int mismatches, int worstIndex, float worstActual, float worstExpected) {
+            int nan, int inf, int mismatches, int worstIndex, float worstActual, float worstExpected, double cosine) {
         this.count = count;
         this.maxAbsError = maxAbs;
         this.meanAbsError = meanAbs;
@@ -34,6 +36,7 @@ public final class ErrorStats {
         this.worstIndex = worstIndex;
         this.worstActual = worstActual;
         this.worstExpected = worstExpected;
+        this.cosineSimilarity = cosine;
     }
 
     /**
@@ -52,6 +55,7 @@ public final class ErrorStats {
         int nan = 0, inf = 0, bad = 0, worst = -1;
         double worstErr = -1;
         int finite = 0;
+        double dotAE = 0, nA = 0, nE = 0;
         for (int i = 0; i < n; i++) {
             float a = actual[i];
             float e = expected[i];
@@ -76,6 +80,9 @@ public final class ErrorStats {
             }
             double err = Math.abs((double) a - (double) e);
             finite++;
+            dotAE += (double) a * e;
+            nA += (double) a * a;
+            nE += (double) e * e;
             sumAbs += err;
             sumSq += err * err;
             if (err > maxAbs) {
@@ -95,7 +102,8 @@ public final class ErrorStats {
         }
         double denom = Math.max(finite, 1);
         return new ErrorStats(n, maxAbs, sumAbs / denom, maxRel, Math.sqrt(sumSq / denom), nan, inf, bad, worst,
-                worst >= 0 ? actual[worst] : 0f, worst >= 0 ? expected[worst] : 0f);
+                worst >= 0 ? actual[worst] : 0f, worst >= 0 ? expected[worst] : 0f,
+                (nA == 0 || nE == 0) ? (nA == nE ? 1.0 : 0.0) : dotAE / Math.sqrt(nA * nE));
     }
 
     public boolean passed() {
@@ -104,8 +112,8 @@ public final class ErrorStats {
 
     @Override
     public String toString() {
-        return String.format("n=%d maxAbs=%.3e meanAbs=%.3e maxRel=%.3e rms=%.3e nan=%d inf=%d mismatches=%d worst[%d] actual=%s expected=%s",
-                count, maxAbsError, meanAbsError, maxRelError, rmsError, nanCount, infCount, mismatchCount,
+        return String.format("n=%d maxAbs=%.3e meanAbs=%.3e maxRel=%.3e rms=%.3e cosine=%.9f nan=%d inf=%d mismatches=%d worst[%d] actual=%s expected=%s",
+                count, maxAbsError, meanAbsError, maxRelError, rmsError, cosineSimilarity, nanCount, infCount, mismatchCount,
                 worstIndex, worstActual, worstExpected);
     }
 }

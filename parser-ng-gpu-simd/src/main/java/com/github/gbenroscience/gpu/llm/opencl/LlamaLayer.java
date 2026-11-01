@@ -228,16 +228,21 @@ public final class LlamaLayer {
         }
 
         public static GpuWeights fromGguf(GpuContext ctx, GGUFLoader.GGUFFile gguf, String layerPrefix) throws Throwable {
-            return new GpuWeights(ctx,
-                    find(gguf, layerPrefix + "attn_q.weight").loadQ8_0(),
-                    find(gguf, layerPrefix + "attn_k.weight").loadQ8_0(),
-                    find(gguf, layerPrefix + "attn_v.weight").loadQ8_0(),
-                    loadAsFloat(find(gguf, layerPrefix + "attn_output.weight")),
-                    find(gguf, layerPrefix + "ffn_gate.weight").loadQ8_0(),
-                    find(gguf, layerPrefix + "ffn_up.weight").loadQ8_0(),
-                    find(gguf, layerPrefix + "ffn_down.weight").loadQ8_0(),
-                    loadAsFloat(find(gguf, layerPrefix + "attn_norm.weight")),
-                    loadAsFloat(find(gguf, layerPrefix + "ffn_norm.weight")));
+            final long tRead = LoadTimer.start();
+            byte[] wq = find(gguf, layerPrefix + "attn_q.weight").loadQ8_0();
+            byte[] wk = find(gguf, layerPrefix + "attn_k.weight").loadQ8_0();
+            byte[] wv = find(gguf, layerPrefix + "attn_v.weight").loadQ8_0();
+            float[] wo = loadAsFloat(find(gguf, layerPrefix + "attn_output.weight"));
+            byte[] wGate = find(gguf, layerPrefix + "ffn_gate.weight").loadQ8_0();
+            byte[] wUp = find(gguf, layerPrefix + "ffn_up.weight").loadQ8_0();
+            byte[] wDown = find(gguf, layerPrefix + "ffn_down.weight").loadQ8_0();
+            float[] attnNorm = loadAsFloat(find(gguf, layerPrefix + "attn_norm.weight"));
+            float[] ffnNorm = loadAsFloat(find(gguf, layerPrefix + "ffn_norm.weight"));
+            LoadTimer.stop("layers: read tensors from GGUF (+Q8->F32 for wo)", tRead);
+            final long tUp = LoadTimer.start();
+            GpuWeights w = new GpuWeights(ctx, wq, wk, wv, wo, wGate, wUp, wDown, attnNorm, ffnNorm);
+            LoadTimer.stop("layers: device upload (clCreateBuffer + write)", tUp);
+            return w;
         }
 
         private static float[] loadAsFloat(GGUFLoader.Tensor t) {
@@ -437,7 +442,7 @@ public final class LlamaLayer {
             MemorySegment mem = (MemorySegment) ctx.cl.clCreateBuffer.invoke(
                     ctx.context, OpenCLBindings.CL_MEM_READ_WRITE, byteCount, MemorySegment.NULL, errBuf);
             GpuContext.check(errBuf.get(ValueLayout.JAVA_INT, 0), "clCreateBuffer");
-            ctx.allocations.add(mem.address());
+            ctx.allocations.add(mem.address(), byteCount);
             return mem;
         }
     }
@@ -568,11 +573,9 @@ public final class LlamaLayer {
         final int posInclusive = s.pos + 1;
 
         synchronized (ctx.dispatchLock) {
-            Prof.start(ctx);
             // === 1. Attention block: x = x + attn(rms_norm(x)) ===
             rmsNorm(ctx, x, w.attn_norm_gamma, s.xNorm, dim, cfg.norm_eps, s.rmsPartials);
             quantizeActivationQ8_0(ctx, s.xNorm, s.xNormQ8, dim);
-            Prof.mark(ctx, Prof.NORM);
 
             q8_0GemvPlain(ctx, s.xNormQ8, w.wq_q8_0, s.qSplit, numHeads * headDim, dim);
             q8_0GemvPlain(ctx, s.xNormQ8, w.wk_q8_0, s.kNew, kvDim, dim);
@@ -580,16 +583,14 @@ public final class LlamaLayer {
             // dimensions). V feeds the weighted sum and wo in natural order, exactly like the batched
             // prefill path (q8_0GemmTiled) that fills the same KV cache.
             q8_0GemvPlain(ctx, s.xNormQ8, w.wv_q8_0, s.vNew, kvDim, dim);
-            Prof.mark(ctx, Prof.QKV);
 
             ropeApplyPairs(ctx, s.qSplit, s.cos_table, s.sin_table, numHeads, headDim, s.pos * halfDim);
             ropeApplyPairs(ctx, s.kNew, s.cos_table, s.sin_table, kvHeads, headDim, s.pos * halfDim);
 
             writeIntoCache(ctx, s.kNew, s.k_cache_f32, (long) s.pos * kvDim, kvDim);
             writeIntoCache(ctx, s.vNew, s.v_cache_f32, (long) s.pos * kvDim, kvDim);
-            Prof.mark(ctx, Prof.ROPE_CACHE);
 
-            if (fusedAttentionSupported(headDim)) {
+            if (fusedAttentionSupported(headDim) && !Variants.legacyAttention()) {
                 attnDecodeFused(ctx, s.qSplit, s.k_cache_f32, s.v_cache_f32, s.attnOut, numHeads, kvHeads, headDim, posInclusive, rsqrtD);
             } else {
                 for (int h = 0; h < numHeads; h++) {
@@ -605,23 +606,18 @@ public final class LlamaLayer {
                 }
             }
 
-            Prof.mark(ctx, Prof.ATTENTION);
             f32Gemv(ctx, s.attnOut, w.wo_f32, s.attnProj, dim, dim);
             residualAdd(ctx, x, s.attnProj, dim);
-            Prof.mark(ctx, Prof.WO);
 
             // === 2. FFN block: x = x + ffn(rms_norm(x)) ===
             rmsNorm(ctx, x, w.ffn_norm_gamma, s.ffnNorm, dim, cfg.norm_eps, s.rmsPartials);
             quantizeActivationQ8_0(ctx, s.ffnNorm, s.ffnNormQ8, dim);
-            Prof.mark(ctx, Prof.NORM);
 
             ffnActivateDecode(ctx, s, w, cfg, dim, hidden);
 
             quantizeActivationQ8_0(ctx, s.swigluOut, s.swigluOutQ8, hidden);
-            Prof.mark(ctx, Prof.FFN_UP);
             q8_0GemvPlain(ctx, s.swigluOutQ8, w.w_down_q8_0, s.ffnDownOut, dim, hidden);
             residualAdd(ctx, x, s.ffnDownOut, dim);
-            Prof.mark(ctx, Prof.FFN_DOWN);
 
             // No per-layer clFinish: the queue is in-order, so layers pipeline; the per-token logits readback is the sync point.
         }
@@ -698,6 +694,71 @@ public final class LlamaLayer {
     }
 
     /**
+     * Persistent device and host buffers for the final norm + LM head, so a decode step allocates nothing
+     * (the original {@link #finalLogits} created and freed 3 device buffers per token).
+     */
+    public static final class LogitsScratch {
+
+        final MemorySegment normed;
+        final MemorySegment normedQ8;
+        final MemorySegment logits;
+        final MemorySegment partials;
+        final MemorySegment hostLogits;
+        final int vocab;
+
+        public LogitsScratch(GpuContext ctx, Config cfg, int vocabSize) throws Throwable {
+            MemorySegment n = null, nq = null, lg = null, pt = null;
+            try {
+                n = allocFloats(ctx, cfg.dim);
+                nq = allocBytes(ctx, ((long) cfg.dim / 32 * 34 + 3) / 4 * 4);
+                lg = allocFloats(ctx, vocabSize);
+                pt = allocFloats(ctx, (cfg.dim + KernelSource.RMSNORM_WORKGROUP_SIZE - 1) / KernelSource.RMSNORM_WORKGROUP_SIZE);
+            } catch (Throwable t) {
+                freeQuietly(ctx, n);
+                freeQuietly(ctx, nq);
+                freeQuietly(ctx, lg);
+                freeQuietly(ctx, pt);
+                throw t;
+            }
+            this.normed = n;
+            this.normedQ8 = nq;
+            this.logits = lg;
+            this.partials = pt;
+            this.hostLogits = Arena.ofAuto().allocate((long) vocabSize * Float.BYTES);
+            this.vocab = vocabSize;
+        }
+
+        public void free(GpuContext ctx) {
+            freeQuietly(ctx, normed);
+            freeQuietly(ctx, normedQ8);
+            freeQuietly(ctx, logits);
+            freeQuietly(ctx, partials);
+        }
+    }
+
+    /**
+     * Final RMSNorm + output projection using persistent scratch. With {@code headQ8} the LM head stays in Q8_0
+     * (the normalised hidden state is quantised to int8 blocks exactly like every other Q8_0 projection, which is
+     * what llama.cpp does for Q8_0 output tensors); otherwise the head is an F32 matrix.
+     */
+    public static float[] finalLogits(LogitsScratch s, boolean headQ8, MemorySegment xRow, MemorySegment finalNormGammaDevice,
+            MemorySegment lmHeadDevice, Config cfg, GpuContext ctx) throws Throwable {
+        synchronized (ctx.dispatchLock) {
+            rmsNorm(ctx, xRow, finalNormGammaDevice, s.normed, cfg.dim, cfg.norm_eps, s.partials);
+            if (headQ8) {
+                quantizeActivationQ8_0(ctx, s.normed, s.normedQ8, cfg.dim);
+                q8_0GemvPlain(ctx, s.normedQ8, lmHeadDevice, s.logits, s.vocab, cfg.dim);
+            } else {
+                f32Gemv(ctx, s.normed, lmHeadDevice, s.logits, cfg.dim, s.vocab);
+            }
+        }
+        readBlocking(ctx, s.logits, s.hostLogits, (long) s.vocab * Float.BYTES);
+        float[] out = new float[s.vocab];
+        MemorySegment.copy(s.hostLogits, ValueLayout.JAVA_FLOAT, 0, out, 0, s.vocab);
+        return out;
+    }
+
+    /**
      * Final norm + LM head + host readback on an ARBITRARY already-computed
      * [dim]-sized row buffer -- does NOT run the decoder layers. xRow must
      * be a buffer of exactly cfg.dim floats starting at element 0 (unlike
@@ -715,10 +776,8 @@ public final class LlamaLayer {
 
         try {
             synchronized (ctx.dispatchLock) {
-                Prof.start(ctx);
                 rmsNorm(ctx, xRow, finalNormGammaDevice, normed, cfg.dim, cfg.norm_eps, partials);
                 f32Gemv(ctx, normed, lmHeadDevice, logitsDevice, cfg.dim, vocabSize);
-                Prof.mark(ctx, Prof.LOGITS);
             }
 
             float[] logits = new float[vocabSize];
@@ -858,6 +917,17 @@ public final class LlamaLayer {
 
     static void rmsNorm(GpuContext ctx, MemorySegment x, MemorySegment gamma, MemorySegment out,
             int features, double eps, MemorySegment partials) throws Throwable {
+        if (!Variants.legacyRmsnorm()) {
+            try (Arena tmp = Arena.ofConfined()) {
+                setArg(tmp, ctx, ctx.kRmsnormFused, 0, x);
+                setArg(tmp, ctx, ctx.kRmsnormFused, 1, gamma);
+                setArg(tmp, ctx, ctx.kRmsnormFused, 2, out);
+                setArgI(tmp, ctx, ctx.kRmsnormFused, 3, features);
+                setArgF(tmp, ctx, ctx.kRmsnormFused, 4, (float) eps);
+                launch1D(ctx, ctx.kRmsnormFused, KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP); // one work-group
+            }
+            return;
+        }
         int wgSize = KernelSource.RMSNORM_WORKGROUP_SIZE;
         int numGroups = (features + wgSize - 1) / wgSize;
 
@@ -915,14 +985,23 @@ public final class LlamaLayer {
 
     static void q8_0GemvPlain(GpuContext ctx, MemorySegment xQ8, MemorySegment wQ8, MemorySegment out,
             int N, int K) throws Throwable {
+        final boolean legacy = Variants.legacyGemv();
+        final MemorySegment K_ = legacy ? ctx.kQ8_0GemvPlainLegacy : ctx.kQ8_0GemvPlain;
+        if (ctx.prof != null) {
+            ctx.prof.hintBytes(((long) N + 1) * (K / 32) * 34L); // weight rows + the shared activation vector
+        }
         try (Arena tmp = Arena.ofConfined()) {
-            setArg(tmp, ctx, ctx.kQ8_0GemvPlain, 0, xQ8);
-            setArg(tmp, ctx, ctx.kQ8_0GemvPlain, 1, wQ8);
-            setArg(tmp, ctx, ctx.kQ8_0GemvPlain, 2, out);
-            setArgI(tmp, ctx, ctx.kQ8_0GemvPlain, 3, N);
-            setArgI(tmp, ctx, ctx.kQ8_0GemvPlain, 4, K);
-            // one work-group per output row
-            launch1D(ctx, ctx.kQ8_0GemvPlain, (long) N * KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP);
+            setArg(tmp, ctx, K_, 0, xQ8);
+            setArg(tmp, ctx, K_, 1, wQ8);
+            setArg(tmp, ctx, K_, 2, out);
+            setArgI(tmp, ctx, K_, 3, N);
+            setArgI(tmp, ctx, K_, 4, K);
+            if (legacy) {
+                launch1D(ctx, K_, N, KernelSource.DEFAULT_BLOCK_SIZE);
+            } else {
+                // one work-group per output row
+                launch1D(ctx, K_, (long) N * KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP);
+            }
         }
     }
 
@@ -972,6 +1051,16 @@ public final class LlamaLayer {
         return Math.min(p, 256);
     }
 
+    /** Launches one of the bw_read_* probe kernels: {@code globalItems} work-items grid-stride over {@code n} elements. */
+    static void bandwidthRead(GpuContext ctx, MemorySegment kernel, MemorySegment buf, MemorySegment out, int n, long globalItems) throws Throwable {
+        try (Arena tmp = Arena.ofConfined()) {
+            setArg(tmp, ctx, kernel, 0, buf);
+            setArg(tmp, ctx, kernel, 1, out);
+            setArgI(tmp, ctx, kernel, 2, n);
+            launch1D(ctx, kernel, globalItems, 64);
+        }
+    }
+
     /** True when attn_decode_fused can handle this head geometry (otherwise the per-head path is used). */
     static boolean fusedAttentionSupported(int headDim) {
         return headDim % 4 == 0 && headDim <= KernelSource.ATTN_FUSED_MAX_HEAD_DIM;
@@ -986,6 +1075,9 @@ public final class LlamaLayer {
         }
         if (nCtx < 1 || numHeads % kvHeads != 0) {
             throw new IllegalArgumentException("invalid attention geometry: nCtx=" + nCtx + " numHeads=" + numHeads + " kvHeads=" + kvHeads);
+        }
+        if (ctx.prof != null) {
+            ctx.prof.hintBytes(2L * nCtx * kvHeads * headDim * 4L + (long) numHeads * headDim * 4L); // K and V once per KV head + q
         }
         try (Arena tmp = Arena.ofConfined()) {
             setArg(tmp, ctx, ctx.kAttnDecodeFused, 0, q);
@@ -1058,13 +1150,22 @@ public final class LlamaLayer {
     }
 
     static void f32Gemv(GpuContext ctx, MemorySegment a, MemorySegment B, MemorySegment out, int K, int N) throws Throwable {
+        final boolean legacy = Variants.legacyGemv();
+        final MemorySegment K_ = legacy ? ctx.kF32GemvLegacy : ctx.kF32Gemv;
+        if (ctx.prof != null) {
+            ctx.prof.hintBytes(((long) N + 1) * K * 4L);
+        }
         try (Arena tmp = Arena.ofConfined()) {
-            setArg(tmp, ctx, ctx.kF32Gemv, 0, a);
-            setArg(tmp, ctx, ctx.kF32Gemv, 1, B);
-            setArg(tmp, ctx, ctx.kF32Gemv, 2, out);
-            setArgI(tmp, ctx, ctx.kF32Gemv, 3, K);
-            setArgI(tmp, ctx, ctx.kF32Gemv, 4, N);
-            launch1D(ctx, ctx.kF32Gemv, (long) N * KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP);
+            setArg(tmp, ctx, K_, 0, a);
+            setArg(tmp, ctx, K_, 1, B);
+            setArg(tmp, ctx, K_, 2, out);
+            setArgI(tmp, ctx, K_, 3, K);
+            setArgI(tmp, ctx, K_, 4, N);
+            if (legacy) {
+                launch1D(ctx, K_, N, KernelSource.DEFAULT_BLOCK_SIZE);
+            } else {
+                launch1D(ctx, K_, (long) N * KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP);
+            }
         }
     }
 

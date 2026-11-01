@@ -2,6 +2,7 @@ package com.github.gbenroscience.gpu.llm.opencl;
 
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodType;
 import java.util.List;
 
 /**
@@ -78,6 +79,8 @@ public final class OpenCLBindings {
     public final MethodHandle clGetPlatformInfo;
     public final MethodHandle clGetDeviceIDs;
     public final MethodHandle clGetDeviceInfo;
+    public final MethodHandle clGetEventProfilingInfo;
+    public final MethodHandle clReleaseEvent;
     public final MethodHandle clCreateContext;
     public final MethodHandle clCreateCommandQueue;
     public final MethodHandle clCreateProgramWithSource;
@@ -113,6 +116,11 @@ public final class OpenCLBindings {
     }
 
     public OpenCLBindings() {
+        this(null);
+    }
+
+    /** @param profiler when non-null, the hot-path entry points are wrapped to capture events and counters. */
+    OpenCLBindings(DeviceProfiler profiler) {
         List<String> candidates = candidateLibraryNames();
         SymbolLookup resolved = null;
         StringBuilder attempts = new StringBuilder();
@@ -147,6 +155,14 @@ public final class OpenCLBindings {
         clGetDeviceInfo = downcall("clGetDeviceInfo",
                 FunctionDescriptor.of(CI, PTR, CI, CL, PTR, PTR));
 
+        // cl_int clGetEventProfilingInfo(event, param_name, param_value_size, param_value, param_value_size_ret)
+        clGetEventProfilingInfo = downcall("clGetEventProfilingInfo",
+                FunctionDescriptor.of(CI, PTR, CI, CL, PTR, PTR));
+        clReleaseEvent = downcall("clReleaseEvent", FunctionDescriptor.of(CI, PTR));
+        if (profiler != null) {
+            profiler.setEventApi(clGetEventProfilingInfo, clReleaseEvent);
+        }
+
         // cl_context clCreateContext(properties, num_devices, devices, pfn_notify, user_data, errcode_ret)
         clCreateContext = downcall("clCreateContext",
                 FunctionDescriptor.of(PTR, PTR, CI, PTR, PTR, PTR, PTR));
@@ -172,25 +188,38 @@ public final class OpenCLBindings {
 
         clCreateKernel = downcall("clCreateKernel", FunctionDescriptor.of(PTR, PTR, PTR, PTR));
 
-        clSetKernelArg = downcall("clSetKernelArg",
-                FunctionDescriptor.of(CI, PTR, CI, CL, PTR));
+        clSetKernelArg = profiler == null ? downcall("clSetKernelArg",
+                FunctionDescriptor.of(CI, PTR, CI, CL, PTR)) :
+                DeviceProfiler.wrap("setKernelArg", MethodType.methodType(int.class, MethodHandle.class, DeviceProfiler.class, MemorySegment.class, int.class, long.class, MemorySegment.class), downcall("clSetKernelArg",
+                FunctionDescriptor.of(CI, PTR, CI, CL, PTR)), profiler);
 
-        clCreateBuffer = downcall("clCreateBuffer",
-                FunctionDescriptor.of(PTR, PTR, CL, CL, PTR, PTR));
+        clCreateBuffer = profiler == null ? downcall("clCreateBuffer",
+                FunctionDescriptor.of(PTR, PTR, CL, CL, PTR, PTR)) :
+                DeviceProfiler.wrap("createBuffer", MethodType.methodType(MemorySegment.class, MethodHandle.class, DeviceProfiler.class, MemorySegment.class, long.class, long.class, MemorySegment.class, MemorySegment.class), downcall("clCreateBuffer",
+                FunctionDescriptor.of(PTR, PTR, CL, CL, PTR, PTR)), profiler);
 
-        clEnqueueWriteBuffer = downcall("clEnqueueWriteBuffer",
-                FunctionDescriptor.of(CI, PTR, PTR, CI, CL, CL, PTR, CI, PTR, PTR));
+        clEnqueueWriteBuffer = profiler == null ? downcall("clEnqueueWriteBuffer",
+                FunctionDescriptor.of(CI, PTR, PTR, CI, CL, CL, PTR, CI, PTR, PTR)) :
+                DeviceProfiler.wrap("write", MethodType.methodType(int.class, MethodHandle.class, DeviceProfiler.class, MemorySegment.class, MemorySegment.class, int.class, long.class, long.class, MemorySegment.class, int.class, MemorySegment.class, MemorySegment.class), downcall("clEnqueueWriteBuffer",
+                FunctionDescriptor.of(CI, PTR, PTR, CI, CL, CL, PTR, CI, PTR, PTR)), profiler);
 
-        clEnqueueReadBuffer = downcall("clEnqueueReadBuffer",
-                FunctionDescriptor.of(CI, PTR, PTR, CI, CL, CL, PTR, CI, PTR, PTR));
+        clEnqueueReadBuffer = profiler == null ? downcall("clEnqueueReadBuffer",
+                FunctionDescriptor.of(CI, PTR, PTR, CI, CL, CL, PTR, CI, PTR, PTR)) :
+                DeviceProfiler.wrap("read", MethodType.methodType(int.class, MethodHandle.class, DeviceProfiler.class, MemorySegment.class, MemorySegment.class, int.class, long.class, long.class, MemorySegment.class, int.class, MemorySegment.class, MemorySegment.class), downcall("clEnqueueReadBuffer",
+                FunctionDescriptor.of(CI, PTR, PTR, CI, CL, CL, PTR, CI, PTR, PTR)), profiler);
 
-        clEnqueueCopyBuffer = downcall("clEnqueueCopyBuffer",
-                FunctionDescriptor.of(CI, PTR, PTR, PTR, CL, CL, CL, CI, PTR, PTR));
+        clEnqueueCopyBuffer = profiler == null ? downcall("clEnqueueCopyBuffer",
+                FunctionDescriptor.of(CI, PTR, PTR, PTR, CL, CL, CL, CI, PTR, PTR)) :
+                DeviceProfiler.wrap("copy", MethodType.methodType(int.class, MethodHandle.class, DeviceProfiler.class, MemorySegment.class, MemorySegment.class, MemorySegment.class, long.class, long.class, long.class, int.class, MemorySegment.class, MemorySegment.class), downcall("clEnqueueCopyBuffer",
+                FunctionDescriptor.of(CI, PTR, PTR, PTR, CL, CL, CL, CI, PTR, PTR)), profiler);
 
-        clEnqueueNDRangeKernel = downcall("clEnqueueNDRangeKernel",
-                FunctionDescriptor.of(CI, PTR, PTR, CI, PTR, PTR, PTR, CI, PTR, PTR));
+        clEnqueueNDRangeKernel = profiler == null ? downcall("clEnqueueNDRangeKernel",
+                FunctionDescriptor.of(CI, PTR, PTR, CI, PTR, PTR, PTR, CI, PTR, PTR)) :
+                DeviceProfiler.wrap("ndRange", MethodType.methodType(int.class, MethodHandle.class, DeviceProfiler.class, MemorySegment.class, MemorySegment.class, int.class, MemorySegment.class, MemorySegment.class, MemorySegment.class, int.class, MemorySegment.class, MemorySegment.class), downcall("clEnqueueNDRangeKernel",
+                FunctionDescriptor.of(CI, PTR, PTR, CI, PTR, PTR, PTR, CI, PTR, PTR)), profiler);
 
-        clFinish = downcall("clFinish", FunctionDescriptor.of(CI, PTR));
+        clFinish = profiler == null ? downcall("clFinish", FunctionDescriptor.of(CI, PTR)) :
+                DeviceProfiler.wrap("finish", MethodType.methodType(int.class, MethodHandle.class, DeviceProfiler.class, MemorySegment.class), downcall("clFinish", FunctionDescriptor.of(CI, PTR)), profiler);
 
         clReleaseMemObject = downcall("clReleaseMemObject", FunctionDescriptor.of(CI, PTR));
         clReleaseKernel = downcall("clReleaseKernel", FunctionDescriptor.of(CI, PTR));

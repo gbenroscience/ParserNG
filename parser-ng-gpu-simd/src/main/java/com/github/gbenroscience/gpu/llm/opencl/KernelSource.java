@@ -86,6 +86,13 @@ public final class KernelSource {
     public static final String KERNEL_SWIGLU_ACTIVATE = "swiglu_activate";
     public static final String KERNEL_RESIDUAL_ADD = "residual_add";
     public static final String KERNEL_F32_GEMV = "f32_gemv";
+    public static final String KERNEL_Q8_0_GEMV_PLAIN_LEGACY = "q8_0_gemv_plain_legacy";
+    public static final String KERNEL_F32_GEMV_LEGACY = "f32_gemv_legacy";
+    public static final String KERNEL_RMSNORM_FUSED = "rmsnorm_fused";
+    public static final String KERNEL_BW_U8 = "bw_read_u8";
+    public static final String KERNEL_BW_U32 = "bw_read_u32";
+    public static final String KERNEL_BW_U128 = "bw_read_u128";
+    public static final String KERNEL_BW_V16_OFF2 = "bw_read_v16_off2";
 
     // ---- FFN activation alternatives ----
     public static final String KERNEL_GELU_ACTIVATE = "gelu_activate";
@@ -586,6 +593,113 @@ public final class KernelSource {
             }
             const float total = wg_sum(partial, acc);
             if (get_local_id(0) == 0) out[n] = total;
+        }
+
+        // ---- original generic implementations (one work-item per output row); kept as selectable fallbacks (-Dllm.gemv=legacy)
+        __kernel void q8_0_gemv_plain_legacy(
+            __global const uchar* x_q8_0,
+            __global const uchar* W_q8_0,
+            __global float* out_f32,
+            const int N,
+            const int K)
+        {
+            const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            if (n >= N) return;
+
+            const int numBlocks = K / Q8_0_GROUP_SIZE;
+            const int B_stride = numBlocks * Q8_0_BLOCK_SIZE;
+            const int wRowOff = n * B_stride;
+
+            float acc = 0.0f;
+            for (int b = 0; b < numBlocks; b++) {
+                const int xBlockOff = b * Q8_0_BLOCK_SIZE;
+                const int wBlockOff = wRowOff + b * Q8_0_BLOCK_SIZE;
+
+                float xScale = decode_fp16(x_q8_0[xBlockOff], x_q8_0[xBlockOff + 1]);
+                float wScale = decode_fp16(W_q8_0[wBlockOff], W_q8_0[wBlockOff + 1]);
+                float scale = xScale * wScale;
+
+                int iacc = 0;
+                for (int j = 0; j < Q8_0_GROUP_SIZE; j++) {
+                    char xv = (char) x_q8_0[xBlockOff + 2 + j];
+                    char wv = (char) W_q8_0[wBlockOff + 2 + j];
+                    iacc += (int) xv * (int) wv;
+                }
+                acc += iacc * scale;
+            }
+            out_f32[n] = acc;
+        }
+
+        __kernel void f32_gemv_legacy(
+            __global const float* a,
+            __global const float* B,
+            __global float* out,
+            const int K,
+            const int N)
+        {
+            const int n = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            if (n >= N) return;
+
+            const int rowOff = n * K;
+            float acc = 0.0f;
+            for (int k = 0; k < K; k++) {
+                acc += a[k] * B[rowOff + k];
+            }
+            out[n] = acc;
+        }
+
+        // RMSNorm in ONE launch with no host round trip: a single work-group computes sum(x^2) by
+        // tree reduction, then scales. (The legacy path needs a partial-sums kernel, a blocking
+        // read-back, a host sum, and a second kernel.) In-place safe: all reads of x precede the barrier.
+        __kernel __attribute__((reqd_work_group_size(GEMV_WG, 1, 1)))
+        void rmsnorm_fused(
+            __global const float* x,
+            __global const float* gamma,
+            __global float* out,
+            const int features,
+            const float eps)
+        {
+            __local float partial[GEMV_WG];
+            float ss = 0.0f;
+            for (int i = get_local_id(0); i < features; i += GEMV_WG) {
+                const float v = x[i];
+                ss += v * v;
+            }
+            const float total = wg_sum(partial, ss);
+            const float inv = 1.0f / sqrt(total / (float) features + eps);
+            for (int i = get_local_id(0); i < features; i += GEMV_WG) {
+                out[i] = x[i] * inv * gamma[i];
+            }
+        }
+
+        // ---- memory-bandwidth probes (OpenCLBenchmark --bandwidth): grid-stride coalesced reads at different load widths.
+        // bw_read_v16_off2 reads 16-byte chunks starting 2 bytes past a 4-byte boundary, i.e. the alignment of a
+        // Q8_0 block's quants (34-byte blocks), to show what misaligned vector loads cost on the device.
+        __kernel void bw_read_u8(__global const uchar* p, __global uint* out, const int n) {
+            uint acc = 0;
+            for (int i = get_global_id(0); i < n; i += get_global_size(0)) acc += p[i];
+            out[get_global_id(0)] = acc;
+        }
+        __kernel void bw_read_u32(__global const uint* p, __global uint* out, const int n) {
+            uint acc = 0;
+            for (int i = get_global_id(0); i < n; i += get_global_size(0)) acc += p[i];
+            out[get_global_id(0)] = acc;
+        }
+        __kernel void bw_read_u128(__global const uint4* p, __global uint* out, const int n) {
+            uint4 acc = (uint4)(0u);
+            for (int i = get_global_id(0); i < n; i += get_global_size(0)) acc += p[i];
+            out[get_global_id(0)] = acc.x + acc.y + acc.z + acc.w;
+        }
+        __kernel void bw_read_v16_off2(__global const uchar* p, __global uint* out, const int n) {
+            __global const char* q = (__global const char*) (p + 2);
+            int acc = 0;
+            for (int i = get_global_id(0); i < n; i += get_global_size(0)) {
+                char16 v = vload16(i, q);
+                int8 t = convert_int8(v.lo) + convert_int8(v.hi);
+                int4 u = t.lo + t.hi;
+                acc += u.x + u.y + u.z + u.w;
+            }
+            out[get_global_id(0)] = (uint) acc;
         }
 
         #define ATTN_WG GEMV_WG

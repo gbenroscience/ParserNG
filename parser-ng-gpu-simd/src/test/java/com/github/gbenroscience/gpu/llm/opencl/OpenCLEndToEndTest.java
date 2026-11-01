@@ -62,14 +62,18 @@ class OpenCLEndToEndTest {
         LlamaLayer.GpuWeights[] w = new LlamaLayer.GpuWeights[cfg.n_layers];
         LlamaLayer.GpuState[] s = new LlamaLayer.GpuState[cfg.n_layers];
         MemorySegment norm = null, head = null, x = null, xb = null;
+        OpenCLLlamaEngine.LmHead lmHead = null;
+        LlamaLayer.LogitsScratch scratch = null;
         try {
             for (int l = 0; l < cfg.n_layers; l++) {
                 w[l] = LlamaLayer.GpuWeights.fromGguf(ctx, g, "blk." + l + ".");
                 s[l] = new LlamaLayer.GpuState(ctx, cfg);
             }
             norm = LlamaLayer.uploadFloats(ctx, m.truth.get("output_norm.weight"));
-            head = LlamaLayer.uploadFloats(ctx, m.truth.get("output.weight"));
-            EmbeddingTable emb = new EmbeddingTable(m.truth.get("token_embd.weight"), m.vocab, m.dim);
+            lmHead = OpenCLLlamaEngine.uploadLmHead(ctx, g); // the production head upload (Q8_0 stays Q8_0)
+            head = lmHead.device;
+            scratch = new LlamaLayer.LogitsScratch(ctx, cfg, m.vocab);
+            EmbeddingTable emb = EmbeddingTable.fromGguf(g, m.vocab, m.dim);
             x = LlamaLayer.allocFloats(ctx, m.dim);
             float[][] out = new float[ids.length][];
 
@@ -86,7 +90,7 @@ class OpenCLEndToEndTest {
                 for (int r = 0; r < pre; r++) {
                     MemorySegment row = LlamaLayer.uploadFloats(ctx, java.util.Arrays.copyOfRange(all, r * m.dim, (r + 1) * m.dim));
                     try {
-                        out[r] = LlamaLayer.finalLogits(row, norm, head, cfg, ctx, m.vocab);
+                        out[r] = LlamaLayer.finalLogits(scratch, lmHead.q8, row, norm, head, cfg, ctx);
                     } finally {
                         LlamaLayer.freeQuietly(ctx, row);
                     }
@@ -97,7 +101,7 @@ class OpenCLEndToEndTest {
                 for (int l = 0; l < cfg.n_layers; l++) {
                     LlamaLayer.forward_layer(x, w[l], s[l], cfg, ctx);
                 }
-                out[i] = LlamaLayer.finalLogits(x, norm, head, cfg, ctx, m.vocab);
+                out[i] = LlamaLayer.finalLogits(scratch, lmHead.q8, x, norm, head, cfg, ctx);
             }
             return out;
         } finally {
@@ -110,6 +114,9 @@ class OpenCLEndToEndTest {
                 if (wt != null) {
                     wt.close();
                 }
+            }
+            if (scratch != null) {
+                scratch.free(ctx);
             }
             LlamaLayer.freeQuietly(ctx, norm);
             LlamaLayer.freeQuietly(ctx, head);
@@ -236,7 +243,13 @@ class OpenCLEndToEndTest {
         m.writer.metadata.put("llama.context_length", Integer.MAX_VALUE); // layer 0 weights upload fine, then the KV cache allocation fails
         File f = write(m);
         GpuContext ctx = new GpuContext();
-        Throwable t = assertThrows(Throwable.class, () -> new OpenCLLlamaEngine(f, ctx));
+        System.setProperty("llm.maxContext", String.valueOf(Integer.MAX_VALUE)); // lift the default cap so the absurd KV cache is really requested
+        Throwable t;
+        try {
+            t = assertThrows(Throwable.class, () -> new OpenCLLlamaEngine(f, ctx));
+        } finally {
+            System.clearProperty("llm.maxContext");
+        }
         System.out.println("[failedLoad] expected failure: " + t);
         assertEquals(0, ctx.sweptAtClose, "every buffer acquired before the failure must have been released explicitly");
         assertEquals(0, ctx.allocations.size());
@@ -267,5 +280,188 @@ class OpenCLEndToEndTest {
         // BOS, 'h', then U+00E9 as its two UTF-8 bytes C3 A9, then '!'
         assertArrayEquals(new int[]{256, 'h', 0xC3, 0xA9, '!'}, ids);
         assertEquals("h\u00e9!", tok.decode(ids));
+    }
+
+    @Test
+    void contextIsCappedAndOverflowIsReportedAgainstTheCap() throws Throwable {
+        assumeTrue(skip == null, skip);
+        TinyModel m = tiny(10);
+        m.writer.metadata.put("llama.context_length", 100000);
+        File f = write(m);
+        LoadTimer.reset();
+        GpuContext ctx = new GpuContext();
+        OpenCLLlamaEngine eng = new OpenCLLlamaEngine(f, ctx);
+        try {
+            assertTrue(LoadTimer.report().contains("capped from 100000 to 8192"), LoadTimer.report());
+            assertTrue(LoadTimer.report().contains("device memory after load"), "memory report missing");
+            LlamaGenerationConfig c = new LlamaGenerationConfig();
+            c.maxNewTokens = 9000;
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> eng.generate("hello", c));
+            assertTrue(e.getMessage().contains("8192"), e.getMessage());
+        } finally {
+            eng.close();
+        }
+    }
+
+    @Test
+    void profilerCountsLaunchesAndMeasuresDeviceTime() throws Throwable {
+        assumeTrue(skip == null, skip);
+        TinyModel m = tiny(11);
+        File f = write(m);
+        GpuContext ctx = new GpuContext(true);
+        OpenCLLlamaEngine eng = new OpenCLLlamaEngine(f, ctx);
+        int decodeTokens;
+        try {
+            LlamaGenerationConfig c = new LlamaGenerationConfig();
+            c.temperature = 0f;
+            c.repetitionPenalty = 1f;
+            c.maxNewTokens = 6;
+            c.eosTokenId = -1;
+            eng.generate("hello there", c);
+            decodeTokens = 5; // maxNewTokens - 1 forwards: the last sampled token is never fed back
+            DeviceProfiler p = ctx.prof;
+            assertNotNull(p);
+            long launches = p.counter("decode", DeviceProfiler.LAUNCHES);
+            assertTrue(launches > 0);
+            assertEquals(0, launches % decodeTokens, "launches per decode forward must be a constant integer, got " + launches + "/" + decodeTokens);
+            long perToken = launches / decodeTokens;
+            // 2 layers: no per-head attention loop (fused kernel) -> a small fixed number of launches per layer
+            assertTrue(perToken > 10 && perToken < 200, "launches per token " + perToken);
+            assertEquals(decodeTokens, p.counter("decode", DeviceProfiler.BLOCKING_READS), "one blocking logits read per token");
+            assertTrue(p.counter("prefill", DeviceProfiler.LAUNCHES) > 0);
+            String report = p.report(java.util.Map.of("prefill", 1, "decode", decodeTokens));
+            System.out.println(report);
+            assertTrue(report.contains("attn_decode_fused"), "kernel names must be resolved");
+            assertTrue(report.contains("q8_0_gemv_plain"));
+            assertTrue(report.contains("phase: decode") && report.contains("phase: prefill"));
+            assertFalse(report.contains("no usable profiling timestamps"), report);
+        } finally {
+            eng.close();
+        }
+    }
+
+    /** Every legacy fallback must still produce reference-accurate logits end to end. */
+    @Test
+    void legacyKernelVariantsStillMatchReference() throws Throwable {
+        for (String key : new String[]{"llm.gemv", "llm.attention", "llm.rmsnorm"}) {
+            System.setProperty(key, "legacy");
+            try {
+                compareAllPaths(tiny(21), 7, 3);
+            } finally {
+                System.clearProperty(key);
+            }
+        }
+    }
+
+    /** Pins the measured synchronisation counts: fused RMSNorm leaves only the logits read; the legacy path adds 2 per layer + 1. */
+    @Test
+    void blockingReadsPerTokenFusedVersusLegacyRmsNorm() throws Throwable {
+        assumeTrue(skip == null, skip);
+        for (boolean legacy : new boolean[]{false, true}) {
+            if (legacy) {
+                System.setProperty("llm.rmsnorm", "legacy");
+            }
+            GpuContext ctx = new GpuContext(true);
+            TinyModel m = tiny(22);
+            OpenCLLlamaEngine eng = new OpenCLLlamaEngine(write(m), ctx);
+            try {
+                LlamaGenerationConfig c = new LlamaGenerationConfig();
+                c.temperature = 0f;
+                c.repetitionPenalty = 1f;
+                c.maxNewTokens = 5;
+                c.eosTokenId = -1;
+                eng.generate("hello there", c);
+                long perToken = ctx.prof.counter("decode", DeviceProfiler.BLOCKING_READS) / 4; // 4 decode forwards
+                long expected = legacy ? 2L * m.layers + 2 : 1;
+                assertEquals(expected, perToken, (legacy ? "legacy" : "fused") + " rmsnorm: blocking reads per decode token");
+            } finally {
+                eng.close();
+                System.clearProperty("llm.rmsnorm");
+            }
+        }
+    }
+
+    @Test
+    void logitsMatchReferenceWithQ8HeadAndQ8Embeddings() throws Throwable {
+        TinyModel a = new TinyModel();
+        a.q8Head = true; // separate Q8_0 output.weight
+        a.build(31);
+        compareAllPaths(a, 6, 3);
+        TinyModel b = new TinyModel();
+        b.q8Embeddings = true;
+        b.tiedOutput = true; // no output.weight: the Q8_0 token embedding doubles as the Q8_0 head, as in Llama-3.2
+        b.build(32);
+        compareAllPaths(b, 9, 3);
+    }
+
+    @Test
+    void q8EmbeddingRowsDequantiseExactlyOnDemand() throws Throwable {
+        assumeTrue(skip == null, skip);
+        TinyModel m = new TinyModel();
+        m.q8Embeddings = true;
+        m.build(33);
+        GGUFLoader.GGUFFile g = GGUFLoader.load(write(m));
+        EmbeddingTable emb = EmbeddingTable.fromGguf(g, m.vocab, m.dim);
+        int[] ids = {0, 5, 255, 256, 287, 5};
+        MemorySegment dev = LlamaLayer.allocFloats(shared, (long) ids.length * m.dim);
+        try {
+            emb.embedRows(ids, dev, shared);
+            float[] got = LlamaLayer.downloadFloats(shared, dev, ids.length * m.dim);
+            byte[] q = m.writer.tensors.get("token_embd.weight").data;
+            int rowBytes = m.dim / 32 * 34;
+            float[] expect = new float[ids.length * m.dim];
+            for (int r = 0; r < ids.length; r++) {
+                System.arraycopy(CpuReference.dequantizeQ8_0(java.util.Arrays.copyOfRange(q, ids[r] * rowBytes, (ids[r] + 1) * rowBytes), m.dim), 0, expect, r * m.dim, m.dim);
+            }
+            assertArrayEquals(expect, got, 0f);
+        } finally {
+            LlamaLayer.freeQuietly(shared, dev);
+        }
+    }
+
+    @Test
+    void engineWithQ8HeadMatchesReferenceGreedyAndAllocatesNothingPerToken() throws Throwable {
+        assumeTrue(skip == null, skip);
+        TinyModel m = new TinyModel();
+        m.q8Embeddings = true;
+        m.tiedOutput = true;
+        m.build(34);
+        File f = write(m);
+        GpuContext ctx = new GpuContext(true);
+        OpenCLLlamaEngine eng = new OpenCLLlamaEngine(f, ctx);
+        try {
+            LlamaGenerationConfig c = new LlamaGenerationConfig();
+            c.temperature = 0f;
+            c.repetitionPenalty = 1f;
+            c.maxNewTokens = 6;
+            c.eosTokenId = -1;
+            String got = eng.generate("hello there", c);
+            ModelSpec spec = ModelSpec.fromGguf(GGUFLoader.load(f));
+            BpeTokenizer tok = BpeTokenizer.fromGguf(GGUFLoader.load(f));
+            int[] prompt = tok.encode("hello there", true);
+            CpuReferenceModel ref = new CpuReferenceModel(spec, m);
+            float[] logits = null;
+            for (int i = 0; i < prompt.length; i++) {
+                logits = ref.forward(prompt[i], i);
+            }
+            int[] gen = new int[c.maxNewTokens];
+            int pos = prompt.length;
+            for (int i = 0; i < gen.length; i++) {
+                int best = 0;
+                for (int t = 1; t < logits.length; t++) {
+                    if (logits[t] > logits[best]) {
+                        best = t;
+                    }
+                }
+                gen[i] = best;
+                if (i + 1 < gen.length) {
+                    logits = ref.forward(best, pos++);
+                }
+            }
+            assertEquals(tok.decode(gen), got, "Q8_0 LM head: device greedy generation must equal the CPU reference");
+            assertEquals(0, ctx.prof.counter("decode", DeviceProfiler.ALLOCS), "a decode step must not allocate device buffers");
+        } finally {
+            eng.close();
+        }
     }
 }

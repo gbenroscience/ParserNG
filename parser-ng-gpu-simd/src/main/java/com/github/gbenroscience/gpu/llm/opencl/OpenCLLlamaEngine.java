@@ -31,6 +31,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
     private final LlamaLayer.GpuState[] states;
     private final MemorySegment finalNormGammaDevice;
     private final MemorySegment lmHeadDevice;
+    private final boolean lmHeadQ8;
     private final LlamaOpenCLEngine engine;
     private final String deviceDescription;
     private boolean closed;
@@ -43,10 +44,29 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         final EmbeddingTable embeddings;
 
         Prepared(File ggufPath) throws Throwable {
+            long t = LoadTimer.start();
             this.gguf = GGUFLoader.load(ggufPath);
+            LoadTimer.stop("host: GGUF parse (header, metadata, tensor table)", t);
+            t = LoadTimer.start();
             this.cfg = LlamaLayer.Config.fromGguf(gguf); // throws UnsupportedModelException before any device work
+            LoadTimer.stop("host: model validation (ModelSpec)", t);
+            // The KV cache, RoPE tables and score buffers are allocated for max_seq positions in EVERY layer.
+            // Models advertise very long contexts (Llama-3.2: 131072), which would reserve gigabytes of device
+            // memory up front; cap it (override with -Dllm.maxContext=N). generate() refuses longer sequences.
+            final int cap = Integer.getInteger("llm.maxContext", 8192);
+            if (cap <= 0) {
+                throw new IllegalArgumentException("llm.maxContext must be > 0, got " + cap);
+            }
+            if (cfg.max_seq > cap) {
+                LoadTimer.note("context length capped from " + cfg.max_seq + " to " + cap + " positions (-Dllm.maxContext=N to change; KV cache memory scales linearly with it)");
+                cfg.max_seq = cap;
+            }
+            t = LoadTimer.start();
             this.tokenizer = BpeTokenizer.fromGguf(gguf);
+            LoadTimer.stop("host: tokenizer build", t);
+            t = LoadTimer.start();
             this.embeddings = EmbeddingTable.fromGguf(gguf, tokenizer.vocabSize(), cfg.dim);
+            LoadTimer.stop("host: embedding table (Q8_0 kept quantised, rows dequantised on demand)", t);
         }
     }
 
@@ -75,16 +95,34 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         LlamaLayer.GpuState[] st = new LlamaLayer.GpuState[cfg.n_layers];
         MemorySegment norm = null;
         MemorySegment head = null;
+        boolean headQ8 = false;
         LlamaOpenCLEngine eng = null;
         try {
+            long weightBytes = 0, stateBytes = 0;
             for (int i = 0; i < cfg.n_layers; i++) {
                 String prefix = "blk." + i + ".";
+                long b0 = c.allocations.liveBytes();
                 w[i] = LlamaLayer.GpuWeights.fromGguf(c, prep.gguf, prefix);
+                long b1 = c.allocations.liveBytes();
+                long t = LoadTimer.start();
                 st[i] = new LlamaLayer.GpuState(c, cfg);
+                LoadTimer.stop("layers: state allocation (KV cache, RoPE tables, scratch)", t);
+                weightBytes += b1 - b0;
+                stateBytes += c.allocations.liveBytes() - b1;
             }
+            long bHead0 = c.allocations.liveBytes();
             norm = loadAndUploadFloat(c, prep.gguf, "output_norm.weight");
-            head = loadAndUploadFloat(c, prep.gguf, findLmHeadTensorName(prep.gguf));
-            eng = new LlamaOpenCLEngine(c, cfg, w, st, prep.embeddings, prep.tokenizer, norm, head, prep.tokenizer.vocabSize());
+            LmHead lh = uploadLmHead(c, prep.gguf);
+            head = lh.device;
+            headQ8 = lh.q8;
+            long headBytes = c.allocations.liveBytes() - bHead0;
+            long kvPerLayer = 2L * cfg.max_seq * cfg.kv_heads * cfg.head_dim * 4L;
+            LoadTimer.note(String.format("device memory after load: %.1f MB live (peak %.1f MB) = layer weights %.1f MB + per-layer state %.1f MB "
+                    + "(of which KV cache %.1f MB: %.1f MB/layer at %d positions) + final norm/LM head %.1f MB (%s)",
+                    c.allocations.liveBytes() / 1e6, c.allocations.peakBytes() / 1e6, weightBytes / 1e6, stateBytes / 1e6,
+                    kvPerLayer * cfg.n_layers / 1e6, kvPerLayer / 1e6, cfg.max_seq, headBytes / 1e6,
+                    headQ8 ? "LM head kept as Q8_0" : "LM head dequantised to F32"));
+            eng = new LlamaOpenCLEngine(c, cfg, w, st, prep.embeddings, prep.tokenizer, norm, head, headQ8, prep.tokenizer.vocabSize());
         } catch (Throwable failure) {
             Throwable cleanup = teardown(c, eng, st, w, norm, head);
             if (cleanup != null) {
@@ -98,6 +136,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         this.states = st;
         this.finalNormGammaDevice = norm;
         this.lmHeadDevice = head;
+        this.lmHeadQ8 = headQ8;
         this.engine = eng;
     }
 
@@ -153,6 +192,11 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         return engine.generate(prompt, genCfg);
     }
 
+    /** Wall-clock timings of the most recent {@link #generate} call. */
+    public LlamaOpenCLEngine.RunStats lastRunStats() {
+        return engine.lastRunStats();
+    }
+
     @Override
     public String getDeviceDescription() {
         return deviceDescription;
@@ -176,13 +220,50 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         if (t == null) {
             throw new NoSuchElementException("Required GGUF tensor missing: " + tensorName);
         }
+        final long tRead = LoadTimer.start();
         float[] data = switch (t.type) {
             case 0 -> t.loadFloat();
             case 8 -> t.loadQ8_0AsFloat();
             default -> throw new IllegalArgumentException(
                     "Tensor '" + tensorName + "' has GGML type " + t.type + " -- only F32 (0) and Q8_0 (8) are handled here.");
         };
-        return LlamaLayer.uploadFloats(ctx, data);
+        LoadTimer.stop("final norm / LM head: read + dequantize to float[]", tRead);
+        final long tUp = LoadTimer.start();
+        MemorySegment dev = LlamaLayer.uploadFloats(ctx, data);
+        LoadTimer.stop("final norm / LM head: device upload", tUp);
+        return dev;
+    }
+
+    /** Device copy of the output projection and its format. */
+    static final class LmHead {
+
+        final MemorySegment device;
+        final boolean q8;
+
+        LmHead(MemorySegment device, boolean q8) {
+            this.device = device;
+            this.q8 = q8;
+        }
+    }
+
+    /**
+     * Uploads the LM head. A Q8_0 head (the tied token embedding of a Q8_0 model, or output.weight) is kept as Q8_0
+     * blocks -- a quarter of the bytes read per token compared with dequantising to F32 -- unless
+     * {@code -Dllm.lmhead=f32} asks for the old F32 form. Any other tensor type goes through the F32 path.
+     */
+    static LmHead uploadLmHead(GpuContext ctx, GGUFLoader.GGUFFile gguf) throws Throwable {
+        String name = findLmHeadTensorName(gguf);
+        GGUFLoader.Tensor t = gguf.tensors.get(name);
+        if (t != null && t.type == 8 && !"f32".equalsIgnoreCase(System.getProperty("llm.lmhead"))) {
+            long t0 = LoadTimer.start();
+            byte[] q8 = t.loadQ8_0();
+            LoadTimer.stop("final norm / LM head: read Q8_0 tensor", t0);
+            long t1 = LoadTimer.start();
+            MemorySegment dev = LlamaLayer.uploadBytes(ctx, q8);
+            LoadTimer.stop("final norm / LM head: device upload", t1);
+            return new LmHead(dev, true);
+        }
+        return new LmHead(loadAndUploadFloat(ctx, gguf, name), false);
     }
 
     private static String findLmHeadTensorName(GGUFLoader.GGUFFile gguf) {

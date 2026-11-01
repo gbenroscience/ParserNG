@@ -41,7 +41,13 @@ public final class CpuReferenceModel {
     /** Returns the logits after feeding {@code token} at absolute position {@code pos}. */
     public float[] forward(int token, int pos) {
         int dim = spec.dim, hd = spec.headDim, qd = spec.qDim(), kd = spec.kvDim(), hidden = spec.hiddenDim;
-        float[] x = java.util.Arrays.copyOfRange(f32.get("token_embd.weight"), token * dim, (token + 1) * dim);
+        float[] x;
+        if (q8.containsKey("token_embd.weight")) {
+            int rowBytes = dim / 32 * CpuReference.Q8_BLOCK_BYTES;
+            x = CpuReference.dequantizeQ8_0(java.util.Arrays.copyOfRange(q8.get("token_embd.weight"), token * rowBytes, (token + 1) * rowBytes), dim);
+        } else {
+            x = java.util.Arrays.copyOfRange(f32.get("token_embd.weight"), token * dim, (token + 1) * dim);
+        }
         for (int l = 0; l < spec.layers; l++) {
             String p = "blk." + l + ".";
             float[] xn = CpuReference.rmsNorm(x, f32.get(p + "attn_norm.weight"), spec.normEps);
@@ -64,7 +70,12 @@ public final class CpuReferenceModel {
             x = add(x, CpuReference.q8Gemv(aq, q8.get(p + "ffn_down.weight"), dim, hidden));
         }
         float[] xn = CpuReference.rmsNorm(x, f32.get("output_norm.weight"), spec.normEps);
-        float[] head = f32.containsKey("output.weight") ? f32.get("output.weight") : f32.get("token_embd.weight");
-        return CpuReference.matvecExact(head, xn, spec.vocabSize, dim);
+        boolean hasOutput = f32.containsKey("output.weight");
+        String headName = hasOutput ? "output.weight" : "token_embd.weight";
+        if (q8.containsKey(headName)) {
+            // Q8_0 head: the normalised hidden state is quantised to int8 blocks, exactly as for every other Q8_0 projection
+            return CpuReference.q8Gemv(CpuReference.quantizeQ8_0(xn), q8.get(headName), spec.vocabSize, dim);
+        }
+        return CpuReference.matvecExact(f32.get(headName), xn, spec.vocabSize, dim);
     }
 }
