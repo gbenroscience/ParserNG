@@ -17,7 +17,18 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class AllocationTracker {
 
-    private final Map<Long, Long> live = new ConcurrentHashMap<>();
+    private static final class Rec {
+
+        final long bytes;
+        final String category;
+
+        Rec(long bytes, String category) {
+            this.bytes = bytes;
+            this.category = category;
+        }
+    }
+
+    private final Map<Long, Rec> live = new ConcurrentHashMap<>();
     private final AtomicLong liveBytes = new AtomicLong();
     private final AtomicLong peakBytes = new AtomicLong();
 
@@ -26,10 +37,14 @@ public final class AllocationTracker {
     }
 
     public void add(long key, long bytes) {
+        add(key, bytes, "uncategorised");
+    }
+
+    public void add(long key, long bytes, String category) {
         if (key == 0L) {
             return;
         }
-        if (live.putIfAbsent(key, bytes) != null) {
+        if (live.putIfAbsent(key, new Rec(bytes, category)) != null) {
             throw new IllegalStateException("device handle 0x" + Long.toHexString(key) + " registered twice");
         }
         long now = liveBytes.addAndGet(bytes);
@@ -41,11 +56,11 @@ public final class AllocationTracker {
         if (key == 0L) {
             return false;
         }
-        Long bytes = live.remove(key);
-        if (bytes == null) {
+        Rec r = live.remove(key);
+        if (r == null) {
             return false;
         }
-        liveBytes.addAndGet(-bytes);
+        liveBytes.addAndGet(-r.bytes);
         return true;
     }
 
@@ -59,6 +74,17 @@ public final class AllocationTracker {
 
     public long peakBytes() {
         return peakBytes.get();
+    }
+
+    /** Live bytes and allocation count per category, sorted by name: {bytes, count}. */
+    public java.util.SortedMap<String, long[]> byCategory() {
+        java.util.TreeMap<String, long[]> m = new java.util.TreeMap<>();
+        for (Rec r : live.values()) {
+            long[] a = m.computeIfAbsent(r.category, k -> new long[2]);
+            a[0] += r.bytes;
+            a[1]++;
+        }
+        return m;
     }
 
     /** Removes and returns every live handle; the caller releases them. */

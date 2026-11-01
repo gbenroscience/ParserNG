@@ -97,7 +97,58 @@ public final class OpenCLBenchmark {
         }
     }
 
+    private static int intArg(String[] a, String key, int def) {
+        for (int i = 0; i < a.length - 1; i++) {
+            if (a[i].equals(key)) {
+                return Integer.parseInt(a[i + 1]);
+            }
+        }
+        return def;
+    }
+
+    /** Model-free modes: --gemv-sweep and --memory-plan (Llama-3.2-1B shapes by default; override with --dim --hidden --heads --kv-heads --head-dim --layers --vocab --max-seq). */
+    private static void modelFree(String[] a) throws Throwable {
+        if (System.getProperty("opencl.device.type") == null && System.getProperty("opencl.vendor") != null) {
+            OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.GpuVendor.valueOf(System.getProperty("opencl.vendor").toUpperCase()));
+        }
+        int dim = intArg(a, "--dim", 2048), hidden = intArg(a, "--hidden", 8192), heads = intArg(a, "--heads", 32);
+        int kv = intArg(a, "--kv-heads", 8), hd = intArg(a, "--head-dim", 64), layers = intArg(a, "--layers", 16);
+        int vocab = intArg(a, "--vocab", 128256), maxSeq = intArg(a, "--max-seq", 8192);
+        boolean sweep = false, plan = false, f32head = false;
+        for (String s : a) {
+            sweep |= s.equals("--gemv-sweep");
+            plan |= s.equals("--memory-plan");
+            f32head |= s.equals("--f32-head");
+        }
+        GpuContext ctx = new GpuContext(sweep);
+        try {
+            System.out.println("==================== hardware ====================\n" + ctx.deviceInfo());
+            if (plan) {
+                LlamaLayer.Config cfg = new LlamaLayer.Config();
+                cfg.n_layers = layers;
+                cfg.dim = dim;
+                cfg.hidden_dim = hidden;
+                cfg.num_heads = heads;
+                cfg.kv_heads = kv;
+                cfg.head_dim = hd;
+                cfg.max_seq = maxSeq;
+                MemoryPlan.run(ctx, cfg, vocab, !f32head);
+            }
+            if (sweep) {
+                GemvSweep.run(ctx, dim, hidden, heads, kv, hd, layers, vocab, true);
+            }
+        } finally {
+            ctx.close();
+        }
+    }
+
     public static void main(String[] args) throws Throwable {
+        for (String s : args) {
+            if (s.equals("--gemv-sweep") || s.equals("--memory-plan")) {
+                modelFree(args);
+                return;
+            }
+        }
         if (args.length >= 1 && args[0].equals("--bandwidth-only")) {
             if (System.getProperty("opencl.device.type") == null && System.getProperty("opencl.vendor") != null) {
                 OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.GpuVendor.valueOf(System.getProperty("opencl.vendor").toUpperCase()));

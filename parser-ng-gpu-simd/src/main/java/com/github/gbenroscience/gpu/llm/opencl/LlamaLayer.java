@@ -216,13 +216,17 @@ public final class LlamaLayer {
                 byte[] wGateQ8_0, byte[] wUpQ8_0, byte[] wDownQ8_0,
                 float[] attnNormGamma, float[] ffnNormGamma) throws Throwable {
             this.ctx = ctx;
+            ctx.allocCategory = "weights: q/k/v/gate/up/down (Q8_0)";
             this.wq_q8_0 = uploadBytes(ctx, wqQ8_0);
             this.wk_q8_0 = uploadBytes(ctx, wkQ8_0);
             this.wv_q8_0 = uploadBytes(ctx, wvQ8_0);
+            ctx.allocCategory = "weights: wo (F32)";
             this.wo_f32 = uploadFloats(ctx, woF32);
+            ctx.allocCategory = "weights: q/k/v/gate/up/down (Q8_0)";
             this.w_gate_q8_0 = uploadBytes(ctx, wGateQ8_0);
             this.w_up_q8_0 = uploadBytes(ctx, wUpQ8_0);
             this.w_down_q8_0 = uploadBytes(ctx, wDownQ8_0);
+            ctx.allocCategory = "weights: norm gammas (F32)";
             this.attn_norm_gamma = uploadFloats(ctx, attnNormGamma);
             this.ffn_norm_gamma = uploadFloats(ctx, ffnNormGamma);
         }
@@ -314,6 +318,7 @@ public final class LlamaLayer {
             this.kvDim = cfg.kv_heads * cfg.head_dim;
             this.maxBatchT = cfg.max_prefill_batch;
 
+            ctx.allocCategory = "state: KV cache";
             this.k_cache_f32 = allocFloats(ctx, (long) cfg.max_seq * kvDim);
             this.v_cache_f32 = allocFloats(ctx, (long) cfg.max_seq * kvDim);
 
@@ -321,9 +326,11 @@ public final class LlamaLayer {
             float[] cosHost = new float[cfg.max_seq * halfDim];
             float[] sinHost = new float[cfg.max_seq * halfDim];
             precomputeRope(cosHost, sinHost, cfg.max_seq, cfg.head_dim, cfg.rope_theta, cfg);
+            ctx.allocCategory = "state: RoPE cos/sin tables";
             this.cos_table = uploadFloats(ctx, cosHost);
             this.sin_table = uploadFloats(ctx, sinHost);
 
+            ctx.allocCategory = "state: decode scratch";
             this.xNorm = allocFloats(ctx, cfg.dim);
             this.xNormQ8 = allocBytes(ctx, q8_0Bytes(cfg.dim));
             this.qSplit = allocFloats(ctx, (long) cfg.num_heads * cfg.head_dim);
@@ -344,6 +351,7 @@ public final class LlamaLayer {
             int maxGroups = (maxLen + KernelSource.RMSNORM_WORKGROUP_SIZE - 1) / KernelSource.RMSNORM_WORKGROUP_SIZE;
             this.rmsPartials = allocFloats(ctx, maxGroups);
 
+            ctx.allocCategory = "state: prefill scratch (per layer)";
             if (maxBatchT > 0) {
                 int qkRowWidth = cfg.num_heads * cfg.head_dim;
                 this.qBatch = allocFloats(ctx, (long) maxBatchT * qkRowWidth);
@@ -442,7 +450,7 @@ public final class LlamaLayer {
             MemorySegment mem = (MemorySegment) ctx.cl.clCreateBuffer.invoke(
                     ctx.context, OpenCLBindings.CL_MEM_READ_WRITE, byteCount, MemorySegment.NULL, errBuf);
             GpuContext.check(errBuf.get(ValueLayout.JAVA_INT, 0), "clCreateBuffer");
-            ctx.allocations.add(mem.address(), byteCount);
+            ctx.allocations.add(mem.address(), byteCount, ctx.allocCategory);
             return mem;
         }
     }
@@ -574,22 +582,30 @@ public final class LlamaLayer {
 
         synchronized (ctx.dispatchLock) {
             // === 1. Attention block: x = x + attn(rms_norm(x)) ===
+            stage(ctx, "rmsnorm");
             rmsNorm(ctx, x, w.attn_norm_gamma, s.xNorm, dim, cfg.norm_eps, s.rmsPartials);
+            stage(ctx, "quantize activation");
             quantizeActivationQ8_0(ctx, s.xNorm, s.xNormQ8, dim);
 
+            stage(ctx, "q proj");
             q8_0GemvPlain(ctx, s.xNormQ8, w.wq_q8_0, s.qSplit, numHeads * headDim, dim);
+            stage(ctx, "k proj");
             q8_0GemvPlain(ctx, s.xNormQ8, w.wk_q8_0, s.kNew, kvDim, dim);
             // V is NOT de-interleaved: only Q and K go through the split layout (it pairs RoPE's rotated
             // dimensions). V feeds the weighted sum and wo in natural order, exactly like the batched
             // prefill path (q8_0GemmTiled) that fills the same KV cache.
+            stage(ctx, "v proj");
             q8_0GemvPlain(ctx, s.xNormQ8, w.wv_q8_0, s.vNew, kvDim, dim);
 
+            stage(ctx, "rope");
             ropeApplyPairs(ctx, s.qSplit, s.cos_table, s.sin_table, numHeads, headDim, s.pos * halfDim);
             ropeApplyPairs(ctx, s.kNew, s.cos_table, s.sin_table, kvHeads, headDim, s.pos * halfDim);
 
+            stage(ctx, "kv cache write");
             writeIntoCache(ctx, s.kNew, s.k_cache_f32, (long) s.pos * kvDim, kvDim);
             writeIntoCache(ctx, s.vNew, s.v_cache_f32, (long) s.pos * kvDim, kvDim);
 
+            stage(ctx, "attention");
             if (fusedAttentionSupported(headDim) && !Variants.legacyAttention()) {
                 attnDecodeFused(ctx, s.qSplit, s.k_cache_f32, s.v_cache_f32, s.attnOut, numHeads, kvHeads, headDim, posInclusive, rsqrtD);
             } else {
@@ -606,17 +622,24 @@ public final class LlamaLayer {
                 }
             }
 
+            stage(ctx, "wo proj");
             f32Gemv(ctx, s.attnOut, w.wo_f32, s.attnProj, dim, dim);
+            stage(ctx, "residual add");
             residualAdd(ctx, x, s.attnProj, dim);
 
             // === 2. FFN block: x = x + ffn(rms_norm(x)) ===
+            stage(ctx, "rmsnorm");
             rmsNorm(ctx, x, w.ffn_norm_gamma, s.ffnNorm, dim, cfg.norm_eps, s.rmsPartials);
+            stage(ctx, "quantize activation");
             quantizeActivationQ8_0(ctx, s.ffnNorm, s.ffnNormQ8, dim);
 
             ffnActivateDecode(ctx, s, w, cfg, dim, hidden);
 
+            stage(ctx, "quantize activation");
             quantizeActivationQ8_0(ctx, s.swigluOut, s.swigluOutQ8, hidden);
+            stage(ctx, "down proj");
             q8_0GemvPlain(ctx, s.swigluOutQ8, w.w_down_q8_0, s.ffnDownOut, dim, hidden);
+            stage(ctx, "residual add");
             residualAdd(ctx, x, s.ffnDownOut, dim);
 
             // No per-layer clFinish: the queue is in-order, so layers pipeline; the per-token logits readback is the sync point.
@@ -628,8 +651,11 @@ public final class LlamaLayer {
     private static void ffnActivateDecode(GpuContext ctx, GpuState s, GpuWeights w, Config cfg, int dim, int hidden) throws Throwable {
         switch (cfg.activationType) {
             case SWIGLU -> {
+                stage(ctx, "gate proj");
                 q8_0GemvPlain(ctx, s.ffnNormQ8, w.w_gate_q8_0, s.gate, hidden, dim);
+                stage(ctx, "up proj");
                 q8_0GemvPlain(ctx, s.ffnNormQ8, w.w_up_q8_0, s.up, hidden, dim);
+                stage(ctx, "swiglu");
                 swigluActivate(ctx, s.gate, s.up, s.swigluOut, hidden);
             }
             case GEGLU -> {
@@ -707,6 +733,7 @@ public final class LlamaLayer {
         final int vocab;
 
         public LogitsScratch(GpuContext ctx, Config cfg, int vocabSize) throws Throwable {
+            ctx.allocCategory = "logits scratch";
             MemorySegment n = null, nq = null, lg = null, pt = null;
             try {
                 n = allocFloats(ctx, cfg.dim);
@@ -744,14 +771,19 @@ public final class LlamaLayer {
     public static float[] finalLogits(LogitsScratch s, boolean headQ8, MemorySegment xRow, MemorySegment finalNormGammaDevice,
             MemorySegment lmHeadDevice, Config cfg, GpuContext ctx) throws Throwable {
         synchronized (ctx.dispatchLock) {
+            stage(ctx, "final rmsnorm");
             rmsNorm(ctx, xRow, finalNormGammaDevice, s.normed, cfg.dim, cfg.norm_eps, s.partials);
             if (headQ8) {
+                stage(ctx, "final quantize activation");
                 quantizeActivationQ8_0(ctx, s.normed, s.normedQ8, cfg.dim);
+                stage(ctx, "lm head");
                 q8_0GemvPlain(ctx, s.normedQ8, lmHeadDevice, s.logits, s.vocab, cfg.dim);
             } else {
+                stage(ctx, "lm head");
                 f32Gemv(ctx, s.normed, lmHeadDevice, s.logits, cfg.dim, s.vocab);
             }
         }
+        stage(ctx, "logits readback");
         readBlocking(ctx, s.logits, s.hostLogits, (long) s.vocab * Float.BYTES);
         float[] out = new float[s.vocab];
         MemorySegment.copy(s.hostLogits, ValueLayout.JAVA_FLOAT, 0, out, 0, s.vocab);
@@ -1049,6 +1081,13 @@ public final class LlamaLayer {
             p <<= 1;
         }
         return Math.min(p, 256);
+    }
+
+    /** Labels the commands enqueued next (profiler only; free when profiling is off). */
+    static void stage(GpuContext ctx, String name) {
+        if (ctx.prof != null) {
+            ctx.prof.stage = name;
+        }
     }
 
     /** Launches one of the bw_read_* probe kernels: {@code globalItems} work-items grid-stride over {@code n} elements. */

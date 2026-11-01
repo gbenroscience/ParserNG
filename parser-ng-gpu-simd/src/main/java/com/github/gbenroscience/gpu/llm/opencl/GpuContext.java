@@ -110,6 +110,9 @@ public final class GpuContext implements AutoCloseable {
         this(DeviceProfiler.ON);
     }
 
+    /** Category recorded with every buffer allocated from now on (for the memory report); owners set it before allocating. */
+    volatile String allocCategory = "other";
+
     /** Event profiler of this context, or null when profiling is off. */
     final DeviceProfiler prof;
 

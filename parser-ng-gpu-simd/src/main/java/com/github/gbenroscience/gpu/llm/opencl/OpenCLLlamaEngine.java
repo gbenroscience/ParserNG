@@ -111,12 +111,20 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
                 stateBytes += c.allocations.liveBytes() - b1;
             }
             long bHead0 = c.allocations.liveBytes();
+            c.allocCategory = "final norm gamma";
             norm = loadAndUploadFloat(c, prep.gguf, "output_norm.weight");
+            c.allocCategory = "lm head";
             LmHead lh = uploadLmHead(c, prep.gguf);
             head = lh.device;
             headQ8 = lh.q8;
             long headBytes = c.allocations.liveBytes() - bHead0;
             long kvPerLayer = 2L * cfg.max_seq * cfg.kv_heads * cfg.head_dim * 4L;
+            StringBuilder cat = new StringBuilder("device memory by category (live buffers, all layers):\n");
+            for (java.util.Map.Entry<String, long[]> e : c.allocations.byCategory().entrySet()) {
+                cat.append(String.format("  %-44s %9.1f MB  (%d buffers, %4.1f%%)%n", e.getKey(), e.getValue()[0] / 1e6, e.getValue()[1],
+                        100.0 * e.getValue()[0] / Math.max(c.allocations.liveBytes(), 1)));
+            }
+            LoadTimer.note(cat.toString().stripTrailing());
             LoadTimer.note(String.format("device memory after load: %.1f MB live (peak %.1f MB) = layer weights %.1f MB + per-layer state %.1f MB "
                     + "(of which KV cache %.1f MB: %.1f MB/layer at %d positions) + final norm/LM head %.1f MB (%s)",
                     c.allocations.liveBytes() / 1e6, c.allocations.peakBytes() / 1e6, weightBytes / 1e6, stateBytes / 1e6,

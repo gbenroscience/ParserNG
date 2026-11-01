@@ -25,7 +25,7 @@ class OpenCLEndToEndTest {
     static final double REL_TOL = 1e-3;
 
     private static GpuContext shared;
-    private static double worstAbs, worstRel, worstRms;
+    private static double worstAbs, worstRel, worstRms, worstMeanAbs, minCosine = 1.0;
     private static int comparedVectors;
     private static String skip;
 
@@ -41,7 +41,7 @@ class OpenCLEndToEndTest {
 
     @AfterAll
     static void close() {
-        System.out.printf("[OpenCLEndToEndTest] %d logit vectors compared; worst maxAbs=%.3e worst maxRel=%.3e worst rms=%.3e%n", comparedVectors, worstAbs, worstRel, worstRms);
+        System.out.printf("[OpenCLEndToEndTest] %d logit vectors compared; worst maxAbs=%.3e worst meanAbs=%.3e worst maxRel=%.3e worst rms=%.3e min cosine=%.12f%n", comparedVectors, worstAbs, worstMeanAbs, worstRel, worstRms, minCosine);
         if (shared != null) {
             shared.close();
         }
@@ -152,6 +152,8 @@ class OpenCLEndToEndTest {
                 worstAbs = Math.max(worstAbs, st.maxAbsError);
                 worstRel = Math.max(worstRel, st.maxRelError);
                 worstRms = Math.max(worstRms, st.rmsError);
+                worstMeanAbs = Math.max(worstMeanAbs, st.meanAbsError);
+                minCosine = Math.min(minCosine, st.cosineSimilarity);
                 comparedVectors++;
                 assertTrue(st.passed(), "promptLen=" + promptLen + " prefill=" + pre + " position " + i + ": " + st);
             }
@@ -460,6 +462,69 @@ class OpenCLEndToEndTest {
             }
             assertEquals(tok.decode(gen), got, "Q8_0 LM head: device greedy generation must equal the CPU reference");
             assertEquals(0, ctx.prof.counter("decode", DeviceProfiler.ALLOCS), "a decode step must not allocate device buffers");
+        } finally {
+            eng.close();
+        }
+    }
+
+    /** The model-free memory plan must equal what a real engine of the same shape actually allocates, byte for byte. */
+    @Test
+    void memoryPlanEqualsRealEngineAllocation() throws Throwable {
+        assumeTrue(skip == null, skip);
+        TinyModel m = tiny(41);
+        File f = write(m);
+        GpuContext real = new GpuContext();
+        OpenCLLlamaEngine eng = new OpenCLLlamaEngine(f, real);
+        long liveReal;
+        java.util.SortedMap<String, long[]> realCats;
+        try {
+            liveReal = real.allocations.liveBytes();
+            realCats = real.allocations.byCategory();
+        } finally {
+            eng.close();
+        }
+        LlamaLayer.Config cfg = LlamaLayer.Config.fromGguf(GGUFLoader.load(f));
+        GpuContext planCtx = new GpuContext();
+        try {
+            long predicted = MemoryPlan.run(planCtx, cfg, m.vocab, false); // TinyModel's output.weight is F32
+            assertEquals(liveReal, predicted, "plan (one real layer x N + once-only buffers) must equal the real engine's live device bytes");
+        } finally {
+            planCtx.close();
+        }
+        assertTrue(realCats.containsKey("state: KV cache") && realCats.containsKey("lm head") && realCats.containsKey("state: prefill scratch (per layer)"), realCats.keySet().toString());
+        long sum = 0;
+        for (long[] v : realCats.values()) {
+            sum += v[0];
+        }
+        assertEquals(liveReal, sum, "categories must partition the live bytes");
+        assertFalse(realCats.containsKey("other") || realCats.containsKey("uncategorised"), "every allocation must carry a category: " + realCats.keySet());
+    }
+
+    @Test
+    void profileReportsEveryOperationAsItsOwnStage() throws Throwable {
+        assumeTrue(skip == null, skip);
+        TinyModel m = new TinyModel();
+        m.q8Embeddings = true;
+        m.tiedOutput = true;
+        m.build(42);
+        GpuContext ctx = new GpuContext(true);
+        OpenCLLlamaEngine eng = new OpenCLLlamaEngine(write(m), ctx);
+        try {
+            LlamaGenerationConfig c = new LlamaGenerationConfig();
+            c.temperature = 0f;
+            c.repetitionPenalty = 1f;
+            c.maxNewTokens = 4;
+            c.eosTokenId = -1;
+            eng.generate("hello there", c);
+            String report = ctx.prof.report(java.util.Map.of("prefill", 1, "decode", 3));
+            for (String stage : new String[]{"q proj", "k proj", "v proj", "attention", "wo proj", "gate proj", "up proj", "swiglu", "down proj",
+                "final rmsnorm", "lm head", "logits readback", "kv cache write", "rope"}) {
+                assertTrue(report.contains(stage), "missing stage '" + stage + "' in profile:\n" + report);
+            }
+            DeviceProfiler.Stat head = ctx.prof.stageStat("decode", "lm head");
+            assertEquals(3, head.count, "one LM-head launch per decoded token");
+            assertTrue(head.deviceNs > 0 && head.bytes > 0);
+            assertEquals(3 * ((long) m.vocab + 1) * (m.dim / 32) * 34, head.bytes, "byte hint of the Q8_0 LM head");
         } finally {
             eng.close();
         }

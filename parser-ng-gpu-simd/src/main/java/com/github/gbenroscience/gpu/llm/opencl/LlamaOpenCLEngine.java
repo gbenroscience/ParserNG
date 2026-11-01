@@ -99,6 +99,7 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
         this.lmHeadQ8 = lmHeadQ8;
         this.vocabSize = vocabSize;
 
+        ctx.allocCategory = "engine scratch";
         this.xSingle = LlamaLayer.allocFloats(ctx, cfg.dim);
         this.xBatch = (cfg.max_prefill_batch > 0)
                 ? LlamaLayer.allocFloats(ctx, (long) cfg.max_prefill_batch * cfg.dim)

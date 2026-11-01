@@ -49,14 +49,16 @@ final class DeviceProfiler {
     private static final class Pending {
 
         final String phase;
+        final String stage;
         final int layer;
         final String op;
         final long bytes;
         final long hostNs;
         final MemorySegment event;
 
-        Pending(String phase, int layer, String op, long bytes, long hostNs, MemorySegment event) {
+        Pending(String phase, String stage, int layer, String op, long bytes, long hostNs, MemorySegment event) {
             this.phase = phase;
+            this.stage = stage;
             this.layer = layer;
             this.op = op;
             this.bytes = bytes;
@@ -73,6 +75,7 @@ final class DeviceProfiler {
     private final List<Pending> pending = new ArrayList<>();
     private final Map<String, Map<String, Stat>> ops = new TreeMap<>();
     private final Map<String, Map<Integer, long[]>> layers = new TreeMap<>(); // phase -> layer -> {deviceNs, commands}
+    private final Map<String, Map<String, Stat>> stages = new TreeMap<>();     // phase -> stage -> stat
     private final Map<String, long[]> windows = new TreeMap<>();               // phase -> {spanNs, busyNs, count}
     private final Map<String, long[]> counters = new TreeMap<>();
     private long unprofiled;
@@ -85,6 +88,7 @@ final class DeviceProfiler {
         kernelBytesHint = bytes;
     }
 
+    volatile String stage = "-";
     volatile String phase = "load";
     volatile int layer = -1;
 
@@ -101,6 +105,19 @@ final class DeviceProfiler {
         return counters.computeIfAbsent(ph, k -> new long[N_COUNTERS]);
     }
 
+    /** Copy of the accumulated stats of one stage in one phase (zeros if none). Call after {@link #flush()}. */
+    synchronized Stat stageStat(String ph, String stg) {
+        Stat src = stages.getOrDefault(ph, new TreeMap<>()).get(stg);
+        Stat out = new Stat();
+        if (src != null) {
+            out.count = src.count;
+            out.deviceNs = src.deviceNs;
+            out.hostNs = src.hostNs;
+            out.bytes = src.bytes;
+        }
+        return out;
+    }
+
     synchronized long counter(String ph, int idx) {
         return c(ph)[idx];
     }
@@ -110,7 +127,7 @@ final class DeviceProfiler {
     }
 
     private synchronized void add(String op, long bytes, long hostNs, MemorySegment event) {
-        pending.add(new Pending(phase, layer, op, bytes, hostNs, event));
+        pending.add(new Pending(phase, stage, layer, op, bytes, hostNs, event));
     }
 
     // ---------------------------------------------------------------- wrapped entry points
@@ -254,6 +271,11 @@ final class DeviceProfiler {
             s.bytes += e.bytes;
             s.minNs = Math.min(s.minNs, dur);
             s.maxNs = Math.max(s.maxNs, dur);
+            Stat st = stages.computeIfAbsent(e.phase, k -> new TreeMap<>()).computeIfAbsent(e.stage, k -> new Stat());
+            st.count++;
+            st.deviceNs += dur;
+            st.hostNs += e.hostNs;
+            st.bytes += e.bytes;
             long[] l = layers.computeIfAbsent(e.phase, k -> new TreeMap<>()).computeIfAbsent(e.layer, k -> new long[2]);
             l[0] += dur;
             l[1]++;
@@ -279,6 +301,7 @@ final class DeviceProfiler {
     /** Forgets everything measured so far (use after a warm-up run). Pending events must already have been flushed. */
     synchronized void resetStats() {
         ops.clear();
+        stages.clear();
         layers.clear();
         windows.clear();
         counters.clear();
@@ -311,6 +334,16 @@ final class DeviceProfiler {
                 sb.append(String.format("%-34s %8d %12.2f %10.1f %12.2f %12.2f %9s%n", r.getKey(), s.count, s.deviceNs / 1e6,
                         s.deviceNs / 1e3 / Math.max(s.count, 1), s.hostNs / 1e6, s.bytes / 1e6,
                         s.bytes > 0 && s.deviceNs > 0 ? String.format("%.1f", s.bytes / (double) s.deviceNs) : "-"));
+            }
+            sb.append(String.format("%n%-34s %8s %12s %7s %10s %9s  (by operation; GB/s = bytes read / device time)%n",
+                    "stage", "commands", "device ms", "% busy", "avg us", "GB/s"));
+            List<Map.Entry<String, Stat>> srows = new ArrayList<>(stages.getOrDefault(ph, new TreeMap<>()).entrySet());
+            srows.sort((a, b) -> Long.compare(b.getValue().deviceNs, a.getValue().deviceNs));
+            for (Map.Entry<String, Stat> r : srows) {
+                Stat st = r.getValue();
+                sb.append(String.format("%-34s %8d %12.2f %6.1f%% %10.1f %9s%n", r.getKey(), st.count, st.deviceNs / 1e6,
+                        busy == 0 ? 0.0 : 100.0 * st.deviceNs / busy, st.deviceNs / 1e3 / Math.max(st.count, 1),
+                        st.bytes > 0 && st.deviceNs > 0 ? String.format("%.1f", st.bytes / (double) st.deviceNs) : "-"));
             }
             sb.append("device ms per transformer layer (-1 = embedding / final norm / lm head):\n  ");
             for (Map.Entry<Integer, long[]> l : layers.getOrDefault(ph, new TreeMap<>()).entrySet()) {
