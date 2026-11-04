@@ -23,6 +23,46 @@ final class Variants {
         return legacy("llm.gemv");
     }
 
+    /** Forced decode GEMV variant from -Dllm.gemv=wg|vloadf|u32, or -1 (not forced: use the context's autotuned choice). */
+    static int forcedGemvVariant() {
+        String v = System.getProperty("llm.gemv");
+        if (v == null) {
+            return -1;
+        }
+        switch (v.toLowerCase()) {
+            case "wg":
+                return 0;
+            case "vloadf":
+                return 1;
+            case "u32":
+                return 2;
+            default:
+                return -1; // "legacy" and "auto" are handled elsewhere
+        }
+    }
+
+    /** True unless a forced variant (or "legacy") was requested: the engine may autotune the decode GEMV at load. */
+    static boolean autotuneGemv() {
+        String v = System.getProperty("llm.gemv");
+        return v == null || v.equalsIgnoreCase("auto");
+    }
+
+    /** True unless -Dllm.gemm is set to legacy or rows: the engine then times legacy vs row-wise GEMMs at load and keeps the faster. */
+    static boolean autotuneGemm() {
+        String v = System.getProperty("llm.gemm");
+        return v == null || v.equalsIgnoreCase("auto");
+    }
+
+    /** -Dllm.gemm=rows forces the row-wise GEMMs. */
+    static boolean forcedRowsGemm() {
+        return "rows".equalsIgnoreCase(System.getProperty("llm.gemm"));
+    }
+
+    /** -Dllm.gemm=legacy selects the original one-thread-per-output prefill GEMMs. */
+    static boolean legacyGemm() {
+        return legacy("llm.gemm");
+    }
+
     static boolean legacyAttention() {
         return legacy("llm.attention");
     }
@@ -32,7 +72,8 @@ final class Variants {
     }
 
     static String describe() {
-        return "kernel variants: gemv=" + (legacyGemv() ? "legacy" : "workgroup-per-row")
+        return "kernel variants: gemv=" + (legacyGemv() ? "legacy" : forcedGemvVariant() >= 0 ? "forced " + System.getProperty("llm.gemv") : "autotuned at load (wg|vloadf|u32)")
+                + ", gemm=" + (legacyGemm() ? "legacy per-token" : forcedRowsGemm() ? "forced row-wise" : "autotuned at load (legacy|row-wise)")
                 + ", attention=" + (legacyAttention() ? "legacy per-head" : "fused all-heads")
                 + ", rmsnorm=" + (legacyRmsnorm() ? "legacy 2-kernel+readback" : "fused single launch");
     }

@@ -80,6 +80,15 @@ public final class GpuContext implements AutoCloseable {
     public final MemorySegment kQ8_0GemvPlainLegacy;
     public final MemorySegment kF32GemvLegacy;
     public final MemorySegment kRmsnormFused;
+    final MemorySegment kQ8_0GemvVloadf;
+    final MemorySegment kQ8_0GemvU32;
+    final MemorySegment kQ8_0GemmRows;
+    final MemorySegment kF32GemmRows;
+    /** Decode GEMV variant used when -Dllm.gemv is not forced: 0 = wg (vload16), 1 = vloadf (float dp4), 2 = u32 (aligned words). Set by GemvAutotune. */
+    volatile int gemvVariant = 0;
+    /** Prefill GEMM choice (set by GemvAutotune.runGemm; true = row-wise kernels, false = the original one-thread-per-output kernels). */
+    volatile boolean q8GemmRows = true;
+    volatile boolean f32GemmRows = true;
     final MemorySegment kBwU8;
     final MemorySegment kBwU32;
     final MemorySegment kBwU128;
@@ -165,6 +174,10 @@ public final class GpuContext implements AutoCloseable {
             this.kQ8_0GemvPlainLegacy = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_PLAIN_LEGACY);
             this.kF32GemvLegacy = createKernel(bootstrap, KernelSource.KERNEL_F32_GEMV_LEGACY);
             this.kRmsnormFused = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_FUSED);
+            this.kQ8_0GemvVloadf = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_VLOADF);
+            this.kQ8_0GemvU32 = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_U32);
+            this.kQ8_0GemmRows = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMM_ROWS);
+            this.kF32GemmRows = createKernel(bootstrap, KernelSource.KERNEL_F32_GEMM_ROWS);
             this.kBwU8 = createKernel(bootstrap, KernelSource.KERNEL_BW_U8);
             this.kBwU32 = createKernel(bootstrap, KernelSource.KERNEL_BW_U32);
             this.kBwU128 = createKernel(bootstrap, KernelSource.KERNEL_BW_U128);
@@ -281,6 +294,10 @@ public final class GpuContext implements AutoCloseable {
             releaseKernelQuietly(kQ8_0GemvPlainLegacy);
             releaseKernelQuietly(kF32GemvLegacy);
             releaseKernelQuietly(kRmsnormFused);
+            releaseKernelQuietly(kQ8_0GemvVloadf);
+            releaseKernelQuietly(kQ8_0GemvU32);
+            releaseKernelQuietly(kQ8_0GemmRows);
+            releaseKernelQuietly(kF32GemmRows);
             releaseKernelQuietly(kBwU8);
             releaseKernelQuietly(kBwU32);
             releaseKernelQuietly(kBwU128);

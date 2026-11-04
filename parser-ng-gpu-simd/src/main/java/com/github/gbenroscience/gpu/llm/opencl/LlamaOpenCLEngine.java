@@ -222,6 +222,7 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
             if (prof != null) {
                 prof.layer = -1;
             }
+            LlamaLayer.stage(ctx, "embedding upload");
             embeddings.embedRow(nextId, xSingle, ctx);
             final long h1 = System.nanoTime();
             for (int l = 0; l < layers.length; l++) {
@@ -294,6 +295,7 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
 
         if (prefillLen > 0) {
             int[] prefillIds = Arrays.copyOfRange(promptIds, 0, prefillLen);
+            LlamaLayer.stage(ctx, "embedding upload");
             embeddings.embedRows(prefillIds, xBatch, ctx);
             for (int l = 0; l < layers.length; l++) {
                 if (ctx.prof != null) {
@@ -326,6 +328,7 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
         // decode path. Each iteration leaves its result in xSingle; the
         // LAST iteration's xSingle is what the caller needs.
         for (int i = prefillLen; i < T; i++) {
+            LlamaLayer.stage(ctx, "embedding upload");
             embeddings.embedRow(promptIds[i], xSingle, ctx);
             for (int l = 0; l < layers.length; l++) {
                 if (ctx.prof != null) {

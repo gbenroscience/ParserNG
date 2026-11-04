@@ -121,7 +121,10 @@ class OpenCLConformanceTest {
     void q8GemvMatchesReferenceForEdgeShapes() throws Throwable {
         needDevice();
         // K/32 blocks: 1, 2, 63, 64 (== lanes), 65, 129 (not a multiple of the lane count), 256
-        int[][] shapes = {{1, 32}, {3, 64}, {5, 2016}, {7, 2048}, {9, 2080}, {33, 4128}, {64, 8192}, {257, 96}};
+        int[][] shapes = {{1, 32}, {3, 64}, {5, 2016}, {7, 2048}, {9, 2080}, {33, 4128}, {64, 8192}, {257, 96}, {8, 128}};
+        for (int variant = 0; variant < 3; variant++) {
+          ctx.gemvVariant = variant;
+          try {
         for (int[] nk : shapes) {
             int N = nk[0], K = nk[1];
             Random r = new Random(N * 7919L + K);
@@ -136,12 +139,16 @@ class OpenCLConformanceTest {
                 float[] got = LlamaLayer.downloadFloats(ctx, dout, N);
                 com.github.gbenroscience.gpu.llm.core.ErrorStats st = com.github.gbenroscience.gpu.llm.core.ErrorStats
                         .compare(got, CpuReference.q8Gemv(xq, w, N, K), 1e-4, 1e-5);
-                assertTrue(st.passed(), "q8 N=" + N + " K=" + K + " " + st);
+                assertTrue(st.passed(), "variant " + variant + " q8 N=" + N + " K=" + K + " " + st);
             } finally {
                 LlamaLayer.freeQuietly(ctx, dx);
                 LlamaLayer.freeQuietly(ctx, dw);
                 LlamaLayer.freeQuietly(ctx, dout);
             }
+        }
+          } finally {
+            ctx.gemvVariant = 0;
+          }
         }
     }
 
@@ -322,6 +329,118 @@ class OpenCLConformanceTest {
             }
         } finally {
             System.clearProperty("llm.rmsnorm");
+        }
+    }
+
+    /** Row-wise prefill GEMM (weights read once per 16-token chunk) vs the reference, around the chunk boundaries and with the odd-block fallback. */
+    @Test
+    void q8GemmRowsMatchesReference() throws Throwable {
+        needDevice();
+        int[][] shapes = {{5, 64}, {33, 2048}, {7, 4096}, {19, 2016}, {64, 64}, {3, 32}};
+        for (int[] nk : shapes) {
+            for (int T : new int[]{1, 3, 8, 16, 17, 33, 40}) {
+                int N = nk[0], K = nk[1];
+                Random r = new Random(N * 131L + K + T);
+                byte[] w = CpuReference.quantizeQ8_0(randn(r, N * K, 0.05f));
+                byte[][] xs = new byte[T][];
+                byte[] xall = new byte[T * (K / 32) * 34];
+                float[] expect = new float[T * N];
+                for (int t = 0; t < T; t++) {
+                    xs[t] = CpuReference.quantizeQ8_0(randn(r, K, 1f));
+                    System.arraycopy(xs[t], 0, xall, t * xs[t].length, xs[t].length);
+                    System.arraycopy(CpuReference.q8Gemv(xs[t], w, N, K), 0, expect, t * N, N);
+                }
+                MemorySegment dx = LlamaLayer.uploadBytes(ctx, xall);
+                MemorySegment dw = LlamaLayer.uploadBytes(ctx, w);
+                MemorySegment dout = LlamaLayer.allocFloats(ctx, (long) T * N);
+                try {
+                    LlamaLayer.q8_0GemmTiled(ctx, dx, dw, dout, T, N, K);
+                    LlamaLayer.finish(ctx);
+                    com.github.gbenroscience.gpu.llm.core.ErrorStats st = com.github.gbenroscience.gpu.llm.core.ErrorStats
+                            .compare(LlamaLayer.downloadFloats(ctx, dout, T * N), expect, 1e-4, 1e-5);
+                    assertTrue(st.passed(), "q8 gemm T=" + T + " N=" + N + " K=" + K + " " + st);
+                } finally {
+                    LlamaLayer.freeQuietly(ctx, dx);
+                    LlamaLayer.freeQuietly(ctx, dw);
+                    LlamaLayer.freeQuietly(ctx, dout);
+                }
+            }
+        }
+    }
+
+    @Test
+    void f32GemmRowsMatchesReference() throws Throwable {
+        needDevice();
+        int[][] shapes = {{5, 4}, {33, 64}, {7, 2048}, {9, 30}, {16, 1000}, {64, 256}};
+        for (int[] nk : shapes) {
+            for (int T : new int[]{1, 2, 16, 17, 33}) {
+                int N = nk[0], K = nk[1];
+                Random r = new Random(N * 7L + K + T);
+                float[] w = randn(r, N * K, 0.1f);
+                float[] a = randn(r, T * K, 1f);
+                float[] expect = new float[T * N];
+                for (int t = 0; t < T; t++) {
+                    System.arraycopy(CpuReference.matvecExact(w, java.util.Arrays.copyOfRange(a, t * K, (t + 1) * K), N, K), 0, expect, t * N, N);
+                }
+                MemorySegment da = LlamaLayer.uploadFloats(ctx, a);
+                MemorySegment dw = LlamaLayer.uploadFloats(ctx, w);
+                MemorySegment dout = LlamaLayer.allocFloats(ctx, (long) T * N);
+                try {
+                    LlamaLayer.f32GemmTiled(ctx, da, dw, dout, T, K, N);
+                    LlamaLayer.finish(ctx);
+                    com.github.gbenroscience.gpu.llm.core.ErrorStats st = com.github.gbenroscience.gpu.llm.core.ErrorStats
+                            .compare(LlamaLayer.downloadFloats(ctx, dout, T * N), expect, 1e-4, 1e-4);
+                    assertTrue(st.passed(), "f32 gemm T=" + T + " N=" + N + " K=" + K + " " + st);
+                } finally {
+                    LlamaLayer.freeQuietly(ctx, da);
+                    LlamaLayer.freeQuietly(ctx, dw);
+                    LlamaLayer.freeQuietly(ctx, dout);
+                }
+            }
+        }
+    }
+
+    @Test
+    void legacyGemmStillMatchesReference() throws Throwable {
+        needDevice();
+        System.setProperty("llm.gemm", "legacy");
+        try {
+            q8GemmRowsMatchesReference();
+            f32GemmRowsMatchesReference();
+        } finally {
+            System.clearProperty("llm.gemm");
+        }
+    }
+
+    /** The autotuner only ever selects a variant whose output matches the reference variant, and records what it did. */
+    @Test
+    void autotunePicksAValidVariantAndReportsIt() throws Throwable {
+        needDevice();
+        LoadTimer.reset();
+        GemvAutotune.run(ctx, 2048, 512);
+        try {
+            assertTrue(ctx.gemvVariant >= 0 && ctx.gemvVariant <= 2);
+            String rep = LoadTimer.report();
+            assertTrue(rep.contains("GEMV autotune") && rep.contains("-> chose"), rep);
+            q8GemvMatchesReferenceForEdgeShapes(); // sweeps variants itself and resets to 0; autotuned choice was already validated inside run()
+        } finally {
+            ctx.gemvVariant = 0;
+        }
+    }
+
+    @Test
+    void gemmAutotuneKeepsOnlyOutputEquivalentFasterKernelsAndReportsIt() throws Throwable {
+        needDevice();
+        LoadTimer.reset();
+        GemvAutotune.runGemm(ctx, 512, 512);
+        try {
+            String rep = LoadTimer.report();
+            assertTrue(rep.contains("GEMM autotune") && rep.contains("Q8_0") && rep.contains("F32"), rep);
+            q8GemmRowsMatchesReference(); // whichever kernels were chosen must still match the reference
+            f32GemmRowsMatchesReference();
+        } finally {
+            ctx.q8GemmRows = true;
+            ctx.f32GemmRows = true;
         }
     }
 }

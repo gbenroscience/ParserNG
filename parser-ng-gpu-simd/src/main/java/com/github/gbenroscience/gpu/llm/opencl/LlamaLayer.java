@@ -873,12 +873,20 @@ public final class LlamaLayer {
             uploadIntsInto(ctx, s.positionsBatch, positions);
 
             // === 1. Attention block ===
+            stage(ctx, "rmsnorm");
             rmsNormRows(ctx, xBatch, w.attn_norm_gamma, s.xNormBatch, dim, cfg.norm_eps, T, s.rmsPartialsBatch, s.rmsRowValuesBatch);
+            stage(ctx, "quantize activation");
             quantizeActivationQ8_0(ctx, s.xNormBatch, s.xNormQ8Batch, T * dim);
 
+            stage(ctx, "q proj");
+
             q8_0GemmTiled(ctx, s.xNormQ8Batch, w.wq_q8_0, s.qBatch, T, qRowStride, dim);
+            stage(ctx, "k proj");
             q8_0GemmTiled(ctx, s.xNormQ8Batch, w.wk_q8_0, s.kBatch, T, kvDim, dim);
+            stage(ctx, "v proj");
             q8_0GemmTiled(ctx, s.xNormQ8Batch, w.wv_q8_0, s.vBatch, T, kvDim, dim);
+
+            stage(ctx, "rope");
 
             ropeApplyPairwiseRows(ctx, s.qBatch, s.cos_table, s.sin_table, numHeads, headDim, s.positionsBatch, T);
             ropeApplyPairwiseRows(ctx, s.kBatch, s.cos_table, s.sin_table, kvHeads, headDim, s.positionsBatch, T);
@@ -886,8 +894,11 @@ public final class LlamaLayer {
             // Bulk cache write -- device-to-device, T*kvDim elements. See
             // class javadoc: this is a genuine improvement over the CUDA
             // original's host round trip, not just a translation.
+            stage(ctx, "kv cache write");
             writeIntoCache(ctx, s.kBatch, s.k_cache_f32, (long) startPos * kvDim, T * kvDim);
             writeIntoCache(ctx, s.vBatch, s.v_cache_f32, (long) startPos * kvDim, T * kvDim);
+
+            stage(ctx, "attention");
 
             for (int h = 0; h < numHeads; h++) {
                 int kvHead = h / groupSize;
@@ -901,17 +912,26 @@ public final class LlamaLayer {
                         kvDim, qRowStride, kvHeadOff, qHeadOff, headDim, T);
             }
 
+            stage(ctx, "wo proj");
+
             f32GemmTiled(ctx, s.attnOutBatch, w.wo_f32, s.attnProjBatch, T, dim, dim);
+            stage(ctx, "residual add");
             residualAdd(ctx, xBatch, s.attnProjBatch, T * dim);
 
             // === 2. FFN block ===
+            stage(ctx, "rmsnorm");
             rmsNormRows(ctx, xBatch, w.ffn_norm_gamma, s.ffnNormBatch, dim, cfg.norm_eps, T, s.rmsPartialsBatch, s.rmsRowValuesBatch);
+            stage(ctx, "quantize activation");
             quantizeActivationQ8_0(ctx, s.ffnNormBatch, s.ffnNormQ8Batch, T * dim);
 
             ffnActivateBatched(ctx, s, w, cfg, T, dim, hidden);
 
+            stage(ctx, "quantize activation");
+
             quantizeActivationQ8_0(ctx, s.swigluOutBatch, s.swigluOutQ8Batch, T * hidden);
+            stage(ctx, "down proj");
             q8_0GemmTiled(ctx, s.swigluOutQ8Batch, w.w_down_q8_0, s.ffnDownOutBatch, T, dim, hidden);
+            stage(ctx, "residual add");
             residualAdd(ctx, xBatch, s.ffnDownOutBatch, T * dim);
 
             GpuContext.check((int) ctx.cl.clFinish.invoke(ctx.queue), "clFinish(end of prefill_layer)");
@@ -923,16 +943,22 @@ public final class LlamaLayer {
     private static void ffnActivateBatched(GpuContext ctx, GpuState s, GpuWeights w, Config cfg, int T, int dim, int hidden) throws Throwable {
         switch (cfg.activationType) {
             case SWIGLU -> {
+                stage(ctx, "gate proj");
                 q8_0GemmTiled(ctx, s.ffnNormQ8Batch, w.w_gate_q8_0, s.gateBatch, T, hidden, dim);
+                stage(ctx, "up proj");
                 q8_0GemmTiled(ctx, s.ffnNormQ8Batch, w.w_up_q8_0, s.upBatch, T, hidden, dim);
+                stage(ctx, "swiglu");
                 swigluActivate(ctx, s.gateBatch, s.upBatch, s.swigluOutBatch, T * hidden);
             }
             case GEGLU -> {
+                stage(ctx, "gate proj");
                 q8_0GemmTiled(ctx, s.ffnNormQ8Batch, w.w_gate_q8_0, s.gateBatch, T, hidden, dim);
+                stage(ctx, "up proj");
                 q8_0GemmTiled(ctx, s.ffnNormQ8Batch, w.w_up_q8_0, s.upBatch, T, hidden, dim);
                 gegluActivate(ctx, s.gateBatch, s.upBatch, s.swigluOutBatch, T * hidden);
             }
             case GELU -> {
+                stage(ctx, "gate proj");
                 q8_0GemmTiled(ctx, s.ffnNormQ8Batch, w.w_gate_q8_0, s.gateBatch, T, hidden, dim);
                 geluActivate(ctx, s.gateBatch, s.swigluOutBatch, T * hidden);
             }
@@ -1015,10 +1041,22 @@ public final class LlamaLayer {
         }
     }
 
+    /** The decode GEMV kernel for this K: the forced variant, else the autotuned one; u32 needs an even number of blocks per row. */
+    static MemorySegment gemvKernel(GpuContext ctx, int K) {
+        int v = Variants.forcedGemvVariant();
+        if (v < 0) {
+            v = ctx.gemvVariant;
+        }
+        if (v == 2 && (K / 32) % 2 != 0) {
+            v = 0;
+        }
+        return v == 2 ? ctx.kQ8_0GemvU32 : v == 1 ? ctx.kQ8_0GemvVloadf : ctx.kQ8_0GemvPlain;
+    }
+
     static void q8_0GemvPlain(GpuContext ctx, MemorySegment xQ8, MemorySegment wQ8, MemorySegment out,
             int N, int K) throws Throwable {
         final boolean legacy = Variants.legacyGemv();
-        final MemorySegment K_ = legacy ? ctx.kQ8_0GemvPlainLegacy : ctx.kQ8_0GemvPlain;
+        final MemorySegment K_ = legacy ? ctx.kQ8_0GemvPlainLegacy : gemvKernel(ctx, K);
         if (ctx.prof != null) {
             ctx.prof.hintBytes(((long) N + 1) * (K / 32) * 34L); // weight rows + the shared activation vector
         }
@@ -1259,26 +1297,62 @@ public final class LlamaLayer {
     }
 
     static void q8_0GemmTiled(GpuContext ctx, MemorySegment xQ8, MemorySegment wQ8, MemorySegment out, int T, int N, int K) throws Throwable {
+        final boolean rows = !Variants.legacyGemm() && ctx.q8GemmRows && (K / 32) % 2 == 0;
+        final MemorySegment k = rows ? ctx.kQ8_0GemmRows : ctx.kQ8_0GemmTiled;
+        final int chunks = (T + KernelSource.GEMM_TOKEN_CHUNK - 1) / KernelSource.GEMM_TOKEN_CHUNK;
+        if (ctx.prof != null && rows) {
+            // weights are read once per 16-token chunk, plus the activations
+            ctx.prof.hintBytes((long) N * (K / 32) * 34L * chunks + (long) T * (K / 32) * 34L);
+        }
         try (Arena tmp = Arena.ofConfined()) {
-            setArg(tmp, ctx, ctx.kQ8_0GemmTiled, 0, xQ8);
-            setArg(tmp, ctx, ctx.kQ8_0GemmTiled, 1, wQ8);
-            setArg(tmp, ctx, ctx.kQ8_0GemmTiled, 2, out);
-            setArgI(tmp, ctx, ctx.kQ8_0GemmTiled, 3, T);
-            setArgI(tmp, ctx, ctx.kQ8_0GemmTiled, 4, N);
-            setArgI(tmp, ctx, ctx.kQ8_0GemmTiled, 5, K);
-            launch2D(ctx, ctx.kQ8_0GemmTiled, T, N, KernelSource.GEMM_TILE_N);
+            setArg(tmp, ctx, k, 0, xQ8);
+            setArg(tmp, ctx, k, 1, wQ8);
+            setArg(tmp, ctx, k, 2, out);
+            setArgI(tmp, ctx, k, 3, T);
+            setArgI(tmp, ctx, k, 4, N);
+            setArgI(tmp, ctx, k, 5, K);
+            if (rows) {
+                launchGroups2D(ctx, k, N, chunks, KernelSource.GEMV_WORKGROUP);
+            } else {
+                launch2D(ctx, k, T, N, KernelSource.GEMM_TILE_N);
+            }
         }
     }
 
     static void f32GemmTiled(GpuContext ctx, MemorySegment a, MemorySegment B, MemorySegment out, int T, int K, int N) throws Throwable {
+        final boolean rows = !Variants.legacyGemm() && ctx.f32GemmRows && K % 4 == 0;
+        final MemorySegment k = rows ? ctx.kF32GemmRows : ctx.kF32GemmTiled;
+        final int chunks = (T + KernelSource.GEMM_TOKEN_CHUNK - 1) / KernelSource.GEMM_TOKEN_CHUNK;
+        if (ctx.prof != null && rows) {
+            ctx.prof.hintBytes((long) N * K * 4L * chunks + (long) T * K * 4L);
+        }
         try (Arena tmp = Arena.ofConfined()) {
-            setArg(tmp, ctx, ctx.kF32GemmTiled, 0, a);
-            setArg(tmp, ctx, ctx.kF32GemmTiled, 1, B);
-            setArg(tmp, ctx, ctx.kF32GemmTiled, 2, out);
-            setArgI(tmp, ctx, ctx.kF32GemmTiled, 3, T);
-            setArgI(tmp, ctx, ctx.kF32GemmTiled, 4, K);
-            setArgI(tmp, ctx, ctx.kF32GemmTiled, 5, N);
-            launch2D(ctx, ctx.kF32GemmTiled, T, N, KernelSource.GEMM_TILE_N);
+            setArg(tmp, ctx, k, 0, a);
+            setArg(tmp, ctx, k, 1, B);
+            setArg(tmp, ctx, k, 2, out);
+            setArgI(tmp, ctx, k, 3, T);
+            setArgI(tmp, ctx, k, 4, K);
+            setArgI(tmp, ctx, k, 5, N);
+            if (rows) {
+                launchGroups2D(ctx, k, N, chunks, KernelSource.GEMV_WORKGROUP);
+            } else {
+                launch2D(ctx, k, T, N, KernelSource.GEMM_TILE_N);
+            }
+        }
+    }
+
+    /** One work-group of {@code local} work-items per (x, y) group: global = {groupsX*local, groupsY}, local = {local, 1}. */
+    private static void launchGroups2D(GpuContext ctx, MemorySegment kernel, long groupsX, long groupsY, int local) throws Throwable {
+        try (Arena tmp = Arena.ofConfined()) {
+            MemorySegment globalSize = tmp.allocate(ValueLayout.JAVA_LONG, 2);
+            globalSize.setAtIndex(ValueLayout.JAVA_LONG, 0, groupsX * local);
+            globalSize.setAtIndex(ValueLayout.JAVA_LONG, 1, groupsY);
+            MemorySegment localSizeSeg = tmp.allocate(ValueLayout.JAVA_LONG, 2);
+            localSizeSeg.setAtIndex(ValueLayout.JAVA_LONG, 0, local);
+            localSizeSeg.setAtIndex(ValueLayout.JAVA_LONG, 1, 1);
+            GpuContext.check((int) ctx.cl.clEnqueueNDRangeKernel.invoke(
+                    ctx.queue, kernel, 2, MemorySegment.NULL, globalSize, localSizeSeg, 0, MemorySegment.NULL, MemorySegment.NULL),
+                    "clEnqueueNDRangeKernel(2D groups)");
         }
     }
 

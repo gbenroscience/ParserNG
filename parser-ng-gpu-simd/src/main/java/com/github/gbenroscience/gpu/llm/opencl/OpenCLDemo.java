@@ -14,7 +14,7 @@ import java.io.File;
  * System properties:
  *   -Dopencl.vendor=INTEL|NVIDIA|AMD|...   device to use (default INTEL; use -Dopencl.device.type=CPU for a CPU device)
  *   -Dllm.timing=true                      (on by default here) time-to-first-token and decode tokens/s
- *   -Dllm.profile=true                     OpenCL event profiler: device time per operation / layer, launches, syncs,
+ *   -Dllm.profile=true|false               (on by default in this demo) OpenCL event profiler: device time per operation / layer, launches, syncs,
  *                                          transfers (adds a little overhead; no extra synchronisation)
  *   -Dllm.maxContext=N                     cap on context positions (default 8192; sizes the KV cache)
  *   (for a full measurement run use OpenCLDiagnostics, which needs no arguments)
@@ -44,6 +44,10 @@ public final class OpenCLDemo {
             return;
         }
         System.setProperty("llm.timing", System.getProperty("llm.timing", "true"));
+        // The event profiler is ON by default in the demo so that every run also reports where the device time goes
+        // (per operation, per layer, launches, synchronisations, transfers). It captures one OpenCL event per command and adds
+        // no extra synchronisation; pass -Dllm.profile=false for the cleanest timing. Must be set before any engine class loads.
+        System.setProperty("llm.profile", System.getProperty("llm.profile", "true"));
 
         File ggufPath = new File(args[0]);
         if (!ggufPath.isFile()) {
@@ -56,7 +60,7 @@ public final class OpenCLDemo {
         // Device selection: honoured by GpuContext, which the engine creates after the model is validated.
         if (System.getProperty("opencl.device.type") == null) {
             OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.GpuVendor.valueOf(
-                    System.getProperty("opencl.vendor", "INTEL").toUpperCase()));
+                    System.getProperty("opencl.vendor", "AMD").toUpperCase()));
         }
 
         if (Boolean.getBoolean("llm.printTokens")) {
@@ -72,7 +76,7 @@ public final class OpenCLDemo {
             System.out.printf("Load + upload: %.1f s on %s%n", (System.nanoTime() - t0) / 1e9, engine.getDeviceDescription());
 
             LlamaGenerationConfig cfg = new LlamaGenerationConfig();
-            cfg.maxNewTokens = 64;
+            cfg.maxNewTokens = 256;
             cfg.temperature = 0.0f; // deterministic greedy decoding
             cfg.topK = 1;
             cfg.topP = 1.0f;

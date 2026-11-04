@@ -43,7 +43,7 @@ final class GemvSweep {
     }
 
     /** Valid Q8_0 data (finite scale, random int8 quants) generated cheaply; the values do not affect GPU timing. */
-    private static byte[] fakeQ8(long blocks, Random r) {
+    static byte[] fakeQ8(long blocks, Random r) {
         byte[] b = new byte[(int) (blocks * 34)];
         int scale = com.github.gbenroscience.gpu.llm.core.Fp16.floatToHalfBits(0.01f);
         byte[] q = new byte[32 * 1024];

@@ -89,6 +89,13 @@ public final class KernelSource {
     public static final String KERNEL_Q8_0_GEMV_PLAIN_LEGACY = "q8_0_gemv_plain_legacy";
     public static final String KERNEL_F32_GEMV_LEGACY = "f32_gemv_legacy";
     public static final String KERNEL_RMSNORM_FUSED = "rmsnorm_fused";
+    public static final String KERNEL_Q8_0_GEMV_VLOADF = "q8_0_gemv_vloadf";
+    public static final String KERNEL_Q8_0_GEMV_U32 = "q8_0_gemv_u32";
+    public static final String KERNEL_Q8_0_GEMM_ROWS = "q8_0_gemm_rows";
+    public static final String KERNEL_F32_GEMM_ROWS = "f32_gemm_rows";
+
+    /** Tokens processed per work-group pass by the *_gemm_rows kernels (must equal GEMM_TCH in the kernel source). */
+    public static final int GEMM_TOKEN_CHUNK = 16;
     public static final String KERNEL_BW_U8 = "bw_read_u8";
     public static final String KERNEL_BW_U32 = "bw_read_u32";
     public static final String KERNEL_BW_U128 = "bw_read_u128";
@@ -593,6 +600,212 @@ public final class KernelSource {
             }
             const float total = wg_sum(partial, acc);
             if (get_local_id(0) == 0) out[n] = total;
+        }
+
+        // ================= candidate Q8_0 GEMV loops and row-wise GEMMs (all bit-compatible with the integer dot) =================
+        // The int8*int8 products of one 32-element block are summed as FLOATS here: every product and every partial sum is
+        // an integer of magnitude < 2^24 (at most 32*127*127 = 516128), so float arithmetic is exact and the result is
+        // identical to the integer dot used by q8_0_gemv_plain; only the instruction mix differs (hardware dp4).
+        #define GEMM_TCH 16
+
+        inline float dp4_i8(uint a, uint b) {
+            return dot(convert_float4(as_char4(a)), convert_float4(as_char4(b)));
+        }
+
+        // One block, loaded with vload16 from the 2-byte-aligned quants (the same memory access as q8_0_gemv_plain).
+        inline float blk_dot_vloadf(__global const char* xq, __global const char* wq) {
+            const char16 xa = vload16(0, xq);
+            const char16 xb = vload16(1, xq);
+            const char16 wa = vload16(0, wq);
+            const char16 wb = vload16(1, wq);
+            return (dot(convert_float4(xa.s0123), convert_float4(wa.s0123)) + dot(convert_float4(xa.s4567), convert_float4(wa.s4567)))
+                 + (dot(convert_float4(xa.s89ab), convert_float4(wa.s89ab)) + dot(convert_float4(xa.scdef), convert_float4(wa.scdef)))
+                 + ((dot(convert_float4(xb.s0123), convert_float4(wb.s0123)) + dot(convert_float4(xb.s4567), convert_float4(wb.s4567)))
+                 + (dot(convert_float4(xb.s89ab), convert_float4(wb.s89ab)) + dot(convert_float4(xb.scdef), convert_float4(wb.scdef))));
+        }
+
+        // Two consecutive Q8_0 blocks form a 68-byte unit that is 4-byte aligned (68 = 17 words) whenever the row has an
+        // even number of blocks. Word 0 = scale0 + quants 0,1; words 0..8 hold block 0 (quants straddle two words, shifted
+        // by 16 bits); word 8's high half is scale1; words 9..16 hold block 1's 32 quants, aligned.
+        // wu = the 17 words of the weight unit (already loaded), xp = the activation unit in global memory.
+        inline float2 pair_dot_w(__global const uint* xp, const uint* wu) {
+            uint xu[17];
+            #pragma unroll
+            for (int i = 0; i < 17; i++) {
+                xu[i] = xp[i];
+            }
+            const float xs0 = decode_fp16((uchar) (xu[0] & 0xFFu), (uchar) ((xu[0] >> 8) & 0xFFu));
+            const float ws0 = decode_fp16((uchar) (wu[0] & 0xFFu), (uchar) ((wu[0] >> 8) & 0xFFu));
+            const float xs1 = decode_fp16((uchar) ((xu[8] >> 16) & 0xFFu), (uchar) ((xu[8] >> 24) & 0xFFu));
+            const float ws1 = decode_fp16((uchar) ((wu[8] >> 16) & 0xFFu), (uchar) ((wu[8] >> 24) & 0xFFu));
+            float d0 = 0.0f;
+            #pragma unroll
+            for (int i = 0; i < 8; i++) {
+                d0 += dp4_i8((xu[i] >> 16) | (xu[i + 1] << 16), (wu[i] >> 16) | (wu[i + 1] << 16));
+            }
+            float d1 = 0.0f;
+            #pragma unroll
+            for (int i = 9; i < 17; i++) {
+                d1 += dp4_i8(xu[i], wu[i]);
+            }
+            return (float2)(d0 * (xs0 * ws0), d1 * (xs1 * ws1));
+        }
+
+        // Same memory access as q8_0_gemv_plain, but the block dot uses float dp4.
+        __kernel __attribute__((reqd_work_group_size(GEMV_WG, 1, 1)))
+        void q8_0_gemv_vloadf(
+            __global const uchar* x_q8_0,
+            __global const uchar* W_q8_0,
+            __global float* out_f32,
+            const int N,
+            const int K)
+        {
+            __local float partial[GEMV_WG];
+            const int n = get_group_id(0);
+            if (n >= N) return;
+            const int numBlocks = K / Q8_0_GROUP_SIZE;
+            __global const uchar* wRow = W_q8_0 + (size_t) n * (size_t) numBlocks * Q8_0_BLOCK_SIZE;
+            float acc = 0.0f;
+            for (int b = get_local_id(0); b < numBlocks; b += GEMV_WG) {
+                __global const uchar* xb = x_q8_0 + (size_t) b * Q8_0_BLOCK_SIZE;
+                __global const uchar* wb = wRow + (size_t) b * Q8_0_BLOCK_SIZE;
+                const float scale = decode_fp16(xb[0], xb[1]) * decode_fp16(wb[0], wb[1]);
+                acc += blk_dot_vloadf((__global const char*) (xb + 2), (__global const char*) (wb + 2)) * scale;
+            }
+            const float total = wg_sum(partial, acc);
+            if (get_local_id(0) == 0) out_f32[n] = total;
+        }
+
+        // Aligned 4-byte loads over 68-byte block pairs. Requires an even number of blocks per row (K % 64 == 0).
+        __kernel __attribute__((reqd_work_group_size(GEMV_WG, 1, 1)))
+        void q8_0_gemv_u32(
+            __global const uchar* x_q8_0,
+            __global const uchar* W_q8_0,
+            __global float* out_f32,
+            const int N,
+            const int K)
+        {
+            __local float partial[GEMV_WG];
+            const int n = get_group_id(0);
+            if (n >= N) return;
+            const int numPairs = K / (2 * Q8_0_GROUP_SIZE);
+            __global const uchar* wRow = W_q8_0 + (size_t) n * (size_t) numPairs * 68;
+            float acc = 0.0f;
+            for (int p = get_local_id(0); p < numPairs; p += GEMV_WG) {
+                __global const uint* wp = (__global const uint*) (wRow + (size_t) p * 68);
+                uint wu[17];
+                #pragma unroll
+                for (int i = 0; i < 17; i++) {
+                    wu[i] = wp[i];
+                }
+                const float2 c = pair_dot_w((__global const uint*) (x_q8_0 + (size_t) p * 68), wu);
+                acc += c.x;
+                acc += c.y;
+            }
+            const float total = wg_sum(partial, acc);
+            if (get_local_id(0) == 0) out_f32[n] = total;
+        }
+
+        // Prefill GEMM: one work-group per output row n and per chunk of GEMM_TCH tokens. The weight row is read ONCE
+        // (aligned words) and applied to every token of the chunk, instead of being re-read for each token.
+        // Output layout [T, N]. Requires an even number of blocks per row.
+        __kernel __attribute__((reqd_work_group_size(GEMV_WG, 1, 1)))
+        void q8_0_gemm_rows(
+            __global const uchar* X_q8_0,
+            __global const uchar* W_q8_0,
+            __global float* out,
+            const int T,
+            const int N,
+            const int K)
+        {
+            __local float partial[GEMM_TCH * (GEMV_WG + 1)];
+            const int n = get_group_id(0);
+            const int t0 = get_group_id(1) * GEMM_TCH;
+            const int lid = get_local_id(0);
+            if (n >= N) return;
+            const int tn = min(GEMM_TCH, T - t0);
+            const int numPairs = K / (2 * Q8_0_GROUP_SIZE);
+            const size_t rowStride = (size_t) numPairs * 68;
+            __global const uchar* wRow = W_q8_0 + (size_t) n * rowStride;
+            float acc[GEMM_TCH];
+            #pragma unroll
+            for (int t = 0; t < GEMM_TCH; t++) {
+                acc[t] = 0.0f;
+            }
+            for (int p = lid; p < numPairs; p += GEMV_WG) {
+                __global const uint* wp = (__global const uint*) (wRow + (size_t) p * 68);
+                uint wu[17];
+                #pragma unroll
+                for (int i = 0; i < 17; i++) {
+                    wu[i] = wp[i];
+                }
+                #pragma unroll
+                for (int t = 0; t < GEMM_TCH; t++) {
+                    if (t < tn) {
+                        const float2 c = pair_dot_w((__global const uint*) (X_q8_0 + (size_t) (t0 + t) * rowStride + (size_t) p * 68), wu);
+                        acc[t] += c.x;
+                        acc[t] += c.y;
+                    }
+                }
+            }
+            #pragma unroll
+            for (int t = 0; t < GEMM_TCH; t++) {
+                partial[t * (GEMV_WG + 1) + lid] = acc[t];
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
+            if (lid < tn) {
+                float sum = 0.0f;
+                for (int l = 0; l < GEMV_WG; l++) {
+                    sum += partial[lid * (GEMV_WG + 1) + l];
+                }
+                out[(size_t) (t0 + lid) * N + n] = sum;
+            }
+        }
+
+        // F32 prefill GEMM with the same structure: A [T, K], B [N, K] (row-major weights), out [T, N]. Requires K % 4 == 0.
+        __kernel __attribute__((reqd_work_group_size(GEMV_WG, 1, 1)))
+        void f32_gemm_rows(
+            __global const float* A,
+            __global const float* B,
+            __global float* out,
+            const int T,
+            const int K,
+            const int N)
+        {
+            __local float partial[GEMM_TCH * (GEMV_WG + 1)];
+            const int n = get_group_id(0);
+            const int t0 = get_group_id(1) * GEMM_TCH;
+            const int lid = get_local_id(0);
+            if (n >= N) return;
+            const int tn = min(GEMM_TCH, T - t0);
+            const int K4 = K >> 2;
+            __global const float4* w4 = (__global const float4*) (B + (size_t) n * (size_t) K);
+            float acc[GEMM_TCH];
+            #pragma unroll
+            for (int t = 0; t < GEMM_TCH; t++) {
+                acc[t] = 0.0f;
+            }
+            for (int k = lid; k < K4; k += GEMV_WG) {
+                const float4 w = w4[k];
+                #pragma unroll
+                for (int t = 0; t < GEMM_TCH; t++) {
+                    if (t < tn) {
+                        acc[t] += dot(((__global const float4*) (A + (size_t) (t0 + t) * (size_t) K))[k], w);
+                    }
+                }
+            }
+            #pragma unroll
+            for (int t = 0; t < GEMM_TCH; t++) {
+                partial[t * (GEMV_WG + 1) + lid] = acc[t];
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
+            if (lid < tn) {
+                float sum = 0.0f;
+                for (int l = 0; l < GEMV_WG; l++) {
+                    sum += partial[lid * (GEMV_WG + 1) + l];
+                }
+                out[(size_t) (t0 + lid) * N + n] = sum;
+            }
         }
 
         // ---- original generic implementations (one work-item per output row); kept as selectable fallbacks (-Dllm.gemv=legacy)
