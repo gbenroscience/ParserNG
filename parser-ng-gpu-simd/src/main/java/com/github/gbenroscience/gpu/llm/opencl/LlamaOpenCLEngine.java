@@ -223,7 +223,7 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
                 prof.layer = -1;
             }
             LlamaLayer.stage(ctx, "embedding upload");
-            embeddings.embedRow(nextId, xSingle, ctx);
+            embeddings.embedRowAsync(nextId, xSingle, ctx); // non-blocking: the logits read below is the only sync of the step
             final long h1 = System.nanoTime();
             for (int l = 0; l < layers.length; l++) {
                 if (prof != null) {

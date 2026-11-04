@@ -146,7 +146,7 @@ public final class OpenCLAssistant {
         /*
          * Generation settings.
          */
-        setDefaultProperty("llm.maxNewTokens", "256");
+        setDefaultProperty("llm.maxNewTokens", "1024");
         setDefaultProperty("llm.temperature", "0.0");
         setDefaultProperty("llm.topK", "1");
         setDefaultProperty("llm.topP", "1.0");
@@ -287,7 +287,7 @@ public final class OpenCLAssistant {
         LlamaGenerationConfig config = new LlamaGenerationConfig();
 
         config.maxNewTokens = Integer.getInteger(
-                "llm.maxNewTokens", 256
+                "llm.maxNewTokens", 1024
         );
 
         config.temperature = Float.parseFloat(

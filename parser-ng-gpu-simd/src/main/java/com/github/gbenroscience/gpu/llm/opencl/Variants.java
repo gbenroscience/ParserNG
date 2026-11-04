@@ -63,6 +63,11 @@ final class Variants {
         return legacy("llm.gemm");
     }
 
+    /** -Dllm.prefill=legacy restores the original prefill synchronisation: per-layer positions upload, per-layer clFinish (and, with -Dllm.rmsnorm=legacy, the host-round-trip norms). */
+    static boolean legacyPrefill() {
+        return legacy("llm.prefill");
+    }
+
     static boolean legacyAttention() {
         return legacy("llm.attention");
     }

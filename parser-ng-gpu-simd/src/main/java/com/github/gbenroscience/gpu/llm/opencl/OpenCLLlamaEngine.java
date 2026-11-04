@@ -9,20 +9,20 @@ import java.lang.foreign.MemorySegment;
 import java.util.NoSuchElementException;
 
 /**
- * OpenCL implementation of {@link LlamaGpuEngine} -- same loading sequence as
- * {@link OpenCLDemo}'s {@code main()} (GGUF -> config -> GpuContext ->
+ * OpenCL implementation of {@link LlamaGpuEngine} -- same loading sequence
+ * as {@link OpenCLDemo}'s {@code main()} (GGUF -> config -> GpuContext ->
  * tokenizer/embeddings -> per-layer weights/state -> final norm/LM head ->
- * {@link LlamaOpenCLEngine}), just packaged as a constructor + fields instead
- * of a linear main() method, so
- * {@code com.github.gbenroscience.gpu.llm.LlamaGpuBridge} can build one without
- * knowing any of these steps individually.
+ * {@link LlamaOpenCLEngine}), just packaged as a constructor + fields
+ * instead of a linear main() method, so
+ * {@code com.github.gbenroscience.gpu.llm.LlamaGpuBridge} can build one
+ * without knowing any of these steps individually.
  *
- * Device selection happens exactly as it does for every other OpenCL consumer
- * in this codebase -- see {@link OpenCLDeviceSelector} (this package's own)'s
+ * Device selection happens exactly as it does for every other OpenCL
+ * consumer in this codebase -- see {@link OpenCLDeviceSelector} (this package's own)'s
  * javadoc -- since {@link GpuContext}'s constructor resolves through that
  * selector. Call {@code OpenCLDeviceSelector.selectDevice(...)} before
- * constructing this (or before {@code LlamaGpuBridge.load(...)}) to target a
- * specific vendor/device.
+ * constructing this (or before {@code LlamaGpuBridge.load(...)}) to target
+ * a specific vendor/device.
  */
 public final class OpenCLLlamaEngine implements LlamaGpuEngine {
 
@@ -36,12 +36,8 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
     private final String deviceDescription;
     private boolean closed;
 
-    /**
-     * Everything that needs no device: parsing, full model validation,
-     * tokenizer, embeddings.
-     */
+    /** Everything that needs no device: parsing, full model validation, tokenizer, embeddings. */
     private static final class Prepared {
-
         final GGUFLoader.GGUFFile gguf;
         final LlamaLayer.Config cfg;
         final BpeTokenizer tokenizer;
@@ -74,29 +70,24 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         }
     }
 
-    /**
-     * Validates the model first (no device touched, so a bad file fails fast),
-     * then acquires the device.
-     */
+    /** Validates the model first (no device touched, so a bad file fails fast), then acquires the device. */
     public OpenCLLlamaEngine(File ggufPath) throws Throwable {
         this(new Prepared(ggufPath), new GpuContext());
     }
 
     /**
-     * Same, on a caller-supplied context (used by tests). Ownership of
-     * {@code context} transfers to this engine once the model has been
-     * validated: it is closed if loading fails and by {@link #close()}. If
-     * validation itself fails the caller keeps the context.
+     * Same, on a caller-supplied context (used by tests). Ownership of {@code context} transfers to
+     * this engine once the model has been validated: it is closed if loading fails and by {@link #close()}.
+     * If validation itself fails the caller keeps the context.
      */
     OpenCLLlamaEngine(File ggufPath, GpuContext context) throws Throwable {
         this(new Prepared(ggufPath), context);
     }
 
     /**
-     * Transactional: device acquisition happens inside one try block; if ANY
-     * step throws, every resource acquired so far is released in reverse order
-     * (cleanup failures are attached to the original exception as suppressed)
-     * and the original exception is rethrown.
+     * Transactional: device acquisition happens inside one try block; if ANY step throws, every
+     * resource acquired so far is released in reverse order (cleanup failures are attached to the
+     * original exception as suppressed) and the original exception is rethrown.
      */
     private OpenCLLlamaEngine(Prepared prep, GpuContext c) throws Throwable {
         LlamaLayer.Config cfg = prep.cfg;
@@ -169,10 +160,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         this.engine = eng;
     }
 
-    /**
-     * Releases in reverse order of acquisition. Never throws; returns the first
-     * failure (others suppressed) or null.
-     */
+    /** Releases in reverse order of acquisition. Never throws; returns the first failure (others suppressed) or null. */
     private static Throwable teardown(GpuContext ctx, LlamaOpenCLEngine engine, LlamaLayer.GpuState[] states,
             LlamaLayer.GpuWeights[] layers, MemorySegment norm, MemorySegment head) {
         Throwable[] first = new Throwable[1];
@@ -208,46 +196,23 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
     }
 
     @Override
-    public synchronized String generate(
-            String prompt,
-            LlamaGenerationConfig cfg
-    ) throws Throwable {
-
+    public synchronized String generate(String prompt, LlamaGenerationConfig cfg) throws Throwable {
         if (closed) {
             throw new IllegalStateException("OpenCLLlamaEngine is closed");
         }
-
-        if (prompt == null || prompt.isBlank()) {
-            throw new IllegalArgumentException("Prompt cannot be null or blank");
-        }
-
-        if (cfg == null) {
-            throw new IllegalArgumentException("Generation config cannot be null");
-        }
-
-        if (cfg.maxNewTokens <= 0) {
-            throw new IllegalArgumentException("maxNewTokens must be positive");
-        }
-
-        LlamaOpenCLEngine.GenerationConfig genCfg
-                = new LlamaOpenCLEngine.GenerationConfig();
-
+        LlamaOpenCLEngine.GenerationConfig genCfg = new LlamaOpenCLEngine.GenerationConfig();
         genCfg.maxNewTokens = cfg.maxNewTokens;
         genCfg.eosTokenId = cfg.eosTokenId;
-
         genCfg.sampler.temperature = cfg.temperature;
         genCfg.sampler.topK = cfg.topK;
         genCfg.sampler.topP = cfg.topP;
         genCfg.sampler.repetitionPenalty = cfg.repetitionPenalty;
         genCfg.sampler.repetitionPenaltyWindow = cfg.repetitionPenaltyWindow;
         genCfg.sampler.seed = cfg.seed;
-
         return engine.generate(prompt, genCfg);
     }
 
-    /**
-     * Wall-clock timings of the most recent {@link #generate} call.
-     */
+    /** Wall-clock timings of the most recent {@link #generate} call. */
     public LlamaOpenCLEngine.RunStats lastRunStats() {
         return engine.lastRunStats();
     }
@@ -257,10 +222,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         return deviceDescription;
     }
 
-    /**
-     * Idempotent. Throws IllegalStateException (first failure as cause, others
-     * suppressed) if any resource failed to release.
-     */
+    /** Idempotent. Throws IllegalStateException (first failure as cause, others suppressed) if any resource failed to release. */
     @Override
     public synchronized void close() {
         if (closed) {
@@ -280,13 +242,10 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         }
         final long tRead = LoadTimer.start();
         float[] data = switch (t.type) {
-            case 0 ->
-                t.loadFloat();
-            case 8 ->
-                t.loadQ8_0AsFloat();
-            default ->
-                throw new IllegalArgumentException(
-                        "Tensor '" + tensorName + "' has GGML type " + t.type + " -- only F32 (0) and Q8_0 (8) are handled here.");
+            case 0 -> t.loadFloat();
+            case 8 -> t.loadQ8_0AsFloat();
+            default -> throw new IllegalArgumentException(
+                    "Tensor '" + tensorName + "' has GGML type " + t.type + " -- only F32 (0) and Q8_0 (8) are handled here.");
         };
         LoadTimer.stop("final norm / LM head: read + dequantize to float[]", tRead);
         final long tUp = LoadTimer.start();
@@ -295,9 +254,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         return dev;
     }
 
-    /**
-     * Device copy of the output projection and its format.
-     */
+    /** Device copy of the output projection and its format. */
     static final class LmHead {
 
         final MemorySegment device;
@@ -310,11 +267,9 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
     }
 
     /**
-     * Uploads the LM head. A Q8_0 head (the tied token embedding of a Q8_0
-     * model, or output.weight) is kept as Q8_0 blocks -- a quarter of the bytes
-     * read per token compared with dequantising to F32 -- unless
-     * {@code -Dllm.lmhead=f32} asks for the old F32 form. Any other tensor type
-     * goes through the F32 path.
+     * Uploads the LM head. A Q8_0 head (the tied token embedding of a Q8_0 model, or output.weight) is kept as Q8_0
+     * blocks -- a quarter of the bytes read per token compared with dequantising to F32 -- unless
+     * {@code -Dllm.lmhead=f32} asks for the old F32 form. Any other tensor type goes through the F32 path.
      */
     static LmHead uploadLmHead(GpuContext ctx, GGUFLoader.GGUFFile gguf) throws Throwable {
         String name = findLmHeadTensorName(gguf);

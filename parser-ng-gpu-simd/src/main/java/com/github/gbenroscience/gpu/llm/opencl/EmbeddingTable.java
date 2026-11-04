@@ -102,6 +102,28 @@ public final class EmbeddingTable {
     }
 
     /** Uploads ONE token's embedding row directly into an already-allocated device buffer (e.g. the engine's decode-path [dim] scratch). xDevice must be a plain [dim]-sized buffer -- this always writes at offset 0. */
+    private MemorySegment asyncStage;
+    private float[] asyncRow;
+
+    /**
+     * Like {@link #embedRow} but the device write is NON-blocking, so a decode step needs only one blocking call (the logits
+     * read). The staging memory is reused: that is safe because the previous token's blocking logits read has returned,
+     * which on the in-order queue means the previous write has already executed. Do not call twice without a blocking
+     * read (or finish) in between.
+     */
+    public synchronized void embedRowAsync(int tokenId, MemorySegment xDevice, GpuContext ctx) throws Throwable {
+        if (tokenId < 0 || tokenId >= vocabSize) {
+            throw new IllegalArgumentException("tokenId " + tokenId + " out of range [0," + vocabSize + ")");
+        }
+        if (asyncStage == null) {
+            asyncStage = Arena.ofAuto().allocate((long) dim * ValueLayout.JAVA_FLOAT.byteSize());
+            asyncRow = new float[dim];
+        }
+        rowInto(asyncRow, 0, tokenId);
+        MemorySegment.copy(asyncRow, 0, asyncStage, ValueLayout.JAVA_FLOAT, 0, dim);
+        LlamaLayer.writeAsync(ctx, xDevice, asyncStage, (long) dim * ValueLayout.JAVA_FLOAT.byteSize());
+    }
+
     public void embedRow(int tokenId, MemorySegment xDevice, GpuContext ctx) throws Throwable {
         if (tokenId < 0 || tokenId >= vocabSize) {
             throw new IllegalArgumentException("tokenId " + tokenId + " out of range [0," + vocabSize + ")");

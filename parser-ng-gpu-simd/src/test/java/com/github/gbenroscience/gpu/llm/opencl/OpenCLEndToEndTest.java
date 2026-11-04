@@ -573,4 +573,76 @@ class OpenCLEndToEndTest {
             System.clearProperty("llm.gemm");
         }
     }
+
+    /** Prefill no longer synchronises per layer: its sync count is a small constant independent of depth; legacy grows with depth. */
+    @Test
+    void prefillSyncCountIsConstantInDepthAndDecodeHasASingleBlockingCall() throws Throwable {
+        assumeTrue(skip == null, skip);
+        long[] fused = new long[2];
+        long legacy2 = 0;
+        int idx = 0;
+        for (int layers : new int[]{2, 4}) {
+            TinyModel m = new TinyModel();
+            m.layers = layers;
+            m.build(70);
+            GpuContext ctx = new GpuContext(true);
+            OpenCLLlamaEngine eng = new OpenCLLlamaEngine(write(m), ctx);
+            try {
+                LlamaGenerationConfig c = new LlamaGenerationConfig();
+                c.temperature = 0f;
+                c.repetitionPenalty = 1f;
+                c.maxNewTokens = 4;
+                c.eosTokenId = -1;
+                eng.generate("hello there", c);
+                DeviceProfiler p = ctx.prof;
+                fused[idx++] = p.counter("prefill", DeviceProfiler.SYNCS) + p.counter("prefill", DeviceProfiler.BLOCKING_READS)
+                        + p.counter("prefill", DeviceProfiler.BLOCKING_WRITES);
+                assertEquals(0, p.counter("decode", DeviceProfiler.BLOCKING_WRITES), "decode must not do a blocking write (embedding upload is async)");
+                assertEquals(3, p.counter("decode", DeviceProfiler.BLOCKING_READS), "exactly one blocking call (the logits read) per decoded token");
+            } finally {
+                eng.close();
+            }
+        }
+        assertEquals(fused[0], fused[1], "prefill syncs must not depend on the number of layers");
+        assertTrue(fused[0] <= 6, "prefill syncs: " + fused[0]);
+        System.setProperty("llm.prefill", "legacy");
+        System.setProperty("llm.rmsnorm", "legacy");
+        try {
+            TinyModel m = new TinyModel();
+            m.layers = 2;
+            m.build(70);
+            GpuContext ctx = new GpuContext(true);
+            OpenCLLlamaEngine eng = new OpenCLLlamaEngine(write(m), ctx);
+            try {
+                LlamaGenerationConfig c = new LlamaGenerationConfig();
+                c.temperature = 0f;
+                c.repetitionPenalty = 1f;
+                c.maxNewTokens = 2;
+                c.eosTokenId = -1;
+                eng.generate("hello there", c);
+                DeviceProfiler p = ctx.prof;
+                legacy2 = p.counter("prefill", DeviceProfiler.SYNCS) + p.counter("prefill", DeviceProfiler.BLOCKING_READS)
+                        + p.counter("prefill", DeviceProfiler.BLOCKING_WRITES);
+            } finally {
+                eng.close();
+            }
+        } finally {
+            System.clearProperty("llm.prefill");
+            System.clearProperty("llm.rmsnorm");
+        }
+        assertTrue(legacy2 >= 6 * 2, "legacy prefill does ~6 blocking calls per layer, got " + legacy2);
+        System.out.printf("[prefill syncs] fused: %d (2 and 4 layers); legacy with 2 layers: %d%n", fused[0], legacy2);
+    }
+
+    @Test
+    void legacyPrefillStillMatchesReference() throws Throwable {
+        System.setProperty("llm.prefill", "legacy");
+        System.setProperty("llm.rmsnorm", "legacy");
+        try {
+            compareAllPaths(tiny(71), 9, 3);
+        } finally {
+            System.clearProperty("llm.prefill");
+            System.clearProperty("llm.rmsnorm");
+        }
+    }
 }

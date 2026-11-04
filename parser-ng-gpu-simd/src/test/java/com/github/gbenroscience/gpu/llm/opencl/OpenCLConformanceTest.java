@@ -443,4 +443,69 @@ class OpenCLConformanceTest {
             ctx.f32GemmRows = true;
         }
     }
+
+    /** Batched fused RMSNorm (one launch, no host round trip) vs the double-precision reference, per row. */
+    @Test
+    void fusedRmsNormRowsMatchesReference() throws Throwable {
+        needDevice();
+        for (int features : new int[]{32, 64, 100, 2048, 4097}) {
+            for (int T : new int[]{1, 3, 16, 33}) {
+                Random r = new Random(features * 17L + T);
+                float[] x = randn(r, T * features, 2f);
+                float[] g = new float[features];
+                for (int i = 0; i < features; i++) {
+                    g[i] = 1f + 0.1f * (float) r.nextGaussian();
+                }
+                float[] expect = new float[T * features];
+                for (int t = 0; t < T; t++) {
+                    System.arraycopy(CpuReference.rmsNorm(java.util.Arrays.copyOfRange(x, t * features, (t + 1) * features), g, 1e-5), 0, expect, t * features, features);
+                }
+                MemorySegment dx = LlamaLayer.uploadFloats(ctx, x);
+                MemorySegment dg = LlamaLayer.uploadFloats(ctx, g);
+                MemorySegment dout = LlamaLayer.allocFloats(ctx, (long) T * features);
+                MemorySegment dpart = LlamaLayer.allocFloats(ctx, (long) T * ((features + 255) / 256));
+                MemorySegment drms = LlamaLayer.allocFloats(ctx, T);
+                try {
+                    LlamaLayer.rmsNormRows(ctx, dx, dg, dout, features, 1e-5, T, dpart, drms);
+                    LlamaLayer.finish(ctx);
+                    com.github.gbenroscience.gpu.llm.core.ErrorStats st = com.github.gbenroscience.gpu.llm.core.ErrorStats
+                            .compare(LlamaLayer.downloadFloats(ctx, dout, T * features), expect, 1e-5, 1e-5);
+                    assertTrue(st.passed(), "features=" + features + " T=" + T + " " + st);
+                } finally {
+                    LlamaLayer.freeQuietly(ctx, dx);
+                    LlamaLayer.freeQuietly(ctx, dg);
+                    LlamaLayer.freeQuietly(ctx, dout);
+                    LlamaLayer.freeQuietly(ctx, dpart);
+                    LlamaLayer.freeQuietly(ctx, drms);
+                }
+            }
+        }
+    }
+
+    /** RoPE with kernel-derived positions must equal the positions-array kernel exactly (same arithmetic). */
+    @Test
+    void ropeRowsSeqEqualsPositionsArrayKernel() throws Throwable {
+        needDevice();
+        int heads = 4, headDim = 16, T = 9, startPos = 5, maxSeq = 64, half = headDim / 2;
+        Random r = new Random(9);
+        float[] cos = new float[maxSeq * half], sin = new float[maxSeq * half];
+        com.github.gbenroscience.gpu.llm.core.RopeTables.fill(cos, sin, maxSeq, headDim, 10000.0, new com.github.gbenroscience.gpu.llm.core.RopeTables.Params());
+        float[] x = randn(r, T * heads * headDim, 1f);
+        int[] pos = new int[T];
+        for (int i = 0; i < T; i++) {
+            pos[i] = startPos + i;
+        }
+        MemorySegment dc = LlamaLayer.uploadFloats(ctx, cos), ds = LlamaLayer.uploadFloats(ctx, sin);
+        MemorySegment d1 = LlamaLayer.uploadFloats(ctx, x), d2 = LlamaLayer.uploadFloats(ctx, x), dp = LlamaLayer.uploadInts(ctx, pos);
+        try {
+            LlamaLayer.ropeApplyPairwiseRows(ctx, d1, dc, ds, heads, headDim, dp, T);
+            LlamaLayer.ropeApplyPairwiseRowsSeq(ctx, d2, dc, ds, heads, headDim, startPos, T);
+            LlamaLayer.finish(ctx);
+            assertArrayEquals(LlamaLayer.downloadFloats(ctx, d1, x.length), LlamaLayer.downloadFloats(ctx, d2, x.length), 0f);
+        } finally {
+            for (MemorySegment m : new MemorySegment[]{dc, ds, d1, d2, dp}) {
+                LlamaLayer.freeQuietly(ctx, m);
+            }
+        }
+    }
 }

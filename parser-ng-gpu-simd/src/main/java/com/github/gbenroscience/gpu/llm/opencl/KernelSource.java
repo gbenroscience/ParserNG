@@ -89,6 +89,8 @@ public final class KernelSource {
     public static final String KERNEL_Q8_0_GEMV_PLAIN_LEGACY = "q8_0_gemv_plain_legacy";
     public static final String KERNEL_F32_GEMV_LEGACY = "f32_gemv_legacy";
     public static final String KERNEL_RMSNORM_FUSED = "rmsnorm_fused";
+    public static final String KERNEL_RMSNORM_FUSED_ROWS = "rmsnorm_fused_rows";
+    public static final String KERNEL_ROPE_ROWS_SEQ = "rope_apply_pairwise_rows_seq";
     public static final String KERNEL_Q8_0_GEMV_VLOADF = "q8_0_gemv_vloadf";
     public static final String KERNEL_Q8_0_GEMV_U32 = "q8_0_gemv_u32";
     public static final String KERNEL_Q8_0_GEMM_ROWS = "q8_0_gemm_rows";
@@ -806,6 +808,59 @@ public final class KernelSource {
                 }
                 out[(size_t) (t0 + lid) * N + n] = sum;
             }
+        }
+
+        // Batched (prefill) RMSNorm in ONE launch with no host round trip: one work-group per row. The legacy prefill path
+        // computed per-group partial sums, read them back (blocking), summed them on the host and uploaded the per-row
+        // factors again: 2 blocking transfers per norm, ~9 ms of idle GPU each on the Intel driver this was measured on.
+        __kernel __attribute__((reqd_work_group_size(GEMV_WG, 1, 1)))
+        void rmsnorm_fused_rows(
+            __global const float* x,       // [T, features]
+            __global const float* gamma,   // [features]
+            __global float* out,           // [T, features]
+            const int features,
+            const float eps)
+        {
+            __local float partial[GEMV_WG];
+            __global const float* xr = x + (size_t) get_group_id(0) * (size_t) features;
+            __global float* outr = out + (size_t) get_group_id(0) * (size_t) features;
+            float ss = 0.0f;
+            for (int i = get_local_id(0); i < features; i += GEMV_WG) {
+                const float v = xr[i];
+                ss += v * v;
+            }
+            const float total = wg_sum(partial, ss);
+            const float inv = 1.0f / sqrt(total / (float) features + eps);
+            for (int i = get_local_id(0); i < features; i += GEMV_WG) {
+                outr[i] = xr[i] * inv * gamma[i];
+            }
+        }
+
+        // rope_apply_pairwise_rows with positions computed in the kernel (row r is at absolute position startPos + r),
+        // so no positions array has to be uploaded (the legacy path uploaded the same array once per layer, blocking).
+        __kernel void rope_apply_pairwise_rows_seq(
+            __global float* buf,             // [T, heads*head_dim], plain contiguous layout
+            __global const float* cos_table, // [max_seq, halfDim]
+            __global const float* sin_table,
+            const int heads,
+            const int head_dim,
+            const int startPos)
+        {
+            const int halfDim = head_dim >> 1;
+            const int row = get_group_id(1);
+            const int gid = get_group_id(0) * get_local_size(0) + get_local_id(0);
+            const int h = gid / halfDim;
+            const int i = gid % halfDim;
+            if (h >= heads) return;
+
+            const int pos = startPos + row;
+            const int pairOff = row * heads * head_dim + h * head_dim + (i << 1);
+            const float c = cos_table[pos * halfDim + i];
+            const float s = sin_table[pos * halfDim + i];
+            const float x0 = buf[pairOff];
+            const float x1 = buf[pairOff + 1];
+            buf[pairOff] = x0 * c - x1 * s;
+            buf[pairOff + 1] = x0 * s + x1 * c;
         }
 
         // ---- original generic implementations (one work-item per output row); kept as selectable fallbacks (-Dllm.gemv=legacy)

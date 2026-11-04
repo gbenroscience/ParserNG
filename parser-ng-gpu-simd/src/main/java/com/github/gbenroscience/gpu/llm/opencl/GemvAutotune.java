@@ -106,14 +106,15 @@ final class GemvAutotune {
             dout = LlamaLayer.allocFloats(ctx, (long) T * rows);
             if ((k / 32) % 2 == 0) {
                 final MemorySegment qx = dxq, qw = dw, qo = dout;
-                ctx.q8GemmRows = false;
-                double legacy = timeGemm(ctx, () -> LlamaLayer.q8_0GemmTiled(ctx, qx, qw, qo, T, rows, k));
-                float[] ref = LlamaLayer.downloadFloats(ctx, dout, T * rows);
                 ctx.q8GemmRows = true;
                 double fast = timeGemm(ctx, () -> LlamaLayer.q8_0GemmTiled(ctx, qx, qw, qo, T, rows, k));
-                boolean ok = matches(ref, LlamaLayer.downloadFloats(ctx, dout, T * rows), 1e-4);
+                float[] got = LlamaLayer.downloadFloats(ctx, dout, T * rows);
+                ctx.q8GemmRows = false;
+                double legacy = timeOnce(ctx, () -> LlamaLayer.q8_0GemmTiled(ctx, qx, qw, qo, T, rows, k));
+                float[] ref = LlamaLayer.downloadFloats(ctx, dout, T * rows);
+                boolean ok = matches(ref, got, 1e-4);
                 ctx.q8GemmRows = ok && fast < legacy;
-                note.append(String.format("Q8_0 legacy %.2f ms vs row-wise %.2f ms%s -> %s; ", legacy, fast, ok ? "" : " (REJECTED: output differs)",
+                note.append(String.format("Q8_0 legacy %.2f ms (1 launch) vs row-wise %.2f ms%s -> %s; ", legacy, fast, ok ? "" : " (REJECTED: output differs)",
                         ctx.q8GemmRows ? "row-wise" : "legacy"));
             } else {
                 ctx.q8GemmRows = false;
@@ -132,14 +133,15 @@ final class GemvAutotune {
                 daF = LlamaLayer.uploadFloats(ctx, a);
                 doutF = LlamaLayer.allocFloats(ctx, (long) T * k);
                 final MemorySegment fw = dwF, fa = daF, fo = doutF;
-                ctx.f32GemmRows = false;
-                double legacy = timeGemm(ctx, () -> LlamaLayer.f32GemmTiled(ctx, fa, fw, fo, T, k, k));
-                float[] ref = LlamaLayer.downloadFloats(ctx, doutF, T * k);
                 ctx.f32GemmRows = true;
                 double fast = timeGemm(ctx, () -> LlamaLayer.f32GemmTiled(ctx, fa, fw, fo, T, k, k));
-                boolean ok = matches(ref, LlamaLayer.downloadFloats(ctx, doutF, T * k), 1e-4);
+                float[] got = LlamaLayer.downloadFloats(ctx, doutF, T * k);
+                ctx.f32GemmRows = false;
+                double legacy = timeOnce(ctx, () -> LlamaLayer.f32GemmTiled(ctx, fa, fw, fo, T, k, k));
+                float[] ref = LlamaLayer.downloadFloats(ctx, doutF, T * k);
+                boolean ok = matches(ref, got, 1e-4);
                 ctx.f32GemmRows = ok && fast < legacy;
-                note.append(String.format("F32 legacy %.2f ms vs row-wise %.2f ms%s -> %s", legacy, fast, ok ? "" : " (REJECTED: output differs)",
+                note.append(String.format("F32 legacy %.2f ms (1 launch) vs row-wise %.2f ms%s -> %s", legacy, fast, ok ? "" : " (REJECTED: output differs)",
                         ctx.f32GemmRows ? "row-wise" : "legacy"));
             } else {
                 ctx.f32GemmRows = false;
@@ -160,6 +162,14 @@ final class GemvAutotune {
     private interface Launch {
 
         void run() throws Throwable;
+    }
+
+    /** Single timed launch (no warm-up): used for the legacy kernel, which can be 100x slower and need not be repeated. */
+    private static double timeOnce(GpuContext ctx, Launch l) throws Throwable {
+        long a = System.nanoTime();
+        l.run();
+        LlamaLayer.finish(ctx);
+        return (System.nanoTime() - a) / 1e6;
     }
 
     /** Median wall time (ms) of 5 launches after one warm-up. */

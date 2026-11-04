@@ -80,6 +80,8 @@ public final class GpuContext implements AutoCloseable {
     public final MemorySegment kQ8_0GemvPlainLegacy;
     public final MemorySegment kF32GemvLegacy;
     public final MemorySegment kRmsnormFused;
+    final MemorySegment kRmsnormFusedRows;
+    final MemorySegment kRopeRowsSeq;
     final MemorySegment kQ8_0GemvVloadf;
     final MemorySegment kQ8_0GemvU32;
     final MemorySegment kQ8_0GemmRows;
@@ -174,6 +176,8 @@ public final class GpuContext implements AutoCloseable {
             this.kQ8_0GemvPlainLegacy = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_PLAIN_LEGACY);
             this.kF32GemvLegacy = createKernel(bootstrap, KernelSource.KERNEL_F32_GEMV_LEGACY);
             this.kRmsnormFused = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_FUSED);
+            this.kRmsnormFusedRows = createKernel(bootstrap, KernelSource.KERNEL_RMSNORM_FUSED_ROWS);
+            this.kRopeRowsSeq = createKernel(bootstrap, KernelSource.KERNEL_ROPE_ROWS_SEQ);
             this.kQ8_0GemvVloadf = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_VLOADF);
             this.kQ8_0GemvU32 = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMV_U32);
             this.kQ8_0GemmRows = createKernel(bootstrap, KernelSource.KERNEL_Q8_0_GEMM_ROWS);
@@ -294,6 +298,8 @@ public final class GpuContext implements AutoCloseable {
             releaseKernelQuietly(kQ8_0GemvPlainLegacy);
             releaseKernelQuietly(kF32GemvLegacy);
             releaseKernelQuietly(kRmsnormFused);
+            releaseKernelQuietly(kRmsnormFusedRows);
+            releaseKernelQuietly(kRopeRowsSeq);
             releaseKernelQuietly(kQ8_0GemvVloadf);
             releaseKernelQuietly(kQ8_0GemvU32);
             releaseKernelQuietly(kQ8_0GemmRows);

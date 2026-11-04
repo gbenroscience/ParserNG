@@ -543,6 +543,16 @@ public final class LlamaLayer {
         }
     }
 
+    /**
+     * Non-blocking host-to-device write. {@code hostSrc} MUST stay valid and unmodified until the command has executed
+     * (the in-order queue guarantees that a later blocking read has returned only after it ran).
+     */
+    static void writeAsync(GpuContext ctx, MemorySegment mem, MemorySegment hostSrc, long byteSize) throws Throwable {
+        GpuContext.check((int) ctx.cl.clEnqueueWriteBuffer.invoke(
+                ctx.queue, mem, OpenCLBindings.CL_FALSE, 0L, byteSize, hostSrc, 0, MemorySegment.NULL, MemorySegment.NULL),
+                "clEnqueueWriteBuffer(non-blocking)");
+    }
+
     private static void writeBlocking(GpuContext ctx, MemorySegment mem, MemorySegment hostSrc, long byteSize) throws Throwable {
         GpuContext.check((int) ctx.cl.clEnqueueWriteBuffer.invoke(
                 ctx.queue, mem, OpenCLBindings.CL_TRUE, 0L, byteSize, hostSrc, 0, MemorySegment.NULL, MemorySegment.NULL),
@@ -864,13 +874,16 @@ public final class LlamaLayer {
         final int groupSize = numHeads / kvHeads;
         final float rsqrtD = (float) (1.0 / Math.sqrt(headDim));
 
+        final boolean legacyPrefill = Variants.legacyPrefill();
         int[] positions = new int[T];
         for (int i = 0; i < T; i++) {
             positions[i] = startPos + i;
         }
 
         synchronized (ctx.dispatchLock) {
-            uploadIntsInto(ctx, s.positionsBatch, positions);
+            if (legacyPrefill) {
+                uploadIntsInto(ctx, s.positionsBatch, positions); // blocking; identical for every layer
+            }
 
             // === 1. Attention block ===
             stage(ctx, "rmsnorm");
@@ -888,8 +901,13 @@ public final class LlamaLayer {
 
             stage(ctx, "rope");
 
-            ropeApplyPairwiseRows(ctx, s.qBatch, s.cos_table, s.sin_table, numHeads, headDim, s.positionsBatch, T);
-            ropeApplyPairwiseRows(ctx, s.kBatch, s.cos_table, s.sin_table, kvHeads, headDim, s.positionsBatch, T);
+            if (legacyPrefill) {
+                ropeApplyPairwiseRows(ctx, s.qBatch, s.cos_table, s.sin_table, numHeads, headDim, s.positionsBatch, T);
+                ropeApplyPairwiseRows(ctx, s.kBatch, s.cos_table, s.sin_table, kvHeads, headDim, s.positionsBatch, T);
+            } else {
+                ropeApplyPairwiseRowsSeq(ctx, s.qBatch, s.cos_table, s.sin_table, numHeads, headDim, startPos, T);
+                ropeApplyPairwiseRowsSeq(ctx, s.kBatch, s.cos_table, s.sin_table, kvHeads, headDim, startPos, T);
+            }
 
             // Bulk cache write -- device-to-device, T*kvDim elements. See
             // class javadoc: this is a genuine improvement over the CUDA
@@ -934,7 +952,10 @@ public final class LlamaLayer {
             stage(ctx, "residual add");
             residualAdd(ctx, xBatch, s.ffnDownOutBatch, T * dim);
 
-            GpuContext.check((int) ctx.cl.clFinish.invoke(ctx.queue), "clFinish(end of prefill_layer)");
+            if (legacyPrefill) {
+                GpuContext.check((int) ctx.cl.clFinish.invoke(ctx.queue), "clFinish(end of prefill_layer)");
+            }
+            // otherwise no sync: the queue is in-order and the caller's read of the last row is the synchronisation point
         }
 
         s.pos = startPos + T;
@@ -1257,6 +1278,17 @@ public final class LlamaLayer {
 
     static void rmsNormRows(GpuContext ctx, MemorySegment x, MemorySegment gamma, MemorySegment out,
             int features, double eps, int T, MemorySegment partialsBatch, MemorySegment rmsRowValuesBatch) throws Throwable {
+        if (!Variants.legacyRmsnorm()) {
+            try (Arena tmp = Arena.ofConfined()) {
+                setArg(tmp, ctx, ctx.kRmsnormFusedRows, 0, x);
+                setArg(tmp, ctx, ctx.kRmsnormFusedRows, 1, gamma);
+                setArg(tmp, ctx, ctx.kRmsnormFusedRows, 2, out);
+                setArgI(tmp, ctx, ctx.kRmsnormFusedRows, 3, features);
+                setArgF(tmp, ctx, ctx.kRmsnormFusedRows, 4, (float) eps);
+                launch1D(ctx, ctx.kRmsnormFusedRows, (long) T * KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP); // one work-group per row
+            }
+            return;
+        }
         int wgSize = KernelSource.RMSNORM_WORKGROUP_SIZE;
         int numGroups = (features + wgSize - 1) / wgSize;
 
@@ -1353,6 +1385,20 @@ public final class LlamaLayer {
             GpuContext.check((int) ctx.cl.clEnqueueNDRangeKernel.invoke(
                     ctx.queue, kernel, 2, MemorySegment.NULL, globalSize, localSizeSeg, 0, MemorySegment.NULL, MemorySegment.NULL),
                     "clEnqueueNDRangeKernel(2D groups)");
+        }
+    }
+
+    /** Prefill RoPE with positions derived in the kernel (row r = startPos + r): no positions array, no upload. */
+    static void ropeApplyPairwiseRowsSeq(GpuContext ctx, MemorySegment buf, MemorySegment cosTable, MemorySegment sinTable,
+            int heads, int headDim, int startPos, int T) throws Throwable {
+        try (Arena tmp = Arena.ofConfined()) {
+            setArg(tmp, ctx, ctx.kRopeRowsSeq, 0, buf);
+            setArg(tmp, ctx, ctx.kRopeRowsSeq, 1, cosTable);
+            setArg(tmp, ctx, ctx.kRopeRowsSeq, 2, sinTable);
+            setArgI(tmp, ctx, ctx.kRopeRowsSeq, 3, heads);
+            setArgI(tmp, ctx, ctx.kRopeRowsSeq, 4, headDim);
+            setArgI(tmp, ctx, ctx.kRopeRowsSeq, 5, startPos);
+            launch2D(ctx, ctx.kRopeRowsSeq, T, (long) heads * (headDim / 2), KernelSource.DEFAULT_BLOCK_SIZE);
         }
     }
 

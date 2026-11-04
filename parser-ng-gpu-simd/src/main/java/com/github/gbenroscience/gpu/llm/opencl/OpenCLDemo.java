@@ -60,7 +60,7 @@ public final class OpenCLDemo {
         // Device selection: honoured by GpuContext, which the engine creates after the model is validated.
         if (System.getProperty("opencl.device.type") == null) {
             OpenCLDeviceSelector.selectDevice(OpenCLDeviceSelector.GpuVendor.valueOf(
-                    System.getProperty("opencl.vendor", "AMD").toUpperCase()));
+                    System.getProperty("opencl.vendor", "INTEL").toUpperCase()));
         }
 
         if (Boolean.getBoolean("llm.printTokens")) {
@@ -76,7 +76,7 @@ public final class OpenCLDemo {
             System.out.printf("Load + upload: %.1f s on %s%n", (System.nanoTime() - t0) / 1e9, engine.getDeviceDescription());
 
             LlamaGenerationConfig cfg = new LlamaGenerationConfig();
-            cfg.maxNewTokens = 256;
+            cfg.maxNewTokens = 64;
             cfg.temperature = 0.0f; // deterministic greedy decoding
             cfg.topK = 1;
             cfg.topP = 1.0f;
