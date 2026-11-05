@@ -121,7 +121,11 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
             if (Variants.autotuneGemv() && !Variants.legacyGemv()) {
                 long tTune = LoadTimer.start();
                 c.allocCategory = "autotune scratch (freed)";
-                GemvAutotune.run(c, cfg.dim, Math.min(cfg.hidden_dim, 4096));
+                GemvAutotune.run(c, cfg.dim, Math.min(cfg.hidden_dim, 4096)); // q/k/v/gate/up projections and the LM head (K = dim)
+                if (cfg.hidden_dim != cfg.dim) {
+                    GemvAutotune.run(c, cfg.hidden_dim, Math.min(cfg.dim, 2048)); // down projection (K = hidden_dim): a different shape
+                }
+                c.gemvVariant = c.gemvVariantByK.getOrDefault(cfg.dim, c.gemvVariant);
                 LoadTimer.stop("opencl: decode GEMV autotune", tTune);
             }
             if (Variants.autotuneGemm() && !Variants.legacyGemm() && !Variants.forcedRowsGemm()) {

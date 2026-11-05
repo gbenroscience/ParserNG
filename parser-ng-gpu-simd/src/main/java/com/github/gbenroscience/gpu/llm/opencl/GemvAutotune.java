@@ -25,6 +25,7 @@ final class GemvAutotune {
     static void run(GpuContext ctx, int k, int n) throws Throwable {
         final long t0 = System.nanoTime();
         final int rows = Math.max(256, n);
+        ctx.gemvVariantByK.remove(k); // candidates must be evaluated through ctx.gemvVariant, not a previous choice for this K
         Random r = new Random(11);
         MemorySegment dw = null, dx = null, dout = null;
         StringBuilder note = new StringBuilder("GEMV autotune (K=" + k + ", N=" + rows + ", median of 7): ");
@@ -70,6 +71,7 @@ final class GemvAutotune {
                 }
             }
             ctx.gemvVariant = best;
+            ctx.gemvVariantByK.put(k, best);
             note.append("-> chose ").append(NAMES[best]).append(String.format(" (autotune took %.0f ms)", (System.nanoTime() - t0) / 1e6));
         } finally {
             LlamaLayer.freeQuietly(ctx, dw);

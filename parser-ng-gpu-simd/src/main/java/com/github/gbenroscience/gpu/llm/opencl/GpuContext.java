@@ -88,6 +88,8 @@ public final class GpuContext implements AutoCloseable {
     final MemorySegment kF32GemmRows;
     /** Decode GEMV variant used when -Dllm.gemv is not forced: 0 = wg (vload16), 1 = vloadf (float dp4), 2 = u32 (aligned words). Set by GemvAutotune. */
     volatile int gemvVariant = 0;
+    /** Per-K choice from GemvAutotune (the best variant can depend on the row length, e.g. K=2048 vs K=8192); falls back to {@link #gemvVariant}. */
+    final java.util.concurrent.ConcurrentHashMap<Integer, Integer> gemvVariantByK = new java.util.concurrent.ConcurrentHashMap<>();
     /** Prefill GEMM choice (set by GemvAutotune.runGemm; true = row-wise kernels, false = the original one-thread-per-output kernels). */
     volatile boolean q8GemmRows = true;
     volatile boolean f32GemmRows = true;

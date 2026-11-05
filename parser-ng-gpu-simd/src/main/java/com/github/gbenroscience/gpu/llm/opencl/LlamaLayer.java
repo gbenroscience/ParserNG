@@ -1066,7 +1066,8 @@ public final class LlamaLayer {
     static MemorySegment gemvKernel(GpuContext ctx, int K) {
         int v = Variants.forcedGemvVariant();
         if (v < 0) {
-            v = ctx.gemvVariant;
+            Integer perK = ctx.gemvVariantByK.get(K);
+            v = perK != null ? perK : ctx.gemvVariant;
         }
         if (v == 2 && (K / 32) % 2 != 0) {
             v = 0;
