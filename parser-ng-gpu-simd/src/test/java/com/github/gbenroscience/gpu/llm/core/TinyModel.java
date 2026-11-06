@@ -32,6 +32,10 @@ public final class TinyModel {
     public boolean q8Head = false;
     /** Store token_embd.weight as Q8_0 (the tied LM head then is Q8_0 too). */
     public boolean q8Embeddings = false;
+    /** Store attn_output.weight as Q8_0 (like a Q8_0 GGUF does) instead of F32. */
+    public boolean q8Wo = false;
+    /** Put the Llama-3 header / end-of-turn tokens into the vocabulary (ids 258..262) so the chat template applies. */
+    public boolean llama3Specials = false;
     public float weightScale = 0.08f;
 
     public final GgufTestWriter writer = new GgufTestWriter();
@@ -83,7 +87,11 @@ public final class TinyModel {
             q8(p + "attn_q.weight", new int[]{dim, qd}, rnd);
             q8(p + "attn_k.weight", new int[]{dim, kd}, rnd);
             q8(p + "attn_v.weight", new int[]{dim, kd}, rnd);
-            f32(p + "attn_output.weight", new int[]{qd, dim}, rnd, weightScale);
+            if (q8Wo) {
+                q8(p + "attn_output.weight", new int[]{qd, dim}, rnd);
+            } else {
+                f32(p + "attn_output.weight", new int[]{qd, dim}, rnd, weightScale);
+            }
             q8(p + "ffn_gate.weight", new int[]{dim, hidden}, rnd);
             q8(p + "ffn_up.weight", new int[]{dim, hidden}, rnd);
             q8(p + "ffn_down.weight", new int[]{hidden, dim}, rnd);
@@ -157,6 +165,13 @@ public final class TinyModel {
         }
         t.add("<s>");
         t.add("</s>");
+        if (llama3Specials) {
+            t.add("<|start_header_id|>"); // 258
+            t.add("<|end_header_id|>");   // 259
+            t.add("<|eot_id|>");          // 260
+            t.add("<|eom_id|>");          // 261
+            t.add("<|end_of_text|>");     // 262
+        }
         while (t.size() < vocab) {
             t.add("<extra" + t.size() + ">");
         }

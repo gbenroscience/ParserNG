@@ -28,6 +28,8 @@ class OpenCLEndToEndTest {
     private static double worstAbs, worstRel, worstRms, worstMeanAbs, minCosine = 1.0;
     private static int comparedVectors, strictVectors, flipVectors;
     private static String skip;
+    /** Q8_0 device layout used by compareAllPaths (restored to AoS afterwards). */
+    private static boolean layoutSoa = false;
 
     @BeforeAll
     static void open() {
@@ -67,7 +69,7 @@ class OpenCLEndToEndTest {
         try {
             for (int l = 0; l < cfg.n_layers; l++) {
                 w[l] = LlamaLayer.GpuWeights.fromGguf(ctx, g, "blk." + l + ".");
-                s[l] = new LlamaLayer.GpuState(ctx, cfg);
+                s[l] = l == 0 ? new LlamaLayer.GpuState(ctx, cfg) : new LlamaLayer.GpuState(ctx, cfg, s[0]); // shared scratch, as the engine does
             }
             norm = LlamaLayer.uploadFloats(ctx, m.truth.get("output_norm.weight"));
             lmHead = OpenCLLlamaEngine.uploadLmHead(ctx, g); // the production head upload (Q8_0 stays Q8_0)
@@ -144,6 +146,8 @@ class OpenCLEndToEndTest {
         }
         // decode-only, full prefill, and a chunk boundary in the middle of the prompt
         int[] prefillOptions = {0, promptLen, Math.max(1, promptLen / 2)};
+        shared.q8Soa = layoutSoa;
+        try {
         for (int pre : prefillOptions) {
             cfg.max_prefill_batch = Math.max(pre, 1);
             float[][] got = deviceLogits(shared, g, cfg, m, ids, pre);
@@ -175,6 +179,76 @@ class OpenCLEndToEndTest {
                     flipVectors++;
                 }
             }
+        }
+        } finally {
+            shared.q8Soa = false;
+        }
+    }
+
+    private void withLayout(boolean soa, Runnable body) {
+        assumeTrue(shared != null, skip);
+        assumeTrue(!soa || shared.soaAvailable, "SoA kernels did not compile on this device");
+        layoutSoa = soa;
+        try {
+            body.run();
+        } finally {
+            layoutSoa = false;
+        }
+    }
+
+    private static void sneaky(ThrowingRunnable r) {
+        try {
+            r.run();
+        } catch (RuntimeException | Error e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new RuntimeException(t);
+        }
+    }
+
+    private interface ThrowingRunnable {
+        void run() throws Throwable;
+    }
+
+    @Test
+    void soaLayoutLogitsMatchReferenceAcrossDecodeAndPrefillPaths() {
+        withLayout(true, () -> sneaky(() -> {
+            compareAllPaths(tiny(1), 1, 3);
+            compareAllPaths(tiny(2), 7, 4);
+            compareAllPaths(tiny(3), 20, 3); // more than one 16-token chunk in the SoA GEMM
+        }));
+    }
+
+    @Test
+    void soaLayoutMhaMqaAndOddShapes() {
+        withLayout(true, () -> sneaky(() -> {
+            TinyModel mha = new TinyModel();
+            mha.heads = 4;
+            mha.kvHeads = 4;
+            mha.build(4);
+            compareAllPaths(mha, 6, 3);
+            TinyModel odd = new TinyModel();
+            odd.dim = 96; // 3 blocks per row: an ODD block count, which the AoS u32 / row-wise kernels cannot take
+            odd.hidden = 160;
+            odd.heads = 4;
+            odd.kvHeads = 1;
+            odd.layers = 3;
+            odd.build(5);
+            compareAllPaths(odd, 9, 3);
+        }));
+    }
+
+    @Test
+    void q8WoMatchesReferenceInBothLayouts() {
+        for (boolean soa : new boolean[]{false, true}) {
+            withLayout(soa, () -> sneaky(() -> {
+                TinyModel m = new TinyModel();
+                m.q8Wo = true;
+                m.q8Embeddings = true;
+                m.tiedOutput = true;
+                m.build(8);
+                compareAllPaths(m, 7, 4);
+            }));
         }
     }
 
@@ -352,7 +426,7 @@ class OpenCLEndToEndTest {
             String report = p.report(java.util.Map.of("prefill", 1, "decode", decodeTokens));
             System.out.println(report);
             assertTrue(report.contains("attn_decode_fused"), "kernel names must be resolved");
-            assertTrue(report.contains("q8_0_gemv_plain"));
+            assertTrue(report.contains("q8_0_gemv_plain") || report.contains("q8_0_gemv_soa"), "the Q8_0 decode GEMV of either layout must appear");
             assertTrue(report.contains("phase: decode") && report.contains("phase: prefill"));
             assertFalse(report.contains("no usable profiling timestamps"), report);
         } finally {
@@ -503,13 +577,14 @@ class OpenCLEndToEndTest {
         }
         LlamaLayer.Config cfg = LlamaLayer.Config.fromGguf(GGUFLoader.load(f));
         GpuContext planCtx = new GpuContext();
+        planCtx.q8Soa = real.q8Soa; // the plan must use the layout the real engine selected (it changes activation buffer sizes)
         try {
             long predicted = MemoryPlan.run(planCtx, cfg, m.vocab, false); // TinyModel's output.weight is F32
             assertEquals(liveReal, predicted, "plan (one real layer x N + once-only buffers) must equal the real engine's live device bytes");
         } finally {
             planCtx.close();
         }
-        assertTrue(realCats.containsKey("state: KV cache") && realCats.containsKey("lm head") && realCats.containsKey("state: prefill scratch (per layer)"), realCats.keySet().toString());
+        assertTrue(realCats.containsKey("state: KV cache") && realCats.containsKey("lm head") && realCats.containsKey("state: prefill scratch (shared)"), realCats.keySet().toString());
         long sum = 0;
         for (long[] v : realCats.values()) {
             sum += v[0];
@@ -542,7 +617,10 @@ class OpenCLEndToEndTest {
             DeviceProfiler.Stat head = ctx.prof.stageStat("decode", "lm head");
             assertEquals(3, head.count, "one LM-head launch per decoded token");
             assertTrue(head.deviceNs > 0 && head.bytes > 0);
-            assertEquals(3 * ((long) m.vocab + 1) * (m.dim / 32) * 34, head.bytes, "byte hint of the Q8_0 LM head");
+            long perLaunch = ctx.q8Soa
+                    ? Q8Layout.weightBytes(true, m.vocab, m.dim) + Q8Layout.activationBytes(true, m.dim)
+                    : ((long) m.vocab + 1) * (m.dim / 32) * 34;
+            assertEquals(3 * perLaunch, head.bytes, "byte hint of the Q8_0 LM head (layout " + (ctx.q8Soa ? "SoA" : "AoS") + ")");
         } finally {
             eng.close();
         }

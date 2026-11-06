@@ -88,11 +88,36 @@ public final class GpuContext implements AutoCloseable {
     final MemorySegment kF32GemmRows;
     /** Decode GEMV variant used when -Dllm.gemv is not forced: 0 = wg (vload16), 1 = vloadf (float dp4), 2 = u32 (aligned words). Set by GemvAutotune. */
     volatile int gemvVariant = 0;
-    /** Per-K choice from GemvAutotune (the best variant can depend on the row length, e.g. K=2048 vs K=8192); falls back to {@link #gemvVariant}. */
-    final java.util.concurrent.ConcurrentHashMap<Integer, Integer> gemvVariantByK = new java.util.concurrent.ConcurrentHashMap<>();
     /** Prefill GEMM choice (set by GemvAutotune.runGemm; true = row-wise kernels, false = the original one-thread-per-output kernels). */
     volatile boolean q8GemmRows = true;
     volatile boolean f32GemmRows = true;
+    // ---- SoA Q8_0 layout (null / soaAvailable == false when the device compiler rejected KernelSourceSoa) ----
+    /** True when the SoA kernels compiled on this device. */
+    volatile boolean soaAvailable = false;
+    MemorySegment kQuantizeSoa;
+    MemorySegment kQ8_0GemmSoa;
+    /** Decode GEMV kernels, index-aligned with {@link KernelSourceSoa#GEMV_LPR}. */
+    MemorySegment[] kSoaGemv;
+    /** True when every Q8_0 tensor / activation on this context uses the SoA layout. Set before any weight is uploaded. */
+    volatile boolean q8Soa = false;
+    /** Lanes per row used when no per-K choice exists. */
+    volatile int soaLpr = 16;
+    /** Autotuned lanes-per-row by K (row length); read-only after tuning. */
+    final java.util.Map<Integer, Integer> soaLprByK = new java.util.concurrent.ConcurrentHashMap<>();
+
+    int soaLprFor(int k) {
+        return soaLprByK.getOrDefault(k, soaLpr);
+    }
+
+    MemorySegment soaGemvKernel(int lpr) {
+        for (int i = 0; i < KernelSourceSoa.GEMV_LPR.length; i++) {
+            if (KernelSourceSoa.GEMV_LPR[i] == lpr) {
+                return kSoaGemv[i];
+            }
+        }
+        throw new IllegalArgumentException("no SoA GEMV kernel for lanes-per-row " + lpr);
+    }
+
     final MemorySegment kBwU8;
     final MemorySegment kBwU32;
     final MemorySegment kBwU128;
@@ -203,6 +228,14 @@ public final class GpuContext implements AutoCloseable {
             this.kAttnScoresCausalBatched = createKernel(bootstrap, KernelSource.KERNEL_ATTN_SCORES_CAUSAL_BATCHED);
             this.kSoftmaxInplaceRows = createKernel(bootstrap, KernelSource.KERNEL_SOFTMAX_INPLACE_ROWS);
             this.kAttnWeightedSumCausalBatched = createKernel(bootstrap, KernelSource.KERNEL_ATTN_WEIGHTED_SUM_CAUSAL_BATCHED);
+            if (soaAvailable) {
+                this.kQuantizeSoa = createKernel(bootstrap, KernelSourceSoa.KERNEL_QUANTIZE);
+                this.kQ8_0GemmSoa = createKernel(bootstrap, KernelSourceSoa.KERNEL_GEMM);
+                this.kSoaGemv = new MemorySegment[KernelSourceSoa.GEMV_LPR.length];
+                for (int i = 0; i < kSoaGemv.length; i++) {
+                    this.kSoaGemv[i] = createKernel(bootstrap, KernelSourceSoa.gemvName(KernelSourceSoa.GEMV_LPR[i]));
+                }
+            }
             LoadTimer.stop("opencl: clCreateKernel x all", tKern);
 
             System.err.println("[ParserNG LLM-OpenCL] " + selectedDeviceDescription);
@@ -213,7 +246,22 @@ public final class GpuContext implements AutoCloseable {
     }
 
     private MemorySegment buildProgram(Arena arena) throws Throwable {
-        MemorySegment src = arena.allocateFrom(KernelSource.CL_SOURCE, StandardCharsets.UTF_8);
+        if (!"0".equals(System.getProperty("llm.soaKernels"))) {
+            try {
+                MemorySegment p = buildProgram(arena, KernelSource.CL_SOURCE + KernelSourceSoa.SOURCE);
+                soaAvailable = true;
+                return p;
+            } catch (IllegalStateException soaBuildFailure) {
+                LOG.log(System.Logger.Level.WARNING, "SoA Q8_0 kernels failed to build on this device; continuing with the AoS layout only: "
+                        + soaBuildFailure.getMessage());
+            }
+        }
+        soaAvailable = false;
+        return buildProgram(arena, KernelSource.CL_SOURCE);
+    }
+
+    private MemorySegment buildProgram(Arena arena, String source) throws Throwable {
+        MemorySegment src = arena.allocateFrom(source, StandardCharsets.UTF_8);
         MemorySegment stringsArr = arena.allocate(ValueLayout.ADDRESS, 1);
         stringsArr.setAtIndex(ValueLayout.ADDRESS, 0, src);
         // lengths=NULL -> each string is treated as a NUL-terminated C string, which allocateFrom guarantees.
@@ -227,9 +275,10 @@ public final class GpuContext implements AutoCloseable {
         int buildStatus = (int) cl.clBuildProgram.invoke(
                 prog, 1, devicesArr, MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL);
         if (buildStatus != OpenCLBindings.CL_SUCCESS) {
+            String log = fetchBuildLog(arena, prog);
+            cl.clReleaseProgram.invoke(prog);
             throw new IllegalStateException(
-                    "OpenCL build of LLM decoder kernels failed (" + OpenCLBindings.errorString(buildStatus) + "): "
-                            + fetchBuildLog(arena, prog));
+                    "OpenCL build of LLM decoder kernels failed (" + OpenCLBindings.errorString(buildStatus) + "): " + log);
         }
         return prog;
     }
@@ -323,6 +372,13 @@ public final class GpuContext implements AutoCloseable {
             releaseKernelQuietly(kAttnScoresCausalBatched);
             releaseKernelQuietly(kSoftmaxInplaceRows);
             releaseKernelQuietly(kAttnWeightedSumCausalBatched);
+            releaseKernelQuietly(kQuantizeSoa);
+            releaseKernelQuietly(kQ8_0GemmSoa);
+            if (kSoaGemv != null) {
+                for (MemorySegment k : kSoaGemv) {
+                    releaseKernelQuietly(k);
+                }
+            }
             cl.clReleaseProgram.invoke(program);
             cl.clReleaseCommandQueue.invoke(queue);
             cl.clReleaseContext.invoke(context);

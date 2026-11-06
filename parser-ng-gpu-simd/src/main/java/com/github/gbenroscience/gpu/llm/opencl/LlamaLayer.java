@@ -202,51 +202,128 @@ public final class LlamaLayer {
         }
     }
 
-    /** GPU-resident weights for ONE decoder layer. Same tensors, same GGUF names as the CUDA original -- only the field TYPE changed (MemorySegment cl_mem, not long CUdeviceptr). */
+    /**
+     * GPU-resident weights for ONE decoder layer. Q8_0 tensors are stored in the context's layout
+     * ({@link GpuContext#q8Soa}); {@code wo} is either F32 ({@link #wo_f32}) or Q8_0 ({@link #wo_q8}), never both.
+     */
     public static final class GpuWeights implements AutoCloseable {
         final GpuContext ctx;
         final MemorySegment wq_q8_0, wk_q8_0, wv_q8_0;
-        final MemorySegment wo_f32;
+        final MemorySegment wo_f32, wo_q8;
         final MemorySegment w_gate_q8_0, w_up_q8_0, w_down_q8_0;
         final MemorySegment attn_norm_gamma, ffn_norm_gamma;
 
+        /** AoS-only constructor kept for callers that have no dimensions at hand (tests, benchmarks). Rejected when the context uses SoA. */
         public GpuWeights(GpuContext ctx,
                 byte[] wqQ8_0, byte[] wkQ8_0, byte[] wvQ8_0,
                 float[] woF32,
                 byte[] wGateQ8_0, byte[] wUpQ8_0, byte[] wDownQ8_0,
                 float[] attnNormGamma, float[] ffnNormGamma) throws Throwable {
+            this(ctx, 0, 0, 0, 0, wqQ8_0, wkQ8_0, wvQ8_0, null, woF32, wGateQ8_0, wUpQ8_0, wDownQ8_0, attnNormGamma, ffnNormGamma);
+        }
+
+        /**
+         * @param dim    model width (K of q/k/v/gate/up, N of wo and down)
+         * @param qDim   num_heads * head_dim (N of q, K of wo)
+         * @param kvDim  kv_heads * head_dim (N of k and v)
+         * @param hidden FFN width (N of gate/up, K of down)
+         * @param woQ8   wo as GGUF Q8_0 blocks, or null to use {@code woF32}
+         * Transactional: if any upload fails, every buffer already uploaded by this constructor is released.
+         */
+        public GpuWeights(GpuContext ctx, int dim, int qDim, int kvDim, int hidden,
+                byte[] wqQ8_0, byte[] wkQ8_0, byte[] wvQ8_0,
+                byte[] woQ8, float[] woF32,
+                byte[] wGateQ8_0, byte[] wUpQ8_0, byte[] wDownQ8_0,
+                float[] attnNormGamma, float[] ffnNormGamma) throws Throwable {
+            if (ctx.q8Soa && dim <= 0) {
+                throw new IllegalStateException("this context stores Q8_0 tensors in the SoA layout, which needs the tensor dimensions: "
+                        + "use the GpuWeights constructor that takes dim/qDim/kvDim/hidden");
+            }
+            if ((woQ8 == null) == (woF32 == null)) {
+                throw new IllegalArgumentException("exactly one of woQ8 / woF32 must be given");
+            }
             this.ctx = ctx;
-            ctx.allocCategory = "weights: q/k/v/gate/up/down (Q8_0)";
-            this.wq_q8_0 = uploadBytes(ctx, wqQ8_0);
-            this.wk_q8_0 = uploadBytes(ctx, wkQ8_0);
-            this.wv_q8_0 = uploadBytes(ctx, wvQ8_0);
-            ctx.allocCategory = "weights: wo (F32)";
-            this.wo_f32 = uploadFloats(ctx, woF32);
-            ctx.allocCategory = "weights: q/k/v/gate/up/down (Q8_0)";
-            this.w_gate_q8_0 = uploadBytes(ctx, wGateQ8_0);
-            this.w_up_q8_0 = uploadBytes(ctx, wUpQ8_0);
-            this.w_down_q8_0 = uploadBytes(ctx, wDownQ8_0);
-            ctx.allocCategory = "weights: norm gammas (F32)";
-            this.attn_norm_gamma = uploadFloats(ctx, attnNormGamma);
-            this.ffn_norm_gamma = uploadFloats(ctx, ffnNormGamma);
+            java.util.List<MemorySegment> got = new java.util.ArrayList<>();
+            try {
+                ctx.allocCategory = "weights: q/k/v/gate/up/down (Q8_0)";
+                this.wq_q8_0 = track(got, Q8Layout.uploadWeight(ctx, wqQ8_0, qDim, dim));
+                this.wk_q8_0 = track(got, Q8Layout.uploadWeight(ctx, wkQ8_0, kvDim, dim));
+                this.wv_q8_0 = track(got, Q8Layout.uploadWeight(ctx, wvQ8_0, kvDim, dim));
+                if (woQ8 != null) {
+                    ctx.allocCategory = "weights: wo (Q8_0)";
+                    this.wo_q8 = track(got, Q8Layout.uploadWeight(ctx, woQ8, dim, qDim));
+                    this.wo_f32 = null;
+                } else {
+                    ctx.allocCategory = "weights: wo (F32)";
+                    this.wo_f32 = track(got, uploadFloats(ctx, woF32));
+                    this.wo_q8 = null;
+                }
+                ctx.allocCategory = "weights: q/k/v/gate/up/down (Q8_0)";
+                this.w_gate_q8_0 = track(got, Q8Layout.uploadWeight(ctx, wGateQ8_0, hidden, dim));
+                this.w_up_q8_0 = track(got, Q8Layout.uploadWeight(ctx, wUpQ8_0, hidden, dim));
+                this.w_down_q8_0 = track(got, Q8Layout.uploadWeight(ctx, wDownQ8_0, dim, hidden));
+                ctx.allocCategory = "weights: norm gammas (F32)";
+                this.attn_norm_gamma = track(got, uploadFloats(ctx, attnNormGamma));
+                this.ffn_norm_gamma = track(got, uploadFloats(ctx, ffnNormGamma));
+            } catch (Throwable t) {
+                for (MemorySegment m : got) {
+                    freeQuietly(ctx, m);
+                }
+                throw t;
+            }
+        }
+
+        private static MemorySegment track(java.util.List<MemorySegment> got, MemorySegment m) {
+            got.add(m);
+            return m;
         }
 
         public static GpuWeights fromGguf(GpuContext ctx, GGUFLoader.GGUFFile gguf, String layerPrefix) throws Throwable {
             final long tRead = LoadTimer.start();
-            byte[] wq = find(gguf, layerPrefix + "attn_q.weight").loadQ8_0();
-            byte[] wk = find(gguf, layerPrefix + "attn_k.weight").loadQ8_0();
+            GGUFLoader.Tensor tq = find(gguf, layerPrefix + "attn_q.weight");
+            GGUFLoader.Tensor tk = find(gguf, layerPrefix + "attn_k.weight");
+            GGUFLoader.Tensor tGate = find(gguf, layerPrefix + "ffn_gate.weight");
+            GGUFLoader.Tensor tWo = find(gguf, layerPrefix + "attn_output.weight");
+            // GGUF dims are [fastest-varying = K (in_features), N (out_features)]
+            final int dim = tq.cols();
+            final int qDim = tq.rows();
+            final int kvDim = tk.rows();
+            final int hidden = tGate.rows();
+            byte[] wq = tq.loadQ8_0();
+            byte[] wk = tk.loadQ8_0();
             byte[] wv = find(gguf, layerPrefix + "attn_v.weight").loadQ8_0();
-            float[] wo = loadAsFloat(find(gguf, layerPrefix + "attn_output.weight"));
-            byte[] wGate = find(gguf, layerPrefix + "ffn_gate.weight").loadQ8_0();
+            byte[] woQ8 = null;
+            float[] woF32 = null;
+            if (useWoQ8(tWo)) {
+                woQ8 = tWo.loadQ8_0();
+            } else {
+                woF32 = loadAsFloat(tWo);
+            }
+            byte[] wGate = tGate.loadQ8_0();
             byte[] wUp = find(gguf, layerPrefix + "ffn_up.weight").loadQ8_0();
             byte[] wDown = find(gguf, layerPrefix + "ffn_down.weight").loadQ8_0();
             float[] attnNorm = loadAsFloat(find(gguf, layerPrefix + "attn_norm.weight"));
             float[] ffnNorm = loadAsFloat(find(gguf, layerPrefix + "ffn_norm.weight"));
-            LoadTimer.stop("layers: read tensors from GGUF (+Q8->F32 for wo)", tRead);
+            LoadTimer.stop("layers: read tensors from GGUF (+Q8->F32 for wo when f32)", tRead);
             final long tUp = LoadTimer.start();
-            GpuWeights w = new GpuWeights(ctx, wq, wk, wv, wo, wGate, wUp, wDown, attnNorm, ffnNorm);
-            LoadTimer.stop("layers: device upload (clCreateBuffer + write)", tUp);
+            GpuWeights w = new GpuWeights(ctx, dim, qDim, kvDim, hidden, wq, wk, wv, woQ8, woF32, wGate, wUp, wDown, attnNorm, ffnNorm);
+            LoadTimer.stop("layers: device upload (clCreateBuffer + write" + (ctx.q8Soa ? ", SoA repack" : "") + ")", tUp);
             return w;
+        }
+
+        /** wo stays Q8_0 when the file stores it as Q8_0 (auto) or when -Dllm.wo=q8 is given; -Dllm.wo=f32 dequantises it. */
+        static boolean useWoQ8(GGUFLoader.Tensor wo) {
+            String req = Variants.woRequest();
+            if (req.equals("f32")) {
+                return false;
+            }
+            if (wo.type == 8) {
+                return true;
+            }
+            if (req.equals("q8")) {
+                throw new IllegalArgumentException("-Dllm.wo=q8 but tensor '" + wo.name + "' is GGML type " + wo.type + ", not Q8_0");
+            }
+            return false;
         }
 
         private static float[] loadAsFloat(GGUFLoader.Tensor t) {
@@ -272,6 +349,7 @@ public final class LlamaLayer {
             freeQuietly(ctx, wk_q8_0);
             freeQuietly(ctx, wv_q8_0);
             freeQuietly(ctx, wo_f32);
+            freeQuietly(ctx, wo_q8);
             freeQuietly(ctx, w_gate_q8_0);
             freeQuietly(ctx, w_up_q8_0);
             freeQuietly(ctx, w_down_q8_0);
@@ -280,29 +358,163 @@ public final class LlamaLayer {
         }
     }
 
-    /** Per-sequence GPU state: KV cache, RoPE tables, decode-path scratch, PLUS prefill-path batch scratch. Same layout/sizing as the CUDA original -- only the field TYPE changed. */
+    /**
+     * Everything in a {@link GpuState} that is only ever used by ONE layer at a time (the queue is in-order and layers
+     * run sequentially): RoPE tables, decode scratch and prefill scratch. Allocated once per engine and shared by all
+     * layers' states (reference counted); only the KV cache is per layer. Before sharing, each of 16 layers held its own
+     * copy -- 1,366 MB of prefill scratch alone for Llama-3.2-1B at the default context.
+     */
+    static final class Scratch {
+        MemorySegment cos_table, sin_table;
+        MemorySegment xNorm, xNormQ8, qSplit, kNew, vNew, scores, attnOut, attnOutQ8, attnProj, ffnNorm, ffnNormQ8;
+        MemorySegment gate, up, swigluOut, swigluOutQ8, ffnDownOut, rmsPartials;
+        MemorySegment qBatch, kBatch, vBatch, xNormBatch, xNormQ8Batch, scoresBatch, attnOutBatch, attnOutQ8Batch, attnProjBatch;
+        MemorySegment ffnNormBatch, ffnNormQ8Batch, gateBatch, upBatch, swigluOutBatch, swigluOutQ8Batch, ffnDownOutBatch;
+        MemorySegment rmsPartialsBatch, rmsRowValuesBatch, positionsBatch;
+        // shape this scratch was built for (a sibling state must match it)
+        int dim, hidden, qDim, kvDim, maxSeq, maxBatchT;
+        boolean soa;
+        private int refs = 1;
+
+        static Scratch allocate(GpuContext ctx, Config cfg) throws Throwable {
+            cfg.validate();
+            Scratch x = new Scratch();
+            x.dim = cfg.dim;
+            x.hidden = cfg.hidden_dim;
+            x.qDim = cfg.num_heads * cfg.head_dim;
+            x.kvDim = cfg.kv_heads * cfg.head_dim;
+            x.maxSeq = cfg.max_seq;
+            x.maxBatchT = cfg.max_prefill_batch;
+            x.soa = ctx.q8Soa;
+            try {
+                x.fill(ctx, cfg);
+            } catch (Throwable t) {
+                x.freeAll(ctx);
+                throw t;
+            }
+            return x;
+        }
+
+        private void fill(GpuContext ctx, Config cfg) throws Throwable {
+            final int maxBatchT = cfg.max_prefill_batch;
+            int halfDim = cfg.head_dim / 2;
+            float[] cosHost = new float[cfg.max_seq * halfDim];
+            float[] sinHost = new float[cfg.max_seq * halfDim];
+            RopeTables.fill(cosHost, sinHost, cfg.max_seq, cfg.head_dim, cfg.rope_theta, cfg.ropeParams());
+            ctx.allocCategory = "state: RoPE cos/sin tables (shared)";
+            cos_table = uploadFloats(ctx, cosHost);
+            sin_table = uploadFloats(ctx, sinHost);
+
+            ctx.allocCategory = "state: decode scratch (shared)";
+            xNorm = allocFloats(ctx, cfg.dim);
+            xNormQ8 = allocBytes(ctx, q8Act(ctx, cfg.dim));
+            qSplit = allocFloats(ctx, (long) cfg.num_heads * cfg.head_dim);
+            kNew = allocFloats(ctx, kvDim);
+            vNew = allocFloats(ctx, kvDim);
+            scores = allocFloats(ctx, cfg.max_seq);
+            attnOut = allocFloats(ctx, qDim);
+            attnOutQ8 = allocBytes(ctx, q8Act(ctx, qDim));
+            attnProj = allocFloats(ctx, cfg.dim);
+            ffnNorm = allocFloats(ctx, cfg.dim);
+            ffnNormQ8 = allocBytes(ctx, q8Act(ctx, cfg.dim));
+            gate = allocFloats(ctx, cfg.hidden_dim);
+            up = allocFloats(ctx, cfg.hidden_dim);
+            swigluOut = allocFloats(ctx, cfg.hidden_dim);
+            swigluOutQ8 = allocBytes(ctx, q8Act(ctx, cfg.hidden_dim));
+            ffnDownOut = allocFloats(ctx, cfg.dim);
+            int maxLen = Math.max(cfg.dim, cfg.hidden_dim);
+            int maxGroups = (maxLen + KernelSource.RMSNORM_WORKGROUP_SIZE - 1) / KernelSource.RMSNORM_WORKGROUP_SIZE;
+            rmsPartials = allocFloats(ctx, maxGroups);
+
+            if (maxBatchT > 0) {
+                ctx.allocCategory = "state: prefill scratch (shared)";
+                int qkRowWidth = cfg.num_heads * cfg.head_dim;
+                qBatch = allocFloats(ctx, (long) maxBatchT * qkRowWidth);
+                kBatch = allocFloats(ctx, (long) maxBatchT * kvDim);
+                vBatch = allocFloats(ctx, (long) maxBatchT * kvDim);
+                xNormBatch = allocFloats(ctx, (long) maxBatchT * cfg.dim);
+                xNormQ8Batch = allocBytes(ctx, q8Act(ctx, (long) maxBatchT * cfg.dim));
+                scoresBatch = allocFloats(ctx, (long) maxBatchT * maxBatchT);
+                attnOutBatch = allocFloats(ctx, (long) maxBatchT * qDim);
+                attnOutQ8Batch = allocBytes(ctx, q8Act(ctx, (long) maxBatchT * qDim));
+                attnProjBatch = allocFloats(ctx, (long) maxBatchT * cfg.dim);
+                ffnNormBatch = allocFloats(ctx, (long) maxBatchT * cfg.dim);
+                ffnNormQ8Batch = allocBytes(ctx, q8Act(ctx, (long) maxBatchT * cfg.dim));
+                gateBatch = allocFloats(ctx, (long) maxBatchT * cfg.hidden_dim);
+                upBatch = allocFloats(ctx, (long) maxBatchT * cfg.hidden_dim);
+                swigluOutBatch = allocFloats(ctx, (long) maxBatchT * cfg.hidden_dim);
+                swigluOutQ8Batch = allocBytes(ctx, q8Act(ctx, (long) maxBatchT * cfg.hidden_dim));
+                ffnDownOutBatch = allocFloats(ctx, (long) maxBatchT * cfg.dim);
+                rmsPartialsBatch = allocFloats(ctx, (long) maxBatchT * maxGroups);
+                rmsRowValuesBatch = allocFloats(ctx, maxBatchT);
+                positionsBatch = allocBytes(ctx, (long) maxBatchT * ValueLayout.JAVA_INT.byteSize());
+            }
+        }
+
+        private static long q8Act(GpuContext ctx, long len) {
+            return Q8Layout.activationBytes(ctx.q8Soa, len);
+        }
+
+        synchronized Scratch retain(Config cfg, GpuContext ctx) {
+            if (refs <= 0) {
+                throw new IllegalStateException("scratch already released");
+            }
+            if (dim != cfg.dim || hidden != cfg.hidden_dim || qDim != cfg.num_heads * cfg.head_dim
+                    || kvDim != cfg.kv_heads * cfg.head_dim || maxSeq != cfg.max_seq || maxBatchT != cfg.max_prefill_batch
+                    || soa != ctx.q8Soa) {
+                throw new IllegalArgumentException("cannot share scratch between states of different shape or Q8_0 layout");
+            }
+            refs++;
+            return this;
+        }
+
+        synchronized void release(GpuContext ctx) {
+            if (refs > 0 && --refs == 0) {
+                freeAll(ctx);
+            }
+        }
+
+        private void freeAll(GpuContext ctx) {
+            for (MemorySegment m : new MemorySegment[]{cos_table, sin_table, xNorm, xNormQ8, qSplit, kNew, vNew, scores, attnOut, attnOutQ8,
+                attnProj, ffnNorm, ffnNormQ8, gate, up, swigluOut, swigluOutQ8, ffnDownOut, rmsPartials, qBatch, kBatch, vBatch,
+                xNormBatch, xNormQ8Batch, scoresBatch, attnOutBatch, attnOutQ8Batch, attnProjBatch, ffnNormBatch, ffnNormQ8Batch,
+                gateBatch, upBatch, swigluOutBatch, swigluOutQ8Batch, ffnDownOutBatch, rmsPartialsBatch, rmsRowValuesBatch, positionsBatch}) {
+                freeQuietly(ctx, m);
+            }
+        }
+    }
+
+    /**
+     * Per-sequence, per-layer GPU state: this layer's KV cache plus references to the {@link Scratch} (RoPE tables,
+     * decode scratch, prefill scratch). {@code new GpuState(ctx, cfg)} owns a private scratch (old behaviour);
+     * {@code new GpuState(ctx, cfg, sibling)} shares the sibling's, which is what the engine does for layers 1..n-1.
+     */
     public static final class GpuState implements AutoCloseable {
         final GpuContext ctx;
         final int kvDim;
         final int maxBatchT;
+        private final Scratch scratch;
+        private boolean closed;
 
-        // ---- decode-path ----
+        // ---- per-layer ----
         final MemorySegment k_cache_f32, v_cache_f32;
+
+        // ---- shared (same segments in every state built from the same scratch) ----
         final MemorySegment cos_table, sin_table;
         final MemorySegment xNorm, xNormQ8;
         final MemorySegment qSplit, kNew, vNew;
         final MemorySegment scores;
-        final MemorySegment attnOut, attnProj;
+        final MemorySegment attnOut, attnOutQ8, attnProj;
         final MemorySegment ffnNorm, ffnNormQ8;
         final MemorySegment gate, up, swigluOut, swigluOutQ8;
         final MemorySegment ffnDownOut;
         final MemorySegment rmsPartials;
 
-        // ---- prefill-path batch scratch (0-length/null-equivalent if maxBatchT == 0) ----
+        // prefill-path batch scratch (null if maxBatchT == 0)
         final MemorySegment qBatch, kBatch, vBatch;
         final MemorySegment xNormBatch, xNormQ8Batch;
         final MemorySegment scoresBatch;
-        final MemorySegment attnOutBatch, attnProjBatch;
+        final MemorySegment attnOutBatch, attnOutQ8Batch, attnProjBatch;
         final MemorySegment ffnNormBatch, ffnNormQ8Batch;
         final MemorySegment gateBatch, upBatch, swigluOutBatch, swigluOutQ8Batch;
         final MemorySegment ffnDownOutBatch;
@@ -313,128 +525,82 @@ public final class LlamaLayer {
         public int pos = 0;
 
         public GpuState(GpuContext ctx, Config cfg) throws Throwable {
-            cfg.validate();
-            this.ctx = ctx;
-            this.kvDim = cfg.kv_heads * cfg.head_dim;
-            this.maxBatchT = cfg.max_prefill_batch;
+            this(ctx, cfg, Scratch.allocate(ctx, cfg), true);
+        }
 
-            ctx.allocCategory = "state: KV cache";
-            this.k_cache_f32 = allocFloats(ctx, (long) cfg.max_seq * kvDim);
-            this.v_cache_f32 = allocFloats(ctx, (long) cfg.max_seq * kvDim);
+        /** A state for another layer that shares {@code sibling}'s scratch and RoPE tables and owns only its KV cache. */
+        public GpuState(GpuContext ctx, Config cfg, GpuState sibling) throws Throwable {
+            this(ctx, cfg, sibling.scratch.retain(cfg, ctx), false);
+        }
 
-            int halfDim = cfg.head_dim / 2;
-            float[] cosHost = new float[cfg.max_seq * halfDim];
-            float[] sinHost = new float[cfg.max_seq * halfDim];
-            precomputeRope(cosHost, sinHost, cfg.max_seq, cfg.head_dim, cfg.rope_theta, cfg);
-            ctx.allocCategory = "state: RoPE cos/sin tables";
-            this.cos_table = uploadFloats(ctx, cosHost);
-            this.sin_table = uploadFloats(ctx, sinHost);
-
-            ctx.allocCategory = "state: decode scratch";
-            this.xNorm = allocFloats(ctx, cfg.dim);
-            this.xNormQ8 = allocBytes(ctx, q8_0Bytes(cfg.dim));
-            this.qSplit = allocFloats(ctx, (long) cfg.num_heads * cfg.head_dim);
-            this.kNew = allocFloats(ctx, kvDim);
-            this.vNew = allocFloats(ctx, kvDim);
-            this.scores = allocFloats(ctx, cfg.max_seq);
-            this.attnOut = allocFloats(ctx, cfg.dim);
-            this.attnProj = allocFloats(ctx, cfg.dim);
-            this.ffnNorm = allocFloats(ctx, cfg.dim);
-            this.ffnNormQ8 = allocBytes(ctx, q8_0Bytes(cfg.dim));
-            this.gate = allocFloats(ctx, cfg.hidden_dim);
-            this.up = allocFloats(ctx, cfg.hidden_dim);
-            this.swigluOut = allocFloats(ctx, cfg.hidden_dim);
-            this.swigluOutQ8 = allocBytes(ctx, q8_0Bytes(cfg.hidden_dim));
-            this.ffnDownOut = allocFloats(ctx, cfg.dim);
-
-            int maxLen = Math.max(cfg.dim, cfg.hidden_dim);
-            int maxGroups = (maxLen + KernelSource.RMSNORM_WORKGROUP_SIZE - 1) / KernelSource.RMSNORM_WORKGROUP_SIZE;
-            this.rmsPartials = allocFloats(ctx, maxGroups);
-
-            ctx.allocCategory = "state: prefill scratch (per layer)";
-            if (maxBatchT > 0) {
-                int qkRowWidth = cfg.num_heads * cfg.head_dim;
-                this.qBatch = allocFloats(ctx, (long) maxBatchT * qkRowWidth);
-                this.kBatch = allocFloats(ctx, (long) maxBatchT * kvDim);
-                this.vBatch = allocFloats(ctx, (long) maxBatchT * kvDim);
-                this.xNormBatch = allocFloats(ctx, (long) maxBatchT * cfg.dim);
-                this.xNormQ8Batch = allocBytes(ctx, (long) maxBatchT * q8_0Bytes(cfg.dim));
-                this.scoresBatch = allocFloats(ctx, (long) maxBatchT * maxBatchT);
-                this.attnOutBatch = allocFloats(ctx, (long) maxBatchT * cfg.dim);
-                this.attnProjBatch = allocFloats(ctx, (long) maxBatchT * cfg.dim);
-                this.ffnNormBatch = allocFloats(ctx, (long) maxBatchT * cfg.dim);
-                this.ffnNormQ8Batch = allocBytes(ctx, (long) maxBatchT * q8_0Bytes(cfg.dim));
-                this.gateBatch = allocFloats(ctx, (long) maxBatchT * cfg.hidden_dim);
-                this.upBatch = allocFloats(ctx, (long) maxBatchT * cfg.hidden_dim);
-                this.swigluOutBatch = allocFloats(ctx, (long) maxBatchT * cfg.hidden_dim);
-                this.swigluOutQ8Batch = allocBytes(ctx, (long) maxBatchT * q8_0Bytes(cfg.hidden_dim));
-                this.ffnDownOutBatch = allocFloats(ctx, (long) maxBatchT * cfg.dim);
-                this.rmsPartialsBatch = allocFloats(ctx, (long) maxBatchT * maxGroups);
-                this.rmsRowValuesBatch = allocFloats(ctx, maxBatchT);
-                this.positionsBatch = allocBytes(ctx, (long) maxBatchT * ValueLayout.JAVA_INT.byteSize());
-            } else {
-                this.qBatch = null; this.kBatch = null; this.vBatch = null;
-                this.xNormBatch = null; this.xNormQ8Batch = null;
-                this.scoresBatch = null;
-                this.attnOutBatch = null; this.attnProjBatch = null;
-                this.ffnNormBatch = null; this.ffnNormQ8Batch = null;
-                this.gateBatch = null; this.upBatch = null; this.swigluOutBatch = null; this.swigluOutQ8Batch = null;
-                this.ffnDownOutBatch = null;
-                this.rmsPartialsBatch = null; this.rmsRowValuesBatch = null; this.positionsBatch = null;
+        private GpuState(GpuContext ctx, Config cfg, Scratch sc, boolean ownsFreshScratch) throws Throwable {
+            MemorySegment kc = null, vc = null;
+            try {
+                this.ctx = ctx;
+                this.kvDim = cfg.kv_heads * cfg.head_dim;
+                this.maxBatchT = cfg.max_prefill_batch;
+                ctx.allocCategory = "state: KV cache";
+                kc = allocFloats(ctx, (long) cfg.max_seq * kvDim);
+                vc = allocFloats(ctx, (long) cfg.max_seq * kvDim);
+            } catch (Throwable t) {
+                freeQuietly(ctx, kc);
+                freeQuietly(ctx, vc);
+                sc.release(ctx);
+                throw t;
             }
+            this.k_cache_f32 = kc;
+            this.v_cache_f32 = vc;
+            this.scratch = sc;
+            this.cos_table = sc.cos_table;
+            this.sin_table = sc.sin_table;
+            this.xNorm = sc.xNorm;
+            this.xNormQ8 = sc.xNormQ8;
+            this.qSplit = sc.qSplit;
+            this.kNew = sc.kNew;
+            this.vNew = sc.vNew;
+            this.scores = sc.scores;
+            this.attnOut = sc.attnOut;
+            this.attnOutQ8 = sc.attnOutQ8;
+            this.attnProj = sc.attnProj;
+            this.ffnNorm = sc.ffnNorm;
+            this.ffnNormQ8 = sc.ffnNormQ8;
+            this.gate = sc.gate;
+            this.up = sc.up;
+            this.swigluOut = sc.swigluOut;
+            this.swigluOutQ8 = sc.swigluOutQ8;
+            this.ffnDownOut = sc.ffnDownOut;
+            this.rmsPartials = sc.rmsPartials;
+            this.qBatch = sc.qBatch;
+            this.kBatch = sc.kBatch;
+            this.vBatch = sc.vBatch;
+            this.xNormBatch = sc.xNormBatch;
+            this.xNormQ8Batch = sc.xNormQ8Batch;
+            this.scoresBatch = sc.scoresBatch;
+            this.attnOutBatch = sc.attnOutBatch;
+            this.attnOutQ8Batch = sc.attnOutQ8Batch;
+            this.attnProjBatch = sc.attnProjBatch;
+            this.ffnNormBatch = sc.ffnNormBatch;
+            this.ffnNormQ8Batch = sc.ffnNormQ8Batch;
+            this.gateBatch = sc.gateBatch;
+            this.upBatch = sc.upBatch;
+            this.swigluOutBatch = sc.swigluOutBatch;
+            this.swigluOutQ8Batch = sc.swigluOutQ8Batch;
+            this.ffnDownOutBatch = sc.ffnDownOutBatch;
+            this.rmsPartialsBatch = sc.rmsPartialsBatch;
+            this.rmsRowValuesBatch = sc.rmsRowValuesBatch;
+            this.positionsBatch = sc.positionsBatch;
         }
 
-        private static int q8_0Bytes(int len) {
-            return (len / 32) * 34;
-        }
-
-        /** Delegates to {@link RopeTables}: one RoPE definition for CUDA, OpenCL and Metal. */
-        private static void precomputeRope(float[] cosOut, float[] sinOut, int maxSeq, int headDim, double base, Config cfg) {
-            RopeTables.fill(cosOut, sinOut, maxSeq, headDim, base, cfg.ropeParams());
-        }
-
+        /** Idempotent. Frees this layer's KV cache and drops its reference to the shared scratch (freed with the last reference). */
         @Override
         public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
             freeQuietly(ctx, k_cache_f32);
             freeQuietly(ctx, v_cache_f32);
-            freeQuietly(ctx, cos_table);
-            freeQuietly(ctx, sin_table);
-            freeQuietly(ctx, xNorm);
-            freeQuietly(ctx, xNormQ8);
-            freeQuietly(ctx, qSplit);
-            freeQuietly(ctx, kNew);
-            freeQuietly(ctx, vNew);
-            freeQuietly(ctx, scores);
-            freeQuietly(ctx, attnOut);
-            freeQuietly(ctx, attnProj);
-            freeQuietly(ctx, ffnNorm);
-            freeQuietly(ctx, ffnNormQ8);
-            freeQuietly(ctx, gate);
-            freeQuietly(ctx, up);
-            freeQuietly(ctx, swigluOut);
-            freeQuietly(ctx, swigluOutQ8);
-            freeQuietly(ctx, ffnDownOut);
-            freeQuietly(ctx, rmsPartials);
-            if (maxBatchT > 0) {
-                freeQuietly(ctx, qBatch);
-                freeQuietly(ctx, kBatch);
-                freeQuietly(ctx, vBatch);
-                freeQuietly(ctx, xNormBatch);
-                freeQuietly(ctx, xNormQ8Batch);
-                freeQuietly(ctx, scoresBatch);
-                freeQuietly(ctx, attnOutBatch);
-                freeQuietly(ctx, attnProjBatch);
-                freeQuietly(ctx, ffnNormBatch);
-                freeQuietly(ctx, ffnNormQ8Batch);
-                freeQuietly(ctx, gateBatch);
-                freeQuietly(ctx, upBatch);
-                freeQuietly(ctx, swigluOutBatch);
-                freeQuietly(ctx, swigluOutQ8Batch);
-                freeQuietly(ctx, ffnDownOutBatch);
-                freeQuietly(ctx, rmsPartialsBatch);
-                freeQuietly(ctx, rmsRowValuesBatch);
-                freeQuietly(ctx, positionsBatch);
-            }
+            scratch.release(ctx);
         }
     }
 
@@ -553,7 +719,7 @@ public final class LlamaLayer {
                 "clEnqueueWriteBuffer(non-blocking)");
     }
 
-    private static void writeBlocking(GpuContext ctx, MemorySegment mem, MemorySegment hostSrc, long byteSize) throws Throwable {
+    static void writeBlocking(GpuContext ctx, MemorySegment mem, MemorySegment hostSrc, long byteSize) throws Throwable {
         GpuContext.check((int) ctx.cl.clEnqueueWriteBuffer.invoke(
                 ctx.queue, mem, OpenCLBindings.CL_TRUE, 0L, byteSize, hostSrc, 0, MemorySegment.NULL, MemorySegment.NULL),
                 "clEnqueueWriteBuffer");
@@ -633,7 +799,12 @@ public final class LlamaLayer {
             }
 
             stage(ctx, "wo proj");
-            f32Gemv(ctx, s.attnOut, w.wo_f32, s.attnProj, dim, dim);
+            if (w.wo_q8 != null) {
+                quantizeActivationQ8_0(ctx, s.attnOut, s.attnOutQ8, numHeads * headDim);
+                q8_0GemvPlain(ctx, s.attnOutQ8, w.wo_q8, s.attnProj, dim, numHeads * headDim);
+            } else {
+                f32Gemv(ctx, s.attnOut, w.wo_f32, s.attnProj, dim, dim);
+            }
             stage(ctx, "residual add");
             residualAdd(ctx, x, s.attnProj, dim);
 
@@ -747,7 +918,7 @@ public final class LlamaLayer {
             MemorySegment n = null, nq = null, lg = null, pt = null;
             try {
                 n = allocFloats(ctx, cfg.dim);
-                nq = allocBytes(ctx, ((long) cfg.dim / 32 * 34 + 3) / 4 * 4);
+                nq = allocBytes(ctx, Q8Layout.activationBytes(ctx.q8Soa, cfg.dim));
                 lg = allocFloats(ctx, vocabSize);
                 pt = allocFloats(ctx, (cfg.dim + KernelSource.RMSNORM_WORKGROUP_SIZE - 1) / KernelSource.RMSNORM_WORKGROUP_SIZE);
             } catch (Throwable t) {
@@ -932,7 +1103,12 @@ public final class LlamaLayer {
 
             stage(ctx, "wo proj");
 
-            f32GemmTiled(ctx, s.attnOutBatch, w.wo_f32, s.attnProjBatch, T, dim, dim);
+            if (w.wo_q8 != null) {
+                quantizeActivationQ8_0(ctx, s.attnOutBatch, s.attnOutQ8Batch, T * qRowStride);
+                q8_0GemmTiled(ctx, s.attnOutQ8Batch, w.wo_q8, s.attnProjBatch, T, dim, qRowStride);
+            } else {
+                f32GemmTiled(ctx, s.attnOutBatch, w.wo_f32, s.attnProjBatch, T, dim, dim);
+            }
             stage(ctx, "residual add");
             residualAdd(ctx, xBatch, s.attnProjBatch, T * dim);
 
@@ -1041,11 +1217,12 @@ public final class LlamaLayer {
     }
 
     static void quantizeActivationQ8_0(GpuContext ctx, MemorySegment x, MemorySegment outQ8, int len) throws Throwable {
+        final MemorySegment k = ctx.q8Soa ? ctx.kQuantizeSoa : ctx.kQuantizeActivationQ8_0;
         try (Arena tmp = Arena.ofConfined()) {
-            setArg(tmp, ctx, ctx.kQuantizeActivationQ8_0, 0, x);
-            setArg(tmp, ctx, ctx.kQuantizeActivationQ8_0, 1, outQ8);
-            setArgI(tmp, ctx, ctx.kQuantizeActivationQ8_0, 2, len);
-            launch1D(ctx, ctx.kQuantizeActivationQ8_0, len, KernelSource.QUANTIZE_BLOCK_SIZE);
+            setArg(tmp, ctx, k, 0, x);
+            setArg(tmp, ctx, k, 1, outQ8);
+            setArgI(tmp, ctx, k, 2, len);
+            launch1D(ctx, k, len, KernelSource.QUANTIZE_BLOCK_SIZE);
         }
     }
 
@@ -1066,8 +1243,7 @@ public final class LlamaLayer {
     static MemorySegment gemvKernel(GpuContext ctx, int K) {
         int v = Variants.forcedGemvVariant();
         if (v < 0) {
-            Integer perK = ctx.gemvVariantByK.get(K);
-            v = perK != null ? perK : ctx.gemvVariant;
+            v = ctx.gemvVariant;
         }
         if (v == 2 && (K / 32) % 2 != 0) {
             v = 0;
@@ -1075,8 +1251,51 @@ public final class LlamaLayer {
         return v == 2 ? ctx.kQ8_0GemvU32 : v == 1 ? ctx.kQ8_0GemvVloadf : ctx.kQ8_0GemvPlain;
     }
 
+    /** SoA decode GEMV: {@code lpr} lanes per output row, 64/lpr rows per work-group (see KernelSourceSoa). */
+    static void q8_0GemvSoa(GpuContext ctx, MemorySegment xQ8, MemorySegment wQ8, MemorySegment out, int N, int K) throws Throwable {
+        final int lpr = ctx.soaLprFor(K);
+        final MemorySegment k = ctx.soaGemvKernel(lpr);
+        final int rowsPerGroup = KernelSource.GEMV_WORKGROUP / lpr;
+        final long groups = (N + rowsPerGroup - 1) / rowsPerGroup;
+        if (ctx.prof != null) {
+            ctx.prof.hintBytes(Q8Layout.weightBytes(true, N, K) + Q8Layout.activationBytes(true, K));
+        }
+        try (Arena tmp = Arena.ofConfined()) {
+            setArg(tmp, ctx, k, 0, xQ8);
+            setArg(tmp, ctx, k, 1, wQ8);
+            setArg(tmp, ctx, k, 2, out);
+            setArgI(tmp, ctx, k, 3, N);
+            setArgI(tmp, ctx, k, 4, K);
+            launch1D(ctx, k, groups * KernelSource.GEMV_WORKGROUP, KernelSource.GEMV_WORKGROUP);
+        }
+    }
+
+    /** SoA prefill GEMM: out[T, N] = X[T, K] * W[N, K]^T, 16 tokens per work-group. */
+    static void q8_0GemmSoa(GpuContext ctx, MemorySegment xQ8, MemorySegment wQ8, MemorySegment out, int T, int N, int K) throws Throwable {
+        final int rowsPerGroup = KernelSource.GEMV_WORKGROUP / KernelSourceSoa.GEMM_LPR;
+        final long groupsX = (N + rowsPerGroup - 1) / rowsPerGroup;
+        final int chunks = (T + KernelSource.GEMM_TOKEN_CHUNK - 1) / KernelSource.GEMM_TOKEN_CHUNK;
+        if (ctx.prof != null) {
+            ctx.prof.hintBytes(Q8Layout.weightBytes(true, N, K) * chunks + Q8Layout.activationBytes(true, (long) T * K));
+        }
+        try (Arena tmp = Arena.ofConfined()) {
+            final MemorySegment k = ctx.kQ8_0GemmSoa;
+            setArg(tmp, ctx, k, 0, xQ8);
+            setArg(tmp, ctx, k, 1, wQ8);
+            setArg(tmp, ctx, k, 2, out);
+            setArgI(tmp, ctx, k, 3, T);
+            setArgI(tmp, ctx, k, 4, N);
+            setArgI(tmp, ctx, k, 5, K);
+            launchGroups2D(ctx, k, groupsX, chunks, KernelSource.GEMV_WORKGROUP);
+        }
+    }
+
     static void q8_0GemvPlain(GpuContext ctx, MemorySegment xQ8, MemorySegment wQ8, MemorySegment out,
             int N, int K) throws Throwable {
+        if (ctx.q8Soa) {
+            q8_0GemvSoa(ctx, xQ8, wQ8, out, N, K);
+            return;
+        }
         final boolean legacy = Variants.legacyGemv();
         final MemorySegment K_ = legacy ? ctx.kQ8_0GemvPlainLegacy : gemvKernel(ctx, K);
         if (ctx.prof != null) {
@@ -1330,6 +1549,10 @@ public final class LlamaLayer {
     }
 
     static void q8_0GemmTiled(GpuContext ctx, MemorySegment xQ8, MemorySegment wQ8, MemorySegment out, int T, int N, int K) throws Throwable {
+        if (ctx.q8Soa) {
+            q8_0GemmSoa(ctx, xQ8, wQ8, out, T, N, K);
+            return;
+        }
         final boolean rows = !Variants.legacyGemm() && ctx.q8GemmRows && (K / 32) % 2 == 0;
         final MemorySegment k = rows ? ctx.kQ8_0GemmRows : ctx.kQ8_0GemmTiled;
         final int chunks = (T + KernelSource.GEMM_TOKEN_CHUNK - 1) / KernelSource.GEMM_TOKEN_CHUNK;

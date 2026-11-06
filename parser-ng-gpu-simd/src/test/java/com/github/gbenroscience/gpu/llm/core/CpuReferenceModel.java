@@ -6,7 +6,7 @@ import java.util.Map;
  * Complete decode-step Llama forward pass built ONLY from {@link CpuReference}
  * primitives and the tensors that were written to the GGUF file. It mirrors the
  * numerical contract of the device engines (Q8_0 activations/weights with fp16
- * scales for q/k/v/gate/up/down, F32 for wo and the output head, double-precision
+ * scales for q/k/v/gate/up/down, F32 or Q8_0 for wo and the output head depending on how the file stores them, double-precision
  * norms/softmax) but shares no code with any kernel or backend.
  */
 public final class CpuReferenceModel {
@@ -60,7 +60,12 @@ public final class CpuReferenceModel {
             System.arraycopy(k, 0, kCache[l], pos * kd, kd);
             System.arraycopy(v, 0, vCache[l], pos * kd, kd);
             float[] a = CpuReference.attentionDecode(q, kCache[l], vCache[l], spec.heads, spec.kvHeads, hd, pos + 1);
-            x = add(x, CpuReference.matvecExact(f32.get(p + "attn_output.weight"), a, dim, qd));
+            if (q8.containsKey(p + "attn_output.weight")) {
+                // Q8_0 wo: the attention output is quantised to int8 blocks like every other Q8_0 projection input
+                x = add(x, CpuReference.q8Gemv(CpuReference.quantizeQ8_0(a), q8.get(p + "attn_output.weight"), dim, qd));
+            } else {
+                x = add(x, CpuReference.matvecExact(f32.get(p + "attn_output.weight"), a, dim, qd));
+            }
 
             float[] xn2 = CpuReference.rmsNorm(x, f32.get(p + "ffn_norm.weight"), spec.normEps);
             byte[] xq2 = CpuReference.quantizeQ8_0(xn2);

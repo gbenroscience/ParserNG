@@ -122,7 +122,6 @@ class OpenCLConformanceTest {
         needDevice();
         // K/32 blocks: 1, 2, 63, 64 (== lanes), 65, 129 (not a multiple of the lane count), 256
         int[][] shapes = {{1, 32}, {3, 64}, {5, 2016}, {7, 2048}, {9, 2080}, {33, 4128}, {64, 8192}, {257, 96}, {8, 128}};
-        ctx.gemvVariantByK.clear(); // evaluate each forced variant, not a previous autotune choice
         for (int variant = 0; variant < 3; variant++) {
           ctx.gemvVariant = variant;
           try {
@@ -419,16 +418,13 @@ class OpenCLConformanceTest {
         needDevice();
         LoadTimer.reset();
         GemvAutotune.run(ctx, 2048, 512);
-        GemvAutotune.run(ctx, 4096, 256); // a second K is tuned independently
         try {
             assertTrue(ctx.gemvVariant >= 0 && ctx.gemvVariant <= 2);
-            assertTrue(ctx.gemvVariantByK.containsKey(2048) && ctx.gemvVariantByK.containsKey(4096), "per-K choices must be recorded");
             String rep = LoadTimer.report();
             assertTrue(rep.contains("GEMV autotune") && rep.contains("-> chose"), rep);
             q8GemvMatchesReferenceForEdgeShapes(); // sweeps variants itself and resets to 0; autotuned choice was already validated inside run()
         } finally {
             ctx.gemvVariant = 0;
-            ctx.gemvVariantByK.clear();
         }
     }
 

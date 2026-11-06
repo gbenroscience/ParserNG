@@ -11,36 +11,27 @@ import java.util.Scanner;
 /**
  * Reusable interactive OpenCL GGUF inference engine.
  *
- * The model is loaded and uploaded ONCE.
- * Multiple prompts are processed using the same engine instance.
+ * The model is loaded and uploaded ONCE. Multiple prompts are processed using
+ * the same engine instance.
  *
  * Usage:
  *
- *   OpenCLDemo
- *   OpenCLDemo model.gguf
+ * OpenCLDemo OpenCLDemo model.gguf
  *
  * System properties:
  *
- *   -Dopencl.vendor=AMD|INTEL|NVIDIA
- *   -Dopencl.device.type=CPU|GPU
+ * -Dopencl.vendor=AMD|INTEL|NVIDIA -Dopencl.device.type=CPU|GPU
  *
- *   -Dllm.timing=true
- *   -Dllm.profile=false
- *   -Dllm.maxContext=8192
- *   -Dllm.maxNewTokens=256
+ * -Dllm.timing=true -Dllm.profile=false -Dllm.maxContext=8192
+ * -Dllm.maxNewTokens=256
  *
- *   -Dllm.temperature=0.0
- *   -Dllm.topK=1
- *   -Dllm.topP=1.0
- *   -Dllm.repetitionPenalty=1.0
+ * -Dllm.temperature=0.0 -Dllm.topK=1 -Dllm.topP=1.0 -Dllm.repetitionPenalty=1.0
  *
- *   -Dllm.printTokens=false
+ * -Dllm.printTokens=false
  *
  * Interactive commands:
  *
- *   :quit    Exit
- *   :exit    Exit
- *   :help    Display commands
+ * :quit Exit :exit Exit :help Display commands
  *
  * IMPORTANT:
  *
@@ -50,8 +41,8 @@ import java.util.Scanner;
  */
 public final class OpenCLAssistant {
 
-    private static final String DEFAULT_MODEL =
-            "C:\\Users\\GBEMIRO\\Documents\\NetBeansProjects\\ai-models\\llama-3.2-1b-instruct-q8_0.gguf";
+    private static final String DEFAULT_MODEL
+            = "C:\\Users\\GBEMIRO\\Documents\\NetBeansProjects\\ai-models\\llama-3.2-1b-instruct-q8_0.gguf";
 
     private OpenCLAssistant() {
     }
@@ -86,7 +77,7 @@ public final class OpenCLAssistant {
         long loadStart = System.nanoTime();
 
         try (OpenCLLlamaEngine engine = new OpenCLLlamaEngine(model)) {
-
+            System.out.print(com.github.gbenroscience.gpu.llm.opencl.LoadTimer.report());
             long loadTime = System.nanoTime() - loadStart;
 
             System.out.printf(
@@ -173,7 +164,7 @@ public final class OpenCLAssistant {
             return;
         }
 
-        String vendor = System.getProperty("opencl.vendor", "AMD")
+        String vendor = System.getProperty("opencl.vendor", "INTEL")
                 .trim()
                 .toUpperCase();
 

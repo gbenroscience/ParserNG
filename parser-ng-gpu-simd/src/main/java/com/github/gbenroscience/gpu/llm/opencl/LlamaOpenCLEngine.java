@@ -150,6 +150,43 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
         final long tTok0 = System.nanoTime();
         int[] promptIds = tokenizer.encode(prompt, true);
         final double tokenizeMs = (System.nanoTime() - tTok0) / 1e6;
+        int eosId = genCfg.eosTokenId >= 0 ? genCfg.eosTokenId : tokenizer.getEosId();
+        return generateIds(promptIds, tokenizeMs, genCfg, new int[]{eosId});
+    }
+
+    /**
+     * Applies the Llama-3 chat template to {@code messages} and generates the assistant's reply, stopping at any
+     * end-of-generation token ({@code <|eot_id|>}, {@code <|eom_id|>}, {@code <|end_of_text|>} or the metadata EOS; an
+     * explicit {@code genCfg.eosTokenId} is added to that set). Throws {@link UnsupportedOperationException} if the
+     * model's vocabulary is not a Llama-3 one. Every call starts a fresh sequence: pass the whole conversation.
+     */
+    public String chat(List<com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message> messages, GenerationConfig genCfg) throws Throwable {
+        final long tTok0 = System.nanoTime();
+        int[] promptIds = com.github.gbenroscience.gpu.llm.core.ChatTemplate.llama3(tokenizer, messages);
+        final double tokenizeMs = (System.nanoTime() - tTok0) / 1e6;
+        int[] stops = com.github.gbenroscience.gpu.llm.core.ChatTemplate.stopIds(tokenizer);
+        if (genCfg.eosTokenId >= 0) {
+            stops = Arrays.copyOf(stops, stops.length + 1);
+            stops[stops.length - 1] = genCfg.eosTokenId;
+        }
+        return generateIds(promptIds, tokenizeMs, genCfg, stops);
+    }
+
+    /** True when {@link #chat} can be used with this model's vocabulary. */
+    public boolean supportsChat() {
+        return com.github.gbenroscience.gpu.llm.core.ChatTemplate.supportsLlama3(tokenizer);
+    }
+
+    private static boolean isStop(int id, int[] stopIds) {
+        for (int s : stopIds) {
+            if (s >= 0 && s == id) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String generateIds(int[] promptIds, double tokenizeMs, GenerationConfig genCfg, int[] stopIds) throws Throwable {
         if (promptIds.length == 0) {
             throw new IllegalArgumentException("Prompt tokenized to zero tokens");
         }
@@ -189,7 +226,6 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
         final long tStart = System.nanoTime();
         MemorySegment lastRowResult = processPrompt(promptIds);
 
-        int eosId = genCfg.eosTokenId >= 0 ? genCfg.eosTokenId : tokenizer.getEosId();
         Sampler sampler = new Sampler(genCfg.sampler);
         List<Integer> generated = new ArrayList<>(genCfg.maxNewTokens);
 
@@ -209,7 +245,7 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
         }
 
         for (int step = 0; step < genCfg.maxNewTokens; step++) {
-            if (nextId == eosId) {
+            if (isStop(nextId, stopIds)) {
                 break;
             }
             generated.add(nextId);

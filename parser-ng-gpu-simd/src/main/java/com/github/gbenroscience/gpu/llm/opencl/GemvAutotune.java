@@ -22,11 +22,11 @@ final class GemvAutotune {
 
     private static final String[] NAMES = {"wg (vload16)", "vloadf (vload16 + float dp4)", "u32 (aligned words)"};
 
-    static void run(GpuContext ctx, int k, int n) throws Throwable {
+    static double run(GpuContext ctx, int k, int n) throws Throwable {
         final long t0 = System.nanoTime();
         final int rows = Math.max(256, n);
-        ctx.gemvVariantByK.remove(k); // candidates must be evaluated through ctx.gemvVariant, not a previous choice for this K
         Random r = new Random(11);
+        double[] bestOut = {Double.MAX_VALUE};
         MemorySegment dw = null, dx = null, dout = null;
         StringBuilder note = new StringBuilder("GEMV autotune (K=" + k + ", N=" + rows + ", median of 7): ");
         try {
@@ -71,7 +71,7 @@ final class GemvAutotune {
                 }
             }
             ctx.gemvVariant = best;
-            ctx.gemvVariantByK.put(k, best);
+            bestOut[0] = bestMs;
             note.append("-> chose ").append(NAMES[best]).append(String.format(" (autotune took %.0f ms)", (System.nanoTime() - t0) / 1e6));
         } finally {
             LlamaLayer.freeQuietly(ctx, dw);
@@ -79,6 +79,7 @@ final class GemvAutotune {
             LlamaLayer.freeQuietly(ctx, dout);
         }
         LoadTimer.note(note.toString());
+        return bestOut[0];
     }
 
     /**
@@ -159,6 +160,192 @@ final class GemvAutotune {
             LlamaLayer.freeQuietly(ctx, doutF);
         }
         LoadTimer.note(note.toString());
+    }
+
+    // ======================================================================================================
+    // Q8_0 layout selection (runs BEFORE any weight is uploaded, because it decides how they are uploaded)
+    // ======================================================================================================
+
+    /** SoA must beat the best AoS kernel by this factor before it is chosen, so noise cannot flip the layout. */
+    private static final double SOA_MARGIN = 0.92;
+
+    /**
+     * Decides the Q8_0 device layout of this context and the per-K lanes-per-row of the SoA GEMV, on the real device:
+     * <ol>
+     *   <li>-Dllm.layout=aos, or SoA kernels not compiled: AoS (with the usual GEMV variant autotune).</li>
+     *   <li>otherwise time the best AoS decode kernel and every SoA lanes-per-row variant on the same synthetic
+     *       problem; SoA is chosen if it wins by {@link #SOA_MARGIN} (always, when -Dllm.layout=soa).</li>
+     *   <li>every SoA kernel used must reproduce a CPU reference (GEMV for each tuned K; the prefill GEMM against
+     *       the same reference) to a relative 1e-4. If any check fails the context falls back to AoS (or, when SoA was
+     *       forced, throws): a miscompiled kernel must never silently produce wrong text.</li>
+     * </ol>
+     * Sets {@code ctx.q8Soa}, {@code ctx.soaLprByK} and (for AoS) {@code ctx.gemvVariant}; everything is reported via {@link LoadTimer}.
+     */
+    static void selectLayout(GpuContext ctx, LlamaLayer.Config cfg) throws Throwable {
+        final String req = Variants.layoutRequest();
+        ctx.q8Soa = false;
+        if (req.equals("soa") && !ctx.soaAvailable) {
+            throw new IllegalStateException("-Dllm.layout=soa was requested but the SoA kernels did not compile on this device");
+        }
+        final boolean aosTune = Variants.autotuneGemv() && !Variants.legacyGemv();
+        final int rows = Math.max(256, Math.min(cfg.hidden_dim, 4096));
+        double aosMs = Double.MAX_VALUE;
+        if (!req.equals("soa") && aosTune) {
+            aosMs = run(ctx, cfg.dim, Math.min(cfg.hidden_dim, 4096));
+        }
+        if (req.equals("aos") || !ctx.soaAvailable) {
+            LoadTimer.note("Q8_0 layout: AoS (" + (req.equals("aos") ? "requested" : "SoA kernels unavailable") + ")");
+            return;
+        }
+        StringBuilder note = new StringBuilder("Q8_0 layout selection: ");
+        boolean ok = true;
+        double soaMs = Double.MAX_VALUE;
+        java.util.Set<Integer> ks = new java.util.LinkedHashSet<>();
+        ks.add(cfg.dim);
+        ks.add(cfg.hidden_dim);
+        ks.add(cfg.num_heads * cfg.head_dim);
+        try {
+            ctx.q8Soa = true;
+            for (int k : ks) {
+                if (k % 32 != 0) {
+                    ok = false;
+                    note.append("K=").append(k).append(" is not a multiple of 32; ");
+                    break;
+                }
+                int nRows = (k == cfg.dim) ? rows : Math.max(256, Math.min(cfg.dim, 2048));
+                double[] ms = new double[1];
+                int lpr = tuneSoaLpr(ctx, k, nRows, note, ms);
+                if (lpr < 0) {
+                    ok = false;
+                    break;
+                }
+                ctx.soaLprByK.put(k, lpr);
+                if (k == cfg.dim) {
+                    soaMs = ms[0];
+                    ctx.soaLpr = lpr;
+                }
+            }
+            if (ok && !validateSoaGemm(ctx, cfg.dim, rows, note)) {
+                ok = false;
+            }
+        } finally {
+            ctx.q8Soa = false;
+        }
+        boolean forced = req.equals("soa");
+        if (!ok) {
+            ctx.soaLprByK.clear();
+            if (forced) {
+                LoadTimer.note(note.toString());
+                throw new IllegalStateException("-Dllm.layout=soa was requested but the SoA kernels failed validation on this device: " + note);
+            }
+            note.append("-> AoS (SoA failed validation)");
+        } else if (forced || soaMs < aosMs * SOA_MARGIN) {
+            ctx.q8Soa = true;
+            note.append(String.format("-> SoA (%.2f ms vs best AoS %s)", soaMs, aosMs == Double.MAX_VALUE ? "n/a" : String.format("%.2f ms", aosMs)));
+        } else {
+            note.append(String.format("-> AoS (SoA %.2f ms did not beat best AoS %.2f ms by %.0f%%)", soaMs, aosMs, (1 - SOA_MARGIN) * 100));
+            ctx.soaLprByK.clear();
+        }
+        LoadTimer.note(note.toString());
+    }
+
+    /**
+     * Times each SoA GEMV lanes-per-row variant on (K=k, N=rows), checks it against the CPU reference, and returns the
+     * fastest valid lanes-per-row (or -1 if none validates). ctx.q8Soa must be true. Median wall time of 7 launches.
+     */
+    private static int tuneSoaLpr(GpuContext ctx, int k, int rows, StringBuilder note, double[] bestMsOut) throws Throwable {
+        Random r = new Random(17 + k);
+        MemorySegment dw = null, dxf = null, dx = null, dout = null;
+        note.append("SoA GEMV (K=").append(k).append(", N=").append(rows).append("): ");
+        try {
+            byte[] aos = GemvSweep.fakeQ8((long) rows * (k / 32), r);
+            dw = LlamaLayer.uploadBytes(ctx, Q8Layout.repackWeightsSoa(aos, rows, k));
+            float[] x = new float[k];
+            for (int i = 0; i < k; i++) {
+                x[i] = (float) r.nextGaussian();
+            }
+            float[] ref = CpuReference.q8Gemv(CpuReference.quantizeQ8_0(x), aos, rows, k);
+            dxf = LlamaLayer.uploadFloats(ctx, x);
+            dx = LlamaLayer.allocBytes(ctx, Q8Layout.activationBytes(true, k));
+            dout = LlamaLayer.allocFloats(ctx, rows);
+            LlamaLayer.quantizeActivationQ8_0(ctx, dxf, dx, k);
+            int best = -1;
+            double bestMs = Double.MAX_VALUE;
+            for (int lpr : KernelSourceSoa.GEMV_LPR) {
+                ctx.soaLprByK.put(k, lpr);
+                LlamaLayer.q8_0GemvSoa(ctx, dx, dw, dout, rows, k);
+                LlamaLayer.finish(ctx);
+                float[] got = LlamaLayer.downloadFloats(ctx, dout, rows);
+                if (!matches(ref, got, 1e-4)) {
+                    note.append("l").append(lpr).append(" REJECTED (differs from CPU reference); ");
+                    continue;
+                }
+                double[] ms = new double[7];
+                for (int rep = 0; rep < ms.length; rep++) {
+                    long a = System.nanoTime();
+                    LlamaLayer.q8_0GemvSoa(ctx, dx, dw, dout, rows, k);
+                    LlamaLayer.finish(ctx);
+                    ms[rep] = (System.nanoTime() - a) / 1e6;
+                }
+                java.util.Arrays.sort(ms);
+                double med = ms[3];
+                note.append(String.format("l%d %.2f ms (%.1f GB/s); ", lpr, med, (double) Q8Layout.weightBytes(true, rows, k) / 1e6 / med));
+                if (med < bestMs) {
+                    bestMs = med;
+                    best = lpr;
+                }
+            }
+            bestMsOut[0] = bestMs;
+            if (best < 0) {
+                note.append("no variant validated; ");
+            } else {
+                note.append("best l").append(best).append("; ");
+            }
+            return best;
+        } finally {
+            ctx.soaLprByK.remove(k);
+            LlamaLayer.freeQuietly(ctx, dw);
+            LlamaLayer.freeQuietly(ctx, dxf);
+            LlamaLayer.freeQuietly(ctx, dx);
+            LlamaLayer.freeQuietly(ctx, dout);
+        }
+    }
+
+    /** Checks the SoA prefill GEMM (T=16 tokens, N=rows, K=k) against the CPU reference token by token. ctx.q8Soa must be true. */
+    private static boolean validateSoaGemm(GpuContext ctx, int k, int rows, StringBuilder note) throws Throwable {
+        final int T = 16;
+        Random r = new Random(23);
+        MemorySegment dw = null, dxf = null, dx = null, dout = null;
+        try {
+            byte[] aos = GemvSweep.fakeQ8((long) rows * (k / 32), r);
+            dw = LlamaLayer.uploadBytes(ctx, Q8Layout.repackWeightsSoa(aos, rows, k));
+            float[] x = new float[T * k];
+            for (int i = 0; i < x.length; i++) {
+                x[i] = (float) r.nextGaussian();
+            }
+            dxf = LlamaLayer.uploadFloats(ctx, x);
+            dx = LlamaLayer.allocBytes(ctx, Q8Layout.activationBytes(true, (long) T * k));
+            dout = LlamaLayer.allocFloats(ctx, (long) T * rows);
+            LlamaLayer.quantizeActivationQ8_0(ctx, dxf, dx, T * k);
+            LlamaLayer.q8_0GemmSoa(ctx, dx, dw, dout, T, rows, k);
+            LlamaLayer.finish(ctx);
+            float[] got = LlamaLayer.downloadFloats(ctx, dout, T * rows);
+            for (int t = 0; t < T; t++) {
+                float[] xt = java.util.Arrays.copyOfRange(x, t * k, (t + 1) * k);
+                float[] ref = CpuReference.q8Gemv(CpuReference.quantizeQ8_0(xt), aos, rows, k);
+                if (!matches(ref, java.util.Arrays.copyOfRange(got, t * rows, (t + 1) * rows), 1e-4)) {
+                    note.append("SoA prefill GEMM REJECTED (token ").append(t).append(" differs from CPU reference); ");
+                    return false;
+                }
+            }
+            note.append("SoA prefill GEMM validated (T=16); ");
+            return true;
+        } finally {
+            LlamaLayer.freeQuietly(ctx, dw);
+            LlamaLayer.freeQuietly(ctx, dxf);
+            LlamaLayer.freeQuietly(ctx, dx);
+            LlamaLayer.freeQuietly(ctx, dout);
+        }
     }
 
     private interface Launch {

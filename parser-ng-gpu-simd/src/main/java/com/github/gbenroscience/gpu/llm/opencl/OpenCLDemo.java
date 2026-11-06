@@ -19,8 +19,15 @@ import java.io.File;
  *   -Dllm.maxContext=N                     cap on context positions (default 8192; sizes the KV cache)
  *   (for a full measurement run use OpenCLDiagnostics, which needs no arguments)
  *   -Dllm.printTokens=true                 print the prompt token ids, for diffing against `llama-tokenize`
+ *   -Dllm.chat=true|false                  wrap the prompt in the Llama-3 chat template and stop at the end-of-turn token
+ *                                          (default true when the model's vocabulary has the Llama-3 header tokens)
+ *   -Dllm.layout=aos|soa|auto, -Dllm.wo=f32|q8|auto   see Variants
  *
- * The prompt is passed as plain text. This demo does not apply a chat template, and the current
+ * Output is written as UTF-8 regardless of the console code page (a Windows console in cp1252/cp437 otherwise turns
+ * accented characters into '?' or U+FFFD).
+ *
+ * With -Dllm.chat=false the prompt is passed as plain text with no chat template (an instruct model then continues the
+ * text and usually runs to maxNewTokens). The current
  * BpeTokenizer uses the GPT-2 pre-tokenizer regex rather than the one Llama-3 models declare in
  * tokenizer.ggml.pre, so prompts containing unusual whitespace, contractions or long digit runs may
  * tokenize differently from llama.cpp. Treat output quality accordingly.
@@ -43,6 +50,7 @@ public final class OpenCLDemo {
             System.exit(1);
             return;
         }
+        System.setOut(new java.io.PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.out), true, java.nio.charset.StandardCharsets.UTF_8));
         System.setProperty("llm.timing", System.getProperty("llm.timing", "true"));
         // The event profiler is ON by default in the demo so that every run also reports where the device time goes
         // (per operation, per layer, launches, synchronisations, transfers). It captures one OpenCL event per command and adds
@@ -83,7 +91,11 @@ public final class OpenCLDemo {
             cfg.repetitionPenalty = 1.0f;
 
             System.out.println("Running inference...");
-            String completion = engine.generate(prompt, cfg);
+            boolean chat = Boolean.parseBoolean(System.getProperty("llm.chat", Boolean.toString(engine.supportsChat())));
+            if (chat && !engine.supportsChat()) {
+                throw new IllegalArgumentException("-Dllm.chat=true but this model's vocabulary has no Llama-3 chat tokens");
+            }
+            String completion = chat ? engine.chat(null, prompt, cfg) : engine.generate(prompt, cfg);
             if (completion == null || completion.isBlank()) {
                 System.out.println("Generated text: <empty>");
             } else {

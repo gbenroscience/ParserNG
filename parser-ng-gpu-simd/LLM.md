@@ -275,7 +275,7 @@ longer used by the engines.
 * `-Dllm.timing=true` prints time-to-first-token, decode tokens/s and the host wall split per token.
 * `-Dllm.profile=true` enables the OpenCL event profiler: device time per kernel / phase / layer, launches, synchronisations, allocations, transfers.
 * `-Dllm.maxContext=N` caps the context (default 8192) so KV-cache memory is not sized for the model's full context.
-* `-Dllm.gemv=wg|vloadf|u32|legacy|auto` (default auto: the engine times the Q8_0 decode GEMV variants at load and keeps the fastest equivalent one), `-Dllm.gemm=rows|legacy|auto` (prefill GEMMs, autotuned the same way), `-Dllm.attention=legacy`, `-Dllm.rmsnorm=legacy`, `-Dllm.prefill=legacy` select the original generic kernels for A/B comparison.
+* `-Dllm.gemv=wg|vloadf|u32|legacy|auto` (default auto: the engine times the Q8_0 decode GEMV variants at load and keeps the fastest equivalent one), `-Dllm.gemm=rows|legacy|auto` (prefill GEMMs, autotuned the same way), `-Dllm.attention=legacy`, `-Dllm.rmsnorm=legacy`, `-Dllm.prefill=legacy` select the original generic kernels for A/B comparison. `-Dllm.layout=aos|soa|auto` picks the Q8_0 device layout (auto times both at load and self-checks SoA against a CPU reference), `-Dllm.wo=f32|q8|auto` the attention output projection, `-Dllm.chat=true|false` the demo's chat template. API: `OpenCLLlamaEngine.chat(system, user, cfg)`.
 * `-Dllm.lmhead=f32` keeps the LM head dequantised to F32 (the default keeps a Q8_0 head as Q8_0).
 * `OpenCLDemo` enables the event profiler by default and prints the per-operation / per-layer table after every run.
 * `OpenCLDiagnostics` (no arguments) runs bandwidth, memory plan, GEMV sweep and a profiled model run and writes `llm-diagnostics.txt`.

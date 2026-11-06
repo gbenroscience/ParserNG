@@ -98,6 +98,11 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         boolean headQ8 = false;
         LlamaOpenCLEngine eng = null;
         try {
+            // The Q8_0 device layout (and the decode GEMV variant) must be decided BEFORE any weight is uploaded.
+            long tLayout = LoadTimer.start();
+            c.allocCategory = "autotune scratch (freed)";
+            GemvAutotune.selectLayout(c, cfg);
+            LoadTimer.stop("opencl: Q8_0 layout + decode GEMV autotune", tLayout);
             long weightBytes = 0, stateBytes = 0;
             for (int i = 0; i < cfg.n_layers; i++) {
                 String prefix = "blk." + i + ".";
@@ -105,7 +110,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
                 w[i] = LlamaLayer.GpuWeights.fromGguf(c, prep.gguf, prefix);
                 long b1 = c.allocations.liveBytes();
                 long t = LoadTimer.start();
-                st[i] = new LlamaLayer.GpuState(c, cfg);
+                st[i] = i == 0 ? new LlamaLayer.GpuState(c, cfg) : new LlamaLayer.GpuState(c, cfg, st[0]); // scratch + RoPE shared, KV per layer
                 LoadTimer.stop("layers: state allocation (KV cache, RoPE tables, scratch)", t);
                 weightBytes += b1 - b0;
                 stateBytes += c.allocations.liveBytes() - b1;
@@ -118,17 +123,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
             head = lh.device;
             headQ8 = lh.q8;
             long headBytes = c.allocations.liveBytes() - bHead0;
-            if (Variants.autotuneGemv() && !Variants.legacyGemv()) {
-                long tTune = LoadTimer.start();
-                c.allocCategory = "autotune scratch (freed)";
-                GemvAutotune.run(c, cfg.dim, Math.min(cfg.hidden_dim, 4096)); // q/k/v/gate/up projections and the LM head (K = dim)
-                if (cfg.hidden_dim != cfg.dim) {
-                    GemvAutotune.run(c, cfg.hidden_dim, Math.min(cfg.dim, 2048)); // down projection (K = hidden_dim): a different shape
-                }
-                c.gemvVariant = c.gemvVariantByK.getOrDefault(cfg.dim, c.gemvVariant);
-                LoadTimer.stop("opencl: decode GEMV autotune", tTune);
-            }
-            if (Variants.autotuneGemm() && !Variants.legacyGemm() && !Variants.forcedRowsGemm()) {
+            if (!c.q8Soa && Variants.autotuneGemm() && !Variants.legacyGemm() && !Variants.forcedRowsGemm()) {
                 long tTune = LoadTimer.start();
                 c.allocCategory = "autotune scratch (freed)";
                 GemvAutotune.runGemm(c, cfg.dim, Math.min(cfg.hidden_dim, 2048));
@@ -204,6 +199,34 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         if (closed) {
             throw new IllegalStateException("OpenCLLlamaEngine is closed");
         }
+        LlamaOpenCLEngine.GenerationConfig genCfg = toGenerationConfig(cfg);
+        return engine.generate(prompt, genCfg);
+    }
+
+    /** True when {@link #chat} is available (the model's vocabulary is a Llama-3 one). */
+    public boolean supportsChat() {
+        return engine.supportsChat();
+    }
+
+    /** One user turn (optionally with a system prompt) through the Llama-3 chat template; see {@link LlamaOpenCLEngine#chat}. */
+    public synchronized String chat(String system, String user, LlamaGenerationConfig cfg) throws Throwable {
+        java.util.List<com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message> msgs = new java.util.ArrayList<>();
+        if (system != null && !system.isBlank()) {
+            msgs.add(new com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message("system", system));
+        }
+        msgs.add(new com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message("user", user));
+        return chat(msgs, cfg);
+    }
+
+    /** A whole conversation (system / user / assistant messages) through the Llama-3 chat template. Stops at any end-of-turn token. */
+    public synchronized String chat(java.util.List<com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message> messages, LlamaGenerationConfig cfg) throws Throwable {
+        if (closed) {
+            throw new IllegalStateException("OpenCLLlamaEngine is closed");
+        }
+        return engine.chat(messages, toGenerationConfig(cfg));
+    }
+
+    private static LlamaOpenCLEngine.GenerationConfig toGenerationConfig(LlamaGenerationConfig cfg) {
         LlamaOpenCLEngine.GenerationConfig genCfg = new LlamaOpenCLEngine.GenerationConfig();
         genCfg.maxNewTokens = cfg.maxNewTokens;
         genCfg.eosTokenId = cfg.eosTokenId;
@@ -213,7 +236,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
         genCfg.sampler.repetitionPenalty = cfg.repetitionPenalty;
         genCfg.sampler.repetitionPenaltyWindow = cfg.repetitionPenaltyWindow;
         genCfg.sampler.seed = cfg.seed;
-        return engine.generate(prompt, genCfg);
+        return genCfg;
     }
 
     /** Wall-clock timings of the most recent {@link #generate} call. */
@@ -283,7 +306,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
             byte[] q8 = t.loadQ8_0();
             LoadTimer.stop("final norm / LM head: read Q8_0 tensor", t0);
             long t1 = LoadTimer.start();
-            MemorySegment dev = LlamaLayer.uploadBytes(ctx, q8);
+            MemorySegment dev = Q8Layout.uploadWeight(ctx, q8, t.rows(), t.cols());
             LoadTimer.stop("final norm / LM head: device upload", t1);
             return new LmHead(dev, true);
         }

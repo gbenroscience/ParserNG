@@ -6,28 +6,34 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 
 /**
- * Model-free device-memory plan: allocates exactly ONE transformer layer (weights + per-layer state) plus the
- * once-only buffers through the real engine classes -- so the sizes are what the engine really asks the driver for,
- * not a re-derivation -- and extrapolates to {@code layers}. The result can be compared with the "device memory
- * live" figure the engine prints for a real model of the same shape.
+ * Model-free device-memory plan: allocates exactly ONE transformer layer (weights + its state) plus the once-only
+ * buffers through the real engine classes -- so the sizes are what the engine really asks the driver for, not a
+ * re-derivation -- and extrapolates to {@code layers}. Only per-layer categories (the layer weights and the KV cache)
+ * scale with the layer count; the RoPE tables and decode/prefill scratch are shared by all layers and counted once.
+ * The result can be compared with the "device memory live" figure the engine prints for a real model of the same shape.
  */
 final class MemoryPlan {
 
     private MemoryPlan() {
     }
 
-    /** @return the predicted total device bytes for the whole model (one real layer x layers + once-only buffers) */
     static long run(GpuContext ctx, LlamaLayer.Config cfg, int vocab, boolean headQ8) throws Throwable {
+        return run(ctx, cfg, vocab, headQ8, false);
+    }
+
+    /** @param woQ8 whether wo is kept as Q8_0 (true) or dequantised to F32 (false) */
+    static long run(GpuContext ctx, LlamaLayer.Config cfg, int vocab, boolean headQ8, boolean woQ8) throws Throwable {
         final int dim = cfg.dim;
         final int qd = cfg.num_heads * cfg.head_dim;
         final int kvd = cfg.kv_heads * cfg.head_dim;
         final int hidden = cfg.hidden_dim;
-        long q8 = 34L;
-        byte[] wq = new byte[(int) ((long) qd * (dim / 32) * q8)];
-        byte[] wk = new byte[(int) ((long) kvd * (dim / 32) * q8)];
-        byte[] wg = new byte[(int) ((long) hidden * (dim / 32) * q8)];
-        byte[] wd = new byte[(int) ((long) dim * (hidden / 32) * q8)];
-        float[] wo = new float[dim * qd];
+        // inputs are always the GGUF (AoS) bytes; the weights class repacks them when the context uses SoA
+        byte[] wq = new byte[(int) Q8Layout.weightBytes(false, qd, dim)];
+        byte[] wk = new byte[(int) Q8Layout.weightBytes(false, kvd, dim)];
+        byte[] wg = new byte[(int) Q8Layout.weightBytes(false, hidden, dim)];
+        byte[] wd = new byte[(int) Q8Layout.weightBytes(false, dim, hidden)];
+        byte[] woBytes = woQ8 ? new byte[(int) Q8Layout.weightBytes(false, dim, qd)] : null;
+        float[] wo = woQ8 ? null : new float[dim * qd];
         float[] norm = new float[dim];
         LlamaLayer.GpuWeights w = null;
         LlamaLayer.GpuState st = null;
@@ -36,51 +42,41 @@ final class MemoryPlan {
         long predicted = 0;
         try {
             long before = ctx.allocations.liveBytes();
-            w = new LlamaLayer.GpuWeights(ctx, wq, wk, wk, wo, wg, wg, wd, norm, norm);
+            w = new LlamaLayer.GpuWeights(ctx, dim, qd, kvd, hidden, wq, wk, wk, woBytes, wo, wg, wg, wd, norm, norm);
             st = new LlamaLayer.GpuState(ctx, cfg);
-            SortedMap<String, long[]> layerCats = new TreeMap<>(ctx.allocations.byCategory());
-            long layerBytes = ctx.allocations.liveBytes() - before;
 
             ctx.allocCategory = "final norm gamma";
             finalNorm = LlamaLayer.allocFloats(ctx, dim);
             ctx.allocCategory = "lm head";
-            head = LlamaLayer.allocBytes(ctx, headQ8 ? (long) vocab * (dim / 32) * q8 : (long) vocab * dim * 4L);
+            head = LlamaLayer.allocBytes(ctx, headQ8 ? Q8Layout.weightBytes(ctx.q8Soa, vocab, dim) : (long) vocab * dim * 4L);
             ctx.allocCategory = "engine scratch";
             xs = LlamaLayer.allocFloats(ctx, dim);
             xb = cfg.max_prefill_batch > 0 ? LlamaLayer.allocFloats(ctx, (long) cfg.max_prefill_batch * dim) : null;
             lr = LlamaLayer.allocFloats(ctx, dim);
             ls = new LlamaLayer.LogitsScratch(ctx, cfg, vocab);
-            long once = ctx.allocations.liveBytes() - before - layerBytes;
 
-            System.out.printf("%n==================== device memory plan: %d layers, dim %d, hidden %d, heads %d/%d (head_dim %d), vocab %d, context %d, prefill batch %d, LM head %s ====================%n",
-                    cfg.n_layers, dim, hidden, cfg.num_heads, cfg.kv_heads, cfg.head_dim, vocab, cfg.max_seq, cfg.max_prefill_batch, headQ8 ? "Q8_0" : "F32");
-            System.out.printf("%-46s %12s %14s %10s%n", "category (one real layer allocated, scaled)", "MB / layer", "MB x layers", "share");
-            double total = 0;
+            SortedMap<String, long[]> all = ctx.allocations.byCategory();
             Map<String, Double> scaled = new TreeMap<>();
-            for (Map.Entry<String, long[]> e : layerCats.entrySet()) {
-                if (e.getKey().startsWith("state:") || e.getKey().startsWith("weights:")) {
-                    scaled.put(e.getKey(), e.getValue()[0] * (double) cfg.n_layers);
-                }
-            }
-            double onceTotal = once;
-            double grand = onceTotal;
-            for (double v : scaled.values()) {
+            double grand = 0;
+            for (Map.Entry<String, long[]> e : all.entrySet()) {
+                boolean perLayer = e.getKey().startsWith("weights:") || e.getKey().equals("state: KV cache");
+                double v = e.getValue()[0] * (perLayer ? (double) cfg.n_layers : 1.0);
+                scaled.put(e.getKey(), v);
                 grand += v;
             }
+            System.out.printf("%n==================== device memory plan: %d layers, dim %d, hidden %d, heads %d/%d (head_dim %d), vocab %d, context %d, prefill batch %d, LM head %s, Q8_0 layout %s, wo %s ====================%n",
+                    cfg.n_layers, dim, hidden, cfg.num_heads, cfg.kv_heads, cfg.head_dim, vocab, cfg.max_seq, cfg.max_prefill_batch,
+                    headQ8 ? "Q8_0" : "F32", ctx.q8Soa ? "SoA" : "AoS", woQ8 ? "Q8_0" : "F32");
+            System.out.printf("%-46s %12s %14s %10s%n", "category", "MB each", "MB total", "share");
             for (Map.Entry<String, Double> e : scaled.entrySet()) {
-                System.out.printf("%-46s %12.1f %14.1f %9.1f%%%n", e.getKey(), e.getValue() / cfg.n_layers / 1e6, e.getValue() / 1e6, 100 * e.getValue() / grand);
-                total += e.getValue();
+                boolean perLayer = e.getKey().startsWith("weights:") || e.getKey().equals("state: KV cache");
+                System.out.printf("%-46s %12.1f %14.1f %9.1f%%%s%n", e.getKey(), e.getValue() / (perLayer ? cfg.n_layers : 1) / 1e6,
+                        e.getValue() / 1e6, 100 * e.getValue() / grand, perLayer ? "  (x layers)" : "  (once)");
             }
-            SortedMap<String, long[]> all = ctx.allocations.byCategory();
-            for (String cat : new String[]{"lm head", "final norm gamma", "engine scratch", "logits scratch"}) {
-                long[] v = all.get(cat);
-                if (v != null) {
-                    System.out.printf("%-46s %12s %14.1f %9.1f%%%n", cat + " (once)", "-", v[0] / 1e6, 100.0 * v[0] / grand);
-                }
-            }
-            System.out.printf("%-46s %12.1f %14.1f%n", "TOTAL predicted device memory", layerBytes / 1e6, grand / 1e6);
+            System.out.printf("%-46s %12s %14.1f%n", "TOTAL predicted device memory", "", grand / 1e6);
             predicted = Math.round(grand);
-            System.out.printf("(host side, not counted above: Q8_0 token-embedding bytes kept for row lookup = %.1f MB for this vocab/dim)%n", (double) vocab * (dim / 32) * q8 / 1e6);
+            System.out.printf("(one layer of weights + KV = %.1f MB; host side, not counted above: Q8_0 token-embedding bytes kept for row lookup = %.1f MB)%n",
+                    (ctx.allocations.liveBytes() - before) / 1e6, (double) Q8Layout.weightBytes(false, vocab, dim) / 1e6);
         } finally {
             if (ls != null) {
                 ls.free(ctx);

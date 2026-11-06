@@ -7,6 +7,11 @@ package com.github.gbenroscience.gpu.llm.opencl;
  *   <li>{@code -Dllm.gemv=legacy}      one work-item per output row (original q8_0_gemv_plain / f32_gemv)</li>
  *   <li>{@code -Dllm.attention=legacy} three launches per head per layer (attn_scores / softmax / attn_weighted_sum)</li>
  *   <li>{@code -Dllm.rmsnorm=legacy}   two kernels plus a blocking host read-back per norm</li>
+ *   <li>{@code -Dllm.layout=aos|soa|auto} device layout of every Q8_0 tensor: the GGUF 34-byte blocks (aos), the coalesced
+ *       structure-of-arrays form (soa), or let the engine time both on the device at load (auto, the default). Any
+ *       explicit {@code -Dllm.gemv} other than {@code auto} implies aos, because those kernels read AoS.</li>
+ *   <li>{@code -Dllm.wo=f32|q8|auto} the attention output projection: dequantised to F32 (f32) or kept as Q8_0 with the
+ *       activation quantised like every other Q8_0 projection (q8; auto = q8 whenever the file stores wo as Q8_0).</li>
  * </ul>
  * Read on every call so tests can flip them.
  */
@@ -76,10 +81,43 @@ final class Variants {
         return legacy("llm.rmsnorm");
     }
 
+    /** Layout request: "aos", "soa" or "auto". Anything else is rejected loudly rather than silently ignored. */
+    static String layoutRequest() {
+        String v = System.getProperty("llm.layout");
+        if (v == null || v.isBlank() || v.equalsIgnoreCase("auto")) {
+            // a forced AoS GEMV kernel (or legacy) can only read the AoS layout
+            String g = System.getProperty("llm.gemv");
+            return (g != null && !g.equalsIgnoreCase("auto")) ? "aos" : "auto";
+        }
+        switch (v.toLowerCase()) {
+            case "aos":
+            case "soa":
+                return v.toLowerCase();
+            default:
+                throw new IllegalArgumentException("-Dllm.layout must be aos, soa or auto, got \"" + v + "\"");
+        }
+    }
+
+    /** -Dllm.wo: "f32", "q8" or "auto" (default). */
+    static String woRequest() {
+        String v = System.getProperty("llm.wo");
+        if (v == null || v.isBlank() || v.equalsIgnoreCase("auto")) {
+            return "auto";
+        }
+        switch (v.toLowerCase()) {
+            case "f32":
+            case "q8":
+                return v.toLowerCase();
+            default:
+                throw new IllegalArgumentException("-Dllm.wo must be f32, q8 or auto, got \"" + v + "\"");
+        }
+    }
+
     static String describe() {
         return "kernel variants: gemv=" + (legacyGemv() ? "legacy" : forcedGemvVariant() >= 0 ? "forced " + System.getProperty("llm.gemv") : "autotuned at load (wg|vloadf|u32)")
                 + ", gemm=" + (legacyGemm() ? "legacy per-token" : forcedRowsGemm() ? "forced row-wise" : "autotuned at load (legacy|row-wise)")
                 + ", attention=" + (legacyAttention() ? "legacy per-head" : "fused all-heads")
-                + ", rmsnorm=" + (legacyRmsnorm() ? "legacy 2-kernel+readback" : "fused single launch");
+                + ", rmsnorm=" + (legacyRmsnorm() ? "legacy 2-kernel+readback" : "fused single launch")
+                + ", layout=" + layoutRequest() + ", wo=" + woRequest();
     }
 }

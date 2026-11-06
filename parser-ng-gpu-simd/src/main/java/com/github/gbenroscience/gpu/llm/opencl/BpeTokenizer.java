@@ -49,7 +49,7 @@ import java.util.regex.Pattern;
  * callers not going through a GGUF file at all (tests, non-GGUF vocab
  * sources).
  */
-public final class BpeTokenizer {
+public final class BpeTokenizer implements com.github.gbenroscience.gpu.llm.core.ChatTemplate.Encoder {
 
     // GPT-2's own pre-tokenization regex, simplified to drop the
     // case-insensitive-contraction variant ((?i:'s|'t|...)) -- this
@@ -170,6 +170,28 @@ public final class BpeTokenizer {
 
     public int vocabSize() {
         return idToToken.length;
+    }
+
+    @Override
+    public int[] encodeText(String text) {
+        return encode(text, false);
+    }
+
+    /** Vocabulary id of an exact token string (e.g. "&lt;|eot_id|&gt;"), or -1. */
+    @Override
+    public int tokenId(String piece) {
+        Integer id = tokenToId.get(piece);
+        return id == null ? -1 : id;
+    }
+
+    @Override
+    public int bosId() {
+        return bosId;
+    }
+
+    @Override
+    public int eosId() {
+        return eosId;
     }
 
     public int[] encode(String text, boolean addBos) {
