@@ -81,6 +81,24 @@ final class Variants {
         return legacy("llm.rmsnorm");
     }
 
+    /**
+     * -Dllm.flushEvery=N: during a decode step, hand the queue to the device after every N-th layer so it starts
+     * executing while the host is still enqueueing the rest (0 disables; default 4). Many drivers batch commands until
+     * a flush or a blocking call, which leaves the device idle for the whole enqueue time (7-9 ms per token measured on
+     * an HD 520). Results are identical either way.
+     */
+    static int flushEvery() {
+        String v = System.getProperty("llm.flushEvery");
+        if (v == null || v.isBlank()) {
+            return 4;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(v.trim()));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("-Dllm.flushEvery must be a non-negative integer, got \"" + v + "\"");
+        }
+    }
+
     /** Layout request: "aos", "soa" or "auto". Anything else is rejected loudly rather than silently ignored. */
     static String layoutRequest() {
         String v = System.getProperty("llm.layout");
@@ -118,6 +136,7 @@ final class Variants {
                 + ", gemm=" + (legacyGemm() ? "legacy per-token" : forcedRowsGemm() ? "forced row-wise" : "autotuned at load (legacy|row-wise)")
                 + ", attention=" + (legacyAttention() ? "legacy per-head" : "fused all-heads")
                 + ", rmsnorm=" + (legacyRmsnorm() ? "legacy 2-kernel+readback" : "fused single launch")
-                + ", layout=" + layoutRequest() + ", wo=" + woRequest();
+                + ", layout=" + layoutRequest() + ", wo=" + woRequest() + ", flushEvery=" + flushEvery()
+                + ", programCache=" + (ProgramCache.enabled() ? "on" : "off");
     }
 }

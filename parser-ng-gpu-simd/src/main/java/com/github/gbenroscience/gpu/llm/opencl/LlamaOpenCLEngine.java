@@ -38,6 +38,8 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
 
     private final GpuContext ctx;
     private final LlamaLayer.Config cfg;
+    /** Queue hand-off interval during decode, in layers (0 = off); see {@link Variants#flushEvery()}. */
+    private final int flushEvery = Variants.flushEvery();
     private final LlamaLayer.GpuWeights[] layers;
     private final LlamaLayer.GpuState[] states;
     private final EmbeddingTable embeddings;
@@ -266,6 +268,9 @@ public final class LlamaOpenCLEngine implements AutoCloseable {
                     prof.layer = l;
                 }
                 LlamaLayer.forward_layer(xSingle, layers[l], states[l], cfg, ctx);
+                if (flushEvery > 0 && (l + 1) % flushEvery == 0 && l + 1 < layers.length) {
+                    LlamaLayer.flushQueue(ctx); // let the device start while the host enqueues the remaining layers
+                }
             }
             final long h2 = System.nanoTime();
             if (prof != null) {

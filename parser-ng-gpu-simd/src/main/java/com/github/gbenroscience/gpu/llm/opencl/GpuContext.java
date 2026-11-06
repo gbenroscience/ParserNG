@@ -98,6 +98,9 @@ public final class GpuContext implements AutoCloseable {
     MemorySegment kQ8_0GemmSoa;
     /** Decode GEMV kernels, index-aligned with {@link KernelSourceSoa#GEMV_LPR}. */
     MemorySegment[] kSoaGemv;
+    /** True when the program was loaded from the on-disk binary cache instead of being compiled (see {@link ProgramCache}). */
+    volatile boolean programFromCache = false;
+
     /** True when every Q8_0 tensor / activation on this context uses the SoA layout. Set before any weight is uploaded. */
     volatile boolean q8Soa = false;
     /** Lanes per row used when no per-K choice exists. */
@@ -261,6 +264,96 @@ public final class GpuContext implements AutoCloseable {
     }
 
     private MemorySegment buildProgram(Arena arena, String source) throws Throwable {
+        String cacheKey = null;
+        if (ProgramCache.enabled()) {
+            try {
+                cacheKey = ProgramCache.key(infoString(0x102B), infoString(0x102C), infoString(0x102D), infoString(0x102F), source);
+            } catch (Throwable t) {
+                cacheKey = null; // cannot identify the device: just compile
+            }
+        }
+        if (cacheKey != null) {
+            MemorySegment cached = loadCachedProgram(arena, cacheKey);
+            if (cached != null) {
+                programFromCache = true;
+                LoadTimer.note("opencl program binary: loaded from cache " + ProgramCache.dir());
+                return cached;
+            }
+        }
+        programFromCache = false;
+        MemorySegment prog = compileProgram(arena, source);
+        if (cacheKey != null) {
+            saveProgramBinary(arena, prog, cacheKey);
+        }
+        return prog;
+    }
+
+    /** Creates the program from a cached binary and finalises it; returns null (and drops the file) on any problem. */
+    private MemorySegment loadCachedProgram(Arena arena, String key) {
+        byte[] bin = ProgramCache.read(key);
+        if (bin == null) {
+            return null;
+        }
+        MemorySegment prog = null;
+        try {
+            MemorySegment binSeg = arena.allocate(bin.length, 16);
+            MemorySegment.copy(bin, 0, binSeg, ValueLayout.JAVA_BYTE, 0, bin.length);
+            MemorySegment lens = arena.allocate(ValueLayout.JAVA_LONG, 1);
+            lens.set(ValueLayout.JAVA_LONG, 0, (long) bin.length);
+            MemorySegment ptrs = arena.allocate(ValueLayout.ADDRESS, 1);
+            ptrs.setAtIndex(ValueLayout.ADDRESS, 0, binSeg);
+            MemorySegment status = arena.allocate(ValueLayout.JAVA_INT, 1);
+            MemorySegment err = arena.allocate(ValueLayout.JAVA_INT);
+            MemorySegment devs = arena.allocate(ValueLayout.ADDRESS, 1);
+            devs.setAtIndex(ValueLayout.ADDRESS, 0, device);
+            prog = (MemorySegment) cl.clCreateProgramWithBinary.invoke(context, 1, devs, lens, ptrs, status, err);
+            if (err.get(ValueLayout.JAVA_INT, 0) != OpenCLBindings.CL_SUCCESS || status.get(ValueLayout.JAVA_INT, 0) != OpenCLBindings.CL_SUCCESS
+                    || prog == null || prog.equals(MemorySegment.NULL)) {
+                throw new IllegalStateException("driver rejected the cached binary");
+            }
+            int bs = (int) cl.clBuildProgram.invoke(prog, 1, devs, MemorySegment.NULL, MemorySegment.NULL, MemorySegment.NULL);
+            if (bs != OpenCLBindings.CL_SUCCESS) {
+                throw new IllegalStateException("driver could not finalise the cached binary (" + OpenCLBindings.errorString(bs) + ")");
+            }
+            return prog;
+        } catch (Throwable t) {
+            ProgramCache.delete(key);
+            if (prog != null && !prog.equals(MemorySegment.NULL)) {
+                try {
+                    cl.clReleaseProgram.invoke(prog);
+                } catch (Throwable ignored) {
+                    // nothing more can be done
+                }
+            }
+            LOG.log(System.Logger.Level.INFO, "ignoring cached program binary: " + t.getMessage());
+            return null;
+        }
+    }
+
+    /** Best effort: reads the device binary back from a freshly compiled program and stores it. Never throws. */
+    private void saveProgramBinary(Arena arena, MemorySegment prog, String key) {
+        try {
+            MemorySegment sizes = arena.allocate(ValueLayout.JAVA_LONG, 1);
+            check((int) cl.clGetProgramInfo.invoke(prog, 0x1165, 8L, sizes, MemorySegment.NULL), "clGetProgramInfo(BINARY_SIZES)");
+            long n = sizes.get(ValueLayout.JAVA_LONG, 0);
+            if (n <= 0 || n > (512L << 20)) {
+                return;
+            }
+            MemorySegment buf = arena.allocate(n, 16);
+            MemorySegment ptrs = arena.allocate(ValueLayout.ADDRESS, 1);
+            ptrs.setAtIndex(ValueLayout.ADDRESS, 0, buf);
+            check((int) cl.clGetProgramInfo.invoke(prog, 0x1166, 8L, ptrs, MemorySegment.NULL), "clGetProgramInfo(BINARIES)");
+            byte[] out = new byte[(int) n];
+            MemorySegment.copy(buf, ValueLayout.JAVA_BYTE, 0, out, 0, (int) n);
+            if (ProgramCache.write(key, out)) {
+                LoadTimer.note("opencl program binary: compiled from source and cached (" + (n >> 10) + " KB) in " + ProgramCache.dir());
+            }
+        } catch (Throwable ignored) {
+            // the cache is an optimisation only
+        }
+    }
+
+    private MemorySegment compileProgram(Arena arena, String source) throws Throwable {
         MemorySegment src = arena.allocateFrom(source, StandardCharsets.UTF_8);
         MemorySegment stringsArr = arena.allocate(ValueLayout.ADDRESS, 1);
         stringsArr.setAtIndex(ValueLayout.ADDRESS, 0, src);

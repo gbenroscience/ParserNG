@@ -719,6 +719,11 @@ public final class LlamaLayer {
                 "clEnqueueWriteBuffer(non-blocking)");
     }
 
+    /** clFlush: submit everything enqueued so far to the device without waiting for it. */
+    static void flushQueue(GpuContext ctx) throws Throwable {
+        GpuContext.check((int) ctx.cl.clFlush.invoke(ctx.queue), "clFlush");
+    }
+
     static void writeBlocking(GpuContext ctx, MemorySegment mem, MemorySegment hostSrc, long byteSize) throws Throwable {
         GpuContext.check((int) ctx.cl.clEnqueueWriteBuffer.invoke(
                 ctx.queue, mem, OpenCLBindings.CL_TRUE, 0L, byteSize, hostSrc, 0, MemorySegment.NULL, MemorySegment.NULL),

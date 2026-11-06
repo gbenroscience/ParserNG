@@ -86,6 +86,9 @@ public final class OpenCLBindings {
     public final MethodHandle clCreateProgramWithSource;
     public final MethodHandle clBuildProgram;
     public final MethodHandle clGetProgramBuildInfo;
+    public final MethodHandle clGetProgramInfo;
+    public final MethodHandle clCreateProgramWithBinary;
+    public final MethodHandle clFlush;
     public final MethodHandle clCreateKernel;
     public final MethodHandle clSetKernelArg;
     public final MethodHandle clCreateBuffer;
@@ -185,6 +188,17 @@ public final class OpenCLBindings {
 
         clGetProgramBuildInfo = downcall("clGetProgramBuildInfo",
                 FunctionDescriptor.of(CI, PTR, PTR, CI, CL, PTR, PTR));
+
+        // cl_int clGetProgramInfo(program, param_name, param_value_size, param_value, param_value_size_ret)
+        clGetProgramInfo = downcall("clGetProgramInfo",
+                FunctionDescriptor.of(CI, PTR, CI, CL, PTR, PTR));
+
+        // cl_program clCreateProgramWithBinary(context, num_devices, device_list, lengths*, binaries**, binary_status*, errcode_ret*)
+        clCreateProgramWithBinary = downcall("clCreateProgramWithBinary",
+                FunctionDescriptor.of(PTR, PTR, CI, PTR, PTR, PTR, PTR, PTR));
+
+        // cl_int clFlush(command_queue): hands everything enqueued so far to the device without waiting for it
+        clFlush = downcall("clFlush", FunctionDescriptor.of(CI, PTR));
 
         clCreateKernel = downcall("clCreateKernel", FunctionDescriptor.of(PTR, PTR, PTR, PTR));
 
