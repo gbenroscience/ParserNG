@@ -69,6 +69,30 @@ public static class Tensor {
         return out;
     }
 
+    /** Bytes per bulk read when streaming a tensor through a reusable array (a whole number of 4-byte floats). */
+    private static final int STREAM_CHUNK = 4 << 20;
+    /** Q8_0 blocks per dequantisation chunk (34 bytes each, so a chunk is a whole number of blocks): about 2.2 MB. */
+    private static final int Q8_BLOCKS_PER_CHUNK = 1 << 16;
+
+    private interface ChunkSink {
+        void accept(byte[] chunk, int length);
+    }
+
+    /**
+     * Walks the tensor's bytes in chunks of at most {@code chunkBytes} through one reused array: one bulk copy per
+     * chunk instead of one MappedByteBuffer.get() per element, which is what made the dequantising loaders slow.
+     * {@code chunkBytes} must be a multiple of the element/block size the sink works in.
+     */
+    private void stream(int chunkBytes, ChunkSink sink) {
+        ByteBuffer buf = buffer();
+        byte[] chunk = new byte[Math.min(chunkBytes, Math.max(1, buf.remaining()))];
+        while (buf.hasRemaining()) {
+            int n = Math.min(chunk.length, buf.remaining());
+            buf.get(chunk, 0, n);
+            sink.accept(chunk, n);
+        }
+    }
+
     /**
      * Streams and dequantizes Q8_0 blocks straight into a flat float array.
      * Prevents intermediate byte[] allocations to optimize startup throughput.
@@ -77,56 +101,20 @@ public static class Tensor {
         if (type != 8) {
             throw new IllegalArgumentException("Tensor '" + name + "' is not GGML_TYPE_Q8_0 (8). Found: " + type);
         }
-
-        ByteBuffer buf = buffer();
-        int total = (int) elements();
-        float[] out = new float[total];
-
-        int blockCount = total / 32; // GGUF guarantees rows are 32-element aligned
-        int idx = 0;
-
-        for (int b = 0; b < blockCount; b++) {
-            // 1. Read the 16-bit float scale factor (ggml_fp16_t)
-            short fp16Scale = buf.getShort();
-            // 2. Expand to standard native 32-bit float
-            float scale = Float.float16ToFloat(fp16Scale);
-
-            // 3. Dequantize 32 elements (Fully unrolled to maximize CPU pipeline utilization)
-            out[idx]      = buf.get() * scale;
-            out[idx + 1]  = buf.get() * scale;
-            out[idx + 2]  = buf.get() * scale;
-            out[idx + 3]  = buf.get() * scale;
-            out[idx + 4]  = buf.get() * scale;
-            out[idx + 5]  = buf.get() * scale;
-            out[idx + 6]  = buf.get() * scale;
-            out[idx + 7]  = buf.get() * scale;
-            out[idx + 8]  = buf.get() * scale;
-            out[idx + 9]  = buf.get() * scale;
-            out[idx + 10] = buf.get() * scale;
-            out[idx + 11] = buf.get() * scale;
-            out[idx + 12] = buf.get() * scale;
-            out[idx + 13] = buf.get() * scale;
-            out[idx + 14] = buf.get() * scale;
-            out[idx + 15] = buf.get() * scale;
-            out[idx + 16] = buf.get() * scale;
-            out[idx + 17] = buf.get() * scale;
-            out[idx + 18] = buf.get() * scale;
-            out[idx + 19] = buf.get() * scale;
-            out[idx + 20] = buf.get() * scale;
-            out[idx + 21] = buf.get() * scale;
-            out[idx + 22] = buf.get() * scale;
-            out[idx + 23] = buf.get() * scale;
-            out[idx + 24] = buf.get() * scale;
-            out[idx + 25] = buf.get() * scale;
-            out[idx + 26] = buf.get() * scale;
-            out[idx + 27] = buf.get() * scale;
-            out[idx + 28] = buf.get() * scale;
-            out[idx + 29] = buf.get() * scale;
-            out[idx + 30] = buf.get() * scale;
-            out[idx + 31] = buf.get() * scale;
-
-            idx += 32;
-        }
+        final float[] out = new float[(int) elements()];
+        final int[] idx = {0};
+        stream(Q8_BLOCKS_PER_CHUNK * 34, (c, n) -> {
+            int i = idx[0];
+            for (int p = 0; p + 34 <= n; p += 34) {
+                // ggml_fp16_t scale (little endian), then 32 signed quants
+                float scale = Float.float16ToFloat((short) ((c[p] & 0xFF) | (c[p + 1] << 8)));
+                for (int j = 0; j < 32; j++) {
+                    out[i + j] = c[p + 2 + j] * scale;
+                }
+                i += 32;
+            }
+            idx[0] = i;
+        });
         return out;
     }
 
@@ -138,53 +126,19 @@ public static class Tensor {
         if (type != 8) {
             throw new IllegalArgumentException("Tensor '" + name + "' is not GGML_TYPE_Q8_0 (8). Found: " + type);
         }
-
-        ByteBuffer buf = buffer();
-        int total = (int) elements();
-        double[] out = new double[total];
-
-        int blockCount = total / 32;
-        int idx = 0;
-
-        for (int b = 0; b < blockCount; b++) {
-            short fp16Scale = buf.getShort();
-            double scale = Float.float16ToFloat(fp16Scale);
-
-            out[idx]      = buf.get() * scale;
-            out[idx + 1]  = buf.get() * scale;
-            out[idx + 2]  = buf.get() * scale;
-            out[idx + 3]  = buf.get() * scale;
-            out[idx + 4]  = buf.get() * scale;
-            out[idx + 5]  = buf.get() * scale;
-            out[idx + 6]  = buf.get() * scale;
-            out[idx + 7]  = buf.get() * scale;
-            out[idx + 8]  = buf.get() * scale;
-            out[idx + 9]  = buf.get() * scale;
-            out[idx + 10] = buf.get() * scale;
-            out[idx + 11] = buf.get() * scale;
-            out[idx + 12] = buf.get() * scale;
-            out[idx + 13] = buf.get() * scale;
-            out[idx + 14] = buf.get() * scale;
-            out[idx + 15] = buf.get() * scale;
-            out[idx + 16] = buf.get() * scale;
-            out[idx + 17] = buf.get() * scale;
-            out[idx + 18] = buf.get() * scale;
-            out[idx + 19] = buf.get() * scale;
-            out[idx + 20] = buf.get() * scale;
-            out[idx + 21] = buf.get() * scale;
-            out[idx + 22] = buf.get() * scale;
-            out[idx + 23] = buf.get() * scale;
-            out[idx + 24] = buf.get() * scale;
-            out[idx + 25] = buf.get() * scale;
-            out[idx + 26] = buf.get() * scale;
-            out[idx + 27] = buf.get() * scale;
-            out[idx + 28] = buf.get() * scale;
-            out[idx + 29] = buf.get() * scale;
-            out[idx + 30] = buf.get() * scale;
-            out[idx + 31] = buf.get() * scale;
-
-            idx += 32;
-        }
+        final double[] out = new double[(int) elements()];
+        final int[] idx = {0};
+        stream(Q8_BLOCKS_PER_CHUNK * 34, (c, n) -> {
+            int i = idx[0];
+            for (int p = 0; p + 34 <= n; p += 34) {
+                double scale = Float.float16ToFloat((short) ((c[p] & 0xFF) | (c[p + 1] << 8)));
+                for (int j = 0; j < 32; j++) {
+                    out[i + j] = c[p + 2 + j] * scale;
+                }
+                i += 32;
+            }
+            idx[0] = i;
+        });
         return out;
     }
 
@@ -195,14 +149,16 @@ public static class Tensor {
         if (type != 0) {
             throw new IllegalArgumentException("Tensor '" + name + "' is not GGML_TYPE_F32 (0). Found: " + type);
         }
-        
-        ByteBuffer buf = buffer();
-        int total = (int) elements();
-        double[] out = new double[total];
-        
-        for (int i = 0; i < total; i++) {
-            out[i] = buf.getFloat();
-        }
+        final double[] out = new double[(int) elements()];
+        final int[] idx = {0};
+        stream(STREAM_CHUNK, (c, n) -> {
+            java.nio.FloatBuffer fb = ByteBuffer.wrap(c, 0, n).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
+            int i = idx[0];
+            while (fb.hasRemaining()) {
+                out[i++] = fb.get();
+            }
+            idx[0] = i;
+        });
         return out;
     }
 }
