@@ -364,4 +364,18 @@ class OpenCLSoaTest {
             assertThrows(UnsupportedOperationException.class, () -> eng.chat(null, "hi", new com.github.gbenroscience.gpu.llm.LlamaGenerationConfig()));
         }
     }
+
+    @Test
+    void layoutDecisionFavoursSoaWithinMeasurementNoise() {
+        // the exact case that flipped a Hainan run to AoS (decode 6.9 vs 7.95 tok/s, prefill 24 vs 44 tok/s)
+        assertTrue(GemvAutotune.preferSoa(1.16, 1.08));
+        assertTrue(GemvAutotune.preferSoa(1.35, 1.00));
+        // SoA slightly slower in the micro-benchmark is still chosen: within the noise, SoA is the better layout overall
+        assertTrue(GemvAutotune.preferSoa(1.00, 1.09));
+        // a clear AoS win is respected
+        assertFalse(GemvAutotune.preferSoa(1.00, 1.25));
+        assertFalse(GemvAutotune.preferSoa(1.00, 2.00));
+        // AoS not measured at all
+        assertTrue(GemvAutotune.preferSoa(Double.MAX_VALUE, 1.00));
+    }
 }

@@ -45,7 +45,7 @@ public final class LoadTimer {
             total += e.getValue()[0];
             sb.append(String.format("%-52s %10.1f ms  (%d call%s)%n", e.getKey(), e.getValue()[0] / 1e6, e.getValue()[1], e.getValue()[1] == 1 ? "" : "s"));
         }
-        sb.append(String.format("%-52s %10.1f ms%n", "sum of timed phases", total / 1e6));
+        sb.append(String.format("%-52s %10.1f ms%n", "sum of timed phases (phases can overlap)", total / 1e6));
         for (String n : NOTES) {
             sb.append(n).append('\n');
         }

@@ -72,7 +72,71 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
 
     /** Validates the model first (no device touched, so a bad file fails fast), then acquires the device. */
     public OpenCLLlamaEngine(File ggufPath) throws Throwable {
-        this(new Prepared(ggufPath), new GpuContext());
+        this(Setup.start(ggufPath));
+    }
+
+    private OpenCLLlamaEngine(Setup setup) throws Throwable {
+        this(setup.prep, setup.ctx);
+    }
+
+    /**
+     * The device-free preparation and the device context. By default they run concurrently: the context (device
+     * selection and the kernel compile, or the cached binary) is created on a second thread while this thread parses and
+     * validates the model, and the model file is read ahead into the OS cache. A bad model still fails with its own
+     * exception and the context being created for it is closed as soon as it exists; -Dllm.parallelLoad=false restores
+     * the old strictly sequential order.
+     */
+    private static final class Setup {
+        final Prepared prep;
+        final GpuContext ctx;
+
+        private Setup(Prepared prep, GpuContext ctx) {
+            this.prep = prep;
+            this.ctx = ctx;
+        }
+
+        static Setup start(File ggufPath) throws Throwable {
+            if (!Variants.parallelLoad()) {
+                Prepared p = new Prepared(ggufPath);
+                return new Setup(p, new GpuContext());
+            }
+            final long t0 = LoadTimer.start();
+            FilePrefetcher prefetch = FilePrefetcher.start(ggufPath);
+            final java.util.concurrent.CompletableFuture<GpuContext> ctxFuture = new java.util.concurrent.CompletableFuture<>();
+            Thread init = new Thread(() -> {
+                try {
+                    ctxFuture.complete(new GpuContext());
+                } catch (Throwable t) {
+                    ctxFuture.completeExceptionally(t);
+                }
+            }, "opencl-context-init");
+            init.setDaemon(true);
+            init.start();
+            Prepared prep;
+            try {
+                prep = new Prepared(ggufPath);
+            } catch (Throwable invalidModel) {
+                if (prefetch != null) {
+                    prefetch.cancel();
+                }
+                ctxFuture.whenComplete((c, e) -> {
+                    if (c != null) {
+                        c.close();
+                    }
+                });
+                throw invalidModel;
+            }
+            try {
+                GpuContext ctx = ctxFuture.get();
+                LoadTimer.stop("load: host preparation + device acquisition, wall time (run concurrently)", t0);
+                return new Setup(prep, ctx);
+            } catch (java.util.concurrent.ExecutionException deviceFailure) {
+                if (prefetch != null) {
+                    prefetch.cancel();
+                }
+                throw deviceFailure.getCause();
+            }
+        }
     }
 
     /**

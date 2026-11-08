@@ -166,15 +166,26 @@ final class GemvAutotune {
     // Q8_0 layout selection (runs BEFORE any weight is uploaded, because it decides how they are uploaded)
     // ======================================================================================================
 
-    /** SoA must beat the best AoS kernel by this factor before it is chosen, so noise cannot flip the layout. */
-    private static final double SOA_MARGIN = 0.92;
+    /**
+     * SoA is chosen unless the best AoS kernel is more than this much faster in the head-to-head measurement.
+     * The first version required SoA to win by 8 %; the launch-to-launch noise of the measurement is larger than
+     * that (the same AoS kernel measured 1.16, 1.21, 1.35 and 2.69 ms on one Hainan in four starts), so identical
+     * code picked AoS in one run (decode 6.9 tok/s, prefill 24 tok/s) and SoA in the next (7.95 and 44 tok/s). SoA was
+     * the better layout on both test GPUs for decode and prefill, so the burden of proof is on AoS.
+     */
+    static final double SOA_TOLERANCE = 1.10;
+
+    /** The layout decision from per-launch times (ms) of the best AoS kernel and the best SoA kernel. */
+    static boolean preferSoa(double aosMs, double soaMs) {
+        return soaMs <= aosMs * SOA_TOLERANCE;
+    }
 
     /**
      * Decides the Q8_0 device layout of this context and the per-K lanes-per-row of the SoA GEMV, on the real device:
      * <ol>
      *   <li>-Dllm.layout=aos, or SoA kernels not compiled: AoS (with the usual GEMV variant autotune).</li>
      *   <li>otherwise time the best AoS decode kernel and every SoA lanes-per-row variant on the same synthetic
-     *       problem; SoA is chosen if it wins by {@link #SOA_MARGIN} (always, when -Dllm.layout=soa).</li>
+     *       problem, then head-to-head (interleaved, batched); SoA is chosen unless AoS is more than {@link #SOA_TOLERANCE}-1 faster (always, when -Dllm.layout=soa).</li>
      *   <li>every SoA kernel used must reproduce a CPU reference (GEMV for each tuned K; the prefill GEMM against
      *       the same reference) to a relative 1e-4. If any check fails the context falls back to AoS (or, when SoA was
      *       forced, throws): a miscompiled kernel must never silently produce wrong text.</li>
@@ -228,6 +239,13 @@ final class GemvAutotune {
             if (ok && !validateSoaGemm(ctx, cfg.dim, rows, note)) {
                 ok = false;
             }
+            if (ok && !req.equals("soa")) {
+                double[] h2h = headToHead(ctx, cfg.dim, rows, note);
+                if (h2h != null) {
+                    aosMs = h2h[0];
+                    soaMs = h2h[1];
+                }
+            }
         } finally {
             ctx.q8Soa = false;
         }
@@ -239,14 +257,77 @@ final class GemvAutotune {
                 throw new IllegalStateException("-Dllm.layout=soa was requested but the SoA kernels failed validation on this device: " + note);
             }
             note.append("-> AoS (SoA failed validation)");
-        } else if (forced || soaMs < aosMs * SOA_MARGIN) {
+        } else if (forced || preferSoa(aosMs, soaMs)) {
             ctx.q8Soa = true;
             note.append(String.format("-> SoA (%.2f ms vs best AoS %s)", soaMs, aosMs == Double.MAX_VALUE ? "n/a" : String.format("%.2f ms", aosMs)));
         } else {
-            note.append(String.format("-> AoS (SoA %.2f ms did not beat best AoS %.2f ms by %.0f%%)", soaMs, aosMs, (1 - SOA_MARGIN) * 100));
+            note.append(String.format("-> AoS (best AoS %.2f ms is more than %.0f%% faster than SoA %.2f ms)", aosMs, (SOA_TOLERANCE - 1) * 100, soaMs));
             ctx.soaLprByK.clear();
         }
         LoadTimer.note(note.toString());
+    }
+
+    /**
+     * Times the best AoS kernel and the chosen SoA kernel on the same problem, alternating between them so clock and
+     * thermal drift hits both equally, with eight launches per synchronisation so the launch round trip is amortised
+     * (a single launch of this size takes about a millisecond, the same order as the round trip). Returns
+     * {aosMs, soaMs} per launch (median of five rounds), or null if anything fails. ctx.q8Soa must be true on entry
+     * and is true on exit.
+     */
+    private static double[] headToHead(GpuContext ctx, int k, int rows, StringBuilder note) {
+        MemorySegment dwA = null, dwS = null, dxf = null, dxA = null, dxS = null, dout = null;
+        try {
+            Random r = new Random(41 + k);
+            byte[] aos = GemvSweep.fakeQ8((long) rows * (k / 32), r);
+            float[] x = new float[k];
+            for (int i = 0; i < k; i++) {
+                x[i] = (float) r.nextGaussian();
+            }
+            dwA = LlamaLayer.uploadBytes(ctx, aos);
+            dwS = LlamaLayer.uploadBytes(ctx, Q8Layout.repackWeightsSoa(aos, rows, k));
+            dxf = LlamaLayer.uploadFloats(ctx, x);
+            dxA = LlamaLayer.allocBytes(ctx, Q8Layout.activationBytes(false, k));
+            dxS = LlamaLayer.allocBytes(ctx, Q8Layout.activationBytes(true, k));
+            dout = LlamaLayer.allocFloats(ctx, rows);
+            ctx.q8Soa = false;
+            LlamaLayer.quantizeActivationQ8_0(ctx, dxf, dxA, k);
+            ctx.q8Soa = true;
+            LlamaLayer.quantizeActivationQ8_0(ctx, dxf, dxS, k);
+            final int rounds = 5, batch = 8;
+            double[] a = new double[rounds], b = new double[rounds];
+            for (int round = 0; round < rounds + 1; round++) { // round 0 is a warm-up
+                boolean aosFirst = round % 2 == 0;
+                for (int pass = 0; pass < 2; pass++) {
+                    boolean aosNow = (pass == 0) == aosFirst;
+                    ctx.q8Soa = !aosNow;
+                    long t0 = System.nanoTime();
+                    for (int i = 0; i < batch; i++) {
+                        if (aosNow) {
+                            LlamaLayer.q8_0GemvPlain(ctx, dxA, dwA, dout, rows, k);
+                        } else {
+                            LlamaLayer.q8_0GemvPlain(ctx, dxS, dwS, dout, rows, k);
+                        }
+                    }
+                    LlamaLayer.finish(ctx);
+                    double ms = (System.nanoTime() - t0) / 1e6 / batch;
+                    if (round > 0) {
+                        (aosNow ? a : b)[round - 1] = ms;
+                    }
+                }
+            }
+            java.util.Arrays.sort(a);
+            java.util.Arrays.sort(b);
+            note.append(String.format("head-to-head at K=%d, N=%d (5 alternating rounds x 8 launches): AoS %.2f ms vs SoA %.2f ms per launch; ", k, rows, a[rounds / 2], b[rounds / 2]));
+            return new double[]{a[rounds / 2], b[rounds / 2]};
+        } catch (Throwable t) {
+            note.append("head-to-head measurement failed (").append(t).append("); ");
+            return null;
+        } finally {
+            ctx.q8Soa = true;
+            for (MemorySegment m : new MemorySegment[]{dwA, dwS, dxf, dxA, dxS, dout}) {
+                LlamaLayer.freeQuietly(ctx, m);
+            }
+        }
     }
 
     /**

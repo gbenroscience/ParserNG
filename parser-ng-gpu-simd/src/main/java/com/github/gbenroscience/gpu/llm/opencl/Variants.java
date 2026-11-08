@@ -83,20 +83,33 @@ final class Variants {
 
     /**
      * -Dllm.flushEvery=N: during a decode step, hand the queue to the device after every N-th layer so it starts
-     * executing while the host is still enqueueing the rest (0 disables; default 4). Many drivers batch commands until
+     * executing while the host is still enqueueing the rest (0 disables; default 0). Measured on an HD 520 with N=4 it moved
+     * time from the wait (90 to 74 ms) into the enqueue (7 to 25 ms) and left the decode step unchanged (about 100 ms), so it is
+     * off unless asked for. Many drivers batch commands until
      * a flush or a blocking call, which leaves the device idle for the whole enqueue time (7-9 ms per token measured on
      * an HD 520). Results are identical either way.
      */
     static int flushEvery() {
         String v = System.getProperty("llm.flushEvery");
         if (v == null || v.isBlank()) {
-            return 4;
+            return 0;
         }
         try {
             return Math.max(0, Integer.parseInt(v.trim()));
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("-Dllm.flushEvery must be a non-negative integer, got \"" + v + "\"");
         }
+    }
+
+    /**
+     * -Dllm.parallelLoad=true acquires the device (selection plus kernel compile or cache load) on a second thread while
+     * the model file is parsed, in {@code new OpenCLLlamaEngine(File)}; -Dllm.prefetch=true additionally reads the model
+     * file ahead into the OS cache ({@link FilePrefetcher}). Both are OFF by default: they are tested for correctness
+     * but not measured on real hardware, and on a slow disk concurrent readers can be slower than one.
+     */
+    static boolean parallelLoad() {
+        String v = System.getProperty("llm.parallelLoad");
+        return v != null && (v.equalsIgnoreCase("true") || v.equals("1") || v.equalsIgnoreCase("on"));
     }
 
     /** Layout request: "aos", "soa" or "auto". Anything else is rejected loudly rather than silently ignored. */
@@ -137,6 +150,7 @@ final class Variants {
                 + ", attention=" + (legacyAttention() ? "legacy per-head" : "fused all-heads")
                 + ", rmsnorm=" + (legacyRmsnorm() ? "legacy 2-kernel+readback" : "fused single launch")
                 + ", layout=" + layoutRequest() + ", wo=" + woRequest() + ", flushEvery=" + flushEvery()
-                + ", programCache=" + (ProgramCache.enabled() ? "on" : "off");
+                + ", programCache=" + (ProgramCache.enabled() ? "on" : "off")
+                + ", parallelLoad=" + (parallelLoad() ? "on" : "off") + ", prefetch=" + (FilePrefetcher.enabled() ? "on" : "off");
     }
 }

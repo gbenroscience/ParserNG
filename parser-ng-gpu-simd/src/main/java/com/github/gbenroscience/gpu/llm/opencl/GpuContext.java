@@ -98,6 +98,9 @@ public final class GpuContext implements AutoCloseable {
     MemorySegment kQ8_0GemmSoa;
     /** Decode GEMV kernels, index-aligned with {@link KernelSourceSoa#GEMV_LPR}. */
     MemorySegment[] kSoaGemv;
+    /** Contexts created and not yet closed (tests use it to prove that a failed load does not leak the device). */
+    static final java.util.concurrent.atomic.AtomicInteger OPEN_CONTEXTS = new java.util.concurrent.atomic.AtomicInteger();
+
     /** True when the program was loaded from the on-disk binary cache instead of being compiled (see {@link ProgramCache}). */
     volatile boolean programFromCache = false;
 
@@ -242,6 +245,7 @@ public final class GpuContext implements AutoCloseable {
             LoadTimer.stop("opencl: clCreateKernel x all", tKern);
 
             System.err.println("[ParserNG LLM-OpenCL] " + selectedDeviceDescription);
+            OPEN_CONTEXTS.incrementAndGet();
 
         } catch (Throwable t) {
             throw new RuntimeException("Failed to bootstrap OpenCL GpuContext", t);
@@ -415,6 +419,7 @@ public final class GpuContext implements AutoCloseable {
             return;
         }
         closed = true;
+        OPEN_CONTEXTS.decrementAndGet();
         long[] leaked = allocations.drain();
         sweptAtClose = leaked.length;
         if (leaked.length > 0) {
