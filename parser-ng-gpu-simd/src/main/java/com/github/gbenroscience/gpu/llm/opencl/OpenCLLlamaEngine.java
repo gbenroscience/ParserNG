@@ -265,7 +265,7 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
     }
 
     /** Streaming generate: {@code listener} receives the text as it is produced; see {@link TokenListener}. A null listener is the plain call. */
-    @Override
+    @Override 
     public synchronized String generate(String prompt, LlamaGenerationConfig cfg, TokenListener listener) throws Throwable {
         if (closed) {
             throw new IllegalStateException("OpenCLLlamaEngine is closed");
