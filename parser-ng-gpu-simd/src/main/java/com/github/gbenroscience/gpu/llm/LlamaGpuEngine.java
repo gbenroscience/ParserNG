@@ -21,6 +21,18 @@ public interface LlamaGpuEngine extends AutoCloseable {
     String generate(String prompt, LlamaGenerationConfig cfg) throws Throwable;
 
     /**
+     * Same as {@link #generate(String, LlamaGenerationConfig)} but hands the text to {@code listener} as it is produced.
+     * This default implementation is for backends without incremental output: it generates everything and then delivers
+     * the whole text in one piece. The OpenCL engine overrides it with true token-by-token streaming.
+     */
+    default String generate(String prompt, LlamaGenerationConfig cfg, TokenListener listener) throws Throwable {
+        String text = generate(prompt, cfg);
+        boolean go = text.isEmpty() || listener.onText(text);
+        listener.onComplete(go ? StopReason.UNKNOWN : StopReason.CANCELLED, -1);
+        return text;
+    }
+
+    /**
      * Which GPU this instance is bound to -- e.g.
      * "[platform 0: Intel(R) OpenCL Graphics] [device 0: Intel(R) Corporation Intel(R) Iris(R) Xe Graphics]"
      * on OpenCL, "[device 0: NVIDIA GeForce RTX 4090 (compute capability 8.9)]"

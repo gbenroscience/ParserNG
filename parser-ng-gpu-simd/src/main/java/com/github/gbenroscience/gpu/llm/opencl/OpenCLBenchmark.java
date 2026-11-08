@@ -10,7 +10,7 @@ import java.util.Map;
  * Reproducible end-to-end benchmark of the OpenCL engine.
  *
  * <pre>
- * OpenCLBenchmark &lt;model.gguf&gt; [--prompt "text"] [--max-new N] [--warm-runs R] [--no-profile] [--no-timing] [--bandwidth]
+ * OpenCLBenchmark &lt;model.gguf&gt; [--prompt "text"] [--max-new N] [--warm-runs R] [--no-profile] [--no-timing] [--stream] [--bandwidth]
  * OpenCLBenchmark --bandwidth-only          (no model needed: device info + streaming read bandwidth probe)
  * </pre>
  *
@@ -29,6 +29,23 @@ import java.util.Map;
 public final class OpenCLBenchmark {
 
     private OpenCLBenchmark() {
+    }
+
+    /** One generation; with {@code stream} it goes through a TokenListener (counting only, no printing) and reports first-piece latency. */
+    private static void generateMaybeStreaming(OpenCLLlamaEngine eng, String prompt, int maxNew, boolean stream) throws Throwable {
+        if (!stream) {
+            eng.generate(prompt, config(maxNew));
+            return;
+        }
+        final int[] pieces = {0}, chars = {0};
+        eng.generate(prompt, config(maxNew), piece -> {
+            pieces[0]++;
+            chars[0] += piece.length();
+            return true;
+        });
+        LlamaOpenCLEngine.RunStats st = eng.lastRunStats();
+        System.out.printf("[stream] %d pieces, %d chars, first piece after %.1f ms (prefill+first token %.1f ms), stop=%s%n",
+                pieces[0], chars[0], st.firstPieceMs, st.prefillMs, st.stopReason);
     }
 
     private static LlamaGenerationConfig config(int maxNew) {
@@ -173,6 +190,7 @@ public final class OpenCLBenchmark {
         int warmRuns = 1;
         boolean doProfile = true;
         boolean doTiming = true;
+        boolean stream = false;
         boolean doBandwidth = false;
         for (int i = 1; i < args.length; i++) {
             switch (args[i]) {
@@ -180,6 +198,7 @@ public final class OpenCLBenchmark {
                 case "--max-new" -> maxNew = Integer.parseInt(args[++i]);
                 case "--warm-runs" -> warmRuns = Integer.parseInt(args[++i]);
                 case "--no-profile" -> doProfile = false;
+                case "--stream" -> stream = true; // generate through a TokenListener: checks that streaming costs no decode speed
                 case "--no-timing" -> doTiming = false;
                 case "--bandwidth" -> doBandwidth = true;
                 default -> throw new IllegalArgumentException("unknown option " + args[i]);
@@ -214,11 +233,11 @@ public final class OpenCLBenchmark {
                 System.out.printf("model load + upload: %.1f s%n", loadS);
                 System.out.print(LoadTimer.report());
                 System.out.println("\n-- cold generation (first use of every kernel) --");
-                eng.generate(prompt, config(maxNew));
+                generateMaybeStreaming(eng, prompt, maxNew, stream);
                 cold = eng.lastRunStats();
                 for (int r = 0; r < warmRuns; r++) {
                     System.out.println("-- warm generation " + (r + 1) + " --");
-                    eng.generate(prompt, config(maxNew));
+                    generateMaybeStreaming(eng, prompt, maxNew, stream);
                     warm = eng.lastRunStats();
                     printRun("warm " + (r + 1), warm);
                 }

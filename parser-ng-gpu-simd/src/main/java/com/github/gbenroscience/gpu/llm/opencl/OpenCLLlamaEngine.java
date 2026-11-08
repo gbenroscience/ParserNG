@@ -2,6 +2,7 @@ package com.github.gbenroscience.gpu.llm.opencl;
 
 import com.github.gbenroscience.gpu.llm.LlamaGenerationConfig;
 import com.github.gbenroscience.gpu.llm.LlamaGpuEngine;
+import com.github.gbenroscience.gpu.llm.TokenListener;
 import com.github.gbenroscience.simd.turbo.tools.llm.loader.GGUFLoader;
 
 import java.io.File;
@@ -260,11 +261,17 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
 
     @Override
     public synchronized String generate(String prompt, LlamaGenerationConfig cfg) throws Throwable {
+        return generate(prompt, cfg, null);
+    }
+
+    /** Streaming generate: {@code listener} receives the text as it is produced; see {@link TokenListener}. A null listener is the plain call. */
+    @Override
+    public synchronized String generate(String prompt, LlamaGenerationConfig cfg, TokenListener listener) throws Throwable {
         if (closed) {
             throw new IllegalStateException("OpenCLLlamaEngine is closed");
         }
         LlamaOpenCLEngine.GenerationConfig genCfg = toGenerationConfig(cfg);
-        return engine.generate(prompt, genCfg);
+        return engine.generate(prompt, genCfg, listener);
     }
 
     /** True when {@link #chat} is available (the model's vocabulary is a Llama-3 one). */
@@ -274,20 +281,31 @@ public final class OpenCLLlamaEngine implements LlamaGpuEngine {
 
     /** One user turn (optionally with a system prompt) through the Llama-3 chat template; see {@link LlamaOpenCLEngine#chat}. */
     public synchronized String chat(String system, String user, LlamaGenerationConfig cfg) throws Throwable {
+        return chat(system, user, cfg, (TokenListener) null);
+    }
+
+    /** Streaming single-turn chat; see {@link TokenListener}. */
+    public synchronized String chat(String system, String user, LlamaGenerationConfig cfg, TokenListener listener) throws Throwable {
         java.util.List<com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message> msgs = new java.util.ArrayList<>();
         if (system != null && !system.isBlank()) {
             msgs.add(new com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message("system", system));
         }
         msgs.add(new com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message("user", user));
-        return chat(msgs, cfg);
+        return chat(msgs, cfg, listener);
     }
 
     /** A whole conversation (system / user / assistant messages) through the Llama-3 chat template. Stops at any end-of-turn token. */
     public synchronized String chat(java.util.List<com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message> messages, LlamaGenerationConfig cfg) throws Throwable {
+        return chat(messages, cfg, null);
+    }
+
+    /** Streaming whole-conversation chat; see {@link TokenListener}. */
+    public synchronized String chat(java.util.List<com.github.gbenroscience.gpu.llm.core.ChatTemplate.Message> messages, LlamaGenerationConfig cfg,
+            TokenListener listener) throws Throwable {
         if (closed) {
             throw new IllegalStateException("OpenCLLlamaEngine is closed");
         }
-        return engine.chat(messages, toGenerationConfig(cfg));
+        return engine.chat(messages, toGenerationConfig(cfg), listener);
     }
 
     private static LlamaOpenCLEngine.GenerationConfig toGenerationConfig(LlamaGenerationConfig cfg) {

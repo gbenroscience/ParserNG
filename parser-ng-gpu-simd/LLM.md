@@ -308,3 +308,26 @@ RoPE tables and model validation now live once in `llm/core`
 (`Sampler`, `RopeTables`, `ModelSpec`) -- change them there, not per backend. When changing
 shared model behavior, grep for the same method/field name across all
 three `<backend>` packages before considering the change complete.
+
+## Streaming output
+
+`generate` and `chat` take an optional `TokenListener` and hand it the text as it is produced instead of returning it all at the end:
+
+```java
+String reply = engine.chat(null, userText, cfg, piece -> {
+    System.out.print(piece);
+    System.out.flush();
+    return true;            // return false to stop the generation (a Stop button, Esc, a timeout ...)
+});
+System.out.println();
+```
+
+Also `engine.generate(prompt, cfg, listener)` and `engine.chat(messages, cfg, listener)`. The return value is the same string the plain call returns (when cancelled: exactly the text delivered so far). Contract, in full, in the `TokenListener` javadoc; the points that matter:
+
+- **Whole characters only.** Byte-level BPE tokens do not respect character boundaries (one emoji is several tokens), so a piece is never empty and never contains half a character: an incomplete trailing UTF-8 sequence is held back until it is complete (`BpeTokenizer.StreamDecoder`; the pieces joined always equal `decode(ids)`, tested on 20,000 random and malformed streams).
+- **Calling thread, between tokens.** The callback runs on the thread that called `generate`/`chat`, after the next step has been submitted to the device and before the engine waits for it, so a callback faster than one token (about 90-130 ms on the test GPUs) costs no throughput. Do slow work (UI updates, network) on another thread. Calling the same engine from inside a callback throws `IllegalStateException`.
+- **Cancel and errors.** Returning `false` stops; an exception thrown by the callback aborts and is rethrown unchanged. Either way the device queue is drained first and the engine is immediately reusable.
+- **`onComplete(StopReason, tokens)`** (default no-op) reports `STOP_TOKEN`, `MAX_TOKENS` or `CANCELLED`. `lastRunStats()` additionally has `generatedTokens`, `generatedIds`, `stopReason` and `firstPieceMs` (time to the first piece handed to the listener).
+- Backends without incremental output (`LlamaGpuEngine`'s default method) deliver the whole text as one piece.
+- `OpenCLDemo` streams by default (`-Dllm.stream=false` for the old behaviour); `OpenCLBenchmark --stream` runs the timed generations through a listener and prints the first-piece latency, to check that streaming costs no decode speed.
+

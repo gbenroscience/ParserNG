@@ -19,6 +19,7 @@ import java.io.File;
  *   -Dllm.maxContext=N                     cap on context positions (default 8192; sizes the KV cache)
  *   (for a full measurement run use OpenCLDiagnostics, which needs no arguments)
  *   -Dllm.printTokens=true                 print the prompt token ids, for diffing against `llama-tokenize`
+ *   -Dllm.stream=true|false                print the reply token by token as it is generated (default true)
  *   -Dllm.chat=true|false                  wrap the prompt in the Llama-3 chat template and stop at the end-of-turn token
  *                                          (default true when the model's vocabulary has the Llama-3 header tokens)
  *   -Dllm.layout=aos|soa|auto, -Dllm.wo=f32|q8|auto   see Variants
@@ -95,8 +96,22 @@ public final class OpenCLDemo {
             if (chat && !engine.supportsChat()) {
                 throw new IllegalArgumentException("-Dllm.chat=true but this model's vocabulary has no Llama-3 chat tokens");
             }
-            String completion = chat ? engine.chat(null, prompt, cfg) : engine.generate(prompt, cfg);
-            if (completion == null || completion.isBlank()) {
+            final boolean stream = Boolean.parseBoolean(System.getProperty("llm.stream", "true"));
+            final boolean[] printed = {false};
+            com.github.gbenroscience.gpu.llm.TokenListener printer = piece -> {
+                if (!printed[0]) {
+                    System.out.println("Generated text:");
+                    printed[0] = true;
+                }
+                System.out.print(piece); // each piece as soon as its token is sampled
+                System.out.flush();
+                return true;
+            };
+            com.github.gbenroscience.gpu.llm.TokenListener listener = stream ? printer : null;
+            String completion = chat ? engine.chat(null, prompt, cfg, listener) : engine.generate(prompt, cfg, listener);
+            if (stream && printed[0]) {
+                System.out.println(); // end the streamed line
+            } else if (completion == null || completion.isBlank()) {
                 System.out.println("Generated text: <empty>");
             } else {
                 System.out.println("Generated text:");

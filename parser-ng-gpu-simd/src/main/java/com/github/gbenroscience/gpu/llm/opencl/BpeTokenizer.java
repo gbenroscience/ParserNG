@@ -248,6 +248,98 @@ public final class BpeTokenizer implements com.github.gbenroscience.gpu.llm.core
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
+    /**
+     * The raw bytes a token contributes to the text (empty for the BOS/EOS markers and out-of-range ids). Concatenating
+     * these over a sequence and UTF-8 decoding once is exactly {@link #decode}.
+     */
+    public byte[] tokenBytes(int id) {
+        if (id == bosId || id == eosId || id < 0 || id >= idToToken.length) {
+            return new byte[0];
+        }
+        String mapped = idToToken[id];
+        byte[] out = new byte[mapped.length()];
+        for (int i = 0; i < out.length; i++) {
+            Integer b = byteDecoder.get(mapped.charAt(i));
+            out[i] = (byte) (int) (b != null ? b : 0);
+        }
+        return out;
+    }
+
+    /** A fresh incremental decoder for one generation. */
+    public StreamDecoder newStreamDecoder() {
+        return new StreamDecoder();
+    }
+
+    /**
+     * Turns a stream of token ids into text piece by piece. Byte-level BPE tokens do not respect character boundaries
+     * (a single emoji is several tokens, and a token can end inside a character), so decoding each token on its own
+     * produces replacement characters. This decoder keeps an incomplete trailing multi-byte sequence until the rest
+     * arrives; the concatenation of every {@link #push} result plus {@link #finish} equals {@link #decode} of the same
+     * ids (tested, including random and malformed streams). One instance per generation; not thread-safe.
+     */
+    public final class StreamDecoder {
+
+        private byte[] pending = new byte[16];
+        private int length;
+
+        private StreamDecoder() {
+        }
+
+        /** Adds one token; returns the text that is now complete (possibly empty). */
+        public String push(int id) {
+            byte[] t = tokenBytes(id);
+            if (t.length == 0) {
+                return "";
+            }
+            if (length + t.length > pending.length) {
+                pending = java.util.Arrays.copyOf(pending, Math.max(pending.length * 2, length + t.length));
+            }
+            System.arraycopy(t, 0, pending, length, t.length);
+            length += t.length;
+            int cut = completePrefixLength(pending, length);
+            if (cut == 0) {
+                return "";
+            }
+            String s = new String(pending, 0, cut, StandardCharsets.UTF_8);
+            System.arraycopy(pending, cut, pending, 0, length - cut);
+            length -= cut;
+            return s;
+        }
+
+        /** The held-back tail at the end of the stream (decoded with replacement characters, as {@link #decode} would). */
+        public String finish() {
+            if (length == 0) {
+                return "";
+            }
+            String s = new String(pending, 0, length, StandardCharsets.UTF_8);
+            length = 0;
+            return s;
+        }
+    }
+
+    /**
+     * How many leading bytes of b[0..n) can be decoded now: everything except a trailing UTF-8 sequence that is
+     * incomplete but could still be completed by following bytes.
+     */
+    static int completePrefixLength(byte[] b, int n) {
+        for (int back = 1; back <= 3 && back <= n; back++) {
+            int i = n - back;
+            int c = b[i] & 0xFF;
+            if (c < 0x80) {
+                return n; // ASCII: nothing before it is pending
+            }
+            if (c >= 0xC0) { // a lead byte: is its sequence complete?
+                if (c > 0xF4) {
+                    return n; // can never start a valid sequence: the decoder replaces it now
+                }
+                int need = c >= 0xF0 ? 4 : (c >= 0xE0 ? 3 : 2);
+                return back < need ? i : n;
+            }
+            // 0x80..0xBF continuation byte: keep looking for its lead byte
+        }
+        return n;
+    }
+
     /** Iterative lowest-merge-rank pairing, standard BPE encode algorithm. Result cached per unique byte-mapped piece. */
     private List<String> bpeMerge(String byteMappedPiece) {
         List<String> cached = bpeCache.get(byteMappedPiece);
