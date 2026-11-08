@@ -1,6 +1,7 @@
 package com.github.gbenroscience.gpu.llm.opencl;
 
 import com.github.gbenroscience.gpu.llm.LlamaGenerationConfig;
+import com.github.gbenroscience.gpu.llm.TokenListener;
 import com.github.gbenroscience.simd.turbo.tools.llm.loader.GGUFLoader;
 
 import java.io.File;
@@ -178,7 +179,11 @@ public final class OpenCLAssistant {
      *
      * The same engine instance processes every prompt.
      *
-     * This method does not close the engine or scanner.
+     * This method does not close the engine or scanner. 
+     * @param engine
+     * @param scanner
+     * @param out
+     * @throws Throwable 
      */
     public static void runInteractiveSession(
             OpenCLLlamaEngine engine,
@@ -230,14 +235,20 @@ public final class OpenCLAssistant {
                 /*
                  * Reuse the already initialized OpenCL engine.
                  */
-                String response = engine.generate(prompt, config);
+                String response = engine.generate(prompt, config, (String piece) -> {
+                    System.out.print(piece);
+                    System.out.flush();
+                    return true;          // return false to stop (a Stop button, Esc, a timeout)
+
+                });
 
                 long elapsed = System.nanoTime() - start;
 
                 if (response == null || response.isBlank()) {
                     out.println("<empty response>");
                 } else {
-                    out.println(response);
+                   // out.println(response);
+                    out.println("______________________________________________________".repeat(5));
                 }
 
                 out.printf(
