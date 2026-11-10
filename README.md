@@ -1,4 +1,4 @@
-# ParserNG 3.0.9.3 🧮⚡
+# ParserNG 3.1.0 🧮⚡
 
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?style=flat-square&color=blue)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![Downloads](https://img.shields.io/badge/Downloads-11k%2B-brightgreen?style=flat-square)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
@@ -18,6 +18,8 @@ ParserNG powers math visualization, analytical pipelines, and platform tooling a
 ## 🆕 What's new
 
 The full change log for each release is in [LATEST.md](LATEST.md).
+
+### 3.1.0: Expands the calculus capabilities by including a partial differential equations engine in pure Java.
 
 ### 3.0.9.3: Incubating OpenCL LLM Engine optimization and bug fixes to `MathScanner`, `RootFinder` and `Matrix#det`
 
@@ -475,7 +477,7 @@ The full GPU quick-start, including multi-vendor device selection, is at the top
 
 ## 📦 Installation & Configuration
 
-Module choice maps directly onto the evolution table above: pick the highest tier you need, and each module pulls in everything below it. All examples below use version `3.0.9.3`.
+Module choice maps directly onto the evolution table above: pick the highest tier you need, and each module pulls in everything below it. All examples below use version `3.1.0`.
 
 ### For standard Android or legacy pre-JDK 21 runtimes
 
@@ -485,7 +487,7 @@ Core interpreter, Turbo scalar and matrix tiers, and `BulkTurboEvaluator` for me
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.9.3</version>
+    <version>3.1.0</version>
 </dependency>
 ```
 
@@ -504,12 +506,12 @@ Adds `VectorTurboEvaluator` and `SIMDVectorTurboEvaluator`:
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.9.3</version>
+    <version>3.1.0</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.0.9.3</version>
+    <version>3.1.0</version>
 </dependency>
 ```
 
@@ -521,17 +523,17 @@ Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evalua
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.9.3</version>
+    <version>3.1.0</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.0.9.3</version>
+    <version>3.1.0</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-gpu-simd</artifactId>
-    <version>3.0.9.3</version>
+    <version>3.1.0</version>
 </dependency>
 ```
 
@@ -551,7 +553,7 @@ Add them the same way as the modules above. Each module's own README has the det
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-bench</artifactId>
-    <version>3.0.9.3</version>
+    <version>3.1.0</version>
 </dependency>
 ```
 

@@ -1,4 +1,4 @@
-# ParserNG 3.0.9.2
+# ParserNG 3.1.0
   
 An ultra-high-performance mathematical expression parsing and evaluation engine for Java. Version 2.0.x introduces a breakthrough **Block Vectorization Engine** (`VectorTurboEvaluator`) and `SIMDVectorTurboEvaluator` powered by the Java **Vector API** (`jdk.incubator.vector`). 
 

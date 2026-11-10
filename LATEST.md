@@ -1,6 +1,28 @@
 # ParserNG
 
 
+### ParserNG 3.1.0 Partial Differential Equation Solver
+This update upgrades the platform with its own pure Java, near-zero allocation PDE solver, extending ParserNG's reach further across the spectrum of calculus. Pure Java 8, no new dependencies, and it sits beside the ODE engine without modifying it.
+ 
+- **What it solves:** elliptic, parabolic and hyperbolic problems in 1, 2 and 3 space dimensions; linear and nonlinear; single equations and coupled systems. Equations are written in ordinary ParserNG syntax:
+```java
+PDEResult r = PDE.problem("diff(u,t) = alpha*diff(u,x,2)")   // u_t = alpha u_xx
+        .param("alpha", 0.1)
+        .domain("x", 0, 1, 101)
+        .initial("u", "sin(pi*x)")
+        .dirichlet("u", "0")
+        .solve(0.5, 1e-3, "crank_nicolson");
+```
+- **First class in `MathExpression`:** a PDE is recognised by the constructor, either as a bare equation (`diff(u,t) = alpha*diff(u,x,2)`) or through the new `pde(...)` command, including systems (`pde(eq1, eq2)` or the `@(2)("eq1","eq2")` array form). `getExpressionKind()` reports `PDE` or `PDE_SYSTEM`, and `asPDE()` hands you a builder preloaded with the equation. Existing scalar and ODE paths are unchanged.
+- **Methods:** `euler`, `heun`, `rk4`, adaptive `rk45`, `backward_euler`, `crank_nicolson` and `verlet` in time; `jacobi`, `gauss_seidel`, `sor`, `red_black_sor` and `newton_krylov` for steady problems; central differences of order 2, 4 and 6 and upwind first derivatives up to order 6. Boundary conditions: Dirichlet, Neumann, Robin and periodic, with data that may depend on position and time. Implicit steps use an exact Jacobian from ParserNG's automatic differentiator.
+- **Safeguards:** explicit steps are checked for stability before they run (`UnstableTimeStepException` reports the largest stable step), elliptic solves report convergence and residuals, and bad setups fail with a message that says what to change.
+- **Fast and allocation free:** stepping allocates 0 bytes (verified by tests), constant-coefficient linear problems are fused into branch-free kernels that run within about 1.4x to 2.6x of hand-written Java (300+ million node updates per second on one core), and results are bit-identical for any thread count. For real-time use, `PDESolver.step(dt)` advances the live `double[]` field in place, ready to draw every frame.
+- **Incompressible Navier-Stokes (`IncompressibleFlow`):** 2-D and 3-D on a staggered MAC grid with a geometric multigrid pressure solver (`PoissonMultigrid`), no-slip, moving-wall, inflow, outflow and periodic boundaries, and a full set of flow diagnostics. Validated against exact solutions (Taylor-Green, Couette, Poiseuille, Kovasznay, Ethier-Steinman). The lid-driven cavity agrees with the published Ghia values only partly, and the doc lists this as an open item.
+- **Finite volume and shock capturing (`FiniteVolumeSolver`):** conservation laws such as Burgers and the compressible Euler equations in 1, 2 and 3-D, with LLF, HLL and HLLC fluxes, MUSCL reconstruction (minmod, MC, van Leer) and SSP Runge-Kutta. A law is recognised straight from `diff(u,t) + diff(u^2/2,x) = 0`. Validated on the Sod shock tube against the exact Riemann solution, and on a smooth isentropic vortex (order about 2.2).
+- **Not in this release:** non-uniform, curvilinear or unstructured grids, flow around obstacles, finite elements, spectral methods, and SIMD or GPU back ends. Strong shocks and near-vacuum states are untested, and multi-core scaling has not been measured.
+Full syntax, methods, measured numbers and limitations are in [PDE.md](parser-ng/PDE.md).
+ 
+
 ### ParserNG 3.0.9.3 Major and Minor updates.
 #### 1. Minor
 Fixes to `MathScanner`, `Matrix` and `RootFinder`.

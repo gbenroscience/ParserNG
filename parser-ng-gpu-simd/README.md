@@ -134,18 +134,18 @@ Enterprise binaries are hosted securely inside your designated private repositor
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng</artifactId>
-        <version>3.0.9.3</version>
+        <version>3.1.0</version>
     </dependency>
 
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-simd</artifactId>
-        <version>3.0.9.3</version>
+        <version>3.1.0</version>
     </dependency>
     <dependency>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-gpu-simd</artifactId>
-        <version>3.0.9.3</version>
+        <version>3.1.0</version>
     </dependency>
 </dependencies>
 ```
