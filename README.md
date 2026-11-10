@@ -1,4 +1,4 @@
-# ParserNG 3.0.9.2 🧮⚡
+# ParserNG 3.0.9.3 🧮⚡
 
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?style=flat-square&color=blue)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![Downloads](https://img.shields.io/badge/Downloads-11k%2B-brightgreen?style=flat-square)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
@@ -7,28 +7,172 @@
 
 > **The fastest pure-Java math runtime, now with GPU (CUDA, Metal and OpenCL) bulk evaluators and a fully open-sourced Vector API (SIMD) kernel. Zero JNI. Zero native binaries. Zero bytecode-safety risk.**
 
-[**ParserNG 3.0.9.2 is live**](LATEST.md)
-ParserNG's core class, `MathExpression`, has been armed with a `strict` flag(instance field)
-This allows it to determine whether to allow undeclared variable/method names fly as valid variables initialized to zero or not. When the flag is set to true, undeclared variables/methods throw a error at constructor initialization time. To preserve behaviour, the flag is set to false by default, but once set to true, undeclared variable names and method names will throw a parser exception.
+**ParserNG** is an ultra-high-performance mathematical runtime built for modern JVM workloads: real-time plotting pipelines, financial modeling, and deep learning activation functions (SwiGLU, GELU, and the rest of the Transformer toolkit). By adopting a hardware-aligned, fast-interpreted memory model instead of risky dynamic bytecode generation, ParserNG eliminates classloader bloat, protects your runtime from native segmentation faults, and dramatically simplifies your Software Bill of Materials (SBOM) compliance posture.
 
+Five execution tiers, one parser, one syntax, and now big data. Pick the tier that matches how hot your loop is; you never rewrite the expression to move up a tier.
 
-[**ParserNG 3.0.9**](LATEST.md)
-- In this version, `parser-ng-parquet` becomes the latest addition to the ParserNG ecosystem. It affords JVM users the ability to read parquet files, both local and remote(e.g s3) at perhaps, the highest possible rates on the JVM; about 3x-4x the rate that `parquet-java` itself affords.
-It introduces powerful speedups to the base `MathExpression` constructor itself and perfects the `BaseNFunction` which is the `MathExpression` class extended to all number bases between 2 and 36(included).
-A secret allocation source that was randomly appearing on the SIMD bulk evaluators was also squashed.
-`parser-ng-sql` now supports select over parquet files, both local and remote(e.g. s3).
-The float32 SIMD bulk evaluators(`SIMDCommandF32, SIMDCommandSegmentF32) broke 1.4 billion evals/second on my Dell Inspiron 4150's Intel mobile skylake processor(manufacturere, 2015 or 2016) using just 2 workers on the quadratic expression `x^2+2*x+1`. 
-Please check the READMEs for `parser-ng-sql` and `parser-ng-parquet` properly as there are many new updates.
+ParserNG powers math visualization, analytical pipelines, and platform tooling at **167 organizations** around the globe. Need enterprise-grade confidence? Book a **free 30-minute introductory call** to discuss your production needs. Ongoing consulting, custom development, and support engagements are available after the initial conversation: **[Schedule a call](https://calendly.com/gbenroscience/30min)**.
 
-- In version 3.0.8, `parser-ng-sql`, the new extension introduced in v3.0.7 to help Apache Arrow users of ParserNG(parser-ng-arrow) maximize its use, has received major speed and bug updates. 
-- It introduced (in v3.0.5) float32 (Java's float type) and float64 (Java's primitive double type) bulk evaluators, alongside MemorySegment-based bulk evaluators for both precisions.
-- It puts all of that to work in **parser-ng-arrow**: a true zero-copy bridge between ParserNG and Apache Arrow, letting you evaluate any runtime string expression, filter rows, and project computed columns directly over Arrow's columnar memory, no serialization, no staging buffers, no leaving the Arrow buffer at all. In its SIMD mode (`ArrowBulkEvaluator`), it beats Apache Gandiva by 10 to 30 times on every transcendental function: `sin`, `cos`, `log`, `exp`, and the rest of the set. Gandiva still edges it out on hardware-intrinsic `sqrt` and plain arithmetic, by 1.5x to 2x, but flip on `ArrowBulkEvaluator`'s built-in parallelism and that gap is gone at just 2 workers.
-- For workloads that want more than the CPU can give, `ArrowGpuBulkEvaluator` dispatches the same expressions straight to CUDA, OpenCL, or Metal, with zero JNI and zero native binaries anywhere in your build.
-- Version 3.0.8 rounds this out with real query power: `filter`, `project`, and `filterProject`. These aren't a SQL engine, and they're no replacement for Gandiva or DataFusion, but for math-heavy numeric expressions over Arrow batches, they're the faster tool for the job. `filterProject` fuses row selection with column computation so your projection never runs on a row about to be thrown away. When your expressions are float/float64-heavy, `parser-ng-arrow` is the faster choice, by a lot.
+---
 
-### `filter`, `project`, and `filterProject` in action
+## 🆕 What's new
 
-Not toy expressions. The kind of thing that actually runs in production, and the kind of thing an engineering manager cares about because it touches fraud losses, cloud spend, or patient safety.
+The full change log for each release is in [LATEST.md](LATEST.md).
+
+### 3.0.9.3: Incubating OpenCL LLM Engine optimization and bug fixes to `MathScanner`, `RootFinder` and `Matrix#det`
+
+### 3.0.9.2: strict mode
+
+`MathExpression`, ParserNG's core class, now has a `strict` flag (an instance field). It decides what happens when an expression uses a variable or method name that has not been declared:
+
+* `strict = false` (the default, so existing behaviour is preserved): an undeclared name is accepted as a variable initialised to zero.
+* `strict = true`: an undeclared variable or method name throws a parser exception when the expression is constructed.
+
+### 3.0.9: Parquet, and a faster constructor
+
+* **`parser-ng-parquet`** joins the ParserNG family. It reads Parquet files, local and remote (for example on S3), at perhaps the highest rates available on the JVM: about 3x to 4x the rate of `parquet-java` itself.
+* **`parser-ng-sql`** now supports `select` over Parquet files, local and remote.
+* The base `MathExpression` constructor is much faster, and `BaseNFunction`, the `MathExpression` class extended to every number base from 2 to 36 inclusive, is now complete.
+* A hidden allocation source that occasionally appeared in the SIMD bulk evaluators has been removed.
+* The float32 SIMD bulk evaluators (`SIMDCommandF32`, `SIMDCommandSegmentF32`) passed 1.4 billion evaluations per second on the quadratic `x^2+2*x+1`, using just 2 workers on an Intel mobile Skylake processor (2015 or 2016 vintage) in a Dell Inspiron 5759.
+* Please read the READMEs of `parser-ng-sql` and `parser-ng-parquet`, as there are many new updates.
+
+### 3.0.8 and earlier: Arrow, SQL and the GPU
+
+* Version 3.0.5 introduced float32 (Java's `float`) and float64 (Java's primitive `double`) bulk evaluators, alongside MemorySegment-based bulk evaluators for both precisions.
+* **`parser-ng-arrow`** puts all of that to work: a true zero-copy bridge between ParserNG and Apache Arrow. You can evaluate any runtime string expression, filter rows, and project computed columns directly over Arrow's columnar memory, with no serialization, no staging buffers, and no leaving the Arrow buffer at all. In its SIMD mode (`ArrowBulkEvaluator`), it beats Apache Gandiva by 10 to 30 times on every transcendental function: `sin`, `cos`, `log`, `exp`, and the rest of the set. Gandiva still edges it out on hardware-intrinsic `sqrt` and plain arithmetic, by 1.5x to 2x, but turn on `ArrowBulkEvaluator`'s built-in parallelism and that gap is gone at just 2 workers.
+* For workloads that want more than the CPU can give, `ArrowGpuBulkEvaluator` dispatches the same expressions straight to CUDA, OpenCL or Metal, with zero JNI and zero native binaries anywhere in your build.
+* **`parser-ng-sql`**, introduced in 3.0.7 for users of `parser-ng-arrow`, received major speed and bug fixes in 3.0.8.
+* 3.0.8 also added real query power to `parser-ng-arrow`: `filter`, `project` and `filterProject` (see [below](#-arrow-filter-project-and-filterproject)).
+* 3.0.8 added `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` with CPU pinning, the native GPU bulk evaluators, and the `ARRAY` type (see [the table below](#-the-evolution-of-parserng)).
+
+---
+
+## 🔥 Start here: GPU, SIMDEngineEvaluator, SIMDVectorTurboEvaluator
+
+This is the part of ParserNG worth losing sleep over, so it goes first.
+
+### GPU bulk evaluation: CUDA, OpenCL and Metal, zero native code
+
+One kernel, three backends, your choice of double or genuinely native float32 (not double silently upcast: a lot of consumer GPUs run fp64 at a fraction of their fp32 rate, so faking float32 would defeat the entire point). ParserNG auto-detects whichever backend is installed, or you pick explicitly:
+
+```java
+MathExpression me = new MathExpression("3*cos(x-2)+ln(3*x^3-5*x-4*tan(x))");
+VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
+
+try (GpuCompositeExpression gpu = GpuExpressionBridge.from(vte)) {   // auto-picks CUDA, falls back to OpenCL/Metal
+    double[] flat = /* your sample buffer, column-major per variable slot */;
+    double[] out  = new double[flat.length];
+    gpu.applyBulk(flat, out);          // full double precision
+    // gpu.applyBulk(floatIn, floatOut) // native float32 kernel: a real throughput gain, not a cast
+}
+```
+
+Multiple GPUs installed? Select by vendor, not by driver-string guesswork:
+
+```java
+OpenClCompositeExpression.selectDevice(OpenClCompositeExpression.GpuVendor.AMD);
+// or: OpenClCompositeExpression.listAvailableDevices().forEach(System.out::println);
+```
+
+`MemorySegment`s allow zero-copy transfers. The segment path and the `float[]` path give identical results:
+
+```java
+import com.github.gbenroscience.gpu.opencl.OpenClCompositeExpression;
+import com.github.gbenroscience.gpu.opencl.OpenClExpressionBridge;
+import com.github.gbenroscience.parser.MathExpression;
+import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+
+MathExpression me = new MathExpression("2*x^2-3*x+1");
+VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
+
+try (OpenClCompositeExpression gpu = (OpenClCompositeExpression) OpenClExpressionBridge.from(vte);
+     Arena arena = Arena.ofConfined()) {
+
+    int dataSize = 2_000_000;
+    float[] flat = new float[dataSize];
+    for (int i = 0; i < dataSize; i++) {
+        flat[i] = (float) (-25.6 + i * 0.1);
+    }
+
+    // float[] path
+    float[] outViaArray = new float[dataSize];
+    gpu.applyBulk(flat, outViaArray);
+
+    // MemorySegment path (float32)
+    MemorySegment inSeg = arena.allocate((long) dataSize * ValueLayout.JAVA_FLOAT.byteSize());
+    MemorySegment outSeg = arena.allocate((long) dataSize * ValueLayout.JAVA_FLOAT.byteSize());
+    MemorySegment.copy(flat, 0, inSeg, ValueLayout.JAVA_FLOAT, 0, dataSize);
+    gpu.applyBulkF32(inSeg, outSeg);
+
+    // outSeg now holds exactly the values in outViaArray
+}
+```
+
+### SIMDEngineEvaluator: CPU-pinned parallelism (JDK 22+)
+
+The most efficient CPU-bound tier ParserNG has. CPU pinning (best on Linux) means 2 workers on 2 cores get you about 1.8x to 2.0x the throughput of 1 worker on 1 core: real scaling, not the diminishing returns you get from unpinned thread pools fighting the scheduler.
+
+```java
+MathExpression me = new MathExpression("3*sin(x)*cos(y)+sqrt(abs(x*y))");
+var evaluator = new SIMDEngineEvaluator(me).compile();
+
+double[][] inputs = new double[2][dataSize]; // x, y
+double[] out = new double[dataSize];
+
+evaluator.applyBulkParallel(inputs, out, 2); // 2 pinned workers
+```
+
+`SIMDEngineEvaluator` also works over `MemorySegment`s, for greater throughput. Parallel work only happens when you call `applyBulkParallel`, and the dataset must be large enough to exceed the parallel threshold. Use a shared arena so that the worker threads can all read the segments:
+
+```java
+MathExpression me = new MathExpression(
+        "(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
+var evaluator = SIMDEngineEvaluator.getEvaluator(me, 2); // 2 workers; omit the argument to use one per CPU
+
+long n = 30_000_000L; // elements per variable
+try (Arena arena = Arena.ofShared()) {
+    MemorySegment in = arena.allocate(3 * n * 8L);   // x1, x2, x3: one block of n doubles per variable
+    MemorySegment out = arena.allocate(n * 8L);
+
+    for (long i = 0; i < n; i++) {
+        in.set(ValueLayout.JAVA_DOUBLE, (0 * n + i) * 8L, 1.5 + i * 0.001); // x1
+        in.set(ValueLayout.JAVA_DOUBLE, (1 * n + i) * 8L, 2.0 + i * 0.005); // x2
+        in.set(ValueLayout.JAVA_DOUBLE, (2 * n + i) * 8L, 0.5);             // x3
+    }
+
+    evaluator.applyBulkParallel(in, out);
+    double first = out.get(ValueLayout.JAVA_DOUBLE, 0);
+}
+```
+
+`SIMDCommandTurboEvaluator` sits right beside it in `parser-ng-gpu-simd` with the same CPU-pinned parallel model. `SIMDEngineEvaluator` is typically a few nanoseconds per op faster, so it is the default recommendation.
+
+### SIMDVectorTurboEvaluator: explicit Vector API (JDK 21+)
+
+Maps your expression straight to 256 or 512-bit AVX lanes via `jdk.incubator.vector`, instead of hoping the JIT auto-vectorizes:
+
+```java
+MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
+var evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression)
+        new SIMDVectorTurboEvaluator(me).compile();
+
+double[][] inputs = new double[1][dataSize];
+double[] out = new double[dataSize];
+evaluator.applyBulk(inputs, out);
+// evaluator.applyBulkParallel(inputs, out); // works, but JDK 21 has no CPU pinning, so SIMDEngineEvaluator scales better
+```
+
+`VectorTurboEvaluator` (the non-`SIMD`-prefixed sibling) takes the opposite bet: no explicit Vector API calls at all, just memory layout and loop shape engineered to *coerce* the JIT into auto-vectorizing. Use it where the Vector API's incubator status is a concern; use `SIMDVectorTurboEvaluator` everywhere else.
+
+---
+
+## 🏹 Arrow: `filter`, `project` and `filterProject`
+
+`parser-ng-arrow` evaluates ParserNG expressions directly over Apache Arrow batches. These are not toy expressions: they are the kind of thing that runs in production, and the kind an engineering manager cares about because it touches fraud losses, cloud spend or patient safety. They are not a SQL engine, and they are no replacement for Gandiva or DataFusion, but for math-heavy numeric expressions over Arrow batches they are the faster tool for the job. `filterProject` fuses row selection with column computation, so your projection never runs on a row that is about to be thrown away. When your expressions are float or float64 heavy, `parser-ng-arrow` is the faster choice, by a lot.
 
 **`filter`, fintech: screening a payments batch for fraud review before a human ever sees it**
 
@@ -47,14 +191,14 @@ try (ArrowBulkEvaluator costPerRequest =
              ArrowBulkEvaluator.compile("(cpu_ms * cpu_rate + mem_gb_s * mem_rate) / request_count")) {
     VectorSchemaRoot withCost = costPerRequest.project(traceBatch, "cost_per_request");
     // Every span in this minute's trace batch now carries its own "cost_per_request" column,
-    // computed once over however many million rows your tracing pipeline just handed you,
+    // computed once over however many million rows your tracing pipeline just handed you:
     // the kind of number that ends up on a cloud-spend dashboard your VP actually reads.
 }
 ```
 
-**`filterProject`, healthcare/IoT: two ways to score early-warning risk from a stream of patient vitals**
+**`filterProject`, healthcare and IoT: two ways to score early-warning risk from a stream of patient vitals**
 
-The first is `ArrowExpressionEvaluators.filterProject`, an ad-hoc, SQL-`WHERE`/`SELECT`-shaped convenience. Every expression, predicate included, is plain text compiled fresh on this one call, the right shape when the alert rule itself is something a clinician configured at runtime and isn't worth precompiling:
+The first is `ArrowExpressionEvaluators.filterProject`, an ad-hoc, SQL-`WHERE`/`SELECT`-shaped convenience. Every expression, predicate included, is plain text compiled fresh on this one call. That is the right shape when the alert rule is something a clinician configured at runtime and is not worth precompiling:
 
 ```java
 VectorSchemaRoot atRisk = ArrowExpressionEvaluators.filterProject(
@@ -63,14 +207,14 @@ VectorSchemaRoot atRisk = ArrowExpressionEvaluators.filterProject(
         "patient_id", "heart_rate", "spo2",
         "0.4 * (heart_rate - 100) + 0.6 * (94 - spo2)");
 // Only the patients whose vitals actually crossed the threshold survive the filter.
-// "patient_id", "heart_rate", and "spo2" pass straight through unchanged, zero copy,
+// "patient_id", "heart_rate" and "spo2" pass straight through unchanged, zero copy,
 // recognized as bare column names rather than routed through the expression engine at all.
 // The last one is computed fresh, only over the rows that survived, and comes back
 // named after its own trimmed expression text. The result holds exactly these four
 // columns, nothing else from vitalsBatch tags along uninvited.
 ```
 
-The second is the precompiled instance-method form covered above, the right shape once that same rule is going to run against every batch streaming off a bedside monitor, not just once:
+The second is the precompiled instance-method form, shown in the `filter` and `project` examples above. It is the right shape once the same rule is going to run against every batch streaming off a bedside monitor, not just once:
 
 ```java
 try (ArrowBulkEvaluator isAbnormal = ArrowBulkEvaluator.compile("heart_rate > 120 || spo2 < 92");
@@ -78,207 +222,13 @@ try (ArrowBulkEvaluator isAbnormal = ArrowBulkEvaluator.compile("heart_rate > 12
              ArrowBulkEvaluator.compile("0.4 * (heart_rate - 100) + 0.6 * (94 - spo2)")) {
 
     VectorSchemaRoot scored = isAbnormal.filterProject(vitalsBatch, earlyWarningScore, "ews_score");
-    // Same fusion guarantee (the score never runs on a normal reading), but this time
-    // the predicate and the projection are compiled once and reused across every batch
-    // this monitor streams, instead of being recompiled on every single call the way
-    // the ad-hoc form above always is. This form also keeps vitalsBatch's full schema
-    // and simply appends "ews_score" as a new column, rather than returning only the
-    // columns you named.
+    // Same fusion guarantee (the score never runs on a normal reading), but the predicate
+    // and the projection are compiled once and reused across every batch this monitor
+    // streams, instead of being recompiled on every call as in the ad-hoc form above.
+    // This form also keeps vitalsBatch's full schema and simply appends "ews_score"
+    // as a new column, rather than returning only the columns you named.
 }
 ```
-
-
-**ParserNG** is an ultra-high-performance mathematical runtime built for modern JVM workloads: real-time plotting pipelines, financial modeling, and deep learning activation functions (SwiGLU, GELU, and the rest of the Transformer toolkit). By adopting a hardware-aligned, fast-interpreted memory model instead of risky dynamic bytecode generation, ParserNG eliminates classloader bloat, protects your runtime from native segmentation faults, and dramatically simplifies your Software Bill of Materials (SBOM) compliance posture.
-
-Five execution tiers, one parser, one syntax, and now BigData! Pick the tier that matches how hot your loop is; you never rewrite the expression to move up a tier.
- 
----
-
-## 🏢 Globally Trusted
-
-ParserNG powers mission-critical math visualization, analytical pipelines, and platform tooling at **167 organizations** around the globe.
-
-### Need Enterprise-Grade Confidence?
-
-Book a **free 30-minute introductory call** to discuss your production needs. Ongoing consulting, custom development, and support engagements are available after the initial conversation.
-
-**[Schedule a call →](https://calendly.com/gbenroscience/30min)**
----
-
-## 🔥 Start here: GPU, SIMDEngineEvaluator, SIMDVectorTurboEvaluator
-
-This is the part of ParserNG worth losing sleep over, so it goes first.
-
-### GPU bulk evaluation: CUDA and OpenCL, and Metal, zero native code
-
-One kernel, three backends, your choice of double or genuinely native float32 (not double silently upcast: a lot of consumer GPUs run fp64 at a fraction of their fp32 rate, so faking float32 would defeat the entire point). Auto-detects whichever backend is installed, or you pick explicitly:
-
-```java
-MathExpression me = new MathExpression("3*cos(x-2)+ln(3*x^3-5*x-4*tan(x))");
-VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
-
-try (GpuCompositeExpression gpu = GpuExpressionBridge.from(vte)) {   // auto-picks CUDA, falls back to OpenCL/Metal
-    double[] flat = /* your sample buffer, column-major per variable slot */;
-    double[] out  = new double[flat.length];
-    gpu.applyBulk(flat, out);          // full double precision
-    // gpu.applyBulk(floatIn, floatOut) // native float32 kernel -- real throughput gain, not a cast
-}
-```
-
-Multiple GPUs installed? Select by vendor, not driver-string guesswork:
-
-```java
-OpenClCompositeExpression.selectDevice(OpenClCompositeExpression.GpuVendor.AMD);
-// or: OpenClCompositeExpression.listAvailableDevices().forEach(System.out::println);
-```
-
-And MemorySegments allow for zero-copy!
-
-```Java
-
-import com.github.gbenroscience.gpu.opencl.OpenClCompositeExpression;
-import com.github.gbenroscience.gpu.opencl.OpenClExpressionBridge;
-import com.github.gbenroscience.gpu.opencl.OpenClKernelSource;
-import com.github.gbenroscience.parser.MathExpression;
-import com.github.gbenroscience.simd.turbo.tools.VectorTurboEvaluator;
-import static org.junit.jupiter.api.Assertions.*;
-
-
-  @Test
- void memorySegmentOverloadMatchesFloatArrayOverload() throws Throwable {
-        MathExpression me = new MathExpression("2*x^2-3*x+1");
-        VectorTurboEvaluator vte = new VectorTurboEvaluator(me);
-
-        try (OpenClCompositeExpression gpu = (OpenClCompositeExpression) OpenClExpressionBridge.from(vte); Arena arena = Arena.ofConfined()) {
-
-            int dataSize = 2_000_000;
-            float[] flat = new float[dataSize];
-            for (int i = 0; i < dataSize; i++) {
-                flat[i] = (float) (-25.6 + i * 0.1);
-            }
-
-            float[] outViaArray = new float[dataSize];
-            long tArray = System.nanoTime();
-            gpu.applyBulk(flat, outViaArray);
-            tArray = System.nanoTime() - tArray;
-            System.out.println("float[] path: " + (tArray / 1000) + " us");
-
-            MemorySegment inSeg = arena.allocate((long) dataSize * ValueLayout.JAVA_FLOAT.byteSize());
-            MemorySegment outSeg = arena.allocate((long) dataSize * ValueLayout.JAVA_FLOAT.byteSize());
-            MemorySegment.copy(flat, 0, inSeg, ValueLayout.JAVA_FLOAT, 0, dataSize);
-
-            long tSeg = System.nanoTime();
-            gpu.applyBulkF32(inSeg, outSeg);
-            tSeg = System.nanoTime() - tSeg;
-            System.out.println("MemorySegment path (f32): " + (tSeg / 1000) + " us");
-
-            float[] outViaSegment = new float[dataSize];
-            MemorySegment.copy(outSeg, ValueLayout.JAVA_FLOAT, 0, outViaSegment, 0, dataSize);
-
-            assertArrayEquals(outViaArray, outViaSegment, 0.0f,
-                    "float[] and MemorySegment (applyBulkF32) overloads diverged for identical input -- "
-                    + "bug is in the staging/copy layer, not the kernel");
-        }
-    }
-```
-
-### SIMDEngineEvaluator: CPU-pinned parallelism (JDK 22+)
-
-The most efficient CPU-bound tier ParserNG has. CPU pinning (best on Linux) means 2 workers on 2 cores get you ~1.8×–2.0× the throughput of 1 worker on 1 core: real scaling, not the diminishing returns you get from unpinned thread pools fighting the scheduler.
-
-```java
-MathExpression me = new MathExpression("3*sin(x)*cos(y)+sqrt(abs(x*y))");
-var evaluator = new SIMDEngineEvaluator(me).compile();
-
-double[][] inputs = new double[2][dataSize]; // x, y
-double[] out = new double[dataSize];
-
-evaluator.applyBulkParallel(inputs, out, 2); // 2 pinned workers
-```
-
-
-Feel free to use the SIMDEngineEvaluator with MemorySegments also, for greater throughput - 
-```Java
-
-   /**
-     * Test API Call: Parallel MemorySegment Bulk Execution Uses
-     * Arena.ofShared() to allow worker threads to access the memory segments.
-     */
-    @Test
-    public void testMathematicalPrecisionVsNativeMemorySegmentBulkParallel() throws Throwable {
-        MathExpression me = new MathExpression("(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-        // Instantiate with 4 workers to ensure parallel execution pool is created
-        var evaluator = SIMDEngineEvaluator.getEvaluator(me, 2);// the second argument is the number of workers to use.
-        //If not specified, the worker count
-        //is equal to the number of cpus. NOTE: parallel processing only occurs when applyBulkParallel is called
-
-        logDetails(me, evaluator, !active);
-
-        // Use a dataset large enough to exceed PARALLEL_OPS_THRESHOLD
-        long totalElements = 300_000_00L;
-        int varCount = 3; // x1, x2, x3
-        double start = System.nanoTime();
-        // MUST use shared arena for multi-threaded memory access
-        try (Arena arena = Arena.ofShared()) {
-            MemorySegment inputSegment = arena.allocate(varCount * totalElements * 8L);
-            MemorySegment outputSegment = arena.allocate(totalElements * 8L);
-            System.out.println("Started loading input data");
-            for (long i = 0; i < totalElements; i++) {
-                double x1Val = 1.5 + (i * 0.001);
-                double x2Val = 2.0 + (i * 0.005);
-                double x3Val = 0.5;
-
-                inputSegment.set(ValueLayout.JAVA_DOUBLE, ((0 * totalElements) + i) * 8L, x1Val);
-                inputSegment.set(ValueLayout.JAVA_DOUBLE, ((1 * totalElements) + i) * 8L, x2Val);
-                inputSegment.set(ValueLayout.JAVA_DOUBLE, ((2 * totalElements) + i) * 8L, x3Val);
-            }
-            double t0 = System.nanoTime() - start;
-            System.out.println("Done loading input data in " + t0 + "ns");
-
-            start = System.nanoTime();
-            // Execute Parallel Segment Path
-            evaluator.applyBulkParallel(inputSegment, outputSegment);
-            double t1 = System.nanoTime() - start;
-            System.out.println("evalTime = " + t1 + "ns");
-
-            System.out.println("Started testing output results");
-            start = System.nanoTime();
-            for (long i = 0; i < totalElements; i++) {
-                double x1 = inputSegment.get(ValueLayout.JAVA_DOUBLE, ((0 * totalElements) + i) * 8L);
-                double x2 = inputSegment.get(ValueLayout.JAVA_DOUBLE, ((1 * totalElements) + i) * 8L);
-                double x3 = inputSegment.get(ValueLayout.JAVA_DOUBLE, ((2 * totalElements) + i) * 8L);
-
-                double expected = (1.0 / (x1 * Math.sqrt(2.0 * 3.14159)))
-                        * Math.exp((-Math.pow((x2 - x3), 2.0)) / (2.0 * Math.pow(x1, 2.0)));
-
-                double actual = outputSegment.get(ValueLayout.JAVA_DOUBLE, i * 8L);
-                assertEquals(expected, actual, EPSILON, "SIMD MemorySegment (Parallel) math drifted at index: " + i);
-            }
-            double t2 = System.nanoTime() - start;
-            System.out.println("Ended testing output results in "+t2+"ns");
-        }
-    }
-
-```
-
-`SIMDCommandTurboEvaluator` sits right beside it in `parser-ng-gpu-simd` with the same CPU-pinned parallel model; `SIMDEngineEvaluator` is typically a few nanoseconds/op faster, so it's the default recommendation.
-
-### SIMDVectorTurboEvaluator: explicit Vector API (JDK 21+)
-
-Maps your expression straight to 256/512-bit AVX lanes via `jdk.incubator.vector`, not just hoping the JIT auto-vectorizes:
-
-```java
-MathExpression me = new MathExpression("4*x+3*sin(5+x^2)");
-var evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression)
-        new SIMDVectorTurboEvaluator(me).compile();
-
-double[][] inputs = new double[1][dataSize];
-double[] out = new double[dataSize];
-evaluator.applyBulk(inputs, out);
-// evaluator.applyBulkParallel(inputs, out); // works, but JDK 21 has no CPU pinning -- SIMDEngineEvaluator scales better
-```
-
-`VectorTurboEvaluator` (the non-`SIMD`-prefixed sibling) takes the opposite bet: no explicit Vector API calls at all; just memory layout and loop shape engineered to *coerce* the JIT into auto-vectorizing. Use it where the Vector API's incubator status is a concern; use `SIMDVectorTurboEvaluator` everywhere else.
 
 ---
 
@@ -286,10 +236,14 @@ evaluator.applyBulk(inputs, out);
 
 | Version | What shipped |
 | :--- | :--- |
-| **< 1.0.0** | `MathExpression`, the interpreter. ParserNG Standard. |
-| **1.0.0 – 1.x** | Turbo tier arrives: `ScalarTurboEvaluator1` (variable args as an array), `ScalarTurboEvaluator2` (variable args as widened primitives internally), and `MatrixTurboEvaluator`, all built on `MethodHandles`. |
-| **2.0.0 – 2.x** | Bulk evaluation, via mechanical sympathy *and* SIMD. `VectorTurboEvaluator` coerces auto-vectorization through code shape alone; `SIMDVectorTurboEvaluator` forces it via the explicit Vector API. Both support `applyBulkParallel(in, out)`, but JDK 21 has no CPU pinning, capping the parallel win. |
-| **3.0.8** | `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` add CPU pinning (best on Linux): 2 workers on 2 cores ≈ 1.8×–2.0× the work of 1 worker on 1 core. `SIMDEngineEvaluator` edges out `SIMDCommandTurboEvaluator` by a few ns/op. Both live in **`parser-ng-gpu-simd`** (JDK 22+), the module that also houses the star of this release: native **GPU bulk evaluators for CUDA and OpenCL and Metal**. |
+| **Before 1.0.0** | `MathExpression`, the interpreter. ParserNG Standard. |
+| **1.0.0 to 1.x** | Turbo tier arrives: `ScalarTurboEvaluator1` (variable args as an array), `ScalarTurboEvaluator2` (variable args as widened primitives internally), and `MatrixTurboEvaluator`, all built on `MethodHandles`. |
+| **2.0.0 to 2.x** | Bulk evaluation, via mechanical sympathy *and* SIMD. `VectorTurboEvaluator` coerces auto-vectorization through code shape alone; `SIMDVectorTurboEvaluator` forces it via the explicit Vector API. Both support `applyBulkParallel(in, out)`, but JDK 21 has no CPU pinning, capping the parallel win. |
+| **3.0.5** | float32 and float64 bulk evaluators, plus MemorySegment-based bulk evaluators for both precisions. |
+| **3.0.7** | `parser-ng-sql`, introduced to help users of `parser-ng-arrow`, the zero-copy Apache Arrow bridge. |
+| **3.0.8** | `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` add CPU pinning (best on Linux): 2 workers on 2 cores give about 1.8x to 2.0x the work of 1 worker on 1 core. `SIMDEngineEvaluator` edges out `SIMDCommandTurboEvaluator` by a few ns/op. Both live in **`parser-ng-gpu-simd`** (JDK 22+), the module that also houses native **GPU bulk evaluators for CUDA, OpenCL and Metal**. Also new: `filter`, `project` and `filterProject` in `parser-ng-arrow`, and the `ARRAY` type. |
+| **3.0.9** | `parser-ng-parquet`, `select` over Parquet in `parser-ng-sql`, a much faster `MathExpression` constructor, and a complete `BaseNFunction`. |
+| **3.0.9.2** | The `strict` flag on `MathExpression`. |
 
 Same `MathExpression` syntax at every tier. You scale up by choosing a different evaluator, never by rewriting the expression.
 
@@ -297,19 +251,23 @@ Same `MathExpression` syntax at every tier. You scale up by choosing a different
 
 ## 📊 Performance & Throughput Profiles
 
-### Throughput Horizons
-| Execution Mode | Throughput Capacity (Evaluations / Sec) - on a 2015, Dell Inspiron 5759 - Processor: Intel(R) Core(TM) 76500U CPU @2.50GHz (4 CPUs), ~2.6GHz |
-| :--- | :--- |
-| **Standard Mode** | 3,000,000 – 10,000,000 |
-| **Turbo Mode** | 10,000,000 – 90,000,000 |
-| **Bulk Turbo (Single Core)** | **200,000,000+** |
-| **Bulk Turbo (Parallel Workers)** | **Even Higher (Hardware Saturation)** |
-| **GPU Bulk Turbo (Massive Parallelism)** | **Highest (Hardware Saturation)** |
+### Throughput horizons
 
-### Amortized Activation Latencies (JDK 21+)
-* **SwiGLU Kernel:** `1.8 ns / element`
-* **GELU Kernel:** `2.1 ns / element`
-* **Custom Expressions:** Highly scalable, consistently executing multiple times faster than standard Janino scalar compilations on single-core setups.
+Measured on a 2015 Dell Inspiron 5759 with an Intel Core i7-6500U CPU @ 2.50GHz (4 logical CPUs, about 2.6GHz).
+
+| Execution mode | Throughput capacity (evaluations / sec) |
+| :--- | :--- |
+| **Standard Mode** | 3,000,000 to 10,000,000 |
+| **Turbo Mode** | 10,000,000 to 90,000,000 |
+| **Bulk Turbo (Single Core)** | **200,000,000+** |
+| **Bulk Turbo (Parallel Workers)** | **Even higher (hardware saturation)** |
+| **GPU Bulk Turbo (Massive Parallelism)** | **Highest (hardware saturation)** |
+
+### Amortized activation latencies (JDK 21+)
+
+* **SwiGLU kernel:** `1.8 ns / element`
+* **GELU kernel:** `2.1 ns / element`
+* **Custom expressions:** highly scalable, consistently executing multiple times faster than standard Janino scalar compilations on single-core setups.
 
 Full measured breakdowns, including GPU throughput at scale, live in [BENCHMARK_RESULTS.md](parser-ng/BENCHMARK_RESULTS.md).
 
@@ -317,17 +275,19 @@ Full measured breakdowns, including GPU throughput at scale, live in [BENCHMARK_
 
 ## ✨ Key Capabilities
 
-* **Calculus & Advanced Algebra:** Symbolic differentiation (`diff`), automatic differentiation (`autodiff`) to arbitrary order, numerical integration (`intg`), and full matrix algebra: determinants, `eigvalues`, `adjoint`, `cofactor`, `echelon`, `linear_sys`, matrix division.
-* **Vectorized Orchestration:** Hardware vector registers via `jdk.incubator.vector`, with a smooth Android-compliant scalar fallback.
-* **Versatile Execution Architecture:** Logical/conditional expressions (`if(cond, a, b)`), user-defined functions (`f(x,y)=...` and `@(x,y)...` anonymous forms), equation root solvers (`quadratic`, `t_root` for cubics via Tartaglia, general `root`), point/line/function rotation (`rot`), and real-time geometric plotting buffers.
-* **Global and Local Function Scopes:** Give each `MathExpression` (or group of them) its own private function registry with `FunctionScope`, shadowing or isolating from the global one, with zero allocation on the hot paths. See [global and local function scopes](#-new-global-and-local-function-scopes).
-* **Zero Dependencies:** Portable and self-contained across Java SE, Android, and legacy JavaME profiles.
+* **Calculus & advanced algebra:** symbolic differentiation (`diff`), automatic differentiation (`autodiff`) to arbitrary order, numerical integration (`intg`), and full matrix algebra: determinants, `eigvalues`, `adjoint`, `cofactor`, `echelon`, `linear_sys`, matrix division.
+* **Differential equations:** `diffeqn`, `diffeqnPath`, `diffeqnHO` and `diffeqnPathHO` for single equations, higher-order equations and systems. See [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md).
+* **Vectorized orchestration:** hardware vector registers via `jdk.incubator.vector`, with a smooth Android-compliant scalar fallback.
+* **Versatile execution architecture:** logical and conditional expressions (`if(cond, a, b)`), user-defined functions (`f(x,y)=...` and the anonymous `@(x,y)...` form), equation root solvers (`quadratic`, `t_root` for cubics via Tartaglia, general `root`), point, line and function rotation (`rot`), and real-time geometric plotting buffers.
+* **Global and local function scopes:** give each `MathExpression` (or group of them) its own private function registry with `FunctionScope`, shadowing or isolating from the global one, with zero allocation on the hot paths. See [global and local function scopes](#-new-global-and-local-function-scopes).
+* **Mixed-content arrays:** the `ARRAY` type holds numbers and strings side by side. See the `ARRAY` type section below.
+* **Zero dependencies:** portable and self-contained across Java SE, Android, and legacy JavaME profiles.
 
 ---
 
 ## 🗃️ New in 3.0.8: the `ARRAY` type
 
-ParserNG has always had `@(dim)(...)` vector/matrix literals, but those are strictly numeric, backed by a `Matrix`. 3.0.8 adds a sibling: the **`ARRAY`** type, using the exact same `@(dim)(...)` syntax, but able to hold a genuine *mix* of content: numbers and strings side by side, not just numbers.
+ParserNG has always had `@(dim)(...)` vector and matrix literals, but those are strictly numeric, backed by a `Matrix`. 3.0.8 adds a sibling: the **`ARRAY`** type, using the exact same `@(dim)(...)` syntax, but able to hold a genuine *mix* of content: numbers and strings side by side, not just numbers.
 
 ```java
 MathExpression m = new MathExpression("a=@(4)('3.14', 5, \"I am here\", 32.34)");
@@ -337,15 +297,11 @@ String[] array = FunctionManager.lookUp("a").getArray();
 // array = ["3.14", "5", "I am here", "32.34"]
 ```
 
-An array literal accepts both single- and double-quoted strings (`'3.14'` and `"I am here"` are equally valid) alongside bare numeric literals; ParserNG figures out on its own whether the whole `@(dim)(...)` is a pure numeric `VECTOR` (still `Matrix`-backed, unchanged from before) or a mixed `ARRAY`, and compiles it accordingly. Like every other named function-valued literal, an `ARRAY` is registered with `FunctionManager` under its assigned name and retrieved the same way any `Function` is: `getArray()` sits right alongside the existing `getMatrix()` accessor, always returning `String[]`, since that's the one representation that can hold whatever mix of numbers and strings the literal contained.
+An array literal accepts both single and double-quoted strings (`'3.14'` and `"I am here"` are equally valid) alongside bare numeric literals. ParserNG figures out on its own whether the whole `@(dim)(...)` is a pure numeric `VECTOR` (still `Matrix`-backed, unchanged from before) or a mixed `ARRAY`, and compiles it accordingly. Like every other named function-valued literal, an `ARRAY` is registered with `FunctionManager` under its assigned name and retrieved the same way any `Function` is. `getArray()` sits right alongside the existing `getMatrix()` accessor and always returns a `String[]`, since that is the one representation that can hold whatever mix of numbers and strings the literal contained.
 
-**This is what makes the differential-equation engine's system-solving support possible.** Each equation in an explicit system (see above) is a full algebraic expression, not a constant, and not something ParserNG can evaluate eagerly the way a plain number can. Wrapping the set of equations in an `ARRAY` of quoted strings is what lets ParserNG treat "here are N equations" as a single, ordinary, eagerly-resolvable literal argument, the same trick that already worked for a numeric `y0` vector, extended to a type that can hold text.
+**This is what makes the differential-equation engine's system-solving support possible.** Each equation in an explicit system (see [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md)) is a full algebraic expression, not a constant, and not something ParserNG can evaluate eagerly the way a plain number can. Wrapping the set of equations in an `ARRAY` of quoted strings lets ParserNG treat "here are N equations" as a single, ordinary, eagerly-resolvable literal argument. It is the same trick that already worked for a numeric `y0` vector, extended to a type that can hold text.
 
 ---
-
-
-
-
 
 ## 🔒 New: global and local function scopes
 
@@ -462,7 +418,7 @@ MathExpression.EvalResult r = cond.solveGeneric(-42.0);   // r.scalar, r.vector,
 
 ### 2. Turbo Scalar: `ScalarTurboEvaluator1` / `ScalarTurboEvaluator2`
 
-`TurboEvaluatorFactory` picks the right one for you; reach for a specific evaluator directly when you already know your shape (e.g. point/line/function rotation compiles cleanly on `ScalarTurboEvaluator1`).
+`TurboEvaluatorFactory` picks the right one for you; reach for a specific evaluator directly when you already know your shape (for example, point/line/function rotation compiles cleanly on `ScalarTurboEvaluator1`).
 
 ```java
 MathExpression me = new MathExpression("rot(@(1,3)(0,2,0), pi, @(1,3)(0,0,0), @(1,3)(1,0,0))");
@@ -500,7 +456,7 @@ double[] out = new double[totalElements];
 evaluator.applyBulk(inputs, out); // tail elements auto-masked if totalElements isn't lane-aligned
 ```
 
-### 5. GPU: OpenCL / CUDA / Metal(`parser-ng-gpu-simd`, JDK 22+)
+### 5. GPU: OpenCL / CUDA / Metal (`parser-ng-gpu-simd`, JDK 22+)
 
 ```java
 MathExpression me = new MathExpression("2*x^2-3*x+1");
@@ -513,34 +469,34 @@ try (GpuCompositeExpression gpu = GpuExpressionBridge.from(vte, GpuBackend.OPENC
 }
 ```
 
-Full GPU quick-start, including multi-vendor device selection, is at the top of this document.
+The full GPU quick-start, including multi-vendor device selection, is at the top of this document.
 
 ---
 
 ## 📦 Installation & Configuration
 
-Module choice maps directly onto the evolution table above; pick the highest tier you need; each module pulls in everything below it.
+Module choice maps directly onto the evolution table above: pick the highest tier you need, and each module pulls in everything below it. All examples below use version `3.0.9.3`.
 
-### For Standard Android or Legacy Pre-JDK 21 Runtimes
+### For standard Android or legacy pre-JDK 21 runtimes
 
-Core interpreter, Turbo scalar/matrix tiers, and `BulkTurboEvaluator` for mechanically-sympathetic bulk loops with an inbuilt worker system:
+Core interpreter, Turbo scalar and matrix tiers, and `BulkTurboEvaluator` for mechanically-sympathetic bulk loops with an inbuilt worker system:
 
 ```xml
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.8</version>
+    <version>3.0.9.3</version>
 </dependency>
-
 ```
-```Java
+
+```java
 BulkTurboEvaluator.BatchedVectorCompositeExpression evaluator =
     (BulkTurboEvaluator.BatchedVectorCompositeExpression) new BulkTurboEvaluator(me).compile();
 double[] out = new double[1];
 evaluator.applyBulk(new double[]{5, 4, 1}, out);
 ```
 
-### For Modern JDK 21+ SIMD Vector Acceleration Environments
+### For modern JDK 21+ SIMD Vector API environments
 
 Adds `VectorTurboEvaluator` and `SIMDVectorTurboEvaluator`:
 
@@ -548,95 +504,98 @@ Adds `VectorTurboEvaluator` and `SIMDVectorTurboEvaluator`:
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.8</version>
+    <version>3.0.9.3</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.0.8</version>
+    <version>3.0.9.3</version>
 </dependency>
-
 ```
 
-### For Modern JDK 22+ GPU and/or CPU-Pinned SIMD Environments
+### For modern JDK 22+ GPU and CPU-pinned SIMD environments
 
-Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evaluators (CUDA + OpenCL + Metal):
+Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evaluators (CUDA, OpenCL and Metal):
 
 ```xml
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.0.8</version>
+    <version>3.0.9.3</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.0.8</version>
+    <version>3.0.9.3</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-gpu-simd</artifactId>
-    <version>3.0.8</version>
+    <version>3.0.9.3</version>
 </dependency>
-
 ```
 
-### For Microbenchmarking and Profiling Verification Harnesses
+### For data pipelines: Arrow, SQL and Parquet
+
+| Module | What it does |
+|---|---|
+| `parser-ng-arrow` | Zero-copy evaluation, filtering and projection over Apache Arrow memory, with SIMD and GPU modes. |
+| `parser-ng-sql` | SQL `select` over Arrow data and, since 3.0.9, over Parquet files (local and remote). |
+| `parser-ng-parquet` | Fast reading of Parquet files, local and remote (for example S3). |
+
+Add them the same way as the modules above. Each module's own README has the details.
+
+### For microbenchmarking and profiling harnesses
 
 ```xml
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-bench</artifactId>
-    <version>3.0.8</version>
+    <version>3.0.9.3</version>
 </dependency>
-
 ```
 
 ---
 
 ## 📊 Comprehensive Feature Matrix
 
-| Category | Supported Mathematical Tokens & Functions | Turbo Optimization Support |
+| Category | Supported mathematical tokens & functions | Turbo optimization support |
 | --- | --- | --- |
-| **Arithmetic Operators** | `+`, `-`, `*`, `/`, `^`, `%`, `and`, `or`, `==`, `!=` | **Full Hardware Mapping** |
-| **Trigonometric Functions** | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh` | **Full Hardware Mapping** |
-| **Calculus Engines** | `diff` (Symbolic Engine), `intg` (Numerical Boundaries) | **Yes** |
-| **Calculus Equations** | `diffeqn`, `diffeqnPath`, `diffeqnHO`, `diffeqnPathHO` See:  [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md): | **Yes** |
-
-| **Matrix Algebra** | `det`, `eigvalues`, `eigvec`, `adjoint`, `linear_sys` | **Optimized Linear Path** |
-| **Statistical Functions** | `avg`, `variance`, `rms`, `sort`, `erf`, `erfc` | **Yes** |
-| **Activation Functions** | `gelu`, `geglu`, `swiglu` | **Yes** |
-
+| **Arithmetic operators** | `+`, `-`, `*`, `/`, `^`, `%`, `and`, `or`, `==`, `!=` | **Full hardware mapping** |
+| **Trigonometric functions** | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh` | **Full hardware mapping** |
+| **Calculus engines** | `diff` (symbolic engine), `intg` (numerical boundaries) | **Yes** |
+| **Differential equations** | `diffeqn`, `diffeqnPath`, `diffeqnHO`, `diffeqnPathHO`. See [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md). | **Yes** |
+| **Matrix algebra** | `det`, `eigvalues`, `eigvec`, `adjoint`, `linear_sys` | **Optimized linear path** |
+| **Statistical functions** | `avg`, `variance`, `rms`, `sort`, `erf`, `erfc` | **Yes** |
+| **Activation functions** | `gelu`, `geglu`, `swiglu` | **Yes** |
 
 ---
 
-## 🏢 Trusted in Production by Global Organizations
+## 🏢 Enterprise and support
 
-ParserNG is used globally by **167 organizations** to power mission-critical math visualization, analytical pipelines, and platform tooling. Special thanks to Jiri Vanek for his contribution of `ExpandingParser` and its integration within the [jenkins-report-generic-chart-column](https://github.com/jenkinsci/report-generic-chart-column-plugin/) plugin ecosystem.
+ParserNG is used by 167 organizations to power mission-critical math visualization, analytical pipelines, and platform tooling. Special thanks to Jiri Vanek for contributing `ExpandingParser` and integrating it into the [jenkins-report-generic-chart-column](https://github.com/jenkinsci/report-generic-chart-column-plugin/) plugin ecosystem.
 
-### Looking for Enterprise Guarantees?
+Production infrastructures that need predictable performance, safety assurances, and expert engineering access can upgrade to **ParserNG Enterprise**:
 
-Running any of this in production? Production infrastructures requiring predictable performance, safety assurances, and expert engineering access can upgrade to **ParserNG Enterprise**:
+* **Priority operational support:** 24 to 48-hour SLAs for immediate bug tracking, profiling, and compliance vulnerabilities.
+* **GraalVM Native Image deployment:** turn-key integration configurations for compiling down to fast native binaries.
+* **Direct consultative access:** architectural reviews, customized functions (extensions), and hand-tailored vector and GPU kernel design directly from the author.
 
-* **Priority Operational Support:** 24/48-hour SLAs for immediate bug tracking, profiling, and compliance vulnerabilities.
-* **GraalVM Native Image Deployment:** Turn-key integration configurations for compiling down to lightning-fast native binary footprints.
-* **Direct Consultative Access:** Architectural reviews, customized functions (extension), and hand-tailored vector/GPU kernel design directly from the author.
+📧 **Contact for corporate licensing and consultations:** `gbenroscience@gmail.com`
 
-📧 **Contact Corporate Licensing & Consultations:** `gbenroscience@gmail.com`
-
-☕ **Support Open Source Development:** [GitHub Sponsors Corporate Tiers](https://buymeacoffee.com/gbenroscience/membership): the SIMD engine you're reading about above was Enterprise-only until this release. Sponsorship is what funds moving the next tier out from behind that wall.
+☕ **Support open source development:** [GitHub Sponsors corporate tiers](https://buymeacoffee.com/gbenroscience/membership). The SIMD engine described above was Enterprise-only until the 3.0.8 release. Sponsorship is what funds moving the next tier out from behind that wall.
 
 ---
 
 ## 📚 Documentation & Technical Resources
 
-* **Deep Dive Benchmarking Logs:** [BENCHMARK_RESULTS.md](parser-ng/BENCHMARK_RESULTS.md): Comprehensive execution breakdowns versus competitor runtimes.
-* **High-Fidelity Graphical Plotting:** [GRAPHING.md](parser-ng/GRAPHING.md): Render configuration rules for JavaFX, Swing, and Android surfaces.
-* **Bulk Vectorization Blueprints:** [BULK.md](https://www.google.com/search?q=parser-ng/BULK.md): Optimization techniques for massive array processing.
-* **Differential Equations:** [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md): Full `diffeqn`/`diffeqnPath`/`diffeqnHO`/`diffeqnPathHO` syntax, solver selection guide, and result-capture patterns.
-* **Release Artifact Logs:** [LATEST.md](LATEST.md): Change logs and technical notes for v3.0.8.
-* [MORE.md](MORE.md): Even more to know
-* [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md): Original readme for pre-1.0 versions with a lot of, still valid, examples
+* **Deep-dive benchmarking logs:** [BENCHMARK_RESULTS.md](parser-ng/BENCHMARK_RESULTS.md), comprehensive execution breakdowns versus competitor runtimes.
+* **High-fidelity graphical plotting:** [GRAPHING.md](parser-ng/GRAPHING.md), render configuration rules for JavaFX, Swing, and Android surfaces.
+* **Bulk vectorization blueprints:** [BULK.md](parser-ng/BULK.md), optimization techniques for massive array processing.
+* **Differential equations:** [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md), full `diffeqn`/`diffeqnPath`/`diffeqnHO`/`diffeqnPathHO` syntax, solver selection guide, and result-capture patterns.
+* **Release notes:** [LATEST.md](LATEST.md), change logs and technical notes for the latest release.
+* [MORE.md](MORE.md): even more to know.
+* [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md): the original readme for pre-1.0 versions, with a lot of examples that are still valid.
 
 ---
 

@@ -1,4 +1,4 @@
-# Graphing with ParserNG
+# 2D Graphing with ParserNG
 
 **ParserNG** now enables easy graphing in any Java UI framework, including Swing, JavaFX, Android, and others.
 [See here](./graph.png)

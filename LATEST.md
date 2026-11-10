@@ -1,6 +1,22 @@
 # ParserNG
 
 
+### ParserNG 3.0.9.3 Major and Minor updates.
+#### 1. Minor
+Fixes to `MathScanner`, `Matrix` and `RootFinder`.
+Needed syntax error fixes. Singular matrix determinants were returning an error instead of 0.0(for Matrix)
+
+#### 2. Major(ParserNG LLM)
+<b>INTEL HD520 GPU(2015 or 2016):</b><br>
+a. ParserNG's OpenCL Llama Engine now runs faster than llama.cpp on Vulkan, both on Windows 10, same machine<br>
+
+b. llama.cpp - pre-fill: 48 toks/sec, decode: 5.7-9.7 toks/sec(conversational 5.70 toks/sec, benchmark 9.7 toks/sec)<br>
+ParserNG -  pre-fill: 32 toks/sec, decode: 10.5-11.5 toks/sec.
+
+<b>AMD Hainan(from 2013-2014 or so)</b><br>
+ParserNG's OpenCL Llama engine alone is supported on this hardware. llama.cpp has no AMD Hainan story.<br>
+pre-fill: 44 toks/sec pre-fill and 8 toks/sec decode.
+
 ### ParserNG 3.0.9.2 Minor updates. 
 ParserNG's core class, `MathExpression`, has been armed with a `strict` flag(instance field)
 This allows it to determine whether to allow undeclared variable/method names fly as valid variables initialized to zero or not. When the flag is set to true, undeclared variables/methods throw a error at constructor initialization time.
