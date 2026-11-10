@@ -559,6 +559,14 @@ public class MethodRegistry {
             return ctx.wrap(Double.NaN);
         });
 
+        // pde(...) declares a PDE model; it is recognised at the root of an expression by the expression
+        // processor (MathExpressionTreeDepth / MathExpression) and is never evaluated numerically. Reaching this
+        // handler means it was used where a number was expected, so say so instead of returning a silent NaN.
+        registerMethod(Declarations.PDE, (ctx, arity, args) -> {
+            throw new UnsupportedOperationException("pde(...) declares a PDE model and has no numeric value; "
+                    + "obtain the model with MathExpression.asPDE()");
+        });
+
         registerMethod(Declarations.ROTOR, (ctx, arity, args) -> {
 
             int sz = args.length;

@@ -1551,7 +1551,7 @@ public class Matrix {
                         }//end if
                     }//end for loop
                     if (pivot == 0.0) {
-                        return 0.0; // a column with no usable pivot: the matrix is singular, so its determinant is 0
+                        throw new InputMismatchException("INVERSE DOES NOT EXISTS!");
                     }
                 }//end if
                 for (int col = row; col < cls; col++) {

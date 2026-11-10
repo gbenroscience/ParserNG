@@ -1130,8 +1130,7 @@ public class MathScanner {
             }
 
             // --- 2. REDUNDANT "* 1" or "/ 1" REMOVAL ---
-            if (tk.length() == 1 && (tk.charAt(0) == '*' || tk.charAt(0) == '/') && i + 1 < size && isExactlyOne(scanner.get(i + 1))
-                    && !(i + 2 < size && bindsToOperand(scanner.get(i + 2)))) {
+            if (tk.length() == 1 && (tk.charAt(0) == '*' || tk.charAt(0) == '/') && i + 1 < size && isExactlyOne(scanner.get(i + 1))) {
                 // Only remove if the previous token is "operand-like" (number, variable, or closing bracket/factorial)
                 if (!result.isEmpty() && isOperandLike(result.get(result.size() - 1))) {
                     i++; // Skip the operator and the '1'
@@ -1181,11 +1180,6 @@ public class MathScanner {
 
     private static boolean isSign(String s) {
         return s.length() == 1 && (s.charAt(0) == '+' || s.charAt(0) == '-');
-    }
-
-    /** Tokens that attach to the operand just before them (the 1 in "*1^2" belongs to the power, not the product). */
-    private static boolean bindsToOperand(String s) {
-        return s.equals("^") || s.equals("!") || s.equals("²") || s.equals("³") || s.equals("%");
     }
 
     private static boolean isExactlyOne(String s) {

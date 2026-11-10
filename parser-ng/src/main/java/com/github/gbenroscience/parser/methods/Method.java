@@ -321,6 +321,7 @@ public class Method {
                 || op.equals(TARTAGLIA_ROOTS) || op.equals(PERMUTATION) || op.equals(COMBINATION) 
                 || op.equals(SWIGLU) ||op.equals(GEGLU) 
                 || op.equals(DIFF_EQN)  || op.equals(DIFF_EQN_PATH)  || op.equals(DIFF_EQN_HO)  || op.equals(DIFF_EQN_PATH_HO) 
+                || op.equals(PDE)
                 || op.equals(LOG) || op.equals(LOG_INV) || op.equals(LOG_INV_ALT) || op.equals(PRINT));
     }//end method
 
@@ -1328,6 +1329,16 @@ public static boolean isMethodNameBuilderChar(char c) {
         return false;
     }
     
+    /**
+     * @param method a method name
+     * @return true for the {@code pde} command, which declares a PDE model
+     * and, like the diffeqn family, may only appear as the root of an
+     * expression
+     */
+    public static boolean isSupportedPdeMethod(String method) {
+        return Declarations.PDE.equals(method);
+    }
+
     public static boolean isSupportedDiffEqnMethod(String method){
         return method != null && (method.equals(Declarations.DIFF_EQN) || method.equals(Declarations.DIFF_EQN_PATH) ||
                 method.equals(Declarations.DIFF_EQN_HO) || method.equals(Declarations.DIFF_EQN_PATH_HO));

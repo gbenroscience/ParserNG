@@ -46,46 +46,34 @@ public class ConsoleTable {
         }
     }
 
-    private String divider() {
+    private void printDivider() {
         StringBuilder sb = new StringBuilder("+");
         for (int width : columnWidths) {
             sb.append(STRING.repeating("-", width + 2)).append("+");
         }
-        return sb.toString();
+        System.out.println(sb.toString());
     }
 
-    private String row(String[] row) {
+    private void printRow(String[] row) {
         StringBuilder sb = new StringBuilder("|");
         for (int i = 0; i < row.length; i++) {
             String format = " %-" + columnWidths[i] + "s |";
             sb.append(String.format(format, (row[i] == null ? "null" : row[i])));
         }
-        return sb.toString();
-    }
-
-    /**
-     * Lays the table out as text: the title, then the header and the rows between
-     * dividers. Lines are separated by {@code \n}, with no trailing newline. Use this
-     * when the table has to go somewhere other than {@code System.out}, e.g. a GUI console.
-     *
-     * @return the table as text
-     */
-    public String render() {
-        StringBuilder sb = new StringBuilder(title).append('\n');
-        sb.append(divider()).append('\n');
-        sb.append(row(headers)).append('\n');
-        sb.append(divider()).append('\n');
-        for (String[] r : data) {
-            sb.append(row(r)).append('\n');
-        }
-        sb.append(divider());
-        return sb.toString();
+        System.out.println(sb.toString());
     }
 
     public void display() {
-        System.out.println("\n" + render());
+        System.out.println("\n" + title);
+        printDivider();
+        printRow(headers);
+        printDivider();
+        for (String[] row : data) {
+            printRow(row);
+        }
+        printDivider();
     }
-
+    
     public static void main(String[] args) {
         // 1. Define Title
         String title = "RESULTS for [(sin(3)+cos(4-sin(2)))^(3*sin(4))]";

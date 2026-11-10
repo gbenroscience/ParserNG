@@ -536,7 +536,7 @@ public class RootFinder {
             MathExpression.EvalResult gradFunxn = Derivative.eval("diff(" + function.expressionForm() + ",1)");
 
             //System.err.println("gradient function is "+gradFunxn);
-            Function gradFunc = FunctionManager.lookUp(gradFunxn.textRes);
+            Function gradFunc = new Function("@(" + variable + ")" + gradFunxn);
             //System.err.println("gradient function is "+gradFunc.expressionForm());
 
             function.getMathExpression().updateArgs(xOne);
@@ -551,15 +551,7 @@ public class RootFinder {
             boolean iterationfailed = false;
             double ratio = 0;
             //iterate
-            while (f_x != 0.0 && count < iterations) {
-                ratio = f_x / df_x;
-                if (Double.isNaN(ratio) || Double.isInfinite(ratio)) {
-                    iterationfailed = true; // flat or undefined slope: let the secant method take over
-                    break;
-                }
-                if (abs(ratio) <= 1e-15 * max(1.0, abs(x))) {
-                    break; // the step is at the rounding limit of x
-                }
+            while ((!approxEqualsZero(abs(ratio = f_x / df_x)) && count < iterations)) {
 
                 try {
                     x = x - ratio;
@@ -605,7 +597,7 @@ public class RootFinder {
             function.updateArgs(xTwo);
             double f2 = function.calc();
 
-            double x = abs(f1) <= abs(f2) ? xOne : xTwo; // the better starting point, in case no step is needed
+            double x = 0.5 * (xOne + xTwo);
             int count = 0;
 
             boolean iterationfailed = false;
@@ -613,9 +605,6 @@ public class RootFinder {
             while ((!approxEqualsZero(abs(f2)) && !approxEqualsZero(abs(f1)) && count < iterations)) {
 
                 try {
-                    if (f2 == f1) {
-                        break; // the secant line is flat: keep the best x found so far
-                    }
                     x = xTwo - (f2 * ((xTwo - xOne) / (f2 - f1)));
 
                     xOne = xTwo;

@@ -644,6 +644,21 @@ public class MathExpressionTreeDepth implements Savable {
             java.util.Arrays.asList("diffeqn", "diffeqnPath", "diffeqnHO", "diffeqnPathHO"));
 
     /**
+     * The partial-differential-equation command ({@code pde}). Like the diffeqn
+     * family it is subject to the root-only rule, but its arguments are
+     * equations rather than numbers, so they are validated by
+     * {@link #parsePdeCall(int)} instead of the ordinary argument-list parser:
+     * a single '=' between the two sides of an equation is an equality (not an
+     * assignment or a function definition, which is how a bare
+     * {@code diff(u,t) = ...} would otherwise be read), PDE-shaped derivatives
+     * {@code diff(u,x,2)} / {@code diff(u,x,y)} are accepted with an undeclared
+     * unknown function, and the array form {@code @(n)("eq1",...,"eqN")} (the
+     * same convention the ODE system calls use) is understood.
+     */
+    private static final java.util.Set<String> PDE_FUNCTIONS = new java.util.HashSet<>(
+            java.util.Arrays.asList("pde"));
+
+    /**
      * True if every character in {@code expr[from, to)} is either whitespace or
      * {@code allowed}. Used by the diffeqn-family root-only check to confirm
      * that everything surrounding a candidate root call is nothing but pure
@@ -1042,6 +1057,9 @@ public class MathExpressionTreeDepth implements Savable {
             String name = consumeIdentifier();
             final int identEnd = pos;
             skipWhitespace();
+            if (peek() == '(' && PDE_FUNCTIONS.contains(name)) {
+                return parsePdeCall(nameStart);
+            }
             if (peek() == '(') {
                 final int openParen = pos;
                 nextChar(); // (
@@ -1203,6 +1221,104 @@ public class MathExpressionTreeDepth implements Savable {
         }
 
         throw new ParseException("Unexpected character '" + c + "'", pos);
+    }
+
+    /**
+     * Parses and validates {@code pde(...)}, with {@link #pos} on its opening
+     * '('. Root-only, exactly like the diffeqn family. The argument text is
+     * checked equation by equation: at most one top-level '=' per equation, at
+     * least one PDE-shaped derivative per equation, well-formed derivative
+     * calls, and each side of the equation a structurally valid expression
+     * (checked by a nested {@link MathExpressionTreeDepth}, with the derivatives
+     * replaced by plain placeholders and the unknowns, parameters and
+     * coordinates left undeclared, since they are declared when the numerical
+     * problem is configured).
+     *
+     * @param nameStart index of the 'p' of {@code pde}
+     * @return the stack depth contribution of the call (1: it is one operand)
+     */
+    private int parsePdeCall(int nameStart) {
+        final int openParen = pos;
+        final int close = matchingParenEnd(openParen);
+        if (close < 0) {
+            throw new ParseException("Missing closing ')' for function 'pde'", openParen);
+        }
+        if (!isOnlyWhitespaceAndChar(0, nameStart, '(')) {
+            throw new ParseException(
+                    "A 'pde(...)' call must be the root expression "
+                    + "(optionally wrapped in grouping parentheses); "
+                    + "it cannot appear nested inside another expression.",
+                    nameStart);
+        }
+        if (!isOnlyWhitespaceAndChar(close + 1, expr.length(), ')')) {
+            throw new ParseException(
+                    "A 'pde(...)' call must be the root expression "
+                    + "(optionally wrapped in grouping parentheses); "
+                    + "nothing but closing parentheses may follow the closing ')'.",
+                    close + 1);
+        }
+        functionCount++;
+        enterNesting();
+        try {
+            String inner = expr.substring(openParen + 1, close);
+            java.util.List<String> equations;
+            if (inner.trim().isEmpty()) {
+                throw new ParseException("pde() needs at least one equation, e.g. pde(diff(u,t) = alpha*diff(u,x,2))", openParen + 1);
+            }
+            try {
+                equations = com.github.gbenroscience.math.differentialcalculus.pde.PDEModel.equationsOfCommand(
+                        "pde(" + inner + ")");
+            } catch (com.github.gbenroscience.math.differentialcalculus.pde.PDEException ex) {
+                throw new ParseException("pde(): " + ex.getMessage(), openParen + 1);
+            }
+            if (equations.isEmpty()) {
+                throw new ParseException("pde() needs at least one equation, e.g. pde(diff(u,t) = alpha*diff(u,x,2))", openParen + 1);
+            }
+            for (String eq : equations) {
+                validatePdeEquation(eq, openParen + 1);
+            }
+            pos = close + 1;
+            return 1;
+        } finally {
+            exitNesting();
+        }
+    }
+
+    /** Validates one equation of a pde(...) call; see {@link #parsePdeCall(int)}. */
+    private void validatePdeEquation(String eq, int at) {
+        final String shown = eq.length() > 60 ? eq.substring(0, 57) + "..." : eq;
+        int eqIdx;
+        try {
+            eqIdx = com.github.gbenroscience.math.differentialcalculus.pde.PDEModel.topLevelEquals(eq);
+        } catch (RuntimeException ex) {
+            throw new ParseException("pde(): equation '" + shown + "' has more than one '='", at);
+        }
+        int[] count = new int[1];
+        String isolated;
+        try {
+            isolated = com.github.gbenroscience.math.differentialcalculus.pde.PDEModel.isolateDerivatives(eq, count);
+        } catch (com.github.gbenroscience.math.differentialcalculus.pde.PDEException ex) {
+            throw new ParseException("pde(): " + ex.getMessage(), at);
+        }
+        if (count[0] == 0) {
+            throw new ParseException("pde(): equation '" + shown + "' contains no derivative of an unknown function; "
+                    + "write derivatives as diff(u,t), diff(u,x,2) or diff(u,x,y)", at);
+        }
+        // the '=' position in the isolated text is the same top-level one (placeholders contain none)
+        int isoEq = com.github.gbenroscience.math.differentialcalculus.pde.PDEModel.topLevelEquals(isolated);
+        String[] sides = isoEq < 0
+                ? new String[]{isolated}
+                : new String[]{isolated.substring(0, isoEq), isolated.substring(isoEq + 1)};
+        for (String side : sides) {
+            if (side.trim().isEmpty()) {
+                throw new ParseException("pde(): equation '" + shown + "' has an empty side", at);
+            }
+            try {
+                new MathExpressionTreeDepth(side, registry, false).calculate();
+            } catch (ParseException ex) {
+                throw new ParseException("pde(): invalid expression in equation '" + shown + "': " + ex.getMessage(), at);
+            }
+        }
     }
 
     /**

@@ -1,4 +1,4 @@
-# Solving Ordinary Differential Equations in ParserNG
+# Solving Differential Equations in ParserNG
 
 ParserNG can solve ordinary differential equations — single equations, systems of equations, and higher-order equations — directly inside an expression, using four related functions: `diffeqn`, `diffeqnPath`, `diffeqnHO`, and `diffeqnPathHO`. Results can be assigned to a variable or matrix for later use, the same way any other ParserNG expression's result can. This document explains what each function does, exactly what every argument means, how to capture and read back a result, which solver methods are available and when to reach for each, and the handful of nuances that will save you a debugging session if you know them up front.
 

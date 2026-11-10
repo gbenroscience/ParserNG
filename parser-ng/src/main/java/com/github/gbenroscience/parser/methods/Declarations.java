@@ -118,6 +118,19 @@ public class Declarations {
     public static final String DIFF_EQN_HO = "diffeqnHO";
     public static final String DIFF_EQN_PATH_HO = "diffeqnPathHO";
 
+    /**
+     * The partial-differential-equation command. A call such as
+     * {@code pde(diff(u,t) = alpha*diff(u,x,2))}, or a system
+     * {@code pde(eq1, eq2)} / {@code pde(@(2)("eq1","eq2"))}, declares a PDE model. Like
+     * the diffeqn family it may only appear as the root of an expression, and
+     * it does not compute a number: it represents a mathematical model that
+     * is handed to the PDE subsystem through {@code MathExpression.asPDE()}.
+     * Writing the bare equation ({@code diff(u,t) = alpha*diff(u,x,2)}) is
+     * equivalent: the expression processor recognises it and uses this form
+     * internally.
+     */
+    public static final String PDE = "pde";
+
     public static final String QUADRATIC = "quadratic";
     public static final String TARTAGLIA_ROOTS = "t_root";
     public static final String GENERAL_ROOT = "root";
@@ -275,6 +288,7 @@ public class Declarations {
             case INTEGRATION: case GENERAL_ROOT: case ROTOR:
             case DIFF_EQN: case DIFF_EQN_PATH:
             case DIFF_EQN_HO: case DIFF_EQN_PATH_HO:
+            case PDE:
             case LINEAR_SYSTEM: case DETERMINANT: case INVERSE_MATRIX:
             case TRIANGULAR_MATRIX: case ECHELON_MATRIX:
             case MATRIX_MULTIPLY: case MATRIX_DIVIDE: case MATRIX_ADD:
@@ -577,7 +591,7 @@ public class Declarations {
             COEFFICIENT_OF_VARIATION, MIN, MAX, STD_DEV, VARIANCE,
             STD_ERR, RANDOM, SORT, PLOT, PRINT, DIFFERENTIATION, AUTO_DIFF, AUTO_DIFF_N,
             INTEGRATION, 
-            DIFF_EQN, DIFF_EQN_PATH, DIFF_EQN_HO, DIFF_EQN_PATH_HO, 
+            DIFF_EQN, DIFF_EQN_PATH, DIFF_EQN_HO, DIFF_EQN_PATH_HO, PDE,
             QUADRATIC, TARTAGLIA_ROOTS, GENERAL_ROOT,
             LINEAR_SYSTEM, DETERMINANT, INVERSE_MATRIX, TRIANGULAR_MATRIX,
             ECHELON_MATRIX, MATRIX_MULTIPLY, MATRIX_DIVIDE, MATRIX_ADD,
@@ -801,6 +815,8 @@ public class Declarations {
                 return TYPE.NUMBER.toString();
             case DIFF_EQN_PATH_HO:
                 return TYPE.MATRIX.toString();
+            case PDE:
+                return TYPE.STRING.toString();
 
             case QUADRATIC:
                 return TYPE.VECTOR.toString();

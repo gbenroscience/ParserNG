@@ -12,6 +12,8 @@ import com.github.gbenroscience.logic.DRG_MODE;
 import com.github.gbenroscience.math.Main;
 import com.github.gbenroscience.math.Maths;
 import com.github.gbenroscience.math.differentialcalculus.equations.standard.EquationRuntime;
+import com.github.gbenroscience.math.differentialcalculus.pde.PDEModel;
+import com.github.gbenroscience.math.differentialcalculus.pde.PDEProblem;
 import com.github.gbenroscience.math.matrix.expressParser.Matrix;
 import static com.github.gbenroscience.parser.Number.fastParseDouble;
 import static com.github.gbenroscience.parser.Number.isNumber;
@@ -107,6 +109,13 @@ public class MathExpression implements Savable, Solvable {
      */
     private String expression;
     private MathExpressionTreeDepth.Result treeStats;
+    /**
+     * The PDE model when this expression is a PDE or PDE system (see
+     * {@link #asPDE()}); null for every other kind of expression.
+     */
+    private PDEModel pdeModel;
+    /** Constants defined by assignments in the same input as a PDE, e.g. {@code alpha} in {@code alpha=0.1; diff(u,t)=alpha*diff(u,x,2)}. */
+    private Map<String, Double> pendingPdeParams = new LinkedHashMap<>();
     protected boolean correctFunction = true;//checks if the function is valid.
     protected int noOfListReturningOperators;
     protected List<String> scanner = new ArrayList<>();//the ArrayList that stores the scan input function
@@ -719,8 +728,35 @@ public class MathExpression implements Savable, Solvable {
         List<String> scanned = cs.scan();
         String mathExpr = null;
         int exprCount = 0;
+        List<String> pdeEquations = null;          // equations of a PDE / PDE system found among the statements
+        List<String> assignedNames = new ArrayList<>();
 
         for (String code : scanned) {
+            // PDE recognition comes first: a bare equation such as diff(u,t) = alpha*diff(u,x,2) would otherwise be
+            // taken for a function definition, and pde(...) contains '=' which would be taken for an assignment.
+            PDEModel.StatementKind pdeKind = PDEModel.classifyStatement(code);
+            if (pdeKind != PDEModel.StatementKind.NOT_PDE) {
+                if (pdeEquations == null) {
+                    pdeEquations = new ArrayList<>();
+                }
+                String unwrapped = PDEModel.unwrap(code);
+                if (pdeKind == PDEModel.StatementKind.PDE_COMMAND) {
+                    if (!PDEModel.isPdeCommand(unwrapped)) {
+                        // not exactly one well-formed pde(...) call (nested in something, or unbalanced): the validator
+                        // explains why (root-only rule, missing parenthesis, ...)
+                        validateStatement(unwrapped);
+                        throw new InputMismatchException("Invalid pde(...) command: " + code);
+                    }
+                    try {
+                        pdeEquations.addAll(PDEModel.equationsOfCommand(unwrapped));
+                    } catch (RuntimeException ex) {
+                        throw new InputMismatchException("pde(): " + ex.getMessage());
+                    }
+                } else {
+                    pdeEquations.add(unwrapped);
+                }
+                continue;
+            }
             int indexOfRot = code.indexOf("rot(");
             if (indexOfRot != -1) {//rot(f(x)=sin(x),ang,P1,P2) or rot(f=@(x)sin(x),ang,P1,P2)
                 //process rot function if it contains =
@@ -740,6 +776,10 @@ public class MathExpression implements Savable, Solvable {
 
             if (equalsPresentAndCanLookForwardAndBackward && !isLogicOperator(code.substring(indexOfEquals - 1, indexOfEquals + 1))
                     && !isLogicOperator(code.substring(indexOfEquals, indexOfEquals + 2))) {
+                String assignedTo = code.substring(0, indexOfEquals).trim();
+                if (isVariableString(assignedTo)) {
+                    assignedNames.add(assignedTo);
+                }
                 boolean success = Function.assignObject(STRING.purifierPreservingQuotes(code) + ";", this);
                 if (!success) {
                     correctFunction = success;
@@ -762,7 +802,24 @@ public class MathExpression implements Savable, Solvable {
                 ++exprCount;
             }
         }
-        if (mathExpr != null && !mathExpr.isEmpty() && exprCount == 1) {
+        if (pdeEquations != null) {
+            if (exprCount > 0) {
+                throw new InputMismatchException("A PDE equation cannot be combined with an ordinary expression in one input; "
+                        + "assignments such as alpha=0.1; may precede the equation(s)");
+            }
+            // constants assigned next to the PDE become parameters of the PDE problem
+            pendingPdeParams = new LinkedHashMap<>();
+            for (String name : assignedNames) {
+                Variable v = registry.lookUp(name);
+                if (v == null) {
+                    v = VariableManager.lookUp(name);
+                }
+                if (v != null && !Double.isNaN(v.getValue())) {
+                    pendingPdeParams.put(name, v.getValue());
+                }
+            }
+            setExpression(PDEModel.canonical(pdeEquations));
+        } else if (mathExpr != null && !mathExpr.isEmpty() && exprCount == 1) {
             setExpression(mathExpr);
         }//end if
         else {
@@ -895,9 +952,131 @@ public class MathExpression implements Savable, Solvable {
         log.copyFrom(errorLog);
     }
 
+    /**
+     * Builds the PDE model once {@link MathExpressionTreeDepth} has accepted a
+     * {@code pde(...)} expression. A PDE expression is a mathematical model,
+     * not something to compile to postfix and evaluate, so the numeric
+     * scanning/compilation stages are skipped; the expression stays a valid,
+     * scanned object ({@link #isScannedAndOptimized()}) whose model is
+     * available from {@link #getPDEModel()} / {@link #asPDE()}.
+     */
+    private void initializePdeModel(String canonicalText) throws InputMismatchException {
+        try {
+            this.pdeModel = PDEModel.of(PDEModel.equationsOfCommand(PDEModel.unwrap(canonicalText)), pendingPdeParams);
+        } catch (RuntimeException ex) {
+            correctFunction = false;
+            parser_Result = ParserResult.SYNTAX_ERROR;
+            throw new InputMismatchException("Invalid PDE: " + ex.getMessage());
+        }
+        this.expression = pdeModel.toCanonicalString();
+        this.scanner.clear();
+        this.scanner.add(this.expression);
+        this.cachedPostfix = null;
+        setCorrectFunction(true);
+        this.parser_Result = ParserResult.VALID;
+        setHasListReturningOperators(false);
+        setNoOfListReturningOperators(0);
+    }
+
+    /**
+     * @return true if this expression is a partial differential equation or a
+     * system of them ({@link ExpressionKind#PDE} / {@link ExpressionKind#PDE_SYSTEM})
+     */
+    public boolean isPDE() {
+        return pdeModel != null;
+    }
+
+    /**
+     * @return the mathematical PDE model (equations, unknowns, independent
+     * variables, constants), or null if this is not a PDE expression. The
+     * model is independent of any grid, discretization or solver.
+     */
+    public PDEModel getPDEModel() {
+        return pdeModel;
+    }
+
+    /**
+     * Starts the numerical problem for this PDE expression: composition, not
+     * inheritance. {@code MathExpression} recognises and represents the PDE;
+     * the returned builder (from the PDE subsystem) owns the domain, the
+     * initial and boundary conditions, the numerical method and the solving.
+     * <pre>{@code
+     * PDEResult r = new MathExpression("diff(u,t) = alpha*diff(u,x,2)").asPDE()
+     *         .param("alpha", 0.1).domain("x", 0, 1, 101)
+     *         .initial("u", "sin(pi*x)").dirichlet("u", "0")
+     *         .solve(0.5, 1e-3, "crank_nicolson");
+     * }</pre>
+     *
+     * @return a problem builder preloaded with this expression's equations and constants
+     * @throws IllegalStateException if this expression is not a PDE
+     */
+    public PDEProblem.Builder asPDE() {
+        if (pdeModel == null) {
+            throw new IllegalStateException("'" + expression + "' is not a PDE expression (it is " + getExpressionKind()
+                    + "); PDEs are written like diff(u,t) = alpha*diff(u,x,2) or pde(...)");
+        }
+        return pdeModel.toProblem();
+    }
+
+    /**
+     * Starts a finite-volume problem for a PDE expression written as a conservation law, e.g.
+     * {@code diff(u,t) + diff(u^2/2,x) = 0}. Like {@link #asPDE()} this hands the recognised model to the PDE
+     * subsystem; the same expression is not tied to one discretisation.
+     *
+     * @return a finite-volume builder preloaded with the law
+     * @throws IllegalStateException if this expression is not a PDE
+     * @throws com.github.gbenroscience.math.differentialcalculus.pde.PDEConfigurationException if it is a PDE
+     * but not in conservation form
+     */
+    public com.github.gbenroscience.math.differentialcalculus.pde.FiniteVolumeSolver.Builder asFiniteVolume() {
+        if (pdeModel == null) {
+            throw new IllegalStateException("'" + expression + "' is not a PDE expression (it is " + getExpressionKind()
+                    + "); conservation laws are written like diff(u,t) + diff(u^2/2,x) = 0");
+        }
+        return pdeModel.toFiniteVolume();
+    }
+
+    /**
+     * @return what this expression is: scalar, ODE, ODE system, PDE or PDE system
+     */
+    public ExpressionKind getExpressionKind() {
+        if (pdeModel != null) {
+            return pdeModel.isSystem() ? ExpressionKind.PDE_SYSTEM : ExpressionKind.PDE;
+        }
+        if (cachedPostfix != null && cachedPostfix.length > 0) {
+            Token last = cachedPostfix[cachedPostfix.length - 1];
+            if (last != null && Method.isSupportedDiffEqnMethod(last.name)) {
+                return odeCallIsSystem(last) ? ExpressionKind.ODE_SYSTEM : ExpressionKind.ODE;
+            }
+        }
+        return ExpressionKind.SCALAR;
+    }
+
+    private static boolean odeCallIsSystem(Token call) {
+        try {
+            String[] raw = call.getRawArgs();
+            if (raw == null || raw.length == 0 || raw[0] == null) {
+                return false;
+            }
+            String first = raw[0].trim();
+            if (first.startsWith("@(")) {
+                return true;
+            }
+            Function f = FunctionManager.lookUp(first);
+            return f != null && f.getType() == TYPE.ARRAY;
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
     private void initializing(String expression) throws InputMismatchException {
         this.expression = expression; // raw: the validator must see the real spacing
         computeTreeDepth();
+        if (PDEModel.isPdeCommand(PDEModel.unwrap(expression))) {
+            initializePdeModel(expression);   // validated above; a PDE model is not compiled to postfix
+            return;
+        }
+        this.pdeModel = null;
         this.expression = STRING.purifierPreservingQuotes(expression);
         expression = this.expression;
         setCorrectFunction(true);
@@ -979,6 +1158,9 @@ public class MathExpression implements Savable, Solvable {
      * @throws Throwable if turbo compilation fails
      */
     public FastCompositeExpression compileTurbo() throws Throwable {
+        if (pdeModel != null) {
+            throw new IllegalStateException("A PDE expression is a mathematical model, not a numeric expression; use asPDE()");
+        }
         if (turboCompiled && compiledTurbo != null) {
             return compiledTurbo;
         }
@@ -1702,6 +1884,9 @@ public class MathExpression implements Savable, Solvable {
     }
 
     public EvalResult solveGenericWithThrows() throws Throwable {
+        if (pdeModel != null) {
+            return pdeModelResult();
+        }
         if (help) {
             EvalResult res = new EvalResult();
             res.wrap(Help.getHelp());
@@ -1723,6 +1908,9 @@ public class MathExpression implements Savable, Solvable {
     }
 
     public EvalResult solveGeneric() { 
+        if (pdeModel != null) {
+            return pdeModelResult();
+        }
         if (help) {
             EvalResult res = new EvalResult();
             res.wrap(Help.getHelp());
@@ -1787,6 +1975,17 @@ public class MathExpression implements Savable, Solvable {
                 slot.restore(prev);
             }
         }
+    }
+
+    /**
+     * A PDE expression is a mathematical model, not a number: "solving" it
+     * reports the canonical model text. Use {@link #asPDE()} to configure and
+     * solve the numerical problem.
+     */
+    private EvalResult pdeModelResult() {
+        EvalResult res = new EvalResult();
+        res.wrap(pdeModel.toCanonicalString());
+        return res;
     }
 
     public EvalResult solveGeneric(double... args) {
