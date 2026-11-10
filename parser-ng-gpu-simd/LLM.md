@@ -252,7 +252,7 @@ dimensions.
 
 | Backend | Java compiles | Kernels executed | Checked against CPU reference | Physical GPU |
 |---|---|---|---|---|
-| OpenCL | yes | **yes, on a PoCL CPU device** | **yes** (53-test suite, end-to-end logits within 1e-4 abs) | not reproduced by the audit (the author's earlier hardware run predates the fixes below and must be repeated) |
+| OpenCL | yes | **yes, on a PoCL CPU device and GPUs, INTEL HD520 and AMD Hainan** | **yes** (53-test suite, end-to-end logits within 1e-4 abs) | yes |
 | CUDA | yes (javac only) | **no** | no | **no** |
 | Metal | yes (javac only) | **no** | no | **no** |
 
