@@ -1,5 +1,6 @@
 # ParserNG
 
+### ParserNG 3.1.1 PDE Solver got bug fixes in `IncompressibleFlow` where channel settings diverge.
 
 ### ParserNG 3.1.0 Partial Differential Equation Solver
 This update upgrades the platform with its own pure Java, near-zero allocation PDE solver, extending ParserNG's reach further across the spectrum of calculus. Pure Java 8, no new dependencies, and it sits beside the ODE engine without modifying it.

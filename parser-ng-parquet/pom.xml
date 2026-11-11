@@ -7,14 +7,14 @@
     <parent>
         <groupId>com.github.gbenroscience</groupId>
         <artifactId>parser-ng-parent</artifactId>
-        <version>3.1.0</version>
+        <version>3.1.1</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>parser-ng-parquet</artifactId>
     <packaging>jar</packaging>
     <name>parser-ng-parquet</name>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
     <description>
         ParserNG's Parquet storage layer: projection, predicate-driven row-group pruning and
         allocation-conscious decoding into Apache Arrow VectorSchemaRoot batches.
@@ -155,7 +155,7 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
-                <version>3.1.0</version>
+                <version>3.1.1</version>
                 <configuration>
                     <executable>java</executable>
                     <longModulepath>false</longModulepath>

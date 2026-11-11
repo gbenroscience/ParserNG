@@ -1,4 +1,4 @@
-# ParserNG 3.1.0 🧮⚡
+# ParserNG 3.1.1 🧮⚡
 
 [![Maven Central](https://img.shields.io/maven-central/v/com.github.gbenroscience/parser-ng.svg?style=flat-square&color=blue)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
 [![Downloads](https://img.shields.io/badge/Downloads-11k%2B-brightgreen?style=flat-square)](https://central.sonatype.com/artifact/com.github.gbenroscience/parser-ng)
@@ -9,7 +9,7 @@
 
 **ParserNG** is an ultra-high-performance mathematical runtime built for modern JVM workloads: real-time plotting pipelines, financial modeling, and deep learning activation functions (SwiGLU, GELU, and the rest of the Transformer toolkit). By adopting a hardware-aligned, fast-interpreted memory model instead of risky dynamic bytecode generation, ParserNG eliminates classloader bloat, protects your runtime from native segmentation faults, and dramatically simplifies your Software Bill of Materials (SBOM) compliance posture.
 
-Five execution tiers, one parser, one syntax, and now big data. Pick the tier that matches how hot your loop is; you never rewrite the expression to move up a tier.
+Five execution tiers, one parser, one syntax, big data, and now partial differential equations. Pick the tier that matches how hot your loop is; you never rewrite the expression to move up a tier.
 
 ParserNG powers math visualization, analytical pipelines, and platform tooling at **167 organizations** around the globe. Need enterprise-grade confidence? Book a **free 30-minute introductory call** to discuss your production needs. Ongoing consulting, custom development, and support engagements are available after the initial conversation: **[Schedule a call](https://calendly.com/gbenroscience/30min)**.
 
@@ -19,7 +19,31 @@ ParserNG powers math visualization, analytical pipelines, and platform tooling a
 
 The full change log for each release is in [LATEST.md](LATEST.md).
 
-### 3.1.0: Expands the calculus capabilities by including a partial differential equations engine in pure Java.
+### 3.1.1: PDE solver gets bug fix in `IncompressibleFlow` targeting divergence in channel settings, and allocation bug in PDEPerformanceContractTest(had nothing todo with engine, but with test)
+
+### 3.1.0: a partial differential equation engine in pure Java
+
+ParserNG now has its own near-zero-allocation PDE solver, extending the calculus toolkit beyond the ODE engine. It adds no dependencies and leaves the ODE paths unchanged.
+
+* **What it solves:** elliptic, parabolic and hyperbolic problems in 1, 2 and 3 space dimensions; linear and nonlinear; single equations and coupled systems, written in ordinary ParserNG syntax:
+
+```java
+PDEResult r = PDE.problem("diff(u,t) = alpha*diff(u,x,2)")   // u_t = alpha u_xx
+        .param("alpha", 0.1)
+        .domain("x", 0, 1, 101)
+        .initial("u", "sin(pi*x)")
+        .dirichlet("u", "0")
+        .solve(0.5, 1e-3, "crank_nicolson");
+```
+
+* **First class in `MathExpression`:** a bare equation such as `diff(u,t) = alpha*diff(u,x,2)`, or the new `pde(...)` command (including systems), is recognised by the constructor. `getExpressionKind()` reports `PDE` or `PDE_SYSTEM`, and `asPDE()` returns a builder preloaded with the equation.
+* **Methods:** explicit and implicit time stepping (`euler`, `heun`, `rk4`, adaptive `rk45`, `backward_euler`, `crank_nicolson`, `verlet`), iterative steady solvers (`jacobi`, `gauss_seidel`, `sor`, `red_black_sor`, `newton_krylov`), central differences of order 2, 4 and 6, and Dirichlet, Neumann, Robin and periodic boundaries.
+* **Incompressible Navier-Stokes (`IncompressibleFlow`):** 2-D and 3-D on a staggered grid with a multigrid pressure solver, validated against exact solutions and the lid-driven cavity benchmark.
+* **Finite volume and shock capturing (`FiniteVolumeSolver`):** Burgers and the compressible Euler equations in 1, 2 and 3-D, recognised straight from `diff(u,t) + diff(u^2/2,x) = 0`.
+* **Safeguards and speed:** unstable steps are rejected with the largest stable step reported, stepping allocates 0 bytes, and results are bit-identical for any thread count.
+* **Not in this release:** non-uniform or unstructured grids, flow around obstacles, finite elements, spectral methods, and SIMD or GPU back ends.
+
+Full syntax, methods, measured numbers and limitations are in [PDE.md](parser-ng/PDE.md).
 
 ### 3.0.9.3: Incubating OpenCL LLM Engine optimization and bug fixes to `MathScanner`, `RootFinder` and `Matrix#det`
 
@@ -41,7 +65,7 @@ The full change log for each release is in [LATEST.md](LATEST.md).
 
 ### 3.0.8 and earlier: Arrow, SQL and the GPU
 
-* Version 3.0.5 introduced float32 (Java's `float`) and float64 (Java's primitive `double`) bulk evaluators, alongside MemorySegment-based bulk evaluators for both precisions. It also began retiring `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` in favour of the `SIMDCommand` classes (`SIMDCommandF32`, `SIMDCommandF64`, `SIMDCommandSegmentF32` and `SIMDCommandSegmentF64`), which keep the same API.
+* Version 3.0.5 introduced float32 (Java's `float`) and float64 (Java's primitive `double`) bulk evaluators, alongside MemorySegment-based bulk evaluators for both precisions. It also began retiring `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` in favour of the `SIMDCommand` series (`SIMDCommandF32`, `SIMDCommandF64`, `SIMDCommandSegmentF32` and `SIMDCommandSegmentF64`), which keep the same API.
 * **`parser-ng-arrow`** puts all of that to work: a true zero-copy bridge between ParserNG and Apache Arrow. You can evaluate any runtime string expression, filter rows, and project computed columns directly over Arrow's columnar memory, with no serialization, no staging buffers, and no leaving the Arrow buffer at all. In its SIMD mode (`ArrowBulkEvaluator`), it beats Apache Gandiva by 10 to 30 times on every transcendental function: `sin`, `cos`, `log`, `exp`, and the rest of the set. Gandiva still edges it out on hardware-intrinsic `sqrt` and plain arithmetic, by 1.5x to 2x, but turn on `ArrowBulkEvaluator`'s built-in parallelism and that gap is gone at just 2 workers.
 * For workloads that want more than the CPU can give, `ArrowGpuBulkEvaluator` dispatches the same expressions straight to CUDA, OpenCL or Metal, with zero JNI and zero native binaries anywhere in your build.
 * **`parser-ng-sql`**, introduced in 3.0.7 for users of `parser-ng-arrow`, received major speed and bug fixes in 3.0.8.
@@ -241,12 +265,15 @@ try (ArrowBulkEvaluator isAbnormal = ArrowBulkEvaluator.compile("heart_rate > 12
 | **Before 1.0.0** | `MathExpression`, the interpreter. ParserNG Standard. |
 | **1.0.0 to 1.x** | Turbo tier arrives: `ScalarTurboEvaluator1` (variable args as an array), `ScalarTurboEvaluator2` (variable args as widened primitives internally), and `MatrixTurboEvaluator`, all built on `MethodHandles`. |
 | **2.0.0 to 2.x** | Bulk evaluation, via mechanical sympathy *and* SIMD. `VectorTurboEvaluator` coerces auto-vectorization through code shape alone; `SIMDVectorTurboEvaluator` forces it via the explicit Vector API. Both support `applyBulkParallel(in, out)`, but JDK 21 has no CPU pinning, capping the parallel win. |
+| **3.0.0** | GPU bulk evaluators (CUDA and OpenCL), the CPU-pinned SIMD engine open-sourced from ParserNG Enterprise, nth-order automatic differentiation, a symbolic differentiator, a resilient numerical integrator, and conditionals (`if`, `&&`, `||`) across every backend. |
 | **3.0.5** | float32 and float64 bulk evaluators, plus MemorySegment-based bulk evaluators for both precisions. `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` are retired in favour of the `SIMDCommand` series: `SIMDCommandF32`, `SIMDCommandF64`, `SIMDCommandSegmentF32` and `SIMDCommandSegmentF64`, with the same API. |
 | **3.0.6** | `filter`, `project` and `filterProject` in `parser-ng-arrow`, on both CPU and GPU. |
 | **3.0.7** | `parser-ng-sql`, introduced to help users of `parser-ng-arrow`, the zero-copy Apache Arrow bridge. |
 | **3.0.8** | CPU pinning (best on Linux): 2 workers on 2 cores give about 1.8x to 2.0x the work of 1 worker on 1 core. The pinned evaluators live in **`parser-ng-gpu-simd`** (JDK 22+), the module that also houses native **GPU bulk evaluators for CUDA, OpenCL and Metal**. Also new: the `ARRAY` type. |
 | **3.0.9** | `parser-ng-parquet`, `select` over Parquet in `parser-ng-sql`, a much faster `MathExpression` constructor, and a complete `BaseNFunction`. |
 | **3.0.9.2** | The `strict` flag on `MathExpression`. |
+| **3.0.9.3** | Bug fixes to `MathScanner`, `RootFinder` and `Matrix#det`, and an incubating OpenCL LLM engine optimization. |
+| **3.1.0** | The partial differential equation engine: `PDE`, `IncompressibleFlow` and `FiniteVolumeSolver`, with the `pde(...)` command in `MathExpression`. |
 
 Same `MathExpression` syntax at every tier. You scale up by choosing a different evaluator, never by rewriting the expression.
 
@@ -280,6 +307,7 @@ Full measured breakdowns, including GPU throughput at scale, live in [BENCHMARK_
 
 * **Calculus & advanced algebra:** symbolic differentiation (`diff`), automatic differentiation (`autodiff`) to arbitrary order, numerical integration (`intg`), and full matrix algebra: determinants, `eigvalues`, `adjoint`, `cofactor`, `echelon`, `linear_sys`, matrix division.
 * **Differential equations:** `diffeqn`, `diffeqnPath`, `diffeqnHO` and `diffeqnPathHO` for single equations, higher-order equations and systems. See [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md).
+* **Partial differential equations:** heat, wave, Poisson, advection, Burgers, incompressible Navier-Stokes and compressible Euler problems in 1, 2 and 3 space dimensions, from a plain equation string or the `pde(...)` command. See [PDE.md](parser-ng/PDE.md).
 * **Vectorized orchestration:** hardware vector registers via `jdk.incubator.vector`, with a smooth Android-compliant scalar fallback.
 * **Versatile execution architecture:** logical and conditional expressions (`if(cond, a, b)`), user-defined functions (`f(x,y)=...` and the anonymous `@(x,y)...` form), equation root solvers (`quadratic`, `t_root` for cubics via Tartaglia, general `root`), point, line and function rotation (`rot`), and real-time geometric plotting buffers.
 * **Global and local function scopes:** give each `MathExpression` (or group of them) its own private function registry with `FunctionScope`, shadowing or isolating from the global one, with zero allocation on the hot paths. See [global and local function scopes](#-new-global-and-local-function-scopes).
@@ -478,7 +506,7 @@ The full GPU quick-start, including multi-vendor device selection, is at the top
 
 ## 📦 Installation & Configuration
 
-Module choice maps directly onto the evolution table above: pick the highest tier you need, and each module pulls in everything below it. All ParserNG modules share one version number, and the examples below use `3.1.0`.
+Module choice maps directly onto the evolution table above: pick the highest tier you need, and each module pulls in everything below it. All examples below use version `3.1.1`.
 
 ### For standard Android or legacy pre-JDK 21 runtimes
 
@@ -488,7 +516,7 @@ Core interpreter, Turbo scalar and matrix tiers, and `BulkTurboEvaluator` for me
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
 </dependency>
 ```
 
@@ -507,12 +535,12 @@ Adds `VectorTurboEvaluator` and `SIMDVectorTurboEvaluator`:
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
 </dependency>
 ```
 
@@ -524,17 +552,17 @@ Adds the `SIMDCommand` series and the GPU bulk evaluators (CUDA, OpenCL and Meta
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng</artifactId>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-simd</artifactId>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
 </dependency>
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-gpu-simd</artifactId>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
 </dependency>
 ```
 
@@ -546,27 +574,7 @@ Adds the `SIMDCommand` series and the GPU bulk evaluators (CUDA, OpenCL and Meta
 | `parser-ng-sql` | SQL `select` over Arrow data and, since 3.0.9, over Parquet files (local and remote). |
 | `parser-ng-parquet` | Fast reading of Parquet files, local and remote (for example S3). |
 
-All ParserNG modules share one version number, so a new module always starts at the parent's latest release. Add the ones you need next to `parser-ng`:
-
-```xml
-<dependency>
-    <groupId>com.github.gbenroscience</groupId>
-    <artifactId>parser-ng-arrow</artifactId>
-    <version>3.1.0</version>
-</dependency>
-<dependency>
-    <groupId>com.github.gbenroscience</groupId>
-    <artifactId>parser-ng-sql</artifactId>
-    <version>3.1.0</version>
-</dependency>
-<dependency>
-    <groupId>com.github.gbenroscience</groupId>
-    <artifactId>parser-ng-parquet</artifactId>
-    <version>3.1.0</version>
-</dependency>
-```
-
-Each module's own README has the details.
+Add them the same way as the modules above. Each module's own README has the details.
 
 ### For microbenchmarking and profiling harnesses
 
@@ -574,7 +582,7 @@ Each module's own README has the details.
 <dependency>
     <groupId>com.github.gbenroscience</groupId>
     <artifactId>parser-ng-bench</artifactId>
-    <version>3.1.0</version>
+    <version>3.1.1</version>
 </dependency>
 ```
 
@@ -587,6 +595,7 @@ Each module's own README has the details.
 | **Arithmetic operators** | `+`, `-`, `*`, `/`, `^`, `%`, `and`, `or`, `==`, `!=` | **Full hardware mapping** |
 | **Trigonometric functions** | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh` | **Full hardware mapping** |
 | **Calculus engines** | `diff` (symbolic engine), `intg` (numerical boundaries) | **Yes** |
+| **Partial differential equations** | `pde(...)`, bare equations such as `diff(u,t) = alpha*diff(u,x,2)`, `PDE.problem(...)`, `IncompressibleFlow`, `FiniteVolumeSolver`. See [PDE.md](parser-ng/PDE.md). | **Allocation-free stepping** |
 | **Differential equations** | `diffeqn`, `diffeqnPath`, `diffeqnHO`, `diffeqnPathHO`. See [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md). | **Yes** |
 | **Matrix algebra** | `det`, `eigvalues`, `eigvec`, `adjoint`, `linear_sys` | **Optimized linear path** |
 | **Statistical functions** | `avg`, `variance`, `rms`, `sort`, `erf`, `erfc` | **Yes** |
@@ -606,7 +615,7 @@ Production infrastructures that need predictable performance, safety assurances,
 
 📧 **Contact for corporate licensing and consultations:** `gbenroscience@gmail.com`
 
-☕ **Support open source development:** [GitHub Sponsors corporate tiers](https://buymeacoffee.com/gbenroscience/membership). The SIMD engine described above was Enterprise-only until the 3.0.8 release. Sponsorship is what funds moving the next tier out from behind that wall.
+☕ **Support open source development:** [GitHub Sponsors corporate tiers](https://buymeacoffee.com/gbenroscience/membership). The SIMD engine described above was Enterprise-only until the 3.0.0 release. Sponsorship is what funds moving the next tier out from behind that wall.
 
 ---
 
@@ -616,6 +625,7 @@ Production infrastructures that need predictable performance, safety assurances,
 * **High-fidelity graphical plotting:** [GRAPHING.md](parser-ng/GRAPHING.md), render configuration rules for JavaFX, Swing, and Android surfaces.
 * **Bulk vectorization blueprints:** [BULK.md](parser-ng/BULK.md), optimization techniques for massive array processing.
 * **Differential equations:** [DIFF_ENGINE.md](parser-ng/DIFF_ENGINE.md), full `diffeqn`/`diffeqnPath`/`diffeqnHO`/`diffeqnPathHO` syntax, solver selection guide, and result-capture patterns.
+* **Partial differential equations:** [PDE.md](parser-ng/PDE.md), equation syntax, boundary conditions, methods, Navier-Stokes and shock capturing, measured numbers and limitations.
 * **Release notes:** [LATEST.md](LATEST.md), change logs and technical notes for the latest release.
 * [MORE.md](MORE.md): even more to know.
 * [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md): the original readme for pre-1.0 versions, with a lot of examples that are still valid.

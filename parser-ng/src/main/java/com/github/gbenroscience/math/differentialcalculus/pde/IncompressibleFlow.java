@@ -891,16 +891,25 @@ public final class IncompressibleFlow {
         steps++;
     }
 
-    /** Steps with a fixed {@code dt} (the last step shortened) until {@code tEnd}. */
+    /** Advances to {@code tEnd} in equal steps, none larger than {@code dt}; safe to call repeatedly to sample frames. */
     public void advanceTo(double tEnd, double dt) {
-        double eps = 1e-12 * Math.max(1.0, Math.abs(tEnd));
-        while (time < tEnd - eps) {
-            double d = Math.min(dt, tEnd - time);
-            if (tEnd - time - d < 1e-9 * dt) {
-                d = tEnd - time;
-            }
-            step(d);
+        if (!(dt > 0) || Double.isInfinite(dt)) {
+            throw new PDEConfigurationException("Time step must be positive and finite, got " + dt);
         }
+        double eps = 1e-12 * Math.max(1.0, Math.abs(tEnd));
+        double span = tEnd - time;
+        if (span <= eps) {
+            return;
+        }
+        // Equal steps of at most dt. Taking whole steps of dt and then one shortened step to land on tEnd changes the step
+        // size at the end of every call, and the variable-step scheme (and its pressure history) is not stable under the
+        // repeated size changes that frame-by-frame stepping produces, so uniform steps are used within the call.
+        int n = (int) Math.ceil(span / dt - 1e-9);
+        double h = span / Math.max(1, n);
+        for (int s = 1; s < n; s++) {
+            step(h);
+        }
+        step(tEnd - time); // the last step lands exactly on tEnd
     }
 
     /**

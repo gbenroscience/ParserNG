@@ -528,4 +528,37 @@ public class IncompressibleFlowTest {
                 .boundary(Face.Z_MAX, FlowBoundary.movingWall("1", "0", "0")).build().initialize();
         assertStepsAllocateNothing(f, 2e-3, 600);
     }
+
+    /**
+     * Sampling frames by calling advanceTo(t, dtMax) repeatedly must not destabilise the flow. Each call used to end on a
+     * shortened step, and the resulting changes of step size made channel flows diverge (for example 32 x 16 cells, Re 100,
+     * 60 frames to t = 2).
+     */
+    @Test
+    void repeatedAdvanceToStaysStableOnAChannel() {
+        int[][] cases = {{32, 100, 2}, {40, 50, 3}, {40, 200, 3}, {64, 20, 3}};
+        for (int[] c : cases) {
+            IncompressibleFlow f = IncompressibleFlow.builder().cells(c[0], c[0] / 2).size(2, 1).reynolds(c[1])
+                    .boundary(Face.X_MIN, FlowBoundary.inflow("1", "0")).boundary(Face.X_MAX, FlowBoundary.outflow())
+                    .build().initialize();
+            double dtMax = f.suggestTimeStep();
+            int frames = 60;
+            for (int k = 1; k < frames; k++) {
+                double t = (double) c[2] * k / (frames - 1);
+                f.advanceTo(t, dtMax);
+                assertEquals(t, f.time(), 1e-9, "advanceTo must land on the requested time");
+            }
+            assertTrue(f.diagnostics().divergenceMax < 1e-8, "divergence after repeated advanceTo, case " + java.util.Arrays.toString(c));
+        }
+    }
+
+    @Test
+    void advanceToUsesEqualStepsNoLargerThanDt() {
+        IncompressibleFlow f = IncompressibleFlow.builder().cells(16, 16).size(2 * PI, 2 * PI).viscosity(0.1).periodic("x").periodic("y")
+                .initialVelocity("-cos(x)*sin(y)", "sin(x)*cos(y)").build().initialize();
+        f.advanceTo(1.0, 0.3); // 4 equal steps of 0.25, not 0.3, 0.3, 0.3, 0.1
+        assertEquals(4, f.steps());
+        assertEquals(0.25, f.diagnostics().dt, 1e-12);
+        assertEquals(1.0, f.time(), 1e-12);
+    }
 }
