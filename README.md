@@ -41,16 +41,16 @@ The full change log for each release is in [LATEST.md](LATEST.md).
 
 ### 3.0.8 and earlier: Arrow, SQL and the GPU
 
-* Version 3.0.5 introduced float32 (Java's `float`) and float64 (Java's primitive `double`) bulk evaluators, alongside MemorySegment-based bulk evaluators for both precisions.
+* Version 3.0.5 introduced float32 (Java's `float`) and float64 (Java's primitive `double`) bulk evaluators, alongside MemorySegment-based bulk evaluators for both precisions. It also began retiring `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` in favour of the `SIMDCommand` classes (`SIMDCommandF32`, `SIMDCommandF64`, `SIMDCommandSegmentF32` and `SIMDCommandSegmentF64`), which keep the same API.
 * **`parser-ng-arrow`** puts all of that to work: a true zero-copy bridge between ParserNG and Apache Arrow. You can evaluate any runtime string expression, filter rows, and project computed columns directly over Arrow's columnar memory, with no serialization, no staging buffers, and no leaving the Arrow buffer at all. In its SIMD mode (`ArrowBulkEvaluator`), it beats Apache Gandiva by 10 to 30 times on every transcendental function: `sin`, `cos`, `log`, `exp`, and the rest of the set. Gandiva still edges it out on hardware-intrinsic `sqrt` and plain arithmetic, by 1.5x to 2x, but turn on `ArrowBulkEvaluator`'s built-in parallelism and that gap is gone at just 2 workers.
 * For workloads that want more than the CPU can give, `ArrowGpuBulkEvaluator` dispatches the same expressions straight to CUDA, OpenCL or Metal, with zero JNI and zero native binaries anywhere in your build.
 * **`parser-ng-sql`**, introduced in 3.0.7 for users of `parser-ng-arrow`, received major speed and bug fixes in 3.0.8.
-* 3.0.8 also added real query power to `parser-ng-arrow`: `filter`, `project` and `filterProject` (see [below](#-arrow-filter-project-and-filterproject)).
-* 3.0.8 added `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` with CPU pinning, the native GPU bulk evaluators, and the `ARRAY` type (see [the table below](#-the-evolution-of-parserng)).
+* 3.0.6 added real query power to `parser-ng-arrow`: `filter`, `project` and `filterProject` (see [below](#-arrow-filter-project-and-filterproject)).
+* 3.0.8 brought the CPU-pinned parallel model, the native GPU bulk evaluators and the `ARRAY` type (see [the table below](#-the-evolution-of-parserng)).
 
 ---
 
-## 🔥 Start here: GPU, SIMDEngineEvaluator, SIMDVectorTurboEvaluator
+## 🔥 Start here: GPU, the SIMDCommand series, SIMDVectorTurboEvaluator
 
 This is the part of ParserNG worth losing sleep over, so it goes first.
 
@@ -114,26 +114,26 @@ try (OpenClCompositeExpression gpu = (OpenClCompositeExpression) OpenClExpressio
 }
 ```
 
-### SIMDEngineEvaluator: CPU-pinned parallelism (JDK 22+)
+### The SIMDCommand series: CPU-pinned parallelism (JDK 22+)
 
 The most efficient CPU-bound tier ParserNG has. CPU pinning (best on Linux) means 2 workers on 2 cores get you about 1.8x to 2.0x the throughput of 1 worker on 1 core: real scaling, not the diminishing returns you get from unpinned thread pools fighting the scheduler.
 
 ```java
 MathExpression me = new MathExpression("3*sin(x)*cos(y)+sqrt(abs(x*y))");
-var evaluator = new SIMDEngineEvaluator(me).compile();
+var evaluator = (SIMDCommandF64.SIMDVectorCompositeExpression) new SIMDCommandF64(me, 2).compile(); // 2 pinned workers
 
 double[][] inputs = new double[2][dataSize]; // x, y
 double[] out = new double[dataSize];
 
-evaluator.applyBulkParallel(inputs, out, 2); // 2 pinned workers
+evaluator.applyBulkParallel(inputs, out);
 ```
 
-`SIMDEngineEvaluator` also works over `MemorySegment`s, for greater throughput. Parallel work only happens when you call `applyBulkParallel`, and the dataset must be large enough to exceed the parallel threshold. Use a shared arena so that the worker threads can all read the segments:
+The number of workers is fixed when you create the evaluator. For float32 data use `SIMDCommandF32`. For greater throughput, `SIMDCommandSegmentF64` (and `SIMDCommandSegmentF32`) work over `MemorySegment`s. Parallel work only happens when you call `applyBulkParallel`, and the dataset must be large enough to exceed the parallel threshold. Use a shared arena so that the worker threads can all read the segments:
 
 ```java
 MathExpression me = new MathExpression(
         "(1 / (x1 * sqrt(2 * 3.14159))) * exp((-(x2 - x3)^2) / (2 * x1^2))");
-var evaluator = SIMDEngineEvaluator.getEvaluator(me, 2); // 2 workers; omit the argument to use one per CPU
+var evaluator = SIMDCommandSegmentF64.getEvaluator(me, 2); // 2 workers; omit the argument to use one per CPU
 
 long n = 30_000_000L; // elements per variable
 try (Arena arena = Arena.ofShared()) {
@@ -151,7 +151,7 @@ try (Arena arena = Arena.ofShared()) {
 }
 ```
 
-`SIMDCommandTurboEvaluator` sits right beside it in `parser-ng-gpu-simd` with the same CPU-pinned parallel model. `SIMDEngineEvaluator` is typically a few nanoseconds per op faster, so it is the default recommendation.
+The four classes `SIMDCommandF32`, `SIMDCommandF64`, `SIMDCommandSegmentF32` and `SIMDCommandSegmentF64` live in `parser-ng-gpu-simd` and replace `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator`, with the same signatures. The two old names are kept only for backwards compatibility and are deprecated: use the `SIMDCommand` classes in new code.
 
 ### SIMDVectorTurboEvaluator: explicit Vector API (JDK 21+)
 
@@ -165,7 +165,7 @@ var evaluator = (SIMDVectorTurboEvaluator.SIMDVectorCompositeExpression)
 double[][] inputs = new double[1][dataSize];
 double[] out = new double[dataSize];
 evaluator.applyBulk(inputs, out);
-// evaluator.applyBulkParallel(inputs, out); // works, but JDK 21 has no CPU pinning, so SIMDEngineEvaluator scales better
+// evaluator.applyBulkParallel(inputs, out); // works, but JDK 21 has no CPU pinning, so the `SIMDCommand` classes scale better
 ```
 
 `VectorTurboEvaluator` (the non-`SIMD`-prefixed sibling) takes the opposite bet: no explicit Vector API calls at all, just memory layout and loop shape engineered to *coerce* the JIT into auto-vectorizing. Use it where the Vector API's incubator status is a concern; use `SIMDVectorTurboEvaluator` everywhere else.
@@ -241,9 +241,10 @@ try (ArrowBulkEvaluator isAbnormal = ArrowBulkEvaluator.compile("heart_rate > 12
 | **Before 1.0.0** | `MathExpression`, the interpreter. ParserNG Standard. |
 | **1.0.0 to 1.x** | Turbo tier arrives: `ScalarTurboEvaluator1` (variable args as an array), `ScalarTurboEvaluator2` (variable args as widened primitives internally), and `MatrixTurboEvaluator`, all built on `MethodHandles`. |
 | **2.0.0 to 2.x** | Bulk evaluation, via mechanical sympathy *and* SIMD. `VectorTurboEvaluator` coerces auto-vectorization through code shape alone; `SIMDVectorTurboEvaluator` forces it via the explicit Vector API. Both support `applyBulkParallel(in, out)`, but JDK 21 has no CPU pinning, capping the parallel win. |
-| **3.0.5** | float32 and float64 bulk evaluators, plus MemorySegment-based bulk evaluators for both precisions. |
+| **3.0.5** | float32 and float64 bulk evaluators, plus MemorySegment-based bulk evaluators for both precisions. `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` are retired in favour of the `SIMDCommand` series: `SIMDCommandF32`, `SIMDCommandF64`, `SIMDCommandSegmentF32` and `SIMDCommandSegmentF64`, with the same API. |
+| **3.0.6** | `filter`, `project` and `filterProject` in `parser-ng-arrow`, on both CPU and GPU. |
 | **3.0.7** | `parser-ng-sql`, introduced to help users of `parser-ng-arrow`, the zero-copy Apache Arrow bridge. |
-| **3.0.8** | `SIMDEngineEvaluator` and `SIMDCommandTurboEvaluator` add CPU pinning (best on Linux): 2 workers on 2 cores give about 1.8x to 2.0x the work of 1 worker on 1 core. `SIMDEngineEvaluator` edges out `SIMDCommandTurboEvaluator` by a few ns/op. Both live in **`parser-ng-gpu-simd`** (JDK 22+), the module that also houses native **GPU bulk evaluators for CUDA, OpenCL and Metal**. Also new: `filter`, `project` and `filterProject` in `parser-ng-arrow`, and the `ARRAY` type. |
+| **3.0.8** | CPU pinning (best on Linux): 2 workers on 2 cores give about 1.8x to 2.0x the work of 1 worker on 1 core. The pinned evaluators live in **`parser-ng-gpu-simd`** (JDK 22+), the module that also houses native **GPU bulk evaluators for CUDA, OpenCL and Metal**. Also new: the `ARRAY` type. |
 | **3.0.9** | `parser-ng-parquet`, `select` over Parquet in `parser-ng-sql`, a much faster `MathExpression` constructor, and a complete `BaseNFunction`. |
 | **3.0.9.2** | The `strict` flag on `MathExpression`. |
 
@@ -477,7 +478,7 @@ The full GPU quick-start, including multi-vendor device selection, is at the top
 
 ## 📦 Installation & Configuration
 
-Module choice maps directly onto the evolution table above: pick the highest tier you need, and each module pulls in everything below it. All examples below use version `3.1.0`.
+Module choice maps directly onto the evolution table above: pick the highest tier you need, and each module pulls in everything below it. All ParserNG modules share one version number, and the examples below use `3.1.0`.
 
 ### For standard Android or legacy pre-JDK 21 runtimes
 
@@ -517,7 +518,7 @@ Adds `VectorTurboEvaluator` and `SIMDVectorTurboEvaluator`:
 
 ### For modern JDK 22+ GPU and CPU-pinned SIMD environments
 
-Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evaluators (CUDA, OpenCL and Metal):
+Adds the `SIMDCommand` series and the GPU bulk evaluators (CUDA, OpenCL and Metal):
 
 ```xml
 <dependency>
@@ -545,7 +546,27 @@ Adds `SIMDEngineEvaluator`, `SIMDCommandTurboEvaluator`, and the GPU bulk evalua
 | `parser-ng-sql` | SQL `select` over Arrow data and, since 3.0.9, over Parquet files (local and remote). |
 | `parser-ng-parquet` | Fast reading of Parquet files, local and remote (for example S3). |
 
-Add them the same way as the modules above. Each module's own README has the details.
+All ParserNG modules share one version number, so a new module always starts at the parent's latest release. Add the ones you need next to `parser-ng`:
+
+```xml
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng-arrow</artifactId>
+    <version>3.1.0</version>
+</dependency>
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng-sql</artifactId>
+    <version>3.1.0</version>
+</dependency>
+<dependency>
+    <groupId>com.github.gbenroscience</groupId>
+    <artifactId>parser-ng-parquet</artifactId>
+    <version>3.1.0</version>
+</dependency>
+```
+
+Each module's own README has the details.
 
 ### For microbenchmarking and profiling harnesses
 
