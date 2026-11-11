@@ -799,8 +799,13 @@ public final class IncompressibleFlow {
         double a1 = 0.0;
         if (haveOld) {
             double r = dt / dtOld;
-            a0 = 1.0 + 0.5 * r;
-            a1 = -0.5 * r;
+            // Variable-step AB2 extrapolates R_old with weight -r/2; its stability region shrinks quickly once r > 1 and the
+            // coefficients blow up for r >> 1 (e.g. a step following a shortened last step of advanceTo). Fall back to a
+            // first-order (Euler) step there. Constant steps (r = 1) are unchanged.
+            if (r <= 1.25) {
+                a0 = 1.0 + 0.5 * r;
+                a1 = -0.5 * r;
+            }
         }
         fillPressureGhosts();
         for (int c = 0; c < dim; c++) {

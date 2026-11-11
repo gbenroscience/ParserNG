@@ -18,8 +18,6 @@ package com.github.gbenroscience.util;
 import com.github.gbenroscience.parser.MathExpression;
 import com.github.gbenroscience.parser.turbo.tools.FastCompositeExpression;
 
-import java.lang.management.ManagementFactory;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -572,17 +570,9 @@ public class FunctionScopeTest {
     @Test
     @DisplayName("Scope lookup, scope switching and scoped evaluation allocate nothing")
     public void hotPathsAllocateNothing() throws Exception {
-        final Object mx = ManagementFactory.getThreadMXBean();
-        Class<?> sun;
-        try {
-            sun = Class.forName("com.sun.management.ThreadMXBean");
-        } catch (ClassNotFoundException e) {
+        if (!AllocationMeter.available()) {
             return; // not a HotSpot-style JVM: nothing to measure with
         }
-        if (!sun.isInstance(mx)) {
-            return;
-        }
-        final Method allocated = sun.getMethod("getThreadAllocatedBytes", long.class);
         final long tid = Thread.currentThread().getId();
 
         FunctionScope scope = FunctionScope.create();
@@ -602,42 +592,42 @@ public class FunctionScopeTest {
         }
 
         final int n = 200_000;
-        final long slack = 4096; // covers the reflective measuring calls themselves; a real 16-byte-per-call leak would be 3.2 MB
+        final long slack = 4096; // covers the measuring calls themselves; a real 16-byte-per-call leak would be 3.2 MB
 
-        long a0 = (Long) allocated.invoke(mx, tid);
+        long a0 = AllocationMeter.allocatedBytes(tid);
         for (int i = 0; i < n; i++) {
             scope.lookUp("fsf");
         }
-        long a1 = (Long) allocated.invoke(mx, tid);
+        long a1 = AllocationMeter.allocatedBytes(tid);
         assertTrue(a1 - a0 <= slack, "FunctionScope.lookUp allocated " + (a1 - a0) + " bytes");
 
         for (int i = 0; i < n; i++) {
             FunctionScope prev = FunctionManager.enter(scope);
             FunctionManager.exit(prev);
         }
-        long a2 = (Long) allocated.invoke(mx, tid);
+        long a2 = AllocationMeter.allocatedBytes(tid);
         assertTrue(a2 - a1 <= slack, "enter/exit allocated " + (a2 - a1) + " bytes");
 
         for (int i = 0; i < n; i++) {
             scopedPlain.solveGeneric();
         }
-        long a3 = (Long) allocated.invoke(mx, tid);
+        long a3 = AllocationMeter.allocatedBytes(tid);
         long unscopedBaseline;
         {
-            long b0 = (Long) allocated.invoke(mx, tid);
+            long b0 = AllocationMeter.allocatedBytes(tid);
             for (int i = 0; i < n; i++) {
                 plain.solveGeneric();
             }
-            long b1 = (Long) allocated.invoke(mx, tid);
+            long b1 = AllocationMeter.allocatedBytes(tid);
             unscopedBaseline = b1 - b0;
         }
         assertTrue((a3 - a2) <= unscopedBaseline + slack, "scoped solveGeneric allocated " + (a3 - a2) + " bytes vs " + unscopedBaseline + " unscoped");
 
-        long c0 = (Long) allocated.invoke(mx, tid);
+        long c0 = AllocationMeter.allocatedBytes(tid);
         for (int i = 0; i < n; i++) {
             scopedCall.solveGeneric();
         }
-        long c1 = (Long) allocated.invoke(mx, tid);
+        long c1 = AllocationMeter.allocatedBytes(tid);
         assertTrue(c1 - c0 <= slack, "scoped solveGeneric calling a function allocated " + (c1 - c0) + " bytes");
     }
 }

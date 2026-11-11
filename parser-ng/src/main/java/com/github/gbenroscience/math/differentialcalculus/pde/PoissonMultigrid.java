@@ -103,6 +103,10 @@ public final class PoissonMultigrid {
     private final BC[][] bc;             // [axis][0=min,1=max]
     private final boolean singular;
     private final Stats stats = new Stats();
+    // conjugate-gradient work vectors of the coarsest level (allocated once; solve() stays allocation free)
+    private final double[] cgP;
+    private final double[] cgAp;
+    private final double[] cgQ;
 
     /**
      * @param dim 2 or 3
@@ -162,6 +166,10 @@ public final class PoissonMultigrid {
                 hh[a] *= 2;
             }
         }
+        int cs = box[lv - 1].size;
+        this.cgP = new double[cs];
+        this.cgAp = new double[cs];
+        this.cgQ = new double[cs];
     }
 
     // ------------------------------------------------------------------ configuration
@@ -455,9 +463,94 @@ public final class PoissonMultigrid {
         }
     }
 
+    /**
+     * Coarsest-level solve by (matrix-free) conjugate gradients on -laplace. The coarsening stops as soon as an axis has an
+     * odd cell count (e.g. 14 x 7, 18 x 9, 30 x 15), so the "coarsest" level can be the whole fine grid; a fixed number of
+     * smoothing sweeps then cannot converge and the pressure solve silently returned an unconverged field. The operator is
+     * symmetric (homogeneous ghost rules) and, for an all-Neumann/periodic problem, singular but consistent: CG handles both.
+     */
+    private void coarseSolve(int l) {
+        Box b = box[l];
+        double[] x = phi[l];
+        double[] f = rhs[l];
+        if (singular) {
+            removeMean(f, b);
+        }
+        double[] q = cgQ;
+        double[] p = cgP;
+        double[] ap = cgAp;
+        double[] r = res[l];
+        residual(l);                       // r = f - laplace(x)
+        double qq = 0;
+        for (int k = 0; k < b.n[2]; k++) {
+            for (int j = 0; j < b.n[1]; j++) {
+                int base = b.idx(0, j, k);
+                for (int i = 0; i < b.n[0]; i++) {
+                    int c = base + i;
+                    q[c] = -r[c];          // residual of the SPD system (-laplace) x = -f
+                    p[c] = q[c];
+                    qq += q[c] * q[c];
+                }
+            }
+        }
+        if (!(qq > 0)) {
+            return;
+        }
+        final double stop = (levels > 1 ? 1e-4 : 1e-12) * Math.sqrt(qq);
+        final int maxIt = Math.max(coarseSweeps, 10 * (b.n[0] + b.n[1] + b.n[2]));
+        final double c0 = 1.0 / (h[l][0] * h[l][0]);
+        final double c1 = 1.0 / (h[l][1] * h[l][1]);
+        final double c2 = dim == 3 ? 1.0 / (h[l][2] * h[l][2]) : 0.0;
+        final int s1 = b.st[1];
+        final int s2 = dim == 3 ? b.st[2] : 0;
+        for (int it = 0; it < maxIt && Math.sqrt(qq) > stop; it++) {
+            fillGhosts(l, p);
+            double pap = 0;
+            for (int k = 0; k < b.n[2]; k++) {
+                for (int j = 0; j < b.n[1]; j++) {
+                    int base = b.idx(0, j, k);
+                    for (int i = 0; i < b.n[0]; i++) {
+                        int c = base + i;
+                        double v = -(c0 * (p[c + 1] + p[c - 1] - 2 * p[c]) + c1 * (p[c + s1] + p[c - s1] - 2 * p[c])
+                                + c2 * (p[c + s2] + p[c - s2] - 2 * p[c]));
+                        ap[c] = v;
+                        pap += p[c] * v;
+                    }
+                }
+            }
+            if (!(pap > 0)) {
+                break;
+            }
+            double alpha = qq / pap;
+            double qqNew = 0;
+            for (int k = 0; k < b.n[2]; k++) {
+                for (int j = 0; j < b.n[1]; j++) {
+                    int base = b.idx(0, j, k);
+                    for (int i = 0; i < b.n[0]; i++) {
+                        int c = base + i;
+                        x[c] += alpha * p[c];
+                        q[c] -= alpha * ap[c];
+                        qqNew += q[c] * q[c];
+                    }
+                }
+            }
+            double beta = qqNew / qq;
+            qq = qqNew;
+            for (int k = 0; k < b.n[2]; k++) {
+                for (int j = 0; j < b.n[1]; j++) {
+                    int base = b.idx(0, j, k);
+                    for (int i = 0; i < b.n[0]; i++) {
+                        int c = base + i;
+                        p[c] = q[c] + beta * p[c];
+                    }
+                }
+            }
+        }
+    }
+
     private void cycleAt(int l) {
         if (l == levels - 1) {
-            smooth(l, coarseSweeps);
+            coarseSolve(l);
             return;
         }
         smooth(l, preSweeps);

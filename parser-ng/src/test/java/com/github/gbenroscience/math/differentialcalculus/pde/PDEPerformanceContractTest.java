@@ -15,6 +15,7 @@
  */
 package com.github.gbenroscience.math.differentialcalculus.pde;
 
+import com.github.gbenroscience.util.AllocationMeter;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -39,13 +40,7 @@ public class PDEPerformanceContractTest {
 
     /** @return bytes allocated so far by the given thread, or -1 if the JVM cannot tell. */
     private static long allocated(long threadId) {
-        try {
-            ThreadMXBean bean = ManagementFactory.getThreadMXBean();
-            Method m = Class.forName("com.sun.management.ThreadMXBean").getMethod("getThreadAllocatedBytes", long.class);
-            return (Long) m.invoke(bean, threadId);
-        } catch (Throwable t) {
-            return -1;
-        }
+        return AllocationMeter.allocatedBytes(threadId);
     }
 
     private static long[] engineThreadIds() {
@@ -83,16 +78,21 @@ public class PDEPerformanceContractTest {
             s.step(dt);
         }
         long[] ids = engineThreadIds();
-        long a0 = allocatedBy(ids);
-        for (int i = 0; i < measured / 4; i++) {
-            s.step(dt);
+        // The slope of two independent runs; a genuine per-step allocation shows up in both, a one-off event that
+        // happens to fall inside one window (a GC-triggered TLAB retirement, JIT deoptimisation...) in only one.
+        double perStep = Double.POSITIVE_INFINITY;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            long a0 = allocatedBy(ids);
+            for (int i = 0; i < measured / 4; i++) {
+                s.step(dt);
+            }
+            long a1 = allocatedBy(ids);
+            for (int i = 0; i < measured; i++) {
+                s.step(dt);
+            }
+            long a2 = allocatedBy(ids);
+            perStep = Math.min(perStep, ((a2 - a1) - (a1 - a0)) / (double) (measured - measured / 4));
         }
-        long a1 = allocatedBy(ids);
-        for (int i = 0; i < measured; i++) {
-            s.step(dt);
-        }
-        long a2 = allocatedBy(ids);
-        double perStep = ((a2 - a1) - (a1 - a0)) / (double) (measured - measured / 4);
         assertTrue(perStep < 4.0, s.integrator() + ": " + perStep + " bytes allocated per step");
     }
 

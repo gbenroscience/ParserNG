@@ -15,6 +15,7 @@
  */
 package com.github.gbenroscience.math.differentialcalculus.pde;
 
+import com.github.gbenroscience.util.AllocationMeter;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.Method;
@@ -38,12 +39,7 @@ public final class PDEBenchmarkHarness {
 
     // ------------------------------------------------------------ measurement plumbing
     private static long allocated(long id) {
-        try {
-            Method m = Class.forName("com.sun.management.ThreadMXBean").getMethod("getThreadAllocatedBytes", long.class);
-            return (Long) m.invoke(ManagementFactory.getThreadMXBean(), id);
-        } catch (Throwable t) {
-            return -1;
-        }
+        return AllocationMeter.allocatedBytes(id);
     }
 
     private static long[] engineThreads() {
