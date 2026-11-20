@@ -409,3 +409,11 @@ parser-ng-arrow/
     ArrowBulkEvaluatorTest.java
     ArrowGpuBulkEvaluatorTest.java
 ```
+
+
+*Developed with mathematical rigor and mechanical sympathy by **Gbemiro Jiboye** (@gbenroscience).*
+
+---
+<sub>Analytics: This documentation uses a cookie-free, GDPR-compliant (parser-ng-arrow)<a href="https://scarf.sh">Scarf</a> pixel to measure aggregate page views.</sub>
+
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=e4e5895a-f0c3-49ce-9b42-0ae61246ee81" />
