@@ -619,7 +619,7 @@ Production infrastructures that need predictable performance, safety assurances,
 
 ---
 
-## 📚 Documentation & Technical Resources
+## 📚 Documentation & Technical Resources.
 
 * **Deep-dive benchmarking logs:** [BENCHMARK_RESULTS.md](parser-ng/BENCHMARK_RESULTS.md), comprehensive execution breakdowns versus competitor runtimes.
 * **High-fidelity graphical plotting:** [GRAPHING.md](parser-ng/GRAPHING.md), render configuration rules for JavaFX, Swing, and Android surfaces.
@@ -631,7 +631,9 @@ Production infrastructures that need predictable performance, safety assurances,
 * [Hello world and original readme](src/main/java/com/github/gbenroscience/README.md): the original readme for pre-1.0 versions, with a lot of examples that are still valid.
 
 ---
-
+ 
 *Developed with mathematical rigor and mechanical sympathy by **Gbemiro Jiboye** (@gbenroscience).*
 
+<sub>Analytics: This documentation uses a cookie-free, GDPR-compliant (parser-ng-parent)<a href="https://scarf.sh">Scarf</a> pixel to measure aggregate page views.</sub>
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=780a0b0a-ed6e-4711-9dca-9768e195845e" />
 
