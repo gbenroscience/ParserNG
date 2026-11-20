@@ -475,4 +475,7 @@ ParserNG includes full support contracts designed for mission-critical banking, 
 
 For enterprise license tokens, support inquiries, or custom engagement keys, open a ticket via the enterprise service portal or contact `gbenroscience@gmail.com`.
 
+
 ---
+<sub>Analytics: This documentation uses a cookie-free, GDPR-compliant (parser-ng-gpu-simd)<a href="https://scarf.sh">Scarf</a> pixel to measure aggregate page views.</sub>
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=9da04866-05f7-4136-97e7-214027af4192" />
