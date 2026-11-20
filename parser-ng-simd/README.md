@@ -108,3 +108,7 @@ The test harness evaluates throughput performance vectors across varying scales 
 ### License
 
 Distributed under the **Apache License 2.0**. Contributions, optimizations, and performance discussions regarding hardware intrinsic precision are always welcome.
+
+---
+<sub>Analytics: This documentation uses a cookie-free, GDPR-compliant (parser-ng-simd)<a href="https://scarf.sh">Scarf</a> pixel to measure aggregate page views.</sub>
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=fc9e1820-877d-49cd-b82f-f583f562b9bf" />
