@@ -633,3 +633,8 @@ Production infrastructures that need predictable performance, safety assurances,
 ---
 
 *Developed with mathematical rigor and mechanical sympathy by **Gbemiro Jiboye** (@gbenroscience).*
+
+
+---
+<sub>Analytics: This documentation uses a cookie-free, GDPR-compliant <a href="https://scarf.sh">Scarf</a> pixel to measure aggregate page views.</sub>
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=7b680a85-04a8-46af-a271-914c438ca467" />
