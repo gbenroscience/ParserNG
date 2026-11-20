@@ -1179,3 +1179,9 @@ one `ArrowQuery` instance**; see
 above. Use one query instance per thread if you need this overload from
 more than one thread at a time; each instance can be compiled from the
 same SQL text independently.
+
+*Developed with mathematical rigor and mechanical sympathy by **Gbemiro Jiboye** (@gbenroscience).*
+
+---
+<sub>Analytics: This documentation uses a cookie-free, GDPR-compliant(parser-ng-sql) <a href="https://scarf.sh">Scarf</a> pixel to measure aggregate page views.</sub>
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=9cccba2b-7ed5-48f9-b703-5188bea248ee" />
