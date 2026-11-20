@@ -381,6 +381,9 @@ Add the matching compilation module allocations inside your engine `pom.xml`:
 
 ```
 
-```
 
-```
+
+
+---
+<sub>Analytics: This documentation uses a cookie-free, GDPR-compliant (parser-ng core)<a href="https://scarf.sh">Scarf</a> pixel to measure aggregate page views.</sub>
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=7b680a85-04a8-46af-a271-914c438ca467" />
